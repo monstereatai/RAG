@@ -4,13 +4,13 @@
 
 ## 当前阶段
 
-**技术栈已确认（NestJS / Node.js），rag-plan.md 已对齐 26 个实战项目，待启动项目骨架**
+**M0 已完成，待启动 M1（最简 RAG 管线）**
 
-- rag-plan.md 已定稿（含改进建议 + agent-course 26 项目经验补充）
-- 技术栈选型已确认：NestJS + LangChain.js + LangGraph.js + DeepAgents.js
-- rag-plan.md 已同步更新为 Node.js 生态（架构图、依赖清单、代码示例、改进建议全部对齐 NestJS / TypeScript）
-- SUMMARY.md 已扩展到 26 个实战项目（含 pgsql/redis/neo4j/nest-feature/nest-dockerfile 等遗漏项目）
-- 仓库尚未初始化项目骨架
+- M0 项目骨架可运行已验证（2026-06-18）
+- CLAUDE.md 项目规则已定稿
+- backend/ NestJS 项目已初始化（含 config + health 模块）
+- docker/docker-compose.yml 已就绪（PostgreSQL+pgvector / Redis / Milvus）
+- 待主人启动 docker compose 拉起依赖服务后，进入 M1
 
 ## 已完成
 
@@ -48,6 +48,19 @@
   - 新增 6 个能力补充章节：知识图谱 RAG、MCP 协议、NestJS 工程化、Docker 部署、Prompt 工程、结构化输出
   - 依赖清单新增：@langchain/mcp-adapters、neo4j-driver、@langchain/community/graphs/neo4j_graph
   - 实施优先级表新增 7 项（NestJS 工程化 P0、Prompt 工程 P1、结构化输出 P1、Docker 部署 P1、MCP 集成 P2、知识图谱 P3）
+- [x] **M0 项目骨架可运行**（2026-06-18，已验证）
+  - 顶层目录结构：backend / frontend / admin / docker / skills / workspace
+  - CLAUDE.md 项目规则定稿（技术栈锁死、目录约定、验证命令、红线、里程碑纪律）
+  - 根级 .gitignore（node_modules / .env / dist / docker volumes 等）
+  - backend/ NestJS 项目初始化（npx @nestjs/cli new --strict，不全局安装）
+  - 依赖：@nestjs/config（配置加载）+ @nestjs/terminus（健康检查）+ dotenv
+  - 目录结构：common/{decorators,filters,guards,interceptors,pipes,interfaces} + config + modules/health + providers/{llm,embedding,speech,vector-store,db} + rag/{karpathy,agentic,router} + tools
+  - config/configuration.ts：全量配置加载（向量库/关系库/Redis/ES/LLM/Embedding/Speech/Bocha/Rerank/Neo4j/Workspace）
+  - modules/health：`GET /api/health` 返回 `{status:"ok",timestamp}`
+  - main.ts：全局 API 前缀 `/api`
+  - backend/.env.example：全量环境变量模板（不含真实密钥）
+  - docker/docker-compose.yml：PostgreSQL16+pgvector / Redis7 / Milvus2.4.4（etcd+minio+standalone）+ healthcheck
+  - 验证通过：`npm run build` ✓ / `npm run lint` ✓ / `npm run start` ✓ / `curl /api/health` → `{"status":"ok"}` ✓
 
 ## 进行中
 
@@ -203,7 +216,13 @@
 
 ## 最近验证
 
-- 无（项目尚未开始编码）
+- **M0 项目骨架可运行**（2026-06-18）
+  - `cd backend && npm run build` → 无错误 ✓
+  - `cd backend && npm run lint` → 无错误 ✓
+  - `cd backend && npm run start` → Nest 应用成功启动 ✓
+  - `curl http://localhost:3000/api/health` → `{"status":"ok","timestamp":"2026-06-17T19:57:02.872Z"}` ✓
+  - 路由注册正确：`{ /api/health, GET }` ✓
+  - 注：docker-compose 未实际拉起（需主人手动 `cd docker && docker compose up -d` 验证三服务 healthy）
 
 ---
 
@@ -274,7 +293,7 @@
 
 | 里程碑 | 涉及待办分组 | 验收状态 |
 |--------|-------------|----------|
-| M0 | P0 项目骨架 + docker-compose 基础服务 | 未开始 |
+| M0 | P0 项目骨架 + docker-compose 基础服务 | ✅ 已完成（2026-06-18） |
 | M1 | P1 核心管线（simple 子集）+ P0 Provider 接口 | 未开始 |
 | M2 | P1 核心管线（完整）+ P1 LangGraph 增强 | 未开始 |
 | M3 | P0 NestJS 工程化 + P3 pino 日志 | 未开始 |
@@ -298,3 +317,4 @@
 | 2026-06-18 | rag-plan.md 对齐 SUMMARY.md 26 个项目：综合能力对照表扩展到 26 章、新增 6 个能力补充章节（知识图谱 RAG、MCP 协议、NestJS 工程化、Docker 部署、Prompt 工程、结构化输出）、依赖清单新增 @langchain/mcp-adapters/neo4j-driver、实施优先级表新增 7 项 |
 | 2026-06-18 | ROADMAP 同步 rag-plan.md 最新内容：待办清单新增 P0（NestJS 工程化模式落地）、P1（Prompt 工程、结构化输出、Docker 容器化部署）、P2（MCP 协议集成）、P3（知识图谱 RAG Neo4j）；已完成项补充 SUMMARY.md 26 章节和 rag-plan.md 26 项目对齐记录 |
 | 2026-06-18 | 新增"待确认"项决策建议（多租户→单租户预留 tenant_id、部署→Docker Compose）；新增"里程碑与验收标准"章节（M0~M5 + 后续 M6~M8），每个里程碑含明确验收标准；新增里程碑与待办映射表 + 纪律约束（M0 未达成禁止动 M1） |
+| 2026-06-18 | **M0 完成**：创建顶层目录（backend/frontend/admin/docker/skills/workspace）+ CLAUDE.md 项目规则 + 根级 .gitignore + backend NestJS 初始化（@nestjs/config + @nestjs/terminus + dotenv）+ config/configuration.ts 全量配置 + modules/health 健康检查模块 + main.ts 全局前缀 /api + .env.example 全量模板 + docker-compose.yml（PG16+pgvector/Redis7/Milvus2.4.4+etcd+minio，全 healthcheck）。验证通过：build ✓ / lint ✓ / start ✓ / curl /api/health → {"status":"ok"} ✓ |
