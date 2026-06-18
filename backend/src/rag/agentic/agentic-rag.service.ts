@@ -17,6 +17,7 @@ import {
   deepAgentQueryPlanUserPrompt,
 } from '../prompts/agentic.prompts';
 import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
+import { SemanticExampleSelector } from '../prompts/semantic-example.selector';
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { StateGraph, START, END, MemorySaver } from '@langchain/langgraph';
@@ -44,6 +45,7 @@ export class AgenticRagService {
     private readonly karpathyRagService: KarpathyRagService,
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
+    private readonly semanticExampleSelector: SemanticExampleSelector,
   ) {
     this.initGraph();
   }
@@ -148,7 +150,19 @@ export class AgenticRagService {
       try {
         const structured = model.withStructuredOutput(schema);
         const chain = queryAugmentPrompt.pipe(structured);
-        const fewShotBlock = await queryAugmentFewShotPrompt.format({});
+
+        // 优先使用语义示例选择器（从 Milvus 检索相关示例）
+        let fewShotBlock = await this.semanticExampleSelector.selectAndFormat(
+          state.query,
+          2,
+          'query_augment',
+        );
+
+        // 若语义选择器返回空（Milvus 未就绪），回退到静态 few-shot
+        if (!fewShotBlock) {
+          fewShotBlock = await queryAugmentFewShotPrompt.format({});
+        }
+
         const raw = await chain.invoke({
           query: state.query,
           few_shot_block: fewShotBlock,
@@ -464,6 +478,11 @@ export class AgenticRagService {
       role: 'human' | 'ai';
       content: string;
     }>;
+    const memoryMessages = (config?.configurable?.memoryMessages ??
+      []) as Array<{
+      role: string;
+      content: string;
+    }>;
 
     if (state.retrievedChunks.length === 0) {
       const ans = '未找到相关内容，请先上传文档。';
@@ -481,6 +500,7 @@ export class AgenticRagService {
       context,
       query: state.query,
       history,
+      memory: memoryMessages,
     });
     const stream = await model.stream(messages);
     let answer = '';
@@ -591,6 +611,7 @@ export class AgenticRagService {
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     threadId = 'default-thread',
     userId?: string,
+    memoryMessages: Array<{ role: string; content: string }> = [],
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -609,6 +630,7 @@ export class AgenticRagService {
         query,
         history,
         userId,
+        memoryMessages,
       );
       onEvent?.({ type: 'citation', data: result.references });
       onEvent?.({ type: 'final', data: result });
@@ -642,6 +664,7 @@ export class AgenticRagService {
           onEvent,
           history,
           userId,
+          memoryMessages,
         },
       },
     )) as AgenticRagStateType;

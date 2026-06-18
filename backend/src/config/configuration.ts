@@ -118,6 +118,14 @@ export const configuration = () => ({
     password: process.env.NEO4J_PASSWORD ?? '',
   },
 
+  // Mem0 长期记忆（可插拔：cloud | local | 禁用）
+  mem0: {
+    enabled: process.env.MEM0_ENABLED === 'true',
+    provider: process.env.MEM0_PROVIDER ?? 'cloud',
+    apiKey: process.env.MEM0_API_KEY ?? '',
+    baseUrl: process.env.MEM0_BASE_URL ?? '',
+  },
+
   // 工作区
   workspace: {
     uploadDir:

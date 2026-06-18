@@ -13,6 +13,7 @@ import {
 import { Observable } from 'rxjs';
 import { ChatService } from './chat.service';
 import { ConversationService } from './conversation.service';
+import { MemoryService } from '../memory/memory.service';
 import { ChatDto } from './chat.dto';
 import type { ChatResponse, ChatMode } from './chat.dto';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
@@ -28,6 +29,7 @@ export class ChatController {
     private readonly chatService: ChatService,
     private readonly agenticRagService: AgenticRagService,
     private readonly conversationService: ConversationService,
+    private readonly memoryService: MemoryService,
   ) {}
 
   /**
@@ -78,6 +80,20 @@ export class ChatController {
             data: { threadId: activeThreadId },
           });
 
+          // Mem0 长期记忆搜索：SSE 流式前注入记忆上下文
+          const memoryResult = await this.memoryService.searchMemory(
+            query,
+            userId,
+            activeThreadId,
+          );
+          const memoryMessages: Array<{ role: string; content: string }> = [];
+          if (memoryResult.systemMessage) {
+            memoryMessages.push({
+              role: 'system',
+              content: memoryResult.systemMessage.content as string,
+            });
+          }
+
           this.agenticRagService
             .run(
               query,
@@ -86,6 +102,7 @@ export class ChatController {
               history,
               activeThreadId,
               userId,
+              memoryMessages,
             )
             .then(async (result) => {
               // 持久化本轮对话
@@ -101,6 +118,15 @@ export class ChatController {
                 result.answer,
                 userId,
               );
+
+              // Mem0 分类写入
+              void this.memoryService.classifyAndPersist(
+                userId,
+                activeThreadId,
+                query,
+                result.answer,
+              );
+
               subscriber.complete();
             })
             .catch((err) => {

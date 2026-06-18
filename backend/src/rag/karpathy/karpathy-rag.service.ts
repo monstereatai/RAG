@@ -377,6 +377,7 @@ export class KarpathyRagService implements OnModuleInit {
     query: string,
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     userId?: string,
+    memoryMessages: Array<{ role: string; content: string }> = [],
   ): Promise<KarpathyRagResult> {
     const chunks = await this.retrieve(query, {}, userId);
 
@@ -396,6 +397,7 @@ export class KarpathyRagService implements OnModuleInit {
       context,
       query,
       history,
+      memory: memoryMessages,
     });
     const answer = await this.llmProvider.invoke(messages);
 

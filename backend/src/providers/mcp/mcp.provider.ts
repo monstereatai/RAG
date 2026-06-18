@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
@@ -11,9 +16,14 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
   private tools: any[] = [];
 
   async onModuleInit() {
-    const configPath = path.resolve(process.cwd(), '../workspace/mcp-servers.yaml');
+    const configPath = path.resolve(
+      process.cwd(),
+      '../workspace/mcp-servers.yaml',
+    );
     if (!fs.existsSync(configPath)) {
-      this.logger.log(`No MCP servers configuration found at ${configPath}. MCP tools disabled.`);
+      this.logger.log(
+        `No MCP servers configuration found at ${configPath}. MCP tools disabled.`,
+      );
       return;
     }
 
@@ -23,25 +33,39 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
         mcpServers?: Record<string, any>;
       };
 
-      if (!config || !config.mcpServers || Object.keys(config.mcpServers).length === 0) {
-        this.logger.log('MCP servers configuration is empty. No servers initialized.');
+      if (
+        !config ||
+        !config.mcpServers ||
+        Object.keys(config.mcpServers).length === 0
+      ) {
+        this.logger.log(
+          'MCP servers configuration is empty. No servers initialized.',
+        );
         return;
       }
 
-      this.logger.log(`Initializing MCP servers: ${Object.keys(config.mcpServers).join(', ')}`);
-      
+      this.logger.log(
+        `Initializing MCP servers: ${Object.keys(config.mcpServers).join(', ')}`,
+      );
+
       this.mcpClient = new MultiServerMCPClient({
         mcpServers: config.mcpServers,
       });
 
       // Fetch tools to verify connection and cache them
       this.tools = await this.mcpClient.getTools();
-      this.logger.log(`Successfully connected and loaded ${this.tools.length} MCP tools.`);
+      this.logger.log(
+        `Successfully connected and loaded ${this.tools.length} MCP tools.`,
+      );
       for (const tool of this.tools) {
-        this.logger.log(`Loaded MCP tool: "${tool.name}" - ${tool.description?.slice(0, 80)}`);
+        this.logger.log(
+          `Loaded MCP tool: "${tool.name}" - ${tool.description?.slice(0, 80)}`,
+        );
       }
     } catch (err) {
-      this.logger.error(`Failed to initialize MCP client: ${(err as Error).message}`);
+      this.logger.error(
+        `Failed to initialize MCP client: ${(err as Error).message}`,
+      );
       this.mcpClient = null;
       this.tools = [];
     }
@@ -58,7 +82,9 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
         await this.mcpClient.close();
         this.logger.log('MCP connections closed successfully.');
       } catch (err) {
-        this.logger.error(`Failed to close MCP client: ${(err as Error).message}`);
+        this.logger.error(
+          `Failed to close MCP client: ${(err as Error).message}`,
+        );
       }
     }
   }

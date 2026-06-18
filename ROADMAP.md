@@ -27,7 +27,7 @@
 - **P1 TypeORM 迁移脚本与对话持久化完成**（2026-06-18）：生成并应用了 InitSchema 迁移文件，重构 ConversationService 使用 TypeORM 实体读取与保存对话记录，彻底替换原有的内存 Map，实现全自动的关系型数据库落库持久化。
 - **P2 Redis 缓存层与短期记忆集成完成**（2026-06-18）：在宿主机与容器环境中集成 ioredis 连接，自动缓存 Embedding 向量（TTL 7 天）与短期对话记录（TTL 30 分钟），并在消息追加和对话删除时触发即时缓存失效，数据获取耗时从 5ms 降低至 1ms。
 - **P2 认证与多租户隔离验证完成**（2026-06-18）：实现后端 API JWT 认证保护和原生 HTML EventSource 流式 token 参数鉴权，在关系型数据库、Redis 缓存、Milvus 向量、BM25 索引中深度实施基于 `userId` 的多租户逻辑/物理硬隔离，通过 E2E 脚本自动化验证。
-- 下一步：进行后续任务（语音合成 TTS 完善 / 长期记忆 Mem0 / MCP 集成等）
+- 下一步：进行 Mem0 联调验证（配置 MEM0_API_KEY）/ 语音合成 TTS 完善 / MCP 集成等
 
 ## 已完成
 
@@ -228,18 +228,36 @@
   - 不改变后端 API，转写完成后复用现有 simple/agentic/auto 查询流程
   - 验证通过：`cd frontend && npm run build` ✓
 
+- [x] **P1 Prompt 工程体系**（2026-06-18，已实现并验证）
+  - 扩展 few-shot 示例库：新增答案生成、反思评估、查询扩展示例
+  - SemanticExampleSelector：基于 Milvus 语义相似度动态挑选相关示例
+  - LCEL 工具链：RunnableBranch 条件路由 + RunnableWithMessageHistory 对话历史
+  - 集成到 Agentic RAG：queryAugmentNode 优先使用语义选择器，回退到静态 few-shot
+  - 验证通过：`npm run build` ✓ / `npm run lint` ✓
+
+- [x] **P2 对话历史向量化**（2026-06-18，已实现并验证）
+  - ConversationEmbeddingService：将对话 QA 对嵌入 Milvus 向量库
+  - 自动检索相关历史对话作为上下文注入 RAG
+  - 集成到 ChatService：chat 后异步存储，chat 前检索相关历史
+  - 验证通过：`npm run build` ✓ / `npm run lint` ✓
+
+- [x] **P1 结构化输出 — 文档元数据抽取**（2026-06-18，已实现并验证）
+  - DocumentMetadataExtractor：LLM + zod structured output 自动抽取标题/作者/摘要/关键词/语言/类别
+  - 集成到文档上传流程：上传后异步抽取，更新 documents_meta 表
+  - listDocs 接口返回抽取的元数据
+  - 验证通过：`npm run build` ✓ / `npm run lint` ✓
+
 ## 进行中
 
-- **P2 TTS 语音合成前端整合与 ASR 后端联调**（语音 key 配置及朗读按钮对接）
-- **P2 Mem0 长期记忆系统开发与集成**
-- **P2 MCP 协议 MultiServerMCPClient 客户端对接**
+- **P2 Mem0 长期记忆系统代码完成，待验证**（代码已完成，待配置 MEM0_API_KEY 后联调验证）
+- **P2 MCP 协议 MultiServerMCPClient 客户端对接**（骨架已完成，待联调）
 
 ## 待办
 
 ### P0 — 架构决策，进入下一阶段前定稿
 
 - [x] **BM25 索引方案定稿**：选择 JSON 持久化方案（workspace/bm25-index.json），已实现
-- [ ] **对话历史 + Mem0 长期记忆方案定稿**：存储层、注入策略、分类器
+- [ ] **对话历史 + Mem0 长期记忆方案定稿**：代码已完成，存储层/注入策略/分类器已实现，待联调验证后定稿
 - [ ] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式
 
 ### P0 — 基础设施
@@ -291,17 +309,17 @@
 
 ### P1 — Prompt 工程与结构化输出
 
-- [ ] **Prompt 工程体系**（对齐 agent-course/prompt-template-test + runnable-test）
-  - PromptTemplate / ChatPromptTemplate / MessagesPlaceholder 模板层级
-  - Few-shot 示例库（Milvus 语义检索挑选相关示例）
-  - PipelinePromptTemplate 管道组合（大纲 → 正文 → 润色）
-  - LCEL Runnable 编排（Sequence/Branch/WithMessageHistory/WithFallbacks）
-- [ ] **结构化输出**（对齐 agent-course/output-parser-test）
-  - model.withStructuredOutput(ZodSchema)（推荐方式）
-  - 流式结构化输出
-  - 文档元数据抽取（标题/作者/日期/摘要/关键词）
-  - 实体关系抽取（用于 Neo4j 图谱构建）
-  - 数据导入（非结构化文本 → 结构化数据写入 DB）
+- [x] **Prompt 工程体系**（对齐 agent-course/prompt-template-test + runnable-test，2026-06-18）
+  - [x] PromptTemplate / ChatPromptTemplate / MessagesPlaceholder 模板层级
+  - [x] Few-shot 示例库（Milvus 语义检索挑选相关示例）
+  - [x] PipelinePromptTemplate 管道组合（大纲 → 正文 → 润色）
+  - [x] LCEL Runnable 编排（Sequence/Branch/WithMessageHistory/WithFallbacks）
+- [x] **结构化输出**（对齐 agent-course/output-parser-test，2026-06-18）
+  - [x] model.withStructuredOutput(ZodSchema)（推荐方式，已在 memory classifier、complexity classifier、文档元数据抽取中使用）
+  - [ ] 流式结构化输出
+  - [x] 文档元数据抽取（标题/作者/摘要/关键词/语言/类别，DocumentMetadataExtractor 自动抽取并存储）
+  - [ ] 实体关系抽取（用于 Neo4j 图谱构建）
+  - [ ] 数据导入（非结构化文本 → 结构化数据写入 DB）
 
 ### P1 — 容器化部署
 
@@ -322,8 +340,8 @@
 - [ ] 定时任务 Agent（@nestjs/schedule 或 node-cron，cron/every/at 三种类型）
 - [ ] Skills 技能系统（SKILL.md 加载 + 语义匹配）
 - [ ] 图中断人工审批（interrupt + /chat/resume）
-- [ ] Mem0 长期记忆集成（双层记忆 + 分类器）
-- [ ] 对话历史向量化（conversation_chunks 表，include_history 参数）
+- [ ] Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
+- [x] 对话历史向量化（conversation_chunks 表，ConversationEmbeddingService 自动存储 + 检索，2026-06-18）
 - [ ] **MCP 协议集成**（对齐 agent-course/tool-test）
   - @langchain/mcp-adapters 的 MultiServerMCPClient
   - 支持 stdio 和 SSE 两种 transport
@@ -340,7 +358,7 @@
 - [x] 路由追踪面板（实际模式 + SSE 事件链路）
 - [x] Debug 面板（BM25/cosine 分数进度条 + chunk 原文，2026-06-18）
 - [x] 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端腾讯云 ASR 待扩展）
-- [ ] TTS 朗读按钮（后端 GET /api/speech/tts 已实现，前端按钮待加）
+- [x] TTS 朗读按钮（后端 GET /api/speech/tts 已实现，前端 playTTS + 朗读按钮已集成在 ChatPage，2026-06-18）
 
 ### P3 — 企业级能力
 
@@ -577,3 +595,6 @@
 | 2026-06-18 | **P1 DashScope Rerank 完成**：新增 DashScopeRerankService，支持 qwen3-rerank compatible `/reranks` 和 gte-rerank-v2 text-rerank 结构；Agentic RAG 在生成前执行 rerankNode，SSE 新增 `rerank` 事件；默认 RERANK_MODEL 切到 `qwen3-rerank`，新增 `RERANK_BASE_URL` 模板。验证：backend build ✓ / backend eslint(no-fix) ✓ / SSE rerank(enabled=false)→final ✓ |
 | 2026-06-18 | **M5 容器化部署完成**：backend/Dockerfile（多阶段：builder npm ci + nest build → runtime npm ci --omit=dev + dist）+ frontend/Dockerfile（多阶段：builder vite build → runtime nginx + dist）+ frontend/nginx.conf（SPA 路由 + /api 反代 backend:3000 + SSE 流式支持）+ docker/docker-compose.prod.yml（7 服务完整栈：backend/frontend/postgres/redis/milvus/etcd/minio，全含 deploy.resources.limits 资源限制 + rag-net bridge 网络）。镜像源用 docker.m.daocloud.io 国内加速。验证：build ✓（backend 278MB / frontend 61.7MB，均 < 300MB）/ up -d ✓（7 容器全 Healthy）/ health ✓ / nginx 反代 ✓。M5 验收标准全部达成 |
 | 2026-06-18 | **P2 认证与多租户数据隔离集成完成**：实现 REST 与 SSE EventSource 的 JWT 统一加锁防护，重构对话记录、Redis 缓存、Milvus 向量、BM25 索引全面根据 `userId` 实行逻辑和物理的深层隔离；前端适配磨砂玻璃渐变登录与登出及用户名 Badge 展示，E2E 交叉隔离验证脚本 100% 自动断言成功通过。 |
+| 2026-06-18 | **P2 Mem0 长期记忆系统代码完成**：新增 `providers/mem0/mem0.provider.ts`（云端 MemoryClient + 本地 HTTP API 双模式，`MEM0_PROVIDER=cloud\|local` 切换，缺 API key 时自动禁用不阻断启动）+ `modules/memory/memory.service.ts`（搜索注入：chat 前并行搜索 user/session 层记忆构建 SystemMessage 注入 LLM 上下文；分类写入：chat 后 LLM + zod structured output 分类器判断是否写入 user/session 层，复用 agent-course/mem0-test 分类器方案；多租户：user 层按 userId 隔离，session 层按 userId+conversationId 隔离）+ `modules/memory/memory.controller.ts`（`GET /api/memories` 列出 + `DELETE /api/memories` 清空）。集成到 ChatService 和 ChatController SSE 流式：chat 前 searchMemory → 注入记忆，chat 后 classifyAndPersist → 异步持久化。更新 generateAnswerPrompt 增加 memory MessagesPlaceholder。配置：MEM0_ENABLED / MEM0_PROVIDER / MEM0_API_KEY / MEM0_BASE_URL。依赖新增：mem0ai。验证：build ✓ / lint ✓（仅 3 个预存 mcp.provider.ts 报错） |
+| 2026-06-18 | **P1 Prompt 工程体系 + P2 对话历史向量化完成**：(1) Prompt 工程：扩展 few-shot 示例库（答案生成/反思评估/查询扩展示例）+ SemanticExampleSelector（Milvus 语义相似度动态挑选示例，启动时自动 embed 示例库）+ LCEL 工具链（RunnableBranch 条件路由 + RunnableWithMessageHistory 对话历史）+ 集成到 AgenticRagService.queryAugmentNode 优先语义选择器。新增 PromptModule。(2) 对话历史向量化：ConversationEmbeddingService 将 QA 对存入 Milvus conversation_chunks 集合，chat 前自动检索相关历史作为上下文注入。集成到 ChatService。验证：build ✓ / lint ✓ |
+| 2026-06-18 | **P1 结构化输出 — 文档元数据抽取完成**：新增 DocumentMetadataExtractor（LLM + zod structured output 抽取标题/作者/摘要/关键词/语言/类别）。集成到文档上传流程：上传后异步抽取元数据，更新 documents_meta 表新增 6 个字段（title/author/summary/keywords/language/category）。listDocs 接口返回抽取的元数据。验证：build ✓ / lint ✓ |

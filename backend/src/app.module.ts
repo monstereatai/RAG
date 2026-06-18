@@ -7,12 +7,14 @@ import { SpeechModule as SpeechProviderModule } from './providers/speech/speech.
 import { ElasticsearchModule } from './providers/elasticsearch/elasticsearch.module';
 import { RedisModule } from './providers/redis/redis.module';
 import { McpModule } from './providers/mcp/mcp.module';
+import { Mem0Module } from './providers/mem0/mem0.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { DebugModule } from './modules/debug/debug.module';
 import { SpeechModule } from './modules/speech/speech.module';
+import { MemoryModule } from './modules/memory/memory.module';
 
 @Module({
   imports: [
@@ -26,12 +28,14 @@ import { SpeechModule } from './modules/speech/speech.module';
     ElasticsearchModule,
     RedisModule,
     McpModule,
+    Mem0Module,
     AuthModule,
     HealthModule,
     DocumentModule,
     ChatModule,
     DebugModule,
     SpeechModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}

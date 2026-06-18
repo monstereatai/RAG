@@ -19,6 +19,8 @@ export const generateAnswerPrompt = ChatPromptTemplate.fromMessages([
 2. 如果片段中没有相关信息，明确告知"片段中未提及"
 3. 回答末尾用 [片段N] 标注引用来源`,
   ],
+  // 长期记忆上下文（可选，空字符串时无影响）
+  new MessagesPlaceholder('memory'),
   // 多轮对话历史（可选，空数组时无影响）
   new MessagesPlaceholder('history'),
   [

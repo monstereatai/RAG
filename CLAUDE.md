@@ -19,6 +19,7 @@
 - **语音**：腾讯云 ASR/TTS
 - **搜索工具**：Bocha Web Search
 - **Rerank**：DashScope Rerank
+- **长期记忆**：Mem0（云端 / 本地部署，可插拔）
 - **日志**：pino（JSON 格式）
 - **REPL**：quickjs-emscripten
 
@@ -113,21 +114,25 @@ cd docker && docker compose ps        # 所有服务 healthy
 
 ## 当前阶段
 
-**M1/M2/M3/M4/M5已完成，P2多租户认证数据隔离已验证完成**（2026-06-18）
+**M1/M2/M3/M4/M5已完成，P1 Prompt工程 + P1 结构化输出 + P2 对话历史向量化 + P2 Mem0长期记忆代码已完成**（2026-06-18）
 
 已完成能力：
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
 - M1 simple RAG：上传 Markdown/PDF/TXT/DOCX、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答。
 - M2 Agentic RAG：deepAgent 检索规划、Query 扩展、检索充分性评估、流式生成、置信度自我评估重试。
 - M3 工程化与多租户隔离：JWT 认证保护、EventSource 流式 Token 兼容、统一响应/全局异常/日志，以及基于 `userId` 在数据库、Redis 缓存、Milvus 向量及内存 BM25 中的物理/逻辑硬隔离。
-- M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、simple/agentic/auto 模式、流式事件追踪、Debug 属性面板、Web 语音输入。
+- M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、simple/agentic/auto 模式、流式事件追踪、Debug 属性面板、Web 语音输入、TTS 朗读按钮。
 - M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 代理。
+- P1 Prompt 工程体系：SemanticExampleSelector（Milvus 语义相似度挑选示例）+ LCEL 工具链（RunnableBranch/RunnableWithMessageHistory）+ 集成到 Agentic RAG 查询扩展。
+- P1 结构化输出：DocumentMetadataExtractor（LLM + zod structured output 抽取标题/作者/摘要/关键词/语言/类别），集成到文档上传流程。
+- P2 Mem0 长期记忆（代码完成，待联调）：Mem0Provider（云端/本地双模式）+ MemoryService（搜索注入+分类写入+分类器）+ 记忆管理 API（GET/DELETE /api/memories）。
+- P2 对话历史向量化：ConversationEmbeddingService 将 QA 对嵌入 Milvus，自动检索相关历史对话作为上下文。
 
 当前已知问题：
 - Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。已通过自动快速降级到 BM25（含中文单字/bigram兜底）避免卡死，后续可从索引算法或资源配置层面继续优化性能。
 
 下一步建议：
-- P2：后端腾讯云 ASR/TTS 前端整合（播放朗读按钮）。
-- P2：Mem0 长期记忆系统开发与集成。
-- P2：MCP 协议 MultiServerMCPClient 对接与工具源标定。
+- P2：Mem0 长期记忆联调验证（配置 MEM0_API_KEY 后测试记忆搜索与分类写入）。
+- P2：MCP 协议 MultiServerMCPClient 联调与工具源标定。
+- P1：结构化输出补全（流式结构化输出、实体关系抽取用于 Neo4j）。
 - P3：知识图谱 GraphRAG (Neo4j) 与自动化评测体系。

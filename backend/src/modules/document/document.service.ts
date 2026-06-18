@@ -8,10 +8,19 @@ import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MarkdownChunker } from './chunking.util';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { DocumentMetadataExtractor } from './document-metadata.extractor';
 
 export interface UploadResult {
   docId: string;
   chunkCount: number;
+  metadata?: {
+    title: string;
+    author: string;
+    summary: string;
+    keywords: string[];
+    language: string;
+    category: string;
+  };
 }
 
 export interface DocMeta extends UploadResult {
@@ -34,6 +43,7 @@ export class DocumentService {
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly karpathyRagService: KarpathyRagService,
     private readonly elasticsearchProvider: ElasticsearchProvider,
+    private readonly metadataExtractor: DocumentMetadataExtractor,
   ) {}
 
   async upload(
@@ -75,7 +85,17 @@ export class DocumentService {
     // 5. 同步 Elasticsearch 索引（ES 未启用时自动跳过）
     await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
 
-    // 6. 存元数据到数据库
+    // 6. LLM 抽取文档元数据（异步，不阻塞上传返回）
+    const metadataPromise = this.metadataExtractor
+      .extract(content)
+      .catch((err) => {
+        this.logger.warn(
+          `Metadata extraction failed: ${(err as Error).message}`,
+        );
+        return null;
+      });
+
+    // 7. 存元数据到数据库（先存基础信息，元数据异步更新）
     const docMeta = this.docMetaRepo.create({
       docId,
       filename,
@@ -84,10 +104,36 @@ export class DocumentService {
     });
     await this.docMetaRepo.save(docMeta);
 
+    // 等待元数据抽取完成后更新
+    const metadata = await metadataPromise;
+    if (metadata) {
+      await this.docMetaRepo.update(
+        { docId },
+        {
+          title: metadata.title || null,
+          author: metadata.author || null,
+          summary: metadata.summary || null,
+          keywords:
+            metadata.keywords.length > 0
+              ? JSON.stringify(metadata.keywords)
+              : null,
+          language: metadata.language || null,
+          category: metadata.category || null,
+        },
+      );
+      this.logger.log(
+        `Metadata saved: docId=${docId}, title="${metadata.title}", category=${metadata.category}`,
+      );
+    }
+
     this.logger.log(
       `Upload done: docId=${docId}, chunks=${chunks.length}, esEnabled=${this.elasticsearchProvider.isEnabled()}`,
     );
-    return { docId, chunkCount: chunks.length };
+    return {
+      docId,
+      chunkCount: chunks.length,
+      metadata: metadata || undefined,
+    };
   }
 
   /**
@@ -148,6 +194,18 @@ export class DocumentService {
       filename: meta.filename,
       chunkCount: meta.chunkCount,
       createdAt: meta.createdAt.toISOString(),
+      metadata: meta.title
+        ? {
+            title: meta.title,
+            author: meta.author || '未知',
+            summary: meta.summary || '',
+            keywords: meta.keywords
+              ? (JSON.parse(meta.keywords) as string[])
+              : [],
+            language: meta.language || '未知',
+            category: meta.category || '其他',
+          }
+        : undefined,
     }));
   }
 }
