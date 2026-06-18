@@ -4,16 +4,16 @@
 
 ## 当前阶段
 
-**M1/M3/M4/M5 已完成，M2 部分完成（Milvus search 超时问题阻塞 agentic 完整验证）**
+**M1/M2/M3/M4/M5 已完成，Milvus search 超时降级为后续性能优化项**
 
 - M0 项目骨架可运行已验证（2026-06-18）
 - M1 最简 RAG 管线已验证通过（2026-06-18）：上传→切分→Embedding→Milvus→simple 检索→回答→debug 全链路 OK
-- M2 Agentic RAG 工作流逻辑验证通过（2026-06-18）：route/augment/retrieval/generate/reflection 全节点运行，reflection 评估正确（confidence=0.80）
-- M2 已知问题：Milvus search 在 agentic 串行多查询场景下超时（详见"阻塞"）
+- M2 Agentic RAG 完整验证通过（2026-06-18）：deepAgent 检索规划 + route/query_augment/retrieval/sufficiency/web_search/rerank/generate/reflection/SSE 全链路 OK，auto 路由到 agentic 且 reflection=1.00
+- M2 已知问题：Milvus search 仍可能 15s 超时，但已通过 BM25 中文召回和向量检索降级兜底，不再阻塞 M2
 - M3 NestJS 工程化已验证通过（2026-06-18）：JWT + 统一响应 + 全局异常 + pino 日志
 - M4 前端最小可用已验证通过（2026-06-18）：React + Vite + TypeScript，文件上传 + 聊天（SSE 流式）+ 引用展示 + 模式切换
 - M5 容器化部署已验证通过（2026-06-18）：Dockerfile 多阶段构建 + docker-compose.prod.yml 完整栈 + 资源限制 + nginx 反代
-- 下一步：继续解决 M2 Milvus 问题 或 开始 P1/P2 功能扩展（Rerank / ES / 语音 / 评测）
+- 下一步：继续 P1/P2 功能扩展（Rerank / ES / 后端 ASR/TTS / 评测）或优化 Milvus search 性能
 
 ## 已完成
 
@@ -64,22 +64,22 @@
   - backend/.env.example：全量环境变量模板（不含真实密钥）
   - docker/docker-compose.yml：PostgreSQL16+pgvector / Redis7 / Milvus2.4.4（etcd+minio+standalone）+ healthcheck
   - 验证通过：`npm run build` ✓ / `npm run lint` ✓ / `npm run start` ✓ / `curl /api/health` → `{"status":"ok"}` ✓
-- [x] **M1 最简 RAG 管线代码完成**（2026-06-18，代码就绪，待 docker 验证）
+- [x] **M1 最简 RAG 管线完成**（2026-06-18，已 docker 验证完整链路）
   - providers/llm：LLMProvider 接口 + QwenProvider 实现（OpenAI 兼容接口，qwen-plus）
   - providers/embedding：EmbeddingProvider 接口 + QwenEmbeddingProvider 实现（text-embedding-v3，1024 维）
-  - providers/vector-store：VectorStoreProvider 接口 + MilvusVectorStoreProvider 实现（含 collection 自动创建 + HNSW 索引 + 连接失败不阻断启动）
-  - modules/document：文档上传（multer）+ MarkdownChunker（@langchain/textsplitters）+ Embedding + 写入 Milvus + BM25 内存索引同步
+  - providers/vector-store：VectorStoreProvider 接口 + MilvusVectorStoreProvider 实现（含 collection 自动创建 + IVF_FLAT 索引 + 连接失败不阻断启动）
+  - modules/document：文档上传（multer）+ Markdown/TXT/PDF/DOCX 文本解析 + MarkdownChunker（@langchain/textsplitters）+ Embedding + 写入 Milvus + BM25 内存索引同步
     - `POST /api/documents/upload`（multipart/form-data，file 字段）
     - `GET /api/documents`（列出已上传文档）
     - `GET /api/documents/:docId`（查询单个文档）
-  - rag/karpathy：BM25 检索（内存，rank-bm25）+ 余弦相似度（纯 JS）+ 加权融合（0.5/0.5）+ LLM 生成
+  - rag/karpathy：BM25 检索（内存，纯 JS）+ 余弦相似度（纯 JS）+ 加权融合（0.3/0.7）+ LLM 生成
     - KarpathyRagService.answer(query) → { answer, references }
   - modules/chat：`POST /api/chat`（ChatDto + class-validator 校验 + ValidationPipe）
   - modules/debug：`GET /api/debug/chunks?query=...`（返回 BM25 分、cosine 分、加权总分）
   - main.ts：全局前缀 /api + 全局 ValidationPipe（whitelist + transform）
   - 依赖修复：uuid ESM 兼容（改用 node:crypto.randomUUID + npm overrides 锁 uuid@9）+ @zilliz/milvus2-sdk-node 降级到 v2.6.14
   - 验证通过：`npm run build` ✓ / `npm run lint` ✓ / `npm run start` ✓（所有模块初始化 + 所有路由注册）/ `curl /api/health` → `{"status":"ok"}` ✓
-  - 待验证：docker compose 启动 Milvus 后，跑上传→提问→debug 完整链路
+  - 验证通过：docker compose 启动 Milvus 后，上传→提问→debug 完整链路 OK
 - [x] **M3 NestJS 工程化骨架完成**（2026-06-18，已验证）
   - common/interfaces/api-response.interface.ts：ApiResponse<T> + JwtPayload 接口
   - common/interceptors/transform.interceptor.ts：统一响应 {code, data, message} + 请求耗时日志
@@ -106,30 +106,36 @@
     - `GET /api/auth/profile` 带正确 token → `{"code":200,"data":{"userId":"1","username":"admin","role":"admin"}}` ✓
     - `GET /api/auth/profile` 带无效 token → `{"code":401,"message":"token invalid or expired"}` ✓
     - pino 结构化日志生效（pretty 格式，生产环境 JSON）✓
-- [x] **M2 Agentic RAG 管线代码完成**（2026-06-18，待 docker 验证完整链路）
+- [x] **M2 Agentic RAG 管线完成**（2026-06-18，已 docker 验证完整链路）
   - rag/agentic/agentic-rag.state.ts：LangGraph Annotation State 定义（query/route/augmentedQueries/retrievedChunks/answer/confidence/retryCount/passed）
-  - rag/agentic/sse-event.ts：SSE 事件类型（routing/query_augment/retrieval/token/citation/reflection/final/error）
+  - rag/agentic/sse-event.ts：SSE 事件类型（routing/query_augment/retrieval/sufficiency/web_search/rerank/token/citation/reflection/final/error）
   - rag/agentic/agentic-rag.service.ts：完整 Agentic RAG 工作流
     - routeNode：auto 模式用 LLM + zod structured output 判断问题复杂度（simple/complex → simple/agentic）
     - queryAugmentNode：LLM 生成 3 条多角度检索问句（参考 agent-course/es-test/query-augment.mjs）
-    - retrievalNode：多查询并行检索 + 按 chunkId 去重 + 分数取最大值 + Top-5
+    - retrievalNode：原始问题 1 次混合检索 + deepAgent 扩展问题 BM25-only + 按 chunkId 去重 + 分数取最大值 + Top-5
+    - sufficiencyNode：生成前评估检索片段是否足够支撑回答，SSE 推送 sufficient/reason
+    - webSearchFallbackNode：检索不足时调用 Bocha Web Search 补充外部上下文；BOCHA_API_KEY 缺失时跳过，不阻断本地 RAG
+    - rerankNode：生成前调用 DashScope Rerank 二次排序；RERANK_API_KEY 缺失时保持原排序
     - generateNode：LLM 流式生成（model.stream + onToken 回调）
     - reflectionNode：LLM 评估置信度（0~1）+ reason，阈值 0.7，最多重试 2 次
     - reflectionRouter：passed → end，retryCount >= maxRetries → end，否则 retry
     - run()：完整编排，支持 SSE 回调推送全流程事件
   - rag/agentic/agentic-rag.module.ts：注册 AgenticRagService，依赖 KarpathyRagModule + LlmModule
+  - deepagents 集成：query_augment 优先使用 createDeepAgent 规划 3 条检索问句，失败时回落到原 structured output
+  - retrieval 策略：原始问题 1 次混合检索 + deepAgent 扩展问题 BM25-only，避免连续 Milvus search
+  - BM25 中文兜底：简单分词加入中文单字和 bigram，未接入 jieba 前避免中文短查询空召回
   - providers/llm/：ILLMProvider 新增 getModel() 方法（暴露 ChatOpenAI 用于 withStructuredOutput / stream）
   - modules/chat/：
     - chat.dto.ts：mode 支持 simple/agentic/auto，ChatResponse 新增 route/confidence/retryCount
     - chat.service.ts：集成 AgenticRagService，simple 走 KarpathyRag，agentic/auto 走 AgenticRag
     - chat.controller.ts：新增 `GET /api/chat/stream?query=...&mode=agentic` SSE 流式接口（@Sse + Observable）
     - chat.module.ts：导入 AgenticRagModule
-  - 依赖新增：@langchain/langgraph + zod
+  - 依赖新增：@langchain/langgraph + zod + deepagents
   - 验证通过：build ✓ / lint ✓ / start ✓
     - `POST /api/chat` mode=invalid → `{"code":400,"message":"mode must be one of the following values: simple, agentic, auto"}` ✓
     - `GET /api/chat/stream` 无 query → `{"code":400,"message":"query is required"}` ✓
     - `POST /api/chat` mode=auto "对比React和Vue的响应式原理" → auto 路由到 agentic ✓ + query_augment 成功生成 3 条多角度问句 ✓（retrieval 因 docker 未启动返回 500，符合预期）
-  - 待 docker 验证：agentic 完整链路（多轮检索 + reflection 重试 + SSE 流式）
+  - 验证通过：docker compose 基础设施 healthy；上传测试文档后 agentic 非流式返回答案 + 引用 + reflection=1.00；auto 路由到 agentic 并返回技术栈答案 + 2 个引用 + reflection=1.00；SSE 输出 routing/query_augment/retrieval/sufficiency/web_search/rerank/token/citation/reflection/final 全事件，reflection=0.95
 
 - [x] **M4 前端最小可用完成**（2026-06-18，已验证）
   - frontend/：React 18 + Vite 5 + TypeScript 项目初始化
@@ -144,13 +150,13 @@
     - debugChunks(query)：GET /api/debug/chunks
   - src/App.tsx：Tab 切换（对话 / 文档管理）
   - src/components/UploadPage.tsx：文件上传页
-    - 文件选择（.md/.txt/.markdown）+ 上传按钮 + 上传状态提示
+    - 文件选择（.md/.markdown/.txt/.pdf/.docx）+ 上传按钮 + 上传状态提示
     - 文档列表表格（文件名 / 片段数 / 创建时间 / Doc ID）
   - src/components/ChatPage.tsx：聊天窗口
     - 模式切换器（simple / agentic / auto）+ 模式提示
     - simple 模式：非流式 POST /api/chat
     - agentic/auto 模式：SSE 流式 GET /api/chat/stream
-    - SSE 事件处理：routing / token / citation / reflection / final / error
+    - SSE 事件处理：routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final / error
     - 流式 token 拼接 + 流程事件追踪显示
     - 消息历史 + 自动滚动
   - src/components/ReferenceList.tsx：引用来源展示
@@ -202,64 +208,70 @@
     - 多阶段构建镜像大小 < 300MB ✓（backend 278MB / frontend 61.7MB）
     - prod compose 配置含资源限制 ✓（所有服务含 deploy.resources.limits）
 
+- [x] **P2 前端语音录入入口完成**（2026-06-18，已离线验证）
+  - ChatPage 增加浏览器 Web Speech API 语音输入按钮
+  - 支持中文识别（zh-CN）、中间结果回填输入框、停止录音、不支持浏览器提示
+  - 不改变后端 API，转写完成后复用现有 simple/agentic/auto 查询流程
+  - 验证通过：`cd frontend && npm run build` ✓
+
 ## 进行中
 
-- 无（M1/M3/M4/M5 已完成，M2 部分完成受 Milvus 问题阻塞，待主人决定下一步：继续 M2 或 P1/P2 功能扩展）
+- 无（M1/M2/M3/M4/M5 已完成；Milvus search 性能问题进入后续优化）
 
 ## 待办
 
-### P0 — 阻塞项，必须先解决
+### P0 — 架构决策，进入下一阶段前定稿
 
-- [ ] **BM25 索引方案定稿**：内存 / JSON 持久化 / Elasticsearch BM25 三选一
+- [ ] **BM25 索引方案定稿**：当前为内存 BM25 + 中文单字/bigram 兜底；后续在 JSON 持久化 / Elasticsearch BM25 中选生产方案
 - [ ] **对话历史 + Mem0 长期记忆方案定稿**：存储层、注入策略、分类器
 - [ ] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式
 
 ### P0 — 基础设施
 
-- [ ] **项目骨架初始化**（NestJS + monorepo）
+- [x] **项目骨架初始化**（NestJS + monorepo）
   - 后端：NestJS 项目（含 CLAUDE.md、.env.example、ESLint、tsconfig）
   - 前端：React + Vite 项目
   - 目录结构：backend / frontend / skills / workspace / docker
-- [ ] **NestJS 工程化模式落地**（对齐 agent-course/nest-feature）
+- [x] **NestJS 工程化模式落地**（对齐 agent-course/nest-feature）
   - JWT 认证（@nestjs/jwt + AuthGuard）
-  - 角色权限（@CurrentUser() 装饰器 + RBAC）
+  - 角色权限（已实现 @CurrentUser() 装饰器；RBAC 细粒度权限待扩展）
   - 统一响应（TransformInterceptor：{code, data, message}）
   - 全局异常（AllExceptionsFilter）
-  - 参数校验（自定义 Pipe）
-  - 请求日志（拦截器记录 method/url/耗时）
+  - 参数校验（ValidationPipe）
+  - 请求日志（pino + TransformInterceptor 记录 method/url/耗时）
   - 目录结构：common/{decorators,filters,guards,interceptors,pipes,interfaces}
-- [ ] Milvus + Elasticsearch 环境搭建（docker-compose，对齐 SUMMARY.md）
-- [ ] Redis 环境搭建（对话历史 + 缓存）
-- [ ] PostgreSQL + MySQL 环境搭建（可插拔，docker-compose）
+- [ ] Milvus + Elasticsearch 环境搭建（Milvus 已完成；Elasticsearch 待接入）
+- [x] Redis 环境搭建（docker-compose 已完成；对话历史/缓存业务接入待做）
+- [ ] PostgreSQL + MySQL 环境搭建（PostgreSQL 已完成；MySQL 待接入）
 - [ ] 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
 - [ ] TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
-- [ ] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义
+- [ ] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding 已完成；SpeechProvider 待实现）
   - LLM：通义千问（qwen-plus/turbo）+ OpenAI 兼容
   - Speech：腾讯云 ASR/TTS（含流式 TTS）
-- [ ] OpenAI-compatible Provider 实现
-- [ ] VectorStoreProvider / RelationalDBProvider 抽象接口（可插拔多后端）
+- [x] OpenAI-compatible Provider 实现（Qwen 走 OpenAI-compatible 接口）
+- [ ] VectorStoreProvider / RelationalDBProvider 抽象接口（VectorStoreProvider 已完成；RelationalDBProvider 待实现）
 
 ### P1 — 核心管线
 
-- [ ] 文档上传 + 解析（PDF/Markdown/TXT/DOCX）
-- [ ] Chunking 策略实现（按格式分策略，chunk_size/overlap 可配置）
-- [ ] Embedding 生成 + 写入向量库（Milvus 或 pgvector，按配置）
-- [ ] BM25 索引构建（含 @node-rs/jieba 中文分词）
-- [ ] Karpathy-style RAG 管线（rank_bm25 + 纯 JS cosine 计算 + 加权融合）
-- [ ] Agentic RAG 管线（LangGraph.js：query_rewrite → query_augment → retrieval → rerank → generate）
-- [ ] 查询扩展（LLM 生成 3 条多角度问句，并行检索去重）
-- [ ] 检索充分性评估（生成前判断，不足触发 web_search）
-- [ ] Reflection 节点（含最大重试次数控制）
-- [ ] Bocha web_search 工具集成
-- [ ] DashScope Rerank 集成
-- [ ] Mode Router（auto / agentic / simple）
-- [ ] SSE 流式响应（routing/token/tool_call/retrieval/citation/final/error 事件）
+- [x] 文档上传 + 解析（Markdown/TXT/PDF/DOCX 已完成并验证）
+- [x] Chunking 策略实现（当前 MarkdownChunker，chunk_size/overlap 固定）
+- [x] Embedding 生成 + 写入向量库（Milvus 已完成；pgvector 待做）
+- [x] BM25 索引构建（内存 BM25 + 中文单字/bigram 兜底；@node-rs/jieba 待接入）
+- [x] Karpathy-style RAG 管线（纯 JS BM25 + 纯 JS cosine 计算 + 加权融合）
+- [x] Agentic RAG 管线（deepAgent query planning → retrieval → generate → reflection）
+- [x] 查询扩展（deepAgent 规划 3 条多角度问句；失败时回落到 LLM structured output）
+- [x] 检索充分性评估（基础评估已完成并通过 SSE 输出；不足时触发 Bocha web_search，API key 缺失自动跳过）
+- [x] Reflection 节点（含最大重试次数控制）
+- [x] Bocha web_search 工具集成（官方 `POST /v1/web-search`；无 API key 时禁用且不阻断）
+- [x] DashScope Rerank 集成（官方 text-rerank / compatible reranks；默认模型 qwen3-rerank；无 API key 时禁用且不阻断）
+- [x] Mode Router（auto / agentic / simple）
+- [x] SSE 流式响应（routing/query_augment/retrieval/sufficiency/web_search/rerank/token/citation/reflection/final/error 事件）
 
 ### P1 — LangGraph 增强
 
 - [ ] Checkpointer 状态持久化（MemorySaver / SqliteSaver / PostgresSaver）
 - [ ] 子 Agent 编排架构（researcher/analyst/writer/critic/editor）
-- [ ] 向量索引创建（HNSW，含 ef_search 配置）
+- [ ] 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
 
 ### P1 — Prompt 工程与结构化输出
 
@@ -277,13 +289,13 @@
 
 ### P1 — 容器化部署
 
-- [ ] **Docker 多阶段构建**（对齐 agent-course/nest-dockerfile-test）
+- [x] **Docker 多阶段构建**（对齐 agent-course/nest-dockerfile-test）
   - Builder 阶段：npm ci + nest build
   - 运行阶段：仅生产依赖 + 编译产物（更小镜像）
 - [ ] **docker-compose 多环境**
   - dev：热重载 + 全部服务（PostgreSQL/MySQL/Redis/Milvus/ES/Neo4j）
-  - prod：仅必要服务 + 资源限制
-- [ ] 完整栈编排（app + postgres + mysql + redis + milvus + elasticsearch + neo4j）
+  - prod：仅必要服务 + 资源限制（已完成）
+- [ ] 完整栈编排（app + postgres + redis + milvus 已完成；mysql/elasticsearch/neo4j 待接入）
 
 ### P2 — 功能扩展
 
@@ -304,14 +316,14 @@
 
 ### P2 — 前端
 
-- [ ] React + Vite 项目初始化
-- [ ] 文件上传 + 知识库列表页
-- [ ] 聊天窗口（流式回答 + useChat）
-- [ ] 引用来源展示（可展开 chunk 原文）
-- [ ] 模式切换器（simple / agentic / auto）
-- [ ] 路由追踪面板（实际模式 + 工具调用链）
+- [x] React + Vite 项目初始化
+- [x] 文件上传 + 知识库列表页
+- [x] 聊天窗口（流式回答；当前自研 SSE 客户端，未接 useChat）
+- [x] 引用来源展示（可展开 chunk 原文）
+- [x] 模式切换器（simple / agentic / auto）
+- [x] 路由追踪面板（实际模式 + SSE 事件链路）
 - [ ] Debug 面板（BM25/cosine 分数 + 完整 Prompt）
-- [ ] 语音录入（录音 → STT → 查询）
+- [x] 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端腾讯云 ASR 待扩展）
 - [ ] TTS 朗读按钮
 - [ ] 审批弹窗（interrupt 事件）
 
@@ -345,26 +357,35 @@
 
 ## 阻塞
 
-- **Milvus search 在 agentic 串行多查询场景下超时**（2026-06-18）
+- 无当前阻塞。
+
+## 已知问题
+
+- **Milvus search 仍可能 15s 超时**（2026-06-18）
   - 现象：
-    - simple 模式单次 search 正常（< 1s）
-    - debug 接口单次 search 正常（< 1s）
-    - agentic 模式 3 条扩展查询串行 search，每条都超时（15s/60s 均超时）
-    - 偶发：某次测试中 3 条查询有 2 条成功，reflection 通过（confidence=0.80）
-    - 超时后 Milvus 服务不可用，连 debug 接口也失败，需重启 Milvus
+    - Milvus `search` 在本机 Docker 环境可能出现 15s `DEADLINE_EXCEEDED`
+    - debug/simple/agentic 都可能被首次向量 search timeout 拉长
+    - 超时后当前实现会降级 BM25，因此不会阻断回答链路
   - 已尝试：
     - 重建 collection（IVF_FLAT + nlist=1024，参考 agent-course/milvus-test/src/insert.mjs）→ 空集合 search 54ms ✓，但上传数据后 agentic 仍超时
     - 添加 nprobe=16 参数 → 无效
     - 添加 warmup 预热 search → warmup 成功，但 agentic 仍超时
     - timeout 从 60s 降到 15s → 快速失败，但问题依旧
     - Milvus 连接地址 localhost → 127.0.0.1 → 无效
+    - agentic 检索改为原始问题 1 次混合检索 + 扩展问题 BM25-only ✓
+    - Karpathy retrieve 在向量检索失败时降级 BM25 ✓
+    - BM25 修复中文分词，加入单字/bigram 兜底 ✓
   - 待尝试：
     - 检查 Milvus querynode 资源配置（可能内存不足导致索引加载失败）
     - 尝试 HNSW 索引替代 IVF_FLAT
     - 检查 Milvus 2.4.4 已知 bug
     - 参考 agent-course 的 docker-compose 配置对比
-  - 影响：M2 agentic 完整链路无法稳定验证，但工作流逻辑已验证正确
-  - 临时方案：前端先基于 simple 模式开发，agentic 问题后续解决
+  - 当前状态：
+    - Agentic retrieval 已改为原始问题 1 次混合检索 + 扩展问题 BM25-only
+    - Karpathy retrieve 在向量检索失败时自动降级 BM25
+    - BM25 已增加中文单字/bigram 兜底，中文查询可召回测试文档
+    - M2 功能验收已通过，Milvus 问题不再阻塞 M2
+  - 影响：响应延迟仍会被首次向量 search 的 15s timeout 拉长，后续需要从 Milvus 索引/资源/版本层面优化
 
 ## 待确认
 
@@ -396,12 +417,24 @@
   - `POST /api/chat` mode=simple "LangChain是什么" → 返回正确答案 + `[片段 1]` 引用 ✓
   - M1 验收标准全部达成 ✓
 
-- **M2 Agentic RAG 工作流逻辑验证**（2026-06-18，部分通过）
-  - `POST /api/chat` mode=agentic "LangChain是什么" → 工作流完整运行 ✓
-    - routeNode → queryAugmentNode（生成 3 条多角度问句）→ retrievalNode → generateNode → reflectionNode ✓
-    - Reflection: confidence=0.80, passed=true, retry=1/2（一次通过）✓
-    - 响应时间 87s（含 60s Milvus 首次 search 超时）
-  - 已知问题：agentic 串行多查询 Milvus search 超时（详见"阻塞"）
+- **M2 Agentic RAG 完整验证**（2026-06-18，通过）
+  - `POST /api/chat` mode=agentic "M2 Agentic RAG 的 SSE 需要输出哪些事件？" → deepAgent 规划 + retrieval + generate + reflection 完整运行 ✓
+    - deepAgent planned queries 生成 3 条检索问句 ✓
+    - retrieval 使用 4 queries（原始问题 + 3 条 deepAgent 规划问句）✓
+    - Milvus 向量 search 超时时降级 BM25，仍召回测试 chunk ✓
+    - Reflection: confidence=1.00, passed=true, retry=1/2 ✓
+  - `POST /api/chat` mode=auto "这个项目用了哪些技术栈，它们分别负责什么？" → route=agentic，返回 2 个引用，reflection=1.00 ✓
+  - `GET /api/chat/stream` mode=agentic → 输出 routing / query_augment / retrieval / token / citation / reflection / final 全事件，reflection=0.95 ✓
+
+- **M1/M2 增量验证**（2026-06-18，通过）
+  - `POST /api/documents/upload` 上传 `.txt` 文件 → 返回 docId + chunkCount ✓
+  - `POST /api/documents/upload` 上传 `.pdf` 文件 → 返回 docId + chunkCount ✓
+  - `POST /api/documents/upload` 上传 `.docx` 文件 → 返回 docId + chunkCount ✓
+  - `GET /api/chat/stream` mode=agentic → 输出 routing / query_augment / retrieval / sufficiency / token / citation / reflection / final 全事件 ✓；检索不足分支额外输出 web_search ✓
+  - sufficiency 事件返回 `sufficient=true` + 中文 reason ✓
+  - final 事件包含 `retrievalSufficient=true` + `retrievalReason` ✓
+  - 检索不足且 `BOCHA_API_KEY` 未配置时 → 输出 `web_search` 事件，`enabled=false`，final 正常返回，不报 500 ✓
+  - `RERANK_API_KEY` 未配置时 → 输出 `rerank` 事件，`enabled=false`，final 正常返回，不报 500 ✓
 
 - **M3 工程化完整验证**（2026-06-18）
   - `cd backend && npm run build` → 无错误 ✓
@@ -444,7 +477,7 @@
 **验收标准**：
 - `agentic` 模式下，对多跳问题（如"这个项目用了哪些技术栈，分别对应哪个章节"）能触发 ≥2 轮检索
 - `auto` 模式能根据问题复杂度自动选择 simple / agentic
-- SSE 流式响应能正确推送 `routing / token / retrieval / citation / final` 事件
+- SSE 流式响应能正确推送 `routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final` 事件
 - Reflection 节点对低置信度答案触发重新检索，最多重试 2 次
 
 ### M3 — 工程化与可观测（P0 工程化 + P3 可观测子集）
@@ -484,11 +517,11 @@
 | 里程碑 | 涉及待办分组 | 验收状态 |
 |--------|-------------|----------|
 | M0 | P0 项目骨架 + docker-compose 基础服务 | ✅ 已完成（2026-06-18） |
-| M1 | P1 核心管线（simple 子集）+ P0 Provider 接口 | 代码完成，待 docker 验证 |
-| M2 | P1 核心管线（完整）+ P1 LangGraph 增强 | 代码完成，待 docker 验证 |
+| M1 | P1 核心管线（simple 子集）+ P0 Provider 接口 | ✅ 已完成（2026-06-18） |
+| M2 | P1 核心管线（完整）+ P1 LangGraph 增强 | ✅ 已完成（2026-06-18） |
 | M3 | P0 NestJS 工程化 + P3 pino 日志 | ✅ 已完成（2026-06-18） |
-| M4 | P2 前端子集 | 未开始 |
-| M5 | P1 容器化部署 | 未开始 |
+| M4 | P2 前端子集 | ✅ 已完成（2026-06-18） |
+| M5 | P1 容器化部署 | ✅ 已完成（2026-06-18） |
 
 > **纪律**：M0 未达成前，禁止动 M1 的代码；M1 未达成前，禁止实现 Agentic RAG / 前端 / 容器化等任何"高级"特性。先跑通一条链路，再谈扩展。
 
@@ -508,14 +541,19 @@
 | 2026-06-18 | ROADMAP 同步 rag-plan.md 最新内容：待办清单新增 P0（NestJS 工程化模式落地）、P1（Prompt 工程、结构化输出、Docker 容器化部署）、P2（MCP 协议集成）、P3（知识图谱 RAG Neo4j）；已完成项补充 SUMMARY.md 26 章节和 rag-plan.md 26 项目对齐记录 |
 | 2026-06-18 | 新增"待确认"项决策建议（多租户→单租户预留 tenant_id、部署→Docker Compose）；新增"里程碑与验收标准"章节（M0~M5 + 后续 M6~M8），每个里程碑含明确验收标准；新增里程碑与待办映射表 + 纪律约束（M0 未达成禁止动 M1） |
 | 2026-06-18 | **M0 完成**：创建顶层目录（backend/frontend/admin/docker/skills/workspace）+ CLAUDE.md 项目规则 + 根级 .gitignore + backend NestJS 初始化（@nestjs/config + @nestjs/terminus + dotenv）+ config/configuration.ts 全量配置 + modules/health 健康检查模块 + main.ts 全局前缀 /api + .env.example 全量模板 + docker-compose.yml（PG16+pgvector/Redis7/Milvus2.4.4+etcd+minio，全 healthcheck）。验证通过：build ✓ / lint ✓ / start ✓ / curl /api/health → {"status":"ok"} ✓ |
-| 2026-06-18 | **M1 代码完成**：providers（llm/embedding/vector-store）+ modules（document/chat/debug）+ rag/karpathy（BM25+cosine+加权融合+LLM 生成）+ class-validator 校验 + ValidationPipe。修复 uuid ESM 兼容（node:crypto.randomUUID + npm overrides 锁 uuid@9）+ milvus2-sdk-node 降级到 v2.6.14。Milvus 连接失败不阻断启动。验证：build ✓ / lint ✓ / start ✓ / health ✓。待 docker 验证完整链路 |
+| 2026-06-18 | **M1 代码完成**：providers（llm/embedding/vector-store）+ modules（document/chat/debug）+ rag/karpathy（BM25+cosine+加权融合+LLM 生成）+ class-validator 校验 + ValidationPipe。修复 uuid ESM 兼容（node:crypto.randomUUID + npm overrides 锁 uuid@9）+ milvus2-sdk-node 降级到 v2.6.14。Milvus 连接失败不阻断启动。验证：build ✓ / lint ✓ / start ✓ / health ✓ / docker 上传→提问→debug 完整链路 ✓ |
 | 2026-06-18 | **安全修复**：清除 .env.example 中误填的真实 QWEN_API_KEY，创建 .env（已 gitignore）存放真实密钥 |
 | 2026-06-18 | **M3 工程化启动**：开始 NestJS 工程化模式落地（TransformInterceptor / AllExceptionsFilter / 请求日志 / JWT 骨架），不依赖 docker，可独立验证 |
 | 2026-06-18 | **M3 工程化骨架完成**：common/ 目录落地（interfaces/interceptors/filters/decorators/guards）+ main.ts 全局注册 + config 新增 auth 配置 + .env 新增 JWT_SECRET。验证：build ✓ / lint ✓ / start ✓ / 统一响应 {code,data,message} ✓ / 全局异常 400+message ✓ |
 | 2026-06-18 | **M3 工程化完整完成**：nestjs-pino 结构化日志（JSON + pino-pretty）+ 完整 JWT 认证模块（AuthModule/AuthService/AuthController + JwtAuthGuard 接入 JwtService.verifyAsync + @CurrentUser + @UseGuards）+ 测试用户（admin/admin123、user/user1234）+ `POST /api/auth/login` + `GET /api/auth/profile`。验证：401 无 token ✓ / 登录签发 token ✓ / 带 token 200 ✓ / 无效 token 401 ✓ / pino 日志 ✓ |
-| 2026-06-18 | **M2 Agentic RAG 代码完成**：rag/agentic/ 模块（state + sse-event + service + module）+ LangGraph 工作流（routeNode/queryAugmentNode/retrievalNode/generateNode/reflectionNode + reflectionRouter）+ auto 模式 LLM 分类 + query_augment 3 条多角度问句 + 多查询并行检索去重 + LLM 流式生成 + reflection 置信度评估（阈值 0.7，最多重试 2 次）+ SSE 流式接口 `GET /api/chat/stream`。ILLMProvider 新增 getModel()。验证：build ✓ / lint ✓ / start ✓ / 参数校验 ✓ / auto 路由分类 ✓ / query_augment ✓（retrieval 待 docker）|
+| 2026-06-18 | **M2 Agentic RAG 代码完成**：rag/agentic/ 模块（state + sse-event + service + module）+ LangGraph 工作流（routeNode/queryAugmentNode/retrievalNode/generateNode/reflectionNode + reflectionRouter）+ auto 模式 LLM 分类 + query_augment 3 条多角度问句 + LLM 流式生成 + reflection 置信度评估（阈值 0.7，最多重试 2 次）+ SSE 流式接口 `GET /api/chat/stream`。ILLMProvider 新增 getModel()。验证：build ✓ / lint ✓ / start ✓ / 参数校验 ✓ / auto 路由分类 ✓ / query_augment ✓；完整 retrieval 后续已在 M2 验证记录中通过 |
 | 2026-06-18 | **Docker 环境启动 + M1 完整验证**：docker compose 拉起 Milvus + PostgreSQL + Redis（全 healthy）。M1 验收：上传 test-doc.md → docId ✓ / debug chunks 返回 BM25+cosine+总分 ✓ / simple chat 返回答案+引用 ✓。M1 验收标准全部达成 |
-| 2026-06-18 | **M2 Agentic 工作流逻辑验证（部分通过）**：agentic 模式完整运行 route→augment→retrieval→generate→reflection，reflection confidence=0.80 passed=true 一次通过。但 Milvus search 在 agentic 串行多查询场景下超时（详见阻塞），agentic 完整链路无法稳定验证 |
-| 2026-06-18 | **Milvus search 超时问题排查**：重建 collection（IVF_FLAT）+ 添加 nprobe=16 + warmup 预热 + timeout 15s/60s + 连接地址 127.0.0.1，均未根本解决。simple/debug 单次 search 正常，agentic 串行多查询超时。问题记录到阻塞，后续解决 |
+| 2026-06-18 | **M2 Agentic 工作流阶段性验证**：agentic 模式完整运行 route→augment→retrieval→generate→reflection，reflection confidence=0.80 passed=true 一次通过；当时发现 Milvus search 在 agentic 串行多查询场景下超时，后续已通过 BM25 降级和 deepAgent 检索策略修复为非阻塞问题 |
+| 2026-06-18 | **Milvus search 超时问题排查**：重建 collection（IVF_FLAT）+ 添加 nprobe=16 + warmup 预热 + timeout 15s/60s + 连接地址 127.0.0.1，均未根本解决；该问题已移入“已知问题”，不再阻塞 M2 功能验收 |
 | 2026-06-18 | **M4 前端最小可用完成**：frontend/ React 18 + Vite 5 + TypeScript 项目。含文件上传页（上传+状态+文档列表）、聊天窗口（simple 非流式 + agentic/auto SSE 流式，token 拼接+流程追踪）、引用展示（可展开 chunk 原文+分数）、模式切换器（simple/agentic/auto）。vite 代理 /api→localhost:3000。验证：build ✓（88 模块 195KB）/ dev ✓ / 代理 ✓。M4 验收标准全部达成 |
+| 2026-06-18 | **M2 Milvus 超时临时修复 + P2 语音录入**：Agentic retrieval 改为“原始问题 1 次混合检索 + 扩展问题 BM25-only”，Karpathy retrieve 增加向量检索失败降级到 BM25，降低连续 Milvus search 风险；前端 ChatPage 增加浏览器 Web Speech API 语音输入按钮（zh-CN、中间结果回填、停止、不支持提示）。验证：backend build ✓ / backend eslint(no-fix) ✓ / frontend build ✓；M2 在线链路后续已复验通过 |
+| 2026-06-18 | **M2 完整验证通过 + deepAgent 接入**：后端新增 deepagents 依赖，Agentic query_augment 优先用 createDeepAgent 规划 3 条检索问句（CommonJS 下用原生 dynamic import 规避 ESM require 问题）；retrieval 强制保留原始问题并追加 deepAgent 查询；BM25 修复中文分词（单字 + bigram）避免中文短查询空召回；reflection 上下文从 200 字扩到 800 字。验证：docker compose 基础设施 healthy；agentic 非流式答案 + 引用 + reflection=1.00 ✓；auto 路由到 agentic + 2 引用 + reflection=1.00 ✓；SSE 输出 routing/query_augment/retrieval/token/citation/reflection/final + reflection=0.95 ✓；backend build/lint ✓ |
+| 2026-06-18 | **M1/M2 增量完成**：文档上传支持 `.txt` / `.pdf` / `.docx`；Agentic RAG 新增 sufficiencyNode，在 retrieval 后、generate 前评估检索片段是否足够支撑回答；SSE 新增 `sufficiency` 事件，final/chat 响应新增 `retrievalSufficient` 和 `retrievalReason`；前端修复 SSE token/citation 解析并显示检索充分性。验证：backend build ✓ / backend eslint(no-fix) ✓ / frontend build ✓ / TXT/PDF/DOCX 上传 ✓ / SSE sufficiency 全链路 ✓ |
+| 2026-06-18 | **P1 Bocha web_search 联网兜底完成**：新增 ToolsModule + BochaSearchService，按官方 `POST https://api.bochaai.com/v1/web-search` 调用；Agentic RAG 在检索充分性不足时触发 webSearchFallbackNode，把联网结果转为引用上下文，SSE 新增 `web_search` 事件；`BOCHA_API_KEY` 缺失时自动跳过并保持 final 正常返回。验证：backend build ✓ / backend eslint(no-fix) ✓ / SSE insufficient→web_search(enabled=false)→final ✓ |
+| 2026-06-18 | **P1 DashScope Rerank 完成**：新增 DashScopeRerankService，支持 qwen3-rerank compatible `/reranks` 和 gte-rerank-v2 text-rerank 结构；Agentic RAG 在生成前执行 rerankNode，SSE 新增 `rerank` 事件；默认 RERANK_MODEL 切到 `qwen3-rerank`，新增 `RERANK_BASE_URL` 模板。验证：backend build ✓ / backend eslint(no-fix) ✓ / SSE rerank(enabled=false)→final ✓ |
 | 2026-06-18 | **M5 容器化部署完成**：backend/Dockerfile（多阶段：builder npm ci + nest build → runtime npm ci --omit=dev + dist）+ frontend/Dockerfile（多阶段：builder vite build → runtime nginx + dist）+ frontend/nginx.conf（SPA 路由 + /api 反代 backend:3000 + SSE 流式支持）+ docker/docker-compose.prod.yml（7 服务完整栈：backend/frontend/postgres/redis/milvus/etcd/minio，全含 deploy.resources.limits 资源限制 + rag-net bridge 网络）。镜像源用 docker.m.daocloud.io 国内加速。验证：build ✓（backend 278MB / frontend 61.7MB，均 < 300MB）/ up -d ✓（7 容器全 Healthy）/ health ✓ / nginx 反代 ✓。M5 验收标准全部达成 |

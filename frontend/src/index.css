@@ -384,7 +384,31 @@ body {
   font-size: 14px;
 }
 
+.input-area .voice-button {
+  background: #fff;
+  color: #333;
+  border: 1px solid #d9d9d9;
+  min-width: 64px;
+}
+
+.input-area .voice-button.active {
+  background: #fff1f0;
+  color: #cf1322;
+  border-color: #ffa39e;
+}
+
 .input-area button:disabled {
   background: #d9d9d9;
   cursor: not-allowed;
+}
+
+.input-area .voice-button:disabled {
+  color: #999;
+  border-color: #d9d9d9;
+}
+
+.voice-error {
+  padding: 0 16px 12px;
+  color: #cf1322;
+  font-size: 12px;
 }

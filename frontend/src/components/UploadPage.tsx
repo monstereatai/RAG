@@ -48,7 +48,7 @@ function UploadPage() {
         <div className="upload-form">
           <input
             type="file"
-            accept=".md,.txt,.markdown"
+            accept=".md,.markdown,.txt,.pdf,.docx"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             disabled={uploading}
           />

@@ -104,7 +104,10 @@ export const configuration = () => ({
   rerank: {
     provider: process.env.RERANK_PROVIDER ?? 'dashscope',
     apiKey: process.env.RERANK_API_KEY ?? '',
-    model: process.env.RERANK_MODEL ?? 'gte-rerank',
+    model: process.env.RERANK_MODEL ?? 'qwen3-rerank',
+    baseUrl:
+      process.env.RERANK_BASE_URL ??
+      'https://dashscope-intl.aliyuncs.com/compatible-api/v1/reranks',
   },
 
   // 知识图谱（Neo4j，可选）

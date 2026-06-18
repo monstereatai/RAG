@@ -28,6 +28,10 @@ export interface KarpathyRagResult {
   }>;
 }
 
+export interface RetrieveOptions {
+  vectorSearch?: boolean;
+}
+
 /**
  * Karpathy-Style RAG：BM25 + Cosine 混合检索 + LLM 生成
  * M1 阶段：BM25 索引存内存（重启丢失，M2 落库后从 DB 重建）
@@ -84,17 +88,33 @@ export class KarpathyRagService {
   /**
    * 混合检索：BM25 + Cosine 加权融合
    */
-  async retrieve(query: string): Promise<RetrievedChunk[]> {
+  async retrieve(
+    query: string,
+    options: RetrieveOptions = {},
+  ): Promise<RetrievedChunk[]> {
+    const vectorSearch = options.vectorSearch ?? true;
+
     // 1. BM25 检索 topK*2（多召回一些用于融合）
     const bm25Hits: BM25Hit[] = this.bm25.search(query, this.topK * 2);
     const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
 
     // 2. Cosine 检索 topK*2（通过 Milvus）
-    const queryVector = await this.embeddingProvider.embedQuery(query);
-    const cosineHits = await this.vectorStoreProvider.similaritySearch(
-      queryVector,
-      this.topK * 2,
-    );
+    let cosineHits: Awaited<
+      ReturnType<VectorStoreProvider['similaritySearch']>
+    > = [];
+    if (vectorSearch) {
+      try {
+        const queryVector = await this.embeddingProvider.embedQuery(query);
+        cosineHits = await this.vectorStoreProvider.similaritySearch(
+          queryVector,
+          this.topK * 2,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Vector search failed, fallback to BM25 only: ${(err as Error).message}`,
+        );
+      }
+    }
     const cosineMaxScore = Math.max(...cosineHits.map((h) => h.score), 1);
 
     // 3. 加权融合（归一化后加权）
@@ -141,6 +161,33 @@ export class KarpathyRagService {
       (a, b) => b.totalScore - a.totalScore,
     );
     return results.slice(0, this.topK);
+  }
+
+  /**
+   * 仅使用 BM25 检索。
+   * Agentic 多查询扩展使用该方法，避免对 Milvus 连续 search 导致阻塞。
+   */
+  retrieveBm25Only(query: string): RetrievedChunk[] {
+    const bm25Hits: BM25Hit[] = this.bm25.search(query, this.topK * 2);
+    const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
+
+    return bm25Hits
+      .map((hit) => {
+        const meta = this.chunkMeta.get(hit.id);
+        if (!meta) return null;
+        const normalizedBm25 = hit.score / bm25MaxScore;
+        return {
+          id: hit.id,
+          content: meta.content,
+          docId: meta.docId,
+          chunkIndex: meta.chunkIndex,
+          bm25Score: normalizedBm25,
+          cosineScore: 0,
+          totalScore: normalizedBm25 * this.bm25Weight,
+        } satisfies RetrievedChunk;
+      })
+      .filter((chunk): chunk is RetrievedChunk => chunk !== null)
+      .slice(0, this.topK);
   }
 
   /**

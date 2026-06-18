@@ -11,7 +11,7 @@ export interface UploadResult {
 }
 
 /**
- * 文档服务：解析 MD → 切分 → Embedding → 写入 Milvus
+ * 文档服务：接收已解析文本 → 切分 → Embedding → 写入 Milvus
  * M1 阶段：文档元数据存内存 Map（M2 再落库）
  */
 @Injectable()

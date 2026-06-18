@@ -14,6 +14,8 @@ import {
   reflectionPrompt,
 } from '../prompts/agentic.prompts';
 import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
+import { BochaSearchService } from '../../tools/bocha-search.service';
+import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 
 /**
  * Agentic RAG 服务
@@ -29,6 +31,8 @@ import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
 @Injectable()
 export class AgenticRagService {
   private readonly logger = new Logger(AgenticRagService.name);
+  private deepAgent: { invoke: (input: unknown) => Promise<unknown> } | null =
+    null;
 
   /** Reflection 阈值，低于此值触发重试 */
   private readonly confidenceThreshold = 0.7;
@@ -38,6 +42,8 @@ export class AgenticRagService {
   constructor(
     private readonly llmProvider: LlmProvider,
     private readonly karpathyRagService: KarpathyRagService,
+    private readonly bochaSearchService: BochaSearchService,
+    private readonly dashScopeRerankService: DashScopeRerankService,
   ) {}
 
   /**
@@ -69,6 +75,13 @@ export class AgenticRagService {
   async queryAugmentNode(
     state: AgenticRagStateType,
   ): Promise<Partial<AgenticRagStateType>> {
+    const deepAgentQueries = await this.planQueriesWithDeepAgent(state.query);
+    if (deepAgentQueries.length > 0) {
+      const queries = this.normalizeQueries(state.query, deepAgentQueries);
+      this.logger.log(`DeepAgent planned queries: ${JSON.stringify(queries)}`);
+      return { augmentedQueries: queries };
+    }
+
     const model = this.llmProvider.getModel();
 
     const schema = z.object({
@@ -101,24 +114,28 @@ export class AgenticRagService {
   }
 
   /**
-   * 检索节点：对每条扩展查询独立检索，合并去重
-   * 串行检索避免 Milvus 并发超时
+   * 检索节点：原始问题做一次混合检索，扩展问题走 BM25 检索，合并去重。
+   * 这样保留多角度召回，同时避免 agentic 模式连续触发多次 Milvus search。
    */
   async retrievalNode(
     state: AgenticRagStateType,
   ): Promise<Partial<AgenticRagStateType>> {
     const queries =
       state.augmentedQueries.length > 0
-        ? state.augmentedQueries
+        ? [state.query, ...state.augmentedQueries]
         : [state.query];
 
-    this.logger.log(`Retrieving with ${queries.length} queries (serial)`);
+    this.logger.log(
+      `Retrieving with ${queries.length} queries (1 hybrid + BM25 fallback)`,
+    );
 
-    // 串行检索（避免 Milvus 并发超时）
     const allResults: RetrievedChunk[][] = [];
-    for (const q of queries) {
+    for (const [index, q] of queries.entries()) {
       try {
-        const results = await this.karpathyRagService.retrieve(q);
+        const results =
+          index === 0
+            ? await this.karpathyRagService.retrieve(q)
+            : this.karpathyRagService.retrieveBm25Only(q);
         allResults.push(results);
       } catch (err) {
         this.logger.warn(
@@ -148,6 +165,157 @@ export class AgenticRagService {
       `Retrieved ${chunks.length} unique chunks from ${queries.length} queries`,
     );
     return { retrievedChunks: chunks };
+  }
+
+  /**
+   * 检索充分性评估：生成前判断 chunks 是否足够支撑回答。
+   * 后续接入 Bocha web_search 时，可在 insufficient 分支触发联网补充。
+   */
+  async sufficiencyNode(
+    state: AgenticRagStateType,
+  ): Promise<Partial<AgenticRagStateType>> {
+    if (state.retrievedChunks.length === 0) {
+      return {
+        retrievalSufficient: false,
+        retrievalReason: '没有检索到任何可用片段',
+      };
+    }
+
+    const model = this.llmProvider.getModel();
+    const schema = z.object({
+      sufficient: z.boolean().describe('检索片段是否足够直接支撑回答用户问题'),
+      reason: z.string().describe('中文评估理由'),
+    });
+
+    try {
+      const structured = model.withStructuredOutput(schema);
+      const context = state.retrievedChunks
+        .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 500)}`)
+        .join('\n\n');
+      const result = await structured.invoke([
+        {
+          role: 'system',
+          content: [
+            '你是 RAG 检索充分性评估器。',
+            '判断给定检索片段是否足够支撑后续回答用户问题。',
+            '只要片段包含直接答案、核心事实或足够上下文，就判定 sufficient=true。',
+            '如果片段明显无关、为空、只包含泛泛背景而不能回答问题，则判定 sufficient=false。',
+            '只输出结构化字段 sufficient 和 reason。',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: `用户问题：${state.query}\n\n检索片段：\n${context}`,
+        },
+      ]);
+
+      this.logger.log(
+        `Retrieval sufficiency: sufficient=${result.sufficient}, reason=${result.reason}`,
+      );
+
+      return {
+        retrievalSufficient: result.sufficient,
+        retrievalReason: result.reason,
+      };
+    } catch (err) {
+      const topScore = Math.max(
+        ...state.retrievedChunks.map((chunk) => chunk.totalScore),
+        0,
+      );
+      const sufficient = topScore >= 0.2;
+      const reason = `充分性 LLM 评估失败，按 topScore=${topScore.toFixed(2)} 启发式判断`;
+      this.logger.warn(`${reason}: ${(err as Error).message}`);
+      return {
+        retrievalSufficient: sufficient,
+        retrievalReason: reason,
+      };
+    }
+  }
+
+  /**
+   * 联网兜底：当本地检索不足时，调用 Bocha Web Search 补充外部上下文。
+   */
+  async webSearchFallbackNode(
+    state: AgenticRagStateType,
+  ): Promise<Partial<AgenticRagStateType> & { webSearchCount: number }> {
+    if (state.retrievalSufficient) {
+      return { webSearchCount: 0 };
+    }
+
+    if (!this.bochaSearchService.isEnabled()) {
+      this.logger.warn(
+        'Retrieval insufficient but Bocha web_search is disabled',
+      );
+      return {
+        retrievalReason: `${state.retrievalReason || '检索不足'}；BOCHA_API_KEY 未配置，已跳过联网兜底`,
+        webSearchCount: 0,
+      };
+    }
+
+    try {
+      const results = await this.bochaSearchService.search(state.query, 5);
+      const webChunks = results.map((result, index) => {
+        const parts = [
+          `标题：${result.title}`,
+          `来源：${result.siteName ?? result.url}`,
+          result.datePublished ? `发布时间：${result.datePublished}` : '',
+          result.summary ? `摘要：${result.summary}` : '',
+          result.snippet ? `片段：${result.snippet}` : '',
+          `URL：${result.url}`,
+        ].filter(Boolean);
+
+        return {
+          id: `web:${result.url}`,
+          content: parts.join('\n'),
+          docId: result.url,
+          chunkIndex: index,
+          bm25Score: 0,
+          cosineScore: 0,
+          totalScore: 0.15,
+        } satisfies RetrievedChunk;
+      });
+
+      this.logger.log(`Bocha web_search returned ${webChunks.length} results`);
+      return {
+        retrievedChunks: [...state.retrievedChunks, ...webChunks].slice(0, 8),
+        retrievalReason: `${state.retrievalReason || '检索不足'}；已通过 Bocha web_search 补充 ${webChunks.length} 条结果`,
+        webSearchCount: webChunks.length,
+      };
+    } catch (err) {
+      const reason = `Bocha web_search 调用失败：${(err as Error).message}`;
+      this.logger.warn(reason);
+      return {
+        retrievalReason: `${state.retrievalReason || '检索不足'}；${reason}`,
+        webSearchCount: 0,
+      };
+    }
+  }
+
+  /**
+   * 二次排序：有 RERANK_API_KEY 时调用 DashScope Rerank；未配置时保持原排序。
+   */
+  async rerankNode(
+    state: AgenticRagStateType,
+  ): Promise<Partial<AgenticRagStateType> & { reranked: boolean }> {
+    if (state.retrievedChunks.length < 2) {
+      return { reranked: false };
+    }
+
+    if (!this.dashScopeRerankService.isEnabled()) {
+      return { reranked: false };
+    }
+
+    try {
+      const chunks = await this.dashScopeRerankService.rerank(
+        state.query,
+        state.retrievedChunks,
+        5,
+      );
+      return { retrievedChunks: chunks, reranked: true };
+    } catch (err) {
+      this.logger.warn(`DashScope rerank skipped: ${(err as Error).message}`);
+      return { reranked: false };
+    }
   }
 
   /**
@@ -211,7 +379,7 @@ export class AgenticRagService {
       const result = await chain.invoke({
         query: state.query,
         context: state.retrievedChunks
-          .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 200)}`)
+          .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 800)}`)
           .join('\n'),
         answer: state.answer,
       });
@@ -263,6 +431,8 @@ export class AgenticRagService {
     route: 'simple' | 'agentic';
     confidence: number;
     retryCount: number;
+    retrievalSufficient?: boolean;
+    retrievalReason?: string;
   }> {
     // 1. 路由
     const route =
@@ -289,6 +459,8 @@ export class AgenticRagService {
       route: 'agentic',
       augmentedQueries: [],
       retrievedChunks: [],
+      retrievalSufficient: false,
+      retrievalReason: '',
       answer: '',
       confidence: 0,
       retryCount: 0,
@@ -306,6 +478,43 @@ export class AgenticRagService {
       const retrievalResult = await this.retrievalNode(state);
       state = { ...state, ...retrievalResult };
       onEvent?.({ type: 'retrieval', data: state.retrievedChunks });
+
+      // sufficiency
+      const sufficiencyResult = await this.sufficiencyNode(state);
+      state = { ...state, ...sufficiencyResult };
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: state.retrievalSufficient,
+          reason: state.retrievalReason,
+        },
+      });
+
+      if (!state.retrievalSufficient) {
+        const webSearchResult = await this.webSearchFallbackNode(state);
+        const { webSearchCount, ...statePatch } = webSearchResult;
+        state = { ...state, ...statePatch };
+        onEvent?.({
+          type: 'web_search',
+          data: {
+            count: webSearchCount,
+            enabled: this.bochaSearchService.isEnabled(),
+            reason: state.retrievalReason,
+          },
+        });
+      }
+
+      const rerankResult = await this.rerankNode(state);
+      const { reranked, ...rerankPatch } = rerankResult;
+      state = { ...state, ...rerankPatch };
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled: this.dashScopeRerankService.isEnabled(),
+          reranked,
+          count: state.retrievedChunks.length,
+        },
+      });
 
       // generate（流式 token）
       const generateResult = await this.generateNode(state, (token) => {
@@ -343,6 +552,8 @@ export class AgenticRagService {
       route: 'agentic' as const,
       confidence: state.confidence,
       retryCount: state.retryCount,
+      retrievalSufficient: state.retrievalSufficient,
+      retrievalReason: state.retrievalReason,
     };
     onEvent?.({ type: 'final', data: result });
     return result;
@@ -398,5 +609,106 @@ export class AgenticRagService {
       .filter(Boolean);
     while (out.length < 3) out.push(original);
     return out.slice(0, 3);
+  }
+
+  /**
+   * 使用 deepagents 做 agentic 检索规划。
+   * Nest 当前是 CommonJS 编译，需保留原生 dynamic import，避免 require() 加载 ESM-only 依赖时报错。
+   */
+  private async planQueriesWithDeepAgent(query: string): Promise<string[]> {
+    try {
+      const agent = await this.getDeepAgent();
+      const result = await agent.invoke({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              '请为下面的 RAG 问题规划 3 条中文检索问句。',
+              '只返回 JSON，不要 Markdown，不要解释。',
+              'JSON 格式：{"queries":["问题1","问题2","问题3"]}',
+              `原始问题：${query}`,
+            ].join('\n'),
+          },
+        ],
+      });
+
+      return this.extractQueriesFromDeepAgentResult(result);
+    } catch (err) {
+      this.logger.warn(
+        `DeepAgent query planning failed, fallback to structured output: ${(err as Error).message}`,
+      );
+      return [];
+    }
+  }
+
+  private async getDeepAgent(): Promise<{
+    invoke: (input: unknown) => Promise<unknown>;
+  }> {
+    if (this.deepAgent) {
+      return this.deepAgent;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const dynamicImport = new Function(
+      'specifier',
+      'return import(specifier)',
+    ) as (specifier: string) => Promise<{
+      createDeepAgent: (params: {
+        model: ReturnType<LlmProvider['getModel']>;
+        systemPrompt: string;
+      }) => { invoke: (input: unknown) => Promise<unknown> };
+    }>;
+    const { createDeepAgent } = await dynamicImport('deepagents');
+
+    this.deepAgent = createDeepAgent({
+      model: this.llmProvider.getModel(),
+      systemPrompt: [
+        '你是 RAG 检索规划 Agent。',
+        '你的任务是把用户问题拆成 3 条互补的中文检索问句。',
+        '不要回答用户问题，不要调用不必要的工具。',
+        '必须只输出 JSON：{"queries":["...","...","..."]}',
+      ].join('\n'),
+    });
+
+    return this.deepAgent;
+  }
+
+  private extractQueriesFromDeepAgentResult(result: unknown): string[] {
+    const content = this.extractLastMessageText(result);
+    const jsonText = content.match(/\{[\s\S]*\}/)?.[0] ?? content;
+    const parsed = JSON.parse(jsonText) as { queries?: unknown };
+    return Array.isArray(parsed.queries)
+      ? parsed.queries.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [];
+  }
+
+  private extractLastMessageText(result: unknown): string {
+    const maybeMessages = (result as { messages?: unknown }).messages;
+    if (!Array.isArray(maybeMessages) || maybeMessages.length === 0) {
+      return '';
+    }
+    const last = maybeMessages[maybeMessages.length - 1] as {
+      content?: unknown;
+    };
+    if (typeof last.content === 'string') {
+      return last.content;
+    }
+    if (Array.isArray(last.content)) {
+      return last.content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object' && 'text' in part) {
+            const text = (part as Record<'text', unknown>).text;
+            if (typeof text === 'string') {
+              return text;
+            }
+          }
+          return '';
+        })
+        .join('');
+    }
+    return '';
   }
 }

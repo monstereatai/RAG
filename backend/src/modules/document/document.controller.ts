@@ -10,6 +10,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentService } from './document.service';
+import {
+  detectDocumentKind,
+  extractDocumentText,
+} from './document-parser.util';
 
 @Controller('documents')
 export class DocumentController {
@@ -23,15 +27,12 @@ export class DocumentController {
     if (!file) {
       throw new BadRequestException('file is required');
     }
-    if (
-      !file.originalname.endsWith('.md') &&
-      !file.originalname.endsWith('.markdown')
-    ) {
-      throw new BadRequestException(
-        'only .md / .markdown files are supported in M1',
-      );
+    const kind = detectDocumentKind(file.originalname);
+    const content = (await extractDocumentText(file.buffer, kind)).trim();
+    if (!content) {
+      throw new BadRequestException('document text is empty');
     }
-    const content = file.buffer.toString('utf-8');
+
     this.logger.log(`Received ${file.originalname}, ${content.length} chars`);
     return this.documentService.upload(file.originalname, content);
   }

@@ -44,4 +44,6 @@ export interface ChatResponse {
   route?: 'simple' | 'agentic';
   confidence?: number;
   retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
 }

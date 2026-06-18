@@ -39,6 +39,8 @@ export class ChatService {
       route: result.route,
       confidence: result.confidence,
       retryCount: result.retryCount,
+      retrievalSufficient: result.retrievalSufficient,
+      retrievalReason: result.retrievalReason,
     };
   }
 }

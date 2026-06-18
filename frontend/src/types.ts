@@ -37,6 +37,8 @@ export interface ChatResponse {
   route?: string;
   confidence?: number;
   retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
 }
 
 // Debug 相关

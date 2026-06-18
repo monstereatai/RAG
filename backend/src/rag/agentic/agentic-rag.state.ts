@@ -33,6 +33,18 @@ export const AgenticRagState = Annotation.Root({
     default: () => [],
   }),
 
+  /** 检索结果是否足够支撑生成 */
+  retrievalSufficient: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
+
+  /** 检索充分性评估理由 */
+  retrievalReason: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
+
   /** LLM 生成的答案 */
   answer: Annotation<string>({
     reducer: (_prev, next) => next,

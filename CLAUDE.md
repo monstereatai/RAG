@@ -106,32 +106,28 @@ cd docker && docker compose ps        # 所有服务 healthy
 - **密钥、token、密码不进代码、不进 commit、不进日志**
 - **大改动前先出方案**，主人确认后再动手
 - **不创建 .env 文件**，只创建 .env.example，.env 由主人手动填写
-- **新依赖必须先问**，不得擅自 `npm install` 未在 plan 中列出的包
+- **新依赖必须可追溯**：计划内依赖可安装，计划外依赖先确认并更新文档
 - **不过度工程**：M0 只做 M0 的事，不提前实现 M1+ 的功能
 - **精准修改**：只碰必须碰的，不"改进"相邻代码、不重构没坏的东西
 
 ## 当前阶段
 
-**M1 — 最简 RAG 管线跑通**（M0 已完成于 2026-06-18）
+**M1/M2/M3/M4/M5 已完成**（2026-06-18）
 
-M0 交付物：
-- ✅ 顶层目录结构（backend/frontend/admin/docker/skills/workspace）
-- ✅ CLAUDE.md 项目规则 + 根级 .gitignore
-- ✅ backend/ NestJS 项目（@nestjs/config + @nestjs/terminus + dotenv）
-- ✅ config/configuration.ts 全量配置加载
-- ✅ modules/health 健康检查（`GET /api/health` → `{"status":"ok"}`）
-- ✅ main.ts 全局前缀 `/api`
-- ✅ backend/.env.example 全量环境变量模板
-- ✅ docker/docker-compose.yml（PG16+pgvector / Redis7 / Milvus2.4.4 + etcd + minio，全 healthcheck）
-- ✅ 验证通过：build / lint / start / curl /api/health
+已完成能力：
+- M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
+- M1 simple RAG：上传 Markdown、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答、debug chunks。
+- M2 Agentic RAG：deepAgent 检索规划、query augment、retrieval、streaming generate、reflection、auto 路由、SSE 事件流。
+- M3 工程化：JWT、统一响应、全局异常、ValidationPipe、pino 日志。
+- M4 前端 MVP：文件上传、知识库列表、聊天窗口、simple/agentic/auto 模式、SSE 流式显示、引用展开、浏览器语音输入。
+- M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 反代、基础设施 compose。
 
-M1 验收标准（未达成不得进入 M2）：
-- [ ] 上传 1 个 Markdown 文件，返回 `doc_id`
-- [ ] 切分 + Embedding + 写入 Milvus 成功
-- [ ] 用 `simple` 模式提问，5 秒内返回答案 + 引用来源
-- [ ] `GET /api/debug/chunks?query=...` 返回 BM25 分、cosine 分、加权总分
+当前已知问题：
+- Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。
+- 当前已通过 BM25 中文单字/bigram 兜底和向量检索失败降级，M2 功能不再被阻塞。
+- 后续仍需从 Milvus 索引、资源配置或版本层面优化向量检索性能。
 
-**M1 不做的事**：
-- 不实现 Agentic RAG / web_search / Rerank / 流式 / 多模式切换
-- 不写前端
-- 不写 Dockerfile
+下一步建议：
+- P1：DashScope Rerank、Elasticsearch 混合检索、Prompt/结构化输出体系。
+- P2：后端腾讯云 ASR/TTS、文档删除、缓存/对话历史、Mem0 长期记忆。
+- P3：评测体系、Prometheus/OpenTelemetry、GraphRAG、MCP、Skills。

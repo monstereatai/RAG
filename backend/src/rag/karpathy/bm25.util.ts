@@ -1,6 +1,6 @@
 /**
  * 纯 JS BM25 实现（Karpathy-Style RAG 的关键词检索部分）
- * M1 阶段：简单空格 + 标点分词（M2 再换 jieba）
+ * M1 阶段：简单空格 + 标点分词 + 中文字符/bigram 兜底（M2 再换 jieba）
  */
 
 export interface BM25Doc {
@@ -23,14 +23,31 @@ export class BM25 {
   private avgDocLen = 0;
 
   /**
-   * 简单分词：按空格 + 中英标点切分，转小写
-   * M1 不引 jieba，中文按字切分
+   * 简单分词：按空格 + 中英标点切分，转小写。
+   * 中文片段额外加入单字和 bigram，避免未接入 jieba 前中文查询完全空召回。
    */
   private tokenize(text: string): string[] {
-    return text
+    const rawTokens = text
       .toLowerCase()
       .split(/[\s,。！？.!?,;；:：()（）[\]【】""''""''`]+/)
       .filter((t) => t.length > 0);
+
+    const tokens: string[] = [];
+    for (const token of rawTokens) {
+      tokens.push(token);
+
+      const cjkChars = Array.from(token).filter((char) =>
+        /[\u4e00-\u9fff]/.test(char),
+      );
+      if (cjkChars.length === 0) continue;
+
+      tokens.push(...cjkChars);
+      for (let i = 0; i < cjkChars.length - 1; i += 1) {
+        tokens.push(`${cjkChars[i]}${cjkChars[i + 1]}`);
+      }
+    }
+
+    return tokens;
   }
 
   addDocs(docs: BM25Doc[]): void {

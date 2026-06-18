@@ -30,6 +30,19 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
 
 ---
 
+## 当前实现快照（2026-06-18）
+
+- **M1/M2/M3/M4/M5 已完成**，真实进度以 `ROADMAP.md` 为准。
+- **后端**：NestJS + LangChain.js + LangGraph.js + deepagents；已实现 health/auth/document/chat/debug 模块，文档上传支持 Markdown/TXT/PDF/DOCX 文本解析。
+- **simple 模式**：Karpathy-style RAG，使用内存 BM25 + Milvus cosine 混合检索；当 Milvus search 超时时自动降级 BM25。
+- **agentic/auto 模式**：deepAgent 先规划 3 条检索问句，retrieval 保留原始问题并追加规划问句，之后执行检索、流式生成、reflection。
+- **SSE**：`GET /api/chat/stream` 已输出 `routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final / error`。
+- **前端**：React + Vite 已支持文件上传、文档列表、聊天、引用展示、模式切换、SSE 流式显示和浏览器 Web Speech 语音输入。
+- **已知问题**：Milvus search 在本机 Docker 环境仍可能 15s timeout；当前通过 BM25 中文单字/bigram 兜底与向量检索失败降级保证 M2 功能可用。
+- **未完成**：Elasticsearch、后端腾讯云 ASR/TTS、Mem0、MCP、GraphRAG、评测 CI/CD。
+
+---
+
 ## Key Changes
 
 ### 后端架构
@@ -174,7 +187,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
   - 文件上传
   - 知识库列表
   - 聊天窗口（含流式回答）
-  - 语音录入（浏览器录音 → 后端 STT → 文本查询）
+  - 语音录入（当前已实现：浏览器 Web Speech API → 输入框 → 查询；后续扩展：浏览器录音 → 后端 STT → 文本查询）
   - 引用来源展示（可展开查看 chunk 原文）
   - **模式切换器**：用户可手动选择 `simple / agentic / auto`
   - **路由追踪面板**：每次回答结束后展示"实际使用模式 + 检索轮数 + 工具调用链"
@@ -195,31 +208,35 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
 
 - `POST /api/chat`
   - 非流式调试接口。
-- `POST /api/chat/stream`
-  - 使用 SSE 或 WebSocket 流式输出 token、工具事件和引用来源。
+- `GET /api/chat/stream?query=...&mode=agentic|auto|simple`
+  - 使用 SSE 流式输出 token、检索事件、reflection 事件和引用来源。
 
 Chat 请求字段：
 
-- `message`
+- `query`
 - `mode`: `auto | agentic | simple`
-- `provider`
-- `conversation_id`
-- `top_k`
+- `history`：仅 `POST /api/chat` 支持，可选
+- `provider`：规划字段，当前未启用
+- `conversation_id`：规划字段，当前未启用
+- `top_k`：规划字段，当前未启用
 
 Chat 流式响应事件：
 
 - `routing`：本次实际选用的模式和工具列表
+- `query_augment`：deepAgent 或结构化输出生成的检索问句
 - `token`：LLM 生成的 token 片段
-- `tool_call`：工具调用（含 Bocha web_search 调用）
+- `web_search`：检索不足时的 Bocha 联网兜底调用结果
 - `retrieval`：检索结果，含各 chunk 的 BM25 / cosine 分数
+- `sufficiency`：生成前检索充分性评估，含 sufficient 和 reason
 - `citation`：引用来源
+- `reflection`：答案置信度、是否通过、重试次数
 - `final`：完整答案
 - `error`
 
 ### 语音接口
 
 - `POST /api/speech/transcribe`
-  - 将语音文件转换为文本。
+  - 规划接口，当前尚未实现。当前前端语音输入使用浏览器 Web Speech API，直接把转写文本填入聊天输入框。
 
 ### Debug 接口
 
@@ -1019,9 +1036,9 @@ agents:
 
 ### 十四、检索充分性评估（二次评估机制）
 
-**现状**：计划有 Reflection 节点评估答案质量，但缺少**检索充分性评估**。
+**当前状态**：基础版已实现。Agentic RAG 在检索后、生成前执行 `sufficiencyNode`，并通过 SSE `sufficiency` 事件输出 `sufficient` 和 `reason`；不足后触发 Bocha `web_search` 补充外部上下文，`BOCHA_API_KEY` 缺失时自动跳过。
 
-**补充**：参考 `agent-course/advanced-rag/src/rag-webfallback.mjs` 的评估器设计，在检索后、生成前增加充分性评估。
+**后续补充**：继续优化联网结果去重、质量评估和与 DashScope Rerank 的排序融合。
 
 **流程**：
 ```

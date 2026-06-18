@@ -3,6 +3,35 @@ import { chat, chatStream } from '../api';
 import type { ChatMode, ReferenceChunk } from '../types';
 import ReferenceList from './ReferenceList';
 
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      [index: number]: { transcript: string };
+    };
+  };
+}
+
+interface SpeechRecognitionErrorEventLike {
+  error: string;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -10,6 +39,8 @@ interface Message {
   route?: string;
   confidence?: number;
   retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
   status?: 'streaming' | 'done' | 'error';
   events?: string[]; // SSE 事件追踪
 }
@@ -19,11 +50,21 @@ function ChatPage() {
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<ChatMode>('simple');
   const [loading, setLoading] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceBaseInputRef = useRef('');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -56,6 +97,8 @@ function ChatPage() {
           route: res.route,
           confidence: res.confidence,
           retryCount: res.retryCount,
+          retrievalSufficient: res.retrievalSufficient,
+          retrievalReason: res.retrievalReason,
           status: 'done',
         },
       ]);
@@ -111,12 +154,17 @@ function ChatPage() {
               break;
             }
             case 'token': {
-              const token = (data as { token?: string }).token ?? '';
+              const token =
+                typeof data === 'string'
+                  ? data
+                  : ((data as { token?: string }).token ?? '');
               updateMsg((msg) => ({ ...msg, content: msg.content + token }));
               break;
             }
             case 'citation': {
-              const refs = (data as { references?: ReferenceChunk[] }).references ?? [];
+              const refs = Array.isArray(data)
+                ? (data as ReferenceChunk[])
+                : ((data as { references?: ReferenceChunk[] }).references ?? []);
               updateMsg((msg) => ({ ...msg, references: refs }));
               break;
             }
@@ -129,12 +177,29 @@ function ChatPage() {
               }));
               break;
             }
+            case 'sufficiency': {
+              const s = data as { sufficient?: boolean; reason?: string };
+              updateMsg((msg) => ({
+                ...msg,
+                retrievalSufficient: s.sufficient,
+                retrievalReason: s.reason,
+              }));
+              break;
+            }
             case 'final': {
-              const f = data as { answer?: string; references?: ReferenceChunk[] };
+              const f = data as {
+                answer?: string;
+                references?: ReferenceChunk[];
+                retrievalSufficient?: boolean;
+                retrievalReason?: string;
+              };
               updateMsg((msg) => ({
                 ...msg,
                 content: f.answer ?? msg.content,
                 references: f.references ?? msg.references,
+                retrievalSufficient:
+                  f.retrievalSufficient ?? msg.retrievalSufficient,
+                retrievalReason: f.retrievalReason ?? msg.retrievalReason,
                 status: 'done',
               }));
               resolve();
@@ -176,6 +241,61 @@ function ChatPage() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const getSpeechRecognition = (): SpeechRecognitionConstructor | undefined => {
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+  };
+
+  const handleVoiceInput = () => {
+    if (loading) return;
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setVoiceError('当前浏览器不支持语音输入，请使用 Chrome 或 Edge。');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+    voiceBaseInputRef.current = input.trim();
+    setVoiceError('');
+    setListening(true);
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += event.results[i][0]?.transcript ?? '';
+      }
+      setInput([voiceBaseInputRef.current, transcript.trim()]
+        .filter(Boolean)
+        .join(' '));
+    };
+
+    recognition.onerror = (event) => {
+      setVoiceError(`语音识别失败：${event.error}`);
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.start();
   };
 
   return (
@@ -220,9 +340,14 @@ function ChatPage() {
               {msg.route && (
                 <div className="message-meta">
                   路由: {msg.route}
+                  {msg.retrievalSufficient !== undefined &&
+                    ` | 检索: ${msg.retrievalSufficient ? '充分' : '不足'}`}
                   {msg.confidence !== undefined && ` | 置信度: ${msg.confidence.toFixed(2)}`}
                   {msg.retryCount !== undefined && ` | 重试: ${msg.retryCount}`}
                 </div>
+              )}
+              {msg.retrievalReason && (
+                <div className="message-meta">检索评估: {msg.retrievalReason}</div>
               )}
               {msg.references && msg.references.length > 0 && (
                 <ReferenceList references={msg.references} />
@@ -245,10 +370,19 @@ function ChatPage() {
           rows={2}
           disabled={loading}
         />
+        <button
+          className={`voice-button ${listening ? 'active' : ''}`}
+          onClick={handleVoiceInput}
+          disabled={loading}
+          title={listening ? '停止语音输入' : '开始语音输入'}
+        >
+          {listening ? '停止' : '语音'}
+        </button>
         <button onClick={handleSend} disabled={!input.trim() || loading}>
           发送
         </button>
       </div>
+      {voiceError && <div className="voice-error">{voiceError}</div>}
     </div>
   );
 }
