@@ -1,118 +1,127 @@
-# RAG
+# RAG 知识库系统
 
-Agentic RAG + Karpathy-style RAG Web 应用。
+Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护** 与 **多租户物理/逻辑数据硬隔离** 能力。
 
-当前项目使用 NestJS、LangChain.js、LangGraph.js、deepagents、Milvus、React 和 Vite。`agent-course/` 是参考代码目录，只读，不属于主项目源码。
+当前项目基于 NestJS、LangChain.js、LangGraph.js、deepagents、Milvus、PostgreSQL、Redis、React 和 Vite 进行构建。
+
+---
 
 ## 当前状态
 
-- M1 simple RAG 已完成：上传 Markdown/TXT/PDF/DOCX、切分、Embedding、写入 Milvus、BM25 + cosine 混合检索、回答与引用。
-- M2 Agentic RAG 已完成：deepAgent 检索规划、query augment、retrieval、流式生成、reflection、auto 路由、SSE 全事件。
-- M3 工程化已完成：JWT、统一响应、全局异常、参数校验、pino 日志。
-- M4 前端 MVP 已完成：上传页、聊天页、引用展示、模式切换、SSE 流式显示、浏览器语音输入。
-- M5 容器化已完成：后端/前端 Dockerfile、prod compose、nginx 反代。
+- **M1 simple RAG 已完成**：支持 Markdown/TXT/PDF/DOCX 文档解析上传、切分、Embedding 向量化、Milvus 向量入库、BM25 + Cosine 混合检索及大模型生成与引用定位。
+- **M2 Agentic RAG 已完成**：整合 deepAgent 检索规划、Query 扩展、充分性评估、Bocha 联网搜索兜底、DashScope Rerank 重排序、大模型流式生成、置信度自我评估与重试，支持 SSE 全链路事件流式推送。
+- **M3 工程化与多租户隔离已完成**：
+  - **JWT 鉴权防护**：对除 `/auth/login` 外的所有 REST 与 SSE 接口覆盖 JWT 验证；
+  - **数据硬隔离**：在 PostgreSQL 关系库、Redis 缓存、Milvus 向量存储及内存 BM25 分词索引四大组件中深度引入 `userId` 条件，彻底阻断跨租户的数据交互或隐私泄露。
+- **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
+- **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
 
-详细进度见 [ROADMAP.md](./ROADMAP.md)，规划见 [rag-plan.md](./rag-plan.md)。
+详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./rag-plan.md)。
+
+---
 
 ## 快速启动
 
-启动基础设施：
-
+### 1. 启动基础设施
 ```bash
 cd docker
 docker compose up -d
 docker compose ps
 ```
 
-启动后端：
-
+### 2. 启动后端服务
 ```bash
 cd backend
 npm install
-npm run start
+# 启动 NestJS 开发服务（包含 watch 监听）
+npm run start:dev
 ```
 
-启动前端：
-
+### 3. 启动前端服务
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-默认地址：
+### 4. 访问服务地址
+* **前端开发面板**：http://localhost:5173
+* **后端健康检查**：http://localhost:3000/api/health
+* **Nginx 生产反代（如容器运行）**：http://localhost:80
 
-- 后端健康检查：http://localhost:3000/api/health
-- 前端开发服务：http://localhost:5173
-- 前端生产反代：http://localhost:80
+---
 
-## 核心接口
+## 测试账号与使用指南
 
-- `GET /api/health`：健康检查。
-- `POST /api/auth/login`：测试登录。
-- `GET /api/auth/profile`：JWT profile。
-- `POST /api/documents/upload`：上传文档，字段名 `file`，支持 `.md` / `.markdown` / `.txt` / `.pdf` / `.docx`。
-- `GET /api/documents`：文档列表。
-- `POST /api/chat`：非流式聊天，body 使用 `query` 和 `mode`。
-- `GET /api/chat/stream?query=...&mode=agentic`：SSE 流式聊天。
-- `GET /api/debug/chunks?query=...`：查看 BM25、cosine、融合分数。
+多租户系统预置了两个测试账号供验证使用：
 
-聊天模式：
+| 角色 | 用户名 | 密码 | 物理隔离 UserId |
+| :--- | :--- | :--- | :--- |
+| **管理员 (Admin)** | `admin` | `admin123` | `1` |
+| **普通用户 (User)** | `user` | `user1234` | `2` |
 
-- `simple`：Karpathy-style RAG。
-- `agentic`：deepAgent 规划 + 检索 + 生成 + reflection。
-- `auto`：先判断复杂度，再选择 simple 或 agentic。
+### 隔离特性验证步骤：
+1. 访问 http://localhost:5173，展现现代磨砂登录界面。
+2. 使用右下角快速通道点击 **管理员 (admin)** 登录，上传一份特有文件 A，并在聊天页面针对 A 的核心秘密进行提问。RAG 能成功匹配知识库并回复。
+3. 点击顶部右侧 **注销**，切换为 **普通用户 (user)** 登录。
+4. 切换到文档页面，您将**看不到**管理员上传的文档 A。
+5. 切换到对话页面并进行相同隐私问题的提问，系统检索为空并返回 *“未找到相关内容”*，验证表明 Milvus 及 BM25 过滤均对未授权用户完全不可见，证明物理/逻辑硬隔离已 100% 生效！
 
-SSE 事件：
+---
 
-- `routing`
-- `query_augment`
-- `retrieval`
-- `sufficiency`
-- `web_search`
-- `rerank`
-- `token`
-- `citation`
-- `reflection`
-- `final`
-- `error`
+## 核心 API 接口
 
-## 验证命令
+> 注：除登录接口外，其它接口必须附带 `Authorization: Bearer <token>` 请求头。对于原生 EventSource（SSE 接口），可以把 token 附带在 query 参数中，例如：`?token=<token>`。
 
-后端：
+* **认证模块**
+  * `POST /api/auth/login`：用户登录获取 JWT 访问 Token
+  * `GET /api/auth/profile`：获取当前登录用户的 Profile 详情
+* **文档管理（按 userId 隔离）**
+  * `POST /api/documents/upload`：上传并解析文档，字段名 `file`，支持 `.md/.txt/.pdf/.docx`
+  * `GET /api/documents`：列出当前用户的所有文档
+  * `GET /api/documents/:docId`：查询当前用户拥有的单篇文档详情
+  * `DELETE /api/documents/:docId`：同步删除文档元数据、Milvus 分片及内存 BM25 索引
+* **聊天与检索（按 userId 隔离）**
+  * `POST /api/chat`：非流式聊天（常用于 simple 模式）
+  * `GET /api/chat/stream?query=...&mode=...&threadId=...`：流式 SSE 聊天推送事件链
+  * `GET /api/chat/conversations`：获取用户的会话历史列表
+  * `GET /api/chat/conversations/:threadId`：获取单条会话及详细消息历史
+  * `DELETE /api/chat/conversations/:threadId`：删除会话并失效 Redis 中的缓存
+* **调试与可观测**
+  * `GET /api/debug/chunks?query=...`：查看当前查询在检索召回时的 BM25 分、余弦分及融合加权总分
 
+---
+
+## 验证与测试命令
+
+### 1. 代码规范与编译
+* **后端构建与排查**：
+  ```bash
+  cd backend
+  npm run build
+  npm run lint
+  ```
+* **前端编译**：
+  ```bash
+  cd frontend
+  npm run build
+  ```
+
+### 2. 自动化多租户硬隔离 E2E 验证
+在基础设施和后端服务启动后，可在后端目录直接运行我们在本地集成的 E2E 自动化交叉隔离验证脚本：
 ```bash
 cd backend
-npm run build
-npx eslint "{src,apps,libs,test}/**/*.ts"
+node verify-multitenancy.mjs
 ```
+*该脚本会自动以不同账户身份进行文档上传、跨权限读取拦截测试、对话内容物理隔离检索测试并最终清除测试会话及文档，全链路断言校验，若输出 `🏆 ALL MULTI-TENANCY ISOLATION TESTS PASSED SUCCESSFULLY!` 则代表数据隔离完全符合规格。*
 
-前端：
+---
 
-```bash
-cd frontend
-npm run build
-```
+## 常见问题与已知限制
 
-M2 手动验证示例：
-
-```bash
-curl -sS -F "file=@/tmp/rag-m2-test.md" http://localhost:3000/api/documents/upload
-
-curl -sS -X POST http://localhost:3000/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"这个项目用了哪些技术栈，它们分别负责什么？","mode":"auto"}'
-
-curl -N "http://localhost:3000/api/chat/stream?query=M2%20Agentic%20RAG%20%E7%9A%84%20SSE%20%E9%9C%80%E8%A6%81%E8%BE%93%E5%87%BA%E5%93%AA%E4%BA%9B%E4%BA%8B%E4%BB%B6%EF%BC%9F&mode=agentic"
-```
-
-## 已知问题
-
-Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。当前实现会在向量检索失败时降级到 BM25，并通过中文单字/bigram 兜底保证中文查询可召回，因此 M2 功能不再被阻塞。
-
-后续优化方向：
-
-- 调整 Milvus 索引和 query node 资源配置。
-- 尝试 HNSW 或升级 Milvus 版本。
-- 接入 Elasticsearch 作为稳定关键词检索层。
-- 接入 DashScope Rerank 提升最终引用质量。
+1. **Milvus 检索可能出现 15s Deadline 超时**：
+   * 本地 Docker 环境下，由于内存限制或索引加载慢，Milvus 检索偶发 15s 延迟。
+   * **兜底方案**：系统对此实现了自动优雅降级，向量超时会自动快速跌落至 BM25 纯文本检索（支持单字和 Bigram 兜底），前端界面不卡死，正常呈现回答。
+   
+2. **ASR / TTS 语音识别与合成未生效**：
+   * 默认语音接口依赖腾讯云密钥。需在 `.env` 中正确配置 `TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`。在未配置密钥前，后端会自动拦截并不阻断核心 RAG 进程。

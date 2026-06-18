@@ -10,8 +10,8 @@ export interface ApiResponse<T = unknown> {
 /**
  * JWT Payload
  */
-export interface JwtPayload {
-  userId: string;
-  username: string;
-  role: 'admin' | 'user';
+export class JwtPayload {
+  userId!: string;
+  username!: string;
+  role!: 'admin' | 'user';
 }

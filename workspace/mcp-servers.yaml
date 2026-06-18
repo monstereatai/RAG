@@ -1,0 +1,6 @@
+mcpServers:
+  my-mcp-server:
+    transport: stdio
+    command: node
+    args:
+      - /Users/monster/Documents/GitHub/code/RAG/agent-course/tool-test/src/my-mcp-server.mjs

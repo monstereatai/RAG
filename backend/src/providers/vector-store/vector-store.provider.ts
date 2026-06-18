@@ -43,8 +43,9 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
   similaritySearch(
     queryVector: number[],
     k: number,
+    userId?: string,
   ): Promise<VectorSearchHit[]> {
-    return this.provider.similaritySearch(queryVector, k);
+    return this.provider.similaritySearch(queryVector, k, userId);
   }
 
   deleteByDocId(docId: string): Promise<void> {

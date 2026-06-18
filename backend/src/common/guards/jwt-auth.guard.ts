@@ -22,10 +22,11 @@ export class JwtAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
       headers: { authorization?: string };
+      query?: { token?: string };
       user?: JwtPayload;
     }>();
 
-    const token = this.extractToken(request.headers.authorization);
+    const token = this.extractToken(request);
     if (!token) {
       throw new UnauthorizedException('missing or invalid bearer token');
     }
@@ -36,14 +37,24 @@ export class JwtAuthGuard implements CanActivate {
     return true;
   }
 
-  private extractToken(authorization?: string): string | null {
-    if (!authorization) {
-      return null;
+  private extractToken(request: {
+    headers: { authorization?: string };
+    query?: { token?: string };
+  }): string | null {
+    const authorization = request.headers.authorization;
+    if (authorization) {
+      const [type, token] = authorization.split(' ');
+      if (type === 'Bearer' && token) {
+        return token;
+      }
     }
-    const [type, token] = authorization.split(' ');
-    if (type !== 'Bearer' || !token) {
-      return null;
+
+    // 容错/SSE 支持：如果 Header 没传，尝试从 query 中获取 token
+    const queryToken = request.query?.token;
+    if (queryToken) {
+      return queryToken;
     }
-    return token;
+
+    return null;
   }
 }

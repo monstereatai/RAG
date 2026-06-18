@@ -298,6 +298,21 @@ function ChatPage() {
     recognition.start();
   };
 
+  const playTTS = (text: string) => {
+    const cleanText = text
+      .replace(/\[片段\s*\d+\]/g, '')
+      .replace(/[*#`_\-]/g, '')
+      .trim();
+
+    const token = localStorage.getItem('token');
+    const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
+    const url = `/api/speech/tts?text=${encodeURIComponent(cleanText)}${tokenQuery}`;
+    const audio = new Audio(url);
+    audio.play().catch((err) => {
+      console.error('TTS playback failed:', err);
+    });
+  };
+
   return (
     <div className="chat-page">
       <div className="mode-switcher">
@@ -332,6 +347,15 @@ function ChatPage() {
               <div className="message-text">
                 {msg.content || (msg.status === 'streaming' ? '思考中...' : '')}
               </div>
+              {msg.role === 'assistant' && msg.content && (
+                <button
+                  className="tts-button"
+                  onClick={() => playTTS(msg.content)}
+                  title="朗读"
+                >
+                  🔊 朗读
+                </button>
+              )}
               {msg.events && msg.events.length > 0 && msg.status === 'streaming' && (
                 <div className="message-events">
                   流程: {msg.events.join(' → ')}

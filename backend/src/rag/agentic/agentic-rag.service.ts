@@ -6,33 +6,33 @@ import {
   RetrievedChunk,
 } from '../karpathy/karpathy-rag.service';
 import { SseCallback } from './sse-event';
-import type { AgenticRagStateType } from './agentic-rag.state';
+import { AgenticRagState, type AgenticRagStateType } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import {
   classifyComplexityPrompt,
   queryAugmentPrompt,
   reflectionPrompt,
+  sufficiencyPrompt,
+  deepAgentQueryPlanSystemPrompt,
+  deepAgentQueryPlanUserPrompt,
 } from '../prompts/agentic.prompts';
 import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
+import { StateGraph, START, END, MemorySaver } from '@langchain/langgraph';
+import { RunnableConfig } from '@langchain/core/runnables';
 
 /**
  * Agentic RAG 服务
  *
- * 工作流：router → query_augment → retrieval → generate → reflection → (retry|end)
- *
- * M2 验收：
- * - agentic 模式触发 ≥2 轮检索（query_augment 生成多角度问句 + reflection 重试）
- * - auto 模式根据问题复杂度自动选择 simple/agentic
- * - SSE 流式推送 routing/token/retrieval/citation/final 事件
- * - Reflection 低置信度触发重新检索，最多重试 2 次
+ * 工作流 (LangGraph)：START → queryAugment → retrieval → sufficiency → (rerank | webSearchFallback → rerank) → generate → reflection → (retrieval | END)
  */
 @Injectable()
 export class AgenticRagService {
   private readonly logger = new Logger(AgenticRagService.name);
   private deepAgent: { invoke: (input: unknown) => Promise<unknown> } | null =
     null;
+  private app: any;
 
   /** Reflection 阈值，低于此值触发重试 */
   private readonly confidenceThreshold = 0.7;
@@ -44,10 +44,61 @@ export class AgenticRagService {
     private readonly karpathyRagService: KarpathyRagService,
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
-  ) {}
+  ) {
+    this.initGraph();
+  }
 
   /**
-   * 路由节点：判断走 simple 还是 agentic
+   * 初始化 LangGraph 状态图
+   */
+  private initGraph() {
+    const workflow = new StateGraph(AgenticRagState)
+      .addNode('queryAugment', this.queryAugmentNode.bind(this))
+      .addNode('retrieval', this.retrievalNode.bind(this))
+      .addNode('sufficiency', this.sufficiencyNode.bind(this))
+      .addNode('webSearchFallback', this.webSearchFallbackNode.bind(this))
+      .addNode('rerank', this.rerankNode.bind(this))
+      .addNode('generate', this.generateNode.bind(this))
+      .addNode('reflection', this.reflectionNode.bind(this));
+
+    workflow.addEdge(START, 'queryAugment');
+    workflow.addEdge('queryAugment', 'retrieval');
+    workflow.addEdge('retrieval', 'sufficiency');
+
+    workflow.addConditionalEdges(
+      'sufficiency',
+      (state) => {
+        return state.retrievalSufficient ? 'rerank' : 'webSearchFallback';
+      },
+      {
+        rerank: 'rerank',
+        webSearchFallback: 'webSearchFallback',
+      },
+    );
+
+    workflow.addEdge('webSearchFallback', 'rerank');
+    workflow.addEdge('rerank', 'generate');
+    workflow.addEdge('generate', 'reflection');
+
+    workflow.addConditionalEdges(
+      'reflection',
+      (state) => {
+        const action = this.reflectionRouter(state);
+        return action === 'retry' ? 'retrieval' : END;
+      },
+      {
+        retrieval: 'retrieval',
+        [END]: END,
+      },
+    );
+
+    this.app = workflow.compile({
+      checkpointer: new MemorySaver(),
+    });
+  }
+
+  /**
+   * 路由决策：判断走 simple 还是 agentic
    * auto 模式下由 LLM 判断问题复杂度
    */
   async routeNode(
@@ -57,7 +108,6 @@ export class AgenticRagService {
     let route: 'simple' | 'agentic';
 
     if (mode === 'auto') {
-      // 用 LLM 判断问题复杂度
       route = await this.classifyQueryComplexity(state.query);
     } else {
       route = mode;
@@ -74,59 +124,65 @@ export class AgenticRagService {
    */
   async queryAugmentNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const deepAgentQueries = await this.planQueriesWithDeepAgent(state.query);
+    let queries: string[];
+
     if (deepAgentQueries.length > 0) {
-      const queries = this.normalizeQueries(state.query, deepAgentQueries);
+      queries = this.normalizeQueries(state.query, deepAgentQueries);
       this.logger.log(`DeepAgent planned queries: ${JSON.stringify(queries)}`);
-      return { augmentedQueries: queries };
-    }
+    } else {
+      const model = this.llmProvider.getModel();
 
-    const model = this.llmProvider.getModel();
-
-    const schema = z.object({
-      queries: z
-        .array(z.string())
-        .length(3)
-        .describe(
-          '恰好 3 条中文检索问句：不同角度改写或扩写；保留专有名词、订单号等字面信息',
-        ),
-    });
-
-    try {
-      const structured = model.withStructuredOutput(schema);
-      const chain = queryAugmentPrompt.pipe(structured);
-      // 预格式化 few-shot 示例块，注入到 system 消息
-      const fewShotBlock = await queryAugmentFewShotPrompt.format({});
-      const raw = await chain.invoke({
-        query: state.query,
-        few_shot_block: fewShotBlock,
+      const schema = z.object({
+        queries: z
+          .array(z.string())
+          .length(3)
+          .describe(
+            '恰好 3 条中文检索问句：不同角度改写或扩写；保留专有名词、订单号等字面信息',
+          ),
       });
-      const queries = this.normalizeQueries(state.query, raw.queries);
-      this.logger.log(`Augmented queries: ${JSON.stringify(queries)}`);
-      return { augmentedQueries: queries };
-    } catch (err) {
-      this.logger.warn(
-        `Query augment failed, fallback to original: ${(err as Error).message}`,
-      );
-      return { augmentedQueries: [state.query] };
+
+      try {
+        const structured = model.withStructuredOutput(schema);
+        const chain = queryAugmentPrompt.pipe(structured);
+        const fewShotBlock = await queryAugmentFewShotPrompt.format({});
+        const raw = await chain.invoke({
+          query: state.query,
+          few_shot_block: fewShotBlock,
+        });
+        queries = this.normalizeQueries(state.query, raw.queries);
+        this.logger.log(`Augmented queries: ${JSON.stringify(queries)}`);
+      } catch (err) {
+        this.logger.warn(
+          `Query augment failed, fallback to original: ${(err as Error).message}`,
+        );
+        queries = [state.query];
+      }
     }
+
+    onEvent?.({ type: 'query_augment', data: queries });
+    return { augmentedQueries: queries };
   }
 
   /**
    * 检索节点：原始问题做一次混合检索，扩展问题走 BM25 检索，合并去重。
-   * 这样保留多角度召回，同时避免 agentic 模式连续触发多次 Milvus search。
    */
   async retrievalNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const userId = config?.configurable?.userId as string | undefined;
     const queries =
       state.augmentedQueries.length > 0
         ? [state.query, ...state.augmentedQueries]
         : [state.query];
 
     this.logger.log(
-      `Retrieving with ${queries.length} queries (1 hybrid + BM25 fallback)`,
+      `Retrieving with ${queries.length} queries (1 hybrid + BM25 fallback) for userId=${userId ?? 'none'}`,
     );
 
     const allResults: RetrievedChunk[][] = [];
@@ -134,8 +190,8 @@ export class AgenticRagService {
       try {
         const results =
           index === 0
-            ? await this.karpathyRagService.retrieve(q)
-            : this.karpathyRagService.retrieveBm25Only(q);
+            ? await this.karpathyRagService.retrieve(q, {}, userId)
+            : await this.karpathyRagService.retrieveBm25Only(q, userId);
         allResults.push(results);
       } catch (err) {
         this.logger.warn(
@@ -145,7 +201,6 @@ export class AgenticRagService {
       }
     }
 
-    // 按 chunkId 去重，分数取最大值
     const fusedMap = new Map<string, RetrievedChunk>();
     for (const results of allResults) {
       for (const chunk of results) {
@@ -156,7 +211,6 @@ export class AgenticRagService {
       }
     }
 
-    // 按总分排序，取 Top-5
     const chunks = Array.from(fusedMap.values())
       .sort((a, b) => b.totalScore - a.totalScore)
       .slice(0, 5);
@@ -164,21 +218,32 @@ export class AgenticRagService {
     this.logger.log(
       `Retrieved ${chunks.length} unique chunks from ${queries.length} queries`,
     );
-    return { retrievedChunks: chunks };
+
+    onEvent?.({ type: 'retrieval', data: chunks });
+    return { retrievedChunks: chunks, answer: '', passed: false };
   }
 
   /**
-   * 检索充分性评估：生成前判断 chunks 是否足够支撑回答。
-   * 后续接入 Bocha web_search 时，可在 insufficient 分支触发联网补充。
+   * 检索充分性评估
    */
   async sufficiencyNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     if (state.retrievedChunks.length === 0) {
-      return {
+      const res = {
         retrievalSufficient: false,
         retrievalReason: '没有检索到任何可用片段',
       };
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: res.retrievalSufficient,
+          reason: res.retrievalReason,
+        },
+      });
+      return res;
     }
 
     const model = this.llmProvider.getModel();
@@ -189,29 +254,26 @@ export class AgenticRagService {
 
     try {
       const structured = model.withStructuredOutput(schema);
+      const chain = sufficiencyPrompt.pipe(structured);
       const context = state.retrievedChunks
         .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 500)}`)
         .join('\n\n');
-      const result = await structured.invoke([
-        {
-          role: 'system',
-          content: [
-            '你是 RAG 检索充分性评估器。',
-            '判断给定检索片段是否足够支撑后续回答用户问题。',
-            '只要片段包含直接答案、核心事实或足够上下文，就判定 sufficient=true。',
-            '如果片段明显无关、为空、只包含泛泛背景而不能回答问题，则判定 sufficient=false。',
-            '只输出结构化字段 sufficient 和 reason。',
-          ].join('\n'),
-        },
-        {
-          role: 'user',
-          content: `用户问题：${state.query}\n\n检索片段：\n${context}`,
-        },
-      ]);
+      const result = await chain.invoke({
+        query: state.query,
+        context,
+      });
 
       this.logger.log(
         `Retrieval sufficiency: sufficient=${result.sufficient}, reason=${result.reason}`,
       );
+
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: result.sufficient,
+          reason: result.reason,
+        },
+      });
 
       return {
         retrievalSufficient: result.sufficient,
@@ -225,6 +287,15 @@ export class AgenticRagService {
       const sufficient = topScore >= 0.2;
       const reason = `充分性 LLM 评估失败，按 topScore=${topScore.toFixed(2)} 启发式判断`;
       this.logger.warn(`${reason}: ${(err as Error).message}`);
+
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient,
+          reason,
+        },
+      });
+
       return {
         retrievalSufficient: sufficient,
         retrievalReason: reason,
@@ -233,11 +304,13 @@ export class AgenticRagService {
   }
 
   /**
-   * 联网兜底：当本地检索不足时，调用 Bocha Web Search 补充外部上下文。
+   * 联网兜底
    */
   async webSearchFallbackNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType> & { webSearchCount: number }> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     if (state.retrievalSufficient) {
       return { webSearchCount: 0 };
     }
@@ -246,8 +319,17 @@ export class AgenticRagService {
       this.logger.warn(
         'Retrieval insufficient but Bocha web_search is disabled',
       );
+      const reason = `${state.retrievalReason || '检索不足'}；BOCHA_API_KEY 未配置，已跳过联网兜底`;
+      onEvent?.({
+        type: 'web_search',
+        data: {
+          count: 0,
+          enabled: false,
+          reason,
+        },
+      });
       return {
-        retrievalReason: `${state.retrievalReason || '检索不足'}；BOCHA_API_KEY 未配置，已跳过联网兜底`,
+        retrievalReason: reason,
         webSearchCount: 0,
       };
     }
@@ -276,32 +358,68 @@ export class AgenticRagService {
       });
 
       this.logger.log(`Bocha web_search returned ${webChunks.length} results`);
+      const reason = `${state.retrievalReason || '检索不足'}；已通过 Bocha web_search 补充 ${webChunks.length} 条结果`;
+      onEvent?.({
+        type: 'web_search',
+        data: {
+          count: webChunks.length,
+          enabled: true,
+          reason,
+        },
+      });
       return {
         retrievedChunks: [...state.retrievedChunks, ...webChunks].slice(0, 8),
-        retrievalReason: `${state.retrievalReason || '检索不足'}；已通过 Bocha web_search 补充 ${webChunks.length} 条结果`,
+        retrievalReason: reason,
         webSearchCount: webChunks.length,
       };
     } catch (err) {
       const reason = `Bocha web_search 调用失败：${(err as Error).message}`;
       this.logger.warn(reason);
+      const fallbackReason = `${state.retrievalReason || '检索不足'}；${reason}`;
+      onEvent?.({
+        type: 'web_search',
+        data: {
+          count: 0,
+          enabled: this.bochaSearchService.isEnabled(),
+          reason: fallbackReason,
+        },
+      });
       return {
-        retrievalReason: `${state.retrievalReason || '检索不足'}；${reason}`,
+        retrievalReason: fallbackReason,
         webSearchCount: 0,
       };
     }
   }
 
   /**
-   * 二次排序：有 RERANK_API_KEY 时调用 DashScope Rerank；未配置时保持原排序。
+   * 二次排序
    */
   async rerankNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType> & { reranked: boolean }> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     if (state.retrievedChunks.length < 2) {
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled: this.dashScopeRerankService.isEnabled(),
+          reranked: false,
+          count: state.retrievedChunks.length,
+        },
+      });
       return { reranked: false };
     }
 
     if (!this.dashScopeRerankService.isEnabled()) {
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled: false,
+          reranked: false,
+          count: state.retrievedChunks.length,
+        },
+      });
       return { reranked: false };
     }
 
@@ -311,9 +429,25 @@ export class AgenticRagService {
         state.retrievedChunks,
         5,
       );
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled: true,
+          reranked: true,
+          count: chunks.length,
+        },
+      });
       return { retrievedChunks: chunks, reranked: true };
     } catch (err) {
       this.logger.warn(`DashScope rerank skipped: ${(err as Error).message}`);
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled: true,
+          reranked: false,
+          count: state.retrievedChunks.length,
+        },
+      });
       return { reranked: false };
     }
   }
@@ -323,22 +457,30 @@ export class AgenticRagService {
    */
   async generateNode(
     state: AgenticRagStateType,
-    onToken?: (token: string) => void,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const history = (config?.configurable?.history ?? []) as Array<{
+      role: 'human' | 'ai';
+      content: string;
+    }>;
+
     if (state.retrievedChunks.length === 0) {
-      return { answer: '未找到相关内容，请先上传文档。' };
+      const ans = '未找到相关内容，请先上传文档。';
+      onEvent?.({ type: 'token', data: ans });
+      onEvent?.({ type: 'citation', data: [] });
+      return { answer: ans };
     }
 
     const context = state.retrievedChunks
       .map((c, i) => `[片段 ${i + 1}]\n${c.content}`)
       .join('\n\n---\n\n');
 
-    // 流式生成
     const model = this.llmProvider.getModel();
     const messages = await generateAnswerPrompt.formatMessages({
       context,
       query: state.query,
-      history: [], // Agentic 模式暂不支持多轮历史
+      history,
     });
     const stream = await model.stream(messages);
     let answer = '';
@@ -348,9 +490,10 @@ export class AgenticRagService {
           ? chunk.content
           : JSON.stringify(chunk.content);
       answer += token;
-      onToken?.(token);
+      onEvent?.({ type: 'token', data: token });
     }
 
+    onEvent?.({ type: 'citation', data: state.retrievedChunks });
     return { answer };
   }
 
@@ -359,7 +502,9 @@ export class AgenticRagService {
    */
   async reflectionNode(
     state: AgenticRagStateType,
+    config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const model = this.llmProvider.getModel();
 
     const schema = z.object({
@@ -391,6 +536,15 @@ export class AgenticRagService {
         `Reflection: confidence=${result.confidence.toFixed(2)}, passed=${passed}, retry=${retryCount}/${this.maxRetries}, reason=${result.reason}`,
       );
 
+      onEvent?.({
+        type: 'reflection',
+        data: {
+          confidence: result.confidence,
+          passed,
+          retryCount,
+        },
+      });
+
       return {
         confidence: result.confidence,
         passed,
@@ -400,7 +554,16 @@ export class AgenticRagService {
       this.logger.warn(
         `Reflection failed, assume passed: ${(err as Error).message}`,
       );
-      return { confidence: 1, passed: true, retryCount: state.retryCount + 1 };
+      const retryCount = state.retryCount + 1;
+      onEvent?.({
+        type: 'reflection',
+        data: {
+          confidence: 1,
+          passed: true,
+          retryCount,
+        },
+      });
+      return { confidence: 1, passed: true, retryCount };
     }
   }
 
@@ -425,6 +588,9 @@ export class AgenticRagService {
     query: string,
     mode: 'simple' | 'agentic' | 'auto',
     onEvent?: SseCallback,
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    threadId = 'default-thread',
+    userId?: string,
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -434,14 +600,16 @@ export class AgenticRagService {
     retrievalSufficient?: boolean;
     retrievalReason?: string;
   }> {
-    // 1. 路由
     const route =
       mode === 'simple' ? 'simple' : await this.classifyRoute(query, mode);
     onEvent?.({ type: 'routing', data: { mode, route } });
 
     if (route === 'simple') {
-      // simple 模式直接走 KarpathyRag
-      const result = await this.karpathyRagService.answer(query);
+      const result = await this.karpathyRagService.answer(
+        query,
+        history,
+        userId,
+      );
       onEvent?.({ type: 'citation', data: result.references });
       onEvent?.({ type: 'final', data: result });
       return {
@@ -453,107 +621,39 @@ export class AgenticRagService {
       };
     }
 
-    // 2. agentic 模式：query_augment → retrieval → generate → reflection → (retry|end)
-    let state: AgenticRagStateType = {
-      query,
-      route: 'agentic',
-      augmentedQueries: [],
-      retrievedChunks: [],
-      retrievalSufficient: false,
-      retrievalReason: '',
-      answer: '',
-      confidence: 0,
-      retryCount: 0,
-      passed: false,
-    };
-
-    // query_augment
-    const augmentResult = await this.queryAugmentNode(state);
-    state = { ...state, ...augmentResult };
-    onEvent?.({ type: 'query_augment', data: state.augmentedQueries });
-
-    // 循环：retrieval → generate → reflection，最多 maxRetries+1 次
-    while (true) {
-      // retrieval
-      const retrievalResult = await this.retrievalNode(state);
-      state = { ...state, ...retrievalResult };
-      onEvent?.({ type: 'retrieval', data: state.retrievedChunks });
-
-      // sufficiency
-      const sufficiencyResult = await this.sufficiencyNode(state);
-      state = { ...state, ...sufficiencyResult };
-      onEvent?.({
-        type: 'sufficiency',
-        data: {
-          sufficient: state.retrievalSufficient,
-          reason: state.retrievalReason,
+    // 通过 LangGraph StateGraph 执行 agentic 流程
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const finalState = (await this.app.invoke(
+      {
+        query,
+        route: 'agentic',
+        augmentedQueries: [],
+        retrievedChunks: [],
+        retrievalSufficient: false,
+        retrievalReason: '',
+        answer: '',
+        confidence: 0,
+        retryCount: 0,
+        passed: false,
+      },
+      {
+        configurable: {
+          thread_id: threadId,
+          onEvent,
+          history,
+          userId,
         },
-      });
-
-      if (!state.retrievalSufficient) {
-        const webSearchResult = await this.webSearchFallbackNode(state);
-        const { webSearchCount, ...statePatch } = webSearchResult;
-        state = { ...state, ...statePatch };
-        onEvent?.({
-          type: 'web_search',
-          data: {
-            count: webSearchCount,
-            enabled: this.bochaSearchService.isEnabled(),
-            reason: state.retrievalReason,
-          },
-        });
-      }
-
-      const rerankResult = await this.rerankNode(state);
-      const { reranked, ...rerankPatch } = rerankResult;
-      state = { ...state, ...rerankPatch };
-      onEvent?.({
-        type: 'rerank',
-        data: {
-          enabled: this.dashScopeRerankService.isEnabled(),
-          reranked,
-          count: state.retrievedChunks.length,
-        },
-      });
-
-      // generate（流式 token）
-      const generateResult = await this.generateNode(state, (token) => {
-        onEvent?.({ type: 'token', data: token });
-      });
-      state = { ...state, ...generateResult };
-
-      // citation
-      onEvent?.({ type: 'citation', data: state.retrievedChunks });
-
-      // reflection
-      const reflectionResult = await this.reflectionNode(state);
-      state = { ...state, ...reflectionResult };
-      onEvent?.({
-        type: 'reflection',
-        data: {
-          confidence: state.confidence,
-          passed: state.passed,
-          retryCount: state.retryCount,
-        },
-      });
-
-      // 路由决策
-      const action = this.reflectionRouter(state);
-      if (action === 'end') {
-        break;
-      }
-      // retry：重试时清空答案，保留 augmentedQueries
-      state = { ...state, answer: '', passed: false };
-    }
+      },
+    )) as AgenticRagStateType;
 
     const result = {
-      answer: state.answer,
-      references: state.retrievedChunks,
+      answer: finalState.answer,
+      references: finalState.retrievedChunks,
       route: 'agentic' as const,
-      confidence: state.confidence,
-      retryCount: state.retryCount,
-      retrievalSufficient: state.retrievalSufficient,
-      retrievalReason: state.retrievalReason,
+      confidence: finalState.confidence,
+      retryCount: finalState.retryCount,
+      retrievalSufficient: finalState.retrievalSufficient,
+      retrievalReason: finalState.retrievalReason,
     };
     onEvent?.({ type: 'final', data: result });
     return result;
@@ -613,21 +713,16 @@ export class AgenticRagService {
 
   /**
    * 使用 deepagents 做 agentic 检索规划。
-   * Nest 当前是 CommonJS 编译，需保留原生 dynamic import，避免 require() 加载 ESM-only 依赖时报错。
    */
   private async planQueriesWithDeepAgent(query: string): Promise<string[]> {
     try {
       const agent = await this.getDeepAgent();
+      const formatted = await deepAgentQueryPlanUserPrompt.format({ query });
       const result = await agent.invoke({
         messages: [
           {
             role: 'user',
-            content: [
-              '请为下面的 RAG 问题规划 3 条中文检索问句。',
-              '只返回 JSON，不要 Markdown，不要解释。',
-              'JSON 格式：{"queries":["问题1","问题2","问题3"]}',
-              `原始问题：${query}`,
-            ].join('\n'),
+            content: formatted,
           },
         ],
       });
@@ -662,12 +757,7 @@ export class AgenticRagService {
 
     this.deepAgent = createDeepAgent({
       model: this.llmProvider.getModel(),
-      systemPrompt: [
-        '你是 RAG 检索规划 Agent。',
-        '你的任务是把用户问题拆成 3 条互补的中文检索问句。',
-        '不要回答用户问题，不要调用不必要的工具。',
-        '必须只输出 JSON：{"queries":["...","...","..."]}',
-      ].join('\n'),
+      systemPrompt: deepAgentQueryPlanSystemPrompt,
     });
 
     return this.deepAgent;

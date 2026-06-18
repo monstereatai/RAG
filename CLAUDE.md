@@ -76,6 +76,7 @@ cd backend && npm run build           # 编译通过
 cd backend && npm run lint            # ESLint 通过
 cd backend && npm run start:dev       # 服务启动
 curl http://localhost:3000/api/health # 健康检查
+node verify-multitenancy.mjs          # 多租户隔离 E2E 验证
 
 # 基础设施验证（在 docker/ 目录下）
 cd docker && docker compose ps        # 所有服务 healthy
@@ -112,22 +113,21 @@ cd docker && docker compose ps        # 所有服务 healthy
 
 ## 当前阶段
 
-**M1/M2/M3/M4/M5 已完成**（2026-06-18）
+**M1/M2/M3/M4/M5已完成，P2多租户认证数据隔离已验证完成**（2026-06-18）
 
 已完成能力：
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
-- M1 simple RAG：上传 Markdown、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答、debug chunks。
-- M2 Agentic RAG：deepAgent 检索规划、query augment、retrieval、streaming generate、reflection、auto 路由、SSE 事件流。
-- M3 工程化：JWT、统一响应、全局异常、ValidationPipe、pino 日志。
-- M4 前端 MVP：文件上传、知识库列表、聊天窗口、simple/agentic/auto 模式、SSE 流式显示、引用展开、浏览器语音输入。
-- M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 反代、基础设施 compose。
+- M1 simple RAG：上传 Markdown/PDF/TXT/DOCX、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答。
+- M2 Agentic RAG：deepAgent 检索规划、Query 扩展、检索充分性评估、流式生成、置信度自我评估重试。
+- M3 工程化与多租户隔离：JWT 认证保护、EventSource 流式 Token 兼容、统一响应/全局异常/日志，以及基于 `userId` 在数据库、Redis 缓存、Milvus 向量及内存 BM25 中的物理/逻辑硬隔离。
+- M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、simple/agentic/auto 模式、流式事件追踪、Debug 属性面板、Web 语音输入。
+- M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 代理。
 
 当前已知问题：
-- Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。
-- 当前已通过 BM25 中文单字/bigram 兜底和向量检索失败降级，M2 功能不再被阻塞。
-- 后续仍需从 Milvus 索引、资源配置或版本层面优化向量检索性能。
+- Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。已通过自动快速降级到 BM25（含中文单字/bigram兜底）避免卡死，后续可从索引算法或资源配置层面继续优化性能。
 
 下一步建议：
-- P1：DashScope Rerank、Elasticsearch 混合检索、Prompt/结构化输出体系。
-- P2：后端腾讯云 ASR/TTS、文档删除、缓存/对话历史、Mem0 长期记忆。
-- P3：评测体系、Prometheus/OpenTelemetry、GraphRAG、MCP、Skills。
+- P2：后端腾讯云 ASR/TTS 前端整合（播放朗读按钮）。
+- P2：Mem0 长期记忆系统开发与集成。
+- P2：MCP 协议 MultiServerMCPClient 对接与工具源标定。
+- P3：知识图谱 GraphRAG (Neo4j) 与自动化评测体系。

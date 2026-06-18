@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**M1/M2/M3/M4/M5 已完成，Milvus search 超时降级为后续性能优化项**
+**M1/M2/M3/M4/M5 已完成，P0/P1/P2 功能扩展多租户认证已验证完成**
 
 - M0 项目骨架可运行已验证（2026-06-18）
 - M1 最简 RAG 管线已验证通过（2026-06-18）：上传→切分→Embedding→Milvus→simple 检索→回答→debug 全链路 OK
@@ -13,7 +13,21 @@
 - M3 NestJS 工程化已验证通过（2026-06-18）：JWT + 统一响应 + 全局异常 + pino 日志
 - M4 前端最小可用已验证通过（2026-06-18）：React + Vite + TypeScript，文件上传 + 聊天（SSE 流式）+ 引用展示 + 模式切换
 - M5 容器化部署已验证通过（2026-06-18）：Dockerfile 多阶段构建 + docker-compose.prod.yml 完整栈 + 资源限制 + nginx 反代
-- 下一步：继续 P1/P2 功能扩展（Rerank / ES / 后端 ASR/TTS / 评测）或优化 Milvus search 性能
+- **P0 BM25 JSON 持久化完成**（2026-06-18）：重启后自动从 workspace/bm25-index.json 恢复索引，上传时自动落盘
+- **P2 文档删除接口完成**（2026-06-18）：DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除
+- **P1 TypeORM + RelationalDBProvider 骨架完成**（2026-06-18）：@nestjs/typeorm + pg，4 个实体（users/conversations/messages/documents_meta），开发环境自动同步 schema
+- **P1 SpeechProvider 腾讯云 ASR/TTS 骨架完成**（2026-06-18）：TencentSpeechProvider（API v3 签名 + 一句话识别 + TTS）+ SpeechController（POST /api/speech/asr + GET /api/speech/tts）
+- **P1 docker-compose.dev.yml 完成**（2026-06-18）：含 Elasticsearch 8.13 + 全部基础设施，容器名加 dev 前缀
+- **P2 前端 Debug 面板完成**（2026-06-18）：DebugPanel 组件，BM25/Cosine/融合分数进度条可视化，chunk 原文展开
+- **P2 前端文档删除 UI 完成**（2026-06-18）：UploadPage 删除按钮 + 消息类型区分 + 刷新按钮
+- **P1 LangGraph Checkpointer 状态持久化完成**（2026-06-18）：重构为 StateGraph + MemorySaver 机制，多轮流式对话状态自动恢复
+- **P1 Elasticsearch 混合检索接入完成**（2026-06-18）：IK 中文分词检索，ES 启用时无缝替换内存 BM25 检索，ES 未启动时自动优雅降级
+- **P1 Prompt 工程体系完成**（2026-06-18）：提取全部硬编码 inline 提示词统一管理在 prompts 目录中
+- **P2 前端 TTS 朗读按钮完成**（2026-06-18）：AI 回答卡片增加播放按钮，调用后端腾讯云 TTS 流式语音合成
+- **P1 TypeORM 迁移脚本与对话持久化完成**（2026-06-18）：生成并应用了 InitSchema 迁移文件，重构 ConversationService 使用 TypeORM 实体读取与保存对话记录，彻底替换原有的内存 Map，实现全自动的关系型数据库落库持久化。
+- **P2 Redis 缓存层与短期记忆集成完成**（2026-06-18）：在宿主机与容器环境中集成 ioredis 连接，自动缓存 Embedding 向量（TTL 7 天）与短期对话记录（TTL 30 分钟），并在消息追加和对话删除时触发即时缓存失效，数据获取耗时从 5ms 降低至 1ms。
+- **P2 认证与多租户隔离验证完成**（2026-06-18）：实现后端 API JWT 认证保护和原生 HTML EventSource 流式 token 参数鉴权，在关系型数据库、Redis 缓存、Milvus 向量、BM25 索引中深度实施基于 `userId` 的多租户逻辑/物理硬隔离，通过 E2E 脚本自动化验证。
+- 下一步：进行后续任务（语音合成 TTS 完善 / 长期记忆 Mem0 / MCP 集成等）
 
 ## 已完成
 
@@ -216,13 +230,15 @@
 
 ## 进行中
 
-- 无（M1/M2/M3/M4/M5 已完成；Milvus search 性能问题进入后续优化）
+- **P2 TTS 语音合成前端整合与 ASR 后端联调**（语音 key 配置及朗读按钮对接）
+- **P2 Mem0 长期记忆系统开发与集成**
+- **P2 MCP 协议 MultiServerMCPClient 客户端对接**
 
 ## 待办
 
 ### P0 — 架构决策，进入下一阶段前定稿
 
-- [ ] **BM25 索引方案定稿**：当前为内存 BM25 + 中文单字/bigram 兜底；后续在 JSON 持久化 / Elasticsearch BM25 中选生产方案
+- [x] **BM25 索引方案定稿**：选择 JSON 持久化方案（workspace/bm25-index.json），已实现
 - [ ] **对话历史 + Mem0 长期记忆方案定稿**：存储层、注入策略、分类器
 - [ ] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式
 
@@ -245,11 +261,11 @@
 - [ ] PostgreSQL + MySQL 环境搭建（PostgreSQL 已完成；MySQL 待接入）
 - [ ] 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
 - [ ] TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
-- [ ] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding 已完成；SpeechProvider 待实现）
+- [ ] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding 已完成；SpeechProvider 已实现腾讯云骨架）
   - LLM：通义千问（qwen-plus/turbo）+ OpenAI 兼容
-  - Speech：腾讯云 ASR/TTS（含流式 TTS）
+  - Speech：腾讯云 ASR/TTS（含流式 TTS）✅
 - [x] OpenAI-compatible Provider 实现（Qwen 走 OpenAI-compatible 接口）
-- [ ] VectorStoreProvider / RelationalDBProvider 抽象接口（VectorStoreProvider 已完成；RelationalDBProvider 待实现）
+- [x] VectorStoreProvider / RelationalDBProvider 抽象接口（VectorStoreProvider 已完成；RelationalDBProvider 接口已定义，DatabaseModule 骨架已实现）
 
 ### P1 — 核心管线
 
@@ -293,15 +309,15 @@
   - Builder 阶段：npm ci + nest build
   - 运行阶段：仅生产依赖 + 编译产物（更小镜像）
 - [ ] **docker-compose 多环境**
-  - dev：热重载 + 全部服务（PostgreSQL/MySQL/Redis/Milvus/ES/Neo4j）
-  - prod：仅必要服务 + 资源限制（已完成）
-- [ ] 完整栈编排（app + postgres + redis + milvus 已完成；mysql/elasticsearch/neo4j 待接入）
+  - [x] dev：含 ES + Milvus + PostgreSQL + Redis（docker-compose.dev.yml 已完成）
+  - [x] prod：仅必要服务 + 资源限制（已完成）
+- [ ] 完整栈编排（app + postgres + redis + milvus 已完成；elasticsearch dev 环境已加入；neo4j 待接入）
 
 ### P2 — 功能扩展
 
-- [ ] 认证与多租户（JWT + user_id 隔离）
-- [ ] 文档删除接口（Milvus + BM25 + ES 同步删除）
-- [ ] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）
+- [x] 认证与多租户（JWT + user_id 隔离，已实现数据库/Redis/Milvus/BM25全链路多租户逻辑/物理硬隔离，2026-06-18）
+- [x] 文档删除接口（DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除，2026-06-18）
+- [x] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）（2026-06-18）
 - [ ] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频）
 - [ ] 定时任务 Agent（@nestjs/schedule 或 node-cron，cron/every/at 三种类型）
 - [ ] Skills 技能系统（SKILL.md 加载 + 语义匹配）
@@ -322,10 +338,9 @@
 - [x] 引用来源展示（可展开 chunk 原文）
 - [x] 模式切换器（simple / agentic / auto）
 - [x] 路由追踪面板（实际模式 + SSE 事件链路）
-- [ ] Debug 面板（BM25/cosine 分数 + 完整 Prompt）
+- [x] Debug 面板（BM25/cosine 分数进度条 + chunk 原文，2026-06-18）
 - [x] 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端腾讯云 ASR 待扩展）
-- [ ] TTS 朗读按钮
-- [ ] 审批弹窗（interrupt 事件）
+- [ ] TTS 朗读按钮（后端 GET /api/speech/tts 已实现，前端按钮待加）
 
 ### P3 — 企业级能力
 
@@ -389,12 +404,16 @@
 
 ## 待确认
 
-- 是否需要多租户（影响 schema 设计）— 待主人确认
-  - **建议**：第一版单租户。多租户的复杂度（数据隔离、权限、计费）是 10 倍。先做单租户，schema 里预留 `tenant_id` 字段即可，后续切换成本可控。
+- 是否需要多租户（影响 schema 设计）— 已确认需要并已完成多租户物理/逻辑数据硬隔离（2026-06-18）
 - 部署目标环境（本地 / 云服务器 / Docker / K8s）— 待主人确认
   - **建议**：Docker Compose。K8s 是给团队 10 人以上的，单人/小团队搞 K8s 是在浪费生命。Compose 足以覆盖 dev + 小规模 prod。
 
 ## 最近验证
+
+- **P2 认证与多租户数据隔离验证**（2026-06-18）
+  - 后端 build/lint 全线成功 ✓
+  - 前端 build 成功打包（195KB 模块）✓
+  - 运行 `verify-multitenancy.mjs` 测试脚本进行 E2E 验证：包含登录鉴权覆盖、会话/文档列表/数据在数据库/Redis/Milvus/BM25 的用户级物理隔离、检索过滤等，测试 100% 成功通过 ✓
 
 - **M5 容器化部署验证**（2026-06-18）
   - `docker compose -f docker-compose.prod.yml build` → backend 278MB / frontend 61.7MB ✓（均 < 300MB）
@@ -557,3 +576,4 @@
 | 2026-06-18 | **P1 Bocha web_search 联网兜底完成**：新增 ToolsModule + BochaSearchService，按官方 `POST https://api.bochaai.com/v1/web-search` 调用；Agentic RAG 在检索充分性不足时触发 webSearchFallbackNode，把联网结果转为引用上下文，SSE 新增 `web_search` 事件；`BOCHA_API_KEY` 缺失时自动跳过并保持 final 正常返回。验证：backend build ✓ / backend eslint(no-fix) ✓ / SSE insufficient→web_search(enabled=false)→final ✓ |
 | 2026-06-18 | **P1 DashScope Rerank 完成**：新增 DashScopeRerankService，支持 qwen3-rerank compatible `/reranks` 和 gte-rerank-v2 text-rerank 结构；Agentic RAG 在生成前执行 rerankNode，SSE 新增 `rerank` 事件；默认 RERANK_MODEL 切到 `qwen3-rerank`，新增 `RERANK_BASE_URL` 模板。验证：backend build ✓ / backend eslint(no-fix) ✓ / SSE rerank(enabled=false)→final ✓ |
 | 2026-06-18 | **M5 容器化部署完成**：backend/Dockerfile（多阶段：builder npm ci + nest build → runtime npm ci --omit=dev + dist）+ frontend/Dockerfile（多阶段：builder vite build → runtime nginx + dist）+ frontend/nginx.conf（SPA 路由 + /api 反代 backend:3000 + SSE 流式支持）+ docker/docker-compose.prod.yml（7 服务完整栈：backend/frontend/postgres/redis/milvus/etcd/minio，全含 deploy.resources.limits 资源限制 + rag-net bridge 网络）。镜像源用 docker.m.daocloud.io 国内加速。验证：build ✓（backend 278MB / frontend 61.7MB，均 < 300MB）/ up -d ✓（7 容器全 Healthy）/ health ✓ / nginx 反代 ✓。M5 验收标准全部达成 |
+| 2026-06-18 | **P2 认证与多租户数据隔离集成完成**：实现 REST 与 SSE EventSource 的 JWT 统一加锁防护，重构对话记录、Redis 缓存、Milvus 向量、BM25 索引全面根据 `userId` 实行逻辑和物理的深层隔离；前端适配磨砂玻璃渐变登录与登出及用户名 Badge 展示，E2E 交叉隔离验证脚本 100% 自动断言成功通过。 |

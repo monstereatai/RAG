@@ -6,11 +6,24 @@ import type {
   ChatResponse,
   ChatMode,
   DebugResponse,
+  LoginResponse,
+  UserInfo,
 } from './types';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000, // agentic 模式可能较慢
+});
+
+// Add request interceptor to attach JWT token
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
 });
 
 // 文档上传
@@ -27,6 +40,11 @@ export async function uploadDocument(file: File): Promise<UploadResponse> {
 export async function listDocuments(): Promise<DocumentItem[]> {
   const res = await api.get<ApiResponse<DocumentItem[]>>('/documents');
   return res.data.data;
+}
+
+// 删除文档
+export async function deleteDocument(docId: string): Promise<void> {
+  await api.delete(`/documents/${docId}`);
 }
 
 // 聊天（非流式）
@@ -51,7 +69,9 @@ export function chatStream(
   onError: (err: Error) => void,
   onClose: () => void,
 ): void {
-  const url = `/api/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}`;
+  const token = localStorage.getItem('token');
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  const url = `/api/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
   const eventSource = new EventSource(url);
 
   eventSource.onmessage = (e) => {
@@ -72,4 +92,16 @@ export function chatStream(
     eventSource.close();
     onClose();
   });
+}
+
+// 认证：登录
+export async function login(username: string, password: string): Promise<LoginResponse> {
+  const res = await api.post<ApiResponse<LoginResponse>>('/auth/login', { username, password });
+  return res.data.data;
+}
+
+// 认证：获取当前用户信息
+export async function getProfile(): Promise<UserInfo> {
+  const res = await api.get<ApiResponse<UserInfo>>('/auth/profile');
+  return res.data.data;
 }

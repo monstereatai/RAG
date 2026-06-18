@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsIn, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsIn,
+  ValidateNested,
+  IsUUID,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export type ChatMode = 'simple' | 'agentic' | 'auto';
@@ -20,7 +26,16 @@ export class ChatDto {
   @IsIn(['simple', 'agentic', 'auto'])
   mode?: ChatMode;
 
-  /** 多轮对话历史（可选，前端传入，按时间顺序） */
+  /**
+   * 对话 threadId（可选）
+   * - 不传：新建对话（返回新 threadId）
+   * - 传入：追加到已有对话，注入对话历史到 LLM 上下文
+   */
+  @IsOptional()
+  @IsUUID()
+  threadId?: string;
+
+  /** 多轮对话历史（可选，前端传入，按时间顺序；传 threadId 时服务端自动补充） */
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => ChatMessageDto)
@@ -46,4 +61,6 @@ export interface ChatResponse {
   retryCount?: number;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
+  /** 返回当前对话的 threadId（新建对话时为新生成的 ID） */
+  threadId?: string;
 }

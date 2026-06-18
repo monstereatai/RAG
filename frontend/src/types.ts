@@ -57,3 +57,16 @@ export interface DebugResponse {
   topK: number;
   chunks: DebugChunk[];
 }
+
+export interface LoginResponse {
+  accessToken: string;
+  tokenType: 'Bearer';
+  expiresIn: string;
+}
+
+export interface UserInfo {
+  userId: string;
+  username: string;
+  role: string;
+}
+

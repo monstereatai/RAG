@@ -86,12 +86,39 @@ export class MilvusVectorStoreProvider
       collection_name: this.collection,
     });
     if (has.value) {
-      this.logger.log(`Collection ${this.collection} already exists`);
-      // 对齐 agent-course/milvus-test 参考实现：查询前 loadCollection（已加载会忽略错误）
-      // Milvus 重启后 collection 需要重新 load 到内存才能 search
-      await this.client.loadCollection({ collection_name: this.collection });
-      this.logger.log(`Collection ${this.collection} loaded`);
-      return;
+      this.logger.log(
+        `Collection ${this.collection} already exists, checking schema...`,
+      );
+      try {
+        const desc = await this.client.describeCollection({
+          collection_name: this.collection,
+        });
+        const hasUserIdField = desc.schema.fields.some(
+          (f) => f.name === 'user_id',
+        );
+        if (!hasUserIdField) {
+          this.logger.warn(
+            `Collection schema outdated (missing user_id field). Re-creating...`,
+          );
+          await this.client.dropCollection({
+            collection_name: this.collection,
+          });
+        } else {
+          // 对齐 agent-course/milvus-test 参考实现：查询前 loadCollection（已加载会忽略错误）
+          await this.client.loadCollection({
+            collection_name: this.collection,
+          });
+          this.logger.log(`Collection ${this.collection} loaded`);
+          return;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to describe collection: ${(err as Error).message}. Retrying recreate...`,
+        );
+        await this.client
+          .dropCollection({ collection_name: this.collection })
+          .catch(() => {});
+      }
     }
 
     this.logger.log(`Creating collection ${this.collection}...`);
@@ -123,6 +150,11 @@ export class MilvusVectorStoreProvider
           name: 'chunk_index',
           data_type: DataType.Int64,
         },
+        {
+          name: 'user_id',
+          data_type: DataType.VarChar,
+          max_length: 64,
+        },
       ],
     });
 
@@ -146,6 +178,7 @@ export class MilvusVectorStoreProvider
       content: r.content,
       doc_id: r.docId,
       chunk_index: r.chunkIndex,
+      user_id: r.userId ?? '',
     }));
     const result = await this.client.insert({
       collection_name: this.collection,
@@ -158,23 +191,41 @@ export class MilvusVectorStoreProvider
   async similaritySearch(
     queryVector: number[],
     k: number,
+    userId?: string,
   ): Promise<VectorSearchHit[]> {
     // 对齐 agent-course/milvus-test 参考实现：不传 params（nprobe），使用 IVF_FLAT 默认参数
-    const searchResult = await this.client.search({
+    const searchParams = {
       collection_name: this.collection,
       vector: queryVector,
       limit: k,
       metric_type: MetricType.COSINE,
       output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
-    });
+      expr: userId ? `user_id == "${userId}"` : undefined,
+    };
 
-    return searchResult.results.map((hit) => ({
-      id: String(hit.id),
-      content: String(hit.content ?? ''),
-      docId: String(hit.doc_id ?? ''),
-      chunkIndex: Number(hit.chunk_index ?? 0),
-      score: Number(hit.score ?? 0),
-    }));
+    const searchResult = await this.client.search(searchParams);
+
+    return (searchResult.results as Array<Record<string, unknown>>).map(
+      (hit) => ({
+        id:
+          typeof hit['id'] === 'string' || typeof hit['id'] === 'number'
+            ? String(hit['id'])
+            : '',
+        content: typeof hit['content'] === 'string' ? hit['content'] : '',
+        docId:
+          typeof hit['doc_id'] === 'string' || typeof hit['doc_id'] === 'number'
+            ? String(hit['doc_id'])
+            : '',
+        chunkIndex:
+          typeof hit['chunk_index'] === 'number'
+            ? hit['chunk_index']
+            : Number(hit['chunk_index'] ?? 0),
+        score:
+          typeof hit['score'] === 'number'
+            ? hit['score']
+            : Number(hit['score'] ?? 0),
+      }),
+    );
   }
 
   async deleteByDocId(docId: string): Promise<void> {

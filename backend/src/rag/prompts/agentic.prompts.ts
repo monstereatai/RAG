@@ -1,4 +1,4 @@
-import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { ChatPromptTemplate, PromptTemplate } from '@langchain/core/prompts';
 
 /**
  * Agentic RAG 专用 Prompt 集合
@@ -65,3 +65,42 @@ export const reflectionPrompt = ChatPromptTemplate.fromMessages([
 {answer}`,
   ],
 ]);
+
+/**
+ * 检索充分性评估 Prompt
+ */
+export const sufficiencyPrompt = ChatPromptTemplate.fromMessages([
+  [
+    'system',
+    `你是 RAG 检索充分性评估器。
+判断给定检索片段是否足够支撑后续回答用户问题。
+只要片段包含直接答案、核心事实或足够上下文，就判定 sufficient=true。
+如果片段明显无关、为空、只包含泛泛背景而不能回答问题，则判定 sufficient=false。
+只输出结构化字段 sufficient 和 reason。`,
+  ],
+  [
+    'human',
+    `用户问题：{query}
+
+检索片段：
+{context}`,
+  ],
+]);
+
+/**
+ * DeepAgent 检索规划 System Prompt
+ */
+export const deepAgentQueryPlanSystemPrompt = `你是 RAG 检索规划 Agent。
+你的任务是把用户问题拆成 3 条互补的中文检索问句。
+不要回答用户问题，不要调用不必要的工具。
+必须只输出 JSON：{"queries":["...","...","..."]}`;
+
+/**
+ * DeepAgent 检索规划 User Prompt
+ */
+export const deepAgentQueryPlanUserPrompt = PromptTemplate.fromTemplate(
+  `请为下面的 RAG 问题规划 3 条中文检索问句。
+只返回 JSON，不要 Markdown，不要解释。
+JSON 格式：{"queries":["问题1","问题2","问题3"]}
+原始问题：{query}`,
+);

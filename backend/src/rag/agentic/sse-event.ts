@@ -12,6 +12,7 @@ export type SseEventType =
   | 'citation' // 引用来源
   | 'reflection' // 反思评估
   | 'final' // 最终结果
+  | 'thread' // 会话 thread_id 推送
   | 'error'; // 错误
 
 export interface SseEvent {

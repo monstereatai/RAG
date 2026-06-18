@@ -8,6 +8,7 @@ export interface VectorRecord {
   content: string;
   docId: string;
   chunkIndex: number;
+  userId?: string;
 }
 
 export interface VectorSearchHit {
@@ -35,6 +36,7 @@ export interface IVectorStoreProvider {
   similaritySearch(
     queryVector: number[],
     k: number,
+    userId?: string,
   ): Promise<VectorSearchHit[]>;
 
   /**

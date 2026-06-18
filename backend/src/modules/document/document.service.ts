@@ -1,38 +1,48 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MarkdownChunker } from './chunking.util';
+import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 
 export interface UploadResult {
   docId: string;
   chunkCount: number;
 }
 
+export interface DocMeta extends UploadResult {
+  filename: string;
+  createdAt: string;
+}
+
 /**
- * 文档服务：接收已解析文本 → 切分 → Embedding → 写入 Milvus
- * M1 阶段：文档元数据存内存 Map（M2 再落库）
+ * 文档服务：接收已解析文本 → 切分 → Embedding → 写入 Milvus + BM25 + ES
  */
 @Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
   private readonly chunker = new MarkdownChunker(500, 50);
-  // docId → { filename, chunkCount, createdAt }
-  private readonly docMeta = new Map<
-    string,
-    UploadResult & { filename: string; createdAt: string }
-  >();
 
   constructor(
+    @InjectRepository(DocumentMetaEntity)
+    private readonly docMetaRepo: Repository<DocumentMetaEntity>,
     private readonly embeddingProvider: EmbeddingProvider,
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly karpathyRagService: KarpathyRagService,
+    private readonly elasticsearchProvider: ElasticsearchProvider,
   ) {}
 
-  async upload(filename: string, content: string): Promise<UploadResult> {
+  async upload(
+    filename: string,
+    content: string,
+    userId: string,
+  ): Promise<UploadResult> {
     const docId = randomUUID();
-    this.logger.log(`Uploading ${filename}, docId=${docId}`);
+    this.logger.log(`Uploading ${filename}, docId=${docId}, userId=${userId}`);
 
     // 1. 切分
     const chunks = await this.chunker.split(content);
@@ -41,44 +51,103 @@ export class DocumentService {
     // 2. 批量 Embedding
     const vectors = await this.embeddingProvider.embedDocuments(chunks);
 
-    // 3. 写入 Milvus
+    // 3. 写入 Milvus (包含 userId)
     const records = chunks.map((chunk, idx) => ({
       id: randomUUID(),
       vector: vectors[idx],
       content: chunk,
       docId,
       chunkIndex: idx,
+      userId,
     }));
     await this.vectorStoreProvider.insert(records);
 
-    // 4. 同步 BM25 索引（内存）
-    this.karpathyRagService.indexChunks(
-      chunks.map((chunk, idx) => ({
-        id: records[idx].id,
-        content: chunk,
-        docId,
-        chunkIndex: idx,
-      })),
-    );
+    // 4. 同步 BM25 索引（含 JSON 持久化，带有 userId 隔离）
+    const chunkDocs = chunks.map((chunk, idx) => ({
+      id: records[idx].id,
+      content: chunk,
+      docId,
+      chunkIndex: idx,
+      userId,
+    }));
+    this.karpathyRagService.indexChunks(chunkDocs, userId);
 
-    // 5. 存元数据
-    this.docMeta.set(docId, {
+    // 5. 同步 Elasticsearch 索引（ES 未启用时自动跳过）
+    await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
+
+    // 6. 存元数据到数据库
+    const docMeta = this.docMetaRepo.create({
       docId,
       filename,
       chunkCount: chunks.length,
-      createdAt: new Date().toISOString(),
+      userId,
     });
+    await this.docMetaRepo.save(docMeta);
 
+    this.logger.log(
+      `Upload done: docId=${docId}, chunks=${chunks.length}, esEnabled=${this.elasticsearchProvider.isEnabled()}`,
+    );
     return { docId, chunkCount: chunks.length };
   }
 
-  getDocMeta(
-    docId: string,
-  ): (UploadResult & { filename: string; createdAt: string }) | undefined {
-    return this.docMeta.get(docId);
+  /**
+   * 删除文档：Milvus chunks + BM25 索引 + ES + 数据库元数据
+   */
+  async delete(docId: string, userId: string): Promise<void> {
+    const meta = await this.docMetaRepo.findOne({ where: { docId, userId } });
+    if (!meta) {
+      throw new NotFoundException(`doc ${docId} not found`);
+    }
+
+    this.logger.log(
+      `Deleting doc ${docId} (${meta.filename}) for userId=${userId}`,
+    );
+
+    // 1. 删除 Milvus 中的 chunks
+    try {
+      await this.vectorStoreProvider.deleteByDocId(docId);
+    } catch (err) {
+      this.logger.warn(
+        `Milvus delete failed for docId=${docId}: ${(err as Error).message}`,
+      );
+    }
+
+    // 2. 删除 BM25 内存索引 + JSON 持久化更新
+    this.karpathyRagService.removeDocChunks(docId, userId);
+
+    // 3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
+    await this.elasticsearchProvider.deleteByDocId(docId, userId);
+
+    // 4. 删除数据库元数据
+    await this.docMetaRepo.delete({ docId, userId });
+
+    this.logger.log(`Doc ${docId} deleted successfully`);
   }
 
-  listDocs(): Array<UploadResult & { filename: string; createdAt: string }> {
-    return Array.from(this.docMeta.values());
+  async getDocMeta(
+    docId: string,
+    userId: string,
+  ): Promise<DocMeta | undefined> {
+    const meta = await this.docMetaRepo.findOne({ where: { docId, userId } });
+    if (!meta) return undefined;
+    return {
+      docId: meta.docId,
+      filename: meta.filename,
+      chunkCount: meta.chunkCount,
+      createdAt: meta.createdAt.toISOString(),
+    };
+  }
+
+  async listDocs(userId: string): Promise<DocMeta[]> {
+    const list = await this.docMetaRepo.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+    return list.map((meta) => ({
+      docId: meta.docId,
+      filename: meta.filename,
+      chunkCount: meta.chunkCount,
+      createdAt: meta.createdAt.toISOString(),
+    }));
   }
 }
