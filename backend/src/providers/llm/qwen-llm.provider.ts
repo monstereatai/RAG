@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { BaseMessageLike } from '@langchain/core/messages';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider } from './llm-provider.interface';
 
 /**
@@ -34,5 +35,9 @@ export class QwenLlmProvider implements ILLMProvider {
     return typeof response.content === 'string'
       ? response.content
       : JSON.stringify(response.content);
+  }
+
+  getModel(): BaseChatModel {
+    return this.model;
   }
 }

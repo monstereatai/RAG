@@ -1,4 +1,5 @@
 import { BaseMessageLike } from '@langchain/core/messages';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 /**
  * LLM Provider 抽象接口
@@ -11,4 +12,9 @@ export interface ILLMProvider {
    * @returns LLM 生成的文本
    */
   invoke(messages: string | BaseMessageLike[]): Promise<string>;
+
+  /**
+   * 获取底层 ChatModel 实例（用于 withStructuredOutput / stream 等高级能力）
+   */
+  getModel(): BaseChatModel;
 }

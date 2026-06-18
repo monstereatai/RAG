@@ -1,0 +1,230 @@
+# ============================================================
+# RAG 项目生产环境完整栈编排
+# 使用：cd docker && docker compose -f docker-compose.prod.yml up -d
+# 验证：docker compose -f docker-compose.prod.yml ps
+#
+# 包含：
+#   - backend（NestJS API）
+#   - frontend（nginx + React 静态资源）
+#   - postgres（pgvector）
+#   - redis
+#   - milvus + etcd + minio
+#
+# 密钥：从 backend/.env 读取（QWEN_API_KEY 等），不进 git
+# ============================================================
+
+services:
+  # ============================================================
+  # 应用层
+  # ============================================================
+
+  # ---- Backend（NestJS API）----
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # 基础设施连接（docker 网络内服务名）
+      MILVUS_HOST: milvus
+      MILVUS_PORT: '19530'
+      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/rag
+      REDIS_URL: redis://redis:6379
+      # 密钥类从 .env 读取
+    env_file:
+      - ../backend/.env
+    volumes:
+      - backend_workspace:/app/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+    networks:
+      - rag-net
+
+  # ---- Frontend（nginx + React 静态资源）----
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+        reservations:
+          memory: 32M
+    networks:
+      - rag-net
+
+  # ============================================================
+  # 基础设施层
+  # ============================================================
+
+  # ---- PostgreSQL 16 + pgvector ----
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d rag']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - rag-net
+
+  # ---- Redis 7 ----
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - rag-net
+
+  # ---- Milvus 依赖：etcd ----
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: rag-milvus-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ['CMD', '/bin/sh', '-c', 'ETCDCTL_API=3 etcdctl endpoint health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-net
+
+  # ---- Milvus 依赖：minio ----
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: rag-milvus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - '9001:9001'
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-net
+
+  # ---- Milvus 2.4 standalone ----
+  milvus:
+    image: milvusdb/milvus:v2.4.4
+    container_name: rag-milvus
+    restart: unless-stopped
+    command: ['milvus', 'run', 'standalone']
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - '19530:19530'
+      - '9091:9091'
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - rag-net
+
+networks:
+  rag-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  backend_workspace:

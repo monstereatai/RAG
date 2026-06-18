@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider } from './llm-provider.interface';
 import { QwenLlmProvider } from './qwen-llm.provider';
 
@@ -31,5 +32,9 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     messages: string | Parameters<ILLMProvider['invoke']>[0],
   ): Promise<string> {
     return this.provider.invoke(messages);
+  }
+
+  getModel(): BaseChatModel {
+    return this.provider.getModel();
   }
 }

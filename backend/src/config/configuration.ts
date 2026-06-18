@@ -7,11 +7,17 @@ export const configuration = () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
 
+  // 认证（JWT）
+  auth: {
+    jwtSecret: process.env.JWT_SECRET ?? '',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+  },
+
   // 向量库（可插拔：milvus | pgvector）
   vectorStore: {
     provider: process.env.VECTOR_STORE_PROVIDER ?? 'milvus',
     milvus: {
-      host: process.env.MILVUS_HOST ?? 'localhost',
+      host: process.env.MILVUS_HOST ?? '127.0.0.1',
       port: parseInt(process.env.MILVUS_PORT ?? '19530', 10),
       collection: process.env.MILVUS_COLLECTION ?? 'rag_chunks',
       dimension: parseInt(process.env.MILVUS_DIMENSION ?? '1024', 10),

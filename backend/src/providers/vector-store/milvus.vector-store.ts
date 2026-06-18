@@ -38,17 +38,46 @@ export class MilvusVectorStoreProvider
   }
 
   async onModuleInit(): Promise<void> {
-    this.client = new MilvusClient({ address: `${this.host}:${this.port}` });
+    // 对齐 agent-course/milvus-test 参考实现：不设 timeout，让 Milvus 自行管理
+    this.client = new MilvusClient({
+      address: `${this.host}:${this.port}`,
+    });
     try {
       await this.client.connectPromise;
       this.logger.log(`Milvus connected at ${this.host}:${this.port}`);
       await this.ensureCollection();
+      // 预热：触发 Milvus 加载索引到内存，避免首次 search 超时
+      await this.warmup();
     } catch (err) {
       // Milvus 连接失败不阻断服务启动，相关接口调用时会抛错
       this.logger.error(
         `Milvus connection failed at ${this.host}:${this.port}: ${(err as Error).message}`,
       );
-      this.logger.warn('Service will start but Milvus-related APIs will fail until Milvus is available');
+      this.logger.warn(
+        'Service will start but Milvus-related APIs will fail until Milvus is available',
+      );
+    }
+  }
+
+  /**
+   * 预热：用随机向量做一次 search，触发 Milvus 加载索引到内存。
+   * 避免 agentic 首次 search 因索引未加载而超时。
+   */
+  private async warmup(): Promise<void> {
+    try {
+      const warmupVector = Array(this.dimension)
+        .fill(0)
+        .map(() => Math.random());
+      await this.client.search({
+        collection_name: this.collection,
+        vector: warmupVector,
+        limit: 1,
+        metric_type: MetricType.COSINE,
+        output_fields: ['id'],
+      });
+      this.logger.log('Milvus warmup search done');
+    } catch (err) {
+      this.logger.warn(`Milvus warmup failed: ${(err as Error).message}`);
     }
   }
 
@@ -58,6 +87,10 @@ export class MilvusVectorStoreProvider
     });
     if (has.value) {
       this.logger.log(`Collection ${this.collection} already exists`);
+      // 对齐 agent-course/milvus-test 参考实现：查询前 loadCollection（已加载会忽略错误）
+      // Milvus 重启后 collection 需要重新 load 到内存才能 search
+      await this.client.loadCollection({ collection_name: this.collection });
+      this.logger.log(`Collection ${this.collection} loaded`);
       return;
     }
 
@@ -126,6 +159,7 @@ export class MilvusVectorStoreProvider
     queryVector: number[],
     k: number,
   ): Promise<VectorSearchHit[]> {
+    // 对齐 agent-course/milvus-test 参考实现：不传 params（nprobe），使用 IVF_FLAT 默认参数
     const searchResult = await this.client.search({
       collection_name: this.collection,
       vector: queryVector,

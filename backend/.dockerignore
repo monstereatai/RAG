@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.env
+.env.example
+*.md
+eslint.config.mjs
+pretttier.config.js
+test
+milvus-test.mjs
+milvus-rebuild.mjs
+milvus-status.mjs

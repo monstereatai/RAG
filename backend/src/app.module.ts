@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { configuration } from './config/configuration';
+import { LoggerModule } from './common/logger/logger.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ChatModule } from './modules/chat/chat.module';
@@ -12,6 +14,8 @@ import { DebugModule } from './modules/debug/debug.module';
       isGlobal: true,
       load: [configuration],
     }),
+    LoggerModule,
+    AuthModule,
     HealthModule,
     DocumentModule,
     ChatModule,

@@ -3,6 +3,7 @@ import { BM25, BM25Doc, BM25Hit } from './bm25.util';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { generateAnswerPrompt } from '../prompts/rag.prompts';
 
 export interface RetrievedChunk {
   id: string;
@@ -144,8 +145,12 @@ export class KarpathyRagService {
 
   /**
    * 完整 RAG：检索 + 生成
+   * @param history 多轮对话历史（可选，按时间顺序）
    */
-  async answer(query: string): Promise<KarpathyRagResult> {
+  async answer(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+  ): Promise<KarpathyRagResult> {
     const chunks = await this.retrieve(query);
 
     if (chunks.length === 0) {
@@ -159,22 +164,13 @@ export class KarpathyRagService {
       .map((c, i) => `[片段 ${i + 1}]\n${c.content}`)
       .join('\n\n---\n\n');
 
-    const prompt = `你是一个严谨的知识助手。请基于以下检索到的片段回答用户问题。
-
-检索片段：
-${context}
-
-用户问题：${query}
-
-回答要求：
-1. 只基于上述片段内容回答，不要编造
-2. 如果片段中没有相关信息，明确告知"片段中未提及"
-3. 回答末尾用 [片段N] 标注引用来源
-
-回答：`;
-
     this.logger.log(`Generating answer with ${chunks.length} chunks`);
-    const answer = await this.llmProvider.invoke(prompt);
+    const messages = await generateAnswerPrompt.formatMessages({
+      context,
+      query,
+      history,
+    });
+    const answer = await this.llmProvider.invoke(messages);
 
     return {
       answer,
