@@ -105,7 +105,7 @@ export class ElasticsearchProvider implements OnModuleInit {
           chunkIndex: { type: 'integer' },
           content: {
             type: 'text',
-            analyzer: 'standard',
+            analyzer: 'ik_smart_analyzer',
           },
           userId: { type: 'keyword' },
           createdAt: { type: 'date' },

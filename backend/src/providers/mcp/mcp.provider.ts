@@ -7,13 +7,21 @@ import {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { MultiServerMCPClient } from '@langchain/mcp-adapters';
+import {
+  MultiServerMCPClient,
+  type ClientConfig,
+} from '@langchain/mcp-adapters';
+
+interface McpTool {
+  name: string;
+  description?: string;
+}
 
 @Injectable()
 export class McpProvider implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(McpProvider.name);
   private mcpClient: MultiServerMCPClient | null = null;
-  private tools: any[] = [];
+  private tools: McpTool[] = [];
 
   async onModuleInit() {
     const configPath = path.resolve(
@@ -30,7 +38,7 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
     try {
       const fileContent = fs.readFileSync(configPath, 'utf8');
       const config = yaml.load(fileContent) as {
-        mcpServers?: Record<string, any>;
+        mcpServers?: ClientConfig['mcpServers'];
       };
 
       if (
@@ -53,7 +61,7 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
       });
 
       // Fetch tools to verify connection and cache them
-      this.tools = await this.mcpClient.getTools();
+      this.tools = (await this.mcpClient.getTools()) as McpTool[];
       this.logger.log(
         `Successfully connected and loaded ${this.tools.length} MCP tools.`,
       );
@@ -71,7 +79,7 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  getMcpTools(): any[] {
+  getMcpTools(): McpTool[] {
     return this.tools;
   }
 

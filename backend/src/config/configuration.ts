@@ -13,6 +13,12 @@ export const configuration = () => ({
     jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
   },
 
+  // API 限流（默认 60 req/min）
+  throttle: {
+    ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT ?? '60', 10),
+  },
+
   // 向量库（可插拔：milvus | pgvector）
   vectorStore: {
     provider: process.env.VECTOR_STORE_PROVIDER ?? 'milvus',

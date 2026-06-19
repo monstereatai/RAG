@@ -1,0 +1,63 @@
+import { ConfigService } from '@nestjs/config';
+import { BochaSearchService } from './bocha-search.service';
+
+describe('BochaSearchService', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('is disabled and returns empty results when api key is missing', async () => {
+    const service = new BochaSearchService({
+      get: jest.fn().mockReturnValue(''),
+    } as unknown as ConfigService);
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+
+    await expect(service.search('LangChain')).resolves.toEqual([]);
+
+    expect(service.isEnabled()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('maps valid web page results', async () => {
+    const service = new BochaSearchService({
+      get: jest.fn().mockReturnValue('test-key'),
+    } as unknown as ConfigService);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          webPages: {
+            value: [
+              {
+                name: 'Example',
+                url: 'https://example.com',
+                snippet: 'Snippet',
+                summary: 'Summary',
+                siteName: 'example.com',
+                datePublished: '2026-06-19',
+              },
+              {
+                name: 'Missing URL',
+                snippet: 'Skipped',
+              },
+            ],
+          },
+        }),
+    });
+
+    await expect(service.search('query', 3)).resolves.toEqual([
+      {
+        title: 'Example',
+        url: 'https://example.com',
+        snippet: 'Snippet',
+        summary: 'Summary',
+        siteName: 'example.com',
+        datePublished: '2026-06-19',
+      },
+    ]);
+  });
+});

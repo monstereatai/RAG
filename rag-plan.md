@@ -979,20 +979,26 @@ agents:
 | `rag_retrieval_relevance`（检索相关性） | 召回的 chunk 是否与问题相关 | ≥ 0.7 |
 
 **评测流程**：
-1. **构建 Dataset**：人工标注 50-100 条（问题 + 标准答案 + 相关文档）
-2. **跑评测**：用 Dataset 跑 RAG 管线，收集（问题、答案、上下文）
-3. **LLM-as-Judge**：用更强模型（如 GPT-4）对三个指标打分
-4. **生成报告**：LangSmith 实验报告，对比不同配置的得分
+1. **构建 Dataset**：以合成数据为主，从已上传知识库 chunk 生成 50-100 条样本（问题 + 标准答案 + 相关 chunk id），再抽样人工复核 10-20 条高风险样本。
+2. **跑评测**：用 Dataset 跑 simple / agentic / auto 三种模式，收集（问题、答案、引用上下文、检索分数、SSE 事件链）。
+3. **LLM-as-Judge**：默认使用 OpenAI-compatible Judge 模型（优先更强模型；无外部 key 时使用 Qwen 配置）对三个指标打分。
+4. **生成报告**：LangSmith 实验报告 + 本地 JSON 汇总，对比不同切分策略、检索权重、Prompt、Rerank 配置的得分。
 
 **集成到 CI/CD**：
-- 每次 RAG 管线改动（切分策略、检索参数、Prompt）自动跑评测
-- 得分下降则阻断合并
-- 定期回归评测，监控线上质量
+- 第一阶段不直接改 CI：提供 `npm run eval:rag` 本地命令和报告产物，手动触发。
+- 第二阶段接入 CI：仅当 RAG 管线改动（切分策略、检索参数、Prompt、Rerank、Agentic 图节点）时自动跑 smoke dataset。
+- 门禁规则：`rag_groundedness >= 0.8`、`rag_helpfulness >= 0.7`、`rag_retrieval_relevance >= 0.7`；任一指标较基线下降超过 5% 阻断合并。
+- 定期回归评测：每日/每周全量 dataset，监控线上质量漂移；结果进入 LangSmith 对比实验。
 
 **接口**：
 - `POST /api/v1/eval/run`：触发评测任务
 - `GET /api/v1/eval/results/{run_id}`：查询评测结果
 - `GET /api/v1/eval/dataset`：管理评测数据集
+
+**方案定稿（2026-06-19）**：
+- Dataset 来源：合成数据为主，人工抽样复核，不依赖早期大量人工标注。
+- 评测模型：OpenAI-compatible Judge 模型，可通过环境变量切换；默认沿用项目 Qwen/OpenAI 兼容 Provider。
+- CI/CD 集成：先本地命令，后 smoke dataset 门禁；正式 CI 配置变更需单独确认。
 
 ### 十二、长期记忆系统升级（Mem0）
 

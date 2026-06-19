@@ -1,7 +1,9 @@
 /**
  * 纯 JS BM25 实现（Karpathy-Style RAG 的关键词检索部分）
- * M1 阶段：简单空格 + 标点分词 + 中文字符/bigram 兜底（M2 再换 jieba）
+ * 接入 @node-rs/jieba 中文分词，英文 token 保留完整
  */
+
+import { Jieba } from '@node-rs/jieba';
 
 export interface BM25Doc {
   id: string;
@@ -14,6 +16,22 @@ export interface BM25Hit {
   score: number;
 }
 
+// --- jieba 懒加载 ---
+
+let _jieba: Jieba | null = null;
+const getJieba = (): Jieba | null => {
+  if (_jieba === null) {
+    try {
+      _jieba = new Jieba();
+    } catch {
+      _jieba = null;
+    }
+  }
+  return _jieba;
+};
+
+// --- BM25 ---
+
 export class BM25 {
   private readonly k1 = 1.5;
   private readonly b = 0.75;
@@ -23,31 +41,28 @@ export class BM25 {
   private avgDocLen = 0;
 
   /**
-   * 简单分词：按空格 + 中英标点切分，转小写。
-   * 中文片段额外加入单字和 bigram，避免未接入 jieba 前中文查询完全空召回。
+   * 分词：jieba 中文分词 + 英文单词保留。
+   * jieba 加载失败时自动降级为纯 JS 分词。
    */
   private tokenize(text: string): string[] {
-    const rawTokens = text
+    const jieba = getJieba();
+
+    if (jieba) {
+      // jieba 分词结果已经是 token 数组
+      // 合并小写 + 去重，同时过滤空串
+      const tokens = jieba
+        .cut(text)
+        .map((t: string) => t.trim().toLowerCase())
+        .filter((t: string) => t.length > 0);
+      // 去重保持顺序
+      return [...new Set(tokens)];
+    }
+
+    // 降级：纯 JS 分词
+    return text
       .toLowerCase()
       .split(/[\s,。！？.!?,;；:：()（）[\]【】""''""''`]+/)
       .filter((t) => t.length > 0);
-
-    const tokens: string[] = [];
-    for (const token of rawTokens) {
-      tokens.push(token);
-
-      const cjkChars = Array.from(token).filter((char) =>
-        /[\u4e00-\u9fff]/.test(char),
-      );
-      if (cjkChars.length === 0) continue;
-
-      tokens.push(...cjkChars);
-      for (let i = 0; i < cjkChars.length - 1; i += 1) {
-        tokens.push(`${cjkChars[i]}${cjkChars[i + 1]}`);
-      }
-    }
-
-    return tokens;
   }
 
   addDocs(docs: BM25Doc[]): void {

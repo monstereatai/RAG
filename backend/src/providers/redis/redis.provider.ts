@@ -113,4 +113,47 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
       );
     }
   }
+
+  async zrange(
+    key: string,
+    start: number,
+    stop: number,
+    direction?: 'REV',
+  ): Promise<string[]> {
+    if (!this.enabled) return [];
+    try {
+      if (direction === 'REV') {
+        return await this.client.zrange(key, start, stop, 'REV');
+      }
+      return await this.client.zrange(key, start, stop);
+    } catch (err) {
+      this.logger.warn(
+        `Redis ZRANGE failed for key=${key}: ${(err as Error).message}`,
+      );
+      return [];
+    }
+  }
+
+  async zadd(key: string, score: number, member: string): Promise<void> {
+    if (!this.enabled) return;
+    try {
+      await this.client.zadd(key, score, member);
+    } catch (err) {
+      this.logger.warn(
+        `Redis ZADD failed for key=${key}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    if (!this.enabled) return [];
+    try {
+      return await this.client.keys(pattern);
+    } catch (err) {
+      this.logger.warn(
+        `Redis KEYS failed for pattern=${pattern}: ${(err as Error).message}`,
+      );
+      return [];
+    }
+  }
 }

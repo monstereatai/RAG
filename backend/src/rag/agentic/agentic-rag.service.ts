@@ -20,8 +20,10 @@ import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
 import { SemanticExampleSelector } from '../prompts/semantic-example.selector';
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
-import { StateGraph, START, END, MemorySaver } from '@langchain/langgraph';
+import { StateGraph, START, END } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
+import { RedisProvider } from '../../providers/redis/redis.provider';
+import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
 
 /**
  * Agentic RAG 服务
@@ -46,6 +48,7 @@ export class AgenticRagService {
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
     private readonly semanticExampleSelector: SemanticExampleSelector,
+    private readonly redisProvider: RedisProvider,
   ) {
     this.initGraph();
   }
@@ -95,7 +98,7 @@ export class AgenticRagService {
     );
 
     this.app = workflow.compile({
-      checkpointer: new MemorySaver(),
+      checkpointer: new RedisCheckpointer(this.redisProvider),
     });
   }
 

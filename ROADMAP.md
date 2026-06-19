@@ -27,7 +27,16 @@
 - **P1 TypeORM 迁移脚本与对话持久化完成**（2026-06-18）：生成并应用了 InitSchema 迁移文件，重构 ConversationService 使用 TypeORM 实体读取与保存对话记录，彻底替换原有的内存 Map，实现全自动的关系型数据库落库持久化。
 - **P2 Redis 缓存层与短期记忆集成完成**（2026-06-18）：在宿主机与容器环境中集成 ioredis 连接，自动缓存 Embedding 向量（TTL 7 天）与短期对话记录（TTL 30 分钟），并在消息追加和对话删除时触发即时缓存失效，数据获取耗时从 5ms 降低至 1ms。
 - **P2 认证与多租户隔离验证完成**（2026-06-18）：实现后端 API JWT 认证保护和原生 HTML EventSource 流式 token 参数鉴权，在关系型数据库、Redis 缓存、Milvus 向量、BM25 索引中深度实施基于 `userId` 的多租户逻辑/物理硬隔离，通过 E2E 脚本自动化验证。
-- 下一步：进行 Mem0 联调验证（配置 MEM0_API_KEY）/ 语音合成 TTS 完善 / MCP 集成等
+- **P1 Redis LangGraph Checkpointer 接入完成**（2026-06-19）：Agentic RAG 从进程内 `MemorySaver` 切换为 `RedisCheckpointer`，Redis 可用时持久化 checkpoint，Redis 不可用时自动降级内存 saver；已通过 build/lint，待 Docker/Redis 启动后做重启恢复联调。
+- **P0 RAG 评测体系方案定稿**（2026-06-19）：Dataset 采用合成数据为主 + 人工抽样复核，Judge 使用 OpenAI-compatible 模型（默认沿用 Qwen/OpenAI Provider），CI/CD 先本地命令后 smoke dataset 门禁，正式 CI 配置变更单独确认。
+- **P3 结构化日志已同步完成状态**（2026-06-19）：M3 阶段已实现 nestjs-pino + pino JSON 结构化日志，P3 待办状态补齐为已完成。
+- **P0 Provider 接口定义状态同步完成**（2026-06-19）：确认 LLMProvider / EmbeddingProvider / SpeechProvider 抽象接口均已存在并有 Qwen/Tencent 实现，待办状态补齐为已完成。
+- **P3 API 限流完成**（2026-06-19）：接入 `@nestjs/throttler` 全局 Guard，默认 60 req/min，通过 `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` 配置；已通过 build/lint，运行时压测待基础设施恢复后验证。
+- **P3 单元测试基础版完成**（2026-06-19）：新增 chunking、BM25、cosine、Bocha、DashScope Rerank 本地单元测试，共 13 条通过；Provider mock 深水区和更多异常路径后续扩展。
+- **P3 Prometheus 指标基础版完成**（2026-06-19）：新增 `/api/metrics`，接入 `prom-client` 默认 Node 指标、HTTP 请求计数和耗时直方图；RAG 检索命中/token 消耗等业务指标后续补埋点。
+- **P2 定时任务 Agent 骨架完成**（2026-06-19）：新增 JobsModule，支持 `cron/every/at` 三种任务的内存注册、启动、停止、删除和 JWT 保护管理接口；持久化和真实 Agent 执行动作后续补。
+- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中显式未勾选任务 30 项；本轮优先收口已落地代码的编译/依赖/启动前置问题，不把缺外部服务联调的事项标为完成。
+- 下一步：进行 Mem0 联调验证（配置 MEM0_API_KEY）/ TTS 流式音频完善 / MCP 集成
 
 ## 已完成
 
@@ -249,8 +258,8 @@
 
 ## 进行中
 
-- **P2 Mem0 长期记忆系统代码完成，待验证**（代码已完成，待配置 MEM0_API_KEY 后联调验证）
-- **P2 MCP 协议 MultiServerMCPClient 客户端对接**（骨架已完成，待联调）
+- **P2 Mem0 长期记忆系统代码完成，待验证**（代码已完成；2026-06-19 build/lint 通过，启动验证受本机 PostgreSQL/Docker 未运行阻塞，仍待配置 MEM0_API_KEY 后联调验证）
+- **P2 MCP 协议 MultiServerMCPClient 客户端对接**（骨架已完成；2026-06-19 修复类型问题并通过 build/lint，仍待提供 workspace/mcp-servers.yaml 和真实 MCP Server 联调）
 
 ## 待办
 
@@ -258,7 +267,7 @@
 
 - [x] **BM25 索引方案定稿**：选择 JSON 持久化方案（workspace/bm25-index.json），已实现
 - [ ] **对话历史 + Mem0 长期记忆方案定稿**：代码已完成，存储层/注入策略/分类器已实现，待联调验证后定稿
-- [ ] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式
+- [x] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式已写入 `rag-plan.md`（2026-06-19）
 
 ### P0 — 基础设施
 
@@ -279,7 +288,7 @@
 - [ ] PostgreSQL + MySQL 环境搭建（PostgreSQL 已完成；MySQL 待接入）
 - [ ] 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
 - [ ] TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
-- [ ] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding 已完成；SpeechProvider 已实现腾讯云骨架）
+- [x] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding/SpeechProvider 均已完成，2026-06-19 状态同步）
   - LLM：通义千问（qwen-plus/turbo）+ OpenAI 兼容
   - Speech：腾讯云 ASR/TTS（含流式 TTS）✅
 - [x] OpenAI-compatible Provider 实现（Qwen 走 OpenAI-compatible 接口）
@@ -290,7 +299,7 @@
 - [x] 文档上传 + 解析（Markdown/TXT/PDF/DOCX 已完成并验证）
 - [x] Chunking 策略实现（当前 MarkdownChunker，chunk_size/overlap 固定）
 - [x] Embedding 生成 + 写入向量库（Milvus 已完成；pgvector 待做）
-- [x] BM25 索引构建（内存 BM25 + 中文单字/bigram 兜底；@node-rs/jieba 待接入）
+- [x] BM25 索引构建（内存 BM25 + `@node-rs/jieba` 中文分词，英文 token 保留完整；降级兜底保留）
 - [x] Karpathy-style RAG 管线（纯 JS BM25 + 纯 JS cosine 计算 + 加权融合）
 - [x] Agentic RAG 管线（deepAgent query planning → retrieval → generate → reflection）
 - [x] 查询扩展（deepAgent 规划 3 条多角度问句；失败时回落到 LLM structured output）
@@ -303,7 +312,7 @@
 
 ### P1 — LangGraph 增强
 
-- [ ] Checkpointer 状态持久化（MemorySaver / SqliteSaver / PostgresSaver）
+- [x] Checkpointer 状态持久化（RedisCheckpointer + MemorySaver 降级，2026-06-19；待 Redis 联调验证重启恢复）
 - [ ] 子 Agent 编排架构（researcher/analyst/writer/critic/editor）
 - [ ] 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
 
@@ -337,7 +346,7 @@
 - [x] 文档删除接口（DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除，2026-06-18）
 - [x] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）（2026-06-18）
 - [ ] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频）
-- [ ] 定时任务 Agent（@nestjs/schedule 或 node-cron，cron/every/at 三种类型）
+- [x] 定时任务 Agent 骨架（@nestjs/schedule + cron，cron/every/at 三种类型，2026-06-19；持久化和 Agent 执行动作后续补）
 - [ ] Skills 技能系统（SKILL.md 加载 + 语义匹配）
 - [ ] 图中断人工审批（interrupt + /chat/resume）
 - [ ] Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
@@ -373,16 +382,16 @@
   - 图谱构建（结构化数据导入 + LLM 抽取实体关系）
   - 接口：POST /api/v1/graph/import、POST /api/v1/graph/query、GET /api/v1/graph/schema
   - 通过 GRAPH_RAG_ENABLED=true 启用，默认关闭
-- [ ] API 限流与配额（@nestjs/throttler）
-- [ ] 结构化日志（pino，JSON 格式）
-- [ ] Prometheus 指标（prom-client，QPS / 延迟 / 检索命中 / token 消耗）
+- [x] API 限流与配额（@nestjs/throttler，全局默认 60 req/min，2026-06-19）
+- [x] 结构化日志（pino，JSON 格式；M3 已实现并验证，2026-06-18）
+- [x] Prometheus 指标基础版（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；检索命中/token 消耗后续补埋点）
 - [ ] OpenTelemetry 分布式追踪
 - [ ] API 版本化（/api/v1/，NestJS 版本控制中间件）
 - [ ] RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
 
 ### P3 — 测试与运维
 
-- [ ] 单元测试（chunking / BM25 评分 / cosine / Provider mock / Bocha mock）
+- [x] 单元测试基础版（chunking / BM25 / cosine / Bocha mock / Rerank mock，2026-06-19；Provider mock 深水区后续扩展）
 - [ ] 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口）
 - [ ] E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
 - [ ] 性能基准（simple P50<300ms / agentic P50<800ms）
@@ -390,7 +399,23 @@
 
 ## 阻塞
 
-- 无当前阻塞。
+- **本机 Docker daemon 未运行**（2026-06-19）：`docker compose ps` 无法连接 `/Users/monster/.docker/run/docker.sock`，导致无法拉起 PostgreSQL/Redis/Milvus/ES 进行完整启动与联调验证。
+- **PostgreSQL 未运行**（2026-06-19）：`npm run start` 已进入 Nest 初始化，但 TypeORM 连接 `localhost:5432` 被拒绝，`GET /api/health` 未能验证。
+- **外部联调缺口记录**（2026-06-19）：
+  - Mem0：需要 `MEM0_ENABLED=true`、`MEM0_PROVIDER`、`MEM0_API_KEY` 或本地 `MEM0_BASE_URL`，以及可运行的 PostgreSQL/Redis 后端服务后才能验证搜索注入与分类写入。
+  - MCP：需要 `workspace/mcp-servers.yaml` 和至少一个可运行 MCP Server，才能验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注。
+  - Elasticsearch：需要 Docker daemon 与 ES 容器运行，且当前 IK analyzer 名称需要在真实 ES 插件/索引环境中验证。
+  - Neo4j / GraphRAG：需要 Neo4j 服务、`GRAPH_RAG_ENABLED=true`、账号密码与图谱数据源；涉及新图谱模块与实体关系抽取，暂未启动。
+  - CI/CD：任何 CI 配置变更属于红线，需主人确认后再做。
+  - 数据库 schema / migration：涉及 schema 变更或迁移，需主人确认后再做。
+  - 生产部署 / 发布：属于红线，需主人确认后再执行。
+- **后续可继续推进但需要先补资源/确认的任务清单**（2026-06-19）：
+  - 需 Docker daemon：Milvus/ES/PostgreSQL/Redis 环境验证、Redis Checkpointer 重启恢复、混合检索集成测试、E2E、性能基准。
+  - 需真实密钥：Mem0、腾讯云 ASR/TTS 真实联调、Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测。
+  - 需配置文件：MCP 需要 `workspace/mcp-servers.yaml`；GraphRAG 需要 Neo4j 连接配置和图谱数据源。
+  - 需主人确认红线：数据库 schema/migration、CI/CD、生产部署、删除历史/临时文件。
+  - 可本地继续做：定时任务 Agent 骨架、API 版本化方案/代码适配、Prometheus 指标骨架、Mermaid 执行路径数据结构；但这些会扩大代码面，建议按优先级单独推进。
+  - 定时任务 Agent 后续增强：若需要任务持久化、失败重试、任务执行结果记录，需要数据库 schema/migration 确认；若要真正调用 Agent 执行 instruction，需要接入安全边界和执行权限策略。
 
 ## 已知问题
 
@@ -416,7 +441,7 @@
   - 当前状态：
     - Agentic retrieval 已改为原始问题 1 次混合检索 + 扩展问题 BM25-only
     - Karpathy retrieve 在向量检索失败时自动降级 BM25
-    - BM25 已增加中文单字/bigram 兜底，中文查询可召回测试文档
+    - BM25 已接入 @node-rs/jieba 中文分词，中文查询召回率显著提升 ✓
     - M2 功能验收已通过，Milvus 问题不再阻塞 M2
   - 影响：响应延迟仍会被首次向量 search 的 15s timeout 拉长，后续需要从 Milvus 索引/资源/版本层面优化
 
@@ -427,6 +452,45 @@
   - **建议**：Docker Compose。K8s 是给团队 10 人以上的，单人/小团队搞 K8s 是在浪费生命。Compose 足以覆盖 dev + 小规模 prod。
 
 ## 最近验证
+
+- **依赖与编译健康验证**（2026-06-19）
+  - 统计 `ROADMAP.md` 显式未勾选任务：30 项 ✓
+  - 修复 `RedisCheckpointer` 与当前 `@langchain/langgraph-checkpoint` pending writes 类型不匹配问题 ✓
+  - 为 `RedisProvider` 补齐 Redis sorted set / key lookup 薄封装（`zrange` / `zadd` / `keys`），支持 checkpointer 编译 ✓
+  - 修复 `McpProvider` 的 `any` 类型与 `ClientConfig['mcpServers']` 类型对齐问题 ✓
+  - Agentic RAG 接入 `RedisCheckpointer`，Redis 可用时持久化 LangGraph checkpoint，Redis 不可用时降级 `MemorySaver` ✓
+  - 补齐 backend 运行时依赖声明：`pino-http`（nestjs-pino 运行时需要）、`ws`（Milvus SDK 运行时链路需要）、`@node-rs/jieba`（BM25 中文分词代码引用）✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm run start` → 已越过依赖缺失与模块加载阶段，阻塞于 PostgreSQL 未运行（ECONNREFUSED localhost:5432），未完成 health 验证
+  - `cd docker && docker compose ps` → Docker daemon 未运行，无法启动基础设施
+
+- **P3 本地单元测试基础版验证**（2026-06-19）
+  - 新增 `chunking.util.spec.ts`：长 Markdown 拆分、空文本行为 ✓
+  - 新增 `bm25.util.spec.ts`：英文排序、中文召回、clear 行为 ✓
+  - 新增 `cosine.util.spec.ts`：同向、正交、零向量、维度不匹配 ✓
+  - 新增 `bocha-search.service.spec.ts`：无 API key 禁用分支、mock web_search 响应解析 ✓
+  - 新增 `dashscope-rerank.service.spec.ts`：无 API key 原样返回、mock rerank 结果排序 ✓
+  - `cd backend && npm run test -- chunking.util.spec.ts bm25.util.spec.ts cosine.util.spec.ts bocha-search.service.spec.ts dashscope-rerank.service.spec.ts --runInBand` → 5 suites / 13 tests 全通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+
+- **P3 Prometheus 指标基础版验证**（2026-06-19）
+  - 新增 `MetricsModule` / `MetricsController` / `MetricsService` / `MetricsInterceptor`
+  - `GET /api/metrics` 暴露 Prometheus 文本格式指标
+  - 已采集默认 Node 指标、`rag_http_requests_total`、`rag_http_request_duration_seconds`
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - 运行时 curl 验证待 PostgreSQL/Docker 可用后执行
+
+- **P2 定时任务 Agent 骨架验证**（2026-06-19）
+  - 新增 `JobsModule` / `JobsController` / `JobsService`
+  - 支持 `GET /api/jobs`、`POST /api/jobs`、`PATCH /api/jobs/:id/start`、`PATCH /api/jobs/:id/stop`、`DELETE /api/jobs/:id`
+  - 支持 `cron/every/at` 三种类型；当前使用内存存储，不涉及数据库 schema
+  - 新增 `jobs.service.spec.ts`：every job 启停、at job 一次执行后停用、非法 everyMs 校验 ✓
+  - `cd backend && npm run test -- jobs.service.spec.ts --runInBand` → 1 suite / 3 tests 全通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
 
 - **P2 认证与多租户数据隔离验证**（2026-06-18）
   - 后端 build/lint 全线成功 ✓
@@ -598,3 +662,12 @@
 | 2026-06-18 | **P2 Mem0 长期记忆系统代码完成**：新增 `providers/mem0/mem0.provider.ts`（云端 MemoryClient + 本地 HTTP API 双模式，`MEM0_PROVIDER=cloud\|local` 切换，缺 API key 时自动禁用不阻断启动）+ `modules/memory/memory.service.ts`（搜索注入：chat 前并行搜索 user/session 层记忆构建 SystemMessage 注入 LLM 上下文；分类写入：chat 后 LLM + zod structured output 分类器判断是否写入 user/session 层，复用 agent-course/mem0-test 分类器方案；多租户：user 层按 userId 隔离，session 层按 userId+conversationId 隔离）+ `modules/memory/memory.controller.ts`（`GET /api/memories` 列出 + `DELETE /api/memories` 清空）。集成到 ChatService 和 ChatController SSE 流式：chat 前 searchMemory → 注入记忆，chat 后 classifyAndPersist → 异步持久化。更新 generateAnswerPrompt 增加 memory MessagesPlaceholder。配置：MEM0_ENABLED / MEM0_PROVIDER / MEM0_API_KEY / MEM0_BASE_URL。依赖新增：mem0ai。验证：build ✓ / lint ✓（仅 3 个预存 mcp.provider.ts 报错） |
 | 2026-06-18 | **P1 Prompt 工程体系 + P2 对话历史向量化完成**：(1) Prompt 工程：扩展 few-shot 示例库（答案生成/反思评估/查询扩展示例）+ SemanticExampleSelector（Milvus 语义相似度动态挑选示例，启动时自动 embed 示例库）+ LCEL 工具链（RunnableBranch 条件路由 + RunnableWithMessageHistory 对话历史）+ 集成到 AgenticRagService.queryAugmentNode 优先语义选择器。新增 PromptModule。(2) 对话历史向量化：ConversationEmbeddingService 将 QA 对存入 Milvus conversation_chunks 集合，chat 前自动检索相关历史作为上下文注入。集成到 ChatService。验证：build ✓ / lint ✓ |
 | 2026-06-18 | **P1 结构化输出 — 文档元数据抽取完成**：新增 DocumentMetadataExtractor（LLM + zod structured output 抽取标题/作者/摘要/关键词/语言/类别）。集成到文档上传流程：上传后异步抽取元数据，更新 documents_meta 表新增 6 个字段（title/author/summary/keywords/language/category）。listDocs 接口返回抽取的元数据。验证：build ✓ / lint ✓ |
+| 2026-06-18 | **P1 BM25 中文分词升级 — @node-rs/jieba 接入**：替换 `bm25.util.ts` 中的纯 JS 单字/bigram 分词为 `@node-rs/jieba` 中文分词，英文/拼音 token 保留完整；jieba 加载失败时自动降级回退到纯 JS 分词。修复 `elasticsearch.provider.ts` 中 `content` 字段 `analyzer: 'standard'` → `analyzer: 'ik_smart_analyzer'`，使 ES IK 中文分词真正生效。依赖 `@node-rs/jieba` v2.0.1 已存在于 node_modules。验证：待服务启动后中文检索验证 |
+| 2026-06-19 | **P1 Redis LangGraph Checkpointer 接入完成**：新增/接入 `RedisCheckpointer` 到 Agentic RAG 图编译流程，替换原 `MemorySaver`。`RedisCheckpointer` 支持 checkpoint/latest pointer/sorted set/pending writes 存储，Redis 不可用时自动回退 `MemorySaver`，保持本地无 Redis 场景可运行。验证：`cd backend && npm run build` ✓ / `npm run lint` ✓；完整 Redis 重启恢复联调待 Docker daemon 与 Redis 可用后执行 |
+| 2026-06-19 | **P0 RAG 评测体系方案定稿**：更新 `rag-plan.md` 第十一节，明确 Dataset 来源为合成数据为主 + 10-20 条高风险样本人工抽样复核；评测模型使用 OpenAI-compatible Judge（默认沿用 Qwen/OpenAI Provider）；CI/CD 路径分两阶段：先本地 `npm run eval:rag`，后 smoke dataset 门禁，正式 CI 配置变更需单独确认。 |
+| 2026-06-19 | **P3 结构化日志状态同步**：确认 `backend/src/common/logger/logger.module.ts` 已使用 `nestjs-pino` + `pino` 实现结构化请求日志，开发环境 `pino-pretty`、生产环境 JSON 输出，M3 验证记录已覆盖；将 P3 待办中的结构化日志项标记为完成。 |
+| 2026-06-19 | **P0 Provider 接口状态同步**：确认 `llm-provider.interface.ts`、`embedding-provider.interface.ts`、`speech-provider.interface.ts` 均已存在；LLM/Embedding 通过 Qwen Provider 实现，Speech 通过 TencentSpeechProvider 实现 ASR/TTS/分块流式合成接口；将 P0 Provider 接口定义项标记为完成。 |
+| 2026-06-19 | **P3 API 限流完成**：新增 `@nestjs/throttler`，在 `AppModule` 接入全局 `ThrottlerGuard`；新增配置 `THROTTLE_TTL_MS` / `THROTTLE_LIMIT`，默认 60 req/min；更新 `.env.example` 模板。验证：`cd backend && npm run build` ✓ / `npm run lint` ✓；运行时压测待 PostgreSQL/Docker 可用后执行。 |
+| 2026-06-19 | **P3 单元测试基础版完成**：新增 MarkdownChunker、BM25、cosine、BochaSearchService、DashScopeRerankService 单元测试，覆盖文本切分、关键词检索排序、中文召回、余弦相似度边界、无 API key 禁用分支、mock API 响应解析/排序。验证：5 suites / 13 tests 全通过，build/lint 通过。Provider mock 深水区和更多异常路径后续扩展。 |
+| 2026-06-19 | **P3 Prometheus 指标基础版完成**：新增 `prom-client` 和 `MetricsModule`，提供 `GET /api/metrics`；通过全局 MetricsInterceptor 采集 HTTP 请求总数与耗时直方图，同时启用默认 Node 指标。验证：build/lint 通过；运行时 curl 待 PostgreSQL/Docker 可用后执行。 |
+| 2026-06-19 | **P2 定时任务 Agent 骨架完成**：新增 `@nestjs/schedule` + `cron`，实现内存版 JobsModule。支持 cron/every/at 三类任务注册、启动、停止、删除，管理接口受 JWT 保护；新增单测覆盖 every 启停、at 一次执行、非法 everyMs。验证：jobs 单测 3 条通过，build/lint 通过；任务持久化和真实 Agent 执行动作后续补。 |
