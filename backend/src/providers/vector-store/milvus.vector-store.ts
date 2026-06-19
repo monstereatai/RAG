@@ -204,7 +204,11 @@ export class MilvusVectorStoreProvider
       expr: userId ? `user_id == "${userId}"` : undefined,
     };
 
-    const searchResult = await this.client.search(searchParams);
+    const searchResult = await this.withTimeout(
+      this.client.search(searchParams),
+      5_000,
+      'Milvus similarity search',
+    );
 
     return (searchResult.results as Array<Record<string, unknown>>).map(
       (hit) => ({
@@ -235,5 +239,25 @@ export class MilvusVectorStoreProvider
       expr: `doc_id == "${docId}"`,
     });
     this.logger.log(`Deleted chunks for doc_id=${docId}`);
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        ms,
+      );
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

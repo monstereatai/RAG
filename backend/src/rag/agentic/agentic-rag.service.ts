@@ -168,22 +168,37 @@ export class AgenticRagService {
         const structured = model.withStructuredOutput(schema);
         const chain = queryAugmentPrompt.pipe(structured);
 
-        // 优先使用语义示例选择器（从 Milvus 检索相关示例）
-        let fewShotBlock = await this.semanticExampleSelector.selectAndFormat(
-          state.query,
-          2,
-          'query_augment',
-        );
+        // 优先使用语义示例选择器（从 Milvus 检索相关示例），超时则回退静态 few-shot。
+        let fewShotBlock = '';
+        try {
+          fewShotBlock = await this.withTimeout(
+            this.semanticExampleSelector.selectAndFormat(
+              state.query,
+              2,
+              'query_augment',
+            ),
+            4_000,
+            'Semantic example selection',
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Semantic example selection skipped: ${(err as Error).message}`,
+          );
+        }
 
         // 若语义选择器返回空（Milvus 未就绪），回退到静态 few-shot
         if (!fewShotBlock) {
           fewShotBlock = await queryAugmentFewShotPrompt.format({});
         }
 
-        const raw = await chain.invoke({
-          query: state.query,
-          few_shot_block: fewShotBlock,
-        });
+        const raw = await this.withTimeout(
+          chain.invoke({
+            query: state.query,
+            few_shot_block: fewShotBlock,
+          }),
+          8_000,
+          'Query augment structured output',
+        );
         queries = this.normalizeQueries(state.query, raw.queries);
         this.logger.log(`Augmented queries: ${JSON.stringify(queries)}`);
       } catch (err) {
@@ -874,21 +889,49 @@ export class AgenticRagService {
     return out.slice(0, 3);
   }
 
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        ms,
+      );
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   /**
    * 使用 deepagents 做 agentic 检索规划。
    */
   private async planQueriesWithDeepAgent(query: string): Promise<string[]> {
     try {
-      const agent = await this.getDeepAgent();
+      const agent = await this.withTimeout(
+        this.getDeepAgent(),
+        3_000,
+        'DeepAgent initialization',
+      );
       const formatted = await deepAgentQueryPlanUserPrompt.format({ query });
-      const result = await agent.invoke({
-        messages: [
-          {
-            role: 'user',
-            content: formatted,
-          },
-        ],
-      });
+      const result = await this.withTimeout(
+        agent.invoke({
+          messages: [
+            {
+              role: 'user',
+              content: formatted,
+            },
+          ],
+        }),
+        8_000,
+        'DeepAgent query planning',
+      );
 
       return this.extractQueriesFromDeepAgentResult(result);
     } catch (err) {

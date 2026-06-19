@@ -127,15 +127,19 @@ export class ConversationEmbeddingService implements OnModuleInit {
     try {
       const queryVector = await this.embeddingProvider.embedQuery(query);
 
-      const searchResult = await this.client.search({
-        collection_name: this.collectionName,
-        vector: queryVector,
-        limit: k,
-        metric_type: MetricType.COSINE,
-        params: { ef: 64 },
-        output_fields: ['content', 'thread_id', 'query'],
-        expr: userId ? `user_id == "${userId}"` : undefined,
-      });
+      const searchResult = await this.withTimeout(
+        this.client.search({
+          collection_name: this.collectionName,
+          vector: queryVector,
+          limit: k,
+          metric_type: MetricType.COSINE,
+          params: { ef: 64 },
+          output_fields: ['content', 'thread_id', 'query'],
+          expr: userId ? `user_id == "${userId}"` : undefined,
+        }),
+        5_000,
+        'Conversation history search',
+      );
 
       return (searchResult.results as Array<Record<string, unknown>>)
         .filter((hit) => typeof hit['content'] === 'string')
@@ -150,6 +154,26 @@ export class ConversationEmbeddingService implements OnModuleInit {
     } catch (err) {
       this.logger.warn(`Failed to search history: ${(err as Error).message}`);
       return [];
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        ms,
+      );
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

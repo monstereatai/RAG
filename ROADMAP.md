@@ -70,6 +70,7 @@
   - **数据库无关 Migration 迁移完成**：将 InitSchema 迁移文件重构为基于 Table 和 TableIndex 定义，实现数据库无关 schema 设计，完美支持 Postgres 与 MySQL。
   - **定时任务数据库持久化与启动恢复完成**：引入 `ScheduledJobEntity` 实现在关系型数据库中的持久化，并在应用启动时由 `JobsService` 自动恢复 active 状态任务的调度。
   - **修复 LangGraph 编译问题**：将 `humanApproval` 节点重命名为 `humanApprovalNode`，修复节点与状态属性命名冲突导致 Graph 无法编译的故障。
+- **问答卡在 routing/无回复问题已修复**（2026-06-19）：定位到 `conversation_chunks` Milvus search 可长时间不返回，以及 Agentic `DeepAgent` 查询规划缺少超时保护会导致 SSE 停在 `routing`；已为 DeepAgent 初始化/规划、语义示例选择、结构化 query augment、对话历史向量检索、主 Milvus 相似度检索增加超时降级。验证通过：`npm run build`、触碰文件定向 `eslint`、`PORT=3001 node dist/src/main`、`GET /api/v1/health`、simple `POST /api/v1/chat` 约 5s 返回、agentic `GET /api/v1/chat/stream` 约 5s 输出 `routing -> query_augment -> retrieval -> sufficiency -> web_search -> rerank -> token -> citation -> reflection -> final`。
 
 ### 未完成任务编号（2026-06-19）
 
