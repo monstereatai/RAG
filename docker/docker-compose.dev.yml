@@ -134,6 +134,28 @@ services:
       retries: 5
       start_period: 60s
 
+  # ---- Neo4j 5（知识图谱 GraphRAG，profile=graphrag 可选启动）----
+  neo4j:
+    image: neo4j:5-community
+    container_name: rag-dev-neo4j
+    restart: unless-stopped
+    profiles:
+      - graphrag
+    environment:
+      NEO4J_AUTH: neo4j/neo4jpassword
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - '7474:7474'   # HTTP Browser
+      - '7687:7687'   # Bolt
+    volumes:
+      - dev_neo4j_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
 volumes:
   dev_postgres_data:
   dev_redis_data:
@@ -141,3 +163,5 @@ volumes:
   dev_minio_data:
   dev_milvus_data:
   dev_es_data:
+  dev_neo4j_data:
+

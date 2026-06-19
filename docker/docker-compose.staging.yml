@@ -1,0 +1,280 @@
+# ============================================================
+# RAG 项目 Staging 环境（docker-compose.staging.yml）
+# 介于 dev 和 prod 之间：含应用层 + 完整基础设施 + Neo4j（可选）
+# 使用：cd docker && docker compose -f docker-compose.staging.yml up -d
+# 含 Neo4j：docker compose -f docker-compose.staging.yml --profile graphrag up -d
+# ============================================================
+
+services:
+  # ============================================================
+  # 应用层
+  # ============================================================
+
+  # ---- Backend（NestJS API）----
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: rag-staging-backend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: staging
+      PORT: 3000
+      MILVUS_HOST: milvus
+      MILVUS_PORT: '19530'
+      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/rag
+      REDIS_URL: redis://redis:6379
+      ES_NODE: http://elasticsearch:9200
+    env_file:
+      - ../backend/.env
+    volumes:
+      - staging_backend_workspace:/app/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+    networks:
+      - rag-staging-net
+
+  # ---- Frontend（nginx + React 静态资源）----
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: rag-staging-frontend
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+        reservations:
+          memory: 32M
+    networks:
+      - rag-staging-net
+
+  # ============================================================
+  # 基础设施层
+  # ============================================================
+
+  # ---- PostgreSQL 16 + pgvector ----
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag
+    ports:
+      - '5432:5432'
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d rag']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-staging-net
+
+  # ---- Redis 7 ----
+  redis:
+    image: redis:7-alpine
+    container_name: rag-staging-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - staging_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - rag-staging-net
+
+  # ---- Milvus 依赖：etcd ----
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: rag-staging-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - staging_etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ['CMD', '/bin/sh', '-c', 'ETCDCTL_API=3 etcdctl endpoint health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-staging-net
+
+  # ---- Milvus 依赖：minio ----
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: rag-staging-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - '9001:9001'
+    volumes:
+      - staging_minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-staging-net
+
+  # ---- Milvus 2.4 standalone ----
+  milvus:
+    image: milvusdb/milvus:v2.4.4
+    container_name: rag-staging-milvus
+    restart: unless-stopped
+    command: ['milvus', 'run', 'standalone']
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - '19530:19530'
+      - '9091:9091'
+    volumes:
+      - staging_milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - rag-staging-net
+
+  # ---- Elasticsearch 8（全文检索）----
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: rag-staging-es
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=rag-staging
+    ports:
+      - '9200:9200'
+    volumes:
+      - staging_es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -sf http://localhost:9200/_cluster/health || exit 1',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - rag-staging-net
+
+  # ---- Neo4j 5（知识图谱 GraphRAG，profile=graphrag 可选启动）----
+  neo4j:
+    image: neo4j:5-community
+    container_name: rag-staging-neo4j
+    restart: unless-stopped
+    profiles:
+      - graphrag
+    environment:
+      NEO4J_AUTH: neo4j/neo4jpassword
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - '7474:7474'   # HTTP Browser
+      - '7687:7687'   # Bolt
+    volumes:
+      - staging_neo4j_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - rag-staging-net
+
+networks:
+  rag-staging-net:
+    driver: bridge
+
+volumes:
+  staging_postgres_data:
+  staging_redis_data:
+  staging_etcd_data:
+  staging_minio_data:
+  staging_milvus_data:
+  staging_es_data:
+  staging_neo4j_data:
+  staging_backend_workspace:

@@ -11,7 +11,7 @@ import type {
 } from './types';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1',
   timeout: 120000, // agentic 模式可能较慢
 });
 
@@ -71,7 +71,7 @@ export function chatStream(
 ): void {
   const token = localStorage.getItem('token');
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  const url = `/api/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
+  const url = `/api/v1/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
   const eventSource = new EventSource(url);
 
   eventSource.onmessage = (e) => {
@@ -102,7 +102,7 @@ export function synthesizeSpeechStream(
   return new Promise((resolve, reject) => {
     const token = localStorage.getItem('token');
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const url = `/api/speech/tts/stream?text=${encodeURIComponent(text)}${tokenParam}`;
+    const url = `/api/v1/speech/tts/stream?text=${encodeURIComponent(text)}${tokenParam}`;
     const eventSource = new EventSource(url);
     const chunks: ArrayBuffer[] = [];
     let contentType = 'audio/wav';

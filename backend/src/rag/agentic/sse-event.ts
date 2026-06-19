@@ -11,6 +11,8 @@ export type SseEventType =
   | 'token' // LLM token 流
   | 'citation' // 引用来源
   | 'reflection' // 反思评估
+  | 'interrupt' // 人工审批中断（等待用户 approve/reject）
+  | 'resume' // 人工审批恢复
   | 'final' // 最终结果
   | 'thread' // 会话 thread_id 推送
   | 'error'; // 错误

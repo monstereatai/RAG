@@ -23,6 +23,8 @@ import { MetricsModule } from './modules/metrics/metrics.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
+import { AgentsModule } from './rag/agents/agents.module';
+import { SupervisorModule } from './modules/supervisor/supervisor.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
     JobsModule,
     SkillsModule,
     WorkflowModule,
+    AgentsModule,
+    SupervisorModule,
   ],
   providers: [
     {

@@ -68,6 +68,18 @@ export const AgenticRagState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => false,
   }),
+
+  /** 人工审批状态：null=未到审批环节，'pending'=等待审批，'approved'=已通过，'rejected'=已拒绝 */
+  humanApproval: Annotation<'pending' | 'approved' | 'rejected' | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+
+  /** 人工审批中断原因 */
+  interruptReason: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
 });
 
 export type AgenticRagStateType = typeof AgenticRagState.State;

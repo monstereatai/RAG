@@ -21,6 +21,7 @@ import type { SseEvent } from '../../rag/agentic/sse-event';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { ChatResumeDto } from './chat-resume.dto';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -189,5 +190,33 @@ export class ChatController {
       throw new BadRequestException(`conversation ${threadId} not found`);
     }
     return { message: `conversation ${threadId} deleted` };
+  }
+
+  /**
+   * 恢复被人工审批中断的 Agentic RAG 图执行
+   * POST /api/chat/resume
+   *
+   * 当 enableInterrupt=true 时，Agentic RAG 在 generate 后暂停等待人工审批。
+   * 前端收到 SSE interrupt 事件后，展示审批 UI，用户决定后调用此接口恢复执行。
+   */
+  @Post('resume')
+  async resume(@Body() body: ChatResumeDto, @CurrentUser() user: JwtPayload) {
+    const result = await this.agenticRagService.resumeGraph(
+      body.threadId,
+      body.approval,
+      body.feedback,
+    );
+
+    if (body.approval === 'approved') {
+      // 审批通过后持久化对话
+      await this.conversationService.addMessage(
+        body.threadId,
+        'ai',
+        result.answer,
+        user.userId,
+      );
+    }
+
+    return result;
   }
 }

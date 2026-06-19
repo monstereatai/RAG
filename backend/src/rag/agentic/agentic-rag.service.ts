@@ -64,6 +64,7 @@ export class AgenticRagService {
       .addNode('webSearchFallback', this.webSearchFallbackNode.bind(this))
       .addNode('rerank', this.rerankNode.bind(this))
       .addNode('generate', this.generateNode.bind(this))
+      .addNode('humanApproval', this.humanApprovalNode.bind(this))
       .addNode('reflection', this.reflectionNode.bind(this));
 
     workflow.addEdge(START, 'queryAugment');
@@ -83,7 +84,20 @@ export class AgenticRagService {
 
     workflow.addEdge('webSearchFallback', 'rerank');
     workflow.addEdge('rerank', 'generate');
-    workflow.addEdge('generate', 'reflection');
+    workflow.addEdge('generate', 'humanApproval');
+
+    // humanApproval → reflection（approved/skipped）或 END（rejected）
+    workflow.addConditionalEdges(
+      'humanApproval',
+      (state) => {
+        if (state.humanApproval === 'rejected') return END;
+        return 'reflection';
+      },
+      {
+        reflection: 'reflection',
+        [END]: END,
+      },
+    );
 
     workflow.addConditionalEdges(
       'reflection',
@@ -591,6 +605,110 @@ export class AgenticRagService {
   }
 
   /**
+   * 人工审批节点：当 enableInterrupt=true 时暂停图执行，等待用户审批
+   * 如果 enableInterrupt=false（默认），直接标记为 approved 跳过
+   */
+  async humanApprovalNode(
+    state: AgenticRagStateType,
+    config?: RunnableConfig,
+  ): Promise<Partial<AgenticRagStateType>> {
+    await Promise.resolve();
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const enableInterrupt = config?.configurable?.enableInterrupt as
+      | boolean
+      | undefined;
+
+    // 如果已经有审批结果（从 resume 恢复），直接返回
+    if (
+      state.humanApproval === 'approved' ||
+      state.humanApproval === 'rejected'
+    ) {
+      this.logger.log(`Human approval already set: ${state.humanApproval}`);
+      onEvent?.({
+        type: 'resume',
+        data: {
+          approval: state.humanApproval,
+          answer: state.answer,
+        },
+      });
+      return {};
+    }
+
+    // 不启用中断时直接跳过
+    if (!enableInterrupt) {
+      return { humanApproval: 'approved' };
+    }
+
+    // 触发中断：推送 interrupt 事件让前端展示审批 UI
+    const reason = `答案生成完成，等待人工审批（confidence 将在后续 reflection 评估）`;
+    this.logger.log(`Human approval interrupt: ${reason}`);
+    onEvent?.({
+      type: 'interrupt',
+      data: {
+        reason,
+        answer: state.answer,
+        references: state.retrievedChunks,
+        threadId: (config?.configurable?.thread_id as string) ?? '',
+      },
+    });
+
+    return {
+      humanApproval: 'pending',
+      interruptReason: reason,
+    };
+  }
+
+  /**
+   * 恢复被人工审批中断的图执行
+   * @param threadId 会话 ID
+   * @param approval 审批结果：'approved' 或 'rejected'
+   * @param feedback 可选的用户反馈
+   * @param onEvent SSE 事件回调
+   */
+  async resumeGraph(
+    threadId: string,
+    approval: 'approved' | 'rejected',
+    feedback?: string,
+    onEvent?: SseCallback,
+  ): Promise<{
+    answer: string;
+    references: RetrievedChunk[];
+    confidence: number;
+    retryCount: number;
+    approved: boolean;
+  }> {
+    this.logger.log(
+      `Resuming graph for thread=${threadId}, approval=${approval}`,
+    );
+
+    // 用审批结果更新状态并继续执行
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const finalState = (await this.app.invoke(
+      {
+        humanApproval: approval,
+        interruptReason: feedback ?? '',
+      },
+      {
+        configurable: {
+          thread_id: threadId,
+          onEvent,
+        },
+      },
+    )) as AgenticRagStateType;
+
+    const result = {
+      answer: finalState.answer,
+      references: finalState.retrievedChunks,
+      confidence: finalState.confidence,
+      retryCount: finalState.retryCount,
+      approved: approval === 'approved',
+    };
+
+    onEvent?.({ type: 'final', data: result });
+    return result;
+  }
+
+  /**
    * 条件路由：reflection 后决定重试还是结束
    */
   reflectionRouter(state: AgenticRagStateType): 'retry' | 'end' {
@@ -615,6 +733,7 @@ export class AgenticRagService {
     threadId = 'default-thread',
     userId?: string,
     memoryMessages: Array<{ role: string; content: string }> = [],
+    enableInterrupt = false,
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -623,6 +742,7 @@ export class AgenticRagService {
     retryCount: number;
     retrievalSufficient?: boolean;
     retrievalReason?: string;
+    interrupted?: boolean;
   }> {
     const route =
       mode === 'simple' ? 'simple' : await this.classifyRoute(query, mode);
@@ -660,6 +780,8 @@ export class AgenticRagService {
         confidence: 0,
         retryCount: 0,
         passed: false,
+        humanApproval: null,
+        interruptReason: '',
       },
       {
         configurable: {
@@ -668,9 +790,24 @@ export class AgenticRagService {
           history,
           userId,
           memoryMessages,
+          enableInterrupt,
         },
       },
     )) as AgenticRagStateType;
+
+    // 如果人工审批处于 pending 状态，返回中间结果（前端需调用 resume）
+    if (finalState.humanApproval === 'pending') {
+      return {
+        answer: finalState.answer,
+        references: finalState.retrievedChunks,
+        route: 'agentic' as const,
+        confidence: 0,
+        retryCount: 0,
+        retrievalSufficient: finalState.retrievalSufficient,
+        retrievalReason: finalState.retrievalReason,
+        interrupted: true,
+      };
+    }
 
     const result = {
       answer: finalState.answer,

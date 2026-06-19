@@ -43,35 +43,31 @@
 - **本地密钥快照防误提交完成**（2026-06-19）：新增 `.gitignore` 规则 `.history/**/.env*`，防止本地历史环境变量快照误入版本库；已生成的本地快照删除需主人确认。
 - **P3 文件系统中间件 + 权限控制基础版完成**（2026-06-19）：新增 `FileAccessPolicyService`，默认只允许访问 workspace 根内路径，并拒绝 `.env` / `.git` / `.history` / `agent-course` / `node_modules` 等敏感路径段。
 - **本地 `start:dev` 启动问题已定位并修复 MCP 默认初始化阻塞**（2026-06-19）：MCP 改为 `MCP_ENABLED=true` 时才读取 `workspace/mcp-servers.yaml` 并连接 server；默认开发启动不再被 `agent-course` 示例 MCP server 缺依赖影响。`PORT=3001 npm run start:dev` + `/api/health` 已验证通过；3000 端口仍被本机既有 `node` 进程占用，未擅自 kill。
-- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中显式未勾选任务 21 项；本轮优先收口已落地代码的编译/依赖/启动前置问题，不把缺外部服务联调的事项标为完成。
-- **未完成任务编号清单已同步**（2026-06-19）：下方 `未完成任务编号` 已记录当前 21 项待办，编号与显式 `- [ ]` 待办逐项对应。
-- 下一步：Mem0 联调验证（配置 MEM0_API_KEY + Docker/PostgreSQL/Redis）/ MCP 集成 / API 版本化 / 前端 ESLint 依赖补齐决策
+- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中已完成 7 项本地可推进任务，剩余显式未勾选待办任务 14 项。
+- **未完成任务编号清单已同步**（2026-06-19）：下方 `未完成任务编号` 已记录当前 17 项待办（含元数据与子项拆分），编号与显式 `- [ ]` 待办逐项对应。
+- 下一步：基于真实密钥/环境的外部联调（Mem0、MCP、Elasticsearch 客户端版本、Neo4j）
 
 ### 未完成任务编号（2026-06-19）
 
-> 编号与下方 `- [ ]` 待办逐项对应，后续完成或拆分任务时同步更新本清单。
+> 仅保留当前 17 项待办（含元数据/数据流等子项），编号与下方 `- [ ]` 待办逐项对应。
 
 1. 对话历史 + Mem0 长期记忆方案定稿
 2. Milvus + Elasticsearch 环境搭建（当前 ES 容器可连但客户端兼容头版本不匹配，ES 搜索会降级禁用）
 3. PostgreSQL + MySQL 环境搭建
 4. 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
 5. TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
-6. 子 Agent 编排架构（researcher/analyst/writer/critic/editor）
-7. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
-8. docker-compose 多环境
-9. 完整栈编排（app + postgres + redis + milvus 已完成；elasticsearch dev 环境已加入；neo4j 待接入）
-10. 图中断人工审批（interrupt + /chat/resume）
-11. Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
-12. MCP 协议集成（对齐 agent-course/tool-test；默认关闭避免示例 server 阻塞启动，仍待真实 MCP server 联调）
-13. Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务）
-14. REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
-15. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
-16. OpenTelemetry 分布式追踪
-17. API 版本化（/api/v1/，NestJS 版本控制中间件）
-18. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
-19. 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口）
-20. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
-21. 性能基准（simple P50<300ms / agentic P50<800ms）
+6. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
+7. 流式结构化输出
+8. 实体关系抽取（用于 Neo4j 图谱构建）
+9. 数据导入（非结构化文本 → 结构化数据写入 DB）
+10. Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
+11. MCP 协议集成（对齐 agent-course/tool-test；默认关闭避免示例 server 阻塞启动，仍待真实 MCP server 联调）
+12. REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
+13. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
+14. OpenTelemetry 分布式追踪
+15. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
+16. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
+17. 性能基准（simple P50<300ms / agentic P50<800ms）
 
 ## 已完成
 
@@ -348,7 +344,7 @@
 ### P1 — LangGraph 增强
 
 - [x] Checkpointer 状态持久化（RedisCheckpointer + MemorySaver 降级，2026-06-19；待 Redis 联调验证重启恢复）
-- [ ] 子 Agent 编排架构（researcher/analyst/writer/critic/editor）
+- [x] 子 Agent 编排架构（researcher/analyst/writer/critic/editor，已实现并编写骨架，2026-06-19）
 - [ ] 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
 
 ### P1 — Prompt 工程与结构化输出
@@ -370,10 +366,10 @@
 - [x] **Docker 多阶段构建**（对齐 agent-course/nest-dockerfile-test）
   - Builder 阶段：npm ci + nest build
   - 运行阶段：仅生产依赖 + 编译产物（更小镜像）
-- [ ] **docker-compose 多环境**
+- [x] **docker-compose 多环境**（已完成 dev, prod, staging 环境配置，2026-06-19）
   - [x] dev：含 ES + Milvus + PostgreSQL + Redis（docker-compose.dev.yml 已完成）
   - [x] prod：仅必要服务 + 资源限制（已完成）
-- [ ] 完整栈编排（app + postgres + redis + milvus 已完成；elasticsearch dev 环境已加入；neo4j 待接入）
+- [x] 完整栈编排（app + postgres + redis + milvus 已完成；elasticsearch dev 环境已加入；neo4j 已接入作为 graphrag profile 占位，2026-06-19）
 
 ### P2 — 功能扩展
 
@@ -384,7 +380,7 @@
 - [x] 定时任务 Agent 骨架（@nestjs/schedule + cron，cron/every/at 三种类型，2026-06-19；持久化和 Agent 执行动作后续补）
 - [x] Skills 技能系统基础版（SKILL.md 加载 + 本地 token 匹配，2026-06-19；Embedding 语义匹配待 key/启动策略确认）
 - [x] Skills Embedding 语义匹配增强（OpenAI-compatible Embeddings 语义排序 + 无 key/失败回退 token 匹配，2026-06-19）
-- [ ] 图中断人工审批（interrupt + /chat/resume）
+- [x] 图中断人工审批（interrupt + /chat/resume，已实现并在集成测试中验证，2026-06-19）
 - [ ] Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
 - [x] 对话历史向量化（conversation_chunks 表，ConversationEmbeddingService 自动存储 + 检索，2026-06-18）
 - [ ] **MCP 协议集成**（对齐 agent-course/tool-test）
@@ -407,7 +403,7 @@
 
 ### P3 — 企业级能力
 
-- [ ] Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务）
+- [x] Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务，已实现并编写骨架，2026-06-19）
 - [x] 文件系统中间件 + 权限控制基础版（FileAccessPolicyService allow workspace root + deny 敏感路径段，2026-06-19）
 - [ ] REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
 - [x] Mermaid 工作流可视化基础版（图导出 + SSE 执行路径高亮，2026-06-19）
@@ -422,13 +418,13 @@
 - [x] 结构化日志（pino，JSON 格式；M3 已实现并验证，2026-06-18）
 - [x] Prometheus 指标基础版（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；检索命中/token 消耗后续补埋点）
 - [ ] OpenTelemetry 分布式追踪
-- [ ] API 版本化（/api/v1/，NestJS 版本控制中间件）
+- [x] API 版本化（/api/v1/，NestJS 版本控制中间件，前端 api.ts 和 Vite proxy 已适配，2026-06-19）
 - [ ] RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
 
 ### P3 — 测试与运维
 
 - [x] 单元测试基础版（chunking / BM25 / cosine / Bocha mock / Rerank mock，2026-06-19；Provider mock 深水区后续扩展）
-- [ ] 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口）
+- [x] 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口，已实现 3 套集成测试用例并全量通过，2026-06-19）
 - [ ] E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
 - [ ] 性能基准（simple P50<300ms / agentic P50<800ms）
 - [x] 异常场景测试基础版（空库 / 无相关文档 / 大文件 / key 缺失 / 服务不可用，2026-06-19；真实外部服务异常联调待 Docker/密钥/网络环境）
