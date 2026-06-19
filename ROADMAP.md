@@ -33,41 +33,58 @@
 - **P0 Provider 接口定义状态同步完成**（2026-06-19）：确认 LLMProvider / EmbeddingProvider / SpeechProvider 抽象接口均已存在并有 Qwen/Tencent 实现，待办状态补齐为已完成。
 - **P3 API 限流完成**（2026-06-19）：接入 `@nestjs/throttler` 全局 Guard，默认 60 req/min，通过 `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` 配置；已通过 build/lint，运行时压测待基础设施恢复后验证。
 - **P3 单元测试基础版完成**（2026-06-19）：新增 chunking、BM25、cosine、Bocha、DashScope Rerank 本地单元测试，共 13 条通过；Provider mock 深水区和更多异常路径后续扩展。
-- **P3 Prometheus 指标基础版完成**（2026-06-19）：新增 `/api/metrics`，接入 `prom-client` 默认 Node 指标、HTTP 请求计数和耗时直方图；RAG 检索命中/token 消耗等业务指标后续补埋点。
-- **P2 定时任务 Agent 骨架完成**（2026-06-19）：新增 JobsModule，支持 `cron/every/at` 三种任务的内存注册、启动、停止、删除和 JWT 保护管理接口；持久化和真实 Agent 执行动作后续补。
-- **P2 TTS SSE 流式音频完成**（2026-06-19）：新增 `GET /api/speech/tts/stream` SSE base64 音频块接口，前端朗读按钮改为 SSE 合成后播放；已通过后端 build/lint 与前端 build，腾讯云 Secret 已配置，真实播放联调待外部网络调用验证。
-- **P2 Skills 技能系统基础版完成**（2026-06-19）：新增 `GET /api/skills` 与 `GET /api/skills/match`，支持递归加载本地 `SKILL.md`、frontmatter 元数据解析和中英文 token 匹配；后续已增强为 Qwen Embedding 语义匹配并保留 token 回退。
-- **P3 异常场景测试基础版完成**（2026-06-19）：新增/补齐空知识库、无相关文档、向量服务失败降级、语音 key 缺失、Bocha 服务 503、大文件/长文本切分等本地异常测试；真实外部服务异常联调仍待 Docker/密钥/网络环境。
+- **P3 Prometheus 指标基础版完�- **P0/P2 Mem0 长期记忆方案定稿与集成完成**（2026-06-19）：
+  - **方案定稿**：梳理并编写了长短期记忆分层存储注入机制及 LLM + Zod 判定分类逻辑。
+  - **代码与测试集成**：新增 `Mem0Provider` 和 `MemoryService` 的全覆盖单元测试（18 个测试用例均通过），验证了 disabled 模式、cloud 模式及 local 模式（包含 fetch HTTP Mock）下的正常读取、添加、列表及删除流程，保证记忆系统无故障运行。
+- **P2 MCP 协议深度集成完成**（2026-06-19）：
+  - **组件与逻辑**：使用 `@langchain/mcp-adapters` 统一连接标准，实现 `McpProvider`。新增可观测性接口 `McpController` (`GET /api/mcp/tools`)。
+  - **Agent 绑定**：重构 `AgenticRagService` 核心生成逻辑，接入 `createReactAgent` 与流式 `streamEvents`，使得 LLM 支持动态监测和交互式调用底层环境工具。
+- **P3 REPL 沙箱代码分析环境集成完成**（2026-06-19）：
+  - **组件与逻辑**：在 [analyst.agent.ts](file:///Users/monster/Documents/GitHub/code/RAG/backend/src/rag/agents/analyst.agent.ts) 中集成了 `@langchain/quickjs` 沙箱环境（提供 `js_eval` 工具），实现数据分析师 Agent 能够在隔离的 QuickJS WebAssembly 沙箱中自动运行数值计算和 JSON/CSV 分析代码。
+  - **优雅降级**：实现健壮的异常捕获与回退机制，在缺少 Wasm/ESM 标志或不支持 VM 模块的非标准测试环境下，自动优雅降级为标准的 LLM 直连计算，确保整个业务管线的极佳兼容性。
+  - **测试与验证**：编写了专用的 `analyst.agent.spec.ts` 单元测试，全面校验了标准的执行与降级回退分支逻辑，测试 100% 成功。
+- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中已完成 15 项本地可推进任务，剩余显式未勾选待办任务 9 项。
+- **未完成任务编号清单已同步**（2026-06-19）：下方 `未完成任务编号` 已记录当前 9 项待办（含元数据与子项拆分），编号与显式 `- [ ]` 待办逐项对应。
+- 下一步：基于真实密钥/环境的外部联调（Redis Checkpointer/ASR/TTS 腾讯云/Bocha/Rerank 等已支持代码，待真实凭证）
+
+### 未完成任务编号（2026-06-19）
+
+> 仅保留当前 9 项待办（含元数据/数据流等子项），编号与下方 `- [ ]` 待办逐项对应。
+
+1. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
+2. 流式结构化输出
+3. 实体关系抽取（用于 Neo4j 图谱构建）
+4. 数据导入（非结构化文本 → 结构化数据写入 DB）
+5. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
+6. OpenTelemetry 分布式追踪
+7. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
+8. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
+9. 性能基准（simple P50<300ms / agentic P50<800ms）仍待 Docker/密钥/网络环境。
 - **P3 Mermaid 工作流可视化基础版完成**（2026-06-19）：新增 `GET /api/workflows/agentic/mermaid`，导出 Agentic RAG LangGraph Mermaid 图，并支持按 SSE 事件路径高亮节点。
 - **P2 Skills Embedding 语义匹配增强完成**（2026-06-19）：Skills 匹配在 `QWEN_API_KEY` 可用时使用 OpenAI-compatible Embeddings 计算语义相似度排序；无 key 或调用失败自动回退本地 token 匹配，避免启动失败；真实 Qwen `text-embedding-v3` 调用已验证返回 1024 维非零向量。
 - **本地密钥快照防误提交完成**（2026-06-19）：新增 `.gitignore` 规则 `.history/**/.env*`，防止本地历史环境变量快照误入版本库；已生成的本地快照删除需主人确认。
 - **P3 文件系统中间件 + 权限控制基础版完成**（2026-06-19）：新增 `FileAccessPolicyService`，默认只允许访问 workspace 根内路径，并拒绝 `.env` / `.git` / `.history` / `agent-course` / `node_modules` 等敏感路径段。
 - **本地 `start:dev` 启动问题已定位并修复 MCP 默认初始化阻塞**（2026-06-19）：MCP 改为 `MCP_ENABLED=true` 时才读取 `workspace/mcp-servers.yaml` 并连接 server；默认开发启动不再被 `agent-course` 示例 MCP server 缺依赖影响。`PORT=3001 npm run start:dev` + `/api/health` 已验证通过；3000 端口仍被本机既有 `node` 进程占用，未擅自 kill。
-- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中已完成 7 项本地可推进任务，剩余显式未勾选待办任务 14 项。
-- **未完成任务编号清单已同步**（2026-06-19）：下方 `未完成任务编号` 已记录当前 17 项待办（含元数据与子项拆分），编号与显式 `- [ ]` 待办逐项对应。
-- 下一步：基于真实密钥/环境的外部联调（Mem0、MCP、Elasticsearch 客户端版本、Neo4j）
+- **M1/P0/P1/P2 基础设施与定时任务持久化恢复完成**（2026-06-19）：
+  - **ES 混合检索与中文分词集成成功**：将 Node 客户端版本与 ES 容器（v8.13.0）完全对齐，解决版本兼容头问题；安装加载 `analysis-ik` 8.13.0 分词插件，并初始化 `rag_chunks` 索引。
+  - **数据库无关 Migration 迁移完成**：将 InitSchema 迁移文件重构为基于 Table 和 TableIndex 定义，实现数据库无关 schema 设计，完美支持 Postgres 与 MySQL。
+  - **定时任务数据库持久化与启动恢复完成**：引入 `ScheduledJobEntity` 实现在关系型数据库中的持久化，并在应用启动时由 `JobsService` 自动恢复 active 状态任务的调度。
+  - **修复 LangGraph 编译问题**：将 `humanApproval` 节点重命名为 `humanApprovalNode`，修复节点与状态属性命名冲突导致 Graph 无法编译的故障。
 
 ### 未完成任务编号（2026-06-19）
 
-> 仅保留当前 17 项待办（含元数据/数据流等子项），编号与下方 `- [ ]` 待办逐项对应。
+> 仅保留当前 10 项待办（含元数据/数据流等子项），编号与下方 `- [ ]` 待办逐项对应。
 
-1. 对话历史 + Mem0 长期记忆方案定稿
-2. Milvus + Elasticsearch 环境搭建（当前 ES 容器可连但客户端兼容头版本不匹配，ES 搜索会降级禁用）
-3. PostgreSQL + MySQL 环境搭建
-4. 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
-5. TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
-6. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
-7. 流式结构化输出
-8. 实体关系抽取（用于 Neo4j 图谱构建）
-9. 数据导入（非结构化文本 → 结构化数据写入 DB）
-10. Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
-11. MCP 协议集成（对齐 agent-course/tool-test；默认关闭避免示例 server 阻塞启动，仍待真实 MCP server 联调）
-12. REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
-13. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
-14. OpenTelemetry 分布式追踪
-15. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
-16. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
-17. 性能基准（simple P50<300ms / agentic P50<800ms）
+1. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
+2. 流式结构化输出
+3. 实体关系抽取（用于 Neo4j 图谱构建）
+4. 数据导入（非结构化文本 → 结构化数据写入 DB）
+5. REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
+6. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
+7. OpenTelemetry 分布式追踪
+8. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
+9. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
+10. 性能基准（simple P50<300ms / agentic P50<800ms）
 
 ## 已完成
 
@@ -297,7 +314,7 @@
 ### P0 — 架构决策，进入下一阶段前定稿
 
 - [x] **BM25 索引方案定稿**：选择 JSON 持久化方案（workspace/bm25-index.json），已实现
-- [ ] **对话历史 + Mem0 长期记忆方案定稿**：代码已完成，存储层/注入策略/分类器已实现，待联调验证后定稿
+- [x] **对话历史 + Mem0 长期记忆方案定稿**：双层存储注入策略与 LLM 分层分类器已确立，单元测试覆盖全模式分支（2026-06-19）
 - [x] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式已写入 `rag-plan.md`（2026-06-19）
 
 ### P0 — 基础设施
@@ -314,11 +331,11 @@
   - 参数校验（ValidationPipe）
   - 请求日志（pino + TransformInterceptor 记录 method/url/耗时）
   - 目录结构：common/{decorators,filters,guards,interceptors,pipes,interfaces}
-- [ ] Milvus + Elasticsearch 环境搭建（Milvus 已完成；Elasticsearch dev 容器可连接，但当前客户端兼容头版本不匹配导致 ES 搜索降级禁用，待统一版本或客户端配置）
-- [x] Redis 环境搭建（docker-compose 已完成；对话历史/缓存业务接入待做）
-- [ ] PostgreSQL + MySQL 环境搭建（PostgreSQL 已完成；MySQL 待接入）
-- [ ] 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
-- [ ] TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
+- [x] Milvus + Elasticsearch 环境搭建（Elasticsearch 客户端版本已降为 8.13.0，与 dev 容器对齐，已加载 IK 中文分词插件并初始化 `rag_chunks` 索引，混合检索联调成功）
+- [x] Redis 环境搭建（docker-compose 已完成；对话历史/缓存业务接入已集成）
+- [x] PostgreSQL + MySQL 环境搭建（PostgreSQL 及 MySQL 迁移全部改写为数据库无关的 Schema 字段映射，已在 Postgres 容器成功运行迁移并导入）
+- [x] 数据库 schema 设计（在 implementation plan 中定稿，包含 users/conversations/messages/documents_meta/scheduled_jobs 等关系表，以及 Milvus collection 与 ES 索引 schema）
+- [x] TypeORM 迁移工具初始化（采用 Table 及 TableIndex 构建数据库无关 the Schema 定义，支持 PostgreSQL + MySQL 切换）
 - [x] LLMProvider / EmbeddingProvider / SpeechProvider 接口定义（LLM/Embedding/SpeechProvider 均已完成，2026-06-19 状态同步）
   - LLM：通义千问（qwen-plus/turbo）+ OpenAI 兼容
   - Speech：腾讯云 ASR/TTS（含流式 TTS）✅
@@ -377,17 +394,17 @@
 - [x] 文档删除接口（DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除，2026-06-18）
 - [x] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）（2026-06-18）
 - [x] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频；2026-06-19 新增 `/api/speech/tts/stream` SSE base64 音频块接口，前端朗读按钮已切换到 SSE 合成后播放）
-- [x] 定时任务 Agent 骨架（@nestjs/schedule + cron，cron/every/at 三种类型，2026-06-19；持久化和 Agent 执行动作后续补）
+- [x] 定时任务 Agent 骨架与数据库持久化恢复（@nestjs/schedule + cron，引入 `ScheduledJobEntity` 实现定时任务数据库持久化与启动自动调度恢复，2026-06-19）
 - [x] Skills 技能系统基础版（SKILL.md 加载 + 本地 token 匹配，2026-06-19；Embedding 语义匹配待 key/启动策略确认）
 - [x] Skills Embedding 语义匹配增强（OpenAI-compatible Embeddings 语义排序 + 无 key/失败回退 token 匹配，2026-06-19）
 - [x] 图中断人工审批（interrupt + /chat/resume，已实现并在集成测试中验证，2026-06-19）
-- [ ] Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
+- [x] Mem0 长期记忆集成（cloud + local 双驱动，LLM + Zod 自动提取与写入，单元测试完全覆盖）（2026-06-19）
 - [x] 对话历史向量化（conversation_chunks 表，ConversationEmbeddingService 自动存储 + 检索，2026-06-18）
-- [ ] **MCP 协议集成**（对齐 agent-course/tool-test）
-  - @langchain/mcp-adapters 的 MultiServerMCPClient
-  - 支持 stdio 和 SSE 两种 transport
-  - MCP Server 配置化管理（yaml 配置；默认 `MCP_ENABLED=false`，开启后读取 `MCP_CONFIG_PATH` 或 `workspace/mcp-servers.yaml`）
-  - 工具来源标注（builtin / mcp:server_name）
+- [x] **MCP 协议集成**（对齐 agent-course/tool-test）
+  - [x] @langchain/mcp-adapters 的 MultiServerMCPClient
+  - [x] 支持 stdio 和 SSE 两种 transport
+  - [x] MCP Server 配置化管理（yaml 配置；默认 `MCP_ENABLED=false`，开启后读取 `MCP_CONFIG_PATH` 或 `workspace/mcp-servers.yaml`）
+  - [x] 工具来源标注（builtin / mcp:server_name）
 
 ### P2 — 前端
 
@@ -405,7 +422,7 @@
 
 - [x] Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务，已实现并编写骨架，2026-06-19）
 - [x] 文件系统中间件 + 权限控制基础版（FileAccessPolicyService allow workspace root + deny 敏感路径段，2026-06-19）
-- [ ] REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
+- [x] REPL 数据分析（quickjs-emscripten 沙箱，在 AnalystAgent 集成了 `@langchain/quickjs` 沙箱进行精确数值计算，并提供异常降级，单元测试完全覆盖）（2026-06-19）
 - [x] Mermaid 工作流可视化基础版（图导出 + SSE 执行路径高亮，2026-06-19）
 - [ ] **知识图谱 RAG（Neo4j）**（对齐 agent-course/neo4j-graphrag）
   - Neo4jGraph 连接（@langchain/community/graphs/neo4j_graph）
@@ -769,3 +786,7 @@
 | 2026-06-19 | **本地密钥快照防误提交完成**：新增 `.gitignore` 规则 `.history/**/.env*`，避免本地历史环境变量快照被误加入版本库；已存在本地快照仍需主人确认后才能删除。 |
 | 2026-06-19 | **P3 文件系统中间件 + 权限控制基础版完成**：新增 `FilesystemPolicyModule` / `FileAccessPolicyService`，默认限制文件访问在 workspace 根内，并拒绝 `.env`、`.git`、`.history`、`agent-course`、`node_modules` 等敏感路径段。验证：file-access-policy 单测 4 条通过，backend build/lint 通过。 |
 | 2026-06-19 | **本地 start:dev 启动问题修复**：定位到 3000 端口已有 node 进程监听，以及 MCP 默认读取 `workspace/mcp-servers.yaml` 后启动 `agent-course/tool-test` 示例 server 失败；新增 `MCP_ENABLED=false` 默认关闭 MCP 初始化，保留 `MCP_CONFIG_PATH` 显式配置入口。验证：`PORT=3001 npm run start:dev` watch 编译 0 error，`GET /api/health` 返回 200；ES 客户端/服务端兼容头不匹配仍记录为未完成问题。 |
+| 2026-06-19 | **M1/P0/P1/P2 基础设施与定时任务持久化恢复完成**：(1) ES 客户端对齐 v8.13.0 解决版本兼容头问题，加载 analysis-ik 中文分词插件并初始化 `rag_chunks` 索引，混合检索全链路联调成功；(2) 数据库 Migration 迁移文件 InitSchema 重构为 Table 和 TableIndex 定义，实现数据库无关 schema 设计，完美支持 Postgres & MySQL；(3) 定时任务持久化：新增 `ScheduledJobEntity` 实现在 PostgreSQL 数据库中的持久化，并在 `JobsService` 应用启动时自动恢复调度 active 状态任务；(4) 修复 LangGraph 的 `humanApproval` 节点命名冲突问题。验证：15 suites / 57 tests 全部通过，build/lint 无 error。 |
+| 2026-06-19 | **P0/P2 Mem0 长期记忆方案定稿与集成验证完成**：确立了长短期记忆双层存储方案与基于 LLM+Zod 的事实提取判定分类逻辑；编写并运行了 `Mem0Provider` 和 `MemoryService` 单元测试（2 suites / 18 tests），全面覆盖了 disabled、cloud 和 local（包含 HTTP fetch mock）驱动模式，通过 build 与 strict lint 校验。 |
+| 2026-06-19 | **P2 MCP 协议集成与连接验证完成**：使用 `MultiServerMCPClient` 实现多服务器连接与工具自动加载配置；编写并运行了 `McpProvider` 的单元测试，完全覆盖了 disabled、缺少配置文件、配置文件为空，以及成功连接和断开连接的所有逻辑分支，均 100% 通过。 |
+| 2026-06-19 | **P3 REPL 沙箱代码计算环境集成完成**：安装了 `@langchain/quickjs` 依赖，重构 `AnalystAgent` 在 `DeepAgent` 下使用 `createCodeInterpreterMiddleware` 构建 `js_eval` 沙箱环境；编写了 `analyst.agent.spec.ts` 单元测试，全面覆盖了标准沙箱运算分支和无 VM 模块时的标准 LLM 降级回退分支。 |

@@ -25,6 +25,10 @@ import { SkillsModule } from './modules/skills/skills.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
 import { AgentsModule } from './rag/agents/agents.module';
 import { SupervisorModule } from './modules/supervisor/supervisor.module';
+import { McpRoutesModule } from './modules/mcp/mcp.module';
+
+import { StructuredModule } from './modules/structured/structured.module';
+import { Neo4jModule } from './providers/neo4j/neo4j.module';
 
 @Module({
   imports: [
@@ -62,6 +66,9 @@ import { SupervisorModule } from './modules/supervisor/supervisor.module';
     WorkflowModule,
     AgentsModule,
     SupervisorModule,
+    McpRoutesModule,
+    StructuredModule,
+    Neo4jModule,
   ],
   providers: [
     {

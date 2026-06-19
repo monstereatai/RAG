@@ -132,6 +132,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
         vector: queryVector,
         limit: k,
         metric_type: MetricType.COSINE,
+        params: { ef: 64 },
         output_fields: ['content', 'thread_id', 'query'],
         expr: userId ? `user_id == "${userId}"` : undefined,
       });
@@ -250,9 +251,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
     await this.client.createIndex({
       collection_name: this.collectionName,
       field_name: 'vector',
-      index_type: IndexType.IVF_FLAT,
+      index_type: IndexType.HNSW,
       metric_type: MetricType.COSINE,
-      params: { nlist: 128 },
+      params: { M: 16, efConstruction: 200 },
     });
 
     await this.client.loadCollection({ collection_name: this.collectionName });

@@ -64,7 +64,7 @@ export class AgenticRagService {
       .addNode('webSearchFallback', this.webSearchFallbackNode.bind(this))
       .addNode('rerank', this.rerankNode.bind(this))
       .addNode('generate', this.generateNode.bind(this))
-      .addNode('humanApproval', this.humanApprovalNode.bind(this))
+      .addNode('humanApprovalNode', this.humanApprovalNode.bind(this))
       .addNode('reflection', this.reflectionNode.bind(this));
 
     workflow.addEdge(START, 'queryAugment');
@@ -84,11 +84,11 @@ export class AgenticRagService {
 
     workflow.addEdge('webSearchFallback', 'rerank');
     workflow.addEdge('rerank', 'generate');
-    workflow.addEdge('generate', 'humanApproval');
+    workflow.addEdge('generate', 'humanApprovalNode');
 
-    // humanApproval → reflection（approved/skipped）或 END（rejected）
+    // humanApprovalNode → reflection（approved/skipped）或 END（rejected）
     workflow.addConditionalEdges(
-      'humanApproval',
+      'humanApprovalNode',
       (state) => {
         if (state.humanApproval === 'rejected') return END;
         return 'reflection';

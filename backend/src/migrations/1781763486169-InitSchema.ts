@@ -1,33 +1,148 @@
-import { MigrationInterface, QueryRunner } from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableIndex } from 'typeorm';
 
 export class InitSchema1781763486169 implements MigrationInterface {
   name = 'InitSchema1781763486169';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `CREATE TABLE "users" ("id" character varying(64) NOT NULL, "username" character varying(64) NOT NULL, "passwordHash" character varying(255) NOT NULL, "role" character varying(32) NOT NULL DEFAULT 'user', "tenantId" character varying(64), "createdAt" TIMESTAMP NOT NULL DEFAULT now(), "updatedAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "UQ_fe0bb3f6520ee0469504521e710" UNIQUE ("username"), CONSTRAINT "PK_a3ffb1c0c8416b9fc6f907b7433" PRIMARY KEY ("id"))`,
+    // 1. users
+    await queryRunner.createTable(
+      new Table({
+        name: 'users',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'username', type: 'varchar', length: '64', isUnique: true },
+          { name: 'passwordHash', type: 'varchar', length: '255' },
+          { name: 'role', type: 'varchar', length: '32', default: "'user'" },
+          { name: 'tenantId', type: 'varchar', length: '64', isNullable: true },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+          {
+            name: 'updatedAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
     );
-    await queryRunner.query(
-      `CREATE TABLE "conversations" ("id" character varying(64) NOT NULL, "userId" character varying(64), "title" character varying(100) NOT NULL DEFAULT '', "mode" character varying(16) NOT NULL DEFAULT 'auto', "createdAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_ee34f4f7ced4ec8681f26bf04ef" PRIMARY KEY ("id"))`,
+
+    // 2. conversations
+    await queryRunner.createTable(
+      new Table({
+        name: 'conversations',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'userId', type: 'varchar', length: '64', isNullable: true },
+          { name: 'title', type: 'varchar', length: '100', default: "''" },
+          { name: 'mode', type: 'varchar', length: '16', default: "'auto'" },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
     );
-    await queryRunner.query(
-      `CREATE TABLE "messages" ("id" character varying(64) NOT NULL, "conversationId" character varying(64) NOT NULL, "role" character varying(8) NOT NULL, "content" text NOT NULL, "createdAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_18325f38ae6de43878487eff986" PRIMARY KEY ("id"))`,
+
+    // 3. messages
+    await queryRunner.createTable(
+      new Table({
+        name: 'messages',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'conversationId', type: 'varchar', length: '64' },
+          { name: 'role', type: 'varchar', length: '8' },
+          { name: 'content', type: 'text' },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
     );
-    await queryRunner.query(
-      `CREATE INDEX "IDX_751332fc6cc6fc576c6975cd07" ON "messages" ("conversationId", "createdAt") `,
+
+    // Create index on messages (conversationId, createdAt)
+    await queryRunner.createIndex(
+      'messages',
+      new TableIndex({
+        name: 'IDX_751332fc6cc6fc576c6975cd07',
+        columnNames: ['conversationId', 'createdAt'],
+      }),
     );
-    await queryRunner.query(
-      `CREATE TABLE "documents_meta" ("docId" character varying(64) NOT NULL, "filename" character varying(512) NOT NULL, "chunkCount" integer NOT NULL DEFAULT '0', "userId" character varying(64), "createdAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_8e92a5175e1dbdb483d52cb8cd5" PRIMARY KEY ("docId"))`,
+
+    // 4. documents_meta
+    await queryRunner.createTable(
+      new Table({
+        name: 'documents_meta',
+        columns: [
+          { name: 'docId', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'filename', type: 'varchar', length: '512' },
+          { name: 'chunkCount', type: 'int', default: 0 },
+          { name: 'userId', type: 'varchar', length: '64', isNullable: true },
+          { name: 'title', type: 'varchar', length: '256', isNullable: true },
+          { name: 'author', type: 'varchar', length: '128', isNullable: true },
+          { name: 'summary', type: 'varchar', length: '512', isNullable: true },
+          {
+            name: 'keywords',
+            type: 'varchar',
+            length: '512',
+            isNullable: true,
+          },
+          { name: 'language', type: 'varchar', length: '32', isNullable: true },
+          { name: 'category', type: 'varchar', length: '32', isNullable: true },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
+    );
+
+    // 5. scheduled_jobs
+    await queryRunner.createTable(
+      new Table({
+        name: 'scheduled_jobs',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'type', type: 'varchar', length: '16' },
+          { name: 'instruction', type: 'text' },
+          { name: 'enabled', type: 'boolean', default: 'true' },
+          { name: 'running', type: 'boolean', default: 'false' },
+          { name: 'cron', type: 'varchar', length: '64', isNullable: true },
+          { name: 'everyMs', type: 'integer', isNullable: true },
+          { name: 'at', type: 'varchar', length: '64', isNullable: true },
+          { name: 'lastRun', type: 'varchar', length: '64', isNullable: true },
+          { name: 'userId', type: 'varchar', length: '64', isNullable: true },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+          {
+            name: 'updatedAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE "documents_meta"`);
-    await queryRunner.query(
-      `DROP INDEX "public"."IDX_751332fc6cc6fc576c6975cd07"`,
-    );
-    await queryRunner.query(`DROP TABLE "messages"`);
-    await queryRunner.query(`DROP TABLE "conversations"`);
-    await queryRunner.query(`DROP TABLE "users"`);
+    await queryRunner.dropTable('scheduled_jobs');
+    await queryRunner.dropTable('documents_meta');
+    await queryRunner.dropIndex('messages', 'IDX_751332fc6cc6fc576c6975cd07');
+    await queryRunner.dropTable('messages');
+    await queryRunner.dropTable('conversations');
+    await queryRunner.dropTable('users');
   }
 }

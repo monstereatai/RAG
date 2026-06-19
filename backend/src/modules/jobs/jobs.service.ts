@@ -1,94 +1,121 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CronJob } from 'cron';
 import { randomUUID } from 'node:crypto';
-import type { CreateJobInput, ScheduledJob } from './job.types';
+import { ScheduledJobEntity } from '../../providers/db/entities/job.entity';
+import type { CreateJobInput } from './job.types';
 
 @Injectable()
-export class JobsService {
+export class JobsService implements OnModuleInit {
   private readonly logger = new Logger(JobsService.name);
-  private readonly jobs = new Map<string, ScheduledJob>();
 
-  constructor(private readonly schedulerRegistry: SchedulerRegistry) {}
+  constructor(
+    private readonly schedulerRegistry: SchedulerRegistry,
+    @InjectRepository(ScheduledJobEntity)
+    private readonly jobRepo: Repository<ScheduledJobEntity>,
+  ) {}
 
-  list(): ScheduledJob[] {
-    return Array.from(this.jobs.values()).sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    );
+  async onModuleInit(): Promise<void> {
+    try {
+      const activeJobs = await this.jobRepo.find({ where: { enabled: true } });
+      this.logger.log(
+        `Restoring ${activeJobs.length} active scheduled jobs...`,
+      );
+      for (const job of activeJobs) {
+        try {
+          this.startRuntime(job);
+          job.running = true;
+          await this.jobRepo.save(job);
+        } catch (err) {
+          this.logger.warn(
+            `Failed to restore job ${job.id}: ${(err as Error).message}`,
+          );
+          job.running = false;
+          await this.jobRepo.save(job);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to query active jobs: ${(err as Error).message}`,
+      );
+    }
   }
 
-  create(input: CreateJobInput): ScheduledJob {
+  async list(): Promise<ScheduledJobEntity[]> {
+    return this.jobRepo.find({
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async create(input: CreateJobInput): Promise<ScheduledJobEntity> {
     this.validateInput(input);
 
-    const now = new Date().toISOString();
-    const job: ScheduledJob = {
+    const job = this.jobRepo.create({
       id: randomUUID(),
       type: input.type,
       instruction: input.instruction,
       enabled: input.enabled ?? true,
       running: false,
-      cron: input.cron,
-      everyMs: input.everyMs,
-      at: input.at,
-      createdAt: now,
-      updatedAt: now,
-    };
+      cron: input.cron || null,
+      everyMs: input.everyMs || null,
+      at: input.at || null,
+    });
 
-    this.jobs.set(job.id, job);
+    await this.jobRepo.save(job);
+
     if (job.enabled) {
-      this.start(job.id);
+      await this.start(job.id);
     }
+
     return this.get(job.id);
   }
 
-  get(id: string): ScheduledJob {
-    const job = this.jobs.get(id);
-    if (!job) {
-      throw new BadRequestException(`job ${id} not found`);
-    }
-    return { ...job };
-  }
-
-  start(id: string): ScheduledJob {
-    const job = this.getMutable(id);
-    if (job.running) return { ...job };
-
-    if (job.type === 'cron') {
-      this.startCron(job);
-    } else if (job.type === 'every') {
-      this.startInterval(job);
-    } else {
-      this.startTimeout(job);
-    }
-
-    job.enabled = true;
-    job.running = true;
-    job.updatedAt = new Date().toISOString();
-    return { ...job };
-  }
-
-  stop(id: string): ScheduledJob {
-    const job = this.getMutable(id);
-    this.stopRuntime(job);
-    job.enabled = false;
-    job.running = false;
-    job.updatedAt = new Date().toISOString();
-    return { ...job };
-  }
-
-  delete(id: string): ScheduledJob {
-    const job = this.getMutable(id);
-    this.stopRuntime(job);
-    this.jobs.delete(id);
-    return { ...job, enabled: false, running: false };
-  }
-
-  private getMutable(id: string): ScheduledJob {
-    const job = this.jobs.get(id);
+  async get(id: string): Promise<ScheduledJobEntity> {
+    const job = await this.jobRepo.findOneBy({ id });
     if (!job) {
       throw new BadRequestException(`job ${id} not found`);
     }
     return job;
+  }
+
+  async start(id: string): Promise<ScheduledJobEntity> {
+    const job = await this.get(id);
+    if (job.running) return job;
+
+    this.startRuntime(job);
+
+    job.enabled = true;
+    job.running = true;
+    job.updatedAt = new Date();
+
+    await this.jobRepo.save(job);
+    return job;
+  }
+
+  async stop(id: string): Promise<ScheduledJobEntity> {
+    const job = await this.get(id);
+    this.stopRuntime(job);
+
+    job.enabled = false;
+    job.running = false;
+    job.updatedAt = new Date();
+
+    await this.jobRepo.save(job);
+    return job;
+  }
+
+  async delete(id: string): Promise<ScheduledJobEntity> {
+    const job = await this.get(id);
+    this.stopRuntime(job);
+    await this.jobRepo.remove(job);
+    return { ...job, enabled: false, running: false };
   }
 
   private validateInput(input: CreateJobInput): void {
@@ -109,44 +136,62 @@ export class JobsService {
     }
   }
 
-  private startCron(job: ScheduledJob): void {
+  private startRuntime(job: ScheduledJobEntity): void {
+    if (job.type === 'cron') {
+      this.startCron(job);
+    } else if (job.type === 'every') {
+      this.startInterval(job);
+    } else {
+      this.startTimeout(job);
+    }
+  }
+
+  private startCron(job: ScheduledJobEntity): void {
     const cronExpr = job.cron ?? '';
-    const runtime = new CronJob(cronExpr, () => this.run(job.id));
+    const runtime = new CronJob(cronExpr, () => {
+      void this.run(job.id);
+    });
     this.schedulerRegistry.addCronJob(job.id, runtime);
     runtime.start();
   }
 
-  private startInterval(job: ScheduledJob): void {
+  private startInterval(job: ScheduledJobEntity): void {
     const everyMs = job.everyMs ?? 0;
-    const ref = setInterval(() => this.run(job.id), everyMs);
+    const ref = setInterval(() => {
+      void this.run(job.id);
+    }, everyMs);
     this.schedulerRegistry.addInterval(job.id, ref);
   }
 
-  private startTimeout(job: ScheduledJob): void {
+  private startTimeout(job: ScheduledJobEntity): void {
     const at = new Date(job.at ?? '');
     const delay = Math.max(0, at.getTime() - Date.now());
     const ref = setTimeout(() => {
-      void this.run(job.id);
-      const current = this.jobs.get(job.id);
-      if (current) {
-        current.enabled = false;
-        current.running = false;
-        current.updatedAt = new Date().toISOString();
-      }
-      this.safeDeleteTimeout(job.id);
+      void (async () => {
+        await this.run(job.id);
+        const current = await this.jobRepo.findOneBy({ id: job.id });
+        if (current) {
+          current.enabled = false;
+          current.running = false;
+          await this.jobRepo.save(current);
+        }
+        this.safeDeleteTimeout(job.id);
+      })();
     }, delay);
     this.schedulerRegistry.addTimeout(job.id, ref);
   }
 
-  private run(id: string): void {
-    const job = this.jobs.get(id);
+  private async run(id: string): Promise<void> {
+    const job = await this.jobRepo.findOneBy({ id });
     if (!job) return;
-    job.lastRun = new Date().toISOString();
-    job.updatedAt = job.lastRun;
+    const now = new Date();
+    job.lastRun = now.toISOString();
+    job.updatedAt = now;
+    await this.jobRepo.save(job);
     this.logger.log(`scheduled job ${job.id}: ${job.instruction}`);
   }
 
-  private stopRuntime(job: ScheduledJob): void {
+  private stopRuntime(job: ScheduledJobEntity): void {
     if (job.type === 'cron') {
       const runtime = this.schedulerRegistry.getCronJobs().get(job.id);
       void runtime?.stop();

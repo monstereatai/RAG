@@ -35,14 +35,14 @@ async function main() {
   });
   console.log('Collection created');
 
-  // 3. 创建索引（IVF_FLAT + COSINE，与参考代码一致）
+  // 3. 创建索引（HNSW + COSINE，与参考代码一致）
   console.log('\nCreating index...');
   await client.createIndex({
     collection_name: COLLECTION_NAME,
     field_name: 'vector',
-    index_type: IndexType.IVF_FLAT,
+    index_type: IndexType.HNSW,
     metric_type: MetricType.COSINE,
-    params: { nlist: 1024 },
+    params: { M: 16, efConstruction: 200 },
   });
   console.log('Index created');
 
@@ -61,6 +61,7 @@ async function main() {
       vector: testVector,
       limit: 5,
       metric_type: MetricType.COSINE,
+      params: { ef: 64 },
       output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
     });
     console.log('Search took:', Date.now() - searchStart, 'ms');

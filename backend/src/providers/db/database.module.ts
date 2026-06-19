@@ -5,6 +5,7 @@ import { UserEntity } from './entities/user.entity';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { DocumentMetaEntity } from './entities/document-meta.entity';
+import { ScheduledJobEntity } from './entities/job.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -13,7 +14,7 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
  * - retryAttempts: 5（默认 10，缩短等待时间）
  * - 连接失败时警告日志但不 crash
  *
- * 实体列表：UserEntity / ConversationEntity / MessageEntity / DocumentMetaEntity
+ * 实体列表：UserEntity / ConversationEntity / MessageEntity / DocumentMetaEntity / ScheduledJobEntity
  */
 @Global()
 @Module({
@@ -41,6 +42,7 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
             ConversationEntity,
             MessageEntity,
             DocumentMetaEntity,
+            ScheduledJobEntity,
           ],
           synchronize: nodeEnv === 'development', // 开发环境自动同步 schema
           logging: nodeEnv === 'development',
@@ -56,6 +58,7 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
       ConversationEntity,
       MessageEntity,
       DocumentMetaEntity,
+      ScheduledJobEntity,
     ]),
   ],
   exports: [TypeOrmModule],

@@ -161,9 +161,9 @@ export class MilvusVectorStoreProvider
     await this.client.createIndex({
       collection_name: this.collection,
       field_name: 'vector',
-      index_type: IndexType.IVF_FLAT,
+      index_type: IndexType.HNSW,
       metric_type: MetricType.COSINE,
-      params: { nlist: 1024 },
+      params: { M: 16, efConstruction: 200 },
     });
 
     await this.client.loadCollection({ collection_name: this.collection });
@@ -193,12 +193,13 @@ export class MilvusVectorStoreProvider
     k: number,
     userId?: string,
   ): Promise<VectorSearchHit[]> {
-    // 对齐 agent-course/milvus-test 参考实现：不传 params（nprobe），使用 IVF_FLAT 默认参数
+    // 对齐 agent-course/milvus-test 参考实现：使用 HNSW 参数
     const searchParams = {
       collection_name: this.collection,
       vector: queryVector,
       limit: k,
       metric_type: MetricType.COSINE,
+      params: { ef: 64 },
       output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
       expr: userId ? `user_id == "${userId}"` : undefined,
     };

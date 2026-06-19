@@ -95,12 +95,9 @@ export const deepAgentQueryPlanSystemPrompt = `你是 RAG 检索规划 Agent。
 不要回答用户问题，不要调用不必要的工具。
 必须只输出 JSON：{"queries":["...","...","..."]}`;
 
-/**
- * DeepAgent 检索规划 User Prompt
- */
 export const deepAgentQueryPlanUserPrompt = PromptTemplate.fromTemplate(
   `请为下面的 RAG 问题规划 3 条中文检索问句。
 只返回 JSON，不要 Markdown，不要解释。
-JSON 格式：{"queries":["问题1","问题2","问题3"]}
+JSON 格式：{{"queries":["问题1","问题2","问题3"]}}
 原始问题：{query}`,
 );

@@ -15,6 +15,7 @@ export type SseEventType =
   | 'resume' // 人工审批恢复
   | 'final' // 最终结果
   | 'thread' // 会话 thread_id 推送
+  | 'tool_call' // 工具调用
   | 'error'; // 错误
 
 export interface SseEvent {

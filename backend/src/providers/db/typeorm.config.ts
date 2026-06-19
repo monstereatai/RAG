@@ -20,6 +20,7 @@ import { UserEntity } from './entities/user.entity';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { DocumentMetaEntity } from './entities/document-meta.entity';
+import { ScheduledJobEntity } from './entities/job.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -32,7 +33,13 @@ const url = isPostgres
 export default new DataSource({
   type: isPostgres ? 'postgres' : 'mysql',
   url,
-  entities: [UserEntity, ConversationEntity, MessageEntity, DocumentMetaEntity],
+  entities: [
+    UserEntity,
+    ConversationEntity,
+    MessageEntity,
+    DocumentMetaEntity,
+    ScheduledJobEntity,
+  ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run
   logging: true,

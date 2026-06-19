@@ -1,0 +1,7 @@
+
+id: 1
+data: {"type":"thread","data":{"threadId":"2d7719e6-b7d2-4eaf-9a33-50018ee2a199"}}
+
+id: 2
+data: {"type":"routing","data":{"mode":"agentic","route":"agentic"}}
+
