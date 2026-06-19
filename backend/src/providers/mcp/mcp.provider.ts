@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
@@ -23,11 +24,20 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
   private mcpClient: MultiServerMCPClient | null = null;
   private tools: McpTool[] = [];
 
+  constructor(private readonly configService: ConfigService) {}
+
   async onModuleInit() {
+    if (!this.configService.get<boolean>('mcp.enabled')) {
+      this.logger.log('MCP is disabled. Set MCP_ENABLED=true to enable it.');
+      return;
+    }
+
+    const configuredPath = this.configService.get<string>('mcp.configPath');
     const configPath = path.resolve(
-      process.cwd(),
-      '../workspace/mcp-servers.yaml',
+      configuredPath ??
+        path.resolve(process.cwd(), '../workspace/mcp-servers.yaml'),
     );
+
     if (!fs.existsSync(configPath)) {
       this.logger.log(
         `No MCP servers configuration found at ${configPath}. MCP tools disabled.`,

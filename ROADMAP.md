@@ -35,8 +35,43 @@
 - **P3 单元测试基础版完成**（2026-06-19）：新增 chunking、BM25、cosine、Bocha、DashScope Rerank 本地单元测试，共 13 条通过；Provider mock 深水区和更多异常路径后续扩展。
 - **P3 Prometheus 指标基础版完成**（2026-06-19）：新增 `/api/metrics`，接入 `prom-client` 默认 Node 指标、HTTP 请求计数和耗时直方图；RAG 检索命中/token 消耗等业务指标后续补埋点。
 - **P2 定时任务 Agent 骨架完成**（2026-06-19）：新增 JobsModule，支持 `cron/every/at` 三种任务的内存注册、启动、停止、删除和 JWT 保护管理接口；持久化和真实 Agent 执行动作后续补。
-- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中显式未勾选任务 30 项；本轮优先收口已落地代码的编译/依赖/启动前置问题，不把缺外部服务联调的事项标为完成。
-- 下一步：进行 Mem0 联调验证（配置 MEM0_API_KEY）/ TTS 流式音频完善 / MCP 集成
+- **P2 TTS SSE 流式音频完成**（2026-06-19）：新增 `GET /api/speech/tts/stream` SSE base64 音频块接口，前端朗读按钮改为 SSE 合成后播放；已通过后端 build/lint 与前端 build，腾讯云 Secret 已配置，真实播放联调待外部网络调用验证。
+- **P2 Skills 技能系统基础版完成**（2026-06-19）：新增 `GET /api/skills` 与 `GET /api/skills/match`，支持递归加载本地 `SKILL.md`、frontmatter 元数据解析和中英文 token 匹配；后续已增强为 Qwen Embedding 语义匹配并保留 token 回退。
+- **P3 异常场景测试基础版完成**（2026-06-19）：新增/补齐空知识库、无相关文档、向量服务失败降级、语音 key 缺失、Bocha 服务 503、大文件/长文本切分等本地异常测试；真实外部服务异常联调仍待 Docker/密钥/网络环境。
+- **P3 Mermaid 工作流可视化基础版完成**（2026-06-19）：新增 `GET /api/workflows/agentic/mermaid`，导出 Agentic RAG LangGraph Mermaid 图，并支持按 SSE 事件路径高亮节点。
+- **P2 Skills Embedding 语义匹配增强完成**（2026-06-19）：Skills 匹配在 `QWEN_API_KEY` 可用时使用 OpenAI-compatible Embeddings 计算语义相似度排序；无 key 或调用失败自动回退本地 token 匹配，避免启动失败；真实 Qwen `text-embedding-v3` 调用已验证返回 1024 维非零向量。
+- **本地密钥快照防误提交完成**（2026-06-19）：新增 `.gitignore` 规则 `.history/**/.env*`，防止本地历史环境变量快照误入版本库；已生成的本地快照删除需主人确认。
+- **P3 文件系统中间件 + 权限控制基础版完成**（2026-06-19）：新增 `FileAccessPolicyService`，默认只允许访问 workspace 根内路径，并拒绝 `.env` / `.git` / `.history` / `agent-course` / `node_modules` 等敏感路径段。
+- **本地 `start:dev` 启动问题已定位并修复 MCP 默认初始化阻塞**（2026-06-19）：MCP 改为 `MCP_ENABLED=true` 时才读取 `workspace/mcp-servers.yaml` 并连接 server；默认开发启动不再被 `agent-course` 示例 MCP server 缺依赖影响。`PORT=3001 npm run start:dev` + `/api/health` 已验证通过；3000 端口仍被本机既有 `node` 进程占用，未擅自 kill。
+- **未完成任务统计**（2026-06-19）：当前 `ROADMAP.md` 中显式未勾选任务 21 项；本轮优先收口已落地代码的编译/依赖/启动前置问题，不把缺外部服务联调的事项标为完成。
+- **未完成任务编号清单已同步**（2026-06-19）：下方 `未完成任务编号` 已记录当前 21 项待办，编号与显式 `- [ ]` 待办逐项对应。
+- 下一步：Mem0 联调验证（配置 MEM0_API_KEY + Docker/PostgreSQL/Redis）/ MCP 集成 / API 版本化 / 前端 ESLint 依赖补齐决策
+
+### 未完成任务编号（2026-06-19）
+
+> 编号与下方 `- [ ]` 待办逐项对应，后续完成或拆分任务时同步更新本清单。
+
+1. 对话历史 + Mem0 长期记忆方案定稿
+2. Milvus + Elasticsearch 环境搭建（当前 ES 容器可连但客户端兼容头版本不匹配，ES 搜索会降级禁用）
+3. PostgreSQL + MySQL 环境搭建
+4. 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
+5. TypeORM 迁移工具初始化（关系型数据：users/conversations/jobs，支持 PostgreSQL + MySQL）
+6. 子 Agent 编排架构（researcher/analyst/writer/critic/editor）
+7. 向量索引创建优化（当前 IVF_FLAT；后续评估 HNSW/ef_search 或 Milvus 版本升级）
+8. docker-compose 多环境
+9. 完整栈编排（app + postgres + redis + milvus 已完成；elasticsearch dev 环境已加入；neo4j 待接入）
+10. 图中断人工审批（interrupt + /chat/resume）
+11. Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
+12. MCP 协议集成（对齐 agent-course/tool-test；默认关闭避免示例 server 阻塞启动，仍待真实 MCP server 联调）
+13. Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务）
+14. REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
+15. 知识图谱 RAG（Neo4j）（对齐 agent-course/neo4j-graphrag）
+16. OpenTelemetry 分布式追踪
+17. API 版本化（/api/v1/，NestJS 版本控制中间件）
+18. RAG 评测 CI/CD 集成（管线改动自动跑评测，分数下降阻断合并）
+19. 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口）
+20. E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
+21. 性能基准（simple P50<300ms / agentic P50<800ms）
 
 ## 已完成
 
@@ -259,7 +294,7 @@
 ## 进行中
 
 - **P2 Mem0 长期记忆系统代码完成，待验证**（代码已完成；2026-06-19 build/lint 通过，启动验证受本机 PostgreSQL/Docker 未运行阻塞，仍待配置 MEM0_API_KEY 后联调验证）
-- **P2 MCP 协议 MultiServerMCPClient 客户端对接**（骨架已完成；2026-06-19 修复类型问题并通过 build/lint，仍待提供 workspace/mcp-servers.yaml 和真实 MCP Server 联调）
+- **P2 MCP 协议 MultiServerMCPClient 客户端对接**（骨架已完成；2026-06-19 修复类型问题并通过 build/lint；2026-06-19 增加 `MCP_ENABLED` 默认关闭，避免示例 server 缺依赖阻塞本地启动；仍待提供真实 MCP Server 联调）
 
 ## 待办
 
@@ -283,7 +318,7 @@
   - 参数校验（ValidationPipe）
   - 请求日志（pino + TransformInterceptor 记录 method/url/耗时）
   - 目录结构：common/{decorators,filters,guards,interceptors,pipes,interfaces}
-- [ ] Milvus + Elasticsearch 环境搭建（Milvus 已完成；Elasticsearch 待接入）
+- [ ] Milvus + Elasticsearch 环境搭建（Milvus 已完成；Elasticsearch dev 容器可连接，但当前客户端兼容头版本不匹配导致 ES 搜索降级禁用，待统一版本或客户端配置）
 - [x] Redis 环境搭建（docker-compose 已完成；对话历史/缓存业务接入待做）
 - [ ] PostgreSQL + MySQL 环境搭建（PostgreSQL 已完成；MySQL 待接入）
 - [ ] 数据库 schema 设计（chunks、documents、conversations、jobs、users，Milvus collection + ES index）
@@ -345,16 +380,17 @@
 - [x] 认证与多租户（JWT + user_id 隔离，已实现数据库/Redis/Milvus/BM25全链路多租户逻辑/物理硬隔离，2026-06-18）
 - [x] 文档删除接口（DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除，2026-06-18）
 - [x] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）（2026-06-18）
-- [ ] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频）
+- [x] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频；2026-06-19 新增 `/api/speech/tts/stream` SSE base64 音频块接口，前端朗读按钮已切换到 SSE 合成后播放）
 - [x] 定时任务 Agent 骨架（@nestjs/schedule + cron，cron/every/at 三种类型，2026-06-19；持久化和 Agent 执行动作后续补）
-- [ ] Skills 技能系统（SKILL.md 加载 + 语义匹配）
+- [x] Skills 技能系统基础版（SKILL.md 加载 + 本地 token 匹配，2026-06-19；Embedding 语义匹配待 key/启动策略确认）
+- [x] Skills Embedding 语义匹配增强（OpenAI-compatible Embeddings 语义排序 + 无 key/失败回退 token 匹配，2026-06-19）
 - [ ] 图中断人工审批（interrupt + /chat/resume）
 - [ ] Mem0 长期记忆集成（代码已完成，待 MEM0_API_KEY 联调验证）
 - [x] 对话历史向量化（conversation_chunks 表，ConversationEmbeddingService 自动存储 + 检索，2026-06-18）
 - [ ] **MCP 协议集成**（对齐 agent-course/tool-test）
   - @langchain/mcp-adapters 的 MultiServerMCPClient
   - 支持 stdio 和 SSE 两种 transport
-  - MCP Server 配置化管理（yaml 配置）
+  - MCP Server 配置化管理（yaml 配置；默认 `MCP_ENABLED=false`，开启后读取 `MCP_CONFIG_PATH` 或 `workspace/mcp-servers.yaml`）
   - 工具来源标注（builtin / mcp:server_name）
 
 ### P2 — 前端
@@ -372,9 +408,9 @@
 ### P3 — 企业级能力
 
 - [ ] Supervisor 多 Agent 架构（按领域路由：HR/财务/技术/法务）
-- [ ] 文件系统中间件 + 权限控制（deny/allow 规则）
+- [x] 文件系统中间件 + 权限控制基础版（FileAccessPolicyService allow workspace root + deny 敏感路径段，2026-06-19）
 - [ ] REPL 数据分析（quickjs-emscripten 沙箱，复用 deepagents-test 方案）
-- [ ] Mermaid 工作流可视化（图导出 + 执行路径高亮）
+- [x] Mermaid 工作流可视化基础版（图导出 + SSE 执行路径高亮，2026-06-19）
 - [ ] **知识图谱 RAG（Neo4j）**（对齐 agent-course/neo4j-graphrag）
   - Neo4jGraph 连接（@langchain/community/graphs/neo4j_graph）
   - LangGraph.js 三节点：generateCypher → executeGraphQuery → generateAnswer
@@ -395,23 +431,24 @@
 - [ ] 集成测试（双索引一致性 / 三模式 / 流式事件顺序 / Debug 接口）
 - [ ] E2E 测试（注册→上传→提问→切换模式→Debug→语音→删除全流程）
 - [ ] 性能基准（simple P50<300ms / agentic P50<800ms）
-- [ ] 异常场景测试（空库 / 无相关文档 / 大文件 / key 缺失 / 服务不可用）
+- [x] 异常场景测试基础版（空库 / 无相关文档 / 大文件 / key 缺失 / 服务不可用，2026-06-19；真实外部服务异常联调待 Docker/密钥/网络环境）
 
 ## 阻塞
 
-- **本机 Docker daemon 未运行**（2026-06-19）：`docker compose ps` 无法连接 `/Users/monster/.docker/run/docker.sock`，导致无法拉起 PostgreSQL/Redis/Milvus/ES 进行完整启动与联调验证。
-- **PostgreSQL 未运行**（2026-06-19）：`npm run start` 已进入 Nest 初始化，但 TypeORM 连接 `localhost:5432` 被拒绝，`GET /api/health` 未能验证。
+- **本机 Docker/PostgreSQL 启动阻塞已解除**（2026-06-19）：已通过 `docker compose -f docker/docker-compose.dev.yml up -d postgres redis milvus etcd minio elasticsearch` 拉起 dev 基础设施；`PORT=3001 npm run start:dev` 成功启动，`GET /api/health` 返回 200。
+- **默认 3000 端口被占用**（2026-06-19）：`lsof -nP -iTCP:3000 -sTCP:LISTEN` 显示本机已有 `node` 进程监听 3000；未擅自 kill。临时验证可用 `PORT=3001 npm run start` / `PORT=3001 npm run start:dev`。
 - **外部联调缺口记录**（2026-06-19）：
   - Mem0：需要 `MEM0_ENABLED=true`、`MEM0_PROVIDER`、`MEM0_API_KEY` 或本地 `MEM0_BASE_URL`，以及可运行的 PostgreSQL/Redis 后端服务后才能验证搜索注入与分类写入。
-  - MCP：需要 `workspace/mcp-servers.yaml` 和至少一个可运行 MCP Server，才能验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注。
-  - Elasticsearch：需要 Docker daemon 与 ES 容器运行，且当前 IK analyzer 名称需要在真实 ES 插件/索引环境中验证。
+  - MCP：默认 `MCP_ENABLED=false`，需要开启后提供 `workspace/mcp-servers.yaml` 和至少一个可运行 MCP Server，才能验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注；当前示例 `agent-course/tool-test` server 缺少自身依赖，不能作为已验证 server。
+  - Elasticsearch：当前 ES 容器可连接，但 Node 客户端发送 `compatible-with=9` 到 ES 8.13 会被拒绝，ES 搜索降级禁用；需统一客户端/服务端版本或调整兼容配置后再验收混合检索。
   - Neo4j / GraphRAG：需要 Neo4j 服务、`GRAPH_RAG_ENABLED=true`、账号密码与图谱数据源；涉及新图谱模块与实体关系抽取，暂未启动。
   - CI/CD：任何 CI 配置变更属于红线，需主人确认后再做。
   - 数据库 schema / migration：涉及 schema 变更或迁移，需主人确认后再做。
   - 生产部署 / 发布：属于红线，需主人确认后再执行。
+- **本地密钥快照风险**（2026-06-19）：本地 `.history/backend/.env_*` 快照曾出现在未跟踪文件中，已新增 `.gitignore` 规则 `.history/**/.env*` 防止误加入版本库；删除已生成历史快照属于删除文件红线，需主人确认后执行。
 - **后续可继续推进但需要先补资源/确认的任务清单**（2026-06-19）：
-  - 需 Docker daemon：Milvus/ES/PostgreSQL/Redis 环境验证、Redis Checkpointer 重启恢复、混合检索集成测试、E2E、性能基准。
-  - 需真实密钥：Mem0、腾讯云 ASR/TTS 真实联调、Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测。
+  - 需专项验证：Redis Checkpointer 重启恢复、混合检索集成测试、E2E、性能基准；Docker dev 基础设施已可拉起，但 ES 兼容版本问题未解决。
+  - 需真实密钥：Mem0、Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测；腾讯云 ASR/TTS 使用 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `TENCENT_REGION`，无需额外 ASR AppId，Secret 已配置，真实 ASR/TTS 联调仍待外部网络验证。
   - 需配置文件：MCP 需要 `workspace/mcp-servers.yaml`；GraphRAG 需要 Neo4j 连接配置和图谱数据源。
   - 需主人确认红线：数据库 schema/migration、CI/CD、生产部署、删除历史/临时文件。
   - 可本地继续做：定时任务 Agent 骨架、API 版本化方案/代码适配、Prometheus 指标骨架、Mermaid 执行路径数据结构；但这些会扩大代码面，建议按优先级单独推进。
@@ -452,6 +489,63 @@
   - **建议**：Docker Compose。K8s 是给团队 10 人以上的，单人/小团队搞 K8s 是在浪费生命。Compose 足以覆盖 dev + 小规模 prod。
 
 ## 最近验证
+
+- **P3 文件系统中间件 + 权限控制基础版验证**（2026-06-19）
+  - 新增 `FilesystemPolicyModule` / `FileAccessPolicyService`
+  - 默认 allow root 为 `workspace` 根目录，relative path 会解析到 workspace 根下 ✓
+  - 拒绝路径穿越到 workspace 外部 ✓
+  - 拒绝 `.env` / `.git` / `.history` / `agent-course` / `node_modules` 等敏感路径段 ✓
+  - `assertAllowed()` 对拒绝路径抛出 `ForbiddenException`，供后续文件工具统一复用 ✓
+  - `cd backend && npm run test -- file-access-policy.service.spec.ts --runInBand` → 1 suite / 4 tests 通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+
+- **P2 Skills Embedding 语义匹配增强验证**（2026-06-19）
+  - `SkillsService.match()` 在 `embedding.qwen.apiKey` 存在时使用 `OpenAIEmbeddings` 对 query 与技能文本生成向量并按 cosine 语义相似度排序 ✓
+  - Embedding 初始化不依赖 `EmbeddingProvider`，避免无 key 环境因 Provider 构造阶段抛错导致应用启动失败 ✓
+  - Embedding key 缺失或调用失败时自动回退本地中英文 token 匹配 ✓
+  - `SkillMatch` 返回 `matchMode` 与 `semanticScore`，便于前端/调试侧区分匹配路径 ✓
+  - 真实调用 Qwen `text-embedding-v3` 成功：返回 1024 维非零向量，向量 norm=1；未输出 key 或向量内容 ✓
+  - `cd backend && npm run test -- skills.service.spec.ts --runInBand` → 1 suite / 4 tests 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+
+- **P3 Mermaid 工作流可视化基础版验证**（2026-06-19）
+  - 新增 `WorkflowModule` / `WorkflowController`
+  - `GET /api/workflows/agentic/mermaid`：导出 Agentic RAG 工作流 Mermaid `flowchart TD` 图 ✓
+  - 支持 `events=query_augment,retrieval,token,reflection,final` 查询参数，将 SSE 事件映射为高亮节点，返回 `diagram` 与 `highlightedNodes` ✓
+  - 新增 `agentic-workflow.mermaid.spec.ts` 覆盖静态图导出、执行路径高亮、未知事件过滤 ✓
+  - `cd backend && npm run test -- agentic-workflow.mermaid.spec.ts --runInBand` → 1 suite / 3 tests 通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+
+- **P3 异常场景测试基础版验证**（2026-06-19）
+  - 新增 `karpathy-rag.service.spec.ts`：空知识库返回友好提示、无相关文档不调用 LLM、Embedding/向量检索失败时自动降级 BM25 ✓
+  - 新增 `tencent-speech.provider.spec.ts`：缺少腾讯云 Secret 时 ASR/TTS 抛出明确配置错误 ✓
+  - 扩展 `bocha-search.service.spec.ts`：Bocha 服务 503 时抛出包含状态码和响应摘要的错误 ✓
+  - 已有 `chunking.util.spec.ts` 覆盖长 Markdown 切分与空文本行为，可覆盖“大文件/长文本切分”基础场景 ✓
+  - `cd backend && npm run test -- karpathy-rag.service.spec.ts tencent-speech.provider.spec.ts bocha-search.service.spec.ts --runInBand` → 3 suites / 8 tests 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - 腾讯云 ASR/TTS 配置已纠正为 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `TENCENT_REGION`；官方 SentenceRecognition 输入参数无 ASR AppId，真实 ASR/TTS 联调未执行
+
+- **P2 Skills 技能系统基础版验证**（2026-06-19）
+  - 新增 `SkillsModule` / `SkillsController` / `SkillsService`
+  - `GET /api/skills`：递归扫描 `SKILLS_DIR`（默认 `../skills`）下的 `SKILL.md`，解析 `name` / `description` / `tags` frontmatter ✓
+  - `GET /api/skills/match?query=...&limit=...`：基础版支持中英文 token 本地匹配与排序，后续已增强为 Qwen Embedding 语义匹配 + token 回退 ✓
+  - 新增 `SKILLS_DIR` 环境变量模板到 `.env.example` ✓
+  - `cd backend && npm run test -- skills.service.spec.ts --runInBand` → 1 suite / 3 tests 通过 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+
+- **P2 TTS SSE 流式音频验证**（2026-06-19）
+  - 新增 `GET /api/speech/tts/stream`：输出 `meta/chunk/done/error` SSE 事件，音频 chunk 使用 base64 承载，保留 JWT query token 鉴权 ✓
+  - 前端 `synthesizeSpeechStream()` 通过 EventSource 接收音频块并组装 `audio/wav` Blob，ChatPage 朗读按钮切换为 SSE 合成后播放 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd frontend && npm run build` → 通过 ✓
+  - `cd frontend && npm run lint` → 未通过：前端未安装 `eslint` 依赖，命令报 `sh: eslint: command not found`；未擅自新增依赖，待主人确认是否补齐前端 lint 工具链
+  - 腾讯云 Secret 已配置；真实 TTS 播放联调待外部网络调用验证
 
 - **依赖与编译健康验证**（2026-06-19）
   - 统计 `ROADMAP.md` 显式未勾选任务：30 项 ✓
@@ -671,3 +765,11 @@
 | 2026-06-19 | **P3 单元测试基础版完成**：新增 MarkdownChunker、BM25、cosine、BochaSearchService、DashScopeRerankService 单元测试，覆盖文本切分、关键词检索排序、中文召回、余弦相似度边界、无 API key 禁用分支、mock API 响应解析/排序。验证：5 suites / 13 tests 全通过，build/lint 通过。Provider mock 深水区和更多异常路径后续扩展。 |
 | 2026-06-19 | **P3 Prometheus 指标基础版完成**：新增 `prom-client` 和 `MetricsModule`，提供 `GET /api/metrics`；通过全局 MetricsInterceptor 采集 HTTP 请求总数与耗时直方图，同时启用默认 Node 指标。验证：build/lint 通过；运行时 curl 待 PostgreSQL/Docker 可用后执行。 |
 | 2026-06-19 | **P2 定时任务 Agent 骨架完成**：新增 `@nestjs/schedule` + `cron`，实现内存版 JobsModule。支持 cron/every/at 三类任务注册、启动、停止、删除，管理接口受 JWT 保护；新增单测覆盖 every 启停、at 一次执行、非法 everyMs。验证：jobs 单测 3 条通过，build/lint 通过；任务持久化和真实 Agent 执行动作后续补。 |
+| 2026-06-19 | **P2 TTS SSE 流式音频完成**：新增 `GET /api/speech/tts/stream` SSE base64 音频块接口，输出 meta/chunk/done/error 事件；前端朗读按钮改为 EventSource 接收音频块并组装 audio/wav Blob 播放。验证：backend build/lint ✓、frontend build ✓；frontend lint 因未安装 eslint 依赖暂未通过；腾讯云 Secret 已配置，真实播放联调待外部网络调用验证。 |
+| 2026-06-19 | **P2 Skills 技能系统基础版完成**：新增 `SkillsModule`，提供 `GET /api/skills` 和 `GET /api/skills/match`；支持递归加载本地 `SKILL.md`、解析 frontmatter 元数据、本地中英文 token 匹配排序。验证：skills 单测 3 条通过，backend build/lint 通过；后续已增强为 Qwen Embedding 语义匹配并保留 token 回退。 |
+| 2026-06-19 | **P3 异常场景测试基础版完成**：新增 Karpathy RAG 空库/无相关文档/向量失败降级测试，新增腾讯云 SpeechProvider 缺 key 错误测试，扩展 Bocha 503 服务不可用测试，并复用已有长文本切分测试覆盖大文件基础场景。验证：异常场景相关 3 suites / 8 tests 通过，backend build/lint 通过。 |
+| 2026-06-19 | **P3 Mermaid 工作流可视化基础版完成**：新增 `WorkflowModule` 和 `GET /api/workflows/agentic/mermaid`，导出 Agentic RAG 工作流 Mermaid 图，并支持通过 SSE 事件列表高亮执行路径。验证：agentic-workflow Mermaid 单测 3 条通过，backend build/lint 通过。 |
+| 2026-06-19 | **P2 Skills Embedding 语义匹配增强完成**：Skills 匹配新增 OpenAI-compatible Embeddings 语义排序，返回 matchMode/semanticScore；无 key 或调用失败时自动回退本地 token 匹配，避免直接接入 EmbeddingProvider 导致无 key 启动失败。验证：真实 Qwen text-embedding-v3 调用返回 1024 维非零向量；skills 单测扩展到 4 条通过，backend build/lint 通过。 |
+| 2026-06-19 | **本地密钥快照防误提交完成**：新增 `.gitignore` 规则 `.history/**/.env*`，避免本地历史环境变量快照被误加入版本库；已存在本地快照仍需主人确认后才能删除。 |
+| 2026-06-19 | **P3 文件系统中间件 + 权限控制基础版完成**：新增 `FilesystemPolicyModule` / `FileAccessPolicyService`，默认限制文件访问在 workspace 根内，并拒绝 `.env`、`.git`、`.history`、`agent-course`、`node_modules` 等敏感路径段。验证：file-access-policy 单测 4 条通过，backend build/lint 通过。 |
+| 2026-06-19 | **本地 start:dev 启动问题修复**：定位到 3000 端口已有 node 进程监听，以及 MCP 默认读取 `workspace/mcp-servers.yaml` 后启动 `agent-course/tool-test` 示例 server 失败；新增 `MCP_ENABLED=false` 默认关闭 MCP 初始化，保留 `MCP_CONFIG_PATH` 显式配置入口。验证：`PORT=3001 npm run start:dev` watch 编译 0 error，`GET /api/health` 返回 200；ES 客户端/服务端兼容头不匹配仍记录为未完成问题。 |

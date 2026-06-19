@@ -94,6 +94,84 @@ export function chatStream(
   });
 }
 
+// TTS SSE：接收 base64 音频块，完成后返回可播放 Blob
+export function synthesizeSpeechStream(
+  text: string,
+  onChunk?: (receivedChunks: number) => void,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const token = localStorage.getItem('token');
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+    const url = `/api/speech/tts/stream?text=${encodeURIComponent(text)}${tokenParam}`;
+    const eventSource = new EventSource(url);
+    const chunks: ArrayBuffer[] = [];
+    let contentType = 'audio/wav';
+    let settled = false;
+
+    const cleanup = () => {
+      eventSource.close();
+    };
+
+    const settleReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const appendBase64Chunk = (base64: string) => {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      chunks.push(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+      onChunk?.(chunks.length);
+    };
+
+    eventSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data) as {
+          type: string;
+          data?: {
+            contentType?: string;
+            chunk?: string;
+            message?: string;
+          };
+        };
+
+        if (event.type === 'meta' && event.data?.contentType) {
+          contentType = event.data.contentType;
+          return;
+        }
+
+        if (event.type === 'chunk' && event.data?.chunk) {
+          appendBase64Chunk(event.data.chunk);
+          return;
+        }
+
+        if (event.type === 'done') {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(new Blob(chunks, { type: contentType }));
+          return;
+        }
+
+        if (event.type === 'error') {
+          settleReject(new Error(event.data?.message ?? 'TTS synthesis failed'));
+        }
+      } catch (err) {
+        settleReject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    eventSource.onerror = () => {
+      settleReject(new Error('TTS SSE connection error'));
+    };
+  });
+}
+
 // 认证：登录
 export async function login(username: string, password: string): Promise<LoginResponse> {
   const res = await api.post<ApiResponse<LoginResponse>>('/auth/login', { username, password });

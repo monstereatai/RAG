@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { chat, chatStream } from '../api';
+import { chat, chatStream, synthesizeSpeechStream } from '../api';
 import type { ChatMode, ReferenceChunk } from '../types';
 import ReferenceList from './ReferenceList';
 
@@ -52,6 +52,7 @@ function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseInputRef = useRef('');
@@ -298,19 +299,42 @@ function ChatPage() {
     recognition.start();
   };
 
-  const playTTS = (text: string) => {
+  const playTTS = async (text: string, messageIndex: number) => {
+    if (speakingIndex !== null) return;
+
     const cleanText = text
       .replace(/\[片段\s*\d+\]/g, '')
       .replace(/[*#`_\-]/g, '')
       .trim();
+    if (!cleanText) return;
 
-    const token = localStorage.getItem('token');
-    const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
-    const url = `/api/speech/tts?text=${encodeURIComponent(cleanText)}${tokenQuery}`;
-    const audio = new Audio(url);
-    audio.play().catch((err) => {
+    setSpeakingIndex(messageIndex);
+    let objectUrl: string | null = null;
+    try {
+      const audioBlob = await synthesizeSpeechStream(cleanText);
+      objectUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(objectUrl);
+      audio.addEventListener('ended', () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }, {
+        once: true,
+      });
+      audio.addEventListener('error', () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }, {
+        once: true,
+      });
+      await audio.play();
+    } catch (err) {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
       console.error('TTS playback failed:', err);
-    });
+    } finally {
+      setSpeakingIndex(null);
+    }
   };
 
   return (
@@ -349,11 +373,12 @@ function ChatPage() {
               </div>
               {msg.role === 'assistant' && msg.content && (
                 <button
-                  className="tts-button"
-                  onClick={() => playTTS(msg.content)}
+                  className={`tts-button ${speakingIndex === idx ? 'active' : ''}`}
+                  onClick={() => playTTS(msg.content, idx)}
+                  disabled={speakingIndex !== null}
                   title="朗读"
                 >
-                  🔊 朗读
+                  {speakingIndex === idx ? '合成中' : '朗读'}
                 </button>
               )}
               {msg.events && msg.events.length > 0 && msg.status === 'streaming' && (

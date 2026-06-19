@@ -97,7 +97,6 @@ export const configuration = () => ({
       secretId: process.env.TENCENT_SECRET_ID ?? '',
       secretKey: process.env.TENCENT_SECRET_KEY ?? '',
       region: process.env.TENCENT_REGION ?? 'ap-shanghai',
-      asrAppId: process.env.TENCENT_ASR_APP_ID ?? '',
     },
   },
 
@@ -132,10 +131,23 @@ export const configuration = () => ({
     baseUrl: process.env.MEM0_BASE_URL ?? '',
   },
 
+  // MCP 工具协议（默认关闭，避免示例 server 影响本地启动）
+  mcp: {
+    enabled: process.env.MCP_ENABLED === 'true',
+    configPath:
+      process.env.MCP_CONFIG_PATH ||
+      path.resolve(process.cwd(), '../workspace/mcp-servers.yaml'),
+  },
+
   // 工作区
   workspace: {
     uploadDir:
       process.env.UPLOAD_DIR ??
       path.resolve(process.cwd(), '../workspace/uploads'),
+  },
+
+  // Skills 技能系统
+  skills: {
+    rootDir: process.env.SKILLS_DIR ?? path.resolve(process.cwd(), '../skills'),
   },
 });

@@ -60,4 +60,19 @@ describe('BochaSearchService', () => {
       },
     ]);
   });
+
+  it('throws a clear error when the web search service is unavailable', async () => {
+    const service = new BochaSearchService({
+      get: jest.fn().mockReturnValue('test-key'),
+    } as unknown as ConfigService);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: () => Promise.resolve('service unavailable'),
+    });
+
+    await expect(service.search('query')).rejects.toThrow(
+      'Bocha web_search failed: 503 service unavailable',
+    );
+  });
 });

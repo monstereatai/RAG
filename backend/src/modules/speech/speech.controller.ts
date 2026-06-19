@@ -9,17 +9,32 @@ import {
   Res,
   Logger,
   UseGuards,
+  Sse,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
+import { Observable } from 'rxjs';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+
+interface SpeechSseEvent {
+  type: 'meta' | 'chunk' | 'done' | 'error';
+  data: {
+    contentType?: string;
+    encoding?: 'base64';
+    chunk?: string;
+    index?: number;
+    totalBytes?: number;
+    message?: string;
+  };
+}
 
 /**
  * Speech Controller
  *
  * POST /api/speech/asr  — 上传音频文件 → 文字
- * GET  /api/speech/tts  — 文字 → 流式音频（SSE chunked）
+ * GET  /api/speech/tts  — 文字 → chunked WAV 音频
+ * GET  /api/speech/tts/stream — 文字 → SSE base64 音频块
  */
 @Controller('speech')
 @UseGuards(JwtAuthGuard)
@@ -89,6 +104,86 @@ export class SpeechController {
         res.end();
       }
     }
+  }
+
+  /**
+   * TTS：文字 → SSE base64 音频块
+   * Query: text=..., voiceType=101001（可选）
+   */
+  @Sse('tts/stream')
+  synthesizeSse(
+    @Query('text') text: string,
+    @Query('voiceType') voiceTypeStr: string,
+  ): Observable<SpeechSseEvent> {
+    if (!text || !text.trim()) {
+      throw new BadRequestException('text query param is required');
+    }
+
+    const voiceType = this.parseVoiceType(voiceTypeStr);
+    this.logger.log(
+      `TTS SSE request: "${text.slice(0, 50)}", voiceType=${voiceType}`,
+    );
+
+    return new Observable<SpeechSseEvent>((subscriber) => {
+      void (async () => {
+        let index = 0;
+        let totalBytes = 0;
+
+        subscriber.next({
+          type: 'meta',
+          data: {
+            contentType: 'audio/wav',
+            encoding: 'base64',
+          },
+        });
+
+        try {
+          for await (const chunk of this.speechProvider.synthesizeStream(
+            text,
+            voiceType,
+          )) {
+            totalBytes += chunk.length;
+            subscriber.next({
+              type: 'chunk',
+              data: {
+                chunk: chunk.toString('base64'),
+                index,
+              },
+            });
+            index += 1;
+          }
+
+          subscriber.next({
+            type: 'done',
+            data: {
+              totalBytes,
+            },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(`TTS SSE failed: ${message}`);
+          subscriber.next({
+            type: 'error',
+            data: { message },
+          });
+        } finally {
+          subscriber.complete();
+        }
+      })();
+    });
+  }
+
+  private parseVoiceType(voiceTypeStr?: string): number {
+    if (!voiceTypeStr) {
+      return 101001;
+    }
+
+    const voiceType = Number(voiceTypeStr);
+    if (!Number.isInteger(voiceType) || voiceType <= 0) {
+      throw new BadRequestException('voiceType must be a positive integer');
+    }
+
+    return voiceType;
   }
 
   private detectAudioFormat(filename: string): string {

@@ -10,6 +10,7 @@ build/
 .env
 .env.local
 .env.*.local
+.history/**/.env*
 
 # IDE
 .vscode/

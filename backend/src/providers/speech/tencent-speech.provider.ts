@@ -19,14 +19,12 @@ export class TencentSpeechProvider implements ISpeechProvider {
   private readonly secretId: string;
   private readonly secretKey: string;
   private readonly region: string;
-  private readonly asrAppId: string;
   private readonly enabled: boolean;
 
   constructor(private readonly config: ConfigService) {
     this.secretId = config.get<string>('speech.tencent.secretId') ?? '';
     this.secretKey = config.get<string>('speech.tencent.secretKey') ?? '';
     this.region = config.get<string>('speech.tencent.region') ?? 'ap-shanghai';
-    this.asrAppId = config.get<string>('speech.tencent.asrAppId') ?? '';
     this.enabled = !!(this.secretId && this.secretKey);
 
     if (!this.enabled) {
@@ -188,7 +186,6 @@ export class TencentSpeechProvider implements ISpeechProvider {
       SubServiceType: 2, // 一句话识别
       Data: audioBuffer.toString('base64'),
       DataLen: audioBuffer.length,
-      AppId: this.asrAppId ? Number(this.asrAppId) : undefined,
     });
 
     this.logger.log(`ASR result: ${res.Result}`);

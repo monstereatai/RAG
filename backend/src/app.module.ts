@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { configuration } from './config/configuration';
 import { LoggerModule } from './common/logger/logger.module';
+import { FilesystemPolicyModule } from './common/filesystem/filesystem-policy.module';
 import { DatabaseModule } from './providers/db/database.module';
 import { SpeechModule as SpeechProviderModule } from './providers/speech/speech.module';
 import { ElasticsearchModule } from './providers/elasticsearch/elasticsearch.module';
@@ -20,6 +21,8 @@ import { SpeechModule } from './modules/speech/speech.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { SkillsModule } from './modules/skills/skills.module';
+import { WorkflowModule } from './modules/workflow/workflow.module';
 
 @Module({
   imports: [
@@ -37,6 +40,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
       ],
     }),
     LoggerModule,
+    FilesystemPolicyModule,
     DatabaseModule,
     SpeechProviderModule,
     ElasticsearchModule,
@@ -52,6 +56,8 @@ import { JobsModule } from './modules/jobs/jobs.module';
     MemoryModule,
     MetricsModule,
     JobsModule,
+    SkillsModule,
+    WorkflowModule,
   ],
   providers: [
     {
