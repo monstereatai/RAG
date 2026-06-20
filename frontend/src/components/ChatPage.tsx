@@ -304,7 +304,7 @@ function ChatPage() {
 
     const cleanText = text
       .replace(/\[片段\s*\d+\]/g, '')
-      .replace(/[*#`_\-]/g, '')
+      .replace(/[*#`_-]/g, '')
       .trim();
     if (!cleanText) return;
 

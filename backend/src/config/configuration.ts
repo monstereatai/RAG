@@ -27,6 +27,13 @@ export const configuration = () => ({
       port: parseInt(process.env.MILVUS_PORT ?? '19530', 10),
       collection: process.env.MILVUS_COLLECTION ?? 'rag_chunks',
       dimension: parseInt(process.env.MILVUS_DIMENSION ?? '1024', 10),
+      indexType: process.env.MILVUS_INDEX_TYPE ?? 'HNSW',
+      hnswM: parseInt(process.env.MILVUS_HNSW_M ?? '16', 10),
+      hnswEfConstruction: parseInt(
+        process.env.MILVUS_HNSW_EF_CONSTRUCTION ?? '200',
+        10,
+      ),
+      hnswEfSearch: parseInt(process.env.MILVUS_HNSW_EF_SEARCH ?? '64', 10),
     },
     pgvector: {
       url:

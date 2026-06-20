@@ -19,6 +19,15 @@ export interface VectorSearchHit {
   score: number;
 }
 
+export interface VectorIndexInfo {
+  provider: string;
+  collection: string;
+  dimension: number;
+  indexType: string;
+  metricType: string;
+  params: Record<string, number | string>;
+}
+
 export interface IVectorStoreProvider {
   /**
    * 初始化集合（不存在则创建 + 建索引 + load）
@@ -43,4 +52,9 @@ export interface IVectorStoreProvider {
    * 按 docId 删除所有 chunks
    */
   deleteByDocId(docId: string): Promise<void>;
+
+  /**
+   * 返回当前索引配置，用于调试和验收。
+   */
+  getIndexInfo(): VectorIndexInfo;
 }

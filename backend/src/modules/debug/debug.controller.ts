@@ -1,9 +1,13 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 
 @Controller('debug')
 export class DebugController {
-  constructor(private readonly karpathyRagService: KarpathyRagService) {}
+  constructor(
+    private readonly karpathyRagService: KarpathyRagService,
+    private readonly vectorStoreProvider: VectorStoreProvider,
+  ) {}
 
   @Get('chunks')
   async debugChunks(@Query('query') query: string, @Query('k') k?: string) {
@@ -25,5 +29,10 @@ export class DebugController {
         totalScore: c.totalScore,
       })),
     };
+  }
+
+  @Get('vector-index')
+  vectorIndex() {
+    return this.vectorStoreProvider.getIndexInfo();
   }
 }

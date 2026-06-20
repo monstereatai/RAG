@@ -781,6 +781,30 @@ export class AgenticRagService {
       };
     }
 
+    if (!this.karpathyRagService.hasIndexedChunks(userId)) {
+      const answer = '未找到相关内容，请先上传文档。';
+      const result = {
+        answer,
+        references: [],
+        route: 'agentic' as const,
+        confidence: 1,
+        retryCount: 0,
+        retrievalSufficient: false,
+        retrievalReason: '当前用户没有已索引的知识库片段',
+      };
+      onEvent?.({ type: 'retrieval', data: [] });
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: false,
+          reason: result.retrievalReason,
+        },
+      });
+      onEvent?.({ type: 'citation', data: [] });
+      onEvent?.({ type: 'final', data: result });
+      return result;
+    }
+
     // 通过 LangGraph StateGraph 执行 agentic 流程
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(

@@ -35,6 +35,7 @@ export interface DocMeta extends UploadResult {
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
   private readonly chunker = new MarkdownChunker(500, 50);
+  private readonly pendingMilvusDeletes = new Map<string, number>();
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -156,6 +157,7 @@ export class DocumentService {
       this.logger.warn(
         `Milvus delete failed for docId=${docId}: ${(err as Error).message}`,
       );
+      this.scheduleMilvusDeleteRetry(docId);
     }
 
     // 2. 删除 BM25 内存索引 + JSON 持久化更新
@@ -168,6 +170,38 @@ export class DocumentService {
     await this.docMetaRepo.delete({ docId, userId });
 
     this.logger.log(`Doc ${docId} deleted successfully`);
+  }
+
+  private scheduleMilvusDeleteRetry(docId: string): void {
+    const attempts = this.pendingMilvusDeletes.get(docId) ?? 0;
+    if (attempts >= 5) {
+      this.logger.warn(
+        `Milvus delete retry exhausted for docId=${docId}; vector hits remain guarded by active docId filtering`,
+      );
+      return;
+    }
+
+    const nextAttempt = attempts + 1;
+    this.pendingMilvusDeletes.set(docId, nextAttempt);
+    const delayMs = Math.min(5_000 * 2 ** attempts, 60_000);
+
+    const timer = setTimeout(() => {
+      void this.retryMilvusDelete(docId);
+    }, delayMs);
+    timer.unref?.();
+  }
+
+  private async retryMilvusDelete(docId: string): Promise<void> {
+    try {
+      await this.vectorStoreProvider.deleteByDocId(docId);
+      this.pendingMilvusDeletes.delete(docId);
+      this.logger.log(`Milvus delete retry succeeded for docId=${docId}`);
+    } catch (err) {
+      this.logger.warn(
+        `Milvus delete retry failed for docId=${docId}: ${(err as Error).message}`,
+      );
+      this.scheduleMilvusDeleteRetry(docId);
+    }
   }
 
   async getDocMeta(

@@ -20,6 +20,7 @@ import { DebugModule } from './modules/debug/debug.module';
 import { SpeechModule } from './modules/speech/speech.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { TracingModule } from './modules/tracing/tracing.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
@@ -29,6 +30,7 @@ import { McpRoutesModule } from './modules/mcp/mcp.module';
 
 import { StructuredModule } from './modules/structured/structured.module';
 import { Neo4jModule } from './providers/neo4j/neo4j.module';
+import { GraphModule } from './modules/graph/graph.module';
 
 @Module({
   imports: [
@@ -61,6 +63,7 @@ import { Neo4jModule } from './providers/neo4j/neo4j.module';
     SpeechModule,
     MemoryModule,
     MetricsModule,
+    TracingModule,
     JobsModule,
     SkillsModule,
     WorkflowModule,
@@ -69,6 +72,7 @@ import { Neo4jModule } from './providers/neo4j/neo4j.module';
     McpRoutesModule,
     StructuredModule,
     Neo4jModule,
+    GraphModule,
   ],
   providers: [
     {

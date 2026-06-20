@@ -24,6 +24,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
   private readonly collectionName: string;
   private readonly dimension: number;
   private initialized = false;
+  private readonly searchTimeoutMs = 500;
+  private readonly deleteTimeoutMs = 800;
+  private circuitOpenUntil = 0;
 
   constructor(
     private readonly config: ConfigService,
@@ -120,7 +123,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
     k = 3,
     userId?: string,
   ): Promise<Array<{ content: string; threadId: string; score: number }>> {
-    if (!this.initialized || !this.client) {
+    if (!this.initialized || !this.client || this.isCircuitOpen()) {
       return [];
     }
 
@@ -136,8 +139,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
           params: { ef: 64 },
           output_fields: ['content', 'thread_id', 'query'],
           expr: userId ? `user_id == "${userId}"` : undefined,
+          timeout: this.searchTimeoutMs,
         }),
-        5_000,
+        this.searchTimeoutMs + 200,
         'Conversation history search',
       );
 
@@ -152,6 +156,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
               : Number(hit['score'] ?? 0),
         }));
     } catch (err) {
+      this.openCircuit();
       this.logger.warn(`Failed to search history: ${(err as Error).message}`);
       return [];
     }
@@ -199,21 +204,36 @@ export class ConversationEmbeddingService implements OnModuleInit {
    * 删除指定对话的历史向量
    */
   async deleteByThreadId(threadId: string): Promise<void> {
-    if (!this.initialized || !this.client) {
+    if (!this.initialized || !this.client || this.isCircuitOpen()) {
       return;
     }
 
     try {
-      await this.client.deleteEntities({
-        collection_name: this.collectionName,
-        expr: `thread_id == "${threadId}"`,
-      });
+      await this.withTimeout(
+        this.client.deleteEntities({
+          collection_name: this.collectionName,
+          filter: 'thread_id == $threadId',
+          exprValues: { threadId },
+          timeout: this.deleteTimeoutMs,
+        }),
+        this.deleteTimeoutMs + 200,
+        'Conversation history delete',
+      );
       this.logger.log(`Deleted conversation chunks for threadId=${threadId}`);
     } catch (err) {
+      this.openCircuit();
       this.logger.warn(
         `Failed to delete conversation chunks: ${(err as Error).message}`,
       );
     }
+  }
+
+  private isCircuitOpen(): boolean {
+    return Date.now() < this.circuitOpenUntil;
+  }
+
+  private openCircuit(): void {
+    this.circuitOpenUntil = Date.now() + 30_000;
   }
 
   /**

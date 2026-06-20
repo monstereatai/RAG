@@ -259,6 +259,7 @@ export class KarpathyRagService implements OnModuleInit {
           this.topK * 2,
           userId,
         );
+        cosineHits = this.filterActiveVectorHits(cosineHits, userId);
       } catch (err) {
         this.logger.warn(
           `Vector search failed, fallback to BM25 only: ${(err as Error).message}`,
@@ -418,5 +419,22 @@ export class KarpathyRagService implements OnModuleInit {
   /** 获取当前索引中的所有 docId（用于校验） */
   getIndexedDocIds(): Set<string> {
     return new Set(this.persistedEntries.map((e) => e.docId));
+  }
+
+  hasIndexedChunks(userId?: string): boolean {
+    return this.persistedEntries.some((entry) => entry.userId === userId);
+  }
+
+  private filterActiveVectorHits(
+    hits: Awaited<ReturnType<VectorStoreProvider['similaritySearch']>>,
+    userId?: string,
+  ): Awaited<ReturnType<VectorStoreProvider['similaritySearch']>> {
+    const activeDocIds = new Set(
+      this.persistedEntries
+        .filter((entry) => entry.userId === userId)
+        .map((entry) => entry.docId),
+    );
+
+    return hits.filter((hit) => activeDocIds.has(hit.docId));
   }
 }

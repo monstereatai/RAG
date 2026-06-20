@@ -8,6 +8,7 @@ import {
 } from '@zilliz/milvus2-sdk-node';
 import {
   IVectorStoreProvider,
+  VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
 } from './vector-store-provider.interface';
@@ -26,6 +27,13 @@ export class MilvusVectorStoreProvider
   private readonly dimension: number;
   private readonly host: string;
   private readonly port: number;
+  private readonly indexType: IndexType;
+  private readonly hnswM: number;
+  private readonly hnswEfConstruction: number;
+  private readonly hnswEfSearch: number;
+  private readonly searchTimeoutMs = 800;
+  private readonly deleteTimeoutMs = 1_000;
+  private circuitOpenUntil = 0;
 
   constructor(private readonly config: ConfigService) {
     this.host =
@@ -35,6 +43,14 @@ export class MilvusVectorStoreProvider
       this.config.get<string>('vectorStore.milvus.collection') ?? 'rag_chunks';
     this.dimension =
       this.config.get<number>('vectorStore.milvus.dimension') ?? 1024;
+    this.indexType = this.resolveIndexType(
+      this.config.get<string>('vectorStore.milvus.indexType') ?? 'HNSW',
+    );
+    this.hnswM = this.config.get<number>('vectorStore.milvus.hnswM') ?? 16;
+    this.hnswEfConstruction =
+      this.config.get<number>('vectorStore.milvus.hnswEfConstruction') ?? 200;
+    this.hnswEfSearch =
+      this.config.get<number>('vectorStore.milvus.hnswEfSearch') ?? 64;
   }
 
   async onModuleInit(): Promise<void> {
@@ -74,6 +90,7 @@ export class MilvusVectorStoreProvider
         limit: 1,
         metric_type: MetricType.COSINE,
         output_fields: ['id'],
+        timeout: this.searchTimeoutMs,
       });
       this.logger.log('Milvus warmup search done');
     } catch (err) {
@@ -161,9 +178,9 @@ export class MilvusVectorStoreProvider
     await this.client.createIndex({
       collection_name: this.collection,
       field_name: 'vector',
-      index_type: IndexType.HNSW,
+      index_type: this.indexType,
       metric_type: MetricType.COSINE,
-      params: { M: 16, efConstruction: 200 },
+      params: this.getCreateIndexParams(),
     });
 
     await this.client.loadCollection({ collection_name: this.collection });
@@ -193,22 +210,33 @@ export class MilvusVectorStoreProvider
     k: number,
     userId?: string,
   ): Promise<VectorSearchHit[]> {
+    if (this.isCircuitOpen()) {
+      throw new Error('Milvus similarity search circuit is open');
+    }
+
     // 对齐 agent-course/milvus-test 参考实现：使用 HNSW 参数
     const searchParams = {
       collection_name: this.collection,
       vector: queryVector,
       limit: k,
       metric_type: MetricType.COSINE,
-      params: { ef: 64 },
+      params: this.getSearchParams(),
       output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
       expr: userId ? `user_id == "${userId}"` : undefined,
+      timeout: this.searchTimeoutMs,
     };
 
-    const searchResult = await this.withTimeout(
-      this.client.search(searchParams),
-      5_000,
-      'Milvus similarity search',
-    );
+    let searchResult: Awaited<ReturnType<MilvusClient['search']>>;
+    try {
+      searchResult = await this.withTimeout(
+        this.client.search(searchParams),
+        this.searchTimeoutMs + 200,
+        'Milvus similarity search',
+      );
+    } catch (err) {
+      this.openCircuit();
+      throw err;
+    }
 
     return (searchResult.results as Array<Record<string, unknown>>).map(
       (hit) => ({
@@ -234,11 +262,70 @@ export class MilvusVectorStoreProvider
   }
 
   async deleteByDocId(docId: string): Promise<void> {
-    await this.client.deleteEntities({
-      collection_name: this.collection,
-      expr: `doc_id == "${docId}"`,
-    });
-    this.logger.log(`Deleted chunks for doc_id=${docId}`);
+    try {
+      await this.withTimeout(
+        this.client.deleteEntities({
+          collection_name: this.collection,
+          filter: 'doc_id == $docId',
+          exprValues: { docId },
+          timeout: this.deleteTimeoutMs,
+        }),
+        this.deleteTimeoutMs + 200,
+        'Milvus delete by docId',
+      );
+      this.logger.log(`Deleted chunks for doc_id=${docId}`);
+    } catch (err) {
+      this.openCircuit();
+      this.logger.warn(
+        `Milvus delete timed out for doc_id=${docId}; continuing with other indexes: ${(err as Error).message}`,
+      );
+      throw err;
+    }
+  }
+
+  getIndexInfo(): VectorIndexInfo {
+    return {
+      provider: 'milvus',
+      collection: this.collection,
+      dimension: this.dimension,
+      indexType: this.indexType,
+      metricType: MetricType.COSINE,
+      params: {
+        M: this.hnswM,
+        efConstruction: this.hnswEfConstruction,
+        ef: this.hnswEfSearch,
+      },
+    };
+  }
+
+  private resolveIndexType(value: string): IndexType {
+    const normalized = value.trim().toUpperCase();
+    if (normalized === 'HNSW') {
+      return IndexType.HNSW;
+    }
+    this.logger.warn(
+      `Unsupported MILVUS_INDEX_TYPE="${value}", fallback to HNSW`,
+    );
+    return IndexType.HNSW;
+  }
+
+  private getCreateIndexParams(): Record<string, number> {
+    return {
+      M: this.hnswM,
+      efConstruction: this.hnswEfConstruction,
+    };
+  }
+
+  private getSearchParams(): Record<string, number> {
+    return { ef: this.hnswEfSearch };
+  }
+
+  private isCircuitOpen(): boolean {
+    return Date.now() < this.circuitOpenUntil;
+  }
+
+  private openCircuit(): void {
+    this.circuitOpenUntil = Date.now() + 30_000;
   }
 
   private async withTimeout<T>(

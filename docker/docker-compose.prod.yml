@@ -9,6 +9,7 @@
 #   - postgres（pgvector）
 #   - redis
 #   - milvus + etcd + minio
+#   - neo4j（GraphRAG，可选 profile=graphrag）
 #
 # 密钥：从 backend/.env 读取（QWEN_API_KEY 等），不进 git
 # ============================================================
@@ -35,6 +36,7 @@ services:
       MILVUS_PORT: '19530'
       POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/rag
       REDIS_URL: redis://redis:6379
+      NEO4J_URL: bolt://neo4j:7687
       # 密钥类从 .env 读取
     env_file:
       - ../backend/.env
@@ -47,6 +49,9 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      neo4j:
+        condition: service_healthy
+        required: false
     deploy:
       resources:
         limits:
@@ -217,6 +222,35 @@ services:
     networks:
       - rag-net
 
+  # ---- Neo4j 5（知识图谱 GraphRAG，profile=graphrag 可选启动）----
+  neo4j:
+    image: neo4j:5-community
+    container_name: rag-neo4j
+    restart: unless-stopped
+    profiles:
+      - graphrag
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-neo4jpassword}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - '7474:7474'   # HTTP Browser
+      - '7687:7687'   # Bolt
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - rag-net
+
 networks:
   rag-net:
     driver: bridge
@@ -227,4 +261,5 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  neo4j_data:
   backend_workspace:

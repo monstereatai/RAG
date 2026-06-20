@@ -52,11 +52,14 @@ export class ChatService {
     }
 
     // 对话历史向量化搜索：检索相关的历史对话作为上下文
-    const historySearch = await this.conversationEmbeddingService.searchHistory(
-      req.query,
-      2,
-      userId,
-    );
+    const shouldSearchHistory = Boolean(req.threadId);
+    const historySearch = shouldSearchHistory
+      ? await this.conversationEmbeddingService.searchHistory(
+          req.query,
+          2,
+          userId,
+        )
+      : [];
     if (historySearch.length > 0) {
       const historyContext =
         this.conversationEmbeddingService.formatHistoryContext(historySearch);

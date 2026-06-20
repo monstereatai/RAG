@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   IVectorStoreProvider,
+  VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
 } from './vector-store-provider.interface';
@@ -50,5 +51,9 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
 
   deleteByDocId(docId: string): Promise<void> {
     return this.provider.deleteByDocId(docId);
+  }
+
+  getIndexInfo(): VectorIndexInfo {
+    return this.provider.getIndexInfo();
   }
 }

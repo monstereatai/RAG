@@ -1,0 +1,23 @@
+[
+  {
+    "id": "rag-definition",
+    "query": "RAG 是什么？",
+    "referenceAnswer": "RAG 是检索增强生成，会先从知识库检索相关内容，再把检索结果交给大模型生成回答。",
+    "expectedKeywords": ["检索", "知识库", "生成"],
+    "minKeywordCoverage": 0.66
+  },
+  {
+    "id": "agentic-rag-flow",
+    "query": "Agentic RAG 通常包含哪些步骤？",
+    "referenceAnswer": "Agentic RAG 通常会做路由、查询增强、检索、充足性判断、必要时 Web 搜索、重排、生成和反思。",
+    "expectedKeywords": ["路由", "查询增强", "检索", "重排", "反思"],
+    "minKeywordCoverage": 0.6
+  },
+  {
+    "id": "citation-requirement",
+    "query": "为什么 RAG 回答需要引用来源？",
+    "referenceAnswer": "引用来源可以让用户检查答案依据，降低幻觉风险，并便于回到原始 chunk 核验。",
+    "expectedKeywords": ["引用", "依据", "幻觉", "chunk"],
+    "minKeywordCoverage": 0.5
+  }
+]

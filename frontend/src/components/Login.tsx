@@ -5,6 +5,17 @@ interface LoginProps {
   onLoginSuccess: (token: string) => void;
 }
 
+function getLoginErrorMessage(err: unknown): string {
+  if (typeof err === 'object' && err !== null && 'response' in err) {
+    const response = (err as { response?: { data?: { message?: unknown } } }).response;
+    if (typeof response?.data?.message === 'string') {
+      return response.data.message;
+    }
+  }
+
+  return '登录失败，请检查用户名和密码是否正确';
+}
+
 export default function Login({ onLoginSuccess }: LoginProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -23,11 +34,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       const response = await login(username, password);
       localStorage.setItem('token', response.accessToken);
       onLoginSuccess(response.accessToken);
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-        '登录失败，请检查用户名和密码是否正确'
-      );
+    } catch (err: unknown) {
+      setError(getLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -42,11 +50,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       const response = await login(user, pass);
       localStorage.setItem('token', response.accessToken);
       onLoginSuccess(response.accessToken);
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-        '登录失败，请检查用户名和密码是否正确'
-      );
+    } catch (err: unknown) {
+      setError(getLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }

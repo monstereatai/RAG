@@ -15,36 +15,59 @@ export class GraphSearchService {
   getTool(): DynamicStructuredTool {
     return new DynamicStructuredTool({
       name: 'graph_search_tool',
-      description: '查询知识图谱（Neo4j）以获取实体关系。输入一个或多个实体名称，返回它们在图谱中的相关节点和关系。',
+      description:
+        '查询知识图谱（Neo4j）以获取实体关系。输入一个或多个实体名称，返回它们在图谱中的相关节点和关系。',
       schema: z.object({
-        entities: z.array(z.string()).describe('要查询的实体名称列表，例如 ["张三", "某某公司"]'),
+        entities: z
+          .array(z.string())
+          .describe('要查询的实体名称列表，例如 ["张三", "某某公司"]'),
+        userId: z.string().optional().describe('可选的用户 ID，用于多租户隔离'),
       }),
-      func: async ({ entities }) => {
+      func: async (input: unknown) => {
         try {
-          this.logger.log(`Executing graph search for entities: ${entities.join(', ')}`);
-          
+          const { entities, userId } = input as {
+            entities?: string[];
+            userId?: string;
+          };
           if (!entities || entities.length === 0) {
-            return "未提供实体名称。";
+            return '未提供实体名称。';
           }
 
-          // 构建 Cypher 查询，查询与给定实体直接相连的节点
-          // 注意：此处仅为简单示例，实际可能需要更复杂的模糊匹配或多跳查询
+          this.logger.log(
+            `Executing graph search for entities: ${entities.join(', ')}`,
+          );
+
           const query = `
-            MATCH (n)-[r]-(m)
-            WHERE n.id IN $entities OR n.label IN $entities
-            RETURN n.id AS source, type(r) AS relationship, m.id AS target
+            MATCH (source:GraphEntity)-[r:GRAPH_RELATION]->(target:GraphEntity)
+            WHERE ($userId = "" OR source.userId = $userId)
+              AND ($userId = "" OR target.userId = $userId)
+              AND ($userId = "" OR r.userId = $userId)
+              AND (
+                source.id IN $entities
+                OR target.id IN $entities
+                OR source.label IN $entities
+                OR target.label IN $entities
+              )
+            RETURN
+              source.id AS source,
+              r.type AS relationship,
+              target.id AS target
             LIMIT 50
           `;
 
-          const results = await this.neo4jProvider.executeRead<any>(query, { entities });
+          const results = await this.neo4jProvider.executeRead<{
+            source: string;
+            relationship: string;
+            target: string;
+          }>(query, { entities, userId: userId ?? '' });
 
           if (results.length === 0) {
             return `在图谱中未找到与 ${entities.join(', ')} 相关的知识。`;
           }
 
-          const formatted = results.map(
-            (r) => `${r.source} -[${r.relationship}]-> ${r.target}`
-          ).join('\n');
+          const formatted = results
+            .map((r) => `${r.source} -[${r.relationship}]-> ${r.target}`)
+            .join('\n');
 
           return `图谱查询结果:\n${formatted}`;
         } catch (error) {

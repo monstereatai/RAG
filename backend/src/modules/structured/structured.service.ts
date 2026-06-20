@@ -1,7 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import { IterableReadableStream } from '@langchain/core/utils/stream';
+
+export interface StructuredReport {
+  title: string;
+  summary: string;
+  keyPoints: string[];
+  conclusion: string;
+}
+
+export interface StructuredStreamEvent {
+  type: 'meta' | 'partial' | 'final';
+  data: unknown;
+}
 
 @Injectable()
 export class StructuredService {
@@ -12,9 +23,12 @@ export class StructuredService {
   /**
    * 生成流式结构化报告
    */
-  async streamReport(topic: string, onEvent: (data: string) => void) {
+  async streamReport(
+    topic: string,
+    onEvent: (event: StructuredStreamEvent) => void,
+  ): Promise<StructuredReport> {
     const model = this.llmProvider.getModel();
-    
+
     // 定义一个结构化输出的 Schema (例如研究报告)
     const reportSchema = z.object({
       title: z.string().describe('报告的标题'),
@@ -32,11 +46,20 @@ export class StructuredService {
         `请为我生成一份关于 "${topic}" 的结构化分析报告。`,
       );
 
+      let finalChunk: Partial<StructuredReport> = {};
+      onEvent({
+        type: 'meta',
+        data: { schema: 'StructuredReport', topic },
+      });
+
       for await (const chunk of stream) {
-        // chunk 在 stream 模式下通常是一个 partial parsed object
-        // 我们可以将其序列化为 JSON 字符串推送到前端
-        onEvent(JSON.stringify(chunk));
+        finalChunk = { ...finalChunk, ...chunk };
+        onEvent({ type: 'partial', data: chunk });
       }
+
+      const final = reportSchema.parse(finalChunk);
+      onEvent({ type: 'final', data: final });
+      return final;
     } catch (err) {
       this.logger.error(`Error in streamReport: ${(err as Error).message}`);
       throw err;

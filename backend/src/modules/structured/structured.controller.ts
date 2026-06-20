@@ -1,6 +1,5 @@
 import {
   Controller,
-  Get,
   Query,
   Sse,
   BadRequestException,
@@ -29,12 +28,13 @@ export class StructuredController {
     return new Observable<SseEvent>((subscriber) => {
       void (async () => {
         try {
-          await this.structuredService.streamReport(topic, (data) => {
+          await this.structuredService.streamReport(topic, (event) => {
             subscriber.next({
-              type: 'token',
-              data,
+              type: event.type,
+              data: event.data,
             });
           });
+          subscriber.next({ type: 'done', data: { ok: true } });
           subscriber.complete();
         } catch (err) {
           subscriber.next({

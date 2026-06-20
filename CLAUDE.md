@@ -6,6 +6,14 @@
 
 企业级 Agentic RAG + Karpathy-Style RAG Web 应用。详细规划见 `rag-plan.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `SUMMARY.md`。
 
+## 文档关系
+
+- `ARCHITECTURE.md`：技术架构与设计约束。
+- `PRD.md`：产品需求与验收标准。
+- `ROADMAP.md`：真实进度源。
+- `CLAUDE.md`：项目规则。
+- `rag-plan.md`：早期计划和技术路线。
+
 ## 技术栈（锁死，未经主人确认不得更换）
 
 ### 后端
@@ -56,6 +64,8 @@ RAG/
 ├── skills/              # Skills 技能系统（M8+）
 ├── workspace/           # 运行时工作区（上传文件等，.gitkeep，运行时内容不进 git）
 ├── CLAUDE.md            # 本文件
+├── ARCHITECTURE.md      # 技术架构与设计约束
+├── PRD.md               # 产品需求与验收标准
 ├── ROADMAP.md           # 进度源
 ├── SUMMARY.md           # 参考代码总结
 └── rag-plan.md          # 规划文档

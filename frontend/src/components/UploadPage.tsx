@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { uploadDocument, listDocuments, deleteDocument } from '../api';
 import type { DocumentItem } from '../types';
 
@@ -11,12 +11,12 @@ function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const showMessage = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const showMessage = useCallback((text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setMessage(text);
     setMessageType(type);
-  };
+  }, []);
 
-  const refreshDocs = async () => {
+  const refreshDocs = useCallback(async () => {
     setLoading(true);
     try {
       const list = await listDocuments();
@@ -26,11 +26,11 @@ function UploadPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showMessage]);
 
   useEffect(() => {
     refreshDocs();
-  }, []);
+  }, [refreshDocs]);
 
   const handleUpload = async () => {
     if (!file) return;

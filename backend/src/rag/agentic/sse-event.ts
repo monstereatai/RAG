@@ -16,6 +16,9 @@ export type SseEventType =
   | 'final' // 最终结果
   | 'thread' // 会话 thread_id 推送
   | 'tool_call' // 工具调用
+  | 'meta' // 元信息
+  | 'partial' // 结构化流式部分结果
+  | 'done' // 流式任务完成
   | 'error'; // 错误
 
 export interface SseEvent {

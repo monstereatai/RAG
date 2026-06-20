@@ -104,4 +104,35 @@ describe('KarpathyRagService exception scenarios', () => {
     });
     expect(results[0].bm25Score).toBeGreaterThan(0);
   });
+
+  it('filters stale vector hits whose docId is no longer active', async () => {
+    const { service } = createService({
+      vectorStoreProvider: {
+        similaritySearch: jest.fn().mockResolvedValue([
+          {
+            id: 'stale-chunk',
+            content: 'Deleted document content from Milvus',
+            docId: 'deleted-doc',
+            chunkIndex: 0,
+            score: 0.99,
+          },
+        ]),
+      },
+    });
+    service.indexChunks(
+      [
+        {
+          id: 'active-chunk',
+          content: 'Active document content',
+          docId: 'active-doc',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    const results = await service.retrieve('stale-vector-only', {}, 'user-1');
+
+    expect(results).toHaveLength(0);
+  });
 });

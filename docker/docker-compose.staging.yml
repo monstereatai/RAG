@@ -27,6 +27,7 @@ services:
       POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/rag
       REDIS_URL: redis://redis:6379
       ES_NODE: http://elasticsearch:9200
+      NEO4J_URL: bolt://neo4j:7687
     env_file:
       - ../backend/.env
     volumes:
@@ -38,6 +39,9 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      neo4j:
+        condition: service_healthy
+        required: false
     deploy:
       resources:
         limits:
