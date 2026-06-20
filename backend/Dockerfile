@@ -5,27 +5,27 @@
 # ============================================================
 
 # ---- 构建阶段 ----
-FROM docker.m.daocloud.io/library/node:20-alpine AS builder
+FROM docker.m.daocloud.io/library/node:20.20.2-alpine AS builder
 WORKDIR /app
 
 # 先拷贝 package 文件，利用 docker 层缓存
 COPY package*.json ./
 RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm ci
+    npm ci --omit=optional --legacy-peer-deps
 
 # 拷贝源码并构建
 COPY . .
 RUN npm run build
 
 # ---- 运行阶段 ----
-FROM docker.m.daocloud.io/library/node:20-alpine
+FROM docker.m.daocloud.io/library/node:20.20.2-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
 # 仅安装生产依赖
 COPY package*.json ./
 RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm ci --omit=dev && \
+    npm ci --omit=dev --omit=optional --legacy-peer-deps && \
     npm cache clean --force
 
 # 拷贝编译产物

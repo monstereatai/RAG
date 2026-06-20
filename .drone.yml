@@ -1,0 +1,52 @@
+kind: pipeline
+type: docker
+name: rag-ci
+
+steps:
+  - name: backend-check
+    image: docker.m.daocloud.io/library/node:20-alpine
+    commands:
+      - cd backend
+      - npm config set registry https://registry.npmmirror.com/
+      - npm ci --omit=optional --legacy-peer-deps
+      - npm run build
+      - npx eslint "{src,apps,libs,test}/**/*.ts"
+      - npm run eval:rag
+
+  - name: frontend-check
+    image: docker.m.daocloud.io/library/node:20-alpine
+    commands:
+      - cd frontend
+      - npm config set registry https://registry.npmmirror.com/
+      - npm ci
+      - npm run lint
+      - npm run build
+
+  - name: docker-build-backend
+    image: plugins/docker
+    settings:
+      dry_run: true
+      context: backend
+      dockerfile: backend/Dockerfile
+      repo: rag-backend
+      tags:
+        - ci
+    depends_on:
+      - backend-check
+
+  - name: docker-build-frontend
+    image: plugins/docker
+    settings:
+      dry_run: true
+      context: frontend
+      dockerfile: frontend/Dockerfile
+      repo: rag-frontend
+      tags:
+        - ci
+    depends_on:
+      - frontend-check
+
+trigger:
+  event:
+    - push
+    - pull_request

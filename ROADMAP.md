@@ -12,7 +12,7 @@
 
 ## 当前阶段
 
-**M1/M2/M3/M4/M5 已完成，P0/P1/P2 功能扩展多租户认证已验证完成**
+**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；当前剩余工作集中在外部专项联调与红线确认项。**
 
 - M0 项目骨架可运行已验证（2026-06-18）
 - M1 最简 RAG 管线已验证通过（2026-06-18）：上传→切分→Embedding→Milvus→simple 检索→回答→debug 全链路 OK
@@ -36,7 +36,7 @@
 - **P2 Redis 缓存层与短期记忆集成完成**（2026-06-18）：在宿主机与容器环境中集成 ioredis 连接，自动缓存 Embedding 向量（TTL 7 天）与短期对话记录（TTL 30 分钟），并在消息追加和对话删除时触发即时缓存失效，数据获取耗时从 5ms 降低至 1ms。
 - **P2 认证与多租户隔离验证完成**（2026-06-18）：实现后端 API JWT 认证保护和原生 HTML EventSource 流式 token 参数鉴权，在关系型数据库、Redis 缓存、Milvus 向量、BM25 索引中深度实施基于 `userId` 的多租户逻辑/物理硬隔离，通过 E2E 脚本自动化验证。
 - **P1 Redis LangGraph Checkpointer 接入完成**（2026-06-19，2026-06-20 复验）：Agentic RAG 从进程内 `MemorySaver` 切换为 `RedisCheckpointer`，Redis 可用时持久化 checkpoint，Redis 不可用时自动降级内存 saver；已通过 build/lint，dev Redis 已恢复且应用启动成功连接 Redis。跨进程重启恢复仍属于专项验证，不影响当前启动链路。
-- **P0 RAG 评测体系方案定稿**（2026-06-19）：Dataset 采用合成数据为主 + 人工抽样复核，Judge 使用 OpenAI-compatible 模型（默认沿用 Qwen/OpenAI Provider），CI/CD 先本地命令后 smoke dataset 门禁，正式 CI 配置变更单独确认。
+- **P0 RAG 评测体系方案定稿**（2026-06-19）：Dataset 采用合成数据为主 + 人工抽样复核，Judge 使用 OpenAI-compatible 模型（默认沿用 Qwen/OpenAI Provider），CI/CD 采用 Drone pipeline，在 Dockerfile 构建验证前执行 `npm run eval:rag` smoke 门禁。
 - **P3 结构化日志已同步完成状态**（2026-06-19）：M3 阶段已实现 nestjs-pino + pino JSON 结构化日志，P3 待办状态补齐为已完成。
 - **P0 Provider 接口定义状态同步完成**（2026-06-19）：确认 LLMProvider / EmbeddingProvider / SpeechProvider 抽象接口均已存在并有 Qwen/Tencent 实现，待办状态补齐为已完成。
 - **P3 API 限流完成**（2026-06-19）：接入 `@nestjs/throttler` 全局 Guard，默认 60 req/min，通过 `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` 配置；已通过 build/lint。压测属于后续增强，当前不阻塞验收。
@@ -53,14 +53,10 @@
   - **组件与逻辑**：在 [analyst.agent.ts](file:///Users/monster/Documents/GitHub/code/RAG/backend/src/rag/agents/analyst.agent.ts) 中集成了 `@langchain/quickjs` 沙箱环境（提供 `js_eval` 工具），实现数据分析师 Agent 能够在隔离的 QuickJS WebAssembly 沙箱中自动运行数值计算和 JSON/CSV 分析代码。
   - **优雅降级**：实现健壮的异常捕获与回退机制，在缺少 Wasm/ESM 标志或不支持 VM 模块的非标准测试环境下，自动优雅降级为标准的 LLM 直连计算，确保整个业务管线的极佳兼容性。
   - **测试与验证**：编写了专用的 `analyst.agent.spec.ts` 单元测试，全面校验了标准的执行与降级回退分支逻辑，测试 100% 成功。
-- **未完成任务统计已同步**（2026-06-20）：当前剩余显式未勾选待办任务 1 项：正式 CI/CD 配置接入。
-- 下一步：外部能力专项联调（MCP 真实 server、GraphRAG 业务图谱数据源、腾讯云 ASR/TTS 真实音频、Bocha/Rerank/LLM-as-Judge 在线调用）。CI/CD 配置除外，需单独确认。
-
-### 未完成任务编号（2026-06-20）
-
-> 仅保留当前 1 项待办。CI/CD 配置变更属于红线，需要主人单独确认。
-
-1. 正式 CI/CD 配置接入 `npm run eval:rag` 门禁（需确认后修改 workflow/CI 配置）
+- **RAG 评测 CI 门禁完成**（2026-06-20）：新增 `.drone.yml`，backend 阶段执行 build、no-fix ESLint、`npm run eval:rag`；frontend 阶段执行 lint/build；随后使用 Drone Docker 插件 dry-run 验证 backend/frontend Dockerfile 构建，不推镜像、不部署。
+- **Jenkins 部署流水线配置完成**（2026-06-20）：新增 `Jenkinsfile`，包含 backend gate、frontend gate、Docker build、手动参数化 Deploy 阶段；默认 `DEPLOY_TARGET=none` 只做 CI 验证，不部署。部署目标支持 staging/prod compose，GraphRAG profile 可选开启。
+- **依赖与基础镜像版本固定完成**（2026-06-20）：backend/frontend `package.json` 依赖版本已按 lockfile 解析结果固定为精确版本；Dockerfile 与 docker compose 中 Node/nginx/pgvector/Redis/Neo4j 等浮动 tag 已固定到明确小版本。
+- 下一步：优先做外部能力专项联调（MCP 真实 server、GraphRAG 业务图谱数据源、腾讯云 ASR/TTS 真实音频、Bocha/Rerank/LLM-as-Judge 在线调用）。数据库 schema/migration、生产部署、删除本地历史快照均需单独确认。
 - **P3 Mermaid 工作流可视化基础版完成**（2026-06-19）：新增 `GET /api/workflows/agentic/mermaid`，导出 Agentic RAG LangGraph Mermaid 图，并支持按 SSE 事件路径高亮节点。
 - **P2 Skills Embedding 语义匹配增强完成**（2026-06-19）：Skills 匹配在 `QWEN_API_KEY` 可用时使用 OpenAI-compatible Embeddings 计算语义相似度排序；无 key 或调用失败自动回退本地 token 匹配，避免启动失败；真实 Qwen `text-embedding-v3` 调用已验证返回 1024 维非零向量。
 - **本地密钥快照防误提交完成**（2026-06-19）：新增 `.gitignore` 规则 `.history/**/.env*`，防止本地历史环境变量快照误入版本库；已生成的本地快照删除需主人确认。
@@ -75,7 +71,7 @@
 - **P1/P3 待办 1-5 完成**（2026-06-20）：完成 Milvus HNSW 索引配置化与 `GET /api/debug/vector-index` 验收接口；完善结构化流式输出 `meta/partial/final/done`；完成实体关系抽取接口 `POST /api/graph/extract`；完成非结构化文本导入图谱接口 `POST /api/graph/import`；完成 GraphRAG 查询与 schema 接口 `POST /api/graph/query` / `GET /api/graph/schema`。GraphRAG 默认受 `GRAPH_RAG_ENABLED=true` 控制，未启用 Neo4j 时返回明确 503，不阻塞应用启动。验证通过：`npm run build`、全量 no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`PORT=3001 node dist/src/main`、`GET /api/v1/health`、`GET /api/v1/debug/vector-index` 返回 HNSW、`GET /api/v1/graph/schema` 返回 disabled schema、`POST /api/v1/graph/import` 在默认关闭时返回 503、`GET /api/v1/structured/stream` 输出 `meta -> partial -> final -> done`、`POST /api/v1/graph/extract` 返回节点/关系。
 - **P3 追踪、评测门禁、E2E 与性能基准完成**（2026-06-20）：新增 W3C `traceparent` 兼容追踪基础版（全局 interceptor + `GET /api/traces` 最近 span 查询，当前 exporter 为 in-memory，OTLP exporter 待后续接入）；新增 `npm run eval:rag` RAG smoke 评测门禁，离线模式校验 dataset，在线模式自动上传评测种子文档、提问打分并删除种子文档；新增 `npm run test:e2e:rag` 外部服务 E2E，覆盖登录、上传、simple 提问、auto/agentic 模式切换、Debug、语音 SSE、删除；新增 `npm run perf:rag` 性能基准脚本，支持 `PERF_RAG_ENFORCE=true` 强制阈值。验证通过：`npm run build`、全量 no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm run eval:rag`、`EVAL_RAG_BASE_URL=http://localhost:3001 npm run eval:rag`、`E2E_BASE_URL=http://localhost:3001 npm run test:e2e:rag`、`GET /api/v1/health` 携带 traceparent 返回同 traceId 新 spanId、`GET /api/v1/traces?limit=5` 返回最近 span。性能基准修复后已达标：`PERF_RAG_BASE_URL=http://localhost:3001 PERF_RAG_SAMPLES=3 PERF_RAG_ENFORCE=true npm run perf:rag` 结果 simple P50≈28.97ms、agentic P50≈34.14ms；该基准覆盖空知识库快速失败路径，不代表有文档且触发真实 LLM 生成时也能稳定低于 800ms。
 - **Milvus 超时降级与删除超时修复**（2026-06-20）：为主向量检索、对话历史检索、对话历史删除、文档向量删除传入 Milvus SDK `timeout` 并增加应用层短期熔断；新会话跳过无意义的历史向量搜索；agentic 在当前用户无索引片段时直接快速返回，避免空知识库仍执行 query augment / reflection / retry。验证通过：Milvus warmup timeout 从 15s 降到约 0.8s；测试文档删除接口返回 200，总耗时约 31-36ms，日志确认 `Deleted chunks for doc_id=...`；`E2E_BASE_URL=http://localhost:3001 npm run test:e2e:rag` 从约 37s 降到约 11.4s。
-- **Milvus 残留向量保护与删除重试完成**（2026-06-20）：保留 Milvus 检索/删除功能，同时新增 active docId 过滤，向量检索命中会在融合前按当前用户 BM25/元数据里的有效 docId 过滤，避免已删除文档的残留向量进入答案；Milvus 删除失败后进入进程内退避重试队列，最多重试 5 次，不新增数据库 schema。验证通过：`npm run build`、全量 no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npx jest src/rag/karpathy/karpathy-rag.service.spec.ts --runInBand` 新增 stale vector hit 过滤用例。运行时 E2E 复验待本机 Docker daemon 启动后执行。
+- **Milvus 残留向量保护与删除重试完成**（2026-06-20）：保留 Milvus 检索/删除功能，同时新增 active docId 过滤，向量检索命中会在融合前按当前用户 BM25/元数据里的有效 docId 过滤，避免已删除文档的残留向量进入答案；Milvus 删除失败后进入进程内退避重试队列，最多重试 5 次，不新增数据库 schema。验证通过：`npm run build`、全量 no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npx jest src/rag/karpathy/karpathy-rag.service.spec.ts --runInBand` 新增 stale vector hit 过滤用例；后续可继续做删除重试运行时专项观察。
 - **前端 lint 工具链补齐完成**（2026-06-20）：frontend 新增 ESLint flat config，补齐本地 ESLint/TypeScript/React Hooks 开发依赖，修复现有 lint 错误。验证通过：`cd frontend && npm run lint`、`cd frontend && npm run build`。
 - **架构设计文档与 PRD 补齐完成**（2026-06-20）：新增 `ARCHITECTURE.md` 与 `PRD.md`，分别记录系统目标、组件边界、核心链路、部署形态、可观测性、风险，以及产品目标、用户故事、功能范围、接口范围、非功能要求、验收口径和开放问题。验证通过：文档文件存在，核心章节可检索；本次为文档补齐，不涉及代码构建。
 
@@ -299,10 +295,11 @@
 
 ## 进行中
 
-- 当前无代码实现中的进行中任务。剩余内容集中在外部资源联调或红线确认：
-  - MCP：客户端与接口已完成，默认关闭已验证；真实工具加载仍需要提供 `workspace/mcp-servers.yaml` 与至少一个可运行 MCP Server。
-  - GraphRAG：Neo4j 服务与后端连接已验证；真实业务查询仍需要导入图谱数据源。
-  - 语音 / 联网增强：腾讯云 ASR/TTS、Bocha、Rerank、LLM-as-Judge 需要真实外部调用专项验证。
+- 当前无代码实现中的进行中任务。
+- 当前剩余工作不适合混在"进行中"里，按性质拆分为：
+  - **待专项联调**：已有代码能力，需要外部服务、真实配置或样本数据验证。
+  - **红线待确认**：CI/CD、数据库 schema/migration、生产部署、删除本地历史快照等，必须主人确认后才能执行。
+  - **可本地增强**：不触碰红线但会扩大代码面，建议单独排优先级后推进。
 
 ## 待办
 
@@ -430,7 +427,7 @@
 - [x] Prometheus 指标基础版（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；`GET /api/v1/metrics` 运行时复验通过，2026-06-20；检索命中/token 消耗后续补埋点）
 - [x] OpenTelemetry 分布式追踪基础版（W3C traceparent 兼容 + `/api/v1/traces` in-memory span 查询，2026-06-20；OTLP exporter 待后续接入）
 - [x] API 版本化（/api/v1/，NestJS 版本控制中间件，前端 api.ts 和 Vite proxy 已适配，2026-06-19）
-- [ ] RAG 评测 CI/CD 集成（`npm run eval:rag` 本地/在线门禁已完成；正式 CI 配置变更需主人确认）
+- [x] RAG 评测 CI/CD 集成（Drone pipeline 已接入 `npm run eval:rag` smoke 门禁，并在 Dockerfile 构建验证前执行；2026-06-20）
 
 ### P3 — 测试与运维
 
@@ -440,26 +437,37 @@
 - [x] 性能基准（`npm run perf:rag` + `PERF_RAG_ENFORCE=true` 已验证；空知识库快速失败路径 simple P50≈28.97ms / agentic P50≈34.14ms，2026-06-20；有文档且触发真实 LLM 生成的端到端耗时不纳入该 300ms/800ms 门禁）
 - [x] 异常场景测试基础版（空库 / 无相关文档 / 大文件 / key 缺失 / 服务不可用，2026-06-19；真实外部服务异常联调待 Docker/密钥/网络环境）
 
+## 待专项联调
+
+- **MCP 真实 Server 联调**：客户端、接口、默认关闭策略已完成；仍需提供 `workspace/mcp-servers.yaml` 与至少一个可运行 MCP Server，验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注。
+- **GraphRAG 业务图谱联调**：Neo4j 服务与后端连接已验证；当前图谱为空，仍需导入真实或种子图谱数据后验证业务查询质量。
+- **腾讯云 ASR/TTS 真实音频联调**：SpeechProvider 与前端入口已完成；仍需真实音频、外部网络和腾讯云凭据环境验证端到端效果。
+- **联网增强真实调用联调**：Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测需要真实 API 调用专项验证。
+- **Redis Checkpointer 跨进程恢复验证**：RedisCheckpointer 已接入并通过启动链路；跨进程重启恢复仍需专项脚本或手工验证。
+- **混合检索质量回归**：Elasticsearch 与 BM25/Milvus 混合链路已可运行；仍可用固定样本集评估中文召回、排序稳定性与降级行为。
+
+## 红线待确认
+
+- **数据库 schema / migration**：任何 schema 变更、迁移、新表或字段调整，需主人确认后执行。
+- **生产部署 / 发布**：生产部署、公开发布、npm publish 等，需主人确认后执行。
+- **删除本地历史快照**：`.history/backend/.env_*` 已被 `.gitignore` 防误提交规则覆盖；删除已生成快照属于删除文件红线，需主人确认后执行。
+- **部署目标环境**：本地 / 云服务器 / Docker / K8s 仍待主人确认；当前建议 Docker Compose，足够覆盖 dev + 小规模 prod。
+
+## 可本地增强
+
+- Prometheus 补充检索命中、token 消耗、LLM 调用耗时等业务指标。
+- 提供一个最小可运行 MCP 示例 server，用于默认联调。
+- 准备 GraphRAG 本地图谱种子数据与导入脚本。
+- 编写 Redis Checkpointer 跨进程重启恢复验证脚本。
+- 继续优化 Milvus 索引、资源配置与版本兼容，降低首次向量检索 warning。
+
 ## 阻塞
 
-- **本机 Docker/PostgreSQL 阻塞已解除**（2026-06-20）：dev 基础设施已在 Docker Desktop 中运行，`rag-dev-postgres` / `rag-dev-redis` / `rag-dev-milvus` / `rag-dev-es` 均为 healthy；PostgreSQL `5432`、Redis `6379`、Milvus `19530/9091`、Elasticsearch `9200` 均已映射到宿主机。`PORT=3001 node dist/src/main` 已成功连接 PostgreSQL/Redis/Elasticsearch/Milvus 并启动，`GET /api/v1/health` 返回 200。Milvus warmup 仍出现约 0.8s `DEADLINE_EXCEEDED` warning，按已知问题快速降级，不阻塞应用启动。
-- **默认 3000 端口被占用**（2026-06-19）：`lsof -nP -iTCP:3000 -sTCP:LISTEN` 显示本机已有 `node` 进程监听 3000；未擅自 kill。临时验证可用 `PORT=3001 npm run start` / `PORT=3001 npm run start:dev`。
-- **外部联调缺口记录**（2026-06-20 更新）：
-  - Mem0：cloud 模式已启用，`GET /api/v1/memories` 返回 `enabled=true`；后续只剩真实对话触发分类写入与长期稳定性观察。
-  - MCP：默认 `MCP_ENABLED=false`，需要开启后提供 `workspace/mcp-servers.yaml` 和至少一个可运行 MCP Server，才能验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注；当前示例 `agent-course/tool-test` server 缺少自身依赖，不能作为已验证 server。
-  - Elasticsearch：ES 容器可连接，后端启动日志确认 `Elasticsearch connected at http://localhost:9200`，历史 compatible-with 版本问题已解除；混合检索质量仍可后续做专项回归。
-  - Neo4j / GraphRAG：Neo4j 服务与后端连接已验证；当前图谱为空，真实业务查询仍需要导入图谱数据源。
-  - CI/CD：任何 CI 配置变更属于红线，需主人确认后再做。
-  - 数据库 schema / migration：涉及 schema 变更或迁移，需主人确认后再做。
-  - 生产部署 / 发布：属于红线，需主人确认后再执行。
-- **本地密钥快照风险**（2026-06-19）：本地 `.history/backend/.env_*` 快照曾出现在未跟踪文件中，已新增 `.gitignore` 规则 `.history/**/.env*` 防止误加入版本库；删除已生成历史快照属于删除文件红线，需主人确认后执行。
-- **后续可继续推进但需要先补资源/确认的任务清单**（2026-06-19）：
-  - 需专项验证：Redis Checkpointer 跨进程重启恢复、混合检索质量回归；E2E 已通过 `npm run test:e2e:rag`，性能基准已通过 `PERF_RAG_ENFORCE=true npm run perf:rag`。
-  - 需真实外部调用：Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测；腾讯云 ASR/TTS 使用 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `TENCENT_REGION`，无需额外 ASR AppId，Secret 已配置，真实 ASR/TTS 联调仍待外部网络验证。
-  - 需配置文件：MCP 需要 `workspace/mcp-servers.yaml`；GraphRAG 已完成 Neo4j 连接配置，仍需要图谱数据源导入。
-  - 需主人确认红线：数据库 schema/migration、CI/CD、生产部署、删除历史/临时文件。
-  - 可本地继续做：检索命中/token 消耗指标、MCP 示例 server、本地图谱种子数据、Redis Checkpointer 重启恢复脚本；但这些会扩大代码面，建议按优先级单独推进。
-  - 定时任务 Agent 后续增强：若需要任务持久化、失败重试、任务执行结果记录，需要数据库 schema/migration 确认；若要真正调用 Agent 执行 instruction，需要接入安全边界和执行权限策略。
+- 当前无阻塞代码开发的问题。
+- 仍需注意：
+  - 默认 3000 端口被本机既有 `node` 进程占用；未擅自 kill。临时验证可用 `PORT=3001 npm run start` / `PORT=3001 npm run start:dev`。
+  - Milvus warmup 仍可能出现约 0.8s `DEADLINE_EXCEEDED` warning，按已知问题快速降级，不阻塞应用启动。
+  - 外部专项联调和红线项已分别移入 `待专项联调` 与 `红线待确认`。
 
 ## 已知问题
 
@@ -495,11 +503,32 @@
 
 ## 待确认
 
-- 是否需要多租户（影响 schema 设计）— 已确认需要并已完成多租户物理/逻辑数据硬隔离（2026-06-18）
 - 部署目标环境（本地 / 云服务器 / Docker / K8s）— 待主人确认
   - **建议**：Docker Compose。K8s 是给团队 10 人以上的，单人/小团队搞 K8s 是在浪费生命。Compose 足以覆盖 dev + 小规模 prod。
 
 ## 最近验证
+
+- **RAG 评测 Drone CI 门禁验证（2026-06-20）**
+  - 新增 `.drone.yml`：backend 阶段执行 `npm run build`、no-fix ESLint、`npm run eval:rag`；frontend 阶段执行 `npm run lint`、`npm run build`；Docker 阶段使用 Drone Docker 插件 dry-run 验证 backend/frontend Dockerfile 构建，不推镜像、不部署 ✓
+  - `cd backend && npm run build && npx eslint "{src,apps,libs,test}/**/*.ts" && npm run eval:rag` → 通过；离线 RAG smoke 评测 `passed=true`，`averageScore=1.0` ✓
+  - `cd frontend && npm run lint && npm run build` → 通过 ✓
+
+- **Jenkinsfile 与 Dockerfile 构建验证（2026-06-20）**
+  - 新增 `Jenkinsfile`：默认 `DEPLOY_TARGET=none`，只执行 backend/frontend 门禁与 Docker build；手动选择 staging/prod 时才执行 `docker compose up -d --build`，不写真实凭据，不自动发布 ✓
+  - 修复 backend Dockerfile 安装阶段：`npm ci` 增加 `--omit=optional --legacy-peer-deps`，跳过未使用的 `@langchain/community` optional peer 解析冲突；runtime 阶段同样使用 `--omit=dev --omit=optional --legacy-peer-deps` ✓
+  - 同步 Drone/Jenkins backend gate 使用 `npm ci --omit=optional --legacy-peer-deps`，避免 CI 环境重现 optional peer 冲突 ✓
+  - `docker build -t rag-backend:ci backend` → 通过；`docker build -t rag-frontend:ci frontend` → 通过 ✓
+  - `cd backend && npm run build && npx eslint "{src,apps,libs,test}/**/*.ts" && npm run eval:rag` → 通过，离线评测 `passed=true`、`averageScore=1.0` ✓
+  - `cd frontend && npm run lint && npm run build` → 通过 ✓
+
+- **依赖与基础镜像版本固定验证（2026-06-20）**
+  - backend/frontend `package.json` 中 dependencies/devDependencies/overrides 均已固定为精确版本，未保留 `^` / `~` / `latest` / 通配范围 ✓
+  - Dockerfile 基础镜像固定：`node:20.20.2-alpine`、`nginx:1.29.3-alpine` ✓
+  - docker compose 基础服务镜像固定：`pgvector/pgvector:0.8.1-pg16`、`redis:7.4.9-alpine`、`etcd:v3.5.5`、`minio:RELEASE.2023-03-20T20-16-18Z`、`milvus:v2.4.4`、`elasticsearch:8.13.0`、`neo4j:5.26.27-community` ✓
+  - `cd backend && npm ci --omit=optional --legacy-peer-deps && npm run build && npx eslint "{src,apps,libs,test}/**/*.ts" && npm run eval:rag` → 通过；离线评测 `passed=true`、`averageScore=1.0` ✓
+  - `cd frontend && npm ci && npm run lint && npm run build` → 通过 ✓
+  - `docker compose -f docker/docker-compose.yml config`、dev/staging/prod profile 配置解析 → 通过 ✓
+  - `docker build -t rag-backend:ci backend`、`docker build -t rag-frontend:ci frontend` → 通过 ✓
 
 - **ROADMAP 非 CI/CD 项状态复验与清理（2026-06-20）**
   - `cd backend && npm run build` → 通过 ✓
@@ -844,3 +873,6 @@
 | 2026-06-20 | **架构设计文档与 PRD 补齐完成**：新增 `ARCHITECTURE.md` 记录 RAG 知识库系统架构、核心链路、模块边界、部署与风险；新增 `PRD.md` 记录产品目标、用户故事、功能范围、验收标准和开放问题；同步 `ROADMAP.md` 最近验证与变更记录。 |
 | 2026-06-20 | **项目文档关系统一**：在 `ARCHITECTURE.md` / `PRD.md` / `ROADMAP.md` / `CLAUDE.md` / `rag-plan.md` 中统一说明五类文档职责：架构、产品需求、真实进度、项目规则、早期计划。 |
 | 2026-06-20 | **ROADMAP 非 CI/CD 项状态优化**：修复 Prometheus 条目损坏，清理 Mem0/ES/Docker/Redis 旧阻塞描述；复验 build、dev compose、后端启动、health、metrics、Mem0、Graph schema、traces、ES health。CI/CD 待办保留不动。 |
+| 2026-06-20 | **ROADMAP 结构整理**：将当前剩余工作拆分为待专项联调、红线待确认、可本地增强；将唯一显式未完成项收口为正式 CI/CD 接入 `npm run eval:rag` 门禁；清理已完成多租户仍停留在待确认、已解除 Docker/PostgreSQL 阻塞仍停留在阻塞区等旧状态描述。 |
+| 2026-06-20 | **RAG 评测 Drone CI 门禁完成**：新增 `.drone.yml`，在 Dockerfile 构建 dry-run 前执行 backend build、no-fix ESLint、`npm run eval:rag`，并执行 frontend lint/build；本地验证通过，离线 RAG smoke 评测 `passed=true`、`averageScore=1.0`。未推镜像，未部署。 |
+| 2026-06-20 | **依赖与 Docker 基础镜像版本固定**：backend/frontend npm 依赖按 lockfile 固定为精确版本；Dockerfile 与 docker compose 中 Node/nginx/pgvector/Redis/Neo4j 等浮动 tag 固定为明确小版本；已通过 npm ci、build、lint、RAG eval、compose config 与 backend/frontend Docker build。 |

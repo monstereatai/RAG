@@ -1,9 +1,9 @@
 mcpServers:
-  my-mcp-server:
+  rag-smoke-mcp:
     transport: stdio
     command: node
     args:
-      - /Users/monster/Documents/GitHub/code/RAG/agent-course/tool-test/src/my-mcp-server.mjs
+      - /absolute/path/to/RAG/backend/scripts/mcp-smoke-server.mjs
 
   # SSE 传输协议示例：
   # weather-server:

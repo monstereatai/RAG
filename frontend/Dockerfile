@@ -5,7 +5,7 @@
 # ============================================================
 
 # ---- 构建阶段 ----
-FROM docker.m.daocloud.io/library/node:20-alpine AS builder
+FROM docker.m.daocloud.io/library/node:20.20.2-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # ---- 运行阶段：nginx ----
-FROM docker.m.daocloud.io/library/nginx:alpine
+FROM docker.m.daocloud.io/library/nginx:1.29.3-alpine
 
 # 拷贝自定义 nginx 配置（SPA 路由 + /api 反代）
 COPY nginx.conf /etc/nginx/conf.d/default.conf

@@ -1,1 +1,1 @@
-{"version":1,"updatedAt":"2026-06-18T06:50:30.733Z","entries":[]}
+{"version":1,"updatedAt":"2026-06-20T12:05:44.682Z","entries":[{"id":"c43fcd9f-0744-4783-bb03-0cc1e8782396","content":"企业知识库检索质量联调文档。神舟项目采用混合检索，关键词召回依赖 BM25，语义召回依赖向量检索。Redis 负责 Agentic RAG 短期记忆和 checkpoint，Neo4j 负责 GraphRAG 业务图谱。Bocha Web Search 用于联网增强，DashScope Rerank 用于重排序。","docId":"2e431538-e435-41ad-b3af-973c6b97d25d","chunkIndex":0,"tokens":[],"userId":"2"}]}
