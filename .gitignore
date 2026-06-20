@@ -11,6 +11,8 @@ build/
 .env.local
 .env.*.local
 .history/**/.env*
+.histroy
+agent-course
 
 # IDE
 .vscode/

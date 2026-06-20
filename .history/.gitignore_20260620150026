@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables（密钥不进 git）
+.env
+.env.local
+.env.*.local
+.history/**/.env*
+.histroy
+agent-course
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+workspace/uploads/
+workspace/cache/
+workspace/*.tmp
+
+# Docker volumes（本地数据卷）
+docker/volumes/
+
+# Test coverage
+coverage/
+
+# Misc
+.cache/
+tmp/
+.tmp/
