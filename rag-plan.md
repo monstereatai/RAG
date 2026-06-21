@@ -40,16 +40,16 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
 
 ---
 
-## 当前实现快照（2026-06-18）
+## 当前实现快照（2026-06-21）
 
 - **M1/M2/M3/M4/M5 已完成**，真实进度以 `ROADMAP.md` 为准。
-- **后端**：NestJS + LangChain.js + LangGraph.js + deepagents；已实现 health/auth/document/chat/debug 模块，文档上传支持 Markdown/TXT/PDF/DOCX 文本解析。
-- **simple 模式**：Karpathy-style RAG，使用内存 BM25 + Milvus cosine 混合检索；当 Milvus search 超时时自动降级 BM25。
-- **agentic/auto 模式**：deepAgent 先规划 3 条检索问句，retrieval 保留原始问题并追加规划问句，之后执行检索、流式生成、reflection。
-- **SSE**：`GET /api/chat/stream` 已输出 `routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final / error`。
-- **前端**：React + Vite 已支持文件上传、文档列表、聊天、引用展示、模式切换、SSE 流式显示和浏览器 Web Speech 语音输入。
-- **已知问题**：Milvus search 在本机 Docker 环境仍可能 15s timeout；当前通过 BM25 中文单字/bigram 兜底与向量检索失败降级保证 M2 功能可用。
-- **未完成**：Elasticsearch、后端腾讯云 ASR/TTS、Mem0、MCP、GraphRAG、评测 CI/CD。
+- **后端**：NestJS + LangChain.js + LangGraph.js + DeepAgents；已实现 auth/document/chat/debug/memory/graph/mcp/metrics/tracing/jobs/skills 等模块。
+- **simple 模式**：Karpathy-style RAG，使用 BM25 / Elasticsearch / Milvus 混合检索；Milvus 超时快速降级，并通过 active docId 过滤避免残留向量进入答案。
+- **agentic/auto 模式**：包含 route、query augment、retrieval、sufficiency、web_search、rerank、generate、reflection 和 resume 流程。
+- **SSE**：`GET /api/v1/chat/stream` 输出 `routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final / error`。
+- **前端**：React + Vite 已支持登录、文件上传、文档列表、聊天、引用展示、模式切换、SSE 流式显示、浏览器语音输入和 TTS 朗读。
+- **专项 smoke**：已新增 MCP、GraphRAG、Speech、external tools、Redis Checkpointer、Hybrid retrieval 脚本；MCP stdio、Qwen Judge、腾讯云 TTS→ASR 直连已验证。
+- **仍需资源**：Bocha/Rerank 真实 key、Docker daemon/后端服务用于 GraphRAG/Hybrid/backend Speech/Redis 运行时 smoke，生产部署目标仍待确认。
 
 ---
 
@@ -93,7 +93,7 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
 
 **可观测能力**（内置 Debug 接口）：
 
-- `GET /api/debug/chunks?query=...` 返回每个 candidate chunk 的 BM25 分、cosine 分和最终分，用于调试。
+- `GET /api/v1/debug/chunks?query=...` 返回每个 candidate chunk 的 BM25 分、cosine 分和最终分，用于调试。
 - 在流式响应的 `retrieval` 事件中携带各 chunk 原始分数，前端 Debug 面板可展开查看完整 prompt。
 
 ### Agentic RAG 模块（工具调用 + 多轮检索）
@@ -197,7 +197,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
   - 文件上传
   - 知识库列表
   - 聊天窗口（含流式回答）
-  - 语音录入（当前已实现：浏览器 Web Speech API → 输入框 → 查询；后续扩展：浏览器录音 → 后端 STT → 文本查询）
+  - 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端已提供腾讯云 ASR/TTS 接口）
   - 引用来源展示（可展开查看 chunk 原文）
   - **模式切换器**：用户可手动选择 `simple / agentic / auto`
   - **路由追踪面板**：每次回答结束后展示"实际使用模式 + 检索轮数 + 工具调用链"
@@ -209,23 +209,23 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
 
 ### 文档接口
 
-- `POST /api/documents/upload`
+- `POST /api/v1/documents/upload`
   - 上传文件并触发索引（向量 + BM25 双索引）。
-- `GET /api/documents`
+- `GET /api/v1/documents`
   - 查看已索引文档和处理状态。
 
 ### 聊天接口
 
-- `POST /api/chat`
+- `POST /api/v1/chat`
   - 非流式调试接口。
-- `GET /api/chat/stream?query=...&mode=agentic|auto|simple`
+- `GET /api/v1/chat/stream?query=...&mode=agentic|auto|simple`
   - 使用 SSE 流式输出 token、检索事件、reflection 事件和引用来源。
 
 Chat 请求字段：
 
 - `query`
 - `mode`: `auto | agentic | simple`
-- `history`：仅 `POST /api/chat` 支持，可选
+- `history`：仅 `POST /api/v1/chat` 支持，可选
 - `provider`：规划字段，当前未启用
 - `conversation_id`：规划字段，当前未启用
 - `top_k`：规划字段，当前未启用
@@ -245,12 +245,16 @@ Chat 流式响应事件：
 
 ### 语音接口
 
-- `POST /api/speech/transcribe`
-  - 规划接口，当前尚未实现。当前前端语音输入使用浏览器 Web Speech API，直接把转写文本填入聊天输入框。
+- `POST /api/v1/speech/asr`
+  - 上传音频文件字段 `audio`，调用腾讯云 ASR 返回识别文本。
+- `GET /api/v1/speech/tts?text=...`
+  - 调用腾讯云 TTS 返回音频。
+- `GET /api/v1/speech/tts/stream?text=...`
+  - 使用 SSE 返回 TTS 音频分片。
 
 ### Debug 接口
 
-- `GET /api/debug/chunks?query=&mode=&top_k=`
+- `GET /api/v1/debug/chunks?query=&mode=&top_k=`
   - 返回 candidate chunks 的 BM25 分、cosine 分、加权总分和文本内容，用于两种方案对比调试。
 
 ---
@@ -407,7 +411,7 @@ Chat 流式响应事件：
 - `simple`、`agentic` 和 `auto` 三种模式都能返回答案及引用。
 - 流式接口按顺序输出 `routing → token → retrieval → final` 事件。
 - Bocha web_search 触发后，`tool_call` 事件正确出现在流中。
-- Debug 接口 `/api/debug/chunks` 返回包含 BM25 / cosine 双分数的结果。
+- Debug 接口 `/api/v1/debug/chunks` 返回包含 BM25 / cosine 双分数的结果。
 
 ### 前端验证
 
@@ -553,7 +557,7 @@ metadata 里已存 `embedding_model` 字段（好设计），但需要明确换�
 
 补充删除接口：
 
-- `DELETE /api/documents/{doc_id}`
+- `DELETE /api/v1/documents/{doc_id}`
   - 删除 Milvus 中该文档的所有 chunks（按 doc_id 过滤删除）
   - 同步删除 ES 索引中对应文档
   - 更新内存 BM25 索引（重建或增量删除）
@@ -583,12 +587,13 @@ metadata 里已存 `embedding_model` 字段（好设计），但需要明确换�
 
 - **应用日志**：用 `pino`（pino-pretty 开发环境）输出结构化 JSON 日志
 - **关键指标**（Prometheus 格式）：
-  - `rag_query_total{mode}`：查询次数按模式统计
-  - `rag_query_duration_seconds`：查询延迟分布
-  - `rag_retrieval_hits`：检索命中数
-  - `rag_tool_calls_total{tool}`：工具调用次数
-  - `rag_llm_tokens_total{type=prompt|completion}`：token 消耗
-- **分布式追踪**：接入 OpenTelemetry（`@opentelemetry/api` + `@opentelemetry/sdk-node`），与 LangSmith 互补
+  - `rag_http_requests_total{method,route,status}`：HTTP 请求次数
+  - `rag_http_request_duration_seconds{method,route,status}`：HTTP 请求耗时
+  - `rag_retrieval_hits_total{source,mode}`：检索命中数
+  - `rag_llm_calls_total{provider,status}`：LLM 调用次数
+  - `rag_llm_call_duration_seconds{provider,status}`：LLM 调用耗时
+  - `rag_llm_tokens_estimated_total{provider,direction}`：输入/输出 token 估算
+- **分布式追踪**：当前为 W3C `traceparent` 兼容的 in-memory tracing；OTLP exporter 属后续增强
 
 ### 四、实施细节（低优先级）
 
@@ -687,14 +692,15 @@ metadata 里已存 `embedding_model` 字段（好设计），但需要明确换�
 
 ### 一、语音能力补全：双向语音（STT + TTS）
 
-**现状**：计划仅有 `POST /api/speech/transcribe`（语音转文字）。
+**现状**：已实现 `POST /api/v1/speech/asr`、`GET /api/v1/speech/tts` 和 `GET /api/v1/speech/tts/stream`，腾讯云 TTS→ASR 直连 smoke 已验证。
 
 **补充**：参考 `agent-course/asr-and-tts-nest-service`，增加 TTS 语音合成输出，实现完整语音对话闭环。
 
 | 接口 | 功能 | 实现 |
 |------|------|------|
-| `POST /api/v1/speech/transcribe` | STT 语音识别 | 复用已有计划 |
-| `POST /api/v1/speech/synthesize` | TTS 语音合成 | 新增，文字转语音 |
+| `POST /api/v1/speech/asr` | STT 语音识别 | 已实现 |
+| `GET /api/v1/speech/tts` | TTS 语音合成 | 已实现 |
+| `GET /api/v1/speech/tts/stream` | TTS 流式分片 | 已实现 |
 
 **TTS 设计**：
 - Provider 抽象：`SpeechProvider` 接口同时覆盖 STT 和 TTS
@@ -1146,7 +1152,7 @@ agents:
 
 ### 十六之三、MCP 协议集成
 
-**现状**：计划工具为内置函数，无外部工具协议。
+**现状**：已实现 MCP Provider 和本地 stdio smoke server。
 
 **补充**：参考 `agent-course/tool-test`，支持 MCP（Model Context Protocol）工具接入，实现工具生态可扩展。
 
@@ -1171,6 +1177,11 @@ mcp_servers:
 
 - Agent 启动时加载所有配置的 MCP Server，工具自动注册
 - 流式响应的 `tool_call` 事件标注工具来源（`builtin` / `mcp:server_name`）
+
+**当前验证**：
+- `workspace/mcp-servers.yaml` 默认指向 `backend/scripts/mcp-smoke-server.mjs`
+- `npm run smoke:mcp` 已验证 `rag_smoke_echo` / `rag_smoke_status` 工具加载与调用
+- 后续接业务 MCP server 时追加 yaml 配置即可
 
 ### 十六之四、NestJS 工程化最佳实践
 

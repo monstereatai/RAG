@@ -97,6 +97,28 @@ export class InitSchema1781763486169 implements MigrationInterface {
           { name: 'language', type: 'varchar', length: '32', isNullable: true },
           { name: 'category', type: 'varchar', length: '32', isNullable: true },
           {
+            name: 'docVersion',
+            type: 'varchar',
+            length: '64',
+            isNullable: true,
+          },
+          {
+            name: 'effectiveAt',
+            type: 'timestamp',
+            isNullable: true,
+          },
+          {
+            name: 'expiredAt',
+            type: 'timestamp',
+            isNullable: true,
+          },
+          {
+            name: 'sourceAuthority',
+            type: 'varchar',
+            length: '32',
+            default: "'normal'",
+          },
+          {
             name: 'createdAt',
             type: 'timestamp',
             default: 'CURRENT_TIMESTAMP',
@@ -106,7 +128,171 @@ export class InitSchema1781763486169 implements MigrationInterface {
       true,
     );
 
-    // 5. scheduled_jobs
+    // 5. document_chunks
+    await queryRunner.createTable(
+      new Table({
+        name: 'document_chunks',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'docId', type: 'varchar', length: '64' },
+          { name: 'userId', type: 'varchar', length: '64', isNullable: true },
+          {
+            name: 'parentChunkId',
+            type: 'varchar',
+            length: '128',
+            isNullable: true,
+          },
+          { name: 'chunkIndex', type: 'int' },
+          {
+            name: 'chunkType',
+            type: 'varchar',
+            length: '32',
+            default: "'leaf'",
+          },
+          { name: 'content', type: 'text' },
+          {
+            name: 'headingPath',
+            type: 'varchar',
+            length: '512',
+            isNullable: true,
+          },
+          {
+            name: 'sectionId',
+            type: 'varchar',
+            length: '128',
+            isNullable: true,
+          },
+          {
+            name: 'clauseId',
+            type: 'varchar',
+            length: '128',
+            isNullable: true,
+          },
+          {
+            name: 'tableRef',
+            type: 'varchar',
+            length: '128',
+            isNullable: true,
+          },
+          { name: 'sourceStart', type: 'int', isNullable: true },
+          { name: 'sourceEnd', type: 'int', isNullable: true },
+          {
+            name: 'docVersion',
+            type: 'varchar',
+            length: '64',
+            isNullable: true,
+          },
+          { name: 'effectiveAt', type: 'timestamp', isNullable: true },
+          { name: 'expiredAt', type: 'timestamp', isNullable: true },
+          {
+            name: 'sourceAuthority',
+            type: 'varchar',
+            length: '32',
+            default: "'normal'",
+          },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
+    );
+    await queryRunner.createIndex(
+      'document_chunks',
+      new TableIndex({
+        name: 'IDX_document_chunks_doc_user',
+        columnNames: ['docId', 'userId'],
+      }),
+    );
+    await queryRunner.createIndex(
+      'document_chunks',
+      new TableIndex({
+        name: 'IDX_document_chunks_parent',
+        columnNames: ['parentChunkId'],
+      }),
+    );
+    await queryRunner.createIndex(
+      'document_chunks',
+      new TableIndex({
+        name: 'IDX_document_chunks_effective',
+        columnNames: ['effectiveAt', 'expiredAt'],
+      }),
+    );
+
+    // 6. fact_conflicts
+    await queryRunner.createTable(
+      new Table({
+        name: 'fact_conflicts',
+        columns: [
+          { name: 'id', type: 'varchar', length: '64', isPrimary: true },
+          { name: 'userId', type: 'varchar', length: '64', isNullable: true },
+          { name: 'docId', type: 'varchar', length: '64' },
+          { name: 'chunkId', type: 'varchar', length: '64', isNullable: true },
+          { name: 'subject', type: 'varchar', length: '256' },
+          { name: 'predicate', type: 'varchar', length: '128' },
+          {
+            name: 'currentValue',
+            type: 'varchar',
+            length: '512',
+            isNullable: true,
+          },
+          {
+            name: 'conflictingValue',
+            type: 'varchar',
+            length: '512',
+            isNullable: true,
+          },
+          {
+            name: 'currentVersion',
+            type: 'varchar',
+            length: '64',
+            isNullable: true,
+          },
+          {
+            name: 'conflictingVersion',
+            type: 'varchar',
+            length: '64',
+            isNullable: true,
+          },
+          {
+            name: 'status',
+            type: 'varchar',
+            length: '32',
+            default: "'detected'",
+          },
+          {
+            name: 'sourceAuthority',
+            type: 'varchar',
+            length: '32',
+            default: "'normal'",
+          },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
+        ],
+      }),
+      true,
+    );
+    await queryRunner.createIndex(
+      'fact_conflicts',
+      new TableIndex({
+        name: 'IDX_fact_conflicts_user_subject',
+        columnNames: ['userId', 'subject'],
+      }),
+    );
+    await queryRunner.createIndex(
+      'fact_conflicts',
+      new TableIndex({
+        name: 'IDX_fact_conflicts_doc',
+        columnNames: ['docId'],
+      }),
+    );
+
+    // 7. scheduled_jobs
     await queryRunner.createTable(
       new Table({
         name: 'scheduled_jobs',
@@ -139,6 +325,25 @@ export class InitSchema1781763486169 implements MigrationInterface {
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.dropTable('scheduled_jobs');
+    await queryRunner.dropIndex('fact_conflicts', 'IDX_fact_conflicts_doc');
+    await queryRunner.dropIndex(
+      'fact_conflicts',
+      'IDX_fact_conflicts_user_subject',
+    );
+    await queryRunner.dropTable('fact_conflicts');
+    await queryRunner.dropIndex(
+      'document_chunks',
+      'IDX_document_chunks_effective',
+    );
+    await queryRunner.dropIndex(
+      'document_chunks',
+      'IDX_document_chunks_parent',
+    );
+    await queryRunner.dropIndex(
+      'document_chunks',
+      'IDX_document_chunks_doc_user',
+    );
+    await queryRunner.dropTable('document_chunks');
     await queryRunner.dropTable('documents_meta');
     await queryRunner.dropIndex('messages', 'IDX_751332fc6cc6fc576c6975cd07');
     await queryRunner.dropTable('messages');

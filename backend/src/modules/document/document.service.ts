@@ -8,11 +8,17 @@ import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MarkdownChunker } from './chunking.util';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
+import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { DocumentMetadataExtractor } from './document-metadata.extractor';
 
 export interface UploadResult {
   docId: string;
   chunkCount: number;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+  sourceAuthority?: string;
   metadata?: {
     title: string;
     author: string;
@@ -40,6 +46,10 @@ export class DocumentService {
   constructor(
     @InjectRepository(DocumentMetaEntity)
     private readonly docMetaRepo: Repository<DocumentMetaEntity>,
+    @InjectRepository(DocumentChunkEntity)
+    private readonly docChunkRepo: Repository<DocumentChunkEntity>,
+    @InjectRepository(FactConflictEntity)
+    private readonly factConflictRepo: Repository<FactConflictEntity>,
     private readonly embeddingProvider: EmbeddingProvider,
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly karpathyRagService: KarpathyRagService,
@@ -55,8 +65,10 @@ export class DocumentService {
     const docId = randomUUID();
     this.logger.log(`Uploading ${filename}, docId=${docId}, userId=${userId}`);
 
-    // 1. 切分
-    const chunks = await this.chunker.split(content);
+    // 1. 结构化切分
+    const structuredChunks = await this.chunker.splitStructured(content);
+    const chunks = structuredChunks.map((chunk) => chunk.content);
+    const governance = this.extractGovernanceMetadata(filename, content);
     this.logger.log(`Split into ${chunks.length} chunks`);
 
     // 2. 批量 Embedding
@@ -80,6 +92,17 @@ export class DocumentService {
       docId,
       chunkIndex: idx,
       userId,
+      parentChunkId: structuredChunks[idx]?.parentChunkId ?? null,
+      headingPath: structuredChunks[idx]?.headingPath ?? [],
+      sectionId: structuredChunks[idx]?.sectionId ?? null,
+      clauseId: structuredChunks[idx]?.clauseId ?? null,
+      tableRef: structuredChunks[idx]?.tableRef ?? null,
+      sourceStart: structuredChunks[idx]?.sourceStart ?? null,
+      sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,
+      docVersion: governance.docVersion,
+      effectiveAt: governance.effectiveAt,
+      expiredAt: governance.expiredAt,
+      sourceAuthority: governance.sourceAuthority,
     }));
     this.karpathyRagService.indexChunks(chunkDocs, userId);
 
@@ -102,8 +125,20 @@ export class DocumentService {
       filename,
       chunkCount: chunks.length,
       userId,
+      docVersion: governance.docVersion,
+      effectiveAt: governance.effectiveAt,
+      expiredAt: governance.expiredAt,
+      sourceAuthority: governance.sourceAuthority,
     });
     await this.docMetaRepo.save(docMeta);
+    await this.saveChunkMetadata(
+      docId,
+      userId,
+      records,
+      structuredChunks,
+      governance,
+    );
+    await this.detectAndSaveFactConflicts(docId, userId, records, governance);
 
     // 等待元数据抽取完成后更新
     const metadata = await metadataPromise;
@@ -133,6 +168,10 @@ export class DocumentService {
     return {
       docId,
       chunkCount: chunks.length,
+      docVersion: governance.docVersion,
+      effectiveAt: governance.effectiveAt?.toISOString() ?? null,
+      expiredAt: governance.expiredAt?.toISOString() ?? null,
+      sourceAuthority: governance.sourceAuthority,
       metadata: metadata || undefined,
     };
   }
@@ -166,7 +205,9 @@ export class DocumentService {
     // 3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
     await this.elasticsearchProvider.deleteByDocId(docId, userId);
 
-    // 4. 删除数据库元数据
+    // 4. 删除数据库元数据与结构化事实索引
+    await this.factConflictRepo.delete({ docId, userId });
+    await this.docChunkRepo.delete({ docId, userId });
     await this.docMetaRepo.delete({ docId, userId });
 
     this.logger.log(`Doc ${docId} deleted successfully`);
@@ -215,6 +256,10 @@ export class DocumentService {
       filename: meta.filename,
       chunkCount: meta.chunkCount,
       createdAt: meta.createdAt.toISOString(),
+      docVersion: meta.docVersion,
+      effectiveAt: meta.effectiveAt?.toISOString() ?? null,
+      expiredAt: meta.expiredAt?.toISOString() ?? null,
+      sourceAuthority: meta.sourceAuthority,
     };
   }
 
@@ -228,6 +273,10 @@ export class DocumentService {
       filename: meta.filename,
       chunkCount: meta.chunkCount,
       createdAt: meta.createdAt.toISOString(),
+      docVersion: meta.docVersion,
+      effectiveAt: meta.effectiveAt?.toISOString() ?? null,
+      expiredAt: meta.expiredAt?.toISOString() ?? null,
+      sourceAuthority: meta.sourceAuthority,
       metadata: meta.title
         ? {
             title: meta.title,
@@ -242,4 +291,160 @@ export class DocumentService {
         : undefined,
     }));
   }
+
+  private async saveChunkMetadata(
+    docId: string,
+    userId: string,
+    records: Array<{ id: string; content: string; chunkIndex: number }>,
+    chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,
+    governance: DocumentGovernanceMetadata,
+  ): Promise<void> {
+    const entities = records.map((record, index) => {
+      const chunk = chunks[index];
+      return this.docChunkRepo.create({
+        id: record.id,
+        docId,
+        userId,
+        parentChunkId: chunk?.parentChunkId ?? null,
+        chunkIndex: record.chunkIndex,
+        chunkType: 'leaf',
+        content: record.content,
+        headingPath:
+          chunk && chunk.headingPath.length > 0
+            ? JSON.stringify(chunk.headingPath)
+            : null,
+        sectionId: chunk?.sectionId ?? null,
+        clauseId: chunk?.clauseId ?? null,
+        tableRef: chunk?.tableRef ?? null,
+        sourceStart: chunk?.sourceStart ?? null,
+        sourceEnd: chunk?.sourceEnd ?? null,
+        docVersion: governance.docVersion,
+        effectiveAt: governance.effectiveAt,
+        expiredAt: governance.expiredAt,
+        sourceAuthority: governance.sourceAuthority,
+      });
+    });
+    await this.docChunkRepo.save(entities);
+  }
+
+  private async detectAndSaveFactConflicts(
+    docId: string,
+    userId: string,
+    records: Array<{ id: string; content: string }>,
+    governance: DocumentGovernanceMetadata,
+  ): Promise<void> {
+    const conflicts = records.flatMap((record) =>
+      this.detectChunkConflicts(record.content).map((conflict) =>
+        this.factConflictRepo.create({
+          id: randomUUID(),
+          userId,
+          docId,
+          chunkId: record.id,
+          subject: conflict.subject,
+          predicate: conflict.predicate,
+          currentValue: conflict.currentValue,
+          conflictingValue: conflict.conflictingValue,
+          currentVersion: governance.docVersion,
+          conflictingVersion: conflict.conflictingVersion,
+          status: 'detected',
+          sourceAuthority: governance.sourceAuthority,
+        }),
+      ),
+    );
+
+    if (conflicts.length > 0) {
+      await this.factConflictRepo.save(conflicts);
+    }
+  }
+
+  private detectChunkConflicts(content: string): FactConflictDraft[] {
+    const years = [...new Set(content.match(/20\d{2}/g) ?? [])];
+    if (years.length < 2) {
+      return [];
+    }
+
+    const amounts = [...new Set(content.match(/\d+(?:\.\d+)?\s*元/g) ?? [])];
+    if (amounts.length < 2) {
+      return [];
+    }
+
+    return [
+      {
+        subject: this.extractConflictSubject(content),
+        predicate: 'versioned_numeric_policy',
+        currentValue: amounts[amounts.length - 1],
+        conflictingValue: amounts[0],
+        conflictingVersion: years[0],
+      },
+    ];
+  }
+
+  private extractConflictSubject(content: string): string {
+    const match = /(住宿报销上限|报销上限|绩效奖金|基本工资|审批规则)/.exec(
+      content,
+    );
+    return match?.[1] ?? 'versioned_policy';
+  }
+
+  private extractGovernanceMetadata(
+    filename: string,
+    content: string,
+  ): DocumentGovernanceMetadata {
+    return {
+      docVersion: this.extractDocVersion(filename, content),
+      effectiveAt: this.extractDate(
+        content,
+        /(?:生效日期|生效时间|effectiveAt)[:：]?\s*(\d{4}-\d{2}-\d{2})/i,
+      ),
+      expiredAt: this.extractDate(
+        content,
+        /(?:失效日期|失效时间|expiredAt)[:：]?\s*(\d{4}-\d{2}-\d{2})/i,
+      ),
+      sourceAuthority: this.extractSourceAuthority(filename, content),
+    };
+  }
+
+  private extractDocVersion(filename: string, content: string): string | null {
+    const haystack = `${filename}\n${content}`;
+    const explicit =
+      /(?:版本|版次|docVersion|version)[:：]?\s*([A-Za-z0-9._-]+|20\d{2}\s*版)/i.exec(
+        haystack,
+      );
+    if (explicit?.[1]) {
+      return explicit[1].replace(/\s+/g, '');
+    }
+    return haystack.match(/20\d{2}\s*版/)?.[0]?.replace(/\s+/g, '') ?? null;
+  }
+
+  private extractDate(text: string, pattern: RegExp): Date | null {
+    const value = pattern.exec(text)?.[1];
+    if (!value) {
+      return null;
+    }
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private extractSourceAuthority(filename: string, content: string): string {
+    const haystack = `${filename}\n${content}`.toLowerCase();
+    if (/废止|失效|deprecated/.test(haystack)) return 'deprecated';
+    if (/草稿|draft/.test(haystack)) return 'draft';
+    if (/正式|官方|制度|policy|official/.test(haystack)) return 'official';
+    return 'normal';
+  }
+}
+
+interface DocumentGovernanceMetadata {
+  docVersion: string | null;
+  effectiveAt: Date | null;
+  expiredAt: Date | null;
+  sourceAuthority: string;
+}
+
+interface FactConflictDraft {
+  subject: string;
+  predicate: string;
+  currentValue: string;
+  conflictingValue: string;
+  conflictingVersion: string | null;
 }

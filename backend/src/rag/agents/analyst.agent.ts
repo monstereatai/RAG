@@ -2,6 +2,20 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import type { ISubAgent, AgentInput, AgentOutput } from './agent.interface';
 
+type DeepAgentFactory = {
+  createDeepAgent: (params: {
+    model: ReturnType<LlmProvider['getModel']>;
+    systemPrompt: string;
+    middleware?: unknown[];
+  }) => {
+    invoke: (input: unknown) => Promise<unknown>;
+  };
+};
+
+type QuickJsMiddlewareFactory = {
+  createCodeInterpreterMiddleware: () => unknown;
+};
+
 /**
  * Analyst Agent — 分析推理
  *
@@ -33,16 +47,16 @@ export class AnalystAgent implements ISubAgent {
       .join('\n');
 
     try {
-      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const dynamicImport = new Function(
         'specifier',
         'return import(specifier)',
-      ) as (specifier: string) => Promise<any>;
+      ) as <T>(specifier: string) => Promise<T>;
 
-      const { createDeepAgent } = await dynamicImport('deepagents');
+      const { createDeepAgent } =
+        await dynamicImport<DeepAgentFactory>('deepagents');
       const { createCodeInterpreterMiddleware } =
-        await dynamicImport('@langchain/quickjs');
+        await dynamicImport<QuickJsMiddlewareFactory>('@langchain/quickjs');
 
       this.logger.log(
         'Initializing Analyst Agent with QuickJS Code Interpreter...',

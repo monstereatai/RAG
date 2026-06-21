@@ -96,7 +96,11 @@ describe('McpProvider', () => {
     await provider.onModuleInit();
 
     expect(provider.getMcpTools()).toEqual([
-      { name: 'mcp-tool-1', description: 'MCP Tool description' },
+      {
+        name: 'mcp-tool-1',
+        description: 'MCP Tool description',
+        source: 'mcp:server1',
+      },
     ]);
 
     await provider.onModuleDestroy();

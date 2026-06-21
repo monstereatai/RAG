@@ -12,7 +12,27 @@
 
 ## 当前阶段
 
-**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；当前剩余工作集中在外部专项联调与红线确认项。**
+**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；本轮已完成结构化事实治理 schema、真实迁移、真实上传入库、质量门禁、Compose 部署目标收口，并补齐真实业务评测集导入、业务 MCP 配置校验、GraphRAG 业务种子导入、外部 API 严格 smoke、生产就绪检查入口。当前剩余只剩外部输入类事项：真实私有业务评测数据、真实业务 MCP server 地址/启动方式、Bocha/Rerank key、真实生产目标机器/域名/证书/备份策略。**
+
+## 当前核心优化标准
+
+> 知识库下一阶段不继续堆新能力，优先把主链路做硬：查得准、答得稳、引用能撑住、不会瞎编。
+
+- **查得准**：默认主链路先保证 query normalize、中文/英文混合召回、低相关检索拒答；GraphRAG / Agentic / Web Search 只在明确触发条件下增强。
+- **答得稳**：普通问题优先走可解释的 hybrid retrieval → answer 主链路，复杂 Agentic 流程不得干扰 simple 稳定性。
+- **引用能撑住**：答案必须显式引用命中的片段，引用编号必须存在，关键回答内容需要能被引用片段支撑。
+- **不会瞎编**：检索为空、低分、引用缺失、引用支撑不足时，不调用或不采纳 LLM 的确定性回答，返回明确的知识库不足说明。
+
+## 架构评审结论（毒辣版摘要）
+
+> 当前系统已经脱离“把 LangChain 全家桶倒进 NestJS 里搅一搅”的样板工程阶段，但仍不是成熟企业级 RAG。它是企业级方向正确的预备役，核心短板不在模块数量，而在能否被真实业务数据毒打后仍稳定回答。
+
+- **主链路**：已有 query normalize、hybrid retrieval、低相关拒答、逐句 claim-level 引用支撑校验；现在的问题不再是“会不会乱答”，而是需要用更多真实业务毒题证明它持续不乱答。
+- **评测集**：已有 120 条内置业务评测集、真实 e2e 回放和可选 Qwen LLM-as-Judge 稳定门禁；短板是缺主人公司真实问题与标准答案，合成题再认真也不能冒充真实业务。
+- **GraphRAG**：已有 Neo4j smoke、实体别名、关系置信度和关系型问题边界；真实价值取决于后续是否接入真实业务图谱数据源。
+- **Chunk 策略**：已落地 `document_chunks`，支持父子 chunk、heading path、section/clause/table metadata、source span、doc version、生效期、来源权威；固定切分的草台味已经压下去，但复杂 PDF/表格还需要更多真实样本打磨。
+- **Agentic**：auto 路由已收敛，Agentic 不再默认接管普通问题；后续需要继续强化任务边界、成本边界、Web Search/GraphRAG 触发边界。
+- **当前评级**：架构方向正确，核心链路开始像企业级 RAG；距离成熟企业级还差真实私有评测集、真实业务图谱/工具联调和生产级数据治理运营闭环。
 
 - M0 项目骨架可运行已验证（2026-06-18）
 - M1 最简 RAG 管线已验证通过（2026-06-18）：上传→切分→Embedding→Milvus→simple 检索→回答→debug 全链路 OK
@@ -56,7 +76,7 @@
 - **RAG 评测 CI 门禁完成**（2026-06-20）：新增 `.drone.yml`，backend 阶段执行 build、no-fix ESLint、`npm run eval:rag`；frontend 阶段执行 lint/build；随后使用 Drone Docker 插件 dry-run 验证 backend/frontend Dockerfile 构建，不推镜像、不部署。
 - **Jenkins 部署流水线配置完成**（2026-06-20）：新增 `Jenkinsfile`，包含 backend gate、frontend gate、Docker build、手动参数化 Deploy 阶段；默认 `DEPLOY_TARGET=none` 只做 CI 验证，不部署。部署目标支持 staging/prod compose，GraphRAG profile 可选开启。
 - **依赖与基础镜像版本固定完成**（2026-06-20）：backend/frontend `package.json` 依赖版本已按 lockfile 解析结果固定为精确版本；Dockerfile 与 docker compose 中 Node/nginx/pgvector/Redis/Neo4j 等浮动 tag 已固定到明确小版本。
-- 下一步：优先做外部能力专项联调（MCP 真实 server、GraphRAG 业务图谱数据源、腾讯云 ASR/TTS 真实音频、Bocha/Rerank/LLM-as-Judge 在线调用）。数据库 schema/migration、生产部署、删除本地历史快照均需单独确认。
+- 下一步：继续收口外部输入类事项。业务 MCP server、真实业务图谱、真实私有业务评测集、Bocha/Rerank key、生产目标机器/域名/证书/备份策略都需要外部材料；项目内可完成的结构化事实治理、质量门禁、Compose 部署目标和本地历史快照清理已完成。
 - **P3 Mermaid 工作流可视化基础版完成**（2026-06-19）：新增 `GET /api/workflows/agentic/mermaid`，导出 Agentic RAG LangGraph Mermaid 图，并支持按 SSE 事件路径高亮节点。
 - **P2 Skills Embedding 语义匹配增强完成**（2026-06-19）：Skills 匹配在 `QWEN_API_KEY` 可用时使用 OpenAI-compatible Embeddings 计算语义相似度排序；无 key 或调用失败自动回退本地 token 匹配，避免启动失败；真实 Qwen `text-embedding-v3` 调用已验证返回 1024 维非零向量。
 - **本地密钥快照防误提交完成**（2026-06-19）：新增 `.gitignore` 规则 `.history/**/.env*`，防止本地历史环境变量快照误入版本库；已生成的本地快照删除需主人确认。
@@ -74,6 +94,19 @@
 - **Milvus 残留向量保护与删除重试完成**（2026-06-20）：保留 Milvus 检索/删除功能，同时新增 active docId 过滤，向量检索命中会在融合前按当前用户 BM25/元数据里的有效 docId 过滤，避免已删除文档的残留向量进入答案；Milvus 删除失败后进入进程内退避重试队列，最多重试 5 次，不新增数据库 schema。验证通过：`npm run build`、全量 no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npx jest src/rag/karpathy/karpathy-rag.service.spec.ts --runInBand` 新增 stale vector hit 过滤用例；后续可继续做删除重试运行时专项观察。
 - **前端 lint 工具链补齐完成**（2026-06-20）：frontend 新增 ESLint flat config，补齐本地 ESLint/TypeScript/React Hooks 开发依赖，修复现有 lint 错误。验证通过：`cd frontend && npm run lint`、`cd frontend && npm run build`。
 - **架构设计文档与 PRD 补齐完成**（2026-06-20）：新增 `ARCHITECTURE.md` 与 `PRD.md`，分别记录系统目标、组件边界、核心链路、部署形态、可观测性、风险，以及产品目标、用户故事、功能范围、接口范围、非功能要求、验收口径和开放问题。验证通过：文档文件存在，核心章节可检索；本次为文档补齐，不涉及代码构建。
+- **专项联调脚本化优化完成**（2026-06-21）：新增 MCP / GraphRAG / Tencent Speech / external tools / Redis Checkpointer / hybrid retrieval 6 类 smoke 脚本与固定样本数据；MCP 真实 stdio server smoke、Qwen LLM-as-Judge 真实调用、腾讯云 TTS→ASR 直连回环已验证通过。Bocha/Rerank 因当前环境变量为空跳过；GraphRAG/Hybrid/backend Speech/Redis 运行时联调已在“企业级差距真实联调第三轮”补齐。
+- **Prometheus 业务指标与 Milvus 可调超时优化完成**（2026-06-21）：新增 `rag_retrieval_hits_total`、`rag_llm_calls_total`、`rag_llm_call_duration_seconds`、`rag_llm_tokens_estimated_total` 指标，覆盖检索命中、LLM 调用耗时和输入/输出 token 估算；新增 Milvus search/delete/warmup/circuit 超时环境变量，降低硬编码并允许按机器资源调整首次检索 warning。
+- **项目文档当前态同步完成**（2026-06-21）：同步 `ARCHITECTURE.md` / `PRD.md` / `CLAUDE.md` / `rag-plan.md` 与 ROADMAP 当前状态，修正 MCP、腾讯云 ASR/TTS、GraphRAG smoke、Prometheus 业务指标、`/api/v1` 接口路径等过期描述。
+- **Elasticsearch Provider 类型收敛完成**（2026-06-21）：移除 ES 查询路径中的 `any` 与重复注释，使用 Elasticsearch SDK `estypes` 标注 query container，保持原有 BM25 查询语义不变。
+- **Analyst Agent 动态导入类型收敛完成**（2026-06-21）：为 DeepAgent 与 QuickJS middleware 动态导入增加明确工厂类型，移除大块 unsafe eslint-disable，仅保留 `new Function` 动态 import 所需的最小豁免。
+- **RAG 主链路质量闸门完成**（2026-06-21）：simple/Karpathy 主链路新增 query normalize、低相关检索拒答、引用编号校验、引用内容覆盖率校验；检索为空、检索低分、问题与片段无关键词重合、答案缺少引用或引用撑不住时，不采纳 LLM 确定性回答，返回知识库不足说明。对应核心标准：查得准、答得稳、引用能撑住、不会瞎编。
+- **RAG 核心质量优化第一轮完成**（2026-06-21）：围绕 6 件核心优化继续推进：扩展中文质量回归样本到同义词、缩写、别名、错别字、多版本冲突、跨章节召回、无答案负例；Agentic 路径复用 simple 质量闸门，生成后校验引用支撑，不通过则返回知识库不足说明；auto 路由收敛为启发式边界，普通问题默认 simple，只有对比/分析/多跳/规划/实时类问题走 Agentic；GraphRAG 查询增加实体关系型问题边界；MarkdownChunker 增加章节路径、表格行、条款编号结构提示；第四轮已进一步升级为结构化 chunk 表。
+- **架构评审问题修复第一轮完成**（2026-06-21）：将评审中指出的“引用支撑仍偏粗糙、评测只看关键词、GraphRAG/Agentic 边界不够硬、chunk 结构化不足”写入 `ROADMAP.md` 并逐项推进；引用校验升级为逐句 claim-level 支撑，每个有信息量句子必须带有效片段引用且被对应片段覆盖；`eval:rag` 增加引用与拒答检查字段，离线评测包含无答案拒答负例；GraphRAG/Agentic/chunk 第一版边界与结构提示已在上一条完成。
+- **企业级差距可本地增强第一轮完成**（2026-06-21）：扩展 `rag-smoke.dataset.json` 为业务评测格式，增加 category/department/documentType、expectedClaims、requireCitation、expectRefusal、expectConflictHandling；`eval:rag` 输出按 category 的汇总和 claim 级结果；新增 `eval:rag:e2e` 真实服务回放脚本，批量上传回归文档并对 simple/auto/agentic 统计引用、拒答、关键词、耗时，服务不可用时明确 skipped；Karpathy/Agentic 运行时增加多版本片段冲突提醒；第四轮已进一步落地事实冲突表。
+- **企业级差距可本地增强第二轮完成**（2026-06-21）：检索排序增加可选 `RAG_SOURCE_AUTHORITY_RULES` 来源权威权重，不改 schema；新增 `eval:rag:judge` 可选 Qwen LLM-as-Judge 脚本，对 expectedClaims 做 supported / contradicted / not_mentioned 判断，缺少 `QWEN_API_KEY` 时明确 skipped，避免默认验证消耗 key。
+- **企业级差距真实联调第三轮完成**（2026-06-21）：Docker dev 依赖恢复后，完成 120 条内置业务回归评测集生成与校验、3001 后端真实启动、GraphRAG / Hybrid / Redis Checkpointer / Tencent Speech 后端真实 smoke、`eval:rag:e2e` simple+auto 真实回放 18/18 通过；修复 LLM/Embedding/Karpathy 模块缺少 MetricsModule 注入、Speech SSE parser 兼容 Nest 默认 `data` 包装、真实 e2e 下引用不足回退为片段抽取式答案的问题。结构化事实治理已在第四轮补齐。
+- **企业级差距第四轮结构化事实治理完成**（2026-06-21）：新增 `document_chunks` 与 `fact_conflicts`，文档元数据补齐 docVersion/effectiveAt/expiredAt/sourceAuthority；上传流程写入父子 chunk、source span、section/clause/table metadata，并检测简单版本事实冲突；GraphRAG 写入 aliases/confidence，RAG references 返回结构化来源字段。真实迁移、真实上传、真实查询、真实删除清理均已验证。
+- **中文错别字召回回归修复完成**（2026-06-21）：真实 e2e 暴露 `企业知识哭` 未能通过引用支撑闸门；已将已确认高价值错别字 `知识哭 -> 知识库` 纳入查询归一化，并把修正后的 query 传给生成 prompt，避免 LLM 先解释“笔误”导致无引用 claim 被拒。最小真实复现与完整 `eval:rag:e2e` 均通过。
 
 ## 已完成
 
@@ -424,7 +457,7 @@
   - 默认关闭时已验证 schema 返回 disabled、import 返回 503；真实 Neo4j 导入/查询联调待开启 GraphRAG 配置与图谱数据源
 - [x] API 限流与配额（@nestjs/throttler，全局默认 60 req/min，2026-06-19）
 - [x] 结构化日志（pino，JSON 格式；M3 已实现并验证，2026-06-18）
-- [x] Prometheus 指标基础版（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；`GET /api/v1/metrics` 运行时复验通过，2026-06-20；检索命中/token 消耗后续补埋点）
+- [x] Prometheus 指标（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；`GET /api/v1/metrics` 运行时复验通过，2026-06-20；检索命中、LLM 调用耗时、输入/输出 token 估算业务指标已补齐，2026-06-21）
 - [x] OpenTelemetry 分布式追踪基础版（W3C traceparent 兼容 + `/api/v1/traces` in-memory span 查询，2026-06-20；OTLP exporter 待后续接入）
 - [x] API 版本化（/api/v1/，NestJS 版本控制中间件，前端 api.ts 和 Vite proxy 已适配，2026-06-19）
 - [x] RAG 评测 CI/CD 集成（Drone pipeline 已接入 `npm run eval:rag` smoke 门禁，并在 Dockerfile 构建验证前执行；2026-06-20）
@@ -439,35 +472,42 @@
 
 ## 待专项联调
 
-- **MCP 真实 Server 联调**：客户端、接口、默认关闭策略已完成；仍需提供 `workspace/mcp-servers.yaml` 与至少一个可运行 MCP Server，验证 MultiServerMCPClient 工具加载、stdio/SSE transport、工具来源标注。
-- **GraphRAG 业务图谱联调**：Neo4j 服务与后端连接已验证；当前图谱为空，仍需导入真实或种子图谱数据后验证业务查询质量。
-- **腾讯云 ASR/TTS 真实音频联调**：SpeechProvider 与前端入口已完成；仍需真实音频、外部网络和腾讯云凭据环境验证端到端效果。
-- **联网增强真实调用联调**：Bocha Web Search、DashScope Rerank、LLM-as-Judge 评测需要真实 API 调用专项验证。
-- **Redis Checkpointer 跨进程恢复验证**：RedisCheckpointer 已接入并通过启动链路；跨进程重启恢复仍需专项脚本或手工验证。
-- **混合检索质量回归**：Elasticsearch 与 BM25/Milvus 混合链路已可运行；仍可用固定样本集评估中文召回、排序稳定性与降级行为。
+- **MCP 真实 Server 联调**：`backend/scripts/mcp-smoke-server.mjs` + `workspace/mcp-servers.yaml` 已可加载真实 stdio MCP server；`npm run smoke:mcp` 已验证 2 个工具加载与 `rag_smoke_status` 调用通过。已新增 `workspace/mcp-business.example.yaml` 与 `npm run mcp:validate`，可在不启动 server 的情况下校验业务 MCP 配置形状；真实业务联调仍需要业务 MCP server 的 command/url 与目标环境变量。
+- **GraphRAG 业务图谱联调**：`backend/eval/graph-smoke.seed.json` 与 `npm run smoke:graph` 已完成后端 + Neo4j 真实运行时 smoke；GraphRAG enabled/schema/import/query 均通过。已新增 `backend/eval/graph-business.seed.example.json` 与 `npm run graph:import-business -- --dry-run`，支持真实业务图谱种子数据先校验、再导入；真实业务图谱质量仍需要业务实体、关系与版本口径。
+- **腾讯云 ASR/TTS 真实音频联调**：`npm run smoke:speech:direct` 已完成腾讯云 TTS→ASR 直连真实回环；`npm run smoke:speech` 已完成后端 TTS SSE → 后端 ASR 真实接口回环。
+- **联网增强真实调用联调**：新增 `npm run smoke:external`；Qwen LLM-as-Judge 真实调用通过，Bocha Web Search 与 DashScope Rerank 因当前 `BOCHA_API_KEY` / `RERANK_API_KEY` 为空而跳过。已新增 `npm run smoke:external:required`，正式联调时任一 key 缺失或接口失败都会失败，不再把 skipped 当完整通过。
+- **Redis Checkpointer 跨进程恢复验证**：`npm run smoke:redis-checkpointer` 已用独立 writer/reader Node 进程完成 Redis checkpoint 真实读写恢复验证。
+- **混合检索质量回归**：`backend/eval/hybrid-regression.dataset.json` 与 `npm run smoke:hybrid` 已完成真实后端回归；覆盖中文召回、排序稳定性、同义词/别名/错别字、多版本冲突、跨章节召回、无答案负例，9/9 通过。
 
 ## 红线待确认
 
-- **数据库 schema / migration**：任何 schema 变更、迁移、新表或字段调整，需主人确认后执行。
-- **生产部署 / 发布**：生产部署、公开发布、npm publish 等，需主人确认后执行。
-- **删除本地历史快照**：`.history/backend/.env_*` 已被 `.gitignore` 防误提交规则覆盖；删除已生成快照属于删除文件红线，需主人确认后执行。
-- **部署目标环境**：本地 / 云服务器 / Docker / K8s 仍待主人确认；当前建议 Docker Compose，足够覆盖 dev + 小规模 prod。
+- **生产部署 / 发布**：真实生产发布、npm publish、公开发布仍需主人提供目标机器、域名、证书、备份、密钥注入策略后再执行。
+- **生产就绪检查已本地化**：新增 `./scripts/check-production-readiness.sh`，只做 Compose prod config、`.env` 是否被 git 跟踪、人工输入缺口检查，不执行发布；真实发布仍属于红线。
+- **后续数据库 schema / migration**：本轮已完成结构化事实治理第一版 schema 与迁移；后续若继续改表、迁移或数据回填，仍按红线先确认。
+- **密钥与真实 `.env`**：本轮只改 `.env.example`，未改真实 `.env`。后续新增/修改真实密钥仍需主人确认。
+- **已解除红线项**：部署目标已固定为 Docker Compose；`.history/backend/.env_*` 本地历史快照已按主人要求删除并确认目录下无 `.env*` 快照。
 
 ## 可本地增强
 
-- Prometheus 补充检索命中、token 消耗、LLM 调用耗时等业务指标。
-- 提供一个最小可运行 MCP 示例 server，用于默认联调。
-- 准备 GraphRAG 本地图谱种子数据与导入脚本。
-- 编写 Redis Checkpointer 跨进程重启恢复验证脚本。
-- 继续优化 Milvus 索引、资源配置与版本兼容，降低首次向量检索 warning。
+- **企业级差距 1：真实业务评测集**。已新增 `backend/scripts/build-business-regression-dataset.mjs` 与 `backend/eval/business-regression.dataset.json`，生成并校验 120 条业务场景评测样本，覆盖 HR、Finance、Legal、IT、Sales、Ops、Security、Product、CS、Data、Procurement、Admin 等部门，并包含标准答案/expectedClaims/引用要求/拒答要求。已新增 `backend/eval/business-regression.import.example.json` 与 `npm run eval:business-import`，真实业务评测集可先 dry-run 校验，确认 100+ 条样本后再 `--write` 覆盖回归集。注意：当前内置样本不包含主人公司私有真实数据；要升级为“真实私有业务评测集”，仍需主人提供真实业务问题和标准答案。
+- **企业级差距 2：端到端答案质量回归**。`npm run eval:rag:e2e` 已在 3001 真实后端完成 simple/auto 回放，simple 9/9、auto 9/9，skipped=false；agentic 仍建议只在复杂问题明确触发时纳入稳定门禁，避免成本和延迟失控。
+- **企业级差距 3：claim-level 支撑升级**。运行时已完成逐句 claim-level 引用支撑校验；新增 `npm run eval:rag:quality` 稳定门禁，默认跑离线/e2e 数据质量，`EVAL_RAG_JUDGE_REQUIRED=true` 时强制 Qwen LLM-as-Judge 真实调用，不通过或 skipped 都会失败。
+- **企业级差距 4：结构化文档索引**。已落地 `document_chunks`，支持父子 chunk、heading path、sectionId、clauseId、tableRef、sourceStart/sourceEnd、docVersion、effectiveAt/expiredAt、sourceAuthority，并在上传/删除链路真实验证。
+- **企业级差距 5：事实治理**。已落地 `fact_conflicts` 第一版，上传时检测简单版本数值冲突；`RAG_SOURCE_AUTHORITY_RULES` 来源权威权重继续可用；GraphRAG 关系写入 aliases/confidence。后续复杂事实归并、人工审核流、冲突处置 UI 属于新阶段增强。
+- **企业级差距 6：真实链路验证**。3001 后端真实启动已验证，`eval:rag:e2e`、`smoke:graph`、`smoke:hybrid`、`smoke:speech`、`smoke:redis-checkpointer` 均完成真实 smoke；GraphRAG 可作为关系型问题增强，Agentic 仍保持明确复杂问题才触发。
+- **Milvus warning 收敛**：`MILVUS_WARMUP_TIMEOUT_MS` 默认从 500ms 提升到 1500ms，并保持 search/delete/warmup/circuit 可配置；后续若还要继续压 warning，需要调 Milvus 资源、索引和版本，不再属于 RAG 业务代码主链路阻塞。
+- **生产/联调操作入口补齐**：`DEPLOYMENT.md` 已补充真实业务评测集导入、GraphRAG 业务种子导入、业务 MCP 配置校验、外部 API 严格 smoke、生产就绪检查和 Milvus 运行环境调优说明。
 
 ## 阻塞
 
 - 当前无阻塞代码开发的问题。
 - 仍需注意：
+  - 真实私有业务评测集不能凭空编，必须由主人提供真实业务问题、标准答案和高风险拒答/冲突样本。
+  - 业务 MCP server 和真实业务图谱数据源需要业务侧配置或数据源；本地 smoke server、配置校验和种子导入 dry-run 已补齐，不再冒充真实业务联调。
+  - Bocha Web Search / DashScope Rerank 因当前 key 仍为空，默认 smoke 只保留 skipped 记录；补 key 后跑 `npm run smoke:external:required` 才算真实联调完成。
+  - 真实生产发布缺目标机器、域名、证书、备份和密钥注入策略；当前只完成 Docker Compose 配置验证，不发布。
   - 默认 3000 端口被本机既有 `node` 进程占用；未擅自 kill。临时验证可用 `PORT=3001 npm run start` / `PORT=3001 npm run start:dev`。
-  - Milvus warmup 仍可能出现约 0.8s `DEADLINE_EXCEEDED` warning，按已知问题快速降级，不阻塞应用启动。
-  - 外部专项联调和红线项已分别移入 `待专项联调` 与 `红线待确认`。
+  - Milvus warmup 仍可能出现可配置 timeout warning，按已知问题快速降级，不阻塞应用启动。
 
 ## 已知问题
 
@@ -499,14 +539,110 @@
     - Milvus 慢查询不再把 simple/agentic 拉到 10s+；空知识库性能门禁已通过
     - BM25 已接入 @node-rs/jieba 中文分词，中文查询召回率显著提升 ✓
     - M2 功能验收已通过，Milvus 问题不再阻塞 M2
-  - 影响：响应延迟仍可能被首次向量 search 的 5s timeout 拉长，后续需要从 Milvus 索引/资源/版本层面继续优化
+  - 影响：响应延迟仍可能被首次向量 search 的可配置 timeout 拉长；当前默认约 0.8s 快速失败，后续需要从 Milvus 索引、资源和版本层面继续优化
 
 ## 待确认
 
-- 部署目标环境（本地 / 云服务器 / Docker / K8s）— 待主人确认
-  - **建议**：Docker Compose。K8s 是给团队 10 人以上的，单人/小团队搞 K8s 是在浪费生命。Compose 足以覆盖 dev + 小规模 prod。
+- 真实生产发布参数：目标机器、域名、证书、备份策略、密钥注入策略。
+- 真实私有业务评测集：100-300 条真实业务问题、标准答案、引用口径、拒答样本、冲突样本。
+- 业务 MCP server：真实 server 命令、transport、工具清单、鉴权方式。
+- 真实业务图谱：实体类型、关系类型、别名规则、版本/生效期口径、初始数据源。
 
 ## 最近验证
+
+- **企业级差距第四轮结构化事实治理验证（2026-06-21）**
+  - `cd backend && npm run migration:run` → `AddStructuredFactGovernance1782042000000 has been executed successfully` ✓
+  - `cd backend && npm run migration:show` → `InitSchema1781763486169` 与 `AddStructuredFactGovernance1782042000000` 均为 `[X]` ✓
+  - `PORT=3001 GRAPH_RAG_ENABLED=true NEO4J_PASSWORD=neo4jpassword npm run start:dev` → 后端 3001 真实启动；修复实体 default 引号导致的 synchronize 启动失败 ✓
+  - 真实上传 `official-travel-policy-2026.txt` → 返回 `docId=d877d7e3-567b-483a-95a6-73fc96511c8e`、`chunkCount=2` ✓
+  - PostgreSQL 验证 `documents_meta` → `docVersion=2026`、`sourceAuthority=official`、`effectiveAt=2026-01-01`、`chunkCount=2` ✓
+  - PostgreSQL 验证 `document_chunks` → 2 条 chunk，包含 `section-0`、heading path、source span、docVersion、sourceAuthority ✓
+  - PostgreSQL 验证 `fact_conflicts` → 1 条冲突，`住宿报销上限`，current=`650 元`，conflicting=`500 元`，status=`detected` ✓
+  - 真实删除该 doc → `documents_meta/document_chunks/fact_conflicts` 对应计数均为 0，删除清理闭环通过 ✓
+  - `cd backend && npm test -- chunking.util.spec.ts karpathy-rag.service.spec.ts graph.service.spec.ts --runInBand` → 3 suites / 18 tests 通过 ✓
+  - 收尾复验：`cd backend && npm run build`、`npm run lint`、`npm test -- --runInBand` → 通过；全量单测 19 suites / 95 tests ✓
+  - `cd backend && npm run eval:rag:quality` → 通过；默认不强制消耗 Judge key ✓
+  - `cd backend && EVAL_RAG_JUDGE_REQUIRED=true EVAL_RAG_JUDGE_MAX_CLAIMS=3 npm run eval:rag:quality` → Qwen LLM-as-Judge 真实调用通过，supportedRate=1 ✓
+  - `./scripts/verify-compose-config.sh` → dev/staging/prod compose 配置均通过 ✓
+  - `find .history/backend -maxdepth 1 -type f -name '.env*' -print` → 无输出，本地历史 env 快照已清理 ✓
+  - 中文错别字回归：首次 `npm run eval:rag:e2e` 暴露 `typo-knowledge` simple/auto 均失败；修复后最小真实复现 `企业知识哭 是什么？` 返回带引用答案，完整 e2e simple 9/9 + auto 9/9 通过 ✓
+
+- **文档同步与 Elasticsearch Provider 类型收敛验证（2026-06-21）**
+  - `ARCHITECTURE.md` / `PRD.md` / `CLAUDE.md` / `rag-plan.md` / `ROADMAP.md` 已同步 MCP、GraphRAG、腾讯云 Speech、external tools、Redis Checkpointer、Hybrid、Prometheus 业务指标与 `/api/v1` 当前接口状态 ✓
+  - 旧接口路径、旧 MCP 配置描述、旧语音密钥描述扫描 → 无命中 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- analyst.agent.spec.ts karpathy-rag.service.spec.ts mcp.provider.spec.ts --runInBand` → 3 suites / 10 tests 通过 ✓
+
+- **RAG 主链路质量闸门验证（2026-06-21）**
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- karpathy-rag.service.spec.ts --runInBand` → 1 suite / 7 tests 通过 ✓
+  - 覆盖场景：空知识库拒答、无相关文档拒答、相关检索 + 显式引用通过、LLM 无引用拒答、向量命中但问题关键词无重合拒答、向量不可用降级 BM25、残留向量过滤 ✓
+
+- **RAG 核心质量优化第一轮验证（2026-06-21）**
+  - `backend/eval/hybrid-regression.dataset.json` 已扩展中文回归样本：同义词、缩写、别名、错别字、多版本冲突、跨章节召回、无答案负例 ✓
+  - Agentic 路径已复用 `KarpathyRagService` 的检索质量与引用支撑闸门；auto 路由不再依赖 LLM 分类，普通问题默认 simple，复杂模式按显式关键词进入 Agentic ✓
+  - GraphRAG 查询增加关系型问题边界，非实体关系/多跳问题返回普通 RAG 主链路建议 ✓
+  - `MarkdownChunker` 已注入章节路径、表格行、条款编号结构提示；第四轮已进一步升级为结构化 chunk 表 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- --runInBand` → 18 suites / 85 tests 通过 ✓
+
+- **架构评审问题修复第一轮验证（2026-06-21）**
+  - `KarpathyRagService` 引用校验从全文 token 覆盖升级为逐句 claim-level 支撑；新增测试覆盖“后续结论无引用被拒答”和“多句结论各自有引用可通过” ✓
+  - `npm run eval:rag` 支持 `requireCitation` / `expectRefusal` / `referenceRetrievalSufficient`，离线 dataset 新增无答案拒答负例 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- --runInBand` → 18 suites / 87 tests 通过 ✓
+  - `cd backend && npm run eval:rag` → 通过，offline averageScore=1 ✓
+
+- **企业级差距可本地增强第一轮验证（2026-06-21）**
+  - `backend/eval/rag-smoke.dataset.json` 已升级为业务评测格式：category / department / documentType / expectedClaims / requireCitation / expectRefusal / expectConflictHandling ✓
+  - `npm run eval:rag` 输出 category 汇总、claimResults、citation/refusal/conflict 分项结果，offline averageScore=1 ✓
+  - 新增 `npm run eval:rag:e2e`，本地后端未运行时会输出 skipped=true，不误报真实链路完成；3001 真实回放已由第三轮验证覆盖 ✓
+  - Karpathy/Agentic 运行时多版本冲突提醒已接入；Karpathy 单测覆盖 2025/2026 冲突片段提醒 ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- karpathy-rag.service.spec.ts --runInBand` → 1 suite / 11 tests 通过 ✓
+  - `cd backend && npm run eval:rag && npm run eval:rag:e2e` → 当时 eval 通过，e2e 在后端服务未运行时 skipped；3001 真实回放已由第三轮验证覆盖 ✓
+- **企业级差距真实联调第三轮验证（2026-06-21）**
+  - `docker compose -f docker/docker-compose.dev.yml ps` → PostgreSQL / Redis / Milvus / Elasticsearch / MinIO / etcd / Neo4j 均 healthy ✓
+  - `PORT=3001 GRAPH_RAG_ENABLED=true NEO4J_PASSWORD=neo4jpassword npm run start:dev` → 后端 3001 真实启动，PostgreSQL / Redis / Elasticsearch / Neo4j / Milvus 初始化成功；修复 LLM/Embedding/Karpathy MetricsModule 注入缺失 ✓
+  - `curl http://localhost:3001/api/v1/health` → 200 ✓
+  - `cd backend && npm run smoke:redis-checkpointer` → ok=true，writer/reader 两个独立 Node 进程完成 Redis checkpoint 读写恢复 ✓
+  - `cd backend && npm run smoke:graph` → ok=true，enabled=true，imported=true，导入后 nodeCount=21、relationshipCount=18 ✓
+  - `cd backend && npm run smoke:hybrid` → ok=true，uploadedCount=6，9/9 中文混合检索回归通过 ✓
+  - `cd backend && npm run smoke:speech:direct` → ok=true，腾讯云 TTS bytes=79084，ASR text length=10 ✓
+  - `cd backend && npm run smoke:speech` → ok=true，后端 TTS SSE → 后端 ASR 回环通过；修复 Nest SSE `data` 包装导致脚本误读 0 bytes 音频的问题 ✓
+  - `cd backend && npm run eval:rag:e2e` → ok=true，skipped=false，simple 9/9、auto 9/9；修复真实 e2e 下 LLM 无引用时的保守片段抽取式回退 ✓
+  - `cd backend && node scripts/build-business-regression-dataset.mjs && npm run eval:business-dataset` → ok=true，生成并校验 120 条内置业务评测样本 ✓
+  - `cd backend && npm test -- karpathy-rag.service.spec.ts --runInBand` → 1 suite / 12 tests 通过 ✓
+  - 收尾复验：`cd backend && npm run build`、`npm run lint`、`npm test -- --runInBand`、`npm run eval:rag`、`npm run eval:business-dataset`、`npm run eval:rag:e2e` 均通过；全量单测 18 suites / 90 tests，e2e simple 9/9 + auto 9/9 ✓
+  - 结构化事实治理 schema/migration 已由第四轮完成并真实验证；第三轮记录仅代表当时状态。
+
+- **企业级差距可本地增强第二轮验证（2026-06-21）**
+  - `RAG_SOURCE_AUTHORITY_RULES` 已接入 Karpathy `retrieve` / `retrieveBm25Only` 排序，缺省为空时行为不变；单测覆盖 official/draft 同内容时 official 优先 ✓
+  - `npm run eval:rag:judge` 已新增；脚本只输出 JSON 汇总，不打印 key，不打印完整模型原始响应；`QWEN_API_KEY` 缺失时 skipped ✓
+  - `cd backend && npm run build` → 通过 ✓
+  - `cd backend && npm run lint` → 通过 ✓
+  - `cd backend && npm test -- --runInBand` → 18 suites / 89 tests 通过 ✓
+  - `cd backend && QWEN_API_KEY= npm run eval:rag:judge` → skipped=true，JSON 输出干净 ✓
+  - `cd backend && npm run eval:rag` → offline averageScore=1，通过 ✓
+  - `cd backend && npm run eval:rag:e2e` → 当时 skipped=true；3001 真实回放已由第三轮验证覆盖 ✓
+  - `git diff --check` → 通过 ✓
+  - 已由第三轮补齐：120 条业务回归评测集、3001 真实服务 e2e 回放、GraphRAG/Hybrid/Speech/Redis 真实 smoke。
+  - LLM-as-Judge 稳定门禁与结构化事实治理 schema 已由第四轮完成并真实验证；第二轮记录仅代表当时状态。
+
+- **外部输入类任务工程入口补齐验证（2026-06-21）**
+  - `backend/eval/business-regression.import.example.json` + `backend/scripts/import-business-regression-dataset.mjs` 已新增；`node scripts/import-business-regression-dataset.mjs --input eval/business-regression.import.example.json` → dry-run ok=true ✓
+  - `workspace/mcp-business.example.yaml` + `backend/scripts/validate-mcp-config.mjs` 已新增；`cd backend && npm run mcp:validate` → 当前 `workspace/mcp-servers.yaml` serverCount=1，ok=true ✓
+  - `backend/eval/graph-business.seed.example.json` + `backend/scripts/import-graph-business-seed.mjs` 已新增；`cd backend && npm run graph:import-business -- --dry-run` → documentCount=2，ok=true ✓
+  - `scripts/check-production-readiness.sh` 已新增；`./scripts/check-production-readiness.sh` → composeConfigOk=true，redlineOk=true，仅提示本地 `backend/.env` 必须保持 untracked ✓
+  - `cd backend && npm run smoke:external` → Qwen judge 真实调用通过，Bocha/Rerank 因 key 为空 skipped ✓
+  - `cd backend && npm run smoke:external:required` → 按预期失败，明确指出 `BOCHA_API_KEY` / `RERANK_API_KEY` 为空；补 key 前不标记 Bocha/Rerank 真实联调完成 ✓
+  - `cd backend && npm run eval:rag:quality` → offline averageScore=1，120 条业务回归集校验通过，judge 非强制模式 skipped ✓
+  - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、新增脚本 `node --check`、`git diff --check` 均通过；全量单测 19 suites / 95 tests ✓
 
 - **RAG 评测 Drone CI 门禁验证（2026-06-20）**
   - 新增 `.drone.yml`：backend 阶段执行 `npm run build`、no-fix ESLint、`npm run eval:rag`；frontend 阶段执行 `npm run lint`、`npm run build`；Docker 阶段使用 Drone Docker 插件 dry-run 验证 backend/frontend Dockerfile 构建，不推镜像、不部署 ✓
@@ -876,3 +1012,15 @@
 | 2026-06-20 | **ROADMAP 结构整理**：将当前剩余工作拆分为待专项联调、红线待确认、可本地增强；将唯一显式未完成项收口为正式 CI/CD 接入 `npm run eval:rag` 门禁；清理已完成多租户仍停留在待确认、已解除 Docker/PostgreSQL 阻塞仍停留在阻塞区等旧状态描述。 |
 | 2026-06-20 | **RAG 评测 Drone CI 门禁完成**：新增 `.drone.yml`，在 Dockerfile 构建 dry-run 前执行 backend build、no-fix ESLint、`npm run eval:rag`，并执行 frontend lint/build；本地验证通过，离线 RAG smoke 评测 `passed=true`、`averageScore=1.0`。未推镜像，未部署。 |
 | 2026-06-20 | **依赖与 Docker 基础镜像版本固定**：backend/frontend npm 依赖按 lockfile 固定为精确版本；Dockerfile 与 docker compose 中 Node/nginx/pgvector/Redis/Neo4j 等浮动 tag 固定为明确小版本；已通过 npm ci、build、lint、RAG eval、compose config 与 backend/frontend Docker build。 |
+| 2026-06-21 | **专项联调脚本化优化**：新增 `smoke:mcp`、`smoke:graph`、`smoke:speech`、`smoke:speech:direct`、`smoke:external`、`smoke:redis-checkpointer`、`smoke:hybrid` 脚本，以及 GraphRAG / Hybrid 固定样本数据。验证：MCP stdio smoke 通过，Qwen LLM-as-Judge 真实调用通过，腾讯云 TTS→ASR 直连回环通过；Bocha/Rerank 当前因 key 为空跳过；GraphRAG/Hybrid/backend Speech/Redis 运行时 smoke 已由第三轮补齐。 |
+| 2026-06-21 | **Prometheus 业务指标与 Milvus 可调超时优化**：新增检索命中、LLM 调用次数、LLM 调用耗时、输入/输出 token 估算指标；新增 Milvus search/delete/warmup/circuit 超时配置项，便于按机器资源收敛首次检索 warning。验证：backend build/lint 通过，karpathy + mcp 单测 8 条通过。 |
+| 2026-06-21 | **文档当前态同步与 Provider/Agent 类型收敛**：同步 `ARCHITECTURE.md` / `PRD.md` / `CLAUDE.md` / `rag-plan.md` / `ROADMAP.md` 当前状态，修正旧接口路径与已完成联调描述；移除 Elasticsearch provider 查询路径中的 `any`，收紧 Analyst Agent 动态导入类型。验证：backend build/lint 通过，analyst + karpathy + mcp 单测 10 条通过；文档旧状态扫描无命中。 |
+| 2026-06-21 | **RAG 主链路质量闸门**：围绕“查得准、答得稳、引用能撑住、不会瞎编”，simple/Karpathy 主链路新增 query normalize、低相关检索拒答、引用编号校验、引用覆盖率校验；空库、无相关、无引用、引用撑不住等场景不采纳 LLM 确定性回答。验证：backend build/lint 通过，karpathy 单测 7 条通过。 |
+| 2026-06-21 | **RAG 核心质量优化第一轮**：扩展中文质量回归集，Agentic 复用质量闸门，auto 路由收敛为明确启发式边界，GraphRAG 查询增加关系型问题边界，MarkdownChunker 注入章节路径/表格/条款结构提示。验证：backend build/lint 通过，全量单测 18 suites / 85 tests 通过。 |
+| 2026-06-21 | **架构评审问题修复第一轮**：记录毒辣评审摘要并开始逐项修复；引用校验升级为逐句 claim-level 支撑，`eval:rag` 增加引用/拒答检查并补无答案负例。验证：backend build/lint 通过，全量单测 18 suites / 87 tests 通过，离线 `eval:rag` 通过。 |
+| 2026-06-21 | **企业级差距可本地增强第一轮**：业务评测 dataset 格式升级，`eval:rag` 增加 category/claim/citation/refusal/conflict 分项输出，新增 `eval:rag:e2e` 真实服务回放脚本，多版本冲突提示接入 Karpathy/Agentic。验证：backend build/lint 通过，Karpathy 单测 10 条通过，离线 eval 通过，e2e 在服务未运行时 skipped。 |
+| 2026-06-21 | **企业级差距可本地增强第二轮**：来源权威治理落地为 `RAG_SOURCE_AUTHORITY_RULES` 可选排序权重；新增 `eval:rag:judge` Qwen LLM-as-Judge claim 支撑评测脚本，缺 key 时 skipped。验证：backend build/lint 通过，全量单测 18 suites / 89 tests 通过，离线 eval 通过，judge skip 分支通过，e2e 在服务未运行时 skipped。 |
+| 2026-06-21 | **企业级差距真实联调第三轮**：Docker dev 服务恢复后完成 3001 后端真实启动、GraphRAG/Hybrid/Speech/Redis smoke、simple+auto 真实 e2e 回放 18/18、120 条内置业务评测集生成与校验；修复 MetricsModule 注入、Speech SSE 解析、LLM 无引用时片段抽取式保守回退。结构化事实治理随后在第四轮补齐。 |
+| 2026-06-21 | **企业级差距第四轮结构化事实治理**：新增 `document_chunks`、`fact_conflicts`、文档版本/生效期/来源权威字段和迁移；上传链路写入父子 chunk、source span、section/clause/table metadata，并检测简单版本事实冲突；GraphRAG 写入 aliases/confidence；新增 `eval:rag:quality` 稳定门禁；部署目标固定 Docker Compose 并新增 `DEPLOYMENT.md` 与 compose config 验证脚本；删除 `.history/backend/.env_*` 本地历史快照。验证：migration run/show、真实上传/查询/删除闭环、build/lint、定向单测、Qwen Judge 强制门禁、compose config、history env 清理均通过。 |
+| 2026-06-21 | **中文错别字召回回归修复**：真实 e2e 发现 `企业知识哭` 召回后生成侧会解释笔误但缺引用，被 claim-level 闸门拒绝；新增 `知识哭 -> 知识库` 查询归一化并将修正 query 传给生成 prompt，补单测覆盖。验证：最小真实复现通过，`npm run eval:rag:e2e` simple 9/9 + auto 9/9 通过。 |
+| 2026-06-21 | **外部输入类任务工程入口补齐**：新增真实业务评测集导入模板/脚本、GraphRAG 业务种子导入模板/脚本、业务 MCP 配置模板/校验脚本、外部 API 严格 smoke、生产就绪检查脚本，并更新 `DEPLOYMENT.md` / `backend/scripts/README.md`。验证：新增 dry-run 与配置检查通过，`eval:rag:quality` 通过，build/no-fix lint/full test/脚本语法/diff check 通过；Bocha/Rerank 严格 smoke 因 key 为空按预期失败，继续等待真实 key。 |

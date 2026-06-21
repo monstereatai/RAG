@@ -17,7 +17,9 @@ export const generateAnswerPrompt = ChatPromptTemplate.fromMessages([
 回答要求：
 1. 只基于上述片段内容回答，不要编造
 2. 如果片段中没有相关信息，明确告知"片段中未提及"
-3. 回答末尾用 [片段N] 标注引用来源`,
+3. 每一个有事实信息的句子末尾都必须标注 [片段N]
+4. 引用编号必须来自检索片段标题中的编号，例如 [片段1]、[片段2]
+5. 不要把没有引用的解释性结论放进答案`,
   ],
   // 长期记忆上下文（可选，空字符串时无影响）
   new MessagesPlaceholder('memory'),

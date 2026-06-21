@@ -8,10 +8,16 @@ import { VectorStoreModule } from '../../providers/vector-store/vector-store.mod
 import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
+import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DocumentMetaEntity]),
+    TypeOrmModule.forFeature([
+      DocumentMetaEntity,
+      DocumentChunkEntity,
+      FactConflictEntity,
+    ]),
     EmbeddingModule,
     VectorStoreModule,
     KarpathyRagModule,

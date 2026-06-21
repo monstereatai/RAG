@@ -2,23 +2,27 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { McpProvider } from '../../providers/mcp/mcp.provider';
 
+interface McpToolView {
+  name: string;
+  description?: string;
+  schema?: unknown;
+  source?: string;
+}
+
 @Controller('mcp')
 @UseGuards(JwtAuthGuard)
 export class McpController {
   constructor(private readonly mcpProvider: McpProvider) {}
 
   @Get('tools')
-  getTools() {
+  getTools(): McpToolView[] {
     const tools = this.mcpProvider.getMcpTools();
 
-    return tools.map((tool: any) => ({
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    return tools.map((tool) => ({
       name: tool.name,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       description: tool.description,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       schema: tool.schema,
-      source: `mcp:unknown`, // @langchain/mcp-adapters might attach mcp source info, but we'll return a generic mcp source for now if it doesn't
+      source: tool.source,
     }));
   }
 }

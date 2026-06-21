@@ -5,6 +5,8 @@ import { UserEntity } from './entities/user.entity';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { DocumentMetaEntity } from './entities/document-meta.entity';
+import { DocumentChunkEntity } from './entities/document-chunk.entity';
+import { FactConflictEntity } from './entities/fact-conflict.entity';
 import { ScheduledJobEntity } from './entities/job.entity';
 
 /**
@@ -14,7 +16,7 @@ import { ScheduledJobEntity } from './entities/job.entity';
  * - retryAttempts: 5（默认 10，缩短等待时间）
  * - 连接失败时警告日志但不 crash
  *
- * 实体列表：UserEntity / ConversationEntity / MessageEntity / DocumentMetaEntity / ScheduledJobEntity
+ * 实体列表：UserEntity / ConversationEntity / MessageEntity / DocumentMetaEntity / DocumentChunkEntity / FactConflictEntity / ScheduledJobEntity
  */
 @Global()
 @Module({
@@ -42,6 +44,8 @@ import { ScheduledJobEntity } from './entities/job.entity';
             ConversationEntity,
             MessageEntity,
             DocumentMetaEntity,
+            DocumentChunkEntity,
+            FactConflictEntity,
             ScheduledJobEntity,
           ],
           synchronize: nodeEnv === 'development', // 开发环境自动同步 schema
@@ -58,6 +62,8 @@ import { ScheduledJobEntity } from './entities/job.entity';
       ConversationEntity,
       MessageEntity,
       DocumentMetaEntity,
+      DocumentChunkEntity,
+      FactConflictEntity,
       ScheduledJobEntity,
     ]),
   ],

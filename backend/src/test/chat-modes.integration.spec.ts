@@ -147,6 +147,7 @@ describe('ChatModes Integration', () => {
 
   it('should handle history context when matching historical conversations found', async () => {
     const query = 'Show status';
+    const threadId = '11111111-1111-4111-8111-111111111111';
     conversationEmbeddingService.searchHistory.mockResolvedValue([
       { id: 'h1', text: 'status ok', metadata: {} } as any,
     ]);
@@ -155,7 +156,7 @@ describe('ChatModes Integration', () => {
       references: [],
     });
 
-    await chatService.chat({ query, mode: 'simple' }, 'user-1');
+    await chatService.chat({ query, mode: 'simple', threadId }, 'user-1');
 
     expect(conversationEmbeddingService.searchHistory).toHaveBeenCalledWith(
       query,

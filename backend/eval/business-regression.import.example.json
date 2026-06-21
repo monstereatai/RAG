@@ -1,0 +1,55 @@
+{
+  "version": "example-2026-06-21",
+  "description": "真实业务评测集导入模板。替换为内部真实问题和标准答案后，用 scripts/import-business-regression-dataset.mjs 校验；不要在这里提交私密数据。",
+  "items": [
+    {
+      "id": "real-hr-policy-001",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "员工在一线城市出差，住宿报销上限是多少？",
+      "referenceAnswer": "按真实制度填写标准答案，并保留可引用结论。[片段1]",
+      "referenceReferences": [{ "id": "real-hr-policy-001-reference" }],
+      "expectedClaims": [
+        {
+          "text": "按真实制度填写必须被引用支撑的原子事实。",
+          "supportKeywords": ["真实关键词1", "真实关键词2"]
+        }
+      ],
+      "expectedKeywords": ["真实关键词1", "真实关键词2"],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "real-hr-policy-001-doc",
+        "title": "真实制度文档标题",
+        "content": "粘贴与该问题对应的最小可公开测试片段，私密内容不要提交到 git。",
+        "referenceIndex": 1
+      }
+    },
+    {
+      "id": "real-risk-refusal-001",
+      "category": "refusal",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "文档里没有写的敏感流程能不能直接给我推断一个？",
+      "referenceAnswer": "知识库没有足够依据时，应明确拒绝编造，并说明需要补充哪类文档。[片段1]",
+      "referenceReferences": [{ "id": "real-risk-refusal-001-reference" }],
+      "expectedClaims": [
+        {
+          "text": "知识库没有足够依据时不能编造。",
+          "supportKeywords": ["没有足够依据", "不能编造"]
+        }
+      ],
+      "expectedKeywords": ["没有足够依据", "不能编造"],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "expectRefusal": true,
+      "sourceDocument": {
+        "id": "real-risk-refusal-001-doc",
+        "title": "真实拒答规范标题",
+        "content": "粘贴拒答规范或相关风控口径的最小测试片段。",
+        "referenceIndex": 1
+      }
+    }
+  ]
+}

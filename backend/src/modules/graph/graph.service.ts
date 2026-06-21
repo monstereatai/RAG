@@ -34,6 +34,8 @@ export interface GraphFact {
   relationship: string;
   target: string;
   targetLabel: string;
+  confidence: number;
+  sourceId: string;
 }
 
 export interface GraphSchemaSummary {
@@ -82,6 +84,15 @@ export class GraphService {
   async queryGraph(query: string, userId: string): Promise<GraphQueryResult> {
     this.assertEnabled();
     const entities = await this.extractQueryEntities(query);
+    if (!this.isGraphQueryCandidate(query, entities)) {
+      return {
+        answer:
+          '该问题未表现出明确的实体关系或多跳查询需求，建议先走普通 RAG 主链路。',
+        entities,
+        facts: [],
+        cypher: this.factSearchCypher(),
+      };
+    }
     const facts = await this.searchFacts(entities, userId);
     const answer = await this.generateGraphAnswer(query, facts);
 
@@ -148,6 +159,7 @@ export class GraphService {
       UNWIND $nodes AS node
       MERGE (n:GraphEntity {id: node.id, userId: node.userId})
       SET n.label = node.label,
+          n.aliases = node.aliases,
           n.sourceId = node.sourceId,
           n.properties = node.properties,
           n.updatedAt = datetime()
@@ -172,6 +184,7 @@ export class GraphService {
       }]->(target)
       SET r.sourceId = rel.sourceId,
           r.properties = rel.properties,
+          r.confidence = rel.confidence,
           r.updatedAt = datetime()
       `,
       { relationships },
@@ -190,6 +203,7 @@ export class GraphService {
     return {
       id: node.id,
       label: node.label,
+      aliases: this.extractAliases(node),
       properties: JSON.stringify(node.properties ?? {}),
       userId,
       sourceId,
@@ -206,9 +220,39 @@ export class GraphService {
       target: relationship.target,
       type: relationship.type,
       properties: JSON.stringify(relationship.properties ?? {}),
+      confidence: this.extractConfidence(relationship),
       userId,
       sourceId,
     };
+  }
+
+  private extractAliases(node: GraphNode): string[] {
+    const raw = node.properties?.aliases ?? node.properties?.alias;
+    if (Array.isArray(raw)) {
+      return raw
+        .map(String)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      return raw
+        .split(/[,，、/]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }
+
+  private extractConfidence(relationship: GraphRelationship): number {
+    const raw =
+      relationship.properties?.confidence ??
+      relationship.properties?.置信度 ??
+      relationship.properties?.score;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      return 1;
+    }
+    return Math.min(Math.max(parsed, 0), 1);
   }
 
   private async extractQueryEntities(query: string): Promise<string[]> {
@@ -254,6 +298,13 @@ export class GraphService {
     return rows;
   }
 
+  private isGraphQueryCandidate(query: string, entities: string[]): boolean {
+    const normalized = query.normalize('NFKC').toLowerCase();
+    const relationPattern =
+      /关系|关联|上下游|依赖|负责|属于|连接|影响|链路|谁|哪些|共同|之间|relation|depend|owner|link|between/;
+    return entities.length >= 2 || relationPattern.test(normalized);
+  }
+
   private factSearchCypher(): string {
     return `
       MATCH (source:GraphEntity {userId: $userId})-[r:GRAPH_RELATION {userId: $userId}]->(target:GraphEntity {userId: $userId})
@@ -261,12 +312,16 @@ export class GraphService {
          OR target.id IN $entities
          OR source.label IN $entities
          OR target.label IN $entities
+         OR any(alias IN coalesce(source.aliases, []) WHERE alias IN $entities)
+         OR any(alias IN coalesce(target.aliases, []) WHERE alias IN $entities)
       RETURN
         source.id AS source,
         source.label AS sourceLabel,
         r.type AS relationship,
         target.id AS target,
-        target.label AS targetLabel
+        target.label AS targetLabel,
+        coalesce(r.confidence, 1.0) AS confidence,
+        coalesce(r.sourceId, '') AS sourceId
       LIMIT 50
     `;
   }
@@ -282,7 +337,7 @@ export class GraphService {
     const context = facts
       .map(
         (fact, index) =>
-          `[事实 ${index + 1}] ${fact.source}(${fact.sourceLabel}) -[${fact.relationship}]-> ${fact.target}(${fact.targetLabel})`,
+          `[事实 ${index + 1}] ${fact.source}(${fact.sourceLabel}) -[${fact.relationship}, confidence=${fact.confidence}]-> ${fact.target}(${fact.targetLabel})`,
       )
       .join('\n');
 

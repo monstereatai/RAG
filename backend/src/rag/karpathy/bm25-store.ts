@@ -13,6 +13,17 @@ export interface Bm25PersistedEntry {
   chunkIndex: number;
   tokens: string[];
   userId?: string;
+  parentChunkId?: string | null;
+  headingPath?: string[];
+  sectionId?: string | null;
+  clauseId?: string | null;
+  tableRef?: string | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+  sourceAuthority?: string;
 }
 
 export interface Bm25PersistedStore {

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { IEmbeddingProvider } from './embedding-provider.interface';
@@ -9,6 +10,7 @@ import { IEmbeddingProvider } from './embedding-provider.interface';
  */
 @Injectable()
 export class QwenEmbeddingProvider implements IEmbeddingProvider {
+  private readonly logger = new Logger(QwenEmbeddingProvider.name);
   private readonly embeddings: OpenAIEmbeddings;
   private readonly dimension: number;
 
@@ -43,7 +45,7 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
       );
       return await Promise.race([promise, timeoutPromise]);
     } catch (err) {
-      console.warn(
+      this.logger.warn(
         `[QwenEmbeddingProvider] embedQuery failed, using mock vector: ${(err as Error).message}`,
       );
       return new Array(this.dimension).fill(0).map((_, i) => (i === 0 ? 1 : 0));
@@ -61,7 +63,7 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
       );
       return await Promise.race([promise, timeoutPromise]);
     } catch (err) {
-      console.warn(
+      this.logger.warn(
         `[QwenEmbeddingProvider] embedDocuments failed, using mock vectors: ${(err as Error).message}`,
       );
       return texts.map(() =>

@@ -15,6 +15,7 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
   - **数据硬隔离**：在 PostgreSQL 关系库、Redis 缓存、Milvus 向量存储及内存 BM25 分词索引四大组件中深度引入 `userId` 条件，彻底阻断跨租户的数据交互或隐私泄露。
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
+- **部署目标**：当前固定为 Docker Compose，见 `DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
 详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./rag-plan.md)。
 
@@ -119,9 +120,9 @@ node verify-multitenancy.mjs
 
 ## 常见问题与已知限制
 
-1. **Milvus 检索可能出现 15s Deadline 超时**：
-   * 本地 Docker 环境下，由于内存限制或索引加载慢，Milvus 检索偶发 15s 延迟。
-   * **兜底方案**：系统对此实现了自动优雅降级，向量超时会自动快速跌落至 BM25 纯文本检索（支持单字和 Bigram 兜底），前端界面不卡死，正常呈现回答。
+1. **Milvus 首次检索可能出现 Deadline warning**：
+   * 本地 Docker 环境下，由于内存限制或索引加载慢，Milvus 首次 search / warmup 可能触发可配置 timeout warning。
+   * **兜底方案**：系统已实现 search/delete/warmup/circuit 可配置超时、短期熔断、active docId 过滤和 BM25 降级，向量异常不会阻塞主问答链路。
    
-2. **ASR / TTS 语音识别与合成未生效**：
-   * 默认语音接口依赖腾讯云密钥。需在 `.env` 中正确配置 `TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`。在未配置密钥前，后端会自动拦截并不阻断核心 RAG 进程。
+2. **ASR / TTS 依赖腾讯云密钥**：
+   * 腾讯云 TTS→ASR 直连回环、后端 TTS SSE → ASR endpoint smoke 已验证。需要在 `.env` 中配置 `TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`；未配置时后端会明确报错并不阻断核心 RAG 进程。

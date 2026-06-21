@@ -20,6 +20,8 @@ import { UserEntity } from './entities/user.entity';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { DocumentMetaEntity } from './entities/document-meta.entity';
+import { DocumentChunkEntity } from './entities/document-chunk.entity';
+import { FactConflictEntity } from './entities/fact-conflict.entity';
 import { ScheduledJobEntity } from './entities/job.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
@@ -38,6 +40,8 @@ export default new DataSource({
     ConversationEntity,
     MessageEntity,
     DocumentMetaEntity,
+    DocumentChunkEntity,
+    FactConflictEntity,
     ScheduledJobEntity,
   ],
   migrations: ['src/migrations/*.ts'],

@@ -239,25 +239,35 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 
 - pino JSON 结构化日志
 - HTTP QPS / 延迟 / Node 默认指标
+- RAG 业务指标：检索命中、LLM 调用次数、LLM 调用耗时、输入/输出 token 估算
 - W3C `traceparent` 兼容的 in-memory tracing
 - Debug chunks 分数面板
 - Agentic workflow Mermaid 导出
 - RAG eval / E2E / perf 脚本
+- RAG 质量闸门：query normalize、低相关拒答、逐句 claim-level 引用支撑校验、多版本冲突提醒
+- 结构化事实治理：`document_chunks` 保存父子 chunk、source span、section/clause/table metadata、doc version、生效期、来源权威；`fact_conflicts` 保存第一版事实冲突记录
+- 可选来源权威排序：`RAG_SOURCE_AUTHORITY_RULES` 按 docId / chunk 内容匹配来源权威权重
+- LLM-as-Judge 质量门禁：`npm run eval:rag:quality` 默认不消耗 Judge key，`EVAL_RAG_JUDGE_REQUIRED=true` 时强制 Qwen 判断 claim 为 supported / contradicted / not_mentioned
+- 专项 smoke 脚本：MCP、GraphRAG、Speech、外部工具、Redis Checkpointer、Hybrid retrieval
 
 待确认：
 
 - 正式 CI/CD 接入属于红线，需单独确认后再改 workflow。
+- 已提供 120 条内置业务场景回归评测集，覆盖多部门问题、标准答案、expectedClaims、引用要求和拒答要求；若要升级为真实私有业务评测集，仍需真实业务问题和标准答案输入。
+- 真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略。
 - OTLP exporter 接入仍是后续增强，不影响当前本地可观测。
 
 ## 10. 已知风险
 
 | 风险 | 当前处理 |
 |---|---|
-| Milvus search 偶发 timeout | 主检索约 0.8s 快速失败并短期熔断，降级 BM25 |
+| Milvus search 偶发 timeout | search/delete/warmup/circuit 超时可通过环境变量配置，主检索快速失败并短期熔断，降级 BM25 |
 | Milvus 删除偶发 timeout | 删除失败进入进程内退避重试，active docId 过滤避免残留命中进入答案 |
-| GraphRAG 图谱为空 | Neo4j 连接已完成，仍需导入业务图谱数据 |
-| MCP 缺真实 server | 默认 `MCP_ENABLED=false`，需提供 `workspace/mcp-servers.yaml` |
-| 外部 key 不完整 | Bocha / Rerank / Tencent / Mem0 等按能力降级或待联调 |
+| GraphRAG 图谱为空 | 已提供 `smoke:graph` 和种子数据，并完成 Docker/Neo4j 真实运行时验证；真实业务图谱仍需业务数据源 |
+| MCP 缺真实 server | 已提供本地 stdio smoke server；业务 MCP server 可追加到 `workspace/mcp-servers.yaml` |
+| 外部 key 不完整 | Qwen Judge 与腾讯云语音直连已验证；Bocha / Rerank 缺 key 时脚本输出 skipped |
+| Docker daemon 不可用 | 2026-06-21 已恢复并完成 GraphRAG / Hybrid / backend Speech / Redis smoke；后续若 Docker 关闭，对应 smoke 会失败或 skipped |
+| 评测集规模偏小 | 已新增 120 条内置业务评测集；真实私有业务样本仍需主人提供 |
 
 ## 11. 文档关系
 

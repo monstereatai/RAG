@@ -20,17 +20,57 @@ try {
 
   const results = [];
   for (const item of dataset) {
-    const answer = baseUrl
+    const response = baseUrl
       ? await askService(baseUrl, token, item.query)
-      : item.referenceAnswer;
+      : {
+          answer: item.referenceAnswer,
+          references: item.referenceReferences ?? [],
+          retrievalSufficient: item.referenceRetrievalSufficient ?? true,
+        };
+    const answer = response.answer;
     const score = keywordCoverage(answer, item.expectedKeywords);
-    const passed = score >= item.minKeywordCoverage;
+    const keywordPassed = score >= item.minKeywordCoverage;
+    const citationPassed =
+      item.requireCitation === true
+        ? hasCitation(answer) && response.references.length > 0
+        : true;
+    const claimResults = evaluateClaims(answer, item.expectedClaims ?? []);
+    const claimsPassed = claimResults.every((claim) => claim.passed);
+    const refusalPassed =
+      item.expectRefusal === true
+        ? response.references.length === 0 &&
+          (response.retrievalSufficient === false ||
+            answer.includes('未找到') ||
+            answer.includes('不足以支撑') ||
+            answer.includes('未提及'))
+        : true;
+    const conflictPassed =
+      item.expectConflictHandling === true
+        ? answer.includes('冲突') ||
+          answer.includes('版本') ||
+          answer.includes('优先')
+        : true;
+    const passed =
+      keywordPassed &&
+      citationPassed &&
+      claimsPassed &&
+      refusalPassed &&
+      conflictPassed;
 
     results.push({
       id: item.id,
+      category: item.category ?? 'uncategorized',
+      department: item.department ?? 'unknown',
+      documentType: item.documentType ?? 'unknown',
       mode: baseUrl ? 'online' : 'offline',
       score,
       threshold: item.minKeywordCoverage,
+      keywordPassed,
+      citationPassed,
+      claimsPassed,
+      conflictPassed,
+      refusalPassed,
+      claimResults,
       passed,
     });
   }
@@ -47,6 +87,7 @@ try {
         mode: baseUrl ? 'online' : 'offline',
         minAverageScore,
         averageScore: Number(averageScore.toFixed(3)),
+        summary: summarize(results),
         seedDocId,
         results,
       },
@@ -71,6 +112,44 @@ function keywordCoverage(answer, expectedKeywords) {
     normalized.includes(keyword.toLowerCase()),
   );
   return Number((hits.length / expectedKeywords.length).toFixed(3));
+}
+
+function hasCitation(answer) {
+  return /\[片段\s*\d+\]/.test(answer ?? '');
+}
+
+function evaluateClaims(answer, claims) {
+  if (!Array.isArray(claims) || claims.length === 0) return [];
+  const normalized = (answer ?? '').toLowerCase();
+  return claims.map((claim) => {
+    const keywords = Array.isArray(claim.supportKeywords)
+      ? claim.supportKeywords
+      : [];
+    const hits = keywords.filter((keyword) =>
+      normalized.includes(String(keyword).toLowerCase()),
+    );
+    return {
+      text: claim.text,
+      score:
+        keywords.length === 0
+          ? 1
+          : Number((hits.length / keywords.length).toFixed(3)),
+      hits,
+      passed: keywords.length === 0 || hits.length === keywords.length,
+    };
+  });
+}
+
+function summarize(results) {
+  const byCategory = {};
+  for (const result of results) {
+    const key = result.category;
+    const bucket = byCategory[key] ?? { total: 0, passed: 0 };
+    bucket.total += 1;
+    if (result.passed) bucket.passed += 1;
+    byCategory[key] = bucket;
+  }
+  return { byCategory };
 }
 
 async function getToken(url) {
@@ -102,7 +181,12 @@ async function askService(url, accessToken, query) {
   if (!res.ok) {
     throw new Error(`chat failed: ${res.status} ${JSON.stringify(body)}`);
   }
-  return unwrap(body).answer;
+  const data = unwrap(body);
+  return {
+    answer: data.answer ?? '',
+    references: Array.isArray(data.references) ? data.references : [],
+    retrievalSufficient: data.retrievalSufficient,
+  };
 }
 
 async function uploadSeedDocument(url, accessToken, items) {

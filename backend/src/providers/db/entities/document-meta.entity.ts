@@ -46,6 +46,22 @@ export class DocumentMetaEntity {
   @Column({ type: 'varchar', length: 32, nullable: true, default: null })
   category!: string | null;
 
+  /** 文档版本，用于多版本事实治理 */
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  docVersion!: string | null;
+
+  /** 文档生效时间 */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  effectiveAt!: Date | null;
+
+  /** 文档失效时间 */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  expiredAt!: Date | null;
+
+  /** 来源权威级别：official / draft / normal / deprecated */
+  @Column({ type: 'varchar', length: 32, default: 'normal' })
+  sourceAuthority!: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

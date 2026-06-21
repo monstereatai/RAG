@@ -16,6 +16,8 @@ import {
 interface McpTool {
   name: string;
   description?: string;
+  schema?: unknown;
+  source?: string;
 }
 
 @Injectable()
@@ -66,12 +68,17 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
         `Initializing MCP servers: ${Object.keys(config.mcpServers).join(', ')}`,
       );
 
+      const serverNames = Object.keys(config.mcpServers);
       this.mcpClient = new MultiServerMCPClient({
         mcpServers: config.mcpServers,
       });
 
-      // Fetch tools to verify connection and cache them
-      this.tools = (await this.mcpClient.getTools()) as McpTool[];
+      // Fetch tools to verify connection and cache them.
+      const loadedTools = (await this.mcpClient.getTools()) as McpTool[];
+      this.tools = loadedTools.map((tool) => ({
+        ...tool,
+        source: this.inferToolSource(tool, serverNames),
+      }));
       this.logger.log(
         `Successfully connected and loaded ${this.tools.length} MCP tools.`,
       );
@@ -91,6 +98,16 @@ export class McpProvider implements OnModuleInit, OnModuleDestroy {
 
   getMcpTools(): McpTool[] {
     return this.tools;
+  }
+
+  private inferToolSource(tool: McpTool, serverNames: string[]): string {
+    if (tool.source) {
+      return tool.source;
+    }
+    if (serverNames.length === 1) {
+      return `mcp:${serverNames[0]}`;
+    }
+    return 'mcp:multiple';
   }
 
   async onModuleDestroy() {

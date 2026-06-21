@@ -1,23 +1,100 @@
 [
   {
     "id": "rag-definition",
+    "category": "definition",
+    "department": "platform",
+    "documentType": "technical-note",
     "query": "RAG 是什么？",
-    "referenceAnswer": "RAG 是检索增强生成，会先从知识库检索相关内容，再把检索结果交给大模型生成回答。",
+    "referenceAnswer": "RAG 是检索增强生成，会先从知识库检索相关内容，再把检索结果交给大模型生成回答。[片段1]",
+    "referenceReferences": [{ "id": "offline-rag" }],
+    "expectedClaims": [
+      {
+        "text": "RAG 是检索增强生成",
+        "supportKeywords": ["检索增强生成"]
+      },
+      {
+        "text": "RAG 会先检索知识库再生成回答",
+        "supportKeywords": ["知识库", "生成"]
+      }
+    ],
     "expectedKeywords": ["检索", "知识库", "生成"],
-    "minKeywordCoverage": 0.66
+    "minKeywordCoverage": 0.66,
+    "requireCitation": true
   },
   {
     "id": "agentic-rag-flow",
+    "category": "workflow",
+    "department": "platform",
+    "documentType": "technical-note",
     "query": "Agentic RAG 通常包含哪些步骤？",
-    "referenceAnswer": "Agentic RAG 通常会做路由、查询增强、检索、充足性判断、必要时 Web 搜索、重排、生成和反思。",
+    "referenceAnswer": "Agentic RAG 通常会做路由、查询增强、检索、充足性判断、必要时 Web 搜索、重排、生成和反思。[片段1]",
+    "referenceReferences": [{ "id": "offline-agentic" }],
+    "expectedClaims": [
+      {
+        "text": "Agentic RAG 包含路由、查询增强、检索、重排和反思",
+        "supportKeywords": ["路由", "查询增强", "检索", "重排", "反思"]
+      }
+    ],
     "expectedKeywords": ["路由", "查询增强", "检索", "重排", "反思"],
-    "minKeywordCoverage": 0.6
+    "minKeywordCoverage": 0.6,
+    "requireCitation": true
   },
   {
     "id": "citation-requirement",
+    "category": "citation",
+    "department": "platform",
+    "documentType": "technical-note",
     "query": "为什么 RAG 回答需要引用来源？",
-    "referenceAnswer": "引用来源可以让用户检查答案依据，降低幻觉风险，并便于回到原始 chunk 核验。",
+    "referenceAnswer": "引用来源可以让用户检查答案依据，降低幻觉风险，并便于回到原始 chunk 核验。[片段1]",
+    "referenceReferences": [{ "id": "offline-citation" }],
+    "expectedClaims": [
+      {
+        "text": "引用来源可以降低幻觉风险",
+        "supportKeywords": ["引用", "幻觉"]
+      },
+      {
+        "text": "引用来源便于回到原始 chunk 核验",
+        "supportKeywords": ["chunk", "核验"]
+      }
+    ],
     "expectedKeywords": ["引用", "依据", "幻觉", "chunk"],
-    "minKeywordCoverage": 0.5
+    "minKeywordCoverage": 0.5,
+    "requireCitation": true
+  },
+  {
+    "id": "no-answer-guard",
+    "category": "no-answer",
+    "department": "platform",
+    "documentType": "policy",
+    "query": "知识库没有资料时应该如何回答？",
+    "referenceAnswer": "知识库片段不足以支撑可靠回答，暂不生成确定结论。",
+    "referenceReferences": [],
+    "referenceRetrievalSufficient": false,
+    "expectedKeywords": ["知识库", "不足以支撑"],
+    "minKeywordCoverage": 0.5,
+    "expectRefusal": true
+  },
+  {
+    "id": "version-conflict",
+    "category": "conflict",
+    "department": "hr",
+    "documentType": "policy",
+    "query": "差旅住宿报销上限应该按哪个版本回答？",
+    "referenceAnswer": "存在 2025 版和 2026 版差旅制度冲突时，应优先说明版本差异，并按 2026 版优先生效回答。[片段1]",
+    "referenceReferences": [{ "id": "offline-conflict" }],
+    "expectedClaims": [
+      {
+        "text": "存在 2025 版和 2026 版差旅制度冲突",
+        "supportKeywords": ["2025", "2026", "冲突"]
+      },
+      {
+        "text": "应按 2026 版优先生效回答",
+        "supportKeywords": ["2026", "优先"]
+      }
+    ],
+    "expectedKeywords": ["2025", "2026", "优先"],
+    "minKeywordCoverage": 0.66,
+    "requireCitation": true,
+    "expectConflictHandling": true
   }
 ]

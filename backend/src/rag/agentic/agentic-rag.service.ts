@@ -9,7 +9,6 @@ import { SseCallback } from './sse-event';
 import { AgenticRagState, type AgenticRagStateType } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import {
-  classifyComplexityPrompt,
   queryAugmentPrompt,
   reflectionPrompt,
   sufficiencyPrompt,
@@ -22,6 +21,7 @@ import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
+import { ConfigService } from '@nestjs/config';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
 
@@ -37,12 +37,19 @@ export class AgenticRagService {
     null;
   private app: any;
 
-  /** Reflection 阈值，低于此值触发重试 */
-  private readonly confidenceThreshold = 0.7;
-  /** 最大重试次数 */
-  private readonly maxRetries = 2;
+  private readonly confidenceThreshold: number;
+  private readonly maxRetries: number;
+  private readonly maxAugmentedQueries: number;
+  private readonly maxRetrievalQueries: number;
+  private readonly maxRetrievedChunks: number;
+  private readonly maxWebSearchResults: number;
+  private readonly maxRerankTopN: number;
+  private readonly maxAutoQueryLength: number;
+  private readonly webSearchFallbackEnabled: boolean;
+  private readonly rerankEnabled: boolean;
 
   constructor(
+    private readonly configService: ConfigService,
     private readonly llmProvider: LlmProvider,
     private readonly karpathyRagService: KarpathyRagService,
     private readonly bochaSearchService: BochaSearchService,
@@ -50,6 +57,49 @@ export class AgenticRagService {
     private readonly semanticExampleSelector: SemanticExampleSelector,
     private readonly redisProvider: RedisProvider,
   ) {
+    this.confidenceThreshold = this.numberConfig(
+      'agentic.confidenceThreshold',
+      0.7,
+      0,
+      1,
+    );
+    this.maxRetries = this.intConfig('agentic.maxRetries', 2, 0, 5);
+    this.maxAugmentedQueries = this.intConfig(
+      'agentic.maxAugmentedQueries',
+      3,
+      1,
+      5,
+    );
+    this.maxRetrievalQueries = this.intConfig(
+      'agentic.maxRetrievalQueries',
+      4,
+      1,
+      8,
+    );
+    this.maxRetrievedChunks = this.intConfig(
+      'agentic.maxRetrievedChunks',
+      5,
+      1,
+      12,
+    );
+    this.maxWebSearchResults = this.intConfig(
+      'agentic.maxWebSearchResults',
+      5,
+      0,
+      10,
+    );
+    this.maxRerankTopN = this.intConfig('agentic.maxRerankTopN', 5, 1, 10);
+    this.maxAutoQueryLength = this.intConfig(
+      'agentic.maxAutoQueryLength',
+      500,
+      80,
+      4000,
+    );
+    this.webSearchFallbackEnabled =
+      this.configService.get<boolean>('agentic.webSearchFallbackEnabled') ??
+      true;
+    this.rerankEnabled =
+      this.configService.get<boolean>('agentic.rerankEnabled') ?? true;
     this.initGraph();
   }
 
@@ -118,16 +168,16 @@ export class AgenticRagService {
 
   /**
    * 路由决策：判断走 simple 还是 agentic
-   * auto 模式下由 LLM 判断问题复杂度
+   * auto 模式下只在明确复杂问题时走 agentic
    */
-  async routeNode(
+  routeNode(
     state: AgenticRagStateType,
     mode: 'simple' | 'agentic' | 'auto',
-  ): Promise<Partial<AgenticRagStateType>> {
+  ): Partial<AgenticRagStateType> {
     let route: 'simple' | 'agentic';
 
     if (mode === 'auto') {
-      route = await this.classifyQueryComplexity(state.query);
+      route = this.shouldUseAgentic(state.query) ? 'agentic' : 'simple';
     } else {
       route = mode;
     }
@@ -158,9 +208,10 @@ export class AgenticRagService {
       const schema = z.object({
         queries: z
           .array(z.string())
-          .length(3)
+          .min(1)
+          .max(this.maxAugmentedQueries)
           .describe(
-            '恰好 3 条中文检索问句：不同角度改写或扩写；保留专有名词、订单号等字面信息',
+            `最多 ${this.maxAugmentedQueries} 条中文检索问句：不同角度改写或扩写；保留专有名词、订单号等字面信息`,
           ),
       });
 
@@ -205,7 +256,7 @@ export class AgenticRagService {
         this.logger.warn(
           `Query augment failed, fallback to original: ${(err as Error).message}`,
         );
-        queries = [state.query];
+      queries = [state.query];
       }
     }
 
@@ -226,13 +277,14 @@ export class AgenticRagService {
       state.augmentedQueries.length > 0
         ? [state.query, ...state.augmentedQueries]
         : [state.query];
+    const boundedQueries = queries.slice(0, this.maxRetrievalQueries);
 
     this.logger.log(
-      `Retrieving with ${queries.length} queries (1 hybrid + BM25 fallback) for userId=${userId ?? 'none'}`,
+      `Retrieving with ${boundedQueries.length}/${queries.length} queries (1 hybrid + BM25 fallback) for userId=${userId ?? 'none'}`,
     );
 
     const allResults: RetrievedChunk[][] = [];
-    for (const [index, q] of queries.entries()) {
+    for (const [index, q] of boundedQueries.entries()) {
       try {
         const results =
           index === 0
@@ -259,10 +311,10 @@ export class AgenticRagService {
 
     const chunks = Array.from(fusedMap.values())
       .sort((a, b) => b.totalScore - a.totalScore)
-      .slice(0, 5);
+      .slice(0, this.maxRetrievedChunks);
 
     this.logger.log(
-      `Retrieved ${chunks.length} unique chunks from ${queries.length} queries`,
+      `Retrieved ${chunks.length} unique chunks from ${boundedQueries.length} queries`,
     );
 
     onEvent?.({ type: 'retrieval', data: chunks });
@@ -290,6 +342,24 @@ export class AgenticRagService {
         },
       });
       return res;
+    }
+
+    const localGate = this.karpathyRagService.assessRetrievedChunks(
+      state.query,
+      state.retrievedChunks,
+    );
+    if (!localGate.sufficient) {
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: false,
+          reason: localGate.reason,
+        },
+      });
+      return {
+        retrievalSufficient: false,
+        retrievalReason: localGate.reason,
+      };
     }
 
     const model = this.llmProvider.getModel();
@@ -361,16 +431,17 @@ export class AgenticRagService {
       return { webSearchCount: 0 };
     }
 
-    if (!this.bochaSearchService.isEnabled()) {
+    if (!this.webSearchFallbackEnabled || !this.bochaSearchService.isEnabled()) {
       this.logger.warn(
-        'Retrieval insufficient but Bocha web_search is disabled',
+        'Retrieval insufficient but Bocha web_search is disabled or budgeted off',
       );
-      const reason = `${state.retrievalReason || '检索不足'}；BOCHA_API_KEY 未配置，已跳过联网兜底`;
+      const reason = `${state.retrievalReason || '检索不足'}；联网兜底未启用或 BOCHA_API_KEY 未配置，已跳过`;
       onEvent?.({
         type: 'web_search',
         data: {
           count: 0,
-          enabled: false,
+          enabled:
+            this.webSearchFallbackEnabled && this.bochaSearchService.isEnabled(),
           reason,
         },
       });
@@ -381,7 +452,13 @@ export class AgenticRagService {
     }
 
     try {
-      const results = await this.bochaSearchService.search(state.query, 5);
+      const results =
+        this.maxWebSearchResults > 0
+          ? await this.bochaSearchService.search(
+              state.query,
+              this.maxWebSearchResults,
+            )
+          : [];
       const webChunks = results.map((result, index) => {
         const parts = [
           `标题：${result.title}`,
@@ -414,7 +491,10 @@ export class AgenticRagService {
         },
       });
       return {
-        retrievedChunks: [...state.retrievedChunks, ...webChunks].slice(0, 8),
+        retrievedChunks: [...state.retrievedChunks, ...webChunks].slice(
+          0,
+          this.maxRetrievedChunks,
+        ),
         retrievalReason: reason,
         webSearchCount: webChunks.length,
       };
@@ -426,7 +506,8 @@ export class AgenticRagService {
         type: 'web_search',
         data: {
           count: 0,
-          enabled: this.bochaSearchService.isEnabled(),
+          enabled:
+            this.webSearchFallbackEnabled && this.bochaSearchService.isEnabled(),
           reason: fallbackReason,
         },
       });
@@ -449,7 +530,8 @@ export class AgenticRagService {
       onEvent?.({
         type: 'rerank',
         data: {
-          enabled: this.dashScopeRerankService.isEnabled(),
+          enabled:
+            this.rerankEnabled && this.dashScopeRerankService.isEnabled(),
           reranked: false,
           count: state.retrievedChunks.length,
         },
@@ -457,7 +539,7 @@ export class AgenticRagService {
       return { reranked: false };
     }
 
-    if (!this.dashScopeRerankService.isEnabled()) {
+    if (!this.rerankEnabled || !this.dashScopeRerankService.isEnabled()) {
       onEvent?.({
         type: 'rerank',
         data: {
@@ -473,7 +555,7 @@ export class AgenticRagService {
       const chunks = await this.dashScopeRerankService.rerank(
         state.query,
         state.retrievedChunks,
-        5,
+        this.maxRerankTopN,
       );
       onEvent?.({
         type: 'rerank',
@@ -543,6 +625,50 @@ export class AgenticRagService {
           : JSON.stringify(chunk.content);
       answer += token;
       onEvent?.({ type: 'token', data: token });
+    }
+    answer = this.karpathyRagService.addVersionConflictNotice(
+      answer,
+      state.retrievedChunks,
+    );
+
+    const citationGate = this.karpathyRagService.validateAnswerCitationSupport(
+      answer,
+      state.retrievedChunks,
+    );
+    if (!citationGate.sufficient) {
+      if (citationGate.reason === '答案缺少显式片段引用') {
+        const fallbackAnswer = this.karpathyRagService.buildExtractiveAnswer(
+          state.query,
+          state.retrievedChunks,
+        );
+        if (fallbackAnswer) {
+          const fallbackGate =
+            this.karpathyRagService.validateAnswerCitationSupport(
+              fallbackAnswer,
+              state.retrievedChunks,
+            );
+          if (fallbackGate.sufficient) {
+            onEvent?.({ type: 'token', data: fallbackAnswer });
+            onEvent?.({ type: 'citation', data: state.retrievedChunks });
+            return {
+              answer: fallbackAnswer,
+              retrievalSufficient: true,
+              retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+            };
+          }
+        }
+      }
+
+      const safeAnswer = this.karpathyRagService.unsupportedReliableAnswer();
+      onEvent?.({ type: 'token', data: safeAnswer });
+      onEvent?.({ type: 'citation', data: [] });
+      return {
+        answer: safeAnswer,
+        retrievedChunks: [],
+        retrievalSufficient: false,
+        retrievalReason: citationGate.reason,
+        passed: true,
+      };
     }
 
     onEvent?.({ type: 'citation', data: state.retrievedChunks });
@@ -760,7 +886,7 @@ export class AgenticRagService {
     interrupted?: boolean;
   }> {
     const route =
-      mode === 'simple' ? 'simple' : await this.classifyRoute(query, mode);
+      mode === 'simple' ? 'simple' : this.classifyRoute(query, mode);
     onEvent?.({ type: 'routing', data: { mode, route } });
 
     if (route === 'simple') {
@@ -864,42 +990,28 @@ export class AgenticRagService {
   /**
    * auto 模式下用 LLM 判断问题复杂度
    */
-  private async classifyRoute(
+  private classifyRoute(
     query: string,
     mode: 'simple' | 'agentic' | 'auto',
-  ): Promise<'simple' | 'agentic'> {
+  ): 'simple' | 'agentic' {
     if (mode === 'simple') return 'simple';
     if (mode === 'agentic') return 'agentic';
-    return this.classifyQueryComplexity(query);
+    if (query.length > this.maxAutoQueryLength) return 'simple';
+    return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
   }
 
-  /**
-   * 用 LLM 判断问题复杂度
-   */
-  private async classifyQueryComplexity(
-    query: string,
-  ): Promise<'simple' | 'agentic'> {
-    const model = this.llmProvider.getModel();
-
-    const schema = z.object({
-      complexity: z
-        .enum(['simple', 'complex'])
-        .describe(
-          '问题复杂度：simple=单一事实查询，complex=多跳推理/对比/分析',
-        ),
-    });
-
-    try {
-      const structured = model.withStructuredOutput(schema);
-      const chain = classifyComplexityPrompt.pipe(structured);
-      const result = await chain.invoke({ query });
-      return result.complexity === 'complex' ? 'agentic' : 'simple';
-    } catch (err) {
-      this.logger.warn(
-        `Complexity classification failed, fallback to simple: ${(err as Error).message}`,
-      );
-      return 'simple';
-    }
+  private shouldUseAgentic(query: string): boolean {
+    const normalized = query.normalize('NFKC').toLowerCase();
+    const complexPatterns = [
+      /对比|比较|区别|差异|优缺点/,
+      /为什么|原因|影响|风险|评估|分析/,
+      /多跳|关联|关系|上下游|依赖|链路/,
+      /分别.*(什么|哪些|如何)|哪些.*分别/,
+      /规划|步骤|方案|策略|拆解/,
+      /联网|最新|实时|新闻|今天|当前/,
+      /compare|difference|trade[- ]?off|analy[sz]e|why|plan|strategy|latest|current/,
+    ];
+    return complexPatterns.some((pattern) => pattern.test(normalized));
   }
 
   /**
@@ -909,8 +1021,30 @@ export class AgenticRagService {
     const out = (Array.isArray(list) ? list : [])
       .map((s) => (typeof s === 'string' ? s.trim() : ''))
       .filter(Boolean);
-    while (out.length < 3) out.push(original);
-    return out.slice(0, 3);
+    while (out.length < this.maxAugmentedQueries) out.push(original);
+    return out.slice(0, this.maxAugmentedQueries);
+  }
+
+  private intConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = this.configService.get<number>(key) ?? fallback;
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, Math.trunc(value)));
+  }
+
+  private numberConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const value = this.configService.get<number>(key) ?? fallback;
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, value));
   }
 
   private async withTimeout<T>(

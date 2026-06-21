@@ -31,8 +31,10 @@ export class MilvusVectorStoreProvider
   private readonly hnswM: number;
   private readonly hnswEfConstruction: number;
   private readonly hnswEfSearch: number;
-  private readonly searchTimeoutMs = 800;
-  private readonly deleteTimeoutMs = 1_000;
+  private readonly searchTimeoutMs: number;
+  private readonly deleteTimeoutMs: number;
+  private readonly warmupTimeoutMs: number;
+  private readonly circuitOpenMs: number;
   private circuitOpenUntil = 0;
 
   constructor(private readonly config: ConfigService) {
@@ -51,6 +53,14 @@ export class MilvusVectorStoreProvider
       this.config.get<number>('vectorStore.milvus.hnswEfConstruction') ?? 200;
     this.hnswEfSearch =
       this.config.get<number>('vectorStore.milvus.hnswEfSearch') ?? 64;
+    this.searchTimeoutMs =
+      this.config.get<number>('vectorStore.milvus.searchTimeoutMs') ?? 800;
+    this.deleteTimeoutMs =
+      this.config.get<number>('vectorStore.milvus.deleteTimeoutMs') ?? 1_000;
+    this.warmupTimeoutMs =
+      this.config.get<number>('vectorStore.milvus.warmupTimeoutMs') ?? 1_500;
+    this.circuitOpenMs =
+      this.config.get<number>('vectorStore.milvus.circuitOpenMs') ?? 30_000;
   }
 
   async onModuleInit(): Promise<void> {
@@ -90,7 +100,7 @@ export class MilvusVectorStoreProvider
         limit: 1,
         metric_type: MetricType.COSINE,
         output_fields: ['id'],
-        timeout: this.searchTimeoutMs,
+        timeout: this.warmupTimeoutMs,
       });
       this.logger.log('Milvus warmup search done');
     } catch (err) {
@@ -294,6 +304,10 @@ export class MilvusVectorStoreProvider
         M: this.hnswM,
         efConstruction: this.hnswEfConstruction,
         ef: this.hnswEfSearch,
+        searchTimeoutMs: this.searchTimeoutMs,
+        deleteTimeoutMs: this.deleteTimeoutMs,
+        warmupTimeoutMs: this.warmupTimeoutMs,
+        circuitOpenMs: this.circuitOpenMs,
       },
     };
   }
@@ -325,7 +339,7 @@ export class MilvusVectorStoreProvider
   }
 
   private openCircuit(): void {
-    this.circuitOpenUntil = Date.now() + 30_000;
+    this.circuitOpenUntil = Date.now() + this.circuitOpenMs;
   }
 
   private async withTimeout<T>(

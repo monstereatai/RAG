@@ -1,0 +1,93 @@
+{
+  "documents": [
+    {
+      "id": "hybrid-rag-cn",
+      "content": "混合检索质量回归样本：RAG 系统同时使用 BM25 关键词检索、Elasticsearch 中文分词检索和 Milvus 向量检索。检索增强生成需要引用来源，因为用户必须回到知识库 chunk 核验答案依据，引用来源可以降低幻觉风险。RAG 系统需要重排器，因为初始召回会混入相似但不够精确的片段，DashScope Rerank 会把更相关的知识库片段排在前面。中文召回需要覆盖 检索增强生成、知识库、引用来源、重排器、语义相似度。"
+    },
+    {
+      "id": "hybrid-ops-cn",
+      "content": "运维样本：Redis Checkpointer 用于保存 LangGraph 线程状态，Prometheus 记录 HTTP 延迟和请求数量，OpenTelemetry traceparent 用于串联请求链路。"
+    },
+    {
+      "id": "policy-payroll-cn",
+      "content": "# 员工手册\n## 薪酬制度\n第一条 基本工资按月发放，员工口语中也称工资、薪资或收入。\n第二条 绩效奖金按照 OKR 完成度按季度评估。\n| 项目 | 规则 |\n| --- | --- |\n| 绩效奖金 | 按季度评估 |\n| 基本工资 | 每月 10 日发放 |"
+    },
+    {
+      "id": "product-alias-cn",
+      "content": "# 内部系统别名\n知识库系统正式名称为 Atlas Knowledge Base，内部别名包括 AKB、企业知识库和知识中台。客服工单系统正式名称为 Service Hub，内部常简称 SH。"
+    },
+    {
+      "id": "conflict-policy-cn",
+      "content": "# 制度版本说明\n2025 版差旅制度规定住宿报销上限为 500 元。2026 版差旅制度规定住宿报销上限为 650 元，并且 2026 版优先生效。"
+    },
+    {
+      "id": "long-cross-section-cn",
+      "content": "# 项目 Alpha\n## 背景\nAlpha 项目用于统一客户数据入口。\n## 权限\n管理员可以审批数据访问申请，普通成员只能提交申请。\n## 审计\nAlpha 项目的审批动作通过审计日志完成审计：系统会把审批人、审批时间、申请单号和审批结果写入审计日志，并通过 traceparent 串联请求链路。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "cn-rag-recall",
+      "query": "检索增强生成 为什么需要引用来源和重排器？",
+      "expectedKeywords": ["检索增强生成", "引用来源", "重排器"],
+      "minKeywordHits": 2,
+      "k": 5
+    },
+    {
+      "id": "ops-recall",
+      "query": "Redis Checkpointer 和 traceparent 分别负责什么？",
+      "expectedKeywords": ["Redis Checkpointer", "traceparent"],
+      "minKeywordHits": 1,
+      "k": 5
+    },
+    {
+      "id": "synonym-payroll",
+      "query": "薪资收入什么时候发？",
+      "expectedKeywords": ["基本工资", "工资", "收入"],
+      "minKeywordHits": 2,
+      "k": 5
+    },
+    {
+      "id": "abbr-okr-bonus",
+      "query": "OKR 和绩效奖金有什么关系？",
+      "expectedKeywords": ["OKR", "绩效奖金", "季度评估"],
+      "minKeywordHits": 2,
+      "k": 5
+    },
+    {
+      "id": "alias-akb",
+      "query": "AKB 是哪个系统？",
+      "expectedKeywords": ["Atlas Knowledge Base", "企业知识库", "知识中台"],
+      "minKeywordHits": 1,
+      "k": 5
+    },
+    {
+      "id": "typo-knowledge",
+      "query": "企业知识哭 是什么？",
+      "expectedKeywords": ["企业知识库", "Atlas Knowledge Base"],
+      "minKeywordHits": 1,
+      "k": 5
+    },
+    {
+      "id": "conflict-version",
+      "query": "2026 住宿报销上限是多少？",
+      "expectedKeywords": ["2026", "650 元", "优先生效"],
+      "minKeywordHits": 2,
+      "k": 5
+    },
+    {
+      "id": "cross-section",
+      "query": "Alpha 项目的审批动作如何审计？",
+      "expectedKeywords": ["Alpha", "审批", "审计日志", "traceparent"],
+      "minKeywordHits": 2,
+      "k": 5
+    },
+    {
+      "id": "no-answer-negative",
+      "query": "公司宠物报销标准是什么？",
+      "expectedKeywords": ["宠物报销"],
+      "minKeywordHits": 0,
+      "k": 5
+    }
+  ]
+}

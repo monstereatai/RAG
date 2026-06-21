@@ -34,6 +34,22 @@ export const configuration = () => ({
         10,
       ),
       hnswEfSearch: parseInt(process.env.MILVUS_HNSW_EF_SEARCH ?? '64', 10),
+      searchTimeoutMs: parseInt(
+        process.env.MILVUS_SEARCH_TIMEOUT_MS ?? '800',
+        10,
+      ),
+      deleteTimeoutMs: parseInt(
+        process.env.MILVUS_DELETE_TIMEOUT_MS ?? '1000',
+        10,
+      ),
+      warmupTimeoutMs: parseInt(
+        process.env.MILVUS_WARMUP_TIMEOUT_MS ?? '1500',
+        10,
+      ),
+      circuitOpenMs: parseInt(
+        process.env.MILVUS_CIRCUIT_OPEN_MS ?? '30000',
+        10,
+      ),
     },
     pgvector: {
       url:
@@ -120,6 +136,51 @@ export const configuration = () => ({
     baseUrl:
       process.env.RERANK_BASE_URL ??
       'https://dashscope-intl.aliyuncs.com/compatible-api/v1/reranks',
+  },
+
+  // RAG 质量闸门
+  ragQuality: {
+    minTopScore: parseFloat(process.env.RAG_MIN_TOP_SCORE ?? '0.05'),
+    minQueryTokenOverlap: parseInt(
+      process.env.RAG_MIN_QUERY_TOKEN_OVERLAP ?? '1',
+      10,
+    ),
+    minCitationCoverage: parseFloat(
+      process.env.RAG_MIN_CITATION_COVERAGE ?? '0.15',
+    ),
+    sourceAuthorityRules: process.env.RAG_SOURCE_AUTHORITY_RULES ?? '',
+  },
+
+  // Agentic RAG 成本与复杂度边界
+  agentic: {
+    confidenceThreshold: parseFloat(
+      process.env.AGENTIC_CONFIDENCE_THRESHOLD ?? '0.7',
+    ),
+    maxRetries: parseInt(process.env.AGENTIC_MAX_RETRIES ?? '2', 10),
+    maxAugmentedQueries: parseInt(
+      process.env.AGENTIC_MAX_AUGMENTED_QUERIES ?? '3',
+      10,
+    ),
+    maxRetrievalQueries: parseInt(
+      process.env.AGENTIC_MAX_RETRIEVAL_QUERIES ?? '4',
+      10,
+    ),
+    maxRetrievedChunks: parseInt(
+      process.env.AGENTIC_MAX_RETRIEVED_CHUNKS ?? '5',
+      10,
+    ),
+    maxWebSearchResults: parseInt(
+      process.env.AGENTIC_MAX_WEB_SEARCH_RESULTS ?? '5',
+      10,
+    ),
+    maxRerankTopN: parseInt(process.env.AGENTIC_MAX_RERANK_TOP_N ?? '5', 10),
+    maxAutoQueryLength: parseInt(
+      process.env.AGENTIC_MAX_AUTO_QUERY_LENGTH ?? '500',
+      10,
+    ),
+    webSearchFallbackEnabled:
+      process.env.AGENTIC_WEB_SEARCH_FALLBACK_ENABLED !== 'false',
+    rerankEnabled: process.env.AGENTIC_RERANK_ENABLED !== 'false',
   },
 
   // 知识图谱（Neo4j，可选）

@@ -1,0 +1,4467 @@
+{
+  "version": "2026-06-21",
+  "description": "120 条企业业务评测样本，覆盖 HR/Finance/Legal/IT/Sales/Ops/Security/Product/CS/Data/Procurement/Admin。样本为项目内置业务回归数据，不包含真实公司私密数据。",
+  "total": 120,
+  "items": [
+    {
+      "id": "hr-01",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "请按制度回答：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-01-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 1
+    },
+    {
+      "id": "hr-02",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "帮我查一下：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-02-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 2
+    },
+    {
+      "id": "hr-03",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "业务同学问：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-03-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 3
+    },
+    {
+      "id": "hr-04",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "如果按最新规则，2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-04-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 4
+    },
+    {
+      "id": "hr-05",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "只基于知识库回答：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-05-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 5
+    },
+    {
+      "id": "hr-06",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "给我一个可引用的结论：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-06-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 6
+    },
+    {
+      "id": "hr-07",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "这条规则具体是：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-07-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 7
+    },
+    {
+      "id": "hr-08",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "不要猜，文档里说：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-08-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 8
+    },
+    {
+      "id": "hr-09",
+      "category": "business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "审批前确认：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-09-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 9
+    },
+    {
+      "id": "hr-10",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "运营复盘里需要写：2026 年一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "hr-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2026 年一线城市住宿报销上限为 650 元，且 2026 版优先生效。",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "优先生效"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "hr-10-doc",
+        "title": "差旅制度 - hr",
+        "content": "差旅制度：2026 版差旅制度规定一线城市住宿报销上限为 650 元，二线城市为 480 元，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 10
+    },
+    {
+      "id": "finance-01",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "请按制度回答：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-01-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 11
+    },
+    {
+      "id": "finance-02",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "帮我查一下：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-02-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 12
+    },
+    {
+      "id": "finance-03",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "业务同学问：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-03-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 13
+    },
+    {
+      "id": "finance-04",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "如果按最新规则，发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-04-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 14
+    },
+    {
+      "id": "finance-05",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "只基于知识库回答：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-05-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 15
+    },
+    {
+      "id": "finance-06",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "给我一个可引用的结论：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-06-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 16
+    },
+    {
+      "id": "finance-07",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "这条规则具体是：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-07-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 17
+    },
+    {
+      "id": "finance-08",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "不要猜，文档里说：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-08-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 18
+    },
+    {
+      "id": "finance-09",
+      "category": "business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "审批前确认：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-09-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 19
+    },
+    {
+      "id": "finance-10",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "运营复盘里需要写：发票开具后多久内要提交费用报销？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "finance-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明。",
+          "supportKeywords": [
+            "30 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "finance-10-doc",
+        "title": "费用报销 - finance",
+        "content": "费用报销：费用报销需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明。",
+        "referenceIndex": 1
+      },
+      "ordinal": 20
+    },
+    {
+      "id": "legal-01",
+      "category": "policy",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "请按制度回答：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-01-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 21
+    },
+    {
+      "id": "legal-02",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "帮我查一下：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-02-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 22
+    },
+    {
+      "id": "legal-03",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "业务同学问：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-03-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 23
+    },
+    {
+      "id": "legal-04",
+      "category": "policy",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "如果按最新规则，超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-04-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 24
+    },
+    {
+      "id": "legal-05",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "只基于知识库回答：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-05-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 25
+    },
+    {
+      "id": "legal-06",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "给我一个可引用的结论：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-06-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 26
+    },
+    {
+      "id": "legal-07",
+      "category": "policy",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "这条规则具体是：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-07-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 27
+    },
+    {
+      "id": "legal-08",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "不要猜，文档里说：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-08-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 28
+    },
+    {
+      "id": "legal-09",
+      "category": "business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "审批前确认：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-09-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 29
+    },
+    {
+      "id": "legal-10",
+      "category": "policy",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "运营复盘里需要写：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "legal-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "legal-10-doc",
+        "title": "合同审批 - legal",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+        "referenceIndex": 1
+      },
+      "ordinal": 30
+    },
+    {
+      "id": "it-01",
+      "category": "policy",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "请按制度回答：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-01-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 31
+    },
+    {
+      "id": "it-02",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "帮我查一下：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-02-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 32
+    },
+    {
+      "id": "it-03",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "业务同学问：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-03-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 33
+    },
+    {
+      "id": "it-04",
+      "category": "policy",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "如果按最新规则，生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-04-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 34
+    },
+    {
+      "id": "it-05",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "只基于知识库回答：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-05-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 35
+    },
+    {
+      "id": "it-06",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "给我一个可引用的结论：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-06-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 36
+    },
+    {
+      "id": "it-07",
+      "category": "policy",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "这条规则具体是：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-07-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 37
+    },
+    {
+      "id": "it-08",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "不要猜，文档里说：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-08-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 38
+    },
+    {
+      "id": "it-09",
+      "category": "business-qa",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "审批前确认：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-09-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 39
+    },
+    {
+      "id": "it-10",
+      "category": "policy",
+      "department": "it",
+      "documentType": "runbook",
+      "query": "运营复盘里需要写：生产系统权限默认有效期多久？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "it-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "it-10-doc",
+        "title": "账号权限 - it",
+        "content": "账号权限：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 40
+    },
+    {
+      "id": "sales-01",
+      "category": "policy",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "请按制度回答：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-01-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 41
+    },
+    {
+      "id": "sales-02",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "帮我查一下：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-02-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 42
+    },
+    {
+      "id": "sales-03",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "业务同学问：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-03-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 43
+    },
+    {
+      "id": "sales-04",
+      "category": "policy",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "如果按最新规则，低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-04-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 44
+    },
+    {
+      "id": "sales-05",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "只基于知识库回答：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-05-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 45
+    },
+    {
+      "id": "sales-06",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "给我一个可引用的结论：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-06-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 46
+    },
+    {
+      "id": "sales-07",
+      "category": "policy",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "这条规则具体是：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-07-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 47
+    },
+    {
+      "id": "sales-08",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "不要猜，文档里说：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-08-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 48
+    },
+    {
+      "id": "sales-09",
+      "category": "business-qa",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "审批前确认：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-09-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 49
+    },
+    {
+      "id": "sales-10",
+      "category": "policy",
+      "department": "sales",
+      "documentType": "playbook",
+      "query": "运营复盘里需要写：低于 8 折的客户折扣怎么审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "sales-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审；8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "sales-10-doc",
+        "title": "客户折扣 - sales",
+        "content": "客户折扣：标准报价 8 折以内由销售总监审批，低于 8 折必须提交 Deal Desk 评审。",
+        "referenceIndex": 1
+      },
+      "ordinal": 50
+    },
+    {
+      "id": "ops-01",
+      "category": "policy",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "请按制度回答：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-01-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 51
+    },
+    {
+      "id": "ops-02",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "帮我查一下：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-02-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 52
+    },
+    {
+      "id": "ops-03",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "业务同学问：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-03-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 53
+    },
+    {
+      "id": "ops-04",
+      "category": "policy",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "如果按最新规则，P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-04-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 54
+    },
+    {
+      "id": "ops-05",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "只基于知识库回答：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-05-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 55
+    },
+    {
+      "id": "ops-06",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "给我一个可引用的结论：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-06-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 56
+    },
+    {
+      "id": "ops-07",
+      "category": "policy",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "这条规则具体是：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-07-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 57
+    },
+    {
+      "id": "ops-08",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "不要猜，文档里说：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-08-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 58
+    },
+    {
+      "id": "ops-09",
+      "category": "business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "审批前确认：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-09-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 59
+    },
+    {
+      "id": "ops-10",
+      "category": "policy",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "运营复盘里需要写：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "ops-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "ops-10-doc",
+        "title": "故障响应 - ops",
+        "content": "故障响应：P1 故障必须在 15 分钟内完成响应，在 2 小时内提交初步复盘，并在 3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 60
+    },
+    {
+      "id": "security-01",
+      "category": "policy",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "请按制度回答：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-01-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 61
+    },
+    {
+      "id": "security-02",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "帮我查一下：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-02-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 62
+    },
+    {
+      "id": "security-03",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "业务同学问：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-03-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 63
+    },
+    {
+      "id": "security-04",
+      "category": "policy",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "如果按最新规则，哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-04-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 64
+    },
+    {
+      "id": "security-05",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "只基于知识库回答：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-05-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 65
+    },
+    {
+      "id": "security-06",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "给我一个可引用的结论：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-06-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 66
+    },
+    {
+      "id": "security-07",
+      "category": "policy",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "这条规则具体是：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-07-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 67
+    },
+    {
+      "id": "security-08",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "不要猜，文档里说：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-08-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 68
+    },
+    {
+      "id": "security-09",
+      "category": "business-qa",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "审批前确认：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-09-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 69
+    },
+    {
+      "id": "security-10",
+      "category": "policy",
+      "department": "security",
+      "documentType": "security-policy",
+      "query": "运营复盘里需要写：哪些数据属于高敏感数据，导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "security-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "security-10-doc",
+        "title": "数据分级 - security",
+        "content": "数据分级：包含身份证号、手机号、银行卡号的数据属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 70
+    },
+    {
+      "id": "product-01",
+      "category": "policy",
+      "department": "product",
+      "documentType": "prd",
+      "query": "请按制度回答：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-01-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 71
+    },
+    {
+      "id": "product-02",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "帮我查一下：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-02-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 72
+    },
+    {
+      "id": "product-03",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "业务同学问：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-03-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 73
+    },
+    {
+      "id": "product-04",
+      "category": "policy",
+      "department": "product",
+      "documentType": "prd",
+      "query": "如果按最新规则，新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-04-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 74
+    },
+    {
+      "id": "product-05",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "只基于知识库回答：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-05-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 75
+    },
+    {
+      "id": "product-06",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "给我一个可引用的结论：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-06-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 76
+    },
+    {
+      "id": "product-07",
+      "category": "policy",
+      "department": "product",
+      "documentType": "prd",
+      "query": "这条规则具体是：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-07-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 77
+    },
+    {
+      "id": "product-08",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "不要猜，文档里说：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-08-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 78
+    },
+    {
+      "id": "product-09",
+      "category": "business-qa",
+      "department": "product",
+      "documentType": "prd",
+      "query": "审批前确认：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-09-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 79
+    },
+    {
+      "id": "product-10",
+      "category": "policy",
+      "department": "product",
+      "documentType": "prd",
+      "query": "运营复盘里需要写：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "product-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户；核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "product-10-doc",
+        "title": "灰度发布 - product",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+        "referenceIndex": 1
+      },
+      "ordinal": 80
+    },
+    {
+      "id": "customer-success-01",
+      "category": "policy",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "请按制度回答：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-01-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 81
+    },
+    {
+      "id": "customer-success-02",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "帮我查一下：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-02-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 82
+    },
+    {
+      "id": "customer-success-03",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "业务同学问：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-03-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 83
+    },
+    {
+      "id": "customer-success-04",
+      "category": "policy",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "如果按最新规则，企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-04-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 84
+    },
+    {
+      "id": "customer-success-05",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "只基于知识库回答：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-05-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 85
+    },
+    {
+      "id": "customer-success-06",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "给我一个可引用的结论：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-06-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 86
+    },
+    {
+      "id": "customer-success-07",
+      "category": "policy",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "这条规则具体是：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-07-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 87
+    },
+    {
+      "id": "customer-success-08",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "不要猜，文档里说：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-08-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 88
+    },
+    {
+      "id": "customer-success-09",
+      "category": "business-qa",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "审批前确认：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-09-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 89
+    },
+    {
+      "id": "customer-success-10",
+      "category": "policy",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "query": "运营复盘里需要写：企业版客户一级工单多久内首次响应？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "customer-success-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应；普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "customer-success-10-doc",
+        "title": "SLA - customer-success",
+        "content": "SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户的一级工单需要 4 小时内首次响应。",
+        "referenceIndex": 1
+      },
+      "ordinal": 90
+    },
+    {
+      "id": "data-01",
+      "category": "policy",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "请按制度回答：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-01-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 91
+    },
+    {
+      "id": "data-02",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "帮我查一下：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-02-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 92
+    },
+    {
+      "id": "data-03",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "业务同学问：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-03-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 93
+    },
+    {
+      "id": "data-04",
+      "category": "policy",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "如果按最新规则，MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-04-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 94
+    },
+    {
+      "id": "data-05",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "只基于知识库回答：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-05-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 95
+    },
+    {
+      "id": "data-06",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "给我一个可引用的结论：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-06-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 96
+    },
+    {
+      "id": "data-07",
+      "category": "policy",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "这条规则具体是：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-07-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 97
+    },
+    {
+      "id": "data-08",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "不要猜，文档里说：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-08-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 98
+    },
+    {
+      "id": "data-09",
+      "category": "business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "审批前确认：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-09-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 99
+    },
+    {
+      "id": "data-10",
+      "category": "policy",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "运营复盘里需要写：MAU 的统计口径是什么？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "data-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "data-10-doc",
+        "title": "指标口径 - data",
+        "content": "指标口径：月活用户 MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 100
+    },
+    {
+      "id": "procurement-01",
+      "category": "policy",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "请按制度回答：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-01-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 101
+    },
+    {
+      "id": "procurement-02",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "帮我查一下：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-02-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 102
+    },
+    {
+      "id": "procurement-03",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "业务同学问：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-03-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 103
+    },
+    {
+      "id": "procurement-04",
+      "category": "policy",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "如果按最新规则，新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-04-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 104
+    },
+    {
+      "id": "procurement-05",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "只基于知识库回答：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-05-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 105
+    },
+    {
+      "id": "procurement-06",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "给我一个可引用的结论：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-06-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 106
+    },
+    {
+      "id": "procurement-07",
+      "category": "policy",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "这条规则具体是：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-07-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 107
+    },
+    {
+      "id": "procurement-08",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "不要猜，文档里说：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-08-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 108
+    },
+    {
+      "id": "procurement-09",
+      "category": "business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "审批前确认：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-09-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 109
+    },
+    {
+      "id": "procurement-10",
+      "category": "policy",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "运营复盘里需要写：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "procurement-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "procurement-10-doc",
+        "title": "供应商准入 - procurement",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 110
+    },
+    {
+      "id": "admin-01",
+      "category": "policy",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "请按制度回答：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-01-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-01-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 111
+    },
+    {
+      "id": "admin-02",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "帮我查一下：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-02-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-02-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 112
+    },
+    {
+      "id": "admin-03",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "业务同学问：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-03-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-03-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 113
+    },
+    {
+      "id": "admin-04",
+      "category": "policy",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "如果按最新规则，20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-04-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-04-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 114
+    },
+    {
+      "id": "admin-05",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "只基于知识库回答：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-05-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-05-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 115
+    },
+    {
+      "id": "admin-06",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "给我一个可引用的结论：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-06-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-06-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 116
+    },
+    {
+      "id": "admin-07",
+      "category": "policy",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "这条规则具体是：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-07-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-07-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 117
+    },
+    {
+      "id": "admin-08",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "不要猜，文档里说：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-08-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-08-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 118
+    },
+    {
+      "id": "admin-09",
+      "category": "business-qa",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "审批前确认：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-09-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-09-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 119
+    },
+    {
+      "id": "admin-10",
+      "category": "policy",
+      "department": "admin",
+      "documentType": "office-policy",
+      "query": "运营复盘里需要写：20 人以上会议室怎么预订和恢复？",
+      "referenceAnswer": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "admin-10-reference"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+          "supportKeywords": [
+            "20 人",
+            "2 个工作日",
+            "30 分钟"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "20 人",
+        "2 个工作日",
+        "30 分钟"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "admin-10-doc",
+        "title": "会议室 - admin",
+        "content": "会议室：20 人以上会议必须提前 2 个工作日预订大会议室，并在会议结束后 30 分钟内恢复现场。",
+        "referenceIndex": 1
+      },
+      "ordinal": 120
+    }
+  ]
+}

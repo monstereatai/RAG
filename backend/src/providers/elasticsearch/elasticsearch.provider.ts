@@ -1,6 +1,23 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Client } from '@elastic/elasticsearch';
+import { Client, estypes } from '@elastic/elasticsearch';
+
+type IndexedChunk = {
+  content: string;
+  docId: string;
+  chunkIndex: number;
+  parentChunkId?: string | null;
+  headingPath?: string[];
+  sectionId?: string | null;
+  clauseId?: string | null;
+  tableRef?: string | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+  sourceAuthority?: string;
+};
 
 /**
  * Elasticsearch Provider
@@ -51,9 +68,6 @@ export class ElasticsearchProvider implements OnModuleInit {
   /**
    * 确保 rag_chunks 索引存在（含中文分词配置）
    */
-  /**
-   * 确保 rag_chunks 索引存在（含中文分词配置）
-   */
   private async ensureIndex(): Promise<void> {
     const exists = await this.client.indices.exists({ index: this.indexName });
     if (exists) {
@@ -67,9 +81,9 @@ export class ElasticsearchProvider implements OnModuleInit {
         const indexMapping = mapping[this.indexName];
 
         const properties = indexMapping?.mappings?.properties as
-          | Record<string, any>
+          | Record<string, unknown>
           | undefined;
-        if (properties && !properties.userId) {
+        if (properties && (!properties.userId || !properties.sourceAuthority)) {
           this.logger.warn(
             `ES mapping outdated (missing userId property). Re-creating...`,
           );
@@ -108,6 +122,17 @@ export class ElasticsearchProvider implements OnModuleInit {
             analyzer: 'ik_smart_analyzer',
           },
           userId: { type: 'keyword' },
+          parentChunkId: { type: 'keyword' },
+          headingPath: { type: 'keyword' },
+          sectionId: { type: 'keyword' },
+          clauseId: { type: 'keyword' },
+          tableRef: { type: 'keyword' },
+          sourceStart: { type: 'integer' },
+          sourceEnd: { type: 'integer' },
+          docVersion: { type: 'keyword' },
+          effectiveAt: { type: 'date' },
+          expiredAt: { type: 'date' },
+          sourceAuthority: { type: 'keyword' },
           createdAt: { type: 'date' },
         },
       },
@@ -125,6 +150,17 @@ export class ElasticsearchProvider implements OnModuleInit {
       docId: string;
       chunkIndex: number;
       userId?: string;
+      parentChunkId?: string | null;
+      headingPath?: string[];
+      sectionId?: string | null;
+      clauseId?: string | null;
+      tableRef?: string | null;
+      sourceStart?: number | null;
+      sourceEnd?: number | null;
+      docVersion?: string | null;
+      effectiveAt?: Date | null;
+      expiredAt?: Date | null;
+      sourceAuthority?: string;
     }>,
     userId?: string,
   ): Promise<void> {
@@ -138,6 +174,17 @@ export class ElasticsearchProvider implements OnModuleInit {
           chunkIndex: c.chunkIndex,
           content: c.content,
           userId: c.userId || userId,
+          parentChunkId: c.parentChunkId,
+          headingPath: c.headingPath,
+          sectionId: c.sectionId,
+          clauseId: c.clauseId,
+          tableRef: c.tableRef,
+          sourceStart: c.sourceStart,
+          sourceEnd: c.sourceEnd,
+          docVersion: c.docVersion,
+          effectiveAt: c.effectiveAt?.toISOString() ?? null,
+          expiredAt: c.expiredAt?.toISOString() ?? null,
+          sourceAuthority: c.sourceAuthority,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -189,12 +236,26 @@ export class ElasticsearchProvider implements OnModuleInit {
       docId: string;
       chunkIndex: number;
       score: number;
+      parentChunkId?: string | null;
+      headingPath?: string[];
+      sectionId?: string | null;
+      clauseId?: string | null;
+      tableRef?: string | null;
+      sourceStart?: number | null;
+      sourceEnd?: number | null;
+      docVersion?: string | null;
+      effectiveAt?: string | null;
+      expiredAt?: string | null;
+      sourceAuthority?: string;
     }>
   > {
     if (!this.enabled) return [];
 
     try {
-      const queryObj = {
+      const filter: estypes.QueryDslQueryContainer[] = userId
+        ? [{ term: { userId } }]
+        : [];
+      const queryObj: estypes.QueryDslQueryContainer = {
         bool: {
           must: [
             {
@@ -205,29 +266,35 @@ export class ElasticsearchProvider implements OnModuleInit {
               },
             },
           ],
-          filter: userId ? { term: { userId } } : undefined,
+          ...(filter.length > 0 ? { filter } : {}),
         },
       };
 
-      const result = await this.client.search({
+      const result = await this.client.search<IndexedChunk>({
         index: this.indexName,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        query: queryObj as any,
+        query: queryObj,
         size: topK,
       });
 
       return result.hits.hits.map((hit) => {
-        const src = hit._source as {
-          content: string;
-          docId: string;
-          chunkIndex: number;
-        };
+        const src = hit._source;
         return {
           id: hit._id ?? '',
-          content: src.content ?? '',
-          docId: src.docId ?? '',
-          chunkIndex: src.chunkIndex ?? 0,
+          content: src?.content ?? '',
+          docId: src?.docId ?? '',
+          chunkIndex: src?.chunkIndex ?? 0,
           score: hit._score ?? 0,
+          parentChunkId: src?.parentChunkId,
+          headingPath: src?.headingPath,
+          sectionId: src?.sectionId,
+          clauseId: src?.clauseId,
+          tableRef: src?.tableRef,
+          sourceStart: src?.sourceStart,
+          sourceEnd: src?.sourceEnd,
+          docVersion: src?.docVersion,
+          effectiveAt: src?.effectiveAt,
+          expiredAt: src?.expiredAt,
+          sourceAuthority: src?.sourceAuthority,
         };
       });
     } catch (err) {

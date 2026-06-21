@@ -95,6 +95,9 @@
 - agentic 模式能输出过程事件。
 - auto 模式能按问题复杂度选择路径。
 - 答案包含引用片段。
+- 关键结论需要逐句引用，引用编号必须存在，且内容能被引用片段支撑。
+- 检索为空、低相关、引用缺失或引用支撑不足时返回知识库不足说明，不生成确定性结论。
+- 多版本制度同时命中时需要提示版本差异，来源权威规则可通过配置影响排序。
 - 无相关文档时返回友好提示。
 
 ### 5.4 流式与过程可视化
@@ -160,19 +163,21 @@
 | Debug | chunks 分数、vector index 信息 |
 | Observability | pino、metrics、traces、workflow Mermaid |
 | Deployment | dev / staging / prod Docker Compose |
-| Evaluation | RAG eval、E2E、perf 脚本 |
+| Evaluation | RAG eval、E2E、LLM-as-Judge、perf 脚本 |
 
 ### 6.2 待确认 / 待补资源
 
 | 项目 | 当前状态 |
 |---|---|
-| CI/CD | 本地评测脚本已完成，正式 workflow 需单独确认 |
-| MCP | 代码完成，仍需真实 `workspace/mcp-servers.yaml` 和可运行 server |
-| GraphRAG 数据 | Neo4j 已连接，仍需导入真实图谱数据源 |
+| CI/CD | 本地评测脚本与 Drone/Jenkins 验证配置已完成，正式生产发布流程仍需单独确认 |
+| MCP | 本地 stdio smoke server 与 `workspace/mcp-servers.yaml` 已验证，业务 MCP server 可按需追加 |
+| GraphRAG 数据 | 本地种子数据与 `smoke:graph` 已完成真实运行时验证，真实业务图谱数据源仍需确认 |
 | Bocha | 需 `BOCHA_API_KEY` 才能真实联网搜索 |
 | Rerank | 需 `RERANK_API_KEY` 才能真实重排 |
-| Tencent ASR/TTS | 需腾讯云密钥和外网联调 |
-| 部署目标 | Docker Compose 已建议，云服务器 / K8s 仍待确认 |
+| Tencent ASR/TTS | 腾讯云 TTS→ASR 直连已验证，后端 TTS SSE → ASR endpoint smoke 已验证 |
+| 真实业务评测集 | 已生成并校验 120 条内置业务场景评测样本；真实私有业务问题和标准答案仍需主人提供 |
+| 结构化事实治理 | 第一版已完成：`document_chunks` / `fact_conflicts` / docVersion / effectiveAt / expiredAt / sourceAuthority / GraphRAG aliases+confidence；后续复杂审核流和 UI 另立阶段 |
+| 部署目标 | 已固定 Docker Compose；真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略 |
 
 ## 7. 关键页面
 
@@ -263,9 +268,10 @@
 ### 9.4 可观测
 
 - 关键接口需要结构化日志。
-- HTTP 指标和 Node 指标可采集。
+- HTTP 指标、Node 指标、检索命中、LLM 调用次数、LLM 调用耗时、输入/输出 token 估算可采集。
 - Trace 支持查询最近 span。
 - RAG 流程事件对前端可见。
+- 专项 smoke 脚本可以验证 MCP、GraphRAG、Speech、外部工具、Redis Checkpointer、Hybrid retrieval。
 
 ## 10. 验收标准
 
@@ -292,6 +298,7 @@
 - Docker dev / staging / prod 配置可解析。
 - prod 启用 `--profile graphrag` 时包含 Neo4j。
 - CI/CD 改动未确认前不得修改 workflow。
+- 变更后至少运行相关 build / lint / test / smoke 命令，并记录未能执行的外部依赖原因。
 
 ## 11. 发布与里程碑
 
@@ -303,7 +310,7 @@
 | M3 | 工程化、鉴权、多租户 | 已完成 |
 | M4 | 前端 MVP | 已完成 |
 | M5 | 容器化部署 | 已完成 |
-| P1/P2/P3 扩展 | Mem0、MCP、GraphRAG、评测、观测 | 多数完成，外部联调继续 |
+| P1/P2/P3 扩展 | Mem0、MCP、GraphRAG、评测、观测、专项 smoke | 多数完成，外部联调继续 |
 
 ## 12. 开放问题
 
@@ -312,7 +319,8 @@
 - 是否需要组织、团队、角色级权限模型。
 - 是否要把 Mem0 记忆管理暴露成可编辑 UI。
 - 是否要将评测门禁接入正式 CI/CD。
-- 生产部署目标是单机 Docker Compose、云服务器还是 K8s。
+- 真实生产发布的目标机器、域名、证书、备份和密钥注入策略。
+- Bocha / Rerank 是否补齐真实 key 后纳入常规 smoke 验收。
 
 ## 13. 文档关系
 

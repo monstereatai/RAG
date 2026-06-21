@@ -85,12 +85,18 @@ RAG/
 # 后端验证（在 backend/ 目录下）
 cd backend && npm run build           # 编译通过
 cd backend && npm run lint            # ESLint 通过
-cd backend && npm run start:dev       # 服务启动
-curl http://localhost:3000/api/health # 健康检查
-node verify-multitenancy.mjs          # 多租户隔离 E2E 验证
+cd backend && npm test -- --runInBand # 相关单测，按改动范围可定向执行
+cd backend && npm run start:dev       # 服务启动，若 3000 被占用使用 PORT=3001
+curl http://localhost:3000/api/v1/health # 健康检查
 
 # 基础设施验证（在 docker/ 目录下）
 cd docker && docker compose ps        # 所有服务 healthy
+
+# 专项 smoke（按本次改动选择执行）
+cd backend && npm run smoke:mcp
+cd backend && npm run smoke:external
+cd backend && npm run smoke:speech:direct
+cd backend && npm run smoke:redis-checkpointer
 ```
 
 **纪律**：每次改动后必须跑相关验证。不要只改不验。
@@ -124,7 +130,7 @@ cd docker && docker compose ps        # 所有服务 healthy
 
 ## 当前阶段
 
-**M1/M2/M3/M4/M5已完成，P1 Prompt工程 + P1 结构化输出 + P2 对话历史向量化 + P2 Mem0长期记忆代码已完成**（2026-06-18）
+**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；当前剩余工作集中在外部专项联调与红线确认项。**（2026-06-21）
 
 已完成能力：
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
@@ -135,14 +141,18 @@ cd docker && docker compose ps        # 所有服务 healthy
 - M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 代理。
 - P1 Prompt 工程体系：SemanticExampleSelector（Milvus 语义相似度挑选示例）+ LCEL 工具链（RunnableBranch/RunnableWithMessageHistory）+ 集成到 Agentic RAG 查询扩展。
 - P1 结构化输出：DocumentMetadataExtractor（LLM + zod structured output 抽取标题/作者/摘要/关键词/语言/类别），集成到文档上传流程。
-- P2 Mem0 长期记忆（代码完成，待联调）：Mem0Provider（云端/本地双模式）+ MemoryService（搜索注入+分类写入+分类器）+ 记忆管理 API（GET/DELETE /api/memories）。
+- P2 Mem0 长期记忆：Mem0Provider（云端/本地双模式）+ MemoryService（搜索注入+分类写入+分类器）+ 记忆管理 API（GET/DELETE /api/v1/memories），单元测试覆盖 cloud/local/disabled。
 - P2 对话历史向量化：ConversationEmbeddingService 将 QA 对嵌入 Milvus，自动检索相关历史对话作为上下文。
+- P2 MCP：MultiServerMCPClient + 本地 stdio smoke server，`npm run smoke:mcp` 已验证工具加载。
+- P3 GraphRAG：Neo4j Provider、实体关系抽取、图谱导入/查询/schema 接口已实现，业务图谱联调脚本已准备。
+- P3 可观测：Prometheus HTTP/Node/检索命中/LLM 调用/token 估算指标，traceparent in-memory tracing，workflow Mermaid。
+- 专项 smoke：MCP、GraphRAG、Speech、external tools、Redis Checkpointer、Hybrid retrieval 脚本已挂到 `backend/package.json`。
 
 当前已知问题：
-- Milvus `search` 在本机 Docker 环境仍可能出现 15s timeout。已通过自动快速降级到 BM25（含中文单字/bigram兜底）避免卡死，后续可从索引算法或资源配置层面继续优化性能。
+- Milvus `search` 仍可能出现短暂 timeout warning。当前主检索快速失败、短期熔断、BM25 降级，且 search/delete/warmup/circuit 超时均可通过环境变量配置。
+- 本机 Docker daemon 不可连接时，GraphRAG / Hybrid / backend Speech / Redis smoke 只能等待基础服务恢复后执行。
 
 下一步建议：
-- P2：Mem0 长期记忆联调验证（配置 MEM0_API_KEY 后测试记忆搜索与分类写入）。
-- P2：MCP 协议 MultiServerMCPClient 联调与工具源标定。
-- P1：结构化输出补全（流式结构化输出、实体关系抽取用于 Neo4j）。
-- P3：知识图谱 GraphRAG (Neo4j) 与自动化评测体系。
+- 恢复 Docker Desktop 后执行 `smoke:graph`、`smoke:speech`、`smoke:hybrid` 和 Redis 真实跨进程 smoke。
+- 补齐 `BOCHA_API_KEY` / `RERANK_API_KEY` 后执行真实联网增强 smoke。
+- 红线项（schema/migration、生产部署、删除 `.history` 快照、部署目标）必须主人单独确认。

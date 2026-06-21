@@ -1,0 +1,18 @@
+{
+  "version": "example-2026-06-21",
+  "description": "GraphRAG 业务图谱导入模板。替换为真实业务实体关系文本后，用 scripts/import-graph-business-seed.mjs 校验或导入。",
+  "documents": [
+    {
+      "sourceId": "business-graph-policy-example",
+      "title": "真实业务制度关系样例",
+      "text": "客户成功团队负责企业版客户 SLA。企业版客户的一级工单需要 1 小时内首次响应。一级工单升级后由值班经理协调研发团队处理。",
+      "query": "企业版客户一级工单涉及哪些团队和 SLA？"
+    },
+    {
+      "sourceId": "business-graph-contract-example",
+      "title": "真实合同审批关系样例",
+      "text": "采购合同超过 50 万元时，需要法务复核和财务复核。采购负责人提交合同后，法务负责人确认条款风险，财务负责人确认预算。",
+      "query": "超过 50 万元的采购合同需要哪些角色复核？"
+    }
+  ]
+}

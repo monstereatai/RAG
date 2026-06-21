@@ -1,0 +1,15 @@
+mcpServers:
+  # 业务 MCP Server 示例。复制到 workspace/mcp-servers.yaml 后替换为真实命令或 URL。
+  # 不要把 token、secret、password 写进这个文件；通过目标机器本地环境变量注入。
+  business-knowledge:
+    transport: stdio
+    command: node
+    args:
+      - /absolute/path/to/business-mcp-server/dist/index.js
+    env:
+      BUSINESS_API_BASE_URL: http://localhost:3010
+
+  # SSE / Streamable HTTP 类 server 示例：
+  # business-search:
+  #   transport: sse
+  #   url: http://localhost:3011/sse
