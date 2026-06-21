@@ -6,6 +6,8 @@ run('node', ['scripts/eval-rag.mjs'], { inherit: true });
 run('node', ['scripts/build-business-regression-dataset.mjs', '--check'], {
   inherit: true,
 });
+run('node', ['scripts/eval-rag-project.mjs'], { inherit: true });
+run('node', ['scripts/eval-rag-maturity.mjs'], { inherit: true });
 
 if (judgeRequired) {
   const judge = run('node', ['scripts/eval-rag-judge.mjs'], { inherit: false });

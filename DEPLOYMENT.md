@@ -95,3 +95,4 @@ MCP_CONFIG_PATH=/path/to/business-mcp-servers.yaml npm run mcp:validate
 - 确认 collection 已建索引并完成 load 后再跑大批量 e2e。
 - 本机 Docker 首次启动后先跑一次 `GET /api/v1/debug/vector-index` 和 `npm run smoke:hybrid` 预热。
 - 若 warning 仍频繁出现，再调 `MILVUS_WARMUP_TIMEOUT_MS`、`MILVUS_SEARCH_TIMEOUT_MS`、`MILVUS_CIRCUIT_BREAKER_MS`，不要把业务答案正确性押在单一路径向量召回上。
+- 诊断命令：`cd backend && npm run smoke:milvus`。该命令会输出 SDK/server 版本、collection schema、row count、index state、load state、loading progress 和一次受限 search。若 metadata 全部正常但 search 仍 `DEADLINE_EXCEEDED`，优先检查 Milvus 容器版本、segment 状态和资源，不要继续在 RAG 生成链路里调 prompt。

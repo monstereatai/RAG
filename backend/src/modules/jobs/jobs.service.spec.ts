@@ -13,6 +13,7 @@ describe('JobsService', () => {
   let scheduler: SchedulerRegistry;
   let mockJobRepo: any;
   let mockJobsMap: Map<string, any>;
+  let mockSupervisorService: any;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -48,7 +49,14 @@ describe('JobsService', () => {
         return Promise.resolve(entity);
       }),
     };
-    service = new JobsService(scheduler, mockJobRepo);
+    mockSupervisorService = {
+      query: jest.fn().mockResolvedValue({
+        domain: 'technical',
+        confidence: 0.8,
+        answer: 'done',
+      }),
+    };
+    service = new JobsService(scheduler, mockJobRepo, mockSupervisorService);
   });
 
   afterEach(async () => {
@@ -95,6 +103,7 @@ describe('JobsService', () => {
     expect(updated.enabled).toBe(false);
     expect(updated.running).toBe(false);
     expect(updated.lastRun).toBeDefined();
+    expect(mockSupervisorService.query).toHaveBeenCalledWith('run once');
   });
 
   it('rejects invalid every jobs', async () => {

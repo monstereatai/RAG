@@ -9,10 +9,11 @@
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
 - `rag-plan.md`：早期计划和技术路线。
+- `INTERVIEW_PLAYBOOK.md`：简历与面试讲解手册，记录本项目面向高级 Agent 工程师、高级 AI 应用开发工程师、高级前端开发工程师、前端负责人时应该掌握和表达的内容。
 
 ## 当前阶段
 
-**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；本轮已完成结构化事实治理 schema、真实迁移、真实上传入库、质量门禁、Compose 部署目标收口，并补齐真实业务评测集导入、业务 MCP 配置校验、GraphRAG 业务种子导入、外部 API 严格 smoke、生产就绪检查入口。当前剩余只剩外部输入类事项：真实私有业务评测数据、真实业务 MCP server 地址/启动方式、Bocha/Rerank key、真实生产目标机器/域名/证书/备份策略。**
+**M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；本轮已完成结构化事实治理 schema、真实迁移、真实上传入库、质量门禁、Compose 部署目标收口，并补齐真实业务评测集导入、项目级仿真实业务评测、业务 MCP 配置校验、GraphRAG 业务种子导入、外部 API 严格 smoke、生产就绪检查入口和企业级成熟度门禁。当前本地工程成熟度为 93/100，已超过 90 分门槛；项目级仿真实业务强制真实回放 22/22 通过。真实生产级落地仍剩外部输入类事项：真实私有业务评测数据、真实业务 MCP server 地址/启动方式、Bocha/Rerank key、真实生产目标机器/域名/证书/备份策略。**
 
 ## 当前核心优化标准
 
@@ -29,10 +30,11 @@
 
 - **主链路**：已有 query normalize、hybrid retrieval、低相关拒答、逐句 claim-level 引用支撑校验；现在的问题不再是“会不会乱答”，而是需要用更多真实业务毒题证明它持续不乱答。
 - **评测集**：已有 120 条内置业务评测集、真实 e2e 回放和可选 Qwen LLM-as-Judge 稳定门禁；短板是缺主人公司真实问题与标准答案，合成题再认真也不能冒充真实业务。
+- **项目级仿真实评测**：新增 8 份模拟业务文档、11 条项目级问题，覆盖版本冲突、跨文档、别名、SLA、审计、负例拒答；`PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 在 3001 后端真实上传/问答/清理，simple 11/11、auto 11/11。
 - **GraphRAG**：已有 Neo4j smoke、实体别名、关系置信度和关系型问题边界；真实价值取决于后续是否接入真实业务图谱数据源。
 - **Chunk 策略**：已落地 `document_chunks`，支持父子 chunk、heading path、section/clause/table metadata、source span、doc version、生效期、来源权威；固定切分的草台味已经压下去，但复杂 PDF/表格还需要更多真实样本打磨。
-- **Agentic**：auto 路由已收敛，Agentic 不再默认接管普通问题；后续需要继续强化任务边界、成本边界、Web Search/GraphRAG 触发边界。
-- **当前评级**：架构方向正确，核心链路开始像企业级 RAG；距离成熟企业级还差真实私有评测集、真实业务图谱/工具联调和生产级数据治理运营闭环。
+- **Agentic**：auto 路由已收敛，Agentic 不再默认接管普通问题；本轮新增可配置成本边界，限制重试次数、扩展查询数、检索查询数、返回 chunk 数、Web Search 数、Rerank topN 和 auto 模式最大 query 长度。Web Search/GraphRAG 触发边界仍需更多真实业务题回归。
+- **当前评级**：本地工程成熟度门禁 `npm run eval:rag:maturity` 为 93/100，达到 90 分线；但这不是生产落地满分，真实私有评测集、Milvus search 运行时治理和生产材料仍是扣分缺口。
 
 - M0 项目骨架可运行已验证（2026-06-18）
 - M1 最简 RAG 管线已验证通过（2026-06-18）：上传→切分→Embedding→Milvus→simple 检索→回答→debug 全链路 OK
@@ -178,7 +180,7 @@
   - common/interceptors/transform.interceptor.ts：统一响应 {code, data, message} + 请求耗时日志
   - common/filters/all-exceptions.filter.ts：全局异常捕获，HttpException 提取 message，未捕获异常记日志
   - common/decorators/current-user.decorator.ts：@CurrentUser() 从 request.user 提取 JwtPayload
-  - common/guards/jwt-auth.guard.ts：JWT 认证守卫骨架（Bearer Token 提取 + 401，待接入 @nestjs/jwt 验签）
+  - common/guards/jwt-auth.guard.ts：JWT 认证守卫（Bearer Token / SSE query token 提取 + AuthService.verifyToken 验签 + request.user 注入）
   - main.ts：全局注册 ValidationPipe + TransformInterceptor + AllExceptionsFilter
   - config/configuration.ts：新增 auth.jwtSecret / auth.jwtExpiresIn 配置
   - .env.example + .env：新增 JWT_SECRET / JWT_EXPIRES_IN
@@ -350,7 +352,7 @@
   - 目录结构：backend / frontend / skills / workspace / docker
 - [x] **NestJS 工程化模式落地**（对齐 agent-course/nest-feature）
   - JWT 认证（@nestjs/jwt + AuthGuard）
-  - 角色权限（已实现 @CurrentUser() 装饰器；RBAC 细粒度权限待扩展）
+  - 角色权限（已实现 @CurrentUser() 装饰器、`@Roles()` 装饰器与 RolesGuard；jobs 管理写操作已限制 admin；完整组织/团队权限模型不在当前阶段）
   - 统一响应（TransformInterceptor：{code, data, message}）
   - 全局异常（AllExceptionsFilter）
   - 参数校验（ValidationPipe）
@@ -371,13 +373,13 @@
 
 - [x] 文档上传 + 解析（Markdown/TXT/PDF/DOCX 已完成并验证）
 - [x] Chunking 策略实现（当前 MarkdownChunker，chunk_size/overlap 固定）
-- [x] Embedding 生成 + 写入向量库（Milvus 已完成；pgvector 待做）
+- [x] Embedding 生成 + 写入向量库（Milvus 已完成并作为当前主向量库；pgvector 仅保留备选配置，不作为当前待办）
 - [x] BM25 索引构建（内存 BM25 + `@node-rs/jieba` 中文分词，英文 token 保留完整；降级兜底保留）
 - [x] Karpathy-style RAG 管线（纯 JS BM25 + 纯 JS cosine 计算 + 加权融合）
-- [x] Agentic RAG 管线（deepAgent query planning → retrieval → generate → reflection）
-- [x] 查询扩展（deepAgent 规划 3 条多角度问句；失败时回落到 LLM structured output）
-- [x] 检索充分性评估（基础评估已完成并通过 SSE 输出；不足时触发 Bocha web_search，API key 缺失自动跳过）
-- [x] Reflection 节点（含最大重试次数控制）
+- [x] Agentic RAG 管线（deepAgent query planning → retrieval → generate → reflection；已新增可配置成本边界）
+- [x] 查询扩展（deepAgent 规划多角度问句；失败时回落到 LLM structured output；`AGENTIC_MAX_AUGMENTED_QUERIES` 控制上限）
+- [x] 检索充分性评估（基础评估已完成并通过 SSE 输出；不足时触发 Bocha web_search，API key 缺失自动跳过；`AGENTIC_WEB_SEARCH_FALLBACK_ENABLED` 可关闭联网兜底）
+- [x] Reflection 节点（`AGENTIC_CONFIDENCE_THRESHOLD` / `AGENTIC_MAX_RETRIES` 控制置信阈值和最大重试）
 - [x] Bocha web_search 工具集成（官方 `POST /v1/web-search`；无 API key 时禁用且不阻断）
 - [x] DashScope Rerank 集成（官方 text-rerank / compatible reranks；默认模型 qwen3-rerank；无 API key 时禁用且不阻断）
 - [x] Mode Router（auto / agentic / simple）
@@ -385,7 +387,7 @@
 
 ### P1 — LangGraph 增强
 
-- [x] Checkpointer 状态持久化（RedisCheckpointer + MemorySaver 降级，2026-06-19；待 Redis 联调验证重启恢复）
+- [x] Checkpointer 状态持久化（RedisCheckpointer + MemorySaver 降级，2026-06-19；`npm run smoke:redis-checkpointer` 已完成跨进程重启恢复验证，2026-06-21）
 - [x] 子 Agent 编排架构（researcher/analyst/writer/critic/editor，已实现并编写骨架，2026-06-19）
 - [x] 向量索引创建优化（Milvus 主 collection 默认 HNSW，支持 HNSW 参数配置与 `/api/v1/debug/vector-index` 验收，2026-06-20）
 
@@ -419,8 +421,8 @@
 - [x] 文档删除接口（DELETE /api/documents/:docId，Milvus + BM25 + 内存元数据同步删除，2026-06-18）
 - [x] 缓存层（Embedding 缓存 / 查询缓存 / 对话历史缓存）（2026-06-18）
 - [x] TTS 语音合成（SpeechProvider 扩展，SSE 流式音频；2026-06-19 新增 `/api/speech/tts/stream` SSE base64 音频块接口，前端朗读按钮已切换到 SSE 合成后播放）
-- [x] 定时任务 Agent 骨架与数据库持久化恢复（@nestjs/schedule + cron，引入 `ScheduledJobEntity` 实现定时任务数据库持久化与启动自动调度恢复，2026-06-19）
-- [x] Skills 技能系统基础版（SKILL.md 加载 + 本地 token 匹配，2026-06-19；Embedding 语义匹配待 key/启动策略确认）
+- [x] 定时任务 Agent 骨架与数据库持久化恢复（@nestjs/schedule + cron，引入 `ScheduledJobEntity` 实现定时任务数据库持久化与启动自动调度恢复；运行时已接入 SupervisorService 执行 instruction，2026-06-21）
+- [x] Skills 技能系统基础版（SKILL.md 加载 + 本地 token 匹配，2026-06-19；后续已增强为 Qwen Embedding 语义匹配并保留 token 回退）
 - [x] Skills Embedding 语义匹配增强（OpenAI-compatible Embeddings 语义排序 + 无 key/失败回退 token 匹配，2026-06-19）
 - [x] 图中断人工审批（interrupt + /chat/resume，已实现并在集成测试中验证，2026-06-19）
 - [x] Mem0 长期记忆集成（cloud + local 双驱动，LLM + Zod 自动提取与写入，单元测试完全覆盖）（2026-06-19）
@@ -440,7 +442,7 @@
 - [x] 模式切换器（simple / agentic / auto）
 - [x] 路由追踪面板（实际模式 + SSE 事件链路）
 - [x] Debug 面板（BM25/cosine 分数进度条 + chunk 原文，2026-06-18）
-- [x] 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端腾讯云 ASR 待扩展）
+- [x] 语音录入（浏览器 Web Speech API → 输入框 → 查询；后端腾讯云 ASR/TTS 已完成真实 smoke）
 - [x] TTS 朗读按钮（后端 GET /api/speech/tts 已实现，前端 playTTS + 朗读按钮已集成在 ChatPage，2026-06-18）
 
 ### P3 — 企业级能力
@@ -454,7 +456,7 @@
   - 安全参数化 Cypher：LLM 只抽取实体，不直接拼接执行任意 Cypher
   - 图谱构建：非结构化文本 → LLM 实体关系抽取 → Neo4j `GraphEntity` / `GRAPH_RELATION`
   - 接口：POST /api/v1/graph/extract、POST /api/v1/graph/import、POST /api/v1/graph/query、GET /api/v1/graph/schema
-  - 默认关闭时已验证 schema 返回 disabled、import 返回 503；真实 Neo4j 导入/查询联调待开启 GraphRAG 配置与图谱数据源
+  - 默认关闭时已验证 schema 返回 disabled、import 返回 503；开启 GraphRAG 后 Neo4j import/query/schema 已完成真实 smoke；业务图谱质量仍需真实业务数据源
 - [x] API 限流与配额（@nestjs/throttler，全局默认 60 req/min，2026-06-19）
 - [x] 结构化日志（pino，JSON 格式；M3 已实现并验证，2026-06-18）
 - [x] Prometheus 指标（prom-client 默认指标 + HTTP QPS/延迟，2026-06-19；`GET /api/v1/metrics` 运行时复验通过，2026-06-20；检索命中、LLM 调用耗时、输入/输出 token 估算业务指标已补齐，2026-06-21）
@@ -495,7 +497,10 @@
 - **企业级差距 4：结构化文档索引**。已落地 `document_chunks`，支持父子 chunk、heading path、sectionId、clauseId、tableRef、sourceStart/sourceEnd、docVersion、effectiveAt/expiredAt、sourceAuthority，并在上传/删除链路真实验证。
 - **企业级差距 5：事实治理**。已落地 `fact_conflicts` 第一版，上传时检测简单版本数值冲突；`RAG_SOURCE_AUTHORITY_RULES` 来源权威权重继续可用；GraphRAG 关系写入 aliases/confidence。后续复杂事实归并、人工审核流、冲突处置 UI 属于新阶段增强。
 - **企业级差距 6：真实链路验证**。3001 后端真实启动已验证，`eval:rag:e2e`、`smoke:graph`、`smoke:hybrid`、`smoke:speech`、`smoke:redis-checkpointer` 均完成真实 smoke；GraphRAG 可作为关系型问题增强，Agentic 仍保持明确复杂问题才触发。
-- **Milvus warning 收敛**：`MILVUS_WARMUP_TIMEOUT_MS` 默认从 500ms 提升到 1500ms，并保持 search/delete/warmup/circuit 可配置；后续若还要继续压 warning，需要调 Milvus 资源、索引和版本，不再属于 RAG 业务代码主链路阻塞。
+- **企业级成熟度门禁**。新增 `npm run eval:rag:maturity`，按查得准、答得稳、引用能撑住、不会瞎编、可观测与恢复、工程化门禁、真实落地准备打分；当前本地工程成熟度 93/100，超过 `RAG_MATURITY_MIN_SCORE=90`。默认不把外部输入缺失作为硬失败；设置 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 后，真实私有业务评测集和生产材料会成为硬阻塞。
+- **项目级仿真实业务评测**。新增 `backend/eval/project-simulated-business.dataset.json` 与 `npm run eval:rag:project`，默认后端不可用时只做数据集结构校验，`PROJECT_EVAL_REQUIRE_LIVE=true` 时必须真实调用后端；当前 3001 后端强制真实回放 score=1，simple/auto 共 22/22 通过。
+- **Agentic 成本边界**：已新增 `AGENTIC_CONFIDENCE_THRESHOLD`、`AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N`、`AGENTIC_MAX_AUTO_QUERY_LENGTH`、`AGENTIC_WEB_SEARCH_FALLBACK_ENABLED`、`AGENTIC_RERANK_ENABLED`，并补单测覆盖查询扩展截断、auto 超长问题回退 simple、检索查询/返回 chunk 截断。
+- **Milvus warning 收敛**：`MILVUS_WARMUP_TIMEOUT_MS` 默认从 500ms 提升到 1500ms，并保持 search/delete/warmup/circuit 可配置；已新增 `npm run smoke:milvus` 诊断 collection/schema/index/load/search 状态。当前诊断显示 health/schema/HNSW index/load progress 均正常，但 search 仍在本机 Docker Milvus 内 `DEADLINE_EXCEEDED`；已排除单纯 RAG 业务代码归因，后续需处理 Milvus 容器版本、segment 状态或资源。
 - **生产/联调操作入口补齐**：`DEPLOYMENT.md` 已补充真实业务评测集导入、GraphRAG 业务种子导入、业务 MCP 配置校验、外部 API 严格 smoke、生产就绪检查和 Milvus 运行环境调优说明。
 
 ## 阻塞
@@ -527,11 +532,12 @@
     - agentic 检索改为原始问题 1 次混合检索 + 扩展问题 BM25-only ✓
     - Karpathy retrieve 在向量检索失败时降级 BM25 ✓
     - BM25 修复中文分词，加入单字/bigram 兜底 ✓
+    - 新增 `npm run smoke:milvus` 直接诊断：health=true、server=v2.4.4、SDK=2.6.17、collection `rag_chunks` 存在、`user_id` 字段存在、rowCount=87、HNSW index Finished、indexedRows=87/totalRows=87、loadState=Loaded、loadingProgress=100，但 search 仍 `DEADLINE_EXCEEDED` after 1.5s
+    - 临时尝试 SDK 降级到 `@zilliz/milvus2-sdk-node@2.4.4` 对齐 server v2.4.4：search 仍超时，且 build 因旧 SDK `DeleteEntitiesReq` 不支持 `exprValues` 失败；已回退 SDK 2.6.17
   - 待尝试：
-    - 检查 Milvus querynode 资源配置（可能内存不足导致索引加载失败）
-    - 检查现有 collection 是否仍是旧索引；新建 collection 默认使用 HNSW
-    - 检查 Milvus 2.4.4 已知 bug
-    - 参考 agent-course 的 docker-compose 配置对比
+    - 处理 Milvus querynode / segment task 状态：当前 Docker 日志出现大量 segment task 与 dropped/growing segment 清理
+    - 评估 Milvus 2.4.4 容器升级或 collection 压实/重建；这涉及数据与容器版本，需单独确认后执行
+    - 参考 agent-course 的 docker-compose 配置继续对比
   - 当前状态：
     - Agentic retrieval 已改为原始问题 1 次混合检索 + 扩展问题 BM25-only
     - Karpathy retrieve 在向量检索失败时自动降级 BM25
@@ -539,7 +545,7 @@
     - Milvus 慢查询不再把 simple/agentic 拉到 10s+；空知识库性能门禁已通过
     - BM25 已接入 @node-rs/jieba 中文分词，中文查询召回率显著提升 ✓
     - M2 功能验收已通过，Milvus 问题不再阻塞 M2
-  - 影响：响应延迟仍可能被首次向量 search 的可配置 timeout 拉长；当前默认约 0.8s 快速失败，后续需要从 Milvus 索引、资源和版本层面继续优化
+  - 影响：响应延迟仍可能被首次向量 search 的可配置 timeout 拉长；当前默认约 0.8s 快速失败，后续需要从 Milvus 容器版本、segment 状态、collection 压实/重建、资源和版本兼容层面继续优化
 
 ## 待确认
 
@@ -643,6 +649,49 @@
   - `cd backend && npm run smoke:external:required` → 按预期失败，明确指出 `BOCHA_API_KEY` / `RERANK_API_KEY` 为空；补 key 前不标记 Bocha/Rerank 真实联调完成 ✓
   - `cd backend && npm run eval:rag:quality` → offline averageScore=1，120 条业务回归集校验通过，judge 非强制模式 skipped ✓
   - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、新增脚本 `node --check`、`git diff --check` 均通过；全量单测 19 suites / 95 tests ✓
+
+- **Agentic 成本边界验证（2026-06-21）**
+  - 新增 `agentic.*` 配置与 `.env.example` 的 `AGENTIC_*` 模板，覆盖置信阈值、最大重试、扩展查询数、检索查询数、返回 chunk 数、联网搜索数、Rerank topN、auto 最大 query 长度、web search/rerank 开关 ✓
+  - `AgenticRagService` 已按预算截断 query augment、retrieval queries、retrieved chunks、Bocha web_search count、Rerank topN；auto 模式超长 query 默认回退 simple，显式 agentic 仍尊重用户选择 ✓
+  - 新增 `agentic-rag.service.spec.ts`，覆盖扩展查询截断、auto 超长问题回退 simple、检索查询/返回 chunk 截断 ✓
+  - 同步 `README.md` / `ARCHITECTURE.md` / `PRD.md` / `ROADMAP.md`，清理 JWT、Redis Checkpointer、GraphRAG、腾讯云语音等旧“待”状态 ✓
+  - 验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、`npm run eval:rag:quality`、`git diff --check` 均通过；全量单测 20 suites / 98 tests ✓
+
+- **RBAC 基础角色守卫验证（2026-06-21）**
+  - 新增 `@Roles()` 装饰器与 `RolesGuard`，基于 JWT payload 的 `role` 做方法级权限判断，不新增数据库 schema ✓
+  - Jobs 管理接口保留 `GET /jobs` 登录可见，`POST /jobs`、`PATCH /jobs/:id/start`、`PATCH /jobs/:id/stop`、`DELETE /jobs/:id` 限制 `admin` 角色 ✓
+  - 新增 `roles.guard.spec.ts` 覆盖无角色元数据放行、匹配角色放行、非匹配角色 403 ✓
+  - 定向验证：`cd backend && npm test -- roles.guard.spec.ts --runInBand`、定向 no-fix ESLint、`npm run build` 均通过 ✓
+  - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、`npm run eval:rag:quality`、`git diff --check` 均通过；全量单测 21 suites / 101 tests ✓
+
+- **Milvus 诊断 smoke 验证（2026-06-21）**
+  - 新增 `backend/scripts/smoke-milvus-index.mjs` 与 `npm run smoke:milvus`，输出 SDK/server 版本、health、collection schema、row count、index state、load state、loading progress 和一次受限 search ✓
+  - `cd backend && npm run smoke:milvus` 当前失败：health=true、server=v2.4.4、SDK=2.6.17、HNSW index Finished、loadState=Loaded、loadingProgress=100，但 search 返回 `DEADLINE_EXCEEDED` after 1.5s；证明 warning 不是 schema/index/load 配置缺失导致 ✗
+  - 临时尝试 SDK 2.4.4 对齐 server v2.4.4：search 仍超时且 build 因旧 SDK 类型不支持 `exprValues` 失败；已回退 SDK 2.6.17，`package-lock.json` 无保留噪声 ✓
+  - Docker 观察：`docker compose -f docker/docker-compose.dev.yml ps` 全部 healthy；`docker stats` 显示 Milvus 约 1.0GiB 内存、CPU 有波动；Milvus 日志出现大量 segment task 与 dropped/growing segment 清理。后续如果要继续处理，需要确认是否允许 collection 压实/重建或容器版本升级。
+
+- **定时任务 Agent 执行动作验证（2026-06-21）**
+  - `JobsService.run()` 已从只记录 instruction 改为调用 `SupervisorService.query(job.instruction)`，复用现有领域路由/多 Agent 管线执行定时任务，不新增数据库 schema ✓
+  - 执行失败只记录 warning，不让 scheduler runtime 崩溃；单次 `at` 任务仍会在执行后 disabled/running=false ✓
+  - `JobsModule` 引入 `SupervisorModule`，jobs 管理写操作仍受 RBAC admin 限制 ✓
+  - 定向验证：`cd backend && npm test -- jobs.service.spec.ts --runInBand`、定向 no-fix ESLint、`npm run build` 均通过 ✓
+  - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、`npm run eval:rag:quality`、`git diff --check` 均通过；全量单测 21 suites / 101 tests ✓
+
+- **企业级成熟度门禁验证（2026-06-21）**
+  - 新增 `backend/scripts/eval-rag-maturity.mjs` 与 `npm run eval:rag:maturity`，并接入 `npm run eval:rag:quality` ✓
+  - 打分维度：查得准、答得稳、引用能撑住、不会瞎编、可观测与恢复、工程化门禁、真实落地准备 ✓
+  - `cd backend && npm run eval:rag:maturity` → passed=true，score=93/100，threshold=90 ✓
+  - 明确扣分项：真实私有业务评测集未接入、Milvus search runtime 仍有降级缺口、生产目标机器/证书/备份策略未确认 ✓
+  - `RAG_MATURITY_REQUIRE_EXTERNAL=true` 可把真实私有题集和生产材料升级为硬阻塞，避免把本地工程分冒充生产落地分 ✓
+  - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、`npm run eval:rag:quality`、`git diff --check` 均通过；全量单测 21 suites / 101 tests，质量门禁输出 maturity score=93/100 ✓
+
+- **项目级仿真实业务评测验证（2026-06-21）**
+  - 新增 `backend/eval/project-simulated-business.dataset.json`：8 份模拟业务文档，覆盖 HR、Finance、Legal、IT、Security、CS、Data 等项目常见资料 ✓
+  - 新增 `backend/scripts/eval-rag-project.mjs` 与 `npm run eval:rag:project`，并接入 `npm run eval:rag:quality` ✓
+  - 首轮强制真实回放暴露版本冲突题失败；已增加制度版本查询归一化锚点，并把 LLM 引用不合格统一回退为片段抽取式答案 ✓
+  - 第二轮强制真实回放暴露无答案负例被“报销”等弱词误召回；已增加中文短语重合闸门，避免单个泛词支撑确定性回答 ✓
+  - `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` → ok=true，score=1，simple 11/11，auto 11/11，skipped=false ✓
+  - 收尾验证：`cd backend && npm run build`、no-fix `npx eslint "{src,apps,libs,test}/**/*.ts"`、`npm test -- --runInBand`、`npm run eval:rag:quality` 均通过；全量单测 21 suites / 103 tests，质量门禁内项目级真实评测再次 score=1、skipped=false ✓
 
 - **RAG 评测 Drone CI 门禁验证（2026-06-20）**
   - 新增 `.drone.yml`：backend 阶段执行 `npm run build`、no-fix ESLint、`npm run eval:rag`；frontend 阶段执行 `npm run lint`、`npm run build`；Docker 阶段使用 Drone Docker 插件 dry-run 验证 backend/frontend Dockerfile 构建，不推镜像、不部署 ✓
@@ -991,7 +1040,7 @@
 | 2026-06-19 | **P3 API 限流完成**：新增 `@nestjs/throttler`，在 `AppModule` 接入全局 `ThrottlerGuard`；新增配置 `THROTTLE_TTL_MS` / `THROTTLE_LIMIT`，默认 60 req/min；更新 `.env.example` 模板。验证：`cd backend && npm run build` ✓ / `npm run lint` ✓；压测属于后续增强，不阻塞当前验收。 |
 | 2026-06-19 | **P3 单元测试基础版完成**：新增 MarkdownChunker、BM25、cosine、BochaSearchService、DashScopeRerankService 单元测试，覆盖文本切分、关键词检索排序、中文召回、余弦相似度边界、无 API key 禁用分支、mock API 响应解析/排序。验证：5 suites / 13 tests 全通过，build/lint 通过。Provider mock 深水区和更多异常路径后续扩展。 |
 | 2026-06-19 | **P3 Prometheus 指标基础版完成**：新增 `prom-client` 和 `MetricsModule`，提供 `GET /api/v1/metrics`；通过全局 MetricsInterceptor 采集 HTTP 请求总数与耗时直方图，同时启用默认 Node 指标。验证：build/lint 通过；2026-06-20 运行时复验返回 Prometheus 文本。 |
-| 2026-06-19 | **P2 定时任务 Agent 骨架完成**：新增 `@nestjs/schedule` + `cron`，实现内存版 JobsModule。支持 cron/every/at 三类任务注册、启动、停止、删除，管理接口受 JWT 保护；新增单测覆盖 every 启停、at 一次执行、非法 everyMs。验证：jobs 单测 3 条通过，build/lint 通过；任务持久化和真实 Agent 执行动作后续补。 |
+| 2026-06-19 | **P2 定时任务 Agent 骨架完成**：新增 `@nestjs/schedule` + `cron`，实现内存版 JobsModule。支持 cron/every/at 三类任务注册、启动、停止、删除，管理接口受 JWT 保护；新增单测覆盖 every 启停、at 一次执行、非法 everyMs。验证：jobs 单测 3 条通过，build/lint 通过；后续已接入 SupervisorService 执行 instruction。 |
 | 2026-06-19 | **P2 TTS SSE 流式音频完成**：新增 `GET /api/speech/tts/stream` SSE base64 音频块接口，输出 meta/chunk/done/error 事件；前端朗读按钮改为 EventSource 接收音频块并组装 audio/wav Blob 播放。验证：backend build/lint ✓、frontend build ✓；frontend lint 已于 2026-06-20 补齐工具链并通过；腾讯云 Secret 已配置，真实播放联调待外部网络调用验证。 |
 | 2026-06-19 | **P2 Skills 技能系统基础版完成**：新增 `SkillsModule`，提供 `GET /api/skills` 和 `GET /api/skills/match`；支持递归加载本地 `SKILL.md`、解析 frontmatter 元数据、本地中英文 token 匹配排序。验证：skills 单测 3 条通过，backend build/lint 通过；后续已增强为 Qwen Embedding 语义匹配并保留 token 回退。 |
 | 2026-06-19 | **P3 异常场景测试基础版完成**：新增 Karpathy RAG 空库/无相关文档/向量失败降级测试，新增腾讯云 SpeechProvider 缺 key 错误测试，扩展 Bocha 503 服务不可用测试，并复用已有长文本切分测试覆盖大文件基础场景。验证：异常场景相关 3 suites / 8 tests 通过，backend build/lint 通过。 |
@@ -1024,3 +1073,10 @@
 | 2026-06-21 | **企业级差距第四轮结构化事实治理**：新增 `document_chunks`、`fact_conflicts`、文档版本/生效期/来源权威字段和迁移；上传链路写入父子 chunk、source span、section/clause/table metadata，并检测简单版本事实冲突；GraphRAG 写入 aliases/confidence；新增 `eval:rag:quality` 稳定门禁；部署目标固定 Docker Compose 并新增 `DEPLOYMENT.md` 与 compose config 验证脚本；删除 `.history/backend/.env_*` 本地历史快照。验证：migration run/show、真实上传/查询/删除闭环、build/lint、定向单测、Qwen Judge 强制门禁、compose config、history env 清理均通过。 |
 | 2026-06-21 | **中文错别字召回回归修复**：真实 e2e 发现 `企业知识哭` 召回后生成侧会解释笔误但缺引用，被 claim-level 闸门拒绝；新增 `知识哭 -> 知识库` 查询归一化并将修正 query 传给生成 prompt，补单测覆盖。验证：最小真实复现通过，`npm run eval:rag:e2e` simple 9/9 + auto 9/9 通过。 |
 | 2026-06-21 | **外部输入类任务工程入口补齐**：新增真实业务评测集导入模板/脚本、GraphRAG 业务种子导入模板/脚本、业务 MCP 配置模板/校验脚本、外部 API 严格 smoke、生产就绪检查脚本，并更新 `DEPLOYMENT.md` / `backend/scripts/README.md`。验证：新增 dry-run 与配置检查通过，`eval:rag:quality` 通过，build/no-fix lint/full test/脚本语法/diff check 通过；Bocha/Rerank 严格 smoke 因 key 为空按预期失败，继续等待真实 key。 |
+| 2026-06-21 | **Agentic 成本边界补齐**：新增 `AGENTIC_*` 配置，限制置信阈值、最大重试、扩展查询数、检索查询数、返回 chunk 数、联网搜索数、Rerank topN、auto 最大 query 长度，并支持关闭 web_search/rerank；补单测覆盖预算截断与 auto 超长回退 simple。验证：build/no-fix lint/full test/quality gate/diff check 通过，全量单测 20 suites / 98 tests。 |
+| 2026-06-21 | **RBAC 基础角色守卫补齐**：新增 `@Roles()` 与 `RolesGuard`，基于 JWT payload role 做方法级权限；jobs 管理写操作限制 admin，列表仍保持登录可见。验证：build/no-fix lint/full test/quality gate/diff check 通过，全量单测 21 suites / 101 tests；完整组织/团队权限模型仍不在当前阶段。 |
+| 2026-06-21 | **Milvus 诊断 smoke 补齐**：新增 `npm run smoke:milvus`，可检查 SDK/server 版本、health、schema、row count、index、load state、loading progress 和受限 search。当前本机结果显示 metadata 全正常但 search `DEADLINE_EXCEEDED`，SDK 2.4.4 对齐尝试无效且破坏 build，已回退；后续需确认是否允许 collection 压实/重建或容器版本升级。 |
+| 2026-06-21 | **定时任务 Agent 执行动作补齐**：`JobsService.run()` 接入 `SupervisorService.query(instruction)`，定时任务触发后会走现有 Supervisor 多 Agent 管线；失败仅记录 warning，不影响 scheduler。验证：build/no-fix lint/full test/quality gate/diff check 通过，全量单测 21 suites / 101 tests。 |
+| 2026-06-21 | **企业级成熟度门禁补齐**：新增 `eval:rag:maturity`，按四个核心标准和工程化/真实落地准备评分；接入 `eval:rag:quality`。当前本地工程成熟度 93/100，达到 90 分门槛，同时保留真实私有题集、Milvus runtime、生产材料三项扣分缺口。 |
+| 2026-06-21 | **项目级仿真实业务评测补齐并真实跑通**：新增 8 文档 / 11 问题项目级评测集与 `eval:rag:project`；修复版本冲突题召回/引用回退和弱词误召回问题。验证：`PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 在 3001 后端真实上传/问答/清理，simple 11/11、auto 11/11，score=1。 |
+| 2026-06-21 | **简历与面试讲解手册补齐**：新增 `INTERVIEW_PLAYBOOK.md`，按高级 Agent 工程师、高级 AI 应用开发工程师、高级前端开发工程师、前端负责人四类目标岗位整理项目定位、必须弄懂的技术点、简历写法、面试讲法、高频问答和不能硬吹的边界。 |

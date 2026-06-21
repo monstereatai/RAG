@@ -173,7 +173,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.answer).toContain('[片段1]');
   });
 
-  it('rejects an LLM answer when a later claim is not cited', async () => {
+  it('falls back to extractive answer when a later claim is not cited', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       'LangChain 用于构建 RAG 应用。[片段1] 它还能自动处理所有权限审批。',
@@ -190,14 +190,14 @@ describe('KarpathyRagService exception scenarios', () => {
       'user-1',
     );
 
-    await expect(
-      service.answer('LangChain RAG', [], 'user-1'),
-    ).resolves.toMatchObject({
-      answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
-      references: [],
-      retrievalSufficient: false,
-      retrievalReason: '关键结论缺少逐句引用：它还能自动处理所有权限审批。',
+    const result = await service.answer('LangChain RAG', [], 'user-1');
+
+    expect(result).toMatchObject({
+      retrievalSufficient: true,
+      retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
     });
+    expect(result.answer).toContain('LangChain builds RAG applications');
+    expect(result.answer).not.toContain('权限审批');
   });
 
   it('accepts multi-claim answers when every claim has support citations', async () => {
@@ -287,6 +287,30 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
+  it('rejects weak Chinese overlap when only a generic word matches', async () => {
+    const { service, llmInvoke } = createService();
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-1',
+          content: '差旅制度规定住宿报销上限为 650 元。',
+          docId: 'doc-1',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    await expect(
+      service.answer('公司宠物医疗报销额度是多少？', [], 'user-1'),
+    ).resolves.toMatchObject({
+      answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
+      references: [],
+      retrievalSufficient: false,
+    });
+    expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
   it('falls back to BM25 when vector search is unavailable', async () => {
     const { service, observeRetrievalHits } = createService({
       embeddingProvider: {
@@ -368,6 +392,37 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.retrievalSufficient).toBe(true);
     const firstPrompt = llmInvoke.mock.calls.at(0)?.at(0);
     expect(JSON.stringify(firstPrompt)).toContain('企业知识库 是什么');
+  });
+
+  it('expands versioned reimbursement queries with policy anchors', async () => {
+    const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce(
+      '2026 年一线城市住宿报销上限为 650 元；如果 2025 版写的是 500 元，应以 2026 版优先生效。[片段1]',
+    );
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-1',
+          content:
+            '2026 版差旅制度规定：一线城市住宿报销上限为 650 元。若历史制度与 2026 版冲突，以 2026 版优先生效。2025 版差旅制度规定一线城市住宿报销上限为 500 元。',
+          docId: 'doc-1',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.answer(
+      '2026 年一线城市住宿报销上限是多少？如果 2025 版写的是 500 元怎么办？',
+      [],
+      'user-1',
+    );
+
+    expect(result.retrievalSufficient).toBe(true);
+    const firstPrompt = llmInvoke.mock.calls.at(0)?.at(0);
+    expect(JSON.stringify(firstPrompt)).toContain(
+      '差旅制度 住宿标准 优先生效 历史版本',
+    );
   });
 
   it('applies configured source authority weights to retrieval ranking', async () => {

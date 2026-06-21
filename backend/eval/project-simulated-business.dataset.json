@@ -1,0 +1,139 @@
+{
+  "version": "2026-06-21",
+  "description": "仿真实项目级业务评测集：多部门、多文档、多版本、跨文档、无答案拒答、缩写别名、引用和冲突处理。数据为项目内置模拟业务材料，不包含真实公司私密数据。",
+  "documents": [
+    {
+      "id": "hr-travel-policy-2026",
+      "title": "2026 差旅与报销制度",
+      "content": "# 2026 差旅与报销制度\n## 住宿标准\n2026 版差旅制度规定：一线城市住宿报销上限为 650 元，二线城市住宿报销上限为 480 元。若历史制度与 2026 版冲突，以 2026 版优先生效。\n## 审批流程\n超过标准的住宿费用必须由直属负责人和财务 BP 双重审批。\n## 生效期\n本制度自 2026-01-01 起生效。"
+    },
+    {
+      "id": "hr-travel-policy-2025",
+      "title": "2025 差旅制度历史版本",
+      "content": "# 2025 差旅制度历史版本\n2025 版差旅制度规定一线城市住宿报销上限为 500 元，二线城市为 400 元。该版本仅用于历史审计，不再作为 2026 年新增报销的执行依据。"
+    },
+    {
+      "id": "finance-procurement-policy",
+      "title": "采购付款与发票制度",
+      "content": "# 采购付款与发票制度\n## 付款节点\n采购订单 PO 金额超过 100000 元时，必须完成预算审批、法务合同归档和供应商准入检查后才能付款。\n## 发票要求\n付款前必须取得增值税专用发票或财务确认的等效票据。\n## 例外\n紧急采购可以先走加急审批，但仍需在 3 个工作日内补齐发票和合同归档。"
+    },
+    {
+      "id": "legal-contract-policy",
+      "title": "合同法务审查规则",
+      "content": "# 合同法务审查规则\n## 审查范围\n涉及个人信息处理、跨境数据传输、排他条款、违约金超过合同金额 20% 的合同，必须进入法务审查。\n## 归档\n法务审查通过后，合同编号、审查人、审查时间和版本号必须归档到合同台账。"
+    },
+    {
+      "id": "it-access-policy",
+      "title": "内部系统权限与审计规则",
+      "content": "# 内部系统权限与审计规则\nAtlas Knowledge Base 简称 AKB，也称企业知识库或知识中台。Service Hub 简称 SH，是客服工单系统。\n## Alpha 项目权限\nAlpha 项目用于统一客户数据入口。管理员可以审批数据访问申请，普通成员只能提交申请。\n## 审计日志\nAlpha 项目的审批动作必须记录审批人、审批时间、申请单号和审批结果，并通过 traceparent 串联请求链路。"
+    },
+    {
+      "id": "security-incident-policy",
+      "title": "安全事件分级与响应制度",
+      "content": "# 安全事件分级与响应制度\nP0 安全事件是导致核心业务不可用、敏感数据大规模泄露或生产权限被异常获取的事件。P0 事件必须在 15 分钟内通知安全负责人、值班负责人和相关业务负责人。\nP1 安全事件必须在 1 小时内完成初步响应。"
+    },
+    {
+      "id": "customer-success-sla",
+      "title": "客户成功 SLA 规则",
+      "content": "# 客户成功 SLA 规则\n企业版客户的 P1 工单首次响应时间不得超过 30 分钟，P2 工单首次响应时间不得超过 4 小时。若工单来自 Service Hub，可以使用 SH 工单号追踪处理进度。"
+    },
+    {
+      "id": "data-retention-policy",
+      "title": "数据保留与删除制度",
+      "content": "# 数据保留与删除制度\n## 保留期限\n客户行为日志默认保留 180 天，用于问题排查、产品分析和安全审计。财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。\n## 删除流程\n删除请求必须记录申请人、审批人、删除范围和执行时间。涉及审计凭证的数据不得绕过财务保留期限直接删除。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "travel-current-limit",
+      "category": "version-conflict",
+      "query": "2026 年一线城市住宿报销上限是多少？如果 2025 版写的是 500 元怎么办？",
+      "expectedKeywords": ["2026", "650 元", "2025", "500 元", "优先"],
+      "minKeywordHits": 3,
+      "requireCitation": true,
+      "expectConflictHandling": true
+    },
+    {
+      "id": "travel-over-limit-approval",
+      "category": "workflow",
+      "query": "住宿费用超过标准时，需要谁审批？",
+      "expectedKeywords": ["直属负责人", "财务 BP", "双重审批"],
+      "minKeywordHits": 2,
+      "requireCitation": true
+    },
+    {
+      "id": "procurement-payment-conditions",
+      "category": "cross-doc-risk",
+      "query": "PO 超过 10 万付款前必须完成哪些动作？",
+      "expectedKeywords": ["预算审批", "法务合同归档", "供应商准入", "发票"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "legal-review-scope",
+      "category": "policy",
+      "query": "什么合同必须进入法务审查？",
+      "expectedKeywords": ["个人信息", "跨境数据", "排他条款", "违约金"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "akb-alias",
+      "category": "alias",
+      "query": "AKB、企业知识库、知识中台是不是一个系统？",
+      "expectedKeywords": ["Atlas Knowledge Base", "AKB", "企业知识库", "知识中台"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "service-hub-sla",
+      "category": "alias-sla",
+      "query": "SH 里的企业版客户 P1 工单多久内首次响应？",
+      "expectedKeywords": ["Service Hub", "SH", "P1", "30 分钟"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "alpha-audit",
+      "category": "cross-section",
+      "query": "Alpha 项目的审批动作要记录哪些审计字段？",
+      "expectedKeywords": ["审批人", "审批时间", "申请单号", "审批结果", "traceparent"],
+      "minKeywordHits": 4,
+      "requireCitation": true
+    },
+    {
+      "id": "security-p0-response",
+      "category": "incident",
+      "query": "P0 安全事件需要多快通知谁？",
+      "expectedKeywords": ["15 分钟", "安全负责人", "值班负责人", "业务负责人"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "data-retention",
+      "category": "retention",
+      "query": "客户行为日志和财务审计凭证分别保留多久？",
+      "expectedKeywords": ["180 天", "10 年", "客户行为日志", "财务审计凭证"],
+      "minKeywordHits": 3,
+      "requireCitation": true
+    },
+    {
+      "id": "no-answer-pet",
+      "category": "negative",
+      "query": "公司宠物医疗报销额度是多少？",
+      "expectedKeywords": ["宠物医疗"],
+      "minKeywordHits": 0,
+      "requireCitation": false,
+      "expectRefusal": true
+    },
+    {
+      "id": "no-answer-stock",
+      "category": "negative",
+      "query": "2026 年员工股票归属比例是多少？",
+      "expectedKeywords": ["股票归属"],
+      "minKeywordHits": 0,
+      "requireCitation": false,
+      "expectRefusal": true
+    }
+  ]
+}

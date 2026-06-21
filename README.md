@@ -9,12 +9,13 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
 ## 当前状态
 
 - **M1 simple RAG 已完成**：支持 Markdown/TXT/PDF/DOCX 文档解析上传、切分、Embedding 向量化、Milvus 向量入库、BM25 + Cosine 混合检索及大模型生成与引用定位。
-- **M2 Agentic RAG 已完成**：整合 deepAgent 检索规划、Query 扩展、充分性评估、Bocha 联网搜索兜底、DashScope Rerank 重排序、大模型流式生成、置信度自我评估与重试，支持 SSE 全链路事件流式推送。
+- **M2 Agentic RAG 已完成**：整合 deepAgent 检索规划、Query 扩展、充分性评估、Bocha 联网搜索兜底、DashScope Rerank 重排序、大模型流式生成、置信度自我评估与重试，支持 SSE 全链路事件流式推送，并通过 `AGENTIC_*` 环境变量限制重试、查询扩展、检索、联网和重排预算。
 - **M3 工程化与多租户隔离已完成**：
   - **JWT 鉴权防护**：对除 `/auth/login` 外的所有 REST 与 SSE 接口覆盖 JWT 验证；
   - **数据硬隔离**：在 PostgreSQL 关系库、Redis 缓存、Milvus 向量存储及内存 BM25 分词索引四大组件中深度引入 `userId` 条件，彻底阻断跨租户的数据交互或隐私泄露。
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
+- **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在 3001 后端跑到 22/22 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
 - **部署目标**：当前固定为 Docker Compose，见 `DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
 详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./rag-plan.md)。
@@ -101,6 +102,7 @@ npm run dev
   cd backend
   npm run build
   npm run lint
+  npm run eval:rag:quality
   ```
 * **前端编译**：
   ```bash
@@ -126,3 +128,7 @@ node verify-multitenancy.mjs
    
 2. **ASR / TTS 依赖腾讯云密钥**：
    * 腾讯云 TTS→ASR 直连回环、后端 TTS SSE → ASR endpoint smoke 已验证。需要在 `.env` 中配置 `TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`；未配置时后端会明确报错并不阻断核心 RAG 进程。
+
+3. **93/100 不是生产落地满分**：
+   * `eval:rag:maturity` 默认评价本地工程成熟度。要把真实私有题集、生产材料等外部输入也纳入硬门禁，设置 `RAG_MATURITY_REQUIRE_EXTERNAL=true`。
+   * 要跑更接近真实项目的强制链路评测，先启动后端，再运行 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project`。

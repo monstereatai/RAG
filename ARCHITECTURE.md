@@ -144,8 +144,8 @@ flowchart TD
 模式策略：
 
 - `simple`：低延迟、透明、可调试，优先用于简单知识库问答。
-- `agentic`：多步检索、查询扩展、联网兜底、Rerank、反思评估。
-- `auto`：根据问题复杂度和上下文自动选择路径。
+- `agentic`：多步检索、查询扩展、联网兜底、Rerank、反思评估；通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制成本边界。
+- `auto`：根据问题复杂度和上下文自动选择路径；超出 `AGENTIC_MAX_AUTO_QUERY_LENGTH` 的长问题默认回到 simple，避免普通入口误触发高成本 Agentic 链路。
 
 ### 5.3 GraphRAG 链路
 
@@ -248,6 +248,8 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - 结构化事实治理：`document_chunks` 保存父子 chunk、source span、section/clause/table metadata、doc version、生效期、来源权威；`fact_conflicts` 保存第一版事实冲突记录
 - 可选来源权威排序：`RAG_SOURCE_AUTHORITY_RULES` 按 docId / chunk 内容匹配来源权威权重
 - LLM-as-Judge 质量门禁：`npm run eval:rag:quality` 默认不消耗 Judge key，`EVAL_RAG_JUDGE_REQUIRED=true` 时强制 Qwen 判断 claim 为 supported / contradicted / not_mentioned
+- 企业级成熟度门禁：`npm run eval:rag:maturity` 按查得准、答得稳、引用能撑住、不会瞎编、可观测恢复、工程化门禁、真实落地准备打分；当前本地工程成熟度 93/100，超过 90 分门槛
+- 项目级仿真实业务评测：`npm run eval:rag:project` 覆盖多文档、多部门、版本冲突、跨文档、缩写别名、无答案拒答和强引用；`PROJECT_EVAL_REQUIRE_LIVE=true` 时必须真实后端上传/问答/打分，当前 3001 真实回放 22/22 通过
 - 专项 smoke 脚本：MCP、GraphRAG、Speech、外部工具、Redis Checkpointer、Hybrid retrieval
 
 待确认：
@@ -255,6 +257,7 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - 正式 CI/CD 接入属于红线，需单独确认后再改 workflow。
 - 已提供 120 条内置业务场景回归评测集，覆盖多部门问题、标准答案、expectedClaims、引用要求和拒答要求；若要升级为真实私有业务评测集，仍需真实业务问题和标准答案输入。
 - 真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略。
+- `RAG_MATURITY_REQUIRE_EXTERNAL=true` 会把真实私有业务评测集和生产材料作为硬阻塞；默认门禁不伪造外部输入。
 - OTLP exporter 接入仍是后续增强，不影响当前本地可观测。
 
 ## 10. 已知风险

@@ -256,7 +256,7 @@ export class AgenticRagService {
         this.logger.warn(
           `Query augment failed, fallback to original: ${(err as Error).message}`,
         );
-      queries = [state.query];
+        queries = [state.query];
       }
     }
 
@@ -431,7 +431,10 @@ export class AgenticRagService {
       return { webSearchCount: 0 };
     }
 
-    if (!this.webSearchFallbackEnabled || !this.bochaSearchService.isEnabled()) {
+    if (
+      !this.webSearchFallbackEnabled ||
+      !this.bochaSearchService.isEnabled()
+    ) {
       this.logger.warn(
         'Retrieval insufficient but Bocha web_search is disabled or budgeted off',
       );
@@ -441,7 +444,8 @@ export class AgenticRagService {
         data: {
           count: 0,
           enabled:
-            this.webSearchFallbackEnabled && this.bochaSearchService.isEnabled(),
+            this.webSearchFallbackEnabled &&
+            this.bochaSearchService.isEnabled(),
           reason,
         },
       });
@@ -507,7 +511,8 @@ export class AgenticRagService {
         data: {
           count: 0,
           enabled:
-            this.webSearchFallbackEnabled && this.bochaSearchService.isEnabled(),
+            this.webSearchFallbackEnabled &&
+            this.bochaSearchService.isEnabled(),
           reason: fallbackReason,
         },
       });

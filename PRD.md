@@ -94,6 +94,7 @@
 - simple 模式能快速检索和回答。
 - agentic 模式能输出过程事件。
 - auto 模式能按问题复杂度选择路径。
+- Agentic 链路必须有可配置预算边界，覆盖最大重试、扩展查询数、检索查询数、返回 chunk 数、联网搜索数和 Rerank topN。
 - 答案包含引用片段。
 - 关键结论需要逐句引用，引用编号必须存在，且内容能被引用片段支撑。
 - 检索为空、低相关、引用缺失或引用支撑不足时返回知识库不足说明，不生成确定性结论。
@@ -163,7 +164,7 @@
 | Debug | chunks 分数、vector index 信息 |
 | Observability | pino、metrics、traces、workflow Mermaid |
 | Deployment | dev / staging / prod Docker Compose |
-| Evaluation | RAG eval、E2E、LLM-as-Judge、perf 脚本 |
+| Evaluation | RAG eval、E2E、LLM-as-Judge、perf 脚本、企业级成熟度评分、项目级仿真实业务评测 |
 
 ### 6.2 待确认 / 待补资源
 
@@ -176,6 +177,8 @@
 | Rerank | 需 `RERANK_API_KEY` 才能真实重排 |
 | Tencent ASR/TTS | 腾讯云 TTS→ASR 直连已验证，后端 TTS SSE → ASR endpoint smoke 已验证 |
 | 真实业务评测集 | 已生成并校验 120 条内置业务场景评测样本；真实私有业务问题和标准答案仍需主人提供 |
+| 企业级成熟度 | `npm run eval:rag:maturity` 当前本地工程成熟度 93/100，达到 90 分门槛；真实外部输入可用 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 纳入硬门禁 |
+| 项目级仿真实评测 | `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在 3001 真实后端完成 simple/auto 22/22 通过；它模拟真实项目问题，但不冒充主人公司私有真实数据 |
 | 结构化事实治理 | 第一版已完成：`document_chunks` / `fact_conflicts` / docVersion / effectiveAt / expiredAt / sourceAuthority / GraphRAG aliases+confidence；后续复杂审核流和 UI 另立阶段 |
 | 部署目标 | 已固定 Docker Compose；真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略 |
 
@@ -319,6 +322,7 @@
 - 是否需要组织、团队、角色级权限模型。
 - 是否要把 Mem0 记忆管理暴露成可编辑 UI。
 - 是否要将评测门禁接入正式 CI/CD。
+- 是否要在正式验收中启用 `RAG_MATURITY_REQUIRE_EXTERNAL=true`，让真实私有题集和生产材料变成硬门槛。
 - 真实生产发布的目标机器、域名、证书、备份和密钥注入策略。
 - Bocha / Rerank 是否补齐真实 key 后纳入常规 smoke 验收。
 

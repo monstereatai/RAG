@@ -11,6 +11,7 @@ import { CronJob } from 'cron';
 import { randomUUID } from 'node:crypto';
 import { ScheduledJobEntity } from '../../providers/db/entities/job.entity';
 import type { CreateJobInput } from './job.types';
+import { SupervisorService } from '../supervisor/supervisor.service';
 
 @Injectable()
 export class JobsService implements OnModuleInit {
@@ -20,6 +21,7 @@ export class JobsService implements OnModuleInit {
     private readonly schedulerRegistry: SchedulerRegistry,
     @InjectRepository(ScheduledJobEntity)
     private readonly jobRepo: Repository<ScheduledJobEntity>,
+    private readonly supervisorService: SupervisorService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -188,7 +190,20 @@ export class JobsService implements OnModuleInit {
     job.lastRun = now.toISOString();
     job.updatedAt = now;
     await this.jobRepo.save(job);
-    this.logger.log(`scheduled job ${job.id}: ${job.instruction}`);
+    try {
+      const result = await this.withTimeout(
+        this.supervisorService.query(job.instruction),
+        30_000,
+        `scheduled job ${job.id}`,
+      );
+      this.logger.log(
+        `scheduled job ${job.id} completed: domain=${result.domain}, confidence=${result.confidence.toFixed(2)}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `scheduled job ${job.id} failed: ${(err as Error).message}`,
+      );
+    }
   }
 
   private stopRuntime(job: ScheduledJobEntity): void {
@@ -224,6 +239,25 @@ export class JobsService implements OnModuleInit {
       this.schedulerRegistry.deleteTimeout(id);
     } catch {
       // already absent
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        ms,
+      );
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 }

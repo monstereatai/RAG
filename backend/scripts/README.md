@@ -14,10 +14,13 @@ Run from `backend/`.
 - `npm run smoke:speech:direct`: calls Tencent TTS and ASR directly without a running backend.
 - `npm run smoke:external`: real Bocha, DashScope Rerank, and Qwen judge calls when keys exist; otherwise reports skipped checks.
 - `npm run smoke:external:required`: same checks as `smoke:external`, but missing keys fail the run. Use this after Bocha/Rerank/Qwen keys are filled.
+- `npm run smoke:milvus`: checks Milvus collection/schema/index metadata, loadCollection, load state, loading progress, SDK/server versions, and a bounded warmup search. Use this when first vector retrieval emits timeout warnings. A failing search with healthy/indexed/loaded metadata points to Milvus runtime/version/segment state rather than RAG answer logic.
 - `npm run smoke:redis-checkpointer`: verifies checkpoint storage can be read by a separate Node process.
 - `npm run smoke:hybrid`: uploads fixed Chinese regression documents, checks debug retrieval, then deletes the uploaded docs.
 - `npm run eval:rag:judge`: optional Qwen LLM-as-Judge check for claim support. It skips when `QWEN_API_KEY` is not set.
-- `npm run eval:rag:quality`: stable local gate. It always runs offline RAG eval and the 120-case business dataset check. Set `EVAL_RAG_JUDGE_REQUIRED=true` to make Qwen LLM-as-Judge mandatory.
+- `npm run eval:rag:maturity`: local enterprise maturity score. It checks the four core standards, business eval coverage, smoke entrypoints, governance evidence, and explicit external blockers. Default threshold is `RAG_MATURITY_MIN_SCORE=90`; set `RAG_MATURITY_REQUIRE_EXTERNAL=true` only when private business data and production materials must block the gate.
+- `npm run eval:rag:project`: project-like business evaluation. It validates `eval/project-simulated-business.dataset.json`; when the backend is running, it uploads simulated business documents and scores live simple/auto answers. Set `PROJECT_EVAL_REQUIRE_LIVE=true` to fail instead of skipping when the backend is unavailable.
+- `npm run eval:rag:quality`: stable local gate. It always runs offline RAG eval, the 120-case business dataset check, and the local maturity gate. Set `EVAL_RAG_JUDGE_REQUIRED=true` to make Qwen LLM-as-Judge mandatory.
 - `npm run eval:business-dataset`: checks the generated 120-case business regression dataset shape and coverage.
 - `npm run eval:business-import -- --input eval/business-regression.import.example.json`: validates a real business regression dataset import file. Add `-- --input <path> --write --min-cases 100` only after the private dataset is sanitized and ready to overwrite `eval/business-regression.dataset.json`.
 
