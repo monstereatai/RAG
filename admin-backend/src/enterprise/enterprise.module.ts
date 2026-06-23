@@ -1,0 +1,69 @@
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../database/database.module';
+import { CacheModule } from '../modules/cache/cache.module';
+import { FaultToleranceModule } from '../modules/fault-tolerance/fault-tolerance.module';
+import { CircuitBreakerModule } from '../circuit-breaker/circuit-breaker.module';
+import { TracingModule } from '../tracing/tracing.module';
+import { QueueModule } from '../queue/queue.module';
+import { OrderModule } from '../modules/order/order.module';
+import { PaymentModule } from '../modules/payment/payment.module';
+import { NotifyModule } from '../modules/notify/notify.module';
+import { PermissionModule } from '../modules/permission/permission.module';
+import { AdminModule } from '../modules/admin/admin.module';
+import { SecurityModule } from '../modules/security/security.module';
+import { TaskModule } from '../modules/task/task.module';
+import { FileModule } from '../modules/file/file.module';
+import { MetricsModule } from '../modules/metrics/metrics.module';
+import { AdminDocumentsModule } from '../modules/admin-documents/admin-documents.module';
+import { AdminNotificationsModule } from '../modules/admin-notifications/admin-notifications.module';
+import { AuditLogsModule } from '../modules/audit-logs/audit-logs.module';
+import { RagOpsModule } from '../modules/rag-ops/rag-ops.module';
+import { SystemConfigModule } from '../modules/system-config/system-config.module';
+
+@Module({
+  imports: [
+    DatabaseModule,
+    CacheModule,
+    QueueModule,
+    FaultToleranceModule,
+    CircuitBreakerModule,
+    TracingModule,
+    SecurityModule,
+    PermissionModule,
+    OrderModule,
+    PaymentModule,
+    NotifyModule,
+    AdminModule,
+    TaskModule,
+    FileModule,
+    MetricsModule,
+    AdminDocumentsModule,
+    AdminNotificationsModule,
+    AuditLogsModule,
+    RagOpsModule,
+    SystemConfigModule,
+  ],
+  exports: [
+    DatabaseModule,
+    CacheModule,
+    QueueModule,
+    FaultToleranceModule,
+    CircuitBreakerModule,
+    TracingModule,
+    SecurityModule,
+    PermissionModule,
+    OrderModule,
+    PaymentModule,
+    NotifyModule,
+    AdminModule,
+    TaskModule,
+    FileModule,
+    MetricsModule,
+    AdminDocumentsModule,
+    AdminNotificationsModule,
+    AuditLogsModule,
+    RagOpsModule,
+    SystemConfigModule,
+  ],
+})
+export class EnterpriseModule {}

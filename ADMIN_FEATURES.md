@@ -14,6 +14,35 @@
 - 支持用户、角色、权限、日志和系统配置管理。
 - 提供数据大盘，持续观察知识库使用情况。
 
+## 1.1 实现边界
+
+管理后台后续作为独立 `admin-backend` 项目实现，不继续塞进当前 RAG 后端。
+
+项目职责拆分：
+
+- `rag-backend`：负责文档解析、切片、Embedding、索引、检索、Rerank、GraphRAG、Agent 问答、引用校验、评测等知识库核心能力。
+- `admin-backend`：负责登录态、用户、角色、权限、菜单、日志、通知、系统配置、后台大盘和运营治理。
+- `admin-backend` 需要展示 RAG 数据时，通过 `rag-backend` 提供的运营 API 获取，不直接 import RAG 内部 service，也不直接读写向量库。
+- 当前不抽 `packages/shared`。`admin-backend` 自己维护 `rag-client` 和调用 RAG API 所需的 DTO，`rag-backend` 维护自己的接口 DTO，两个服务只通过 HTTP API 契约对齐。
+
+当前可接受的重复：
+
+- `admin-backend/src/modules/rag-client/dto/*`
+- 后台列表、筛选、分页需要的展示 DTO
+- 后台系统管理自身的用户、角色、权限 DTO
+
+不建议复制：
+
+- RAG 检索 service
+- 文档入库 service
+- Agent workflow
+- GraphRAG 查询和写入逻辑
+- 向量库 Provider
+- Prompt 和评测执行链路
+- 为了复用而提前抽公共 shared 包
+
+后台接口优先围绕管理系统自身闭环设计，RAG 相关功能只作为运营入口调用 `rag-backend`。
+
 ## 2. 顶部导航
 
 界面顶部主导航包含：

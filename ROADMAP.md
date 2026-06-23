@@ -12,10 +12,22 @@
 - `INTERVIEW_PLAYBOOK.md`：简历与面试讲解手册，记录本项目面向高级 Agent 工程师、高级 AI 应用开发工程师、高级前端开发工程师、前端负责人时应该掌握和表达的内容。
 - `AI_AGENT_CORE_KNOWLEDGE.md`：AI Agent / RAG 核心知识地图，沉淀万变不离其宗的底层概念、判断框架和答题骨架。
 - `ADMIN_FEATURES.md`：管理后台功能清单，基于界面截图整理登录、大盘、文档、搜索、问答、图谱、个人中心、系统管理等模块能力。
+- `SERVICE_BOUNDARIES.md`：管理后台与 RAG 服务拆分设计，记录 `rag-backend` 与 `admin-backend` 两个独立后端项目的职责边界、调用方式和不抽 shared 的契约隔离规则。
 
 ## 当前阶段
 
 **M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；本轮已完成结构化事实治理 schema、真实迁移、真实上传入库、质量门禁、Compose 部署目标收口，并补齐真实业务评测集导入、项目级仿真实业务评测、业务 MCP 配置校验、GraphRAG 业务种子导入、外部 API 严格 smoke、生产就绪检查入口和企业级成熟度门禁。当前本地工程成熟度为 93/100，已超过 90 分门槛；项目级仿真实业务强制真实回放 22/22 通过。真实生产级落地仍剩外部输入类事项：真实私有业务评测数据、真实业务 MCP server 地址/启动方式、Bocha/Rerank key、真实生产目标机器/域名/证书/备份策略。**
+
+## 当前服务拆分决策
+
+2026-06-23 架构方向已从“一个 NestJS 后端内部分 admin-domain / rag-domain”调整为“两个独立后端项目”：
+
+- 当前 `backend/` 继续作为 `rag-backend`，专注文档解析、切片、Embedding、索引、检索、Rerank、GraphRAG、Agent 问答、引用校验和评测。
+- 后续新增独立 `admin-backend/`，专注管理后台登录态、用户、角色、权限、菜单、日志、通知、系统配置、后台大盘和运营治理。
+- `admin-backend` 需要 RAG 数据时，通过 `rag-backend` 的运营 API 调用，不直接 import RAG service，不直接读写向量库。
+- 当前不抽 `packages/shared`；`admin-backend` 自己维护 `rag-client` 与调用 RAG API 所需 DTO，`rag-backend` 维护自己的接口 DTO，两个服务只通过 HTTP API 契约对齐。
+- 已存在的 `backend/src/domains/*` 是上一版单后端分域的过渡代码，后续不继续在其中堆完整后台能力；拆项目时要么迁出，要么只保留 RAG 侧兼容别名。
+- `admin-backend/` 已从 `/Users/monster/Documents/GitHub/code/magazines/template` 搬入当前 RAG 仓库，作为后续独立管理后台后端项目；原 `magazines` 仓库会显示 `template/*` 删除，当前 RAG 仓库会显示 `admin-backend/` 新增，属于本次搬迁结果。
 
 ## 当前核心优化标准
 
@@ -111,6 +123,7 @@
 - **企业级差距真实联调第三轮完成**（2026-06-21）：Docker dev 依赖恢复后，完成 120 条内置业务回归评测集生成与校验、3001 后端真实启动、GraphRAG / Hybrid / Redis Checkpointer / Tencent Speech 后端真实 smoke、`eval:rag:e2e` simple+auto 真实回放 18/18 通过；修复 LLM/Embedding/Karpathy 模块缺少 MetricsModule 注入、Speech SSE parser 兼容 Nest 默认 `data` 包装、真实 e2e 下引用不足回退为片段抽取式答案的问题。结构化事实治理已在第四轮补齐。
 - **企业级差距第四轮结构化事实治理完成**（2026-06-21）：新增 `document_chunks` 与 `fact_conflicts`，文档元数据补齐 docVersion/effectiveAt/expiredAt/sourceAuthority；上传流程写入父子 chunk、source span、section/clause/table metadata，并检测简单版本事实冲突；GraphRAG 写入 aliases/confidence，RAG references 返回结构化来源字段。真实迁移、真实上传、真实查询、真实删除清理均已验证。
 - **中文错别字召回回归修复完成**（2026-06-21）：真实 e2e 暴露 `企业知识哭` 未能通过引用支撑闸门；已将已确认高价值错别字 `知识哭 -> 知识库` 纳入查询归一化，并把修正后的 query 传给生成 prompt，避免 LLM 先解释“笔误”导致无引用 claim 被拒。最小真实复现与完整 `eval:rag:e2e` 均通过。
+- **admin-backend 迁入与本地生成物清理完成**（2026-06-23）：将 `/Users/monster/Documents/GitHub/code/magazines/template` 搬入当前仓库为 `admin-backend/`，保留源码、文档、Docker/Kubernetes/脚本和项目配置；清理 `node_modules/`、`dist/`、`coverage/`、`build/`、`tsconfig.tsbuildinfo` 与 `.DS_Store` 等本地生成物。已按管理后台架构文档修正项目命名：目录名、`package.json`、`package-lock.json`、README、CLAUDE、health/tracing service name 均对齐为 `admin-backend`，分层文档改为 `docs/backend-layers.md`。验证通过：`clean-ok` 确认生成物目录不存在，`naming-ok` 确认 `admin-backend/` 存在且 `template/` 不存在，`package-name-ok` 确认 package 与 lockfile 名称一致。未运行 `npm run verify`，因为本轮清理后未重新安装模板依赖；后续正式改造前需执行 `cd admin-backend && npm ci && npm run verify`。
 
 ## 已完成
 
@@ -345,6 +358,17 @@
 - [x] **BM25 索引方案定稿**：选择 JSON 持久化方案（workspace/bm25-index.json），已实现
 - [x] **对话历史 + Mem0 长期记忆方案定稿**：双层存储注入策略与 LLM 分层分类器已确立，单元测试覆盖全模式分支（2026-06-19）
 - [x] **RAG 评测体系方案定稿**：Dataset 来源、评测模型、CI/CD 集成方式已写入 `rag-plan.md`（2026-06-19）
+- [x] **管理后台与 RAG 服务拆分方案定稿**：从“一个 NestJS 后端内部分域”调整为 `rag-backend` + `admin-backend` 两个独立后端项目；后台通过 RAG 运营 API 协作，不复制 RAG 核心业务 service（2026-06-23）
+
+### P0 — 管理后台独立项目待办
+
+- [ ] **冻结单后端后台扩展**：停止继续在 `backend/src/domains/admin/*` 中实现完整后台功能，避免 RAG 服务继续膨胀。
+- [ ] **梳理 RAG 运营 API 契约**：在 `rag-backend` 定义给 `admin-backend` 调用的运营接口，包括 capabilities、documents、chunks、vector-index、evaluations、conversations、reindex、run-evaluation。
+- [ ] **新建 `admin-backend` 项目规范**：先写项目级规则文档，再初始化独立 NestJS 后端，模块建议包含 auth/users/roles/permissions/dashboard/documents/audit-logs/notifications/system-config/rag-client。
+- [ ] **实现 `admin-backend` RAG client**：后台只通过 HTTP 调用 `rag-backend`，不 import RAG 内部 service，不直接访问 Milvus/Neo4j/ES。
+- [ ] **管理后台基础 API 骨架**：登录态、用户列表、角色权限、首页大盘、文档治理入口、系统配置状态、审计日志入口、通知入口。
+- [ ] **临时代码收口**：评估并处理 `backend/src/domains/*` 过渡代码；未经确认不删除文件，先停止继续扩展该方向。
+- [ ] **暂不抽 shared 包**：不建 `packages/shared`，`admin-backend` 自己维护 `rag-client/dto`，`rag-backend` 自己维护接口 DTO；后续只有在接口稳定且重复维护成本真实出现时，才重新评估公共契约包。
 
 ### P0 — 基础设施
 
@@ -1088,3 +1112,7 @@
 | 2026-06-23 | **AI Agent / RAG 核心知识地图继续补强**：补充数据治理、权限安全、缓存成本、模型选择、多模态 RAG、GraphRAG 使用边界、Human-in-the-loop、线上评测运营和常见工程坑，进一步覆盖 RAG 与 Agent 应用开发的高级追问。 |
 | 2026-06-23 | **AI Agent / RAG 面试决策叙事模板补齐**：在 `AI_AGENT_CORE_KNOWLEDGE.md` 中新增背景、目标、候选方案、方案对比、最终选择、落地实现、验证效果、遗留边界的高级面试叙事模板，并补充 Hybrid Retrieval、Agentic 路由、LangGraph/FSM、记忆方案、项目级评测五组方案对比示例。 |
 | 2026-06-23 | **管理后台功能清单补齐**：新增 `ADMIN_FEATURES.md`，基于 8 张界面截图整理登录注册、首页大盘、文档管理、智能搜索、AI 问答、知识图谱、个人中心、系统管理、通知、权限角色和后续 RAG 运营建议。 |
+| 2026-06-23 | **后台域与 RAG 域边界第一版落地**：新增 `SERVICE_BOUNDARIES.md`，并在后端新增 `CoreDomainModule`、`AdminDomainModule`、`RagDomainModule` 三个领域聚合模块；`AppModule` 改为导入领域模块，新增 `/api/v1/admin-domain/boundary` 与 `/api/v1/rag-domain/boundary` 边界说明接口，保持一个项目内区分管理后台域和 RAG 服务域。 |
+| 2026-06-23 | **后台域与 RAG 域路由别名落地**：按 `SERVICE_BOUNDARIES.md` 继续改造，新增 `/api/v1/admin/dashboard`、`/api/v1/admin/rag/capabilities`、`/api/v1/admin/rag/vector-index` 后台运营入口，并新增 `/api/v1/rag/documents/*`、`/api/v1/rag/chat/*`、`/api/v1/rag/graph/*` RAG 服务域别名；旧路由继续保留兼容，不改 schema，不做跨用户后台聚合。 |
+| 2026-06-23 | **管理后台独立项目方案改版**：根据最新决策，将 `SERVICE_BOUNDARIES.md` 从“一个 NestJS 后端内部分域”改为 `rag-backend` + `admin-backend` 两个独立后端项目；`ADMIN_FEATURES.md` 补充后台独立项目实现边界；`ROADMAP.md` 新增服务拆分决策与管理后台独立项目待办。当前只改文档，不改代码结构，不删除过渡代码。 |
+| 2026-06-23 | **暂不抽 shared 包决策补充**：明确管理后台与 RAG 服务先不创建 `packages/shared`，避免两个业务模型因为共享 DTO/API client 重新耦合；`admin-backend` 自己维护 `rag-client/dto`，`rag-backend` 自己维护接口 DTO，双方只通过 HTTP API 契约对齐。 |

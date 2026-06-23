@@ -1,0 +1,137 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { RagClientResult, RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
+
+@Injectable()
+export class RagClientService {
+  private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+
+  constructor(private readonly configService: ConfigService) {
+    this.baseUrl = (
+      this.configService.get<string>('RAG_SERVICE_BASE_URL') ||
+      process.env.RAG_SERVICE_BASE_URL ||
+      'http://localhost:3000/api/v1'
+    ).replace(/\/$/, '');
+    this.timeoutMs = Number(
+      this.configService.get<string>('RAG_SERVICE_TIMEOUT_MS') ||
+      process.env.RAG_SERVICE_TIMEOUT_MS ||
+      2000,
+    );
+  }
+
+  getConfig() {
+    return {
+      baseUrl: this.baseUrl,
+      timeoutMs: this.timeoutMs,
+      integration: 'http-api-contract',
+      sharedPackage: false,
+    };
+  }
+
+  getCapabilities() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/capabilities');
+  }
+
+  getDocuments(query: RagDocumentQueryDto) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents${this.toQueryString(query)}`,
+    );
+  }
+
+  getDocument(docId: string) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/documents/${encodeURIComponent(docId)}`);
+  }
+
+  getDocumentChunks(docId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/chunks`,
+    );
+  }
+
+  getVectorIndex() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/vector-index');
+  }
+
+  getEvaluations() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/evaluations');
+  }
+
+  getConversations() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/conversations');
+  }
+
+  reindexDocument(docId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/reindex`,
+      {},
+    );
+  }
+
+  runEvaluation(dto: RagEvaluationRunDto) {
+    return this.postJson<Record<string, unknown>>('/rag/admin/evaluations/run', dto);
+  }
+
+  private async getJson<T>(path: string): Promise<RagClientResult<T>> {
+    return this.request<T>(path, { method: 'GET' });
+  }
+
+  private async postJson<T>(path: string, body: unknown): Promise<RagClientResult<T>> {
+    return this.request<T>(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  private async request<T>(path: string, init: RequestInit): Promise<RagClientResult<T>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+
+      return {
+        available: response.ok,
+        status: response.status,
+        data: response.ok ? data : null,
+        error: response.ok ? undefined : this.extractError(data, response.status),
+      };
+    } catch (error) {
+      return {
+        available: false,
+        status: null,
+        data: null,
+        error: error instanceof Error ? error.message : 'rag service request failed',
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private toQueryString(query: RagDocumentQueryDto): string {
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+
+    const text = params.toString();
+    return text ? `?${text}` : '';
+  }
+
+  private extractError(data: unknown, status: number): string {
+    if (data && typeof data === 'object' && 'message' in data) {
+      return String((data as { message: unknown }).message);
+    }
+
+    return `rag service returned ${status}`;
+  }
+}

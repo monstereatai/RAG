@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: production
+data:
+  .env: |
+    ENABLE_DATABASE=true
+    ENABLE_REDIS=true
+    ENABLE_QUEUE=true
+    NODE_ENV=production
+    PORT=3001
+    ALLOWED_ORIGINS=https://your-frontend-domain.com
+    # 数据库复制集群
+    DB_REPLICA_HOSTS=mysql-slave-1.production.svc.cluster.local,mysql-slave-2.production.svc.cluster.local
+    # Redis 集群配置
+    REDIS_CLUSTER=true
+    REDIS_NODES=redis-node-1:7000,redis-node-2:7001,redis-node-3:7002
