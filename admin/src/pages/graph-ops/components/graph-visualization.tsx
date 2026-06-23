@@ -29,14 +29,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [hasData, setHasData] = useState(false);
+  const hasData = nodes.length > 0;
 
   useEffect(() => {
     if (!svgRef.current || !nodes.length) {
-      setHasData(false);
       return;
     }
-    setHasData(true);
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
