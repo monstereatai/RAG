@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
@@ -15,6 +15,10 @@ export class AdminDocumentsController {
   @ApiOperation({ summary: '后台文档治理列表' })
   @RequirePermission('admin:documents:read')
   list(@Query() query: RagDocumentQueryDto) {
+    // 前端 ProTable 传 current，转换为 rag-backend 的 page
+    if (query.current && !query.page) {
+      query.page = query.current;
+    }
     return this.ragClient.getDocuments(query);
   }
 
@@ -57,6 +61,24 @@ export class AdminDocumentsController {
   @RequirePermission('admin:documents:write')
   reindex(@Param('docId') docId: string) {
     return this.ragClient.reindexDocument(docId);
+  }
+
+  @Post(':docId/reprocess')
+  @AuditLog('documents', 'reprocess')
+  @ApiOperation({ summary: '后台触发文档重新处理' })
+  @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
+  @RequirePermission('admin:documents:write')
+  reprocess(@Param('docId') docId: string) {
+    return this.ragClient.reindexDocument(docId);
+  }
+
+  @Delete(':docId')
+  @AuditLog('documents', 'delete')
+  @ApiOperation({ summary: '后台删除文档' })
+  @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
+  @RequirePermission('admin:documents:write')
+  delete(@Param('docId') docId: string) {
+    return this.ragClient.deleteDocument(docId);
   }
 
   @Post('upload')

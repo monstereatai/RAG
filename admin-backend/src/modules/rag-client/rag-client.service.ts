@@ -73,6 +73,12 @@ export class RagClientService {
     );
   }
 
+  deleteDocument(docId: string) {
+    return this.deleteJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}`,
+    );
+  }
+
   runEvaluation(dto: RagEvaluationRunDto) {
     return this.postJson<Record<string, unknown>>('/rag/admin/evaluations/run', dto);
   }
@@ -175,6 +181,10 @@ export class RagClientService {
     });
   }
 
+  private async deleteJson<T>(path: string): Promise<RagClientResult<T>> {
+    return this.request<T>(path, { method: 'DELETE' });
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<RagClientResult<T>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -217,7 +227,7 @@ export class RagClientService {
     const params = new URLSearchParams();
 
     for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== null && value !== '') {
+      if (value !== undefined && value !== null && value !== '' && key !== 'current') {
         params.set(key, String(value));
       }
     }

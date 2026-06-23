@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, SetMetadata } from '@nestjs/common';
+import { Controller, Get, Patch, Body, Query, UseGuards, SetMetadata } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../permission/roles.guard';
 import { AdminDashboardService } from './admin-dashboard.service';
@@ -20,6 +20,18 @@ export class AdminController {
     return this.dashboardService.overview();
   }
 
+  @Get('dashboard/overview')
+  @ApiOperation({ summary: '大盘概览数据（前端 dashboard service）' })
+  getDashboardOverview() {
+    return this.dashboardService.overview();
+  }
+
+  @Get('dashboard/trend')
+  @ApiOperation({ summary: '大盘趋势数据' })
+  getDashboardTrend(@Query('days') days?: number) {
+    return this.dashboardService.trend(days ? Number(days) : 7);
+  }
+
   @Get('features')
   @ApiOperation({ summary: '管理后台功能完成度总览' })
   getFeatures() {
@@ -30,6 +42,12 @@ export class AdminController {
   @ApiOperation({ summary: '当前管理员个人中心基础信息' })
   getProfile(@UserInfo() user: unknown) {
     return this.dashboardService.profile(user);
+  }
+
+  @Patch('profile')
+  @ApiOperation({ summary: '更新当前管理员个人资料' })
+  updateProfile(@UserInfo() user: unknown, @Body() body: { nickname?: string; email?: string; phone?: string }) {
+    return this.dashboardService.updateProfile(user, body);
   }
 
   @Get('boundary')

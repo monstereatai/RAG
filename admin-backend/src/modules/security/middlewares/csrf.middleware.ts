@@ -9,8 +9,8 @@ export class CsrfMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const csrfConfig = this.securityService.getCsrfConfig();
 
-    // 测试环境下跳过 CSRF 检查，以保证单元/E2E测试顺利通过
-    if (process.env.NODE_ENV === 'test') {
+    // 测试环境和开发环境下跳过 CSRF 检查
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
       return next();
     }
 
@@ -18,7 +18,8 @@ export class CsrfMiddleware implements NestMiddleware {
     const dangerousMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
     if (dangerousMethods.includes(req.method)) {
       // 允许注册和登录等公开接口跳过 CSRF 检查
-      const isPublicPath = req.path === '/auth/login' || (req.path === '/users' && req.method === 'POST');
+      const pathWithoutPrefix = req.path.replace(/^\/api/, '');
+      const isPublicPath = pathWithoutPrefix === '/auth/login' || pathWithoutPrefix === '/users' && req.method === 'POST';
       if (isPublicPath) {
         return next();
       }

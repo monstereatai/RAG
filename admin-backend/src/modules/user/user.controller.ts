@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -47,6 +48,25 @@ export class UserController {
   /**
    * 以下路由均需要 JWT token。
    */
+  @Get('me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '获取当前登录用户信息', description: '需要登录' })
+  @ApiResponse({ status: 200, description: '成功返回当前用户信息' })
+  @ApiResponse({ status: 401, description: '未认证' })
+  async findMe(@Req() req: any) {
+    const userId = req.user?.userId ?? req.user?.sub;
+    if (!userId) {
+      return { data: null };
+    }
+    try {
+      const user = await this.userService.findOne(Number(userId));
+      const { password: _pwd, ...safeUser } = user as any;
+      return { data: safeUser };
+    } catch {
+      return { data: null };
+    }
+  }
+
   @Get()
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取所有用户列表', description: '需要登录' })

@@ -135,6 +135,36 @@ export class AdminDashboardService {
     };
   }
 
+  updateProfile(user: unknown, body: { nickname?: string; email?: string; phone?: string }) {
+    const currentUser = (
+      user && typeof user === 'object' ? user : {}
+    ) as Record<string, unknown>;
+    return {
+      success: true,
+      userId: currentUser.userId ?? null,
+      ...body,
+      note: '内存模式，重启后失效',
+    };
+  }
+
+  async trend(days: number = 7) {
+    // 生成模拟趋势数据，真实数据可从 rag-backend 获取
+    const now = new Date();
+    const items = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      items.push({
+        date: dateStr,
+        searchCount: Math.floor(Math.random() * 50) + 10,
+        qaCount: Math.floor(Math.random() * 30) + 5,
+        documentCount: Math.floor(Math.random() * 5),
+      });
+    }
+    return { data: items };
+  }
+
   async overview() {
     const [
       documents,

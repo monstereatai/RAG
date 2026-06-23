@@ -39,9 +39,10 @@ export class SecurityService implements OnModuleInit {
 
   // 2. 速率限制配置（防止暴力破解、DDoS攻击）
   getRateLimitConfig() {
+    const isDev = process.env.NODE_ENV === 'development';
     return {
       windowMs: 15 * 60 * 1000, // 15分钟
-      max: 100, // 每个IP限制100个请求
+      max: isDev ? 10000 : 100, // 开发环境放宽限制
       message: 'Too many requests from this IP, please try again later.',
       standardHeaders: true,
       legacyHeaders: false,

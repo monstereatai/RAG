@@ -6,18 +6,29 @@ import { RoleController } from './role.controller';
 import { RoleService } from './role.service';
 import { Role } from '../../database/entities/role.entity';
 import { PermissionModule } from '../permission/permission.module';
+import { UserModule } from '../user/user.module';
 import { RagClientModule } from '../rag-client/rag-client.module';
 import { AdminDashboardService } from './admin-dashboard.service';
+import { AdminUsersController } from './admin-users.controller';
+import { AdminRolesController } from './admin-roles.controller';
+import { AdminPermissionsController } from './admin-permissions.controller';
 
 const databaseEnabled = isDatabaseEnabled();
 
 @Module({
   imports: [
     PermissionModule,
+    UserModule,
     RagClientModule,
     ...(databaseEnabled ? [TypeOrmModule.forFeature([Role])] : []),
   ],
-  controllers: [AdminController, RoleController],
+  controllers: [
+    AdminController,
+    RoleController,
+    AdminUsersController,
+    AdminRolesController,
+    AdminPermissionsController,
+  ],
   providers: [RoleService, AdminDashboardService],
   exports: [RoleService],
 })

@@ -5,6 +5,27 @@ import { ConfigService } from '@nestjs/config';
 export class SystemConfigService {
   constructor(private readonly configService: ConfigService) {}
 
+  /** 前端 system-config 页面用的配置列表 */
+  getConfigList() {
+    const configs = [
+      { key: 'llm_model', value: 'qwen-plus', description: 'LLM 模型', group: 'rag', updatedAt: new Date().toISOString() },
+      { key: 'embedding_model', value: 'text-embedding-v2', description: 'Embedding 模型', group: 'rag', updatedAt: new Date().toISOString() },
+      { key: 'chunk_size', value: '500', description: '分块大小', group: 'rag', updatedAt: new Date().toISOString() },
+      { key: 'chunk_overlap', value: '50', description: '分块重叠', group: 'rag', updatedAt: new Date().toISOString() },
+      { key: 'vector_top_k', value: '5', description: '向量检索 Top-K', group: 'rag', updatedAt: new Date().toISOString() },
+      { key: 'rag_service_url', value: process.env.RAG_SERVICE_BASE_URL || 'http://localhost:3000/api/v1', description: 'RAG 服务地址', group: 'integration', updatedAt: new Date().toISOString() },
+      { key: 'rag_timeout_ms', value: process.env.RAG_SERVICE_TIMEOUT_MS || '2000', description: 'RAG 超时(ms)', group: 'integration', updatedAt: new Date().toISOString() },
+      { key: 'jwt_expires_in', value: process.env.JWT_EXPIRES_IN || '1h', description: 'JWT 过期时间', group: 'auth', updatedAt: new Date().toISOString() },
+      { key: 'rate_limit_max', value: process.env.RATE_LIMIT_MAX || '100', description: '限流最大请求数', group: 'security', updatedAt: new Date().toISOString() },
+    ];
+    return { data: configs };
+  }
+
+  /** 更新配置项（内存模式，不持久化） */
+  updateConfig(key: string, value: string) {
+    return { success: true, key, value, note: '内存模式，重启后失效' };
+  }
+
   getOverview() {
     return {
       service: 'admin-backend',

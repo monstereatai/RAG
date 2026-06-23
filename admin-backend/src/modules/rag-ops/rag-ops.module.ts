@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { RagClientModule } from '../rag-client/rag-client.module';
-import { RagOpsController } from './rag-ops.controller';
+import { RagOpsController, RagOpsAliasController } from './rag-ops.controller';
 
 @Module({
   imports: [RagClientModule],
-  controllers: [RagOpsController],
+  controllers: [RagOpsController, RagOpsAliasController],
 })
 export class RagOpsModule {}

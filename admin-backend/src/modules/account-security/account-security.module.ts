@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
-import { AccountSecurityController } from './account-security.controller';
+import { AccountSecurityController, AdminSecurityController, AdminAccountController } from './account-security.controller';
 import { AccountSecurityService } from './account-security.service';
 
 @Module({
-  controllers: [AccountSecurityController],
+  controllers: [AccountSecurityController, AdminSecurityController, AdminAccountController],
   providers: [AccountSecurityService],
   exports: [AccountSecurityService],
 })

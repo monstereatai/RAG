@@ -34,21 +34,42 @@ export class AdminNotificationsService {
     }
   }
 
-  async list() {
+  async list(query?: any) {
+    let items: Notification[];
     if (this.notificationRepo) {
-      const items = await this.notificationRepo.find({
+      items = await this.notificationRepo.find({
         order: { createdAt: 'DESC' },
         take: 100,
       });
-      const unread = await this.notificationRepo.count({
-        where: { read: false },
-      });
-      return { unread, items };
+    } else {
+      items = [...this.memoryFallback];
     }
 
+    // 筛选
+    if (query?.type) {
+      items = items.filter((item) => item.type === query.type);
+    }
+    if (query?.read !== undefined) {
+      items = items.filter((item) => item.read === (query.read === 'true' || query.read === true));
+    }
+
+    // 分页
+    const page = Number(query?.current) || 1;
+    const pageSize = Number(query?.pageSize) || 10;
+    const start = (page - 1) * pageSize;
+
+    const unread = items.filter((item) => !item.read).length;
     return {
-      unread: this.memoryFallback.filter((item) => !item.read).length,
-      items: this.memoryFallback,
+      data: items.slice(start, start + pageSize).map((item) => ({
+        id: String(item.id),
+        title: item.title,
+        content: item.message,
+        type: item.type,
+        read: item.read,
+        createdAt: item.createdAt?.toISOString?.() ?? item.createdAt,
+      })),
+      total: items.length,
+      unread,
     };
   }
 
@@ -131,5 +152,22 @@ export class AdminNotificationsService {
       createdAt: new Date(),
       updatedAt: new Date(),
     } as Notification);
+  }
+
+  /** 删除通知 */
+  async delete(id: string) {
+    if (this.notificationRepo) {
+      const numericId = Number(id);
+      if (!Number.isNaN(numericId)) {
+        await this.notificationRepo.delete(numericId);
+      }
+      return { success: true };
+    }
+
+    const index = this.memoryFallback.findIndex((item) => String(item.id) === id);
+    if (index !== -1) {
+      this.memoryFallback.splice(index, 1);
+    }
+    return { success: true };
   }
 }

@@ -24,6 +24,13 @@ export class RagDocumentQueryDto {
   @Min(1)
   page?: number = 1;
 
+  /** 前端 ProTable 传入的 current，等价于 page */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  current?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -46,11 +46,80 @@ export class GraphOpsController {
     };
   }
 
+  @Get('stats')
+  @ApiOperation({ summary: '图谱统计（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async getStats() {
+    const [entities, relationships] = await Promise.all([
+      this.ragClient.getGraphEntities(),
+      this.ragClient.getGraphRelationships(),
+    ]);
+    const entityList = Array.isArray(entities.data) ? entities.data : [];
+    const relList = Array.isArray(relationships.data) ? relationships.data : [];
+    return {
+      data: {
+        nodeCount: entityList.length,
+        edgeCount: relList.length,
+        entityTypes: [],
+        relationTypes: [],
+      },
+    };
+  }
+
   @Get('schema')
   @ApiOperation({ summary: '图谱 schema' })
   @RequirePermission('admin:graph-ops:read')
   async getSchema() {
-    return this.ragClient.getGraphSchema();
+    const result = await this.ragClient.getGraphSchema();
+    return {
+      data: {
+        nodeLabels: (result.data as any)?.nodeLabels ?? [],
+        edgeTypes: (result.data as any)?.edgeTypes ?? [],
+        properties: (result.data as any)?.properties ?? {},
+      },
+    };
+  }
+
+  @Get('nodes')
+  @ApiOperation({ summary: '图谱节点列表（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async getNodes(@Query() query: any) {
+    const entities = await this.ragClient.getGraphEntities();
+    const items = (Array.isArray(entities.data) ? entities.data : []) as any[];
+    return {
+      data: items.map((item: any, index: number) => ({
+        id: item.id ?? String(index + 1),
+        label: item.name ?? item.label ?? '',
+        type: item.type ?? 'entity',
+        properties: item.properties ?? {},
+      })),
+    };
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: '图谱搜索（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async search(@Query('query') query?: string) {
+    const [entities, relationships] = await Promise.all([
+      this.ragClient.getGraphEntities(),
+      this.ragClient.getGraphRelationships(),
+    ]);
+    return {
+      data: {
+        nodes: (Array.isArray(entities.data) ? entities.data : []).map((item: any, index: number) => ({
+          id: item.id ?? String(index + 1),
+          label: item.name ?? item.label ?? '',
+          type: item.type ?? 'entity',
+          properties: item.properties ?? {},
+        })),
+        edges: (Array.isArray(relationships.data) ? relationships.data : []).map((item: any, index: number) => ({
+          id: item.id ?? String(index + 1),
+          source: item.source ?? item.from ?? '',
+          target: item.target ?? item.to ?? '',
+          label: item.type ?? item.label ?? '',
+        })),
+      },
+    };
   }
 
   @Get('entities')

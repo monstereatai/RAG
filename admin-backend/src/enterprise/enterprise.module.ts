@@ -21,6 +21,7 @@ import { RagOpsModule } from '../modules/rag-ops/rag-ops.module';
 import { SystemConfigModule } from '../modules/system-config/system-config.module';
 import { AccountSecurityModule } from '../modules/account-security/account-security.module';
 import { AdminMenusModule } from '../modules/admin-menus/admin-menus.module';
+import { MenusModule } from '../modules/menus/menus.module';
 import { SearchOpsModule } from '../modules/search-ops/search-ops.module';
 import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
 import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
@@ -50,6 +51,7 @@ import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
     SystemConfigModule,
     AccountSecurityModule,
     AdminMenusModule,
+    MenusModule,
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,
@@ -78,6 +80,7 @@ import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
     SystemConfigModule,
     AccountSecurityModule,
     AdminMenusModule,
+    MenusModule,
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,

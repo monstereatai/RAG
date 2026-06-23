@@ -1,0 +1,68 @@
+import { authRequest } from '@/services/rag-admin/api';
+
+export interface DocumentItem {
+  id: string;
+  filename: string;
+  fileType: string;
+  fileSize: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  chunkCount: number;
+  uploadedBy: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: {
+    title?: string;
+    author?: string;
+    summary?: string;
+    keywords?: string[];
+    language?: string;
+    category?: string;
+  };
+}
+
+export async function getDocuments(params?: {
+  current?: number;
+  pageSize?: number;
+  filename?: string;
+  status?: string;
+  fileType?: string;
+}) {
+  return authRequest<{ data: DocumentItem[]; total: number }>(
+    '/api/admin/documents',
+    { params },
+  );
+}
+
+export async function deleteDocument(id: string) {
+  return authRequest(`/api/admin/documents/${id}`, { method: 'DELETE' });
+}
+
+export async function reprocessDocument(id: string) {
+  return authRequest(`/api/admin/documents/${id}/reprocess`, {
+    method: 'POST',
+  });
+}
+
+export async function getDocumentDetail(id: string) {
+  return authRequest<{ data: DocumentItem }>(`/api/admin/documents/${id}`);
+}
+
+export interface ChunkItem {
+  id: string;
+  index: number;
+  content: string;
+  headingPath: string;
+  tokenCount: number;
+  startOffset: number;
+  endOffset: number;
+}
+
+export async function getDocumentChunks(
+  id: string,
+  params?: { current?: number; pageSize?: number },
+) {
+  return authRequest<{ data: ChunkItem[]; total: number }>(
+    `/api/admin/documents/${id}/chunks`,
+    { params },
+  );
+}

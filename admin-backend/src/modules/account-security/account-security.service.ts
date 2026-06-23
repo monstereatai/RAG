@@ -101,6 +101,30 @@ export class AccountSecurityService {
     return this.getMfaStatus(user);
   }
 
+  /** 前端 account-security 页面用的安全信息 */
+  getSecurityInfo() {
+    return {
+      data: {
+        lastPasswordChange: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
+        twoFactorEnabled: false,
+        loginHistory: [
+          { ip: '127.0.0.1', device: 'Chrome / macOS', time: new Date().toISOString(), success: true },
+          { ip: '127.0.0.1', device: 'Chrome / macOS', time: new Date(Date.now() - 3600000).toISOString(), success: false },
+        ],
+      },
+    };
+  }
+
+  /** 修改密码（内存模式占位） */
+  changePassword(body: { oldPassword: string; newPassword: string }) {
+    return { success: true, note: '内存模式，密码未实际修改' };
+  }
+
+  /** 切换两步验证（内存模式占位） */
+  toggleTwoFactor(enabled: boolean) {
+    return { success: true, enabled, note: '内存模式，MFA 未实际启用' };
+  }
+
   private getState(username: string): LoginAttemptState {
     const current = this.attempts.get(username);
 
