@@ -10,6 +10,8 @@
 - `CLAUDE.md`：项目规则。
 - `rag-plan.md`：早期计划和技术路线。
 - `INTERVIEW_PLAYBOOK.md`：简历与面试讲解手册，记录本项目面向高级 Agent 工程师、高级 AI 应用开发工程师、高级前端开发工程师、前端负责人时应该掌握和表达的内容。
+- `AI_AGENT_CORE_KNOWLEDGE.md`：AI Agent / RAG 核心知识地图，沉淀万变不离其宗的底层概念、判断框架和答题骨架。
+- `ADMIN_FEATURES.md`：管理后台功能清单，基于界面截图整理登录、大盘、文档、搜索、问答、图谱、个人中心、系统管理等模块能力。
 
 ## 当前阶段
 
@@ -1080,3 +1082,9 @@
 | 2026-06-21 | **企业级成熟度门禁补齐**：新增 `eval:rag:maturity`，按四个核心标准和工程化/真实落地准备评分；接入 `eval:rag:quality`。当前本地工程成熟度 93/100，达到 90 分门槛，同时保留真实私有题集、Milvus runtime、生产材料三项扣分缺口。 |
 | 2026-06-21 | **项目级仿真实业务评测补齐并真实跑通**：新增 8 文档 / 11 问题项目级评测集与 `eval:rag:project`；修复版本冲突题召回/引用回退和弱词误召回问题。验证：`PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 在 3001 后端真实上传/问答/清理，simple 11/11、auto 11/11，score=1。 |
 | 2026-06-21 | **简历与面试讲解手册补齐**：新增 `INTERVIEW_PLAYBOOK.md`，按高级 Agent 工程师、高级 AI 应用开发工程师、高级前端开发工程师、前端负责人四类目标岗位整理项目定位、必须弄懂的技术点、简历写法、面试讲法、高频问答和不能硬吹的边界。 |
+| 2026-06-22 | **上海 Agent 面试题专项补强**：根据真实面试题补充 `INTERVIEW_PLAYBOOK.md`，覆盖 RAG 召回评测指标、Agent 死循环治理、外部工具调用方式、Skill 与 Tool 区别、结构化切片、召回准确率提升、Agent vs Chatbot、Reranker、记忆方案选择、Context Engineering、LangChain vs LangGraph、ReAct/FSM、多 Agent、可插拔 RAG、本地部署与配置管理。 |
+| 2026-06-22 | **AI Agent / RAG 核心知识地图补齐**：新增 `AI_AGENT_CORE_KNOWLEDGE.md`，不再按零散面试题堆内容，而是按 RAG、召回排序、评测、切片、Agent、工具、Skill、记忆、上下文工程、幻觉控制、生产化、工程抽象和前端产品化沉淀底层知识框架。 |
+| 2026-06-23 | **AI Agent / RAG 核心知识地图人话版重写**：将 `AI_AGENT_CORE_KNOWLEDGE.md` 从抽象提纲改为“人话理解 / 面试说法 / 项目对应”结构，补充类比、可直接复述的话术和最小复习清单，降低理解门槛。 |
+| 2026-06-23 | **AI Agent / RAG 核心知识地图继续补强**：补充数据治理、权限安全、缓存成本、模型选择、多模态 RAG、GraphRAG 使用边界、Human-in-the-loop、线上评测运营和常见工程坑，进一步覆盖 RAG 与 Agent 应用开发的高级追问。 |
+| 2026-06-23 | **AI Agent / RAG 面试决策叙事模板补齐**：在 `AI_AGENT_CORE_KNOWLEDGE.md` 中新增背景、目标、候选方案、方案对比、最终选择、落地实现、验证效果、遗留边界的高级面试叙事模板，并补充 Hybrid Retrieval、Agentic 路由、LangGraph/FSM、记忆方案、项目级评测五组方案对比示例。 |
+| 2026-06-23 | **管理后台功能清单补齐**：新增 `ADMIN_FEATURES.md`，基于 8 张界面截图整理登录注册、首页大盘、文档管理、智能搜索、AI 问答、知识图谱、个人中心、系统管理、通知、权限角色和后续 RAG 运营建议。 |

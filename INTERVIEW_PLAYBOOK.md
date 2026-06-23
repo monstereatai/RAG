@@ -152,6 +152,298 @@ MCP 在这个项目里负责把 Agent 和外部工具解耦。系统支持配置
 外部依赖不稳定是 AI 应用常态，所以系统默认可降级。Milvus search 超时会快速失败并回退 BM25，Bocha/Rerank 没 key 时跳过但不阻断，Redis 不可用时 Checkpointer 回退内存。可观测上有 HTTP 指标、检索命中、LLM 调用耗时、token 估算和 traceparent，方便定位一次回答到底慢在检索、重排还是生成。
 ```
 
+### 9. RAG 召回评测指标
+
+必须能讲清楚：
+
+- 召回评测不是只看最终答案对不对，要拆成 retrieval、rerank、generation 三段。
+- Retrieval 看目标证据有没有被召回：Hit Rate、Recall@K、MRR、NDCG。
+- Rerank 看目标证据是否排到前面：NDCG@K、MRR、Top1/Top3 命中。
+- Answer 看答案是否用对证据：Answer Relevance、Faithfulness、Citation Accuracy、Claim Support。
+- 负例看系统会不会拒答：Refusal Accuracy、False Positive Rate。
+- 按题型分层看：事实题、别名题、缩写题、金额/版本题、跨文档题、冲突题、无答案题、多轮追问题。
+
+建议讲法：
+
+```text
+我会把 RAG 评测拆成召回、排序、生成三层。召回层看 Recall@K、Hit Rate、MRR，确认标准答案证据有没有进 topK；排序层看 rerank 后 NDCG/MRR 是否提升；生成层看答案相关性、faithfulness、引用准确率和 claim 是否被引用片段支撑。企业场景还必须单独评拒答题和冲突题，否则系统很容易在无答案问题上胡编。
+```
+
+项目映射：
+
+- `eval:rag:quality`：质量总门禁。
+- `eval:rag`：业务回归集、claim/citation/refusal/conflict 评测。
+- `eval:rag:project`：项目级仿真实业务真实后端回放。
+- `eval:rag:maturity`：按查得准、答得稳、引用能撑住、不会瞎编打工程成熟度分。
+
+### 10. Agent 死循环治理
+
+必须能讲清楚：
+
+- Agent 死循环通常来自目标不清、工具结果不可判定、planner 反复生成相同 action、observation 没有进入状态、模型无法判断终止。
+- 不能只说“加最大轮数”，这只是兜底。
+- 要同时做 step 上限、tool call 上限、token/耗时/费用预算、重复 action 检测、状态去重、timeout、fallback、human-in-the-loop。
+- ReAct / LangGraph / FSM 都要有明确终止条件。
+
+建议讲法：
+
+```text
+我会把 Agent 死循环当成状态机治理问题，而不是简单 prompt 问题。工程上先加硬预算：max steps、max tool calls、max retries、timeout、token/cost budget；再做软判断：如果连续多轮 action 和 observation 相同，或者状态没有新增信息，就提前终止并返回保守答案。复杂高风险任务可以进入 human-in-the-loop。所有循环路径要记录 trace，后续变成回归样本。
+```
+
+项目映射：
+
+- `AGENTIC_MAX_RETRIES`：限制反思重试。
+- `AGENTIC_MAX_AUGMENTED_QUERIES`：限制 query 扩展。
+- `AGENTIC_MAX_RETRIEVAL_QUERIES`：限制检索查询数。
+- `AGENTIC_MAX_RETRIEVED_CHUNKS`：限制上下文注入。
+- `AGENTIC_MAX_WEB_SEARCH_RESULTS`：限制联网兜底。
+- `AGENTIC_MAX_RERANK_TOP_N`：限制重排成本。
+- `AGENTIC_MAX_AUTO_QUERY_LENGTH`：auto 模式超长问题回退 simple，避免把超大问题直接丢给 Agent。
+
+### 11. Agent 调用外部工具的方式
+
+必须能讲清楚：
+
+- Function Calling / Tool Calling：模型输出结构化工具名和参数，由宿主执行。
+- ReAct：模型按 Thought / Action / Observation 迭代，适合需要推理和多步工具调用的任务。
+- MCP：把工具作为标准 server 暴露，Agent 通过 transport 发现和调用工具。
+- LangChain Tool：在应用代码中把函数包装成模型可调用工具。
+- HTTP API Tool：把外部 REST/RPC 能力包装成工具。
+- Code Interpreter / Browser / File Tool：特殊工具，要有沙箱、权限和审计。
+
+建议讲法：
+
+```text
+Agent 调工具不是让模型直接执行代码，而是模型选择工具和参数，宿主系统做 schema 校验、权限校验、超时、重试、幂等和审计。项目里既有 Bocha、Rerank、Speech 这类 API 工具，也有 MCP 这种标准化工具 server 接入。工具失败不能拖死主链路，要能降级或返回可解释错误。
+```
+
+容易踩坑：
+
+- 不要说“Agent 自己调用接口”，应该说“模型提出工具调用，宿主执行”。
+- 不要忽略参数校验和权限。
+- 不要让工具调用无限重试。
+
+### 12. Skill 与工具的关系
+
+必须能讲清楚：
+
+- Tool 是可执行能力，例如搜索、读文件、写数据库、调用 API。
+- Skill 是可复用工作流，描述什么时候用、怎么用、用哪些工具、遵守什么步骤和边界。
+- Skill 不等于 prompt，也不等于工具；它更像 Agent 的操作手册。
+- Auto-coder Skill 通常包括：读项目规则、定位代码、制定方案、精准修改、运行验证、总结风险。
+
+建议讲法：
+
+```text
+我会把 Tool 理解为能力，把 Skill 理解为经验封装。比如搜索工具只是能查资料，但“调试外部 API”这个 Skill 会规定先查官方文档或参考实现、逐字段比 headers/body、再一次性修复差异。Skill 的价值是把一次成功经验固化成可复用流程，让 Agent 不靠临场发挥。
+```
+
+项目映射：
+
+- 项目里有 `skills/` 目录和 `SKILL.md` 加载能力。
+- Skills 匹配支持本地 token 匹配和 Qwen Embedding 语义匹配。
+- 无 key 或 embedding 失败时回退 token 匹配，不阻断系统。
+
+### 13. 切片策略
+
+必须能讲清楚：
+
+- 切片不是只调 `chunkSize=1000`。
+- 优先按文档结构切：标题、段落、列表、表格、代码块、条款。
+- 保留 heading path、section id、clause id、table ref、source span。
+- 父子 chunk 用于兼顾召回精度和上下文完整性。
+- overlap 只解决边界信息丢失，不能替代结构化切分。
+- PDF/表格/扫描件要特殊处理，不能和纯 Markdown 一样粗切。
+- 版本号、生效期、来源权威要进入 metadata，否则制度类问答容易答旧版本。
+
+建议讲法：
+
+```text
+我会先按结构切，再按 token 长度兜底。标题路径、条款编号、表格行列、source span、doc version、生效期这些 metadata 要跟 chunk 一起进索引。小 chunk 负责精准召回，parent chunk 负责补上下文。overlap 只解决跨边界丢信息，不能解决表格和制度条款的结构语义。
+```
+
+项目映射：
+
+- `document_chunks` 保存父子 chunk、heading path、section/clause/table metadata。
+- `sourceStart/sourceEnd` 支持回到原文定位。
+- `docVersion/effectiveAt/expiredAt/sourceAuthority` 支持制度版本和来源权威治理。
+
+### 14. 提高 RAG 召回准确率
+
+必须能讲清楚：
+
+- 数据侧：清洗、去重、结构化切片、metadata、版本治理。
+- 查询侧：query normalize、同义词、缩写、错别字、query rewrite、query expansion。
+- 检索侧：BM25/ES + 向量混合检索，按题型选择权重。
+- 排序侧：Reranker、来源权威、时间有效性、用户权限过滤。
+- 生成侧：低相关拒答、引用校验、claim 支撑校验。
+- 评测侧：把失败样本沉淀成回归集。
+
+建议讲法：
+
+```text
+提高召回准确率不是只换 embedding 模型。先把文档结构和 metadata 做对，再做 query normalize、同义词/缩写/错别字处理，然后用 BM25/ES 和向量混合召回，最后用 reranker、来源权威、生效期和权限过滤重排。每次失败都要进入评测集，否则优化只是拍脑袋。
+```
+
+### 15. Agent 与 Chatbot 的区别
+
+必须能讲清楚：
+
+- Chatbot 主要是对话界面和问答响应。
+- Agent 是有目标、有状态、有工具、有规划、有执行、有反馈/反思的系统。
+- Chatbot 可以没有工具，Agent 通常需要工具或环境交互。
+- Agent 必须有终止条件、预算、权限和可观测。
+
+建议讲法：
+
+```text
+Chatbot 更像一个对话入口，核心是生成回复；Agent 是能围绕目标规划步骤、调用工具、观察结果、更新状态并决定下一步的执行系统。企业里真正难的是让 Agent 可控：知道什么时候该停、能调用什么工具、失败怎么降级、过程怎么审计。
+```
+
+### 16. 为什么要加 Reranker
+
+必须能讲清楚：
+
+- 初召回追求 recall，宁愿多捞一些候选，会混入噪声。
+- Reranker 追求 precision，把真正相关片段排到前面。
+- 向量相似不等于业务相关，尤其是金额、版本、制度、否定条件。
+- Reranker 可以降低无关 chunk 进入 prompt 的概率，节省上下文并减少幻觉。
+- Reranker 也有成本，所以要限制 topN 和可配置开关。
+
+建议讲法：
+
+```text
+召回阶段解决“有没有捞到”，Reranker 解决“谁应该排前面”。企业知识库里初召 topK 常常混入语义相似但事实不匹配的片段，比如旧版本制度或相似流程。Reranker 能把更符合 query 的 chunk 放到前面，减少 prompt 噪声，提高引用质量。但它不是免费午餐，所以项目里限制 rerank topN，并允许关闭。
+```
+
+### 17. 记忆方案选择
+
+必须能讲清楚：
+
+- 记忆不是一种东西，至少要分工作记忆、短期记忆、长期记忆、语义记忆、情节记忆。
+- 工作记忆：当前 prompt/context，生命周期最短。
+- 短期记忆：当前会话或最近几轮对话，适合 Redis / checkpointer。
+- 长期记忆：跨会话用户偏好、稳定事实，适合 Mem0 / 数据库 / 向量库。
+- 语义记忆：事实知识，例如“用户偏好 TypeScript”。
+- 情节记忆：事件记录，例如“上次用户上传了某份制度文档并问过预算问题”。
+- 记忆写入要有筛选，不是什么都存。
+- 记忆读取要有权限、时效、置信度和可删除能力。
+
+建议讲法：
+
+```text
+我不会把所有历史对话直接塞进上下文。当前轮用工作记忆；当前会话用 Redis Checkpointer 或 message history；跨会话稳定偏好和事实才进入长期记忆，例如 Mem0。写入前要判断是不是稳定事实，读取时要按用户、时间、相关性和置信度过滤。否则记忆会从增强能力变成污染源。
+```
+
+项目映射：
+
+- Redis Checkpointer：保存 LangGraph 线程状态，支持恢复。
+- ConversationEmbeddingService：把 QA 对向量化，用于相关历史检索。
+- Mem0Provider / MemoryService：长期记忆 cloud/local/disabled 三种模式。
+- 多租户隔离：记忆读取必须按 `userId` 过滤。
+
+记忆方案选择：
+
+| 场景 | 推荐方案 | 原因 |
+|---|---|---|
+| 当前一次推理里的中间状态 | LangGraph state / working memory | 生命周期短，直接参与当前决策 |
+| 当前会话多轮追问 | Redis Checkpointer / message history | 快速恢复，适合线程级状态 |
+| 跨会话用户偏好 | Mem0 / relational DB | 需要长期保存、可查询、可删除 |
+| 历史问答相似召回 | 向量库 conversation chunks | 适合语义相关检索 |
+| 审计和合规 | PostgreSQL event/log table | 需要可追踪、可回放、可治理 |
+
+### 18. Context Engineering 与对话压缩
+
+必须能讲清楚：
+
+- 上下文不是越长越好，长上下文会带来噪声、成本和注意力稀释。
+- 压缩不能只做摘要，要保留任务目标、约束、关键事实、未完成事项、用户偏好、引用来源。
+- 压缩后最好带来源或可追溯标记，否则容易把旧 hallucination 固化成记忆。
+- 多轮追问要做 threadId/sessionId 关联，而不是只靠最近 N 条。
+
+建议讲法：
+
+```text
+跨会话压缩我会保留五类信息：用户目标、关键事实、约束边界、已完成/未完成状态、可追溯来源。不会简单把所有聊天记录总结成一段自然语言，因为摘要可能丢掉否定条件和版本信息。压缩结果进入长期记忆前还要过滤，避免把临时推测写成稳定事实。
+```
+
+### 19. LangChain 与 LangGraph 的区别
+
+必须能讲清楚：
+
+- LangChain 偏组件和链式编排：model、prompt、retriever、tool、chain。
+- LangGraph 偏有状态图编排：节点、边、条件路由、循环、中断、恢复、checkpoint。
+- 简单单向流程用 Chain 足够。
+- 多步骤、可循环、可恢复、有人工审批的 Agent 更适合 Graph。
+
+建议讲法：
+
+```text
+LangChain 更像组件库和链式流水线，适合 prompt -> retriever -> model 这种顺序流程。LangGraph 更像有状态工作流引擎，适合 Agent：有条件分支、循环、反思、工具调用、中断恢复和 checkpoint。我的项目里 simple RAG 更接近 chain，agentic RAG 用 LangGraph 表达状态机。
+```
+
+### 20. ReAct、Chain、Tool Use、FSM 怎么选
+
+必须能讲清楚：
+
+- Chain：固定步骤，确定性强，适合稳定主链路。
+- Tool Use：单步或少量工具调用，适合明确 API 调用。
+- ReAct：推理和行动交替，适合不确定步骤的探索任务。
+- FSM / LangGraph：状态和边界明确，适合生产级 Agent 编排。
+
+建议讲法：
+
+```text
+如果任务路径固定，我优先用 Chain；如果只是让模型选一个函数，我用 Tool Calling；如果问题需要边推理边查工具，可以用 ReAct；如果要上线到业务系统，我更倾向用 FSM/LangGraph 把状态、分支、重试、终止和人工审批显式建模。ReAct 灵活，但生产里不能只有 ReAct，没有边界就容易失控。
+```
+
+### 21. 多 Agent 框架设计
+
+必须能讲清楚：
+
+- 按能力拆：researcher、analyst、writer、critic、executor。
+- 按领域拆：HR、Finance、Legal、IT、Sales。
+- 按流程拆：planner、executor、reviewer、approver。
+- 划分依据不是“名字好听”，而是工具权限、上下文需求、责任边界、输出格式不同。
+- 多 Agent 会增加成本和不可控性，不是默认更高级。
+
+建议讲法：
+
+```text
+我会按责任边界拆 Agent，而不是为了炫技。比如 researcher 负责检索，analyst 负责结构化分析，writer 负责组织答案，critic 负责校验引用和风险。不同 Agent 的工具权限和上下文不同。能用单 Agent 解决就不拆，多 Agent 的价值是隔离职责和权限，不是增加复杂度。
+```
+
+### 22. 可插拔 RAG 与工厂模式
+
+必须能讲清楚：
+
+- 可插拔不是热更新噱头，而是 provider 抽象。
+- LLM、Embedding、VectorStore、Rerank、Speech、Search 都可以按接口切换实现。
+- 工厂模式负责根据配置创建 provider。
+- 一键切换要考虑 schema、维度、索引、数据迁移和兼容性，不能只切 env。
+
+建议讲法：
+
+```text
+我会用 Provider 接口和工厂模式做可插拔。比如 LLMProvider、EmbeddingProvider、VectorStoreProvider，各实现只暴露统一方法。配置可以切换 provider，但真正上线不能只改一个 env，因为 embedding 维度、向量索引、metadata schema、重建索引都可能受影响。
+```
+
+### 23. 本地部署与配置管理
+
+必须能讲清楚：
+
+- 本地部署要看端口、服务依赖、数据卷、健康检查、启动顺序、资源限制。
+- 配置管理至少分 `.env.example`、本地 `.env`、容器 env、生产 secret。
+- 密钥不进代码、不进日志、不进 commit。
+- 开发默认值不能阻塞核心链路。
+
+建议讲法：
+
+```text
+本地部署我会用 Docker Compose 管 PostgreSQL、Redis、Milvus、Elasticsearch、Neo4j 等依赖，应用通过 env 读取配置。`.env.example` 只放模板，真实 `.env` 本地填写且不进 git。像 MCP、Bocha、Rerank 这种外部能力默认可以关闭或降级，不能因为缺 key 导致核心 RAG 启动失败。
+```
+
 ## 面向不同岗位的讲法
 
 ### 高级 Agent 工程师
@@ -304,6 +596,118 @@ BM25 对关键词、缩写、编号、金额、版本、制度名很稳定，而
 
 ```text
 我会明确说三个：第一，缺真实私有业务评测集，合成数据不能冒充业务真实；第二，本机 Docker Milvus search 仍有 timeout warning，虽然已快速降级但运行时治理还可继续；第三，GraphRAG 和 MCP 已有工程入口，但真实价值依赖业务侧数据源和真实工具。这个回答比硬吹“全完成”更可信。
+```
+
+### RAG 召回从哪些维度评测？
+
+回答重点：
+
+```text
+我会分三层评测。第一层是 retrieval，看标准证据有没有进 topK，用 Recall@K、Hit Rate、MRR。第二层是排序，看 rerank 后目标证据是否更靠前，用 NDCG、MRR、Top1/Top3 命中。第三层是答案层，看 answer relevance、faithfulness、citation accuracy 和 claim support。企业场景还必须评拒答准确率和冲突处理，因为无答案题答得很流畅其实是事故。
+```
+
+### 碰到 Agent 死循环怎么处理？
+
+回答重点：
+
+```text
+我会先把它当状态机失控处理。硬边界包括 max steps、max tool calls、max retries、timeout、token/cost budget；软边界包括检测重复 action-observation、状态没有新增信息就终止、工具连续失败就 fallback。高风险任务进入 human-in-the-loop。死循环路径要记录 trace，并沉淀成回归用例。
+```
+
+### Agent 调用外部工具有哪些方式？
+
+回答重点：
+
+```text
+常见有 Function/Tool Calling、ReAct、MCP、LangChain Tool、HTTP API Tool、代码解释器、浏览器和文件工具。关键不是“能调”，而是宿主系统要做 schema 校验、权限控制、超时、重试、幂等、审计和降级。模型只负责提出工具调用意图和参数，真正执行必须由受控 runtime 完成。
+```
+
+### Skill 怎么调用工具？
+
+回答重点：
+
+```text
+Skill 本身不是工具，它是可复用工作流。Tool 是具体能力，比如搜索、读文件、调用 API；Skill 规定什么时候用这些工具、按什么顺序用、遵守什么边界、如何验证结果。比如 Auto-coder Skill 会要求先读项目规则，再定位代码、修改、运行验证、总结风险。Skill 的价值是把经验固化，减少 Agent 临场乱发挥。
+```
+
+### 怎么做切片？
+
+回答重点：
+
+```text
+我不会只按固定 token 数粗切。优先按文档结构切：标题、段落、条款、列表、表格、代码块；再用 token 长度兜底。每个 chunk 要带 heading path、section id、source span、doc version、生效期和来源权威。小 chunk 用于精准召回，parent chunk 用于补上下文。overlap 只能缓解边界丢失，不能替代结构化切片。
+```
+
+### 怎么提高 RAG 召回准确率？
+
+回答重点：
+
+```text
+从数据、查询、检索、排序、生成、评测六层做。数据侧做清洗、结构化切片和 metadata；查询侧做 query normalize、同义词、缩写、错别字和 query expansion；检索侧做 BM25/ES + vector hybrid；排序侧做 reranker、来源权威、生效期和权限过滤；生成侧做低相关拒答和引用校验；最后把失败样本沉淀成回归集。
+```
+
+### 什么是 Agent，和 Chatbot 有什么区别？
+
+回答重点：
+
+```text
+Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是围绕目标工作的执行系统，它有状态、有规划、有工具、有观察结果、有下一步决策和终止条件。企业里 Agent 的关键不是“更聪明”，而是可控：知道能调用什么工具、什么时候停止、失败怎么降级、过程怎么审计。
+```
+
+### 为什么要加 Reranker 重排？
+
+回答重点：
+
+```text
+初召回追求 recall，会把相似但不一定正确的 chunk 一起捞上来；reranker 追求 precision，把真正和 query 匹配的证据排到前面。企业知识库里金额、版本、生效期、否定条件很容易被向量相似误导，reranker 可以减少无关上下文进入 prompt，提高引用质量。但 rerank 有成本，所以要限制 topN，并做开关。
+```
+
+### 记忆模块的数据存在什么介质上？
+
+回答重点：
+
+```text
+要按记忆类型选介质。当前推理状态放 LangGraph state；当前会话状态放 Redis Checkpointer 或 message history；跨会话稳定事实和偏好放 Mem0 或关系库；历史问答相似召回可以放向量库 conversation chunks；审计记录放 PostgreSQL。不能把所有聊天记录无脑塞进 prompt，也不能把临时推测写成长久记忆。
+```
+
+### 如何跨会话压缩对话并保留关键信息？
+
+回答重点：
+
+```text
+压缩不是简单摘要。我会保留用户目标、关键事实、约束边界、已完成/未完成状态、用户偏好和来源。压缩结果要能追溯来源，最好带时间和置信度。进入长期记忆前还要过滤，只保存稳定事实，不保存临时猜测。否则压缩会把一次 hallucination 固化成长期污染。
+```
+
+### 为什么选择 ReAct，而不是纯 Chain 或 Tool Use？
+
+回答重点：
+
+```text
+固定流程优先 Chain，明确单步 API 调用用 Tool Calling；如果任务路径不确定，需要边推理边调用工具，可以用 ReAct。但生产级不能只有 ReAct，我更倾向用 LangGraph/FSM 把 ReAct 放进有状态、有预算、有终止条件的框架里。灵活性要被工程边界约束住。
+```
+
+### 多 Agent 框架怎么设计？
+
+回答重点：
+
+```text
+多 Agent 不是按名字堆角色，而是按责任边界、工具权限、上下文需求和输出格式拆。可以按能力拆 researcher、analyst、writer、critic，也可以按领域拆 HR、Finance、Legal。能用单 Agent 解决就不拆，多 Agent 的价值是隔离职责和权限，不是增加热闹。
+```
+
+### 可插拔 RAG 一键配置切换是不是热更新？
+
+回答重点：
+
+```text
+我不会把它简单说成热更新。可插拔的核心是 Provider 抽象和工厂模式，比如 LLMProvider、EmbeddingProvider、VectorStoreProvider。配置可以切换实现，但向量维度、索引类型、metadata schema 和历史数据兼容都要考虑。真正线上切换需要灰度、重建索引和回滚方案。
+```
+
+### 本地部署要考虑什么？配置管理放在哪里？
+
+回答重点：
+
+```text
+本地部署先看依赖服务、端口、数据卷、健康检查、启动顺序和资源限制。配置上 `.env.example` 只放模板，真实 `.env` 本地填写且不进 git；容器和生产用环境变量或 secret 注入。外部能力缺 key 时应该降级或跳过 smoke，不能阻塞核心 RAG 启动。
 ```
 
 ## 可以写进简历的成果指标
