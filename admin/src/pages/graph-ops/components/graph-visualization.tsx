@@ -153,7 +153,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           height,
         }}
       >
-        <Spin tip="加载图谱数据中..." />
+        <Spin description="加载图谱数据中..." />
       </div>
     );
   }

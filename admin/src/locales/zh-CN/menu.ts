@@ -4,6 +4,7 @@ export default {
   'menu.login': '登录',
   'menu.dashboard': '首页大盘',
   'menu.documents': '文档治理',
+  'menu.documents.document-detail': '文档详情',
   'menu.search-ops': '搜索运营',
   'menu.qa-ops': '问答运营',
   'menu.graph-ops': '图谱运营',
