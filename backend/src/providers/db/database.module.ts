@@ -8,6 +8,7 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
 import { DocumentChunkEntity } from './entities/document-chunk.entity';
 import { FactConflictEntity } from './entities/fact-conflict.entity';
 import { ScheduledJobEntity } from './entities/job.entity';
+import { QueryLogEntity } from './entities/query-log.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -47,6 +48,7 @@ import { ScheduledJobEntity } from './entities/job.entity';
             DocumentChunkEntity,
             FactConflictEntity,
             ScheduledJobEntity,
+            QueryLogEntity,
           ],
           synchronize: nodeEnv === 'development', // 开发环境自动同步 schema
           logging: nodeEnv === 'development',
@@ -65,6 +67,7 @@ import { ScheduledJobEntity } from './entities/job.entity';
       DocumentChunkEntity,
       FactConflictEntity,
       ScheduledJobEntity,
+      QueryLogEntity,
     ]),
   ],
   exports: [TypeOrmModule],

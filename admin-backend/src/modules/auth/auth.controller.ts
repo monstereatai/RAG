@@ -6,6 +6,7 @@ import { LoginDto } from './dto/login.dto';
 import { LoginVo } from './vo/login.vo';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RequireLogin } from '../../common/decorators/require-login.decorator';
+import { AuditLog } from '../../common/decorators/audit-log.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -16,6 +17,7 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @AuditLog('auth', 'login')
   @ApiOperation({ summary: '用户登录', description: '使用用户名和密码获取 JWT access_token' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -30,6 +32,7 @@ export class AuthController {
 
   @RequireLogin(false)
   @Get('refresh')
+  @AuditLog('auth', 'refresh')
   @ApiOperation({ summary: '刷新 Token', description: '使用 refresh_token 获取新的 access_token' })
   @ApiResponse({ status: 200, description: '刷新成功', type: LoginVo })
   @ApiResponse({ status: 401, description: 'refresh_token 失效' })

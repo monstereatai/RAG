@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package rag;
+
+service RagService {
+  // 向量混合检索：输入查询文本，返回相关文档片段
+  rpc VectorSearch(VectorSearchRequest) returns (VectorSearchResponse);
+
+  // 获取单个文档信息
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+
+  // 列出文档
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+
+  // 健康检查
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ─── Vector Search ──────────────────────────────────────
+
+message VectorSearchRequest {
+  string query = 1;
+  string user_id = 2;
+  int32 top_k = 3;    // 返回结果数，默认 5
+  string mode = 4;     // simple / agentic，默认 simple
+}
+
+message VectorSearchResponse {
+  repeated ChunkResult chunks = 1;
+  int32 total = 2;
+  bool fallback = 3;  // 是否降级到 BM25-only
+}
+
+message ChunkResult {
+  string chunk_id = 1;
+  string doc_id = 2;
+  string content = 3;
+  float bm25_score = 4;
+  float cosine_score = 5;
+  float fusion_score = 6;
+  string doc_title = 7;
+  string source_authority = 8;
+  int32 chunk_index = 9;
+}
+
+// ─── Document ────────────────────────────────────────────
+
+message GetDocumentRequest {
+  string doc_id = 1;
+  string user_id = 2;
+}
+
+message GetDocumentResponse {
+  string doc_id = 1;
+  string filename = 2;
+  int32 chunk_count = 3;
+  string title = 4;
+  string category = 5;
+  string source_authority = 6;
+  string doc_version = 7;
+  string created_at = 8;
+}
+
+message ListDocumentsRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+  string query = 4;
+}
+
+message ListDocumentsResponse {
+  repeated DocumentSummary documents = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message DocumentSummary {
+  string doc_id = 1;
+  string filename = 2;
+  int32 chunk_count = 3;
+  string title = 4;
+  string category = 5;
+  string created_at = 6;
+}
+
+// ─── Health ──────────────────────────────────────────────
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string status = 2;
+  int64 uptime_seconds = 3;
+}

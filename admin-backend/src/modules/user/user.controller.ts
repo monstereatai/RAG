@@ -21,6 +21,7 @@ import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { RequireLogin } from '../../common/decorators/require-login.decorator';
+import { AuditLog } from '../../common/decorators/audit-log.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -32,6 +33,7 @@ export class UserController {
    */
   @Post()
   @RequireLogin(false)
+  @AuditLog('users', 'create')
   @ApiOperation({ summary: '注册用户', description: '创建新用户账号，不需要认证' })
   @ApiResponse({ status: 201, description: '用户创建成功' })
   @ApiResponse({ status: 400, description: '参数校验失败' })
@@ -65,6 +67,7 @@ export class UserController {
   }
 
   @Put(':id')
+  @AuditLog('users', 'update')
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新用户信息', description: '需要登录' })
   @ApiParam({ name: 'id', type: Number, description: '用户 ID' })
@@ -78,6 +81,7 @@ export class UserController {
   }
 
   @Delete(':id')
+  @AuditLog('users', 'delete')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '删除用户', description: '需要登录' })

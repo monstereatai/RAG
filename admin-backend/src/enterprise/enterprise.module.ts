@@ -19,6 +19,12 @@ import { AdminNotificationsModule } from '../modules/admin-notifications/admin-n
 import { AuditLogsModule } from '../modules/audit-logs/audit-logs.module';
 import { RagOpsModule } from '../modules/rag-ops/rag-ops.module';
 import { SystemConfigModule } from '../modules/system-config/system-config.module';
+import { AccountSecurityModule } from '../modules/account-security/account-security.module';
+import { AdminMenusModule } from '../modules/admin-menus/admin-menus.module';
+import { SearchOpsModule } from '../modules/search-ops/search-ops.module';
+import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
+import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
+// import { GrpcModule } from '../modules/grpc/grpc.module';
 
 @Module({
   imports: [
@@ -42,6 +48,12 @@ import { SystemConfigModule } from '../modules/system-config/system-config.modul
     AuditLogsModule,
     RagOpsModule,
     SystemConfigModule,
+    AccountSecurityModule,
+    AdminMenusModule,
+    SearchOpsModule,
+    QaOpsModule,
+    GraphOpsModule,
+    // GrpcModule, // disabled: proto file missing, use HTTP rag-client instead
   ],
   exports: [
     DatabaseModule,
@@ -64,6 +76,12 @@ import { SystemConfigModule } from '../modules/system-config/system-config.modul
     AuditLogsModule,
     RagOpsModule,
     SystemConfigModule,
+    AccountSecurityModule,
+    AdminMenusModule,
+    SearchOpsModule,
+    QaOpsModule,
+    GraphOpsModule,
+    // GrpcModule,
   ],
 })
 export class EnterpriseModule {}

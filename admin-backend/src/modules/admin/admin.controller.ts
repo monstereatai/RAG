@@ -2,6 +2,7 @@ import { Controller, Get, UseGuards, SetMetadata } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../permission/roles.guard';
 import { AdminDashboardService } from './admin-dashboard.service';
+import { UserInfo } from '../../common/decorators/user-info.decorator';
 
 export const Roles = (...roles: string[]) => SetMetadata('roles', roles);
 
@@ -17,6 +18,18 @@ export class AdminController {
   @UseGuards(RolesGuard)
   getDashboard() {
     return this.dashboardService.overview();
+  }
+
+  @Get('features')
+  @ApiOperation({ summary: '管理后台功能完成度总览' })
+  getFeatures() {
+    return this.dashboardService.features();
+  }
+
+  @Get('profile')
+  @ApiOperation({ summary: '当前管理员个人中心基础信息' })
+  getProfile(@UserInfo() user: unknown) {
+    return this.dashboardService.profile(user);
   }
 
   @Get('boundary')

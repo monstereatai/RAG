@@ -1,9 +1,13 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
 import { MemoryService } from '../memory/memory.service';
+import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { ChatDto, type ChatMode } from './chat.dto';
 import type { ChatResponse } from './chat.dto';
 
@@ -17,6 +21,8 @@ export class ChatService {
     private readonly conversationService: ConversationService,
     private readonly conversationEmbeddingService: ConversationEmbeddingService,
     private readonly memoryService: MemoryService,
+    @InjectRepository(QueryLogEntity)
+    private readonly queryLogRepo: Repository<QueryLogEntity>,
   ) {}
 
   async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
@@ -25,6 +31,7 @@ export class ChatService {
     }
 
     const mode: ChatMode = req.mode ?? 'simple';
+    const startTime = Date.now();
 
     // 对话历史管理：threadId 不传则新建
     const threadId =
@@ -111,6 +118,19 @@ export class ChatService {
         userId,
       );
 
+      // 查询日志（异步，不阻塞返回）
+      void this.logQuery({
+        userId,
+        query: req.query,
+        mode,
+        threadId,
+        startTime,
+        refused:
+          result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
+        citationCount: result.references.length,
+        hasAnswer: result.answer.length > 0,
+      });
+
       return {
         ...result,
         mode: 'simple',
@@ -160,6 +180,19 @@ export class ChatService {
       userId,
     );
 
+    // 查询日志（异步，不阻塞返回）
+    void this.logQuery({
+      userId,
+      query: req.query,
+      mode,
+      threadId,
+      startTime,
+      refused:
+        result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
+      citationCount: result.references?.length ?? 0,
+      hasAnswer: result.answer.length > 0,
+    });
+
     return {
       answer: result.answer,
       references: result.references,
@@ -171,5 +204,34 @@ export class ChatService {
       retrievalReason: result.retrievalReason,
       threadId,
     };
+  }
+
+  private async logQuery(params: {
+    userId: string;
+    query: string;
+    mode: string;
+    threadId: string;
+    startTime: number;
+    refused: boolean;
+    citationCount: number;
+    hasAnswer: boolean;
+  }): Promise<void> {
+    try {
+      await this.queryLogRepo.save(
+        this.queryLogRepo.create({
+          id: randomUUID(),
+          userId: params.userId ?? null,
+          query: params.query.slice(0, 2000),
+          mode: params.mode as 'simple' | 'agentic' | 'auto',
+          threadId: params.threadId ?? null,
+          refused: params.refused,
+          citationCount: params.citationCount,
+          latencyMs: Date.now() - params.startTime,
+          hasAnswer: params.hasAnswer,
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to log query: ${(err as Error).message}`);
+    }
   }
 }

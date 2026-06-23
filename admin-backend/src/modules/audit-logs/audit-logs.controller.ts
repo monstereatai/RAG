@@ -12,7 +12,17 @@ export class AuditLogsController {
   @Get()
   @ApiOperation({ summary: '查看后台审计日志' })
   @RequirePermission('admin:audit:read')
-  list(@Query('limit') limit?: string) {
-    return this.auditLogsService.list(Number(limit) || 20);
+  list(
+    @Query('limit') limit?: string,
+    @Query('action') action?: string,
+    @Query('actor') actor?: string,
+    @Query('keyword') keyword?: string,
+  ) {
+    return this.auditLogsService.list({
+      limit: Number(limit) || 20,
+      action,
+      actor,
+      keyword,
+    });
   }
 }

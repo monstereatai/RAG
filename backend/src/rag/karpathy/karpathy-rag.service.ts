@@ -591,6 +591,15 @@ export class KarpathyRagService implements OnModuleInit {
     return new Set(this.persistedEntries.map((e) => e.docId));
   }
 
+  /** 获取 BM25 索引统计信息（供运营 API 使用） */
+  getStats(): { totalChunks: number; totalDocs: number } {
+    const docIds = new Set(this.persistedEntries.map((e) => e.docId));
+    return {
+      totalChunks: this.persistedEntries.length,
+      totalDocs: docIds.size,
+    };
+  }
+
   hasIndexedChunks(userId?: string): boolean {
     return this.persistedEntries.some((entry) => entry.userId === userId);
   }

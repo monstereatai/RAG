@@ -31,6 +31,8 @@ import { McpRoutesModule } from './modules/mcp/mcp.module';
 import { StructuredModule } from './modules/structured/structured.module';
 import { Neo4jModule } from './providers/neo4j/neo4j.module';
 import { GraphModule } from './modules/graph/graph.module';
+import { RagAdminModule } from './modules/rag-admin/rag-admin.module';
+import { GrpcModule } from './modules/grpc/rag-grpc.module';
 
 @Module({
   imports: [
@@ -73,6 +75,8 @@ import { GraphModule } from './modules/graph/graph.module';
     StructuredModule,
     Neo4jModule,
     GraphModule,
+    RagAdminModule,
+    GrpcModule,
   ],
   providers: [
     {

@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PermissionService } from './permission.service';
 import { CreatePermissionDto, UpdatePermissionDto } from './dto/permission.dto';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { AuditLog } from '../../common/decorators/audit-log.decorator';
 
 @ApiTags('permissions')
 @ApiBearerAuth()
@@ -11,6 +12,7 @@ export class PermissionController {
   constructor(private readonly permissionService: PermissionService) {}
 
   @Post()
+  @AuditLog('permissions', 'create')
   @ApiOperation({ summary: '创建权限' })
   @RequirePermission('admin:permission:create')
   create(@Body() createPermissionDto: CreatePermissionDto) {
@@ -32,6 +34,7 @@ export class PermissionController {
   }
 
   @Put(':id')
+  @AuditLog('permissions', 'update')
   @ApiOperation({ summary: '更新权限' })
   @RequirePermission('admin:permission:update')
   update(
@@ -42,6 +45,7 @@ export class PermissionController {
   }
 
   @Delete(':id')
+  @AuditLog('permissions', 'delete')
   @ApiOperation({ summary: '删除权限' })
   @RequirePermission('admin:permission:delete')
   remove(@Param('id', ParseIntPipe) id: number) {

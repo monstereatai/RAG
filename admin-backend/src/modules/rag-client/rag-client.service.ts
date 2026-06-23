@@ -6,6 +6,7 @@ import { RagClientResult, RagDocumentQueryDto, RagEvaluationRunDto } from './dto
 export class RagClientService {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly serviceToken: string;
 
   constructor(private readonly configService: ConfigService) {
     this.baseUrl = (
@@ -18,6 +19,10 @@ export class RagClientService {
       process.env.RAG_SERVICE_TIMEOUT_MS ||
       2000,
     );
+    this.serviceToken =
+      this.configService.get<string>('RAG_SERVICE_TOKEN') ??
+      process.env.RAG_SERVICE_TOKEN ??
+      '';
   }
 
   getConfig() {
@@ -72,7 +77,93 @@ export class RagClientService {
     return this.postJson<Record<string, unknown>>('/rag/admin/evaluations/run', dto);
   }
 
-  private async getJson<T>(path: string): Promise<RagClientResult<T>> {
+  // ─── Search Operations ──────────────────────────────────────
+
+  getSearchPopularQueries() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/search/queries/popular');
+  }
+
+  getSearchNoResultQueries() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/search/queries/no-result');
+  }
+
+  getSearchRecallIssues() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/search/recall-issues');
+  }
+
+  // ─── QA Operations ──────────────────────────────────────────
+
+  getQaNegativeFeedback() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/qa/negative-feedback');
+  }
+
+  getQaCitationFailures() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/qa/citation-failures');
+  }
+
+  getQaCostSummary() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/qa/cost-summary');
+  }
+
+  // ─── Graph Operations ───────────────────────────────────────
+
+  getGraphSchema() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/graph/schema');
+  }
+
+  getGraphEntities() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/graph/entities');
+  }
+
+  getGraphRelationships() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/graph/relationships');
+  }
+
+  getGraphOrphans() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/graph/orphans');
+  }
+
+  getGraphConflicts() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/graph/conflicts');
+  }
+
+  // ─── Document Actions ───────────────────────────────────────
+
+  downloadDocument(docId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/download`,
+    );
+  }
+
+  archiveDocument(docId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/archive`,
+      {},
+    );
+  }
+
+  updateDocumentPermissions(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/permissions`,
+      body,
+    );
+  }
+
+  batchDocumentOperation(body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      '/rag/admin/documents/batch',
+      body,
+    );
+  }
+
+  uploadDocument() {
+    return this.postJson<Record<string, unknown>>(
+      '/rag/admin/documents/upload',
+      {},
+    );
+  }
+
+  async getJson<T>(path: string): Promise<RagClientResult<T>> {
     return this.request<T>(path, { method: 'GET' });
   }
 
@@ -88,9 +179,17 @@ export class RagClientService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    if (this.serviceToken) {
+      headers['Authorization'] = `Bearer ${this.serviceToken}`;
+    }
+
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         ...init,
+        headers,
         signal: controller.signal,
       });
       const text = await response.text();

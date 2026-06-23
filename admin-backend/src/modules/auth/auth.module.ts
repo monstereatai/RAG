@@ -6,11 +6,13 @@ import { JwtStrategy } from './jwt.strategy';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UserModule } from '../user/user.module';
+import { AccountSecurityModule } from '../account-security/account-security.module';
 
 @Module({
   imports: [
     ConfigModule,
     UserModule,
+    AccountSecurityModule,
     JwtModule.registerAsync({
       global: true,
       imports: [ConfigModule],

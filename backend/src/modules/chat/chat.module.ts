@@ -11,10 +11,15 @@ import { MemoryModule } from '../memory/memory.module';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
+import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ConversationEntity, MessageEntity]),
+    TypeOrmModule.forFeature([
+      ConversationEntity,
+      MessageEntity,
+      QueryLogEntity,
+    ]),
     ConfigModule,
     KarpathyRagModule,
     AgenticRagModule,

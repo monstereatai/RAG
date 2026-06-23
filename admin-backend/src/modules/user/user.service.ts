@@ -13,7 +13,71 @@ export class UserService {
     @Optional()
     @InjectRepository(User)
     private readonly userRepository?: Repository<User>,
-  ) {}
+  ) {
+    // 内存模式下初始化默认测试用户
+    if (!this.userRepository) {
+      this.initDefaultUsers();
+    }
+  }
+
+  private async initDefaultUsers() {
+    const now = new Date();
+    const adminPassword = await bcrypt.hash('Admin@123', 10);
+    const userPassword = await bcrypt.hash('User@123', 10);
+
+    // 内存模式下，admin 用户拥有所有权限
+    const adminPermissions = [
+      'admin:system:read',
+      'admin:documents:read',
+      'admin:documents:write',
+      'admin:audit:read',
+      'admin:role:create',
+      'admin:role:read',
+      'admin:role:update',
+      'admin:role:delete',
+      'admin:role:assign',
+      'admin:permission:create',
+      'admin:permission:read',
+      'admin:permission:update',
+      'admin:permission:delete',
+      'admin:search-ops:read',
+      'admin:qa-ops:read',
+      'admin:graph-ops:read',
+      'admin:rag:read',
+      'admin:rag:write',
+      'admin:notifications:read',
+      'admin:notifications:write',
+      'admin:account-security:read',
+    ];
+
+    this.users = [
+      {
+        id: 1,
+        username: 'admin',
+        password: adminPassword,
+        email: 'admin@example.com',
+        role: 'admin',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        roles: [],
+        permissions: adminPermissions,
+      } as User,
+      {
+        id: 2,
+        username: 'user',
+        password: userPassword,
+        email: 'user@example.com',
+        role: 'user',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        roles: [],
+        permissions: [],
+      } as User,
+    ];
+    this.nextId = 3;
+  }
 
   async findAll(): Promise<User[]> {
     if (!this.userRepository) {

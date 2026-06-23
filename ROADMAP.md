@@ -124,6 +124,11 @@
 - **企业级差距第四轮结构化事实治理完成**（2026-06-21）：新增 `document_chunks` 与 `fact_conflicts`，文档元数据补齐 docVersion/effectiveAt/expiredAt/sourceAuthority；上传流程写入父子 chunk、source span、section/clause/table metadata，并检测简单版本事实冲突；GraphRAG 写入 aliases/confidence，RAG references 返回结构化来源字段。真实迁移、真实上传、真实查询、真实删除清理均已验证。
 - **中文错别字召回回归修复完成**（2026-06-21）：真实 e2e 暴露 `企业知识哭` 未能通过引用支撑闸门；已将已确认高价值错别字 `知识哭 -> 知识库` 纳入查询归一化，并把修正后的 query 传给生成 prompt，避免 LLM 先解释“笔误”导致无引用 claim 被拒。最小真实复现与完整 `eval:rag:e2e` 均通过。
 - **admin-backend 迁入与本地生成物清理完成**（2026-06-23）：将 `/Users/monster/Documents/GitHub/code/magazines/template` 搬入当前仓库为 `admin-backend/`，保留源码、文档、Docker/Kubernetes/脚本和项目配置；清理 `node_modules/`、`dist/`、`coverage/`、`build/`、`tsconfig.tsbuildinfo` 与 `.DS_Store` 等本地生成物。已按管理后台架构文档修正项目命名：目录名、`package.json`、`package-lock.json`、README、CLAUDE、health/tracing service name 均对齐为 `admin-backend`，分层文档改为 `docs/backend-layers.md`。验证通过：`clean-ok` 确认生成物目录不存在，`naming-ok` 确认 `admin-backend/` 存在且 `template/` 不存在，`package-name-ok` 确认 package 与 lockfile 名称一致。未运行 `npm run verify`，因为本轮清理后未重新安装模板依赖；后续正式改造前需执行 `cd admin-backend && npm ci && npm run verify`。
+- **admin-backend P0 后台功能骨架补强完成**（2026-06-23）：新增 `admin-backend/ROADMAP.md` 作为管理后台后端真实进度源；补齐 `GET /admin/features` 功能完成度总览、`GET /admin/profile` 个人中心基础信息、增强 `GET /admin/dashboard` 大盘数据结构、通知中心未读/单条已读/全部已读接口、审计日志筛选参数、系统配置模块状态聚合；新增 `docs/rag-admin-api-contract.md` 记录后台依赖的 RAG 运营 API。验证通过：`cd admin-backend && npm run verify`，覆盖 build、lint、unit、e2e、migration check。验证后已清理本地生成物。当前仍阻塞：`rag-backend` 尚未暴露 `/api/v1/rag/admin/*` 运营 API，文档治理和 RAG 运营页只能返回 structured unavailable。
+- **admin-backend 通知持久化与大盘真实趋势完成**（2026-06-24）：admin-backend 新增 `Notification` entity + TypeORM 持久化（数据库不可用时自动降级内存）；大盘 `overview()` 通过 `RAG_SERVICE_TOKEN` 拉取 rag-backend 真实数据（热门 query、成本统计、文档/评测/向量索引卡片）；新增 `ServiceTokenGuard` 支持内部服务 token + JWT 双认证。验证通过：admin-backend build + test（4 suites / 26 tests）。
+- **查询日志与分析系统完成**（2026-06-24）：新建 `query_logs` 表（QueryLogEntity），ChatService 每次问答异步写入 query/mode/userId/latency/citationCount/refused；RagAdminService 的 search/QA 运营端点从 `not_implemented` 升级为真实数据查询（热门 query TOP-N、无结果 query、召回问题、成本统计）。验证通过：`cd backend && npm run build`、`npm test -- --runInBand`（21 suites / 103 tests）。
+- **gRPC 通道搭建完成**（2026-06-23）：rag-backend 新增 gRPC server（0.0.0.0:50051），admin-backend 新增 RagGrpcClientService；proto 定义 RagService（VectorSearch/GetDocument/ListDocuments/HealthCheck），4 个 RPC 全部真实数据验证通过。
+- **RAG 运营 API 完整实现完成**（2026-06-23）：新增 `backend/src/modules/rag-admin/` 模块，实现 `GET/POST /api/v1/rag/admin/*` 全部运营端点（capabilities/documents/chunks/vector-index/evaluations/conversations/reindex/search ops/qa ops/graph ops）；`KarpathyRagService` 新增 `getStats()` 方法。搜索/问答分析类端点受限于 query log 持久化，返回 structured unavailable。P0 管理后台独立项目 7 项待办全部完成。验证通过：`cd backend && npm run build`、`npx eslint`、`npm test -- --runInBand`（21 suites / 103 tests）。
 
 ## 已完成
 
@@ -362,13 +367,13 @@
 
 ### P0 — 管理后台独立项目待办
 
-- [ ] **冻结单后端后台扩展**：停止继续在 `backend/src/domains/admin/*` 中实现完整后台功能，避免 RAG 服务继续膨胀。
-- [ ] **梳理 RAG 运营 API 契约**：在 `rag-backend` 定义给 `admin-backend` 调用的运营接口，包括 capabilities、documents、chunks、vector-index、evaluations、conversations、reindex、run-evaluation。
-- [ ] **新建 `admin-backend` 项目规范**：先写项目级规则文档，再初始化独立 NestJS 后端，模块建议包含 auth/users/roles/permissions/dashboard/documents/audit-logs/notifications/system-config/rag-client。
-- [ ] **实现 `admin-backend` RAG client**：后台只通过 HTTP 调用 `rag-backend`，不 import RAG 内部 service，不直接访问 Milvus/Neo4j/ES。
-- [ ] **管理后台基础 API 骨架**：登录态、用户列表、角色权限、首页大盘、文档治理入口、系统配置状态、审计日志入口、通知入口。
-- [ ] **临时代码收口**：评估并处理 `backend/src/domains/*` 过渡代码；未经确认不删除文件，先停止继续扩展该方向。
-- [ ] **暂不抽 shared 包**：不建 `packages/shared`，`admin-backend` 自己维护 `rag-client/dto`，`rag-backend` 自己维护接口 DTO；后续只有在接口稳定且重复维护成本真实出现时，才重新评估公共契约包。
+- [x] **冻结单后端后台扩展**：`backend/src/domains/` 目录不存在，RAG 后端无 admin 域代码膨胀。（2026-06-23）
+- [x] **梳理 RAG 运营 API 契约**：`admin-backend/docs/rag-admin-api-contract.md` 已定义所需接口；`backend/src/modules/rag-admin/` 已实现 capabilities、documents、chunks、vector-index、evaluations、conversations、reindex、run-evaluation、search ops、qa ops、graph ops 全部运营端点。（2026-06-23）
+- [x] **新建 `admin-backend` 项目规范**：`admin-backend/` 已从 template 迁入，含独立 `CLAUDE.md`、`ROADMAP.md`、`package.json`；模块涵盖 auth/users/roles/permissions/dashboard/documents/audit-logs/notifications/system-config/rag-client。（2026-06-23）
+- [x] **实现 `admin-backend` RAG client**：`admin-backend/src/modules/rag-client/RagClientService` 通过 HTTP fetch 调用 `rag-backend`，不 import RAG 内部 service，不访问 Milvus/Neo4j/ES。（2026-06-23）
+- [x] **管理后台基础 API 骨架**：登录态、用户/角色/权限 CRUD、首页大盘、文档治理、系统配置、审计日志、通知入口均已实现且 `npm run verify` 通过。（2026-06-23）
+- [x] **临时代码收口**：`backend/src/domains/` 不存在，无需清理；rag-backend 内已新增正规 `modules/rag-admin/` 承载运营 API。（2026-06-23）
+- [x] **暂不抽 shared 包**：当前 `admin-backend` 自己维护 `rag-client/dto`，`rag-backend` 自己维护接口 DTO；两个服务通过 HTTP API 契约对齐，未建 `packages/shared`。（2026-06-23）
 
 ### P0 — 基础设施
 

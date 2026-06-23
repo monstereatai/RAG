@@ -6,12 +6,14 @@
  * Uses mocked dependencies to isolate NestJS service interaction.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { ChatService } from '../modules/chat/chat.service';
 import { KarpathyRagService } from '../rag/karpathy/karpathy-rag.service';
 import { AgenticRagService } from '../rag/agentic/agentic-rag.service';
 import { ConversationService } from '../modules/chat/conversation.service';
 import { ConversationEmbeddingService } from '../modules/chat/conversation-embedding.service';
 import { MemoryService } from '../modules/memory/memory.service';
+import { QueryLogEntity } from '../providers/db/entities/query-log.entity';
 import { BadRequestException } from '@nestjs/common';
 
 describe('ChatModes Integration', () => {
@@ -24,6 +26,9 @@ describe('ChatModes Integration', () => {
   beforeEach(async () => {
     const mockKarpathyRagService = {
       answer: jest.fn(),
+      unsupportedReliableAnswer: jest
+        .fn()
+        .mockReturnValue('知识库片段不足以支撑可靠回答，暂不生成确定结论。'),
     };
     const mockAgenticRagService = {
       run: jest.fn(),
@@ -47,6 +52,11 @@ describe('ChatModes Integration', () => {
       classifyAndPersist: jest.fn().mockResolvedValue(undefined),
     };
 
+    const mockQueryLogRepo = {
+      save: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn().mockImplementation((data: unknown) => data),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
@@ -58,6 +68,10 @@ describe('ChatModes Integration', () => {
           useValue: mockConversationEmbeddingService,
         },
         { provide: MemoryService, useValue: mockMemoryService },
+        {
+          provide: getRepositoryToken(QueryLogEntity),
+          useValue: mockQueryLogRepo,
+        },
       ],
     }).compile();
 
