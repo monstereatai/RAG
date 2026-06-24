@@ -5,6 +5,7 @@ import {
   RagDocumentQueryDto,
   RagEvaluationRunDto,
 } from './dto/rag-admin.dto';
+import { resolveRagServiceToken } from './rag-service-token';
 
 export interface RagAguiStreamQuery {
   query: string;
@@ -30,10 +31,7 @@ export class RagClientService {
       process.env.RAG_SERVICE_TIMEOUT_MS ||
       2000,
     );
-    this.serviceToken =
-      this.configService.get<string>('RAG_SERVICE_TOKEN') ??
-      process.env.RAG_SERVICE_TOKEN ??
-      '';
+    this.serviceToken = resolveRagServiceToken(this.configService);
   }
 
   getConfig() {

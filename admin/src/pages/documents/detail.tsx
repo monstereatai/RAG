@@ -7,7 +7,7 @@ import {
   TagOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { PageContainer } from '@ant-design/pro-components';
+import { ModulePage, documentNav } from '@/components/AdminShell';
 import { history, useParams } from '@umijs/max';
 import {
   Button,
@@ -61,15 +61,15 @@ const DocumentDetail: React.FC = () => {
 
   if (loading) {
     return (
-      <PageContainer>
+      <ModulePage activeKey="mine" navItems={documentNav} title="文档详情">
         <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
-      </PageContainer>
+      </ModulePage>
     );
   }
 
   if (!doc) {
     return (
-      <PageContainer>
+      <ModulePage activeKey="mine" navItems={documentNav} title="文档详情">
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => history.push('/documents')}
@@ -77,7 +77,7 @@ const DocumentDetail: React.FC = () => {
           返回文档列表
         </Button>
         <div style={{ textAlign: 'center', marginTop: 100 }}>文档不存在</div>
-      </PageContainer>
+      </ModulePage>
     );
   }
 
@@ -86,12 +86,7 @@ const DocumentDetail: React.FC = () => {
   const meta = doc.metadata;
 
   return (
-    <PageContainer
-      header={{
-        title: doc.filename,
-        onBack: () => history.push('/documents'),
-      }}
-    >
+    <ModulePage activeKey="mine" navItems={documentNav} title="文档详情">
       <Row gutter={[24, 24]}>
         <Col xs={24} lg={8}>
           <Card title="文档信息" size="small">
@@ -205,7 +200,7 @@ const DocumentDetail: React.FC = () => {
           </Card>
         </Col>
       </Row>
-    </PageContainer>
+    </ModulePage>
   );
 };
 

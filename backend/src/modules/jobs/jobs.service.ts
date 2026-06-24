@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { CronJob } from 'cron';
 import { randomUUID } from 'node:crypto';
 import { ScheduledJobEntity } from '../../providers/db/entities/job.entity';
+import { JobExecutionEntity } from '../../providers/db/entities/job-execution.entity';
 import type { CreateJobInput } from './job.types';
 import { SupervisorService } from '../supervisor/supervisor.service';
 
@@ -21,6 +22,8 @@ export class JobsService implements OnModuleInit {
     private readonly schedulerRegistry: SchedulerRegistry,
     @InjectRepository(ScheduledJobEntity)
     private readonly jobRepo: Repository<ScheduledJobEntity>,
+    @InjectRepository(JobExecutionEntity)
+    private readonly executionRepo: Repository<JobExecutionEntity>,
     private readonly supervisorService: SupervisorService,
   ) {}
 
@@ -53,6 +56,15 @@ export class JobsService implements OnModuleInit {
   async list(): Promise<ScheduledJobEntity[]> {
     return this.jobRepo.find({
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  /** 获取某任务的执行历史 */
+  async getExecutions(jobId: string, limit = 20): Promise<JobExecutionEntity[]> {
+    return this.executionRepo.find({
+      where: { jobId },
+      order: { startedAt: 'DESC' },
+      take: limit,
     });
   }
 
@@ -155,6 +167,10 @@ export class JobsService implements OnModuleInit {
     });
     this.schedulerRegistry.addCronJob(job.id, runtime);
     runtime.start();
+
+    // Compute next run time
+    job.nextRunAt = runtime.nextDate()?.toJSDate() ?? null;
+    this.jobRepo.save(job).catch(() => {});
   }
 
   private startInterval(job: ScheduledJobEntity): void {
@@ -163,6 +179,9 @@ export class JobsService implements OnModuleInit {
       void this.run(job.id);
     }, everyMs);
     this.schedulerRegistry.addInterval(job.id, ref);
+
+    job.nextRunAt = new Date(Date.now() + everyMs);
+    this.jobRepo.save(job).catch(() => {});
   }
 
   private startTimeout(job: ScheduledJobEntity): void {
@@ -175,34 +194,79 @@ export class JobsService implements OnModuleInit {
         if (current) {
           current.enabled = false;
           current.running = false;
+          current.nextRunAt = null;
           await this.jobRepo.save(current);
         }
         this.safeDeleteTimeout(job.id);
       })();
     }, delay);
     this.schedulerRegistry.addTimeout(job.id, ref);
+
+    job.nextRunAt = at;
+    this.jobRepo.save(job).catch(() => {});
   }
 
   private async run(id: string): Promise<void> {
     const job = await this.jobRepo.findOneBy({ id });
     if (!job) return;
+
     const now = new Date();
-    job.lastRun = now.toISOString();
-    job.updatedAt = now;
-    await this.jobRepo.save(job);
+    const startedAt = Date.now();
+    const executionId = randomUUID();
+
+    // Create execution record
+    const execution = this.executionRepo.create({
+      id: executionId,
+      jobId: job.id,
+      status: 'running',
+      startedAt: now,
+    });
+    await this.executionRepo.save(execution);
+
     try {
       const result = await this.withTimeout(
         this.supervisorService.query(job.instruction),
         30_000,
         `scheduled job ${job.id}`,
       );
-      this.logger.log(
-        `scheduled job ${job.id} completed: domain=${result.domain}, confidence=${result.confidence.toFixed(2)}`,
-      );
+
+      const durationMs = Date.now() - startedAt;
+      const resultSummary = `domain=${result.domain}, confidence=${result.confidence.toFixed(2)}`;
+
+      // Update job record
+      job.lastRun = now.toISOString();
+      job.lastResult = resultSummary;
+      job.lastError = null;
+      job.lastDurationMs = durationMs;
+      job.updatedAt = now;
+      await this.jobRepo.save(job);
+
+      // Update execution record
+      execution.status = 'completed';
+      execution.result = resultSummary;
+      execution.durationMs = durationMs;
+      await this.executionRepo.save(execution);
+
+      this.logger.log(`scheduled job ${job.id} completed: ${resultSummary}`);
     } catch (err) {
-      this.logger.warn(
-        `scheduled job ${job.id} failed: ${(err as Error).message}`,
-      );
+      const durationMs = Date.now() - startedAt;
+      const errorMsg = (err as Error).message;
+
+      // Update job record
+      job.lastRun = now.toISOString();
+      job.lastResult = null;
+      job.lastError = errorMsg;
+      job.lastDurationMs = durationMs;
+      job.updatedAt = now;
+      await this.jobRepo.save(job);
+
+      // Update execution record
+      execution.status = 'failed';
+      execution.errorMessage = errorMsg;
+      execution.durationMs = durationMs;
+      await this.executionRepo.save(execution);
+
+      this.logger.warn(`scheduled job ${job.id} failed: ${errorMsg}`);
     }
   }
 

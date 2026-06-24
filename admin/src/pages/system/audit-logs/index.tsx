@@ -1,10 +1,10 @@
 import {
-  PageContainer,
   type ProColumns,
   ProTable,
 } from '@ant-design/pro-components';
 import React from 'react';
 import { type AuditLog, getAuditLogs } from './service';
+import { ModulePage, systemNav } from '@/components/AdminShell';
 
 const AuditLogs: React.FC = () => {
   const columns: ProColumns<AuditLog>[] = [
@@ -29,7 +29,7 @@ const AuditLogs: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <ModulePage activeKey="logs" navItems={systemNav} title="系统管理"><div className="rag-panel" style={{ padding: 24 }}>
       <ProTable<AuditLog>
         headerTitle="审计日志"
         rowKey="id"
@@ -53,7 +53,7 @@ const AuditLogs: React.FC = () => {
         pagination={{ defaultPageSize: 10 }}
         options={{ density: true, fullScreen: true, reload: true }}
       />
-    </PageContainer>
+    </div></ModulePage>
   );
 };
 

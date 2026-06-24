@@ -75,45 +75,113 @@ export async function updateQaFeedback(id: string, feedback: string) {
   });
 }
 
-export function streamAguiAnswer(
+export async function streamAguiAnswer(
   query: string,
   mode: ChatMode,
   onEvent: (event: AguiEvent) => void,
   onError: (error: Error) => void,
   onClose: () => void,
-) {
+): Promise<AbortController> {
+  const controller = new AbortController();
   const token = localStorage.getItem('access_token');
-  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  const url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
-  const eventSource = new EventSource(url);
-  let closedByProtocol = false;
+  const url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}`;
 
-  eventSource.onmessage = (event) => {
+  (async () => {
     try {
-      const aguiEvent = JSON.parse(event.data) as AguiEvent;
-      onEvent(aguiEvent);
-      if (
-        aguiEvent.type === 'RUN_FINISHED' ||
-        aguiEvent.type === 'RUN_ERROR'
-      ) {
-        closedByProtocol = true;
-        eventSource.close();
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const status = response.status;
+        let message: string;
+        if (status === 401) {
+          message = '登录已过期或 token 无效，请重新登录。';
+        } else if (status === 403) {
+          message = '无权访问此功能，请联系管理员。';
+        } else if (status === 502 || status === 503) {
+          message = '后台服务暂不可用（502/503），请稍后重试。';
+        } else {
+          message = `请求失败（HTTP ${status}），请检查 admin-backend 是否正常启动。`;
+        }
+        onError(new Error(message));
         onClose();
+        return;
       }
-    } catch {
-      // Ignore malformed SSE frames.
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError(new Error('流式响应体不可读'));
+        onClose();
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          if (handleSseFrame(part, onEvent)) {
+            onClose();
+            return;
+          }
+        }
+      }
+
+      if (buffer.trim() && handleSseFrame(buffer, onEvent)) {
+        onClose();
+        return;
+      }
+
+      onClose();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        onClose();
+        return;
+      }
+      const errMsg =
+        error instanceof TypeError && error.message.includes('fetch')
+          ? '网络异常，无法连接到 admin-backend（fetch failed）。'
+          : error instanceof Error
+            ? error.message
+            : '流式问答连接异常';
+      onError(new Error(errMsg));
+      onClose();
     }
-  };
+  })();
 
-  eventSource.onerror = () => {
-    if (closedByProtocol) return;
-    eventSource.close();
-    onError(
-      new Error(
-        'AG-UI 流式连接失败，请确认 admin-backend 已启动并可通过 /api/admin/qa-ops/agui/stream 访问。',
-      ),
-    );
-  };
+  return controller;
+}
 
-  return eventSource;
+function handleSseFrame(
+  frame: string,
+  onEvent: (event: AguiEvent) => void,
+): boolean {
+  const data = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trimStart())
+    .join('\n');
+
+  if (!data) return false;
+
+  try {
+    const aguiEvent = JSON.parse(data) as AguiEvent;
+    onEvent(aguiEvent);
+    return aguiEvent.type === 'RUN_FINISHED' || aguiEvent.type === 'RUN_ERROR';
+  } catch {
+    return false;
+  }
 }

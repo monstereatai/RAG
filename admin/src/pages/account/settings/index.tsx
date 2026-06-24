@@ -1,6 +1,6 @@
-import { GridContent } from '@ant-design/pro-components';
 import { Menu } from 'antd';
 import React, { useLayoutEffect, useRef, useState } from 'react';
+import { accountNav, ModulePage } from '@/components/AdminShell';
 import ApiView from './components/api';
 import BaseView from './components/base';
 import NotificationView from './components/notification';
@@ -81,7 +81,7 @@ const Settings: React.FC = () => {
     };
   }, []);
   return (
-    <GridContent>
+    <ModulePage activeKey="settings" navItems={accountNav} title="个人设置">
       <div
         className={styles.main}
         ref={(ref) => {
@@ -108,7 +108,7 @@ const Settings: React.FC = () => {
           <SettingsContent selectKey={initConfig.selectKey} />
         </div>
       </div>
-    </GridContent>
+    </ModulePage>
   );
 };
 export default Settings;

@@ -132,6 +132,11 @@ cd backend && npm run smoke:redis-checkpointer
 
 **M0-M5 已完成，P0/P1/P2/P3 大部分能力已实现并验证；当前剩余工作集中在外部专项联调与红线确认项。**（2026-06-21）
 
+## 开发环境要求
+
+- **Node.js ≥ 22**（管理后台要求 Node ≥ 22；项目根目录有 `.nvmrc` / `.node-version`，`nvm use` 自动切换）
+- **包管理器**：`backend/` 用 npm，`admin/` 用 pnpm，`frontend/` 见各子项目文档
+
 已完成能力：
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
 - M1 simple RAG：上传 Markdown/PDF/TXT/DOCX、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答。

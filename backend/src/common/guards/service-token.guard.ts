@@ -7,6 +7,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
+const LOCAL_DEV_RAG_SERVICE_TOKEN = 'local-rag-service-token';
+
+interface AuthenticatedRequest {
+  headers: Record<string, string | string[] | undefined>;
+  user?: unknown;
+}
+
 /**
  * 复合认证守卫：支持 JWT token 和内部服务 token
  * - JWT: Authorization: Bearer <jwt>
@@ -20,18 +27,15 @@ export class ServiceTokenGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {
-    this.serviceToken =
-      this.configService.get<string>('RAG_SERVICE_TOKEN') ??
-      process.env.RAG_SERVICE_TOKEN ??
-      '';
+    this.serviceToken = this.resolveServiceToken();
   }
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const authHeader = request.headers.authorization;
-    const serviceTokenHeader = request.headers['x-service-token'] as
-      | string
-      | undefined;
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const authHeader = this.firstHeader(request.headers.authorization);
+    const serviceTokenHeader = this.firstHeader(
+      request.headers['x-service-token'],
+    );
 
     // 1. 先尝试服务 token
     const token = serviceTokenHeader ?? this.extractBearerToken(authHeader);
@@ -67,5 +71,29 @@ export class ServiceTokenGuard implements CanActivate {
     if (!header) return null;
     const match = /^Bearer\s+(.+)$/i.exec(header);
     return match?.[1] ?? null;
+  }
+
+  private firstHeader(value?: string | string[]): string | undefined {
+    return Array.isArray(value) ? value[0] : value;
+  }
+
+  private resolveServiceToken(): string {
+    const configured =
+      this.configService.get<string>('RAG_SERVICE_TOKEN') ??
+      process.env.RAG_SERVICE_TOKEN ??
+      '';
+    if (configured.trim()) {
+      return configured.trim();
+    }
+
+    const nodeEnv =
+      this.configService.get<string>('nodeEnv') ??
+      process.env.NODE_ENV ??
+      'development';
+    if (nodeEnv === 'production') {
+      return '';
+    }
+
+    return LOCAL_DEV_RAG_SERVICE_TOKEN;
   }
 }

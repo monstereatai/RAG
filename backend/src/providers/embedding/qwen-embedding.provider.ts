@@ -46,9 +46,9 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
       return await Promise.race([promise, timeoutPromise]);
     } catch (err) {
       this.logger.warn(
-        `[QwenEmbeddingProvider] embedQuery failed, using mock vector: ${(err as Error).message}`,
+        `[QwenEmbeddingProvider] embedQuery failed: ${(err as Error).message}`,
       );
-      return new Array(this.dimension).fill(0).map((_, i) => (i === 0 ? 1 : 0));
+      throw err;
     }
   }
 
@@ -64,11 +64,9 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
       return await Promise.race([promise, timeoutPromise]);
     } catch (err) {
       this.logger.warn(
-        `[QwenEmbeddingProvider] embedDocuments failed, using mock vectors: ${(err as Error).message}`,
+        `[QwenEmbeddingProvider] embedDocuments failed: ${(err as Error).message}`,
       );
-      return texts.map(() =>
-        new Array(this.dimension).fill(0).map((_, i) => (i === 0 ? 1 : 0)),
-      );
+      throw err;
     }
   }
 }

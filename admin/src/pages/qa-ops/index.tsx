@@ -15,15 +15,7 @@ import {
   streamAguiAnswer,
 } from './service';
 
-const conversations = [
-  ['公司差旅报销政策是什么?', '根据公司《差旅费用报销管理办法》，...', '10:30'],
-  ['如何申请系统权限?', '您可以通过以下步骤申请系统权限：...', '昨天'],
-  ['员工入职流程是怎样的?', '员工入职流程主要包括以下几个步骤：...', '昨天'],
-  ['项目管理规范有哪些?', '公司项目管理规范主要包括以下内容：...', '05/20'],
-  ['信息安全管理制度解读', '信息安全管理制度主要包括以下几个方...', '05/19'],
-  ['如何提交IT支持工单?', '您可以通过以下方式提交IT支持工单：...', '05/18'],
-  ['年度绩效考核标准是什么?', '年度绩效考核标准主要包括以下维度：...', '05/17'],
-].map(([title, desc, time]) => ({ title, desc, time }));
+const conversations: { title: string; desc: string; time: string }[] = [];
 
 interface ChatMessage {
   id: string;
@@ -40,33 +32,18 @@ interface ChatMessage {
   events?: string[];
 }
 
-const initialMessages: ChatMessage[] = [
-  {
-    id: 'demo-user',
-    role: 'user',
-    content: '公司差旅报销政策是什么?',
-    createdAt: '10:30',
-  },
-  {
-    id: 'demo-assistant',
-    role: 'assistant',
-    content:
-      '这是示例对话。输入问题并点击发送后，管理后台会通过 AG-UI 流式协议调用 RAG backend。',
-    createdAt: '10:30',
-    status: 'done',
-  },
-];
+const initialMessages: ChatMessage[] = [];
 
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState('');
   const [mode, setMode] = React.useState<ChatMode>('agentic');
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
-  const [activeTitle, setActiveTitle] = React.useState('公司差旅报销政策是什么?');
+  const [activeTitle, setActiveTitle] = React.useState('');
   const [loading, setLoading] = React.useState(false);
-  const eventSourceRef = React.useRef<EventSource | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
-    return () => eventSourceRef.current?.close();
+    return () => abortRef.current?.abort();
   }, []);
 
   const updateMessage = (
@@ -82,7 +59,8 @@ const QaOps: React.FC = () => {
     const query = input.trim();
     if (!query || loading) return;
 
-    eventSourceRef.current?.close();
+    abortRef.current?.abort();
+    abortRef.current = null;
     setInput('');
     setActiveTitle(query);
     setLoading(true);
@@ -110,7 +88,7 @@ const QaOps: React.FC = () => {
       },
     ]);
 
-    eventSourceRef.current = streamAguiAnswer(
+    streamAguiAnswer(
       query,
       mode,
       (event) => applyAguiEvent(event, assistantId),
@@ -123,7 +101,9 @@ const QaOps: React.FC = () => {
         setLoading(false);
       },
       () => setLoading(false),
-    );
+    ).then((controller) => {
+      abortRef.current = controller;
+    });
   };
 
   const applyAguiEvent = (event: AguiEvent, messageId: string) => {
@@ -276,7 +256,8 @@ const QaOps: React.FC = () => {
             ghost
             icon={<PlusOutlined />}
             onClick={() => {
-              eventSourceRef.current?.close();
+              abortRef.current?.abort();
+              abortRef.current = null;
               setMessages([]);
               setActiveTitle('新建对话');
             }}
@@ -286,17 +267,21 @@ const QaOps: React.FC = () => {
             新建对话
           </Button>
           <div className="conversation-list">
-            {conversations.map((item, index) => (
-              <button
-                className={index === 0 ? 'active' : ''}
-                key={item.title}
-                type="button"
-              >
-                <strong>{item.title}</strong>
-                <span>{item.time}</span>
-                <p>{item.desc}</p>
-              </button>
-            ))}
+            {conversations.length === 0 ? (
+              <div className="empty-conversations">暂无对话</div>
+            ) : (
+              conversations.map((item, index) => (
+                <button
+                  className={index === 0 ? 'active' : ''}
+                  key={item.title}
+                  type="button"
+                >
+                  <strong>{item.title}</strong>
+                  <span>{item.time}</span>
+                  <p>{item.desc}</p>
+                </button>
+              ))
+            )}
           </div>
           <Button type="link">查看更多会话⌄</Button>
         </aside>
@@ -306,7 +291,8 @@ const QaOps: React.FC = () => {
             <Button
               icon={<DeleteOutlined />}
               onClick={() => {
-                eventSourceRef.current?.close();
+                abortRef.current?.abort();
+                abortRef.current = null;
                 setMessages([]);
               }}
             >

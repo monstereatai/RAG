@@ -1,5 +1,4 @@
 import {
-  PageContainer,
   ProForm,
   ProFormSelect,
   ProFormSwitch,
@@ -7,10 +6,11 @@ import {
 } from '@ant-design/pro-components';
 import { Card, message } from 'antd';
 import React from 'react';
+import { ModulePage, systemNav } from '@/components/AdminShell';
 
 const SystemConfigPage: React.FC = () => {
   return (
-    <PageContainer>
+    <ModulePage activeKey="config" navItems={systemNav} title="系统管理"><div className="rag-panel" style={{ padding: 24 }}>
       <Card title="基础配置">
         <ProForm
           submitter={{ searchConfig: { submitText: '保存' } }}
@@ -37,7 +37,7 @@ const SystemConfigPage: React.FC = () => {
           <ProFormSwitch name="enableNotification" label="启用通知" />
         </ProForm>
       </Card>
-    </PageContainer>
+    </div></ModulePage>
   );
 };
 

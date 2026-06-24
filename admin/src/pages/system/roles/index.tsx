@@ -1,7 +1,6 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   ModalForm,
-  PageContainer,
   type ProColumns,
   ProFormSelect,
   ProFormText,
@@ -18,6 +17,7 @@ import {
   type RoleItem,
   updateRole,
 } from './service';
+import { ModulePage, systemNav } from '@/components/AdminShell';
 
 const Roles: React.FC = () => {
   const actionRef = useRef<any>(undefined);
@@ -32,10 +32,12 @@ const Roles: React.FC = () => {
     const res = await getPermissions();
     const data = (res as any)?.data ?? res ?? [];
     setPermissionOptions(
-      (Array.isArray(data) ? data : []).map((p: any) => ({
-        label: p.name,
-        value: p.id,
-      })),
+      (Array.isArray(data) ? data : [])
+        .filter((p: any) => p.id || p.code)
+        .map((p: any) => ({
+          label: p.name || p.code || p.id,
+          value: p.id,
+        })),
     );
   };
 
@@ -108,105 +110,105 @@ const Roles: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
-      <ProTable<RoleItem>
-        headerTitle="角色列表"
-        actionRef={actionRef}
-        rowKey="id"
-        toolBarRender={() => [
-          <Button
-            key="create"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={async () => {
-              await loadPermissions();
-              setCreateModalVisible(true);
-            }}
-          >
-            新建角色
-          </Button>,
-        ]}
-        request={async (params) => {
-          const res = await getRoles({
-            current: params.current,
-            pageSize: params.pageSize,
-            name: params.name,
-          });
-          const data = (res as any)?.data ?? res;
-          return {
-            data: Array.isArray(data) ? data : (data?.list ?? []),
-            total: (data as any)?.total ?? 0,
-            success: true,
-          };
-        }}
-        columns={columns}
-        search={{ labelWidth: 'auto' }}
-        pagination={{ defaultPageSize: 10 }}
-      />
-
-      <ModalForm
-        title="新建角色"
-        open={createModalVisible}
-        onOpenChange={setCreateModalVisible}
-        onFinish={async (values) => {
-          await createRole(values as any);
-          message.success('创建成功');
-          setCreateModalVisible(false);
-          actionRef.current?.reload();
-          return true;
-        }}
-      >
-        <ProFormText
-          name="name"
-          label="角色名"
-          rules={[{ required: true, message: '请输入角色名' }]}
+    <ModulePage activeKey="roles" navItems={systemNav} title="系统管理"><div className="rag-panel" style={{ padding: 24 }}>
+        <ProTable<RoleItem>
+          headerTitle="角色列表"
+          actionRef={actionRef}
+          rowKey="id"
+          toolBarRender={() => [
+            <Button
+              key="create"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={async () => {
+                await loadPermissions();
+                setCreateModalVisible(true);
+              }}
+            >
+              新建角色
+            </Button>,
+          ]}
+          request={async (params) => {
+            const res = await getRoles({
+              current: params.current,
+              pageSize: params.pageSize,
+              name: params.name,
+            });
+            const data = (res as any)?.data ?? res;
+            return {
+              data: Array.isArray(data) ? data : (data?.list ?? []),
+              total: (data as any)?.total ?? 0,
+              success: true,
+            };
+          }}
+          columns={columns}
+          search={{ labelWidth: 'auto' }}
+          pagination={{ defaultPageSize: 10 }}
         />
-        <ProFormTextArea name="description" label="描述" />
-        <ProFormSelect
-          name="permissionIds"
-          label="权限"
-          mode="multiple"
-          options={permissionOptions}
-        />
-      </ModalForm>
 
-      <ModalForm
-        title="编辑角色"
-        open={editModalVisible}
-        onOpenChange={(visible) => {
-          setEditModalVisible(visible);
-          if (!visible) setCurrentRole(null);
-        }}
-        initialValues={
-          currentRole
-            ? {
-                name: currentRole.name,
-                description: currentRole.description,
-                permissionIds: currentRole.permissions?.map((p) => p.id),
-              }
-            : {}
-        }
-        onFinish={async (values) => {
-          if (currentRole) {
-            await updateRole(currentRole.id, values as any);
-            message.success('更新成功');
-            setEditModalVisible(false);
-            setCurrentRole(null);
+        <ModalForm
+          title="新建角色"
+          open={createModalVisible}
+          onOpenChange={setCreateModalVisible}
+          onFinish={async (values) => {
+            await createRole(values as any);
+            message.success('创建成功');
+            setCreateModalVisible(false);
             actionRef.current?.reload();
+            return true;
+          }}
+        >
+          <ProFormText
+            name="name"
+            label="角色名"
+            rules={[{ required: true, message: '请输入角色名' }]}
+          />
+          <ProFormTextArea name="description" label="描述" />
+          <ProFormSelect
+            name="permissionIds"
+            label="权限"
+            mode="multiple"
+            options={permissionOptions}
+          />
+        </ModalForm>
+
+        <ModalForm
+          title="编辑角色"
+          open={editModalVisible}
+          onOpenChange={(visible) => {
+            setEditModalVisible(visible);
+            if (!visible) setCurrentRole(null);
+          }}
+          initialValues={
+            currentRole
+              ? {
+                  name: currentRole.name,
+                  description: currentRole.description,
+                  permissionIds: currentRole.permissions?.map((p: any) => p.id),
+                }
+              : {}
           }
-          return true;
-        }}
-      >
-        <ProFormText name="name" label="角色名" />
-        <ProFormTextArea name="description" label="描述" />
-        <ProFormSelect
-          name="permissionIds"
-          label="权限"
-          mode="multiple"
-          options={permissionOptions}
-        />
-      </ModalForm>
-    </PageContainer>
+          onFinish={async (values) => {
+            if (currentRole) {
+              await updateRole(currentRole.id, values as any);
+              message.success('更新成功');
+              setEditModalVisible(false);
+              setCurrentRole(null);
+              actionRef.current?.reload();
+            }
+            return true;
+          }}
+        >
+          <ProFormText name="name" label="角色名" />
+          <ProFormTextArea name="description" label="描述" />
+          <ProFormSelect
+            name="permissionIds"
+            label="权限"
+            mode="multiple"
+            options={permissionOptions}
+          />
+        </ModalForm>
+      </div></ModulePage>
   );
 };
 

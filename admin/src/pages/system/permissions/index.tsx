@@ -1,7 +1,6 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   ModalForm,
-  PageContainer,
   type ProColumns,
   ProFormSelect,
   ProFormText,
@@ -17,6 +16,7 @@ import {
   type PermissionItem,
   updatePermission,
 } from './service';
+import { ModulePage, systemNav } from '@/components/AdminShell';
 
 const moduleOptions = [
   { label: '文档管理', value: 'documents' },
@@ -114,8 +114,8 @@ const Permissions: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
-      <ProTable<PermissionItem>
+    <ModulePage activeKey="permissions" navItems={systemNav} title="系统管理"><div className="rag-panel" style={{ padding: 24 }}>
+        <ProTable<PermissionItem>
         headerTitle="权限列表"
         actionRef={actionRef}
         rowKey="id"
@@ -201,7 +201,7 @@ const Permissions: React.FC = () => {
         <ProFormText name="name" label="权限名" />
         <ProFormTextArea name="description" label="描述" />
       </ModalForm>
-    </PageContainer>
+      </div></ModulePage>
   );
 };
 

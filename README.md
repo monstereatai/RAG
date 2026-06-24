@@ -24,6 +24,12 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
 
 ## 快速启动
 
+### 前置要求
+
+- **Node.js ≥ 22**（管理后台要求 Node ≥ 22，项目根目录包含 `.nvmrc` / `.node-version` 约束，`nvm use` 自动切换）
+- **包管理器**：各子项目使用不同包管理器，详见下方分项目说明
+- **Docker**（用于基础设施：PostgreSQL、Redis、Milvus 等）
+
 ### 1. 启动基础设施
 ```bash
 cd docker

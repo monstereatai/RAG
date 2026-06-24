@@ -4,12 +4,9 @@ import {
   EllipsisOutlined,
   ShareAltOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
 import { Avatar, Card, Dropdown, List, Tooltip } from 'antd';
 import React from 'react';
-import { formatNumber } from '@/utils/format';
 import type { ListItemDataType } from '../../data.d';
-import { queryFakeList } from '../../service';
 import useStyles from './index.style';
 
 function formatWan(val: number) {
@@ -58,11 +55,7 @@ const CardInfo: React.FC<{
 
 const Applications: React.FC = () => {
   const { styles: stylesApplications } = useStyles();
-  // 获取tab列表数据
-  const { data: listData } = useQuery({
-    queryKey: ['applications-list', 30],
-    queryFn: () => queryFakeList({ count: 30 }).then((res) => res.data),
-  });
+  const listData: { list: ListItemDataType[] } = { list: [] };
 
   return (
     <List<ListItemDataType>
@@ -77,55 +70,24 @@ const Applications: React.FC = () => {
         sm: 2,
         xs: 1,
       }}
-      dataSource={listData?.list || []}
+      dataSource={listData.list}
       renderItem={(item) => (
         <List.Item key={item.id}>
-          <Card
-            hoverable
-            styles={{
-              body: {
-                paddingBottom: 20,
-              },
-            }}
+          <Card hoverable styles={{ body: { paddingBottom: 20 } }}
             actions={[
-              <Tooltip key="download" title="下载">
-                <DownloadOutlined />
-              </Tooltip>,
-              <Tooltip title="编辑" key="edit">
-                <EditOutlined />
-              </Tooltip>,
-              <Tooltip title="分享" key="share">
-                <ShareAltOutlined />
-              </Tooltip>,
+              <Tooltip key="download" title="下载"><DownloadOutlined /></Tooltip>,
+              <Tooltip title="编辑" key="edit"><EditOutlined /></Tooltip>,
+              <Tooltip title="分享" key="share"><ShareAltOutlined /></Tooltip>,
               <Dropdown
-                menu={{
-                  items: [
-                    {
-                      key: '1',
-                      title: '1st menu item',
-                    },
-                    {
-                      key: '2',
-                      title: '2nd menu item',
-                    },
-                  ],
-                }}
+                menu={{ items: [{ key: '1', title: '1st menu item' }, { key: '2', title: '2nd menu item' }] }}
                 key="ellipsis"
               >
                 <EllipsisOutlined />
               </Dropdown>,
             ]}
           >
-            <Card.Meta
-              avatar={<Avatar size="small" src={item.avatar} />}
-              title={item.title}
-            />
-            <div>
-              <CardInfo
-                activeUser={formatWan(item.activeUser)}
-                newUser={formatNumber(item.newUser)}
-              />
-            </div>
+            <Card.Meta avatar={<Avatar size="small" src={item.avatar} />} title={item.title} />
+            <div><CardInfo activeUser={formatWan(item.activeUser)} newUser={formatNumber(item.newUser)} /></div>
           </Card>
         </List.Item>
       )}
@@ -133,3 +95,7 @@ const Applications: React.FC = () => {
   );
 };
 export default Applications;
+
+function formatNumber(val: number) {
+  return val?.toLocaleString() ?? '';
+}

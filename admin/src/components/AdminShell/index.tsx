@@ -49,7 +49,7 @@ const moduleMatchers: Record<string, string[]> = {
   '/qa-ops': ['/qa-ops'],
   '/graph-ops': ['/graph-ops'],
   '/account/center': ['/account', '/account-security'],
-  '/system/users': ['/system', '/menus', '/audit-logs', '/system-config', '/notifications'],
+  '/system/users': ['/system'],
 };
 
 export const dashboardNav: SideNavItem[] = [
@@ -98,11 +98,12 @@ export const accountNav: SideNavItem[] = [
 export const systemNav: SideNavItem[] = [
   { key: 'users', label: '用户管理', icon: <UserOutlined />, path: '/system/users' },
   { key: 'roles', label: '角色权限', icon: <AuditOutlined />, path: '/system/roles' },
+  { key: 'permissions', label: '权限管理', icon: <LockOutlined />, path: '/system/permissions' },
   { key: 'config', label: '系统配置', icon: <SettingOutlined />, path: '/system/config' },
   { key: 'logs', label: '日志管理', icon: <FileTextOutlined />, path: '/system/logs' },
-  { key: 'menus', label: '菜单管理', icon: <MenuOutlined />, path: '/menus' },
-  { key: 'notifications', label: '通知中心', icon: <BellOutlined />, path: '/notifications' },
-  { key: 'service', label: '服务配置', icon: <ControlOutlined />, path: '/system-config' },
+  { key: 'menus', label: '菜单管理', icon: <MenuOutlined />, path: '/system/menus' },
+  { key: 'notifications', label: '通知中心', icon: <BellOutlined />, path: '/system/notifications' },
+  { key: 'service', label: '服务配置', icon: <ControlOutlined />, path: '/system/system-config' },
 ];
 
 export function AdminShell({

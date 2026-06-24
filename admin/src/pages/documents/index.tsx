@@ -13,32 +13,12 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
-import { Button, Checkbox, Input, Select, Space, Table, Tag } from 'antd';
+import { Button, Checkbox, Input, Select, Skeleton, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useEffect, useState } from 'react';
 import { getDocuments, getUsers, type DocumentItem } from './service';
 
-const fallbackDocs: DocumentItem[] = [
-  ['1', '2024年产品需求文档.pdf', 'pdf', '张三', 'completed', '仅本人可见', '2024-05-20 14:30:22'],
-  ['2', '企业知识库使用手册.docx', 'docx', '李四', 'completed', '部门可见', '2024-05-20 11:20:15'],
-  ['3', 'Q2市场数据分析报告.xlsx', 'xlsx', '王五', 'completed', '部门可见', '2024-05-19 16:45:30'],
-  ['4', '新员工入职培训.pptx', 'pptx', '赵六', 'processing', '公司可见', '2024-05-19 09:15:45'],
-  ['5', '信息安全管理制度.pdf', 'pdf', '张三', 'completed', '公司可见', '2024-05-18 17:20:33'],
-  ['6', '项目管理流程规范.docx', 'docx', '李四', 'failed', '部门可见', '2024-05-18 10:05:12'],
-  ['7', '客户服务协议模板.pdf', 'pdf', '王五', 'completed', '公开可见', '2024-05-17 15:30:25'],
-  ['8', '年度预算计划表.xlsx', 'xlsx', '赵六', 'completed', '仅本人可见', '2024-05-17 11:10:08'],
-].map(([id, filename, fileType, uploadedBy, status, permission, createdAt]) => ({
-  id,
-  filename,
-  fileType,
-  fileSize: 1024 * 128,
-  uploadedBy,
-  status: status as DocumentItem['status'],
-  chunkCount: 32,
-  createdAt,
-  updatedAt: createdAt,
-  metadata: { category: permission },
-}));
+type PageState = 'loading' | 'data' | 'error' | 'empty';
 
 const iconMap: Record<string, React.ReactNode> = {
   pdf: <FilePdfOutlined className="file-icon pdf" />,
@@ -55,9 +35,12 @@ const statusMap: Record<string, { color: string; text: string }> = {
 };
 
 const Documents: React.FC = () => {
-  const [docs, setDocs] = useState<DocumentItem[]>(fallbackDocs);
+  const [docs, setDocs] = useState<DocumentItem[]>([]);
+  const [pageState, setPageState] = useState<PageState>('loading');
+  const [total, setTotal] = useState(0);
 
-  useEffect(() => {
+  const fetchDocs = () => {
+    setPageState('loading');
     Promise.all([
       getDocuments({ current: 1, pageSize: 20 }),
       getUsers(),
@@ -65,6 +48,7 @@ const Documents: React.FC = () => {
       .then(([docRes, userRes]: [any, any]) => {
         const raw = docRes?.data ?? docRes;
         const items = raw?.data?.items ?? (Array.isArray(raw) ? raw : []);
+        const rawTotal = raw?.data?.total ?? raw?.total ?? (Array.isArray(items) ? items.length : 0);
 
         const userRaw = userRes?.data ?? userRes;
         const userList = userRaw?.data?.items ?? (Array.isArray(userRaw) ? userRaw : []);
@@ -75,7 +59,7 @@ const Documents: React.FC = () => {
           });
         }
 
-        if (Array.isArray(items) && items.length) {
+        if (Array.isArray(items) && items.length > 0) {
           setDocs(
             items.map((item: any) => ({
               id: item.docId,
@@ -89,9 +73,19 @@ const Documents: React.FC = () => {
               metadata: { category: item.category, title: item.title },
             })),
           );
+          setTotal(Number(rawTotal) || items.length);
+          setPageState('data');
+        } else {
+          setPageState('empty');
         }
       })
-      .catch(() => setDocs(fallbackDocs));
+      .catch(() => {
+        setPageState('error');
+      });
+  };
+
+  useEffect(() => {
+    fetchDocs();
   }, []);
 
   const columns: ColumnsType<DocumentItem> = [
@@ -151,14 +145,44 @@ const Documents: React.FC = () => {
         <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
         <Select defaultValue="权限范围" options={[{ value: '权限范围' }]} />
         <Button>更多筛选</Button>
-        <Button icon={<ReloadOutlined />} type="text" />
+        <Button icon={<ReloadOutlined />} onClick={fetchDocs} type="text" />
       </div>
       <div className="view-switch">
         <Button icon={<TableOutlined />} type="primary" />
         <Button icon={<AppstoreOutlined />} />
       </div>
       <div className="rag-panel document-table">
-        <Table columns={columns} dataSource={docs} pagination={{ pageSize: 10, total: 128 }} rowKey="id" />
+        {pageState === 'loading' && (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        )}
+        {pageState === 'error' && (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <h3>加载失败</h3>
+            <p style={{ color: '#999', margin: '12px 0 24px' }}>
+              无法获取文档列表，请确认服务正常运行。
+            </p>
+            <Button icon={<ReloadOutlined />} onClick={fetchDocs} type="primary">
+              重新加载
+            </Button>
+          </div>
+        )}
+        {pageState === 'empty' && (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <h3>暂无文档</h3>
+            <p style={{ color: '#999', margin: '12px 0' }}>
+              知识库还没有文档，请上传文档开始使用。
+            </p>
+            <Button icon={<UploadOutlined />} type="primary">上传文档</Button>
+          </div>
+        )}
+        {pageState === 'data' && (
+          <Table
+            columns={columns}
+            dataSource={docs}
+            pagination={{ pageSize: 10, total }}
+            rowKey="id"
+          />
+        )}
       </div>
     </ModulePage>
   );

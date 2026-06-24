@@ -42,6 +42,11 @@ export class JobsController {
     return this.jobsService.stop(id);
   }
 
+  @Get(':id/executions')
+  getExecutions(@Param('id') id: string) {
+    return this.jobsService.getExecutions(id);
+  }
+
   @Delete(':id')
   @Roles('admin')
   delete(@Param('id') id: string) {

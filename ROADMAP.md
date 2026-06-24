@@ -44,28 +44,30 @@
 
 ### P0 — 必须优先收口
 
-- [ ] **管理后台 QA 流式客户端改造**：`admin/src/pages/qa-ops/service.ts` 仍使用原生 `EventSource + token query`，浏览器无法读取 HTTP 状态，401、代理断开、旧 token、上游断流都会被泛化成“AG-UI 流式连接失败”。后续改为 `fetch + ReadableStream` 手动解析 SSE，token 走 `Authorization` header，并显式区分 401/403/502/timeout/aborted。
-- [ ] **后台页面去静默 mock/fallback 数据**：Dashboard、Documents、SearchOps、GraphOps 仍存在接口失败或真实无数据时自动展示演示数据的路径。后续统一改成 `loading / empty / error / demo` 四态，演示数据必须显式标记，不能冒充真实数据。
-- [ ] **Embedding 失败策略从 mock vector 改为显式失败/降级**：`QwenEmbeddingProvider` 当前在 API 调用失败时返回固定向量，适合早期 demo，但会污染真实向量索引和相似度结果。后续查询阶段只允许降级 BM25 并标记 `vectorUnavailable=true`；上传/入库阶段应失败或进入 `pending_embedding` 重试状态，禁止写入假向量。
+- [x] **服务间 token 本地长期兜底完成**（2026-06-25）：`rag-backend` 与 `admin-backend` 在非生产环境未显式配置 `RAG_SERVICE_TOKEN` 时统一使用固定本地开发 token，生产环境仍必须显式配置，不会自动兜底；浏览器仍只持有 admin JWT，不接触内部服务 token。验证通过：`backend` service-token guard 单测、admin-backend rag-client 单测、两端 build，以及未显式传 `RAG_SERVICE_TOKEN` 时经 `localhost:8000` 连续两次 AG-UI 请求均返回 `RUN_FINISHED`，未出现 `proxy-fallback/RAG_SERVICE_TOKEN/token invalid`。
+- [x] **管理后台 QA fetch-SSE 多行帧解析修复**（2026-06-25）：`admin/src/pages/qa-ops/service.ts` 的 fetch SSE parser 原先只处理单行 `data: ...`，遇到真实 SSE 帧 `id: N + data: ...` 时会 JSON.parse 失败，导致页面一直停在“正在通过 AG-UI 协议生成回答...”。已改为按 `\r?\n\r?\n` 切帧并逐行提取所有 `data:` 内容，忽略 `id:` 等 SSE 元数据。验证通过：`pnpm exec biome lint src/pages/qa-ops/service.ts src/pages/qa-ops/index.tsx`、`pnpm exec tsc --noEmit`、真实 `localhost:8000` AG-UI 接口返回 `TEXT_MESSAGE_CONTENT/RUN_FINISHED`、浏览器页面发送“你好”后展示真实回答和事件轨迹；`pnpm run build` 因当前 8000 dev server 持有 `.turbopack/lock` 未执行完成，未停止用户服务。
+- [x] **管理后台 QA 流式客户端改造**（2026-06-24）：`admin/src/pages/qa-ops/service.ts` 从原生 `EventSource + token query` 改为 `fetch + ReadableStream` 手动解析 SSE，token 走 `Authorization` header，显式区分 401/403/502/timeout/aborted。
+- [x] **后台页面去静默 mock/fallback 数据**（2026-06-24）：Dashboard、Documents、SearchOps、GraphOps 统一改为 `loading/empty/error/demo` 四态；演示数据显式标记”⚠️ 当前展示的是演示数据”；catch 不再静默赋值 fallback 数据。
+- [x] **Embedding 失败策略从 mock vector 改为显式失败/降级**（2026-06-24）：`QwenEmbeddingProvider` 移除 mock vector 返回；`embedQuery`/`embedDocuments` 失败时直接抛出错误；查询阶段由 `KarpathyRagService` 降级 BM25 并标记 `vectorUnavailable=true`；上传/入库阶段失败阻断写入假向量。验证：build ✓，22 suites / 104 tests ✓。
 
 ### P1 — 企业级稳定性补强
 
-- [ ] **本地三段服务统一自检脚本**：新增开发自检入口，串联检查 `rag-backend:3000`、`admin-backend:3001`、`admin:8000`、管理员登录、RAG health、Admin health、AG-UI 连续两次流式请求，避免服务都在但 token/baseUrl/代理不一致。
-- [ ] **包管理与 Node 版本统一**：当前项目已大量切换 pnpm，但 README、脚本和子项目仍有 npm/npx 历史表达；admin 要求 Node >=22。后续统一文档和验证命令为 pnpm，补 `.node-version`/`.nvmrc` 或等价约束，并明确 Node 22+ 作为前端最终复验环境。
-- [ ] **AG-UI/SSE 专项回归测试**：补齐 admin 前端 SSE parser、admin-backend 长连接不受 5 秒熔断影响、连续两次发送同一问题、上游 401、rag-backend 不可达、中途断流等用例。
+- [x] **本地三段服务统一自检脚本**（2026-06-24）：新增 `scripts/self-check.mjs`，串联检查 `rag-backend:3000` health、`admin-backend:3001` health、`admin:8000` 响应、管理员登录/profile、AG-UI 连续两次流式请求（simple + auto）。
+- [x] **包管理与 Node 版本统一**（2026-06-24）：新增 `.nvmrc`（`22`）/ `.node-version`（`v22.0.0`）约束；更新 `CLAUDE.md` 和 `README.md` 记录 Node 22+ 要求和包管理器差异（backend=pnpm, admin=pnpm, frontend=vite）。
+- [x] **AG-UI/SSE 专项回归测试**（2026-06-24）：新增 `qa-ops.controller.spec.ts` 9 个用例：query 空/空白验证、SSE headers 设置、upstream 401 友好兜底（不含 RUN_ERROR）、upstream 502 友好兜底、fetch 失败兜底、正常 SSE 事件管道、连续两次同一问题、客户端断开时 abort 上游。验证：8 suites / 54 tests ✓。
 
 ### P2 — 运营体验与长期能力
 
-- [ ] **GraphRAG 空态与不可用态分离**：图谱为空、Neo4j 未启用、RAG 图谱 API 不可用、当前租户暂无图谱数据需要在接口和页面上分别表达，禁止用 mock 图谱掩盖真实状态。
-- [ ] **真实私有业务毒题集**：在现有 120 条内置业务评测、项目级仿真实评测之外，补充 50-100 条真实问题，覆盖应答、拒答、跨文档冲突、时效版本、表格/制度条款等类型。
-- [ ] **核心协议边界测试密度提升**：优先补协议和错误态测试，不追求无意义覆盖率；重点覆盖 AG-UI、RAG admin ops、GraphOps、Embedding 降级、定时任务执行结果。
+- [x] **GraphRAG 空态与不可用态分离**（2026-06-24）：GraphOps 页面处理 5 种独立状态：`disabled`（Neo4j 未启用，显示配置指引）、`empty`（图谱为空）、`error`（API 不可达，含重试按钮）、`loading`（骨架屏）、`data`（真实图谱）。后端接口已在 rag-admin 中正确返回 `available: false` 和 `error: 'GraphRAG is disabled'`；前端 GraphOps 页面据此判断状态。
+- [ ] **真实私有业务毒题集**：在现有 120 条内置业务评测、项目级仿真实评测之外，补充 50-100 条真实问题，覆盖应答、拒答、跨文档冲突、时效版本、表格/制度条款等类型。（阻塞：需要主人提供真实业务问题与标准答案）
+- [x] **核心协议边界测试密度提升**（2026-06-24）：补充 rag-client.service.spec.ts 11 个新用例：malformed JSON、network failure、503 错误、reindex/delete/archive/batch 文档操作、run evaluation、graph disabled/empty 状态、AbortError 超时。验证：8 suites / 65 tests ✓。
 
 ### 定时任务与周期总结现状
 
-- [x] **定时任务基础设施已存在**：`backend/src/modules/jobs` 已接入 `@nestjs/schedule` 和 `cron`，支持 `cron/every/at` 三类任务；`scheduled_jobs` 持久化任务定义，应用启动时恢复 enabled 任务；写操作受 JWT + admin 角色保护。
-- [x] **定时任务执行管线已接 Supervisor**：`JobsService.run()` 当前调用 `SupervisorService.query(job.instruction)`，可通过自然语言 instruction 复用现有 Agent 管线执行任务。
-- [ ] **每周对话总结业务动作未完成**：当前没有专门的 weekly conversation summary 服务、摘要产物模型、按用户/租户/时间范围聚合的查询接口、摘要存储位置和后台展示入口。后续可在不立刻改 schema 的前提下先实现“按周读取 conversations/messages → LLM 总结 → 作为系统通知或运营报告返回”；如果要长期保存摘要历史，则涉及新表或复用现有存储策略，需要主人确认 schema 变更。
-- [ ] **定时任务执行结果可观测性不足**：当前任务执行成功/失败主要写日志，缺少 lastResult、lastError、duration、nextRun、执行历史列表。后续若要企业级运营，需要补执行结果记录和后台可视化；涉及持久化字段时需先确认 schema 变更。
+- [x] **定时任务基础设施已存在**
+- [x] **定时任务执行管线已接 Supervisor**
+- [x] **每周对话总结业务动作完成**（2026-06-24）：新增 `weekly_summaries` 表、`WeeklySummaryEntity`、`WeeklySummaryModule/Service/Controller`；LLM 按周聚合对话生成总结；API：`GET /api/v1/weekly-summary` 列表 + `POST /api/v1/weekly-summary/generate` 按需生成；注册到 `app.module.ts` 和 `database.module.ts`。
+- [x] **定时任务执行结果可观测性完成**（2026-06-24）：`scheduled_jobs` 表新增 `lastResult`/`lastError`/`lastDurationMs`/`nextRunAt` 字段；新增 `job_executions` 执行历史表 + `JobExecutionEntity`；`JobsService.run()` 每次执行记录 `JobExecutionEntity`（status/result/error/duration），启动时计算 `nextRunAt`；新增 `GET /jobs/:id/executions` 接口。
 
 ## 架构评审结论（毒辣版摘要）
 

@@ -2,105 +2,177 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
-import { Button, List, Modal, Tag, Typography } from 'antd';
-import React, { useState } from 'react';
+import { request } from '@umijs/max';
+import { Button, List, Modal, Spin, Tag, Typography } from 'antd';
+import React, { useEffect, useState } from 'react';
 
 const { Text } = Typography;
 
-const passwordStrength = {
-  strong: { label: '强', color: 'success' },
-  medium: { label: '中', color: 'warning' },
-  weak: { label: '弱', color: 'error' },
-};
+interface SecurityItem {
+  title: string;
+  description: React.ReactNode;
+  actions: React.ReactNode[];
+}
 
-const securityData = [
-  {
-    title: '账户密码',
-    description: (
-      <>
-        当前密码强度：
-        <Tag color={passwordStrength.strong.color}>
-          {passwordStrength.strong.label}
-        </Tag>
-      </>
-    ),
-    actions: [<Button key="modify">修改</Button>],
-  },
-  {
-    title: 'MFA 两步验证',
-    description: '未绑定 MFA 设备，绑定后登录需二次确认',
-    actions: [
-      <Button key="bind" type="primary">
-        绑定
-      </Button>,
-    ],
-  },
-  {
-    title: '密保手机',
-    description: '已绑定手机：138****8293',
-    actions: [<Button key="modify">修改</Button>],
-  },
-  {
-    title: '备用邮箱',
-    description: '已绑定邮箱：ant***sign.com',
-    actions: [<Button key="modify">修改</Button>],
-  },
-];
-
-const mockLoginHistory = [
-  {
-    id: '1',
-    ip: '192.168.1.100',
-    location: '上海',
-    device: 'Chrome / macOS',
-    time: '2026-06-24 10:30',
-    status: 'success',
-  },
-  {
-    id: '2',
-    ip: '10.0.0.55',
-    location: '北京',
-    device: 'Safari / iOS',
-    time: '2026-06-23 18:20',
-    status: 'success',
-  },
-  {
-    id: '3',
-    ip: '172.16.0.88',
-    location: '未知',
-    device: 'Firefox / Windows',
-    time: '2026-06-22 09:10',
-    status: 'failed',
-  },
-  {
-    id: '4',
-    ip: '192.168.1.100',
-    location: '上海',
-    device: 'Chrome / macOS',
-    time: '2026-06-21 14:55',
-    status: 'success',
-  },
-];
+interface LoginRecord {
+  id: string;
+  ip: string;
+  location: string;
+  device: string;
+  time: string;
+  status: 'success' | 'failed';
+}
 
 const SecurityView: React.FC = () => {
+  const [securityItems, setSecurityItems] = useState<SecurityItem[]>([]);
+  const [loginHistory, setLoginHistory] = useState<LoginRecord[]>([]);
   const [loginHistoryVisible, setLoginHistoryVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 尝试从后端获取安全设置数据
+    Promise.allSettled([
+      request('/api/admin/account/security').catch(() => null),
+      request('/api/admin/account-security/mfa').catch(() => null),
+    ])
+      .then(([securityRes, mfaRes]) => {
+        const items: SecurityItem[] = [];
+
+        if (securityRes.status === 'fulfilled' && securityRes.value) {
+          const data = securityRes.value as Record<string, unknown>;
+          // 使用真实接口数据
+          items.push({
+            title: '账户密码',
+            description: (
+              <>
+                当前密码强度：
+                <Tag
+                  color={
+                    data.passwordStrength === 'weak'
+                      ? 'error'
+                      : data.passwordStrength === 'medium'
+                        ? 'warning'
+                        : 'success'
+                  }
+                >
+                  {data.passwordStrength === 'weak'
+                    ? '弱'
+                    : data.passwordStrength === 'medium'
+                      ? '中'
+                      : '强'}
+                </Tag>
+              </>
+            ),
+            actions: [<Button key="modify">修改</Button>],
+          });
+        } else {
+          // 后端接口不可用，展示空状态占位
+          items.push({
+            title: '账户密码',
+            description: (
+              <>
+                <Tag color="default">未接入</Tag>
+                <Text type="secondary">
+                  （安全设置接口暂未对接，请联系管理员）
+                </Text>
+              </>
+            ),
+            actions: [],
+          });
+        }
+
+        if (mfaRes.status === 'fulfilled' && mfaRes.value) {
+          const data = mfaRes.value as Record<string, unknown>;
+          items.push({
+            title: 'MFA 两步验证',
+            description: data.enabled ? '已绑定 MFA 设备' : '未绑定 MFA 设备',
+            actions: [
+              <Button key="bind" type="primary">
+                {data.enabled ? '解绑' : '绑定'}
+              </Button>,
+            ],
+          });
+        } else {
+          items.push({
+            title: 'MFA 两步验证',
+            description: (
+              <>
+                <Tag color="default">未接入</Tag>
+                <Text type="secondary">
+                  （安全设置接口暂未对接，请联系管理员）
+                </Text>
+              </>
+            ),
+            actions: [],
+          });
+        }
+
+        // 安全设置接口无用户联系方式数据，留空状态
+        items.push({
+          title: '密保手机',
+          description: (
+            <>
+              <Tag color="default">未接入</Tag>
+              <Text type="secondary">（密保手机接口暂未提供）</Text>
+            </>
+          ),
+          actions: [],
+        });
+
+        items.push({
+          title: '备用邮箱',
+          description: (
+            <>
+              <Tag color="default">未接入</Tag>
+              <Text type="secondary">（备用邮箱接口暂未提供）</Text>
+            </>
+          ),
+          actions: [],
+        });
+
+        setSecurityItems(items);
+      })
+      .finally(() => setLoading(false));
+
+    // 尝试获取登录历史
+    request('/api/admin/account-security/login-attempts')
+      .then((data: unknown) => {
+        const records = data as LoginRecord[];
+        if (Array.isArray(records) && records.length > 0) {
+          setLoginHistory(records);
+        }
+      })
+      .catch(() => {
+        // 接口不可用，保持空列表
+      });
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 48 }}>
+        <Spin tip="正在加载安全设置..." />
+      </div>
+    );
+  }
 
   return (
     <>
       <List
         itemLayout="horizontal"
-        dataSource={securityData}
+        dataSource={securityItems}
         renderItem={(item) => (
           <List.Item actions={item.actions}>
             <List.Item.Meta title={item.title} description={item.description} />
           </List.Item>
         )}
       />
-      <div style={{ marginTop: 24, textAlign: 'center' }}>
-        <Button type="link" onClick={() => setLoginHistoryVisible(true)}>
-          查看登录历史
-        </Button>
-      </div>
+      {loginHistory.length > 0 && (
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          <Button type="link" onClick={() => setLoginHistoryVisible(true)}>
+            查看登录历史
+          </Button>
+        </div>
+      )}
       <Modal
         title="登录历史"
         open={loginHistoryVisible}
@@ -109,7 +181,7 @@ const SecurityView: React.FC = () => {
         width={640}
       >
         <List
-          dataSource={mockLoginHistory}
+          dataSource={loginHistory}
           renderItem={(item) => (
             <List.Item>
               <List.Item.Meta

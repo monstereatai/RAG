@@ -49,6 +49,11 @@ describe('JobsService', () => {
         return Promise.resolve(entity);
       }),
     };
+    const mockExecutionRepo = {
+      create: jest.fn().mockImplementation((dto) => dto),
+      save: jest.fn().mockResolvedValue({}),
+      find: jest.fn().mockResolvedValue([]),
+    };
     mockSupervisorService = {
       query: jest.fn().mockResolvedValue({
         domain: 'technical',
@@ -56,7 +61,7 @@ describe('JobsService', () => {
         answer: 'done',
       }),
     };
-    service = new JobsService(scheduler, mockJobRepo, mockSupervisorService);
+    service = new JobsService(scheduler, mockJobRepo, mockExecutionRepo as any, mockSupervisorService);
   });
 
   afterEach(async () => {

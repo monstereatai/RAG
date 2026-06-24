@@ -42,6 +42,22 @@ export class ScheduledJobEntity {
   @Column({ type: 'varchar', length: 64, nullable: true })
   userId!: string | null;
 
+  /** 上次执行结果摘要 */
+  @Column({ type: 'text', nullable: true, default: null })
+  lastResult!: string | null;
+
+  /** 上次执行错误信息 */
+  @Column({ type: 'text', nullable: true, default: null })
+  lastError!: string | null;
+
+  /** 上次执行耗时（毫秒） */
+  @Column({ type: 'integer', nullable: true, default: null })
+  lastDurationMs!: number | null;
+
+  /** 下次计划执行时间 */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  nextRunAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

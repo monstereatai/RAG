@@ -99,37 +99,33 @@ export default [
         name: 'logs',
         component: './system/logs',
       },
+      {
+        path: '/system/notifications',
+        name: 'notifications',
+        component: './system/notifications',
+      },
+      {
+        path: '/system/system-config',
+        name: 'system-config',
+        component: './system/system-config',
+      },
+      {
+        path: '/system/audit-logs',
+        name: 'audit-logs',
+        component: './system/audit-logs',
+      },
+      {
+        path: '/system/menus',
+        name: 'menus',
+        component: './system/menus',
+      },
     ],
-  },
-  {
-    path: '/notifications',
-    name: 'notifications',
-    icon: 'bell',
-    component: './notifications',
-  },
-  {
-    path: '/system-config',
-    name: 'system-config',
-    icon: 'control',
-    component: './system-config',
-  },
-  {
-    path: '/audit-logs',
-    name: 'audit-logs',
-    icon: 'audit',
-    component: './audit-logs',
   },
   {
     path: '/account-security',
     name: 'account-security',
     icon: 'safety',
     component: './account-security',
-  },
-  {
-    path: '/menus',
-    name: 'menus',
-    icon: 'menu',
-    component: './menus',
   },
   {
     path: '/account',

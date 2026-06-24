@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { RagClientService } from './rag-client.service';
+import { resolveRagServiceToken } from './rag-service-token';
 
 describe('RagClientService', () => {
   let service: RagClientService;
-  let configService: ConfigService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,7 +25,6 @@ describe('RagClientService', () => {
     }).compile();
 
     service = module.get<RagClientService>(RagClientService);
-    configService = module.get<ConfigService>(ConfigService);
   });
 
   it('should be defined', () => {
@@ -239,5 +238,215 @@ describe('RagClientService', () => {
 
       expect(result.available).toBe(true);
     });
+
+    // ─── Error / Edge Case Tests ─────────────────────────────
+
+    it('should handle malformed JSON from rag backend', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => 'not-json',
+      });
+
+      const result = await service.getCapabilities();
+      expect(result.available).toBe(false);
+      expect(result.error).toContain('not valid JSON');
+    });
+
+    it('should handle network failure gracefully', async () => {
+      mockFetch.mockRejectedValue(new TypeError('fetch failed'));
+
+      const result = await service.getCapabilities();
+      expect(result.available).toBe(false);
+      expect(result.status).toBe(null);
+      expect(result.error).toContain('fetch failed');
+    });
+
+    it('should handle 503 from rag-backend', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: async () => JSON.stringify({ message: 'Service Unavailable' }),
+      });
+
+      const result = await service.getCapabilities();
+      expect(result.available).toBe(false);
+      expect(result.status).toBe(503);
+    });
+
+    // ─── Document Actions ────────────────────────────────────
+
+    it('should call reindex document', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { success: true } }),
+      });
+
+      const result = await service.reindexDocument('doc-456');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/rag/admin/documents/doc-456/reindex',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect(result.available).toBe(true);
+    });
+
+    it('should call delete document', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { success: true } }),
+      });
+
+      const result = await service.deleteDocument('doc-789');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/rag/admin/documents/doc-789',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+      expect(result.available).toBe(true);
+    });
+
+    it('should call archive document', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { archived: true } }),
+      });
+
+      const result = await service.archiveDocument('doc-111');
+      expect(result.available).toBe(true);
+    });
+
+    it('should call batch document operation', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { processed: 3 } }),
+      });
+
+      const result = await service.batchDocumentOperation({ ids: ['1', '2', '3'], action: 'delete' });
+      expect(result.available).toBe(true);
+    });
+
+    // ─── Evaluation ──────────────────────────────────────────
+
+    it('should call run evaluation', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { runId: 'eval-1', status: 'running' } }),
+      });
+
+      const result = await service.runEvaluation({
+        dataset: 'ds-1',
+        mode: 'offline' as any,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/rag/admin/evaluations/run',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('dataset'),
+        }),
+      );
+      expect(result.available).toBe(true);
+    });
+
+    // ─── Graph Ops - disabled state ──────────────────────────
+
+    it('should handle graph disabled (503) for entities', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: async () => JSON.stringify({ message: 'GraphRAG is disabled' }),
+      });
+
+      const result = await service.getGraphEntities();
+      expect(result.available).toBe(false);
+      expect(result.error).toContain('disabled');
+    });
+
+    it('should handle graph empty state', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          code: 200,
+          data: { available: true, nodeCount: 0, data: [] },
+        }),
+      });
+
+      const result = await service.getGraphSchema();
+      expect(result.available).toBe(true);
+      // The raw response body is wrapped in { code, data }
+      expect(result.data).toHaveProperty('code');
+    });
+
+    // ─── Timeout/Abort ───────────────────────────────────────
+
+    it('should handle AbortError for evaluations timeout', async () => {
+      mockFetch.mockImplementation(
+        () =>
+          new Promise((_, reject) => {
+            const error = new Error('The operation was aborted');
+            error.name = 'AbortError';
+            reject(error);
+          }),
+      );
+
+      const result = await service.getEvaluations();
+      expect(result.available).toBe(false);
+      expect(result.data).toBeNull();
+    });
+  });
+});
+
+describe('resolveRagServiceToken', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalToken = process.env.RAG_SERVICE_TOKEN;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalToken === undefined) {
+      delete process.env.RAG_SERVICE_TOKEN;
+    } else {
+      process.env.RAG_SERVICE_TOKEN = originalToken;
+    }
+  });
+
+  it('uses configured service token first', () => {
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'RAG_SERVICE_TOKEN' ? ' configured-token ' : undefined,
+      ),
+    } as unknown as ConfigService;
+
+    expect(resolveRagServiceToken(config)).toBe('configured-token');
+  });
+
+  it('uses local dev token outside production when token is missing', () => {
+    delete process.env.RAG_SERVICE_TOKEN;
+    process.env.NODE_ENV = 'development';
+    const config = {
+      get: jest.fn(() => undefined),
+    } as unknown as ConfigService;
+
+    expect(resolveRagServiceToken(config)).toBe('local-rag-service-token');
+  });
+
+  it('does not invent a token in production', () => {
+    delete process.env.RAG_SERVICE_TOKEN;
+    process.env.NODE_ENV = 'production';
+    const config = {
+      get: jest.fn(() => undefined),
+    } as unknown as ConfigService;
+
+    expect(resolveRagServiceToken(config)).toBe('');
   });
 });

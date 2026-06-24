@@ -1,10 +1,8 @@
 import { LikeOutlined, MessageFilled, StarTwoTone } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
 import { Flex, List, Tag } from 'antd';
 import React from 'react';
 import { ArticleListContent } from '@/components';
 import type { ListItemDataType } from '../../data.d';
-import { queryFakeList } from '../../service';
 import useStyles from './index.style';
 
 const IconText: React.FC<{
@@ -18,53 +16,22 @@ const IconText: React.FC<{
 
 const Articles: React.FC = () => {
   const { styles } = useStyles();
+  const listData: { list: ListItemDataType[] } = { list: [] };
 
-  // 获取tab列表数据
-  const { data: listData } = useQuery({
-    queryKey: ['articles-list', 30],
-    queryFn: () => queryFakeList({ count: 30 }).then((res) => res.data),
-  });
   return (
     <List<ListItemDataType>
       size="large"
       className={styles.articleList}
       rowKey="id"
       itemLayout="vertical"
-      dataSource={listData?.list || []}
-      style={{
-        margin: '0 -24px',
-      }}
-      renderItem={(item) => (
-        <List.Item
-          key={item.id}
-          actions={[
-            <IconText key="star" icon={<StarTwoTone />} text={item.star} />,
-            <IconText key="like" icon={<LikeOutlined />} text={item.like} />,
-            <IconText
-              key="message"
-              icon={<MessageFilled />}
-              text={item.message}
-            />,
-          ]}
-        >
-          <List.Item.Meta
-            title={
-              <a className={styles.listItemMetaTitle} href={item.href}>
-                {item.title}
-              </a>
-            }
-            description={
-              <Flex wrap gap="small">
-                <Tag>Ant Design</Tag>
-                <Tag>设计语言</Tag>
-                <Tag>蚂蚁集团</Tag>
-              </Flex>
-            }
-          />
-          <ArticleListContent data={item} />
+      dataSource={listData.list}
+      renderItem={(item: any) => (
+        <List.Item key={item.id}>
+          <List.Item.Meta title={item.title} description={item.content} />
         </List.Item>
       )}
     />
   );
 };
+
 export default Articles;

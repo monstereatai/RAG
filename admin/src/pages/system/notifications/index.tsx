@@ -1,5 +1,5 @@
 import { CheckOutlined } from '@ant-design/icons';
-import { PageContainer, ProList } from '@ant-design/pro-components';
+import { ProList } from '@ant-design/pro-components';
 import { Badge, Button, message, Space, Tag } from 'antd';
 import React, { useRef } from 'react';
 import {
@@ -9,6 +9,7 @@ import {
   markAsRead,
   type Notification,
 } from './service';
+import { ModulePage, systemNav } from '@/components/AdminShell';
 
 const typeMap: Record<string, { color: string; text: string }> = {
   system: { color: 'blue', text: '系统' },
@@ -20,7 +21,7 @@ const Notifications: React.FC = () => {
   const actionRef = useRef<any>(undefined);
 
   return (
-    <PageContainer>
+    <ModulePage activeKey="notifications" navItems={systemNav} title="系统管理"><div className="rag-panel" style={{ padding: 24 }}>
       <ProList<Notification>
         headerTitle="通知列表"
         actionRef={actionRef}
@@ -111,7 +112,7 @@ const Notifications: React.FC = () => {
         }}
         pagination={{ defaultPageSize: 10 }}
       />
-    </PageContainer>
+    </div></ModulePage>
   );
 };
 

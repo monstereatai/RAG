@@ -1,5 +1,5 @@
+import { ModulePage, accountNav } from '@/components/AdminShell';
 import {
-  PageContainer,
   ProForm,
   ProFormText,
 } from '@ant-design/pro-components';
@@ -16,11 +16,12 @@ import {
 const AccountSecurity: React.FC = () => {
   const [info, setInfo] = useState<SecurityInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     getSecurityInfo()
       .then((res) => setInfo((res as any)?.data ?? res ?? null))
-      .catch(() => {})
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -37,8 +38,28 @@ const AccountSecurity: React.FC = () => {
     },
   ];
 
+  if (loading) {
+    return (
+      <ModulePage activeKey="password" navItems={accountNav} title="账号安全">
+        <div className="rag-panel" style={{ padding: 40, textAlign: 'center', color: '#999' }}>
+          加载中...
+        </div>
+      </ModulePage>
+    );
+  }
+
+  if (error) {
+    return (
+      <ModulePage activeKey="password" navItems={accountNav} title="账号安全">
+        <div className="rag-panel" style={{ padding: 40, textAlign: 'center', color: '#ff4d4f' }}>
+          加载失败，请稍后重试
+        </div>
+      </ModulePage>
+    );
+  }
+
   return (
-    <PageContainer>
+    <ModulePage activeKey="password" navItems={accountNav} title="账号安全">
       <Card title="安全设置" style={{ marginBottom: 24 }} loading={loading}>
         <Descriptions column={1}>
           <Descriptions.Item label="上次修改密码">
@@ -114,7 +135,7 @@ const AccountSecurity: React.FC = () => {
           pagination={{ pageSize: 10 }}
         />
       </Card>
-    </PageContainer>
+    </ModulePage>
   );
 };
 
