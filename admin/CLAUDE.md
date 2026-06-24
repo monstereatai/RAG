@@ -6,18 +6,18 @@ Ant Design Pro — React enterprise boilerplate on Umi Max v4, antd v6, ProCompo
 
 ## Commands
 
-`npm start` (dev+mock), `npm run dev` (no mock), `npm run build` (utoopack), `npm run lint` (Biome+tsc), `npm run test` (Jest), `npx antd lint ./src` (antd-specific checks).
+`pnpm start` (dev+mock), `pnpm run dev` (no mock), `pnpm run build` (utoopack), `pnpm run lint` (Biome+tsc), `pnpm run test` (Vitest), `pnpm exec antd lint ./src` (antd-specific checks).
 
-Other: `npm run openapi` (regenerate `src/services/`), `npm run simple` (**irreversible** — commit first), `npm run biome` (auto-fix), `npm run tsc` (type-check only).
+Other: `pnpm run openapi` (regenerate `src/services/`), `pnpm run simple` (**irreversible** — commit first), `pnpm run biome` (auto-fix), `pnpm run tsc` (type-check only).
 
 ## Critical Rules
 
-- **Never edit `src/services/ant-design-pro/`** — auto-generated, regenerate with `npm run openapi`
-- **Biome only** — no ESLint, no Prettier. Both `npm run lint` and `npx antd lint ./src` must pass before commit
-- **Always `npx antd info <Component>` before writing antd code** — don't guess APIs from memory
-- **`npm run simple` is irreversible** — always commit/branch first
+- **Never edit `src/services/ant-design-pro/`** — auto-generated, regenerate with `pnpm run openapi`
+- **Biome only** — no ESLint, no Prettier. Both `pnpm run lint` and `pnpm exec antd lint ./src` must pass before commit
+- **Always `pnpm exec antd info <Component>` before writing antd code** — don't guess APIs from memory
+- **`pnpm run simple` is irreversible** — always commit/branch first
 - **Conventional commits** required (commitlint enforced)
-- **TypeScript strict** · **Node ≥ 22** · **`package-lock.json`** (not yarn/pnpm)
+- **TypeScript strict** · **Node ≥ 22** · **pnpm + `pnpm-lock.yaml`**
 - **`.umi` dir is auto-generated** — delete `src/.umi` and restart if dev server acts up
 
 ## Architecture Essentials
@@ -52,10 +52,10 @@ Run `/pro-upgrade` in Claude Code to auto-upgrade the project to the latest Ant 
 
 Run `/antd` in Claude Code for any antd-related work. It provides access to `@ant-design/cli` with offline metadata for antd v3/v4/v5/v6. Key commands:
 
-- `npx antd info <Component>` — look up props/API before writing code (mandatory)
-- `npx antd lint ./src` — check for deprecated or problematic usage (must pass before commit)
-- `npx antd demo <Component> <demo>` — get working code examples
-- `npx antd migrate <from> <to>` — migration checklist between major versions
+- `pnpm exec antd info <Component>` — look up props/API before writing code (mandatory)
+- `pnpm exec antd lint ./src` — check for deprecated or problematic usage (must pass before commit)
+- `pnpm exec antd demo <Component> <demo>` — get working code examples
+- `pnpm exec antd migrate <from> <to>` — migration checklist between major versions
 
 ## Page Co-location
 

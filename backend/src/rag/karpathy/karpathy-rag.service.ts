@@ -521,21 +521,33 @@ export class KarpathyRagService implements OnModuleInit {
     const chunks = await this.retrieve(normalizedQuery, {}, userId);
 
     if (chunks.length === 0) {
+      const answer = await this.generateModelFallbackAnswer(
+        query,
+        '没有检索到候选片段',
+        history,
+        memoryMessages,
+      );
       return {
-        answer: '未找到相关内容，请先上传文档。',
+        answer,
         references: [],
         retrievalSufficient: false,
-        retrievalReason: '没有检索到候选片段',
+        retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
       };
     }
 
     const retrievalGate = this.assessRetrievalQuality(normalizedQuery, chunks);
     if (!retrievalGate.sufficient) {
+      const answer = await this.generateModelFallbackAnswer(
+        query,
+        retrievalGate.reason,
+        history,
+        memoryMessages,
+      );
       return {
-        answer: this.unsupportedAnswer,
+        answer,
         references: [],
         retrievalSufficient: false,
-        retrievalReason: retrievalGate.reason,
+        retrievalReason: `${retrievalGate.reason}；已使用模型兜底回答`,
       };
     }
 
@@ -620,6 +632,51 @@ export class KarpathyRagService implements OnModuleInit {
 
   unsupportedReliableAnswer(): string {
     return this.unsupportedAnswer;
+  }
+
+  async generateModelFallbackAnswer(
+    query: string,
+    reason: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    memoryMessages: Array<{ role: string; content: string }> = [],
+  ): Promise<string> {
+    const today = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      dateStyle: 'full',
+    }).format(new Date());
+    const historyText = history
+      .slice(-6)
+      .map(
+        (item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+      )
+      .join('\n');
+    const memoryText = memoryMessages
+      .slice(-6)
+      .map((item) => `${item.role}：${item.content}`)
+      .join('\n');
+
+    const answer = await this.llmProvider.invoke(`你是一个可靠的中文 AI 助手。
+当前日期：${today}
+
+知识库检索不足，原因：${reason}
+
+要求：
+1. 请直接回答用户问题，不要再说"片段中未提及"。
+2. 如果问题依赖实时数据、内部资料、私人数据或你无法确定的信息，要明确说明不确定，并给出可执行的查询/确认建议。
+3. 不要伪造知识库引用，不要输出 [片段N]。
+4. 回答要自然、简洁，适合展示在聊天 UI 中。
+
+长期记忆上下文：
+${memoryText || '无'}
+
+最近对话：
+${historyText || '无'}
+
+用户问题：${query}
+
+回答：`);
+
+    return answer.trim();
   }
 
   addVersionConflictNotice(answer: string, chunks: RetrievedChunk[]): string {

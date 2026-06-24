@@ -1,152 +1,443 @@
 import {
-  PageContainer,
-  type ProColumns,
-  ProTable,
-  StatisticCard,
-} from '@ant-design/pro-components';
-import { Col, Row, Tag, Typography } from 'antd';
-import React, { useEffect, useState } from 'react';
-import { getQaRecords, getQaStats, type QaRecord } from './service';
+  DeleteOutlined,
+  FileWordOutlined,
+  PaperClipOutlined,
+  PlusOutlined,
+  SendOutlined,
+} from '@ant-design/icons';
+import { ModulePage, qaNav } from '@/components/AdminShell';
+import { Avatar, Button, Input } from 'antd';
+import React from 'react';
+import {
+  type AguiEvent,
+  type ChatMode,
+  type ReferenceChunk,
+  streamAguiAnswer,
+} from './service';
 
-const { Paragraph } = Typography;
+const conversations = [
+  ['公司差旅报销政策是什么?', '根据公司《差旅费用报销管理办法》，...', '10:30'],
+  ['如何申请系统权限?', '您可以通过以下步骤申请系统权限：...', '昨天'],
+  ['员工入职流程是怎样的?', '员工入职流程主要包括以下几个步骤：...', '昨天'],
+  ['项目管理规范有哪些?', '公司项目管理规范主要包括以下内容：...', '05/20'],
+  ['信息安全管理制度解读', '信息安全管理制度主要包括以下几个方...', '05/19'],
+  ['如何提交IT支持工单?', '您可以通过以下方式提交IT支持工单：...', '05/18'],
+  ['年度绩效考核标准是什么?', '年度绩效考核标准主要包括以下维度：...', '05/17'],
+].map(([title, desc, time]) => ({ title, desc, time }));
 
-const modeMap: Record<string, { color: string; text: string }> = {
-  simple: { color: 'blue', text: 'Simple' },
-  agentic: { color: 'purple', text: 'Agentic' },
-  auto: { color: 'green', text: 'Auto' },
-};
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  status?: 'streaming' | 'done' | 'error';
+  route?: string;
+  confidence?: number;
+  retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
+  references?: ReferenceChunk[];
+  events?: string[];
+}
+
+const initialMessages: ChatMessage[] = [
+  {
+    id: 'demo-user',
+    role: 'user',
+    content: '公司差旅报销政策是什么?',
+    createdAt: '10:30',
+  },
+  {
+    id: 'demo-assistant',
+    role: 'assistant',
+    content:
+      '这是示例对话。输入问题并点击发送后，管理后台会通过 AG-UI 流式协议调用 RAG backend。',
+    createdAt: '10:30',
+    status: 'done',
+  },
+];
 
 const QaOps: React.FC = () => {
-  const [stats, setStats] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [input, setInput] = React.useState('');
+  const [mode, setMode] = React.useState<ChatMode>('agentic');
+  const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
+  const [activeTitle, setActiveTitle] = React.useState('公司差旅报销政策是什么?');
+  const [loading, setLoading] = React.useState(false);
+  const eventSourceRef = React.useRef<EventSource | null>(null);
 
-  useEffect(() => {
-    getQaStats()
-      .then((res) => setStats((res as any)?.data ?? res ?? null))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  React.useEffect(() => {
+    return () => eventSourceRef.current?.close();
   }, []);
 
-  const columns: ProColumns<QaRecord>[] = [
-    {
-      title: '问题',
-      dataIndex: 'question',
-      ellipsis: true,
-      width: 200,
-    },
-    {
-      title: '回答',
-      dataIndex: 'answer',
-      width: 250,
-      search: false,
-      render: (_, record) => (
-        <Paragraph ellipsis={{ rows: 2 }}>{record.answer}</Paragraph>
-      ),
-    },
-    {
-      title: '模式',
-      dataIndex: 'mode',
-      width: 100,
-      render: (_, record) => {
-        const m = modeMap[record.mode];
-        return m ? <Tag color={m.color}>{m.text}</Tag> : record.mode;
+  const updateMessage = (
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) => (message.id === messageId ? updater(message) : message)),
+    );
+  };
+
+  const handleSend = () => {
+    const query = input.trim();
+    if (!query || loading) return;
+
+    eventSourceRef.current?.close();
+    setInput('');
+    setActiveTitle(query);
+    setLoading(true);
+
+    const now = new Date().toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const assistantId = `assistant-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: query,
+        createdAt: now,
       },
-      valueEnum: Object.fromEntries(
-        Object.entries(modeMap).map(([k, v]) => [k, { text: v.text }]),
-      ),
-    },
-    {
-      title: '置信度',
-      dataIndex: 'confidence',
-      width: 100,
-      search: false,
-      render: (_, record) => (
-        <span>{(record.confidence * 100).toFixed(1)}%</span>
-      ),
-    },
-    {
-      title: '反馈',
-      dataIndex: 'feedback',
-      width: 80,
-      valueEnum: {
-        positive: { text: '好评', status: 'Success' },
-        negative: { text: '差评', status: 'Error' },
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        createdAt: now,
+        status: 'streaming',
+        events: [],
       },
-    },
-    { title: '来源数', dataIndex: 'sourcesCount', width: 80, search: false },
-    {
-      title: '时间',
-      dataIndex: 'createdAt',
-      valueType: 'dateTime',
-      width: 180,
-      search: false,
-    },
-  ];
+    ]);
+
+    eventSourceRef.current = streamAguiAnswer(
+      query,
+      mode,
+      (event) => applyAguiEvent(event, assistantId),
+      (error) => {
+        updateMessage(assistantId, (message) => ({
+          ...message,
+          content: message.content || `错误：${error.message}`,
+          status: 'error',
+        }));
+        setLoading(false);
+      },
+      () => setLoading(false),
+    );
+  };
+
+  const applyAguiEvent = (event: AguiEvent, messageId: string) => {
+    updateMessage(messageId, (message) => ({
+      ...message,
+      events: [...(message.events ?? []), event.type],
+    }));
+
+    if (event.type === 'RUN_STARTED') {
+      const inputData = event.data?.input;
+      if (isRecord(inputData) && typeof inputData.mode === 'string') {
+        const route = inputData.mode;
+        updateMessage(messageId, (message) => ({
+          ...message,
+          route,
+        }));
+      }
+      return;
+    }
+
+    if (event.type === 'TEXT_MESSAGE_CONTENT') {
+      const delta = typeof event.data?.delta === 'string' ? event.data.delta : '';
+      updateMessage(messageId, (message) => ({
+        ...message,
+        content: message.content + delta,
+      }));
+      return;
+    }
+
+    if (event.type === 'STATE_DELTA') {
+      applyStateDelta(event, messageId);
+      return;
+    }
+
+    if (event.type === 'CUSTOM') {
+      applyCustomEvent(event, messageId);
+      return;
+    }
+
+    if (event.type === 'RUN_FINISHED') {
+      const output = event.data?.output;
+      if (isRecord(output)) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          content:
+            typeof output.answer === 'string' ? output.answer : message.content,
+          references: Array.isArray(output.references)
+            ? (output.references as ReferenceChunk[])
+            : message.references,
+          route: typeof output.route === 'string' ? output.route : message.route,
+          confidence:
+            typeof output.confidence === 'number'
+              ? output.confidence
+              : message.confidence,
+          retryCount:
+            typeof output.retryCount === 'number'
+              ? output.retryCount
+              : message.retryCount,
+          retrievalSufficient:
+            typeof output.retrievalSufficient === 'boolean'
+              ? output.retrievalSufficient
+              : message.retrievalSufficient,
+          retrievalReason:
+            typeof output.retrievalReason === 'string'
+              ? output.retrievalReason
+              : message.retrievalReason,
+          status: 'done',
+        }));
+      }
+      return;
+    }
+
+    if (event.type === 'RUN_ERROR') {
+      updateMessage(messageId, (message) => ({
+        ...message,
+        content: `错误：${String(event.data?.message ?? '流式问答失败')}`,
+        status: 'error',
+      }));
+    }
+  };
+
+  const applyStateDelta = (event: AguiEvent, messageId: string) => {
+    const delta = event.data?.delta;
+    if (!Array.isArray(delta)) return;
+
+    for (const patch of delta) {
+      if (!isRecord(patch)) continue;
+      const value = patch.value;
+      if (patch.path === '/routing' && isRecord(value)) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          route: typeof value.route === 'string' ? value.route : message.route,
+        }));
+      }
+      if (patch.path === '/sufficiency' && isRecord(value)) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          retrievalSufficient:
+            typeof value.sufficient === 'boolean'
+              ? value.sufficient
+              : message.retrievalSufficient,
+          retrievalReason:
+            typeof value.reason === 'string'
+              ? value.reason
+              : message.retrievalReason,
+        }));
+      }
+    }
+  };
+
+  const applyCustomEvent = (event: AguiEvent, messageId: string) => {
+    const name = event.data?.name;
+    const value = event.data?.value;
+    if (name === 'rag.citation') {
+      updateMessage(messageId, (message) => ({
+        ...message,
+        references: Array.isArray(value)
+          ? (value as ReferenceChunk[])
+          : message.references,
+      }));
+    }
+    if (name === 'rag.reflection' && isRecord(value)) {
+      updateMessage(messageId, (message) => ({
+        ...message,
+        confidence:
+          typeof value.confidence === 'number'
+            ? value.confidence
+            : message.confidence,
+        retryCount:
+          typeof value.retryCount === 'number'
+            ? value.retryCount
+            : message.retryCount,
+      }));
+    }
+  };
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
 
   return (
-    <PageContainer>
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={6}>
-          <StatisticCard
-            loading={loading}
-            statistic={{ title: '总问答数', value: stats?.totalQa ?? 0 }}
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <StatisticCard
-            loading={loading}
-            statistic={{
-              title: '平均置信度',
-              value: ((stats?.avgConfidence ?? 0) * 100).toFixed(1),
-              suffix: '%',
+    <ModulePage activeKey="new" navItems={qaNav} title="AI问答">
+      <div className="qa-workspace">
+        <aside className="rag-panel qa-list">
+          <div className="panel-head">
+            <h3>会话列表</h3>
+            <Button type="text">☰</Button>
+          </div>
+          <Button
+            block
+            ghost
+            icon={<PlusOutlined />}
+            onClick={() => {
+              eventSourceRef.current?.close();
+              setMessages([]);
+              setActiveTitle('新建对话');
             }}
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <StatisticCard
-            loading={loading}
-            statistic={{
-              title: '好评率',
-              value: ((stats?.positiveRate ?? 0) * 100).toFixed(1),
-              suffix: '%',
-            }}
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <StatisticCard
-            loading={loading}
-            statistic={{
-              title: '差评率',
-              value: ((stats?.negativeRate ?? 0) * 100).toFixed(1),
-              suffix: '%',
-            }}
-          />
-        </Col>
-      </Row>
-
-      <ProTable<QaRecord>
-        headerTitle="问答记录"
-        rowKey="id"
-        request={async (params) => {
-          const res = await getQaRecords({
-            current: params.current,
-            pageSize: params.pageSize,
-            question: params.question,
-            mode: params.mode,
-            feedback: params.feedback,
-          });
-          const data = (res as any)?.data ?? res;
-          return {
-            data: Array.isArray(data) ? data : (data?.list ?? []),
-            total: (data as any)?.total ?? 0,
-            success: true,
-          };
-        }}
-        columns={columns}
-        search={{ labelWidth: 'auto' }}
-        pagination={{ defaultPageSize: 10 }}
-      />
-    </PageContainer>
+            size="large"
+            type="primary"
+          >
+            新建对话
+          </Button>
+          <div className="conversation-list">
+            {conversations.map((item, index) => (
+              <button
+                className={index === 0 ? 'active' : ''}
+                key={item.title}
+                type="button"
+              >
+                <strong>{item.title}</strong>
+                <span>{item.time}</span>
+                <p>{item.desc}</p>
+              </button>
+            ))}
+          </div>
+          <Button type="link">查看更多会话⌄</Button>
+        </aside>
+        <section className="rag-panel qa-chat">
+          <div className="chat-head">
+            <h2>{activeTitle}</h2>
+            <Button
+              icon={<DeleteOutlined />}
+              onClick={() => {
+                eventSourceRef.current?.close();
+                setMessages([]);
+              }}
+            >
+              清空对话
+            </Button>
+          </div>
+          <div className="chat-body">
+            {messages.map((message) =>
+              message.role === 'user' ? (
+                <div className="message user" key={message.id}>
+                  <div>
+                    <p>{message.content}</p>
+                    <span>{message.createdAt}</span>
+                  </div>
+                  <Avatar />
+                </div>
+              ) : (
+                <div className="message assistant" key={message.id}>
+                  <Avatar>AI</Avatar>
+                  <div className="answer-card">
+                    <p>
+                      {message.content ||
+                        (message.status === 'streaming'
+                          ? '正在通过 AG-UI 协议生成回答...'
+                          : '')}
+                    </p>
+                    {message.route && (
+                      <div className="answer-meta">
+                        <span>路由：{message.route}</span>
+                        {message.retrievalSufficient !== undefined && (
+                          <span>
+                            检索：
+                            {message.retrievalSufficient ? '充分' : '不足'}
+                          </span>
+                        )}
+                        {message.confidence !== undefined && (
+                          <span>置信度：{message.confidence.toFixed(2)}</span>
+                        )}
+                        {message.retryCount !== undefined && (
+                          <span>重试：{message.retryCount}</span>
+                        )}
+                      </div>
+                    )}
+                    {message.retrievalReason && (
+                      <p className="retrieval-reason">
+                        检索评估：{message.retrievalReason}
+                      </p>
+                    )}
+                    {message.events && message.events.length > 0 && (
+                      <p className="event-trace">
+                        AG-UI：{message.events.join(' → ')}
+                      </p>
+                    )}
+                    {message.references && message.references.length > 0 && (
+                      <div className="reference-box">
+                        <strong>引用文档（{message.references.length}）</strong>
+                        <div>
+                          {message.references.map((item) => (
+                            <article key={item.id}>
+                              <FileWordOutlined className="file-icon word" />
+                              <div>
+                                <b>{item.docId || item.id}</b>
+                                <span>
+                                  chunk #{item.chunkIndex} · score{' '}
+                                  {(item.totalScore ?? 0).toFixed(2)}
+                                </span>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+          <div className="suggestions">
+            <strong>你可能还想问</strong>
+            {[
+              '差旅报销需要哪些票据?',
+              '报销申请提交后多久能到账?',
+              '差旅报销的审批流程是怎样的?',
+              '特殊情况如何申请超标准报销?',
+            ].map((item) => (
+              <Button key={item} onClick={() => setInput(item)}>
+                {item}
+              </Button>
+            ))}
+            <Button type="link">换一批</Button>
+          </div>
+          <div className="chat-input">
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 3 }}
+              maxLength={2000}
+              onChange={(event) => setInput(event.target.value)}
+              onPressEnter={(event) => {
+                if (!event.shiftKey) {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="请输入问题，Shift + Enter 换行"
+              value={input}
+            />
+            <div>
+              <select
+                aria-label="问答模式"
+                onChange={(event) => setMode(event.target.value as ChatMode)}
+                value={mode}
+              >
+                <option value="agentic">agentic</option>
+                <option value="auto">auto</option>
+                <option value="simple">simple</option>
+              </select>
+              <span>{input.length} / 2000</span>
+              <Button disabled={loading} icon={<PaperClipOutlined />} />
+              <Button
+                disabled={!input.trim() || loading}
+                icon={<SendOutlined />}
+                loading={loading}
+                onClick={handleSend}
+                type="primary"
+              >
+                发送
+              </Button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </ModulePage>
   );
 };
 

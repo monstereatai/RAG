@@ -5,7 +5,7 @@ export interface DocumentItem {
   filename: string;
   fileType: string;
   fileSize: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
   chunkCount: number;
   uploadedBy: string;
   createdAt: string;
@@ -31,6 +31,10 @@ export async function getDocuments(params?: {
     '/api/admin/documents',
     { params },
   );
+}
+
+export async function getUsers() {
+  return authRequest<any>('/api/admin/users');
 }
 
 export async function deleteDocument(id: string) {

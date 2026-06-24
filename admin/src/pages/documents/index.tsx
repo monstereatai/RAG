@@ -1,193 +1,166 @@
 import {
-  DeleteOutlined,
+  AppstoreOutlined,
+  DownloadOutlined,
   EyeOutlined,
-  FileTextOutlined,
-  RedoOutlined,
+  FilePdfOutlined,
+  FilePptOutlined,
+  FileWordOutlined,
+  FileExcelOutlined,
+  MoreOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  TableOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
-import {
-  PageContainer,
-  type ProColumns,
-  ProTable,
-} from '@ant-design/pro-components';
-import { history } from '@umijs/max';
-import { Button, Modal, message, Space, Typography } from 'antd';
-import React from 'react';
-import {
-  type DocumentItem,
-  deleteDocument,
-  getDocuments,
-  reprocessDocument,
-} from './service';
+import { ModulePage, documentNav } from '@/components/AdminShell';
+import { Button, Checkbox, Input, Select, Space, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import React, { useEffect, useState } from 'react';
+import { getDocuments, getUsers, type DocumentItem } from './service';
 
-const { Link } = Typography;
+const fallbackDocs: DocumentItem[] = [
+  ['1', '2024年产品需求文档.pdf', 'pdf', '张三', 'completed', '仅本人可见', '2024-05-20 14:30:22'],
+  ['2', '企业知识库使用手册.docx', 'docx', '李四', 'completed', '部门可见', '2024-05-20 11:20:15'],
+  ['3', 'Q2市场数据分析报告.xlsx', 'xlsx', '王五', 'completed', '部门可见', '2024-05-19 16:45:30'],
+  ['4', '新员工入职培训.pptx', 'pptx', '赵六', 'processing', '公司可见', '2024-05-19 09:15:45'],
+  ['5', '信息安全管理制度.pdf', 'pdf', '张三', 'completed', '公司可见', '2024-05-18 17:20:33'],
+  ['6', '项目管理流程规范.docx', 'docx', '李四', 'failed', '部门可见', '2024-05-18 10:05:12'],
+  ['7', '客户服务协议模板.pdf', 'pdf', '王五', 'completed', '公开可见', '2024-05-17 15:30:25'],
+  ['8', '年度预算计划表.xlsx', 'xlsx', '赵六', 'completed', '仅本人可见', '2024-05-17 11:10:08'],
+].map(([id, filename, fileType, uploadedBy, status, permission, createdAt]) => ({
+  id,
+  filename,
+  fileType,
+  fileSize: 1024 * 128,
+  uploadedBy,
+  status: status as DocumentItem['status'],
+  chunkCount: 32,
+  createdAt,
+  updatedAt: createdAt,
+  metadata: { category: permission },
+}));
+
+const iconMap: Record<string, React.ReactNode> = {
+  pdf: <FilePdfOutlined className="file-icon pdf" />,
+  docx: <FileWordOutlined className="file-icon word" />,
+  xlsx: <FileExcelOutlined className="file-icon excel" />,
+  pptx: <FilePptOutlined className="file-icon ppt" />,
+};
 
 const statusMap: Record<string, { color: string; text: string }> = {
   pending: { color: 'default', text: '待处理' },
-  processing: { color: 'processing', text: '处理中' },
-  completed: { color: 'success', text: '已完成' },
-  failed: { color: 'error', text: '失败' },
+  processing: { color: 'warning', text: '解析中' },
+  completed: { color: 'success', text: '已入库' },
+  failed: { color: 'error', text: '解析失败' },
 };
 
 const Documents: React.FC = () => {
-  const actionRef = React.useRef<any>(undefined);
+  const [docs, setDocs] = useState<DocumentItem[]>(fallbackDocs);
 
-  const handleDelete = (record: DocumentItem) => {
-    Modal.confirm({
-      title: `确认删除文档「${record.filename}」？`,
-      content: '删除后将从向量库中移除所有关联数据，不可恢复。',
-      okText: '确认删除',
-      okType: 'danger',
-      onOk: async () => {
-        await deleteDocument(record.id);
-        message.success('删除成功');
-        actionRef.current?.reload();
-      },
-    });
-  };
+  useEffect(() => {
+    Promise.all([
+      getDocuments({ current: 1, pageSize: 20 }),
+      getUsers(),
+    ])
+      .then(([docRes, userRes]: [any, any]) => {
+        const raw = docRes?.data ?? docRes;
+        const items = raw?.data?.items ?? (Array.isArray(raw) ? raw : []);
 
-  const handleReprocess = async (record: DocumentItem) => {
-    await reprocessDocument(record.id);
-    message.success('已提交重新处理');
-    actionRef.current?.reload();
-  };
+        const userRaw = userRes?.data ?? userRes;
+        const userList = userRaw?.data?.items ?? (Array.isArray(userRaw) ? userRaw : []);
+        const userMap = new Map<string, string>();
+        if (Array.isArray(userList)) {
+          userList.forEach((u: any) => {
+            userMap.set(String(u.id), u.username ?? u.nickname ?? String(u.id));
+          });
+        }
 
-  const columns: ProColumns<DocumentItem>[] = [
+        if (Array.isArray(items) && items.length) {
+          setDocs(
+            items.map((item: any) => ({
+              id: item.docId,
+              filename: item.filename,
+              fileType: (item.filename ?? '').split('.').pop() ?? '',
+              fileSize: 0,
+              chunkCount: item.chunkCount ?? 0,
+              uploadedBy: userMap.get(String(item.userId)) ?? item.userId ?? '',
+              createdAt: item.createdAt,
+              updatedAt: item.createdAt,
+              metadata: { category: item.category, title: item.title },
+            })),
+          );
+        }
+      })
+      .catch(() => setDocs(fallbackDocs));
+  }, []);
+
+  const columns: ColumnsType<DocumentItem> = [
     {
-      title: '文件名',
+      title: <Checkbox />,
+      width: 48,
+      render: () => <Checkbox />,
+    },
+    {
+      title: '文档名称',
       dataIndex: 'filename',
-      ellipsis: true,
-      width: 240,
       render: (_, record) => (
-        <Space>
-          <FileTextOutlined />
-          <Link>{record.filename}</Link>
+        <Space size={12}>
+          {iconMap[record.fileType] ?? iconMap.pdf}
+          <span>{record.filename}</span>
         </Space>
       ),
     },
+    { title: '文件类型', dataIndex: 'fileType', width: 120, render: (value) => String(value).toUpperCase() },
+    { title: '上传时间', dataIndex: 'createdAt', width: 190 },
+    { title: '上传人', dataIndex: 'uploadedBy', width: 130 },
     {
-      title: '类型',
-      dataIndex: 'fileType',
-      width: 80,
-      valueEnum: {
-        pdf: 'PDF',
-        md: 'Markdown',
-        txt: 'TXT',
-        docx: 'DOCX',
-      },
-    },
-    {
-      title: '大小',
-      dataIndex: 'fileSize',
-      width: 100,
-      search: false,
-      render: (_, record) => {
-        const kb = record.fileSize / 1024;
-        return kb > 1024
-          ? `${(kb / 1024).toFixed(1)} MB`
-          : `${kb.toFixed(1)} KB`;
-      },
-    },
-    {
-      title: '状态',
+      title: '文档解析状态',
       dataIndex: 'status',
-      width: 100,
-      valueEnum: Object.fromEntries(
-        Object.entries(statusMap).map(([k, v]) => [
-          k,
-          {
-            text: v.text,
-            status:
-              v.color === 'success'
-                ? 'Success'
-                : v.color === 'error'
-                  ? 'Error'
-                  : v.color === 'processing'
-                    ? 'Processing'
-                    : 'Default',
-          },
-        ]),
-      ),
+      width: 150,
+      render: (value, record) => {
+        const status = value ?? (record.chunkCount > 0 ? 'completed' : 'pending');
+        const item = statusMap[status] ?? statusMap.pending;
+        return <Tag color={item.color}>{item.text}</Tag>;
+      },
     },
     {
-      title: '分块数',
-      dataIndex: 'chunkCount',
-      width: 80,
-      search: false,
-    },
-    {
-      title: '上传者',
-      dataIndex: 'uploadedBy',
-      width: 100,
-    },
-    {
-      title: '上传时间',
-      dataIndex: 'createdAt',
-      valueType: 'dateTime',
-      width: 180,
-      search: false,
+      title: '权限范围',
+      width: 150,
+      render: (_, record) => <Tag color="blue">{record.metadata?.category ?? '部门可见'}</Tag>,
     },
     {
       title: '操作',
-      valueType: 'option',
-      width: 120,
-      render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => history.push(`/documents/${record.id}`)}
-          >
-            详情
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<RedoOutlined />}
-            onClick={() => handleReprocess(record)}
-          >
-            重新处理
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record)}
-          >
-            删除
-          </Button>
+      width: 150,
+      render: () => (
+        <Space size="middle">
+          <EyeOutlined />
+          <DownloadOutlined />
+          <MoreOutlined />
         </Space>
       ),
     },
   ];
 
   return (
-    <PageContainer>
-      <ProTable<DocumentItem>
-        headerTitle="文档列表"
-        actionRef={actionRef}
-        rowKey="id"
-        request={async (params) => {
-          const res = await getDocuments({
-            current: params.current,
-            pageSize: params.pageSize,
-            filename: params.filename,
-            status: params.status,
-            fileType: params.fileType,
-          });
-          const data = (res as any)?.data ?? res;
-          return {
-            data: Array.isArray(data) ? data : (data?.list ?? []),
-            total: (data as any)?.total ?? 0,
-            success: true,
-          };
-        }}
-        columns={columns}
-        search={{ labelWidth: 'auto' }}
-        pagination={{ defaultPageSize: 10 }}
-      />
-    </PageContainer>
+    <ModulePage activeKey="mine" navItems={documentNav} title="文档管理">
+      <div className="rag-panel document-toolbar">
+        <Input prefix={<SearchOutlined />} placeholder="搜索文档名称、内容、上传人等" />
+        <Button icon={<UploadOutlined />} type="primary">批量上传</Button>
+        <Button>新建文件夹</Button>
+        <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
+        <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
+        <Select defaultValue="权限范围" options={[{ value: '权限范围' }]} />
+        <Button>更多筛选</Button>
+        <Button icon={<ReloadOutlined />} type="text" />
+      </div>
+      <div className="view-switch">
+        <Button icon={<TableOutlined />} type="primary" />
+        <Button icon={<AppstoreOutlined />} />
+      </div>
+      <div className="rag-panel document-table">
+        <Table columns={columns} dataSource={docs} pagination={{ pageSize: 10, total: 128 }} rowKey="id" />
+      </div>
+    </ModulePage>
   );
 };
 

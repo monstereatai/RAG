@@ -603,11 +603,25 @@ export class AgenticRagService {
       content: string;
     }>;
 
-    if (state.retrievedChunks.length === 0) {
-      const ans = '未找到相关内容，请先上传文档。';
+    if (state.retrievedChunks.length === 0 || !state.retrievalSufficient) {
+      const reason =
+        state.retrievedChunks.length === 0
+          ? '没有检索到任何可用片段'
+          : state.retrievalReason || '检索不足';
+      const ans = await this.karpathyRagService.generateModelFallbackAnswer(
+        state.query,
+        reason,
+        history,
+        memoryMessages,
+      );
       onEvent?.({ type: 'token', data: ans });
       onEvent?.({ type: 'citation', data: [] });
-      return { answer: ans };
+      return {
+        answer: ans,
+        retrievedChunks: [],
+        retrievalSufficient: false,
+        retrievalReason: `${reason}；已使用模型兜底回答`,
+      };
     }
 
     const context = state.retrievedChunks
@@ -688,6 +702,19 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    if (!state.retrievalSufficient) {
+      onEvent?.({
+        type: 'reflection',
+        data: {
+          confidence: 1,
+          passed: true,
+          retryCount: state.retryCount,
+          reason: '检索不足时已使用模型兜底，不再按引用支撑标准重试',
+        },
+      });
+      return { confidence: 1, passed: true, retryCount: state.retryCount };
+    }
+
     const model = this.llmProvider.getModel();
 
     const schema = z.object({
@@ -913,7 +940,13 @@ export class AgenticRagService {
     }
 
     if (!this.karpathyRagService.hasIndexedChunks(userId)) {
-      const answer = '未找到相关内容，请先上传文档。';
+      const reason = '当前用户没有已索引的知识库片段';
+      const answer = await this.karpathyRagService.generateModelFallbackAnswer(
+        query,
+        reason,
+        history,
+        memoryMessages,
+      );
       const result = {
         answer,
         references: [],
@@ -921,7 +954,7 @@ export class AgenticRagService {
         confidence: 1,
         retryCount: 0,
         retrievalSufficient: false,
-        retrievalReason: '当前用户没有已索引的知识库片段',
+        retrievalReason: `${reason}；已使用模型兜底回答`,
       };
       onEvent?.({ type: 'retrieval', data: [] });
       onEvent?.({

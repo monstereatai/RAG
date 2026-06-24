@@ -24,6 +24,7 @@
     "eval:rag:judge": "node scripts/eval-rag-judge.mjs",
     "eval:rag:maturity": "node scripts/eval-rag-maturity.mjs",
     "eval:rag:project": "node scripts/eval-rag-project.mjs",
+    "eval:rag:langsmith": "node scripts/eval-rag-langsmith.mjs",
     "eval:rag:quality": "node scripts/eval-rag-quality-gate.mjs",
     "eval:business-dataset": "node scripts/build-business-regression-dataset.mjs --check",
     "eval:business-import": "node scripts/import-business-regression-dataset.mjs",
@@ -131,6 +132,9 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^uuid$": "<rootDir>/test/mocks/uuid.cjs"
+    },
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
@@ -145,6 +149,14 @@
     "p-retry": "4.6.2",
     "@langchain/langgraph-sdk": {
       "p-queue": "6.6.2"
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "uuid": "9.0.1",
+      "thrift@0.23.0>uuid": "9.0.1",
+      "p-retry": "4.6.2",
+      "@langchain/langgraph-sdk>p-queue": "6.6.2"
     }
   }
 }

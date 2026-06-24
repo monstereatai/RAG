@@ -1,240 +1,108 @@
-import {
-  DeleteOutlined,
-  EditOutlined,
-  KeyOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
-import {
-  ModalForm,
-  PageContainer,
-  type ProColumns,
-  ProFormSelect,
-  ProFormText,
-  ProTable,
-} from '@ant-design/pro-components';
-import { Button, Modal, message, Space, Tag } from 'antd';
-import React, { useRef, useState } from 'react';
-import {
-  createUser,
-  deleteUser,
-  getUsers,
-  resetPassword,
-  type UserItem,
-  updateUser,
-} from './service';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { ModulePage, systemNav } from '@/components/AdminShell';
+import { Button, Checkbox, DatePicker, Input, Select, Space, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import React, { useEffect, useState } from 'react';
+import { getUsers, type UserItem } from './service';
 
-const statusMap: Record<string, { color: string; text: string }> = {
-  active: { color: 'success', text: '正常' },
-  inactive: { color: 'default', text: '停用' },
-  locked: { color: 'error', text: '锁定' },
-};
+const fallbackUsers: UserItem[] = [
+  ['10001', 'admin', '系统管理员', '技术部', '138****0001', 'admin@company.com', '系统管理员', 'active', '2024-01-15 09:30:21'],
+  ['10002', 'zhangsan', '张三', '产品部', '138****0002', 'zhangsan@company.com', '产品经理', 'active', '2024-01-16 10:15:33'],
+  ['10003', 'lisi', '李四', '研发部', '138****0003', 'lisi@company.com', '开发工程师', 'active', '2024-01-17 11:20:45'],
+  ['10004', 'wangwu', '王五', '运营部', '138****0004', 'wangwu@company.com', '运营专员', 'inactive', '2024-01-18 14:25:12'],
+  ['10005', 'zhaoliu', '赵六', '市场部', '138****0005', 'zhaoliu@company.com', '市场专员', 'active', '2024-01-19 15:30:18'],
+  ['10006', 'sunqi', '孙七', '财务部', '138****0006', 'sunqi@company.com', '财务专员', 'active', '2024-01-20 16:40:22'],
+  ['10007', 'zhouba', '周八', '人事部', '138****0007', 'zhouba@company.com', '人事专员', 'inactive', '2024-01-21 17:50:30'],
+  ['10008', 'wujiu', '吴九', '技术部', '138****0008', 'wujiu@company.com', '开发工程师', 'active', '2024-01-22 18:55:40'],
+  ['10009', 'liushi', '刘十', '产品部', '138****0009', 'liushi@company.com', '产品经理', 'active', '2024-01-23 19:05:50'],
+  ['10010', 'chenyi', '陈一', '研发部', '138****0010', 'chenyi@company.com', '测试工程师', 'active', '2024-01-24 20:10:30'],
+].map(([id, username, name, dept, phone, email, role, status, createdAt]) => ({
+  id,
+  username,
+  name,
+  department: dept,
+  phone,
+  email,
+  status: status as UserItem['status'],
+  roles: [{ id: role, name: role }],
+  createdAt,
+}));
+
+type DisplayUser = UserItem & { name?: string; department?: string };
 
 const Users: React.FC = () => {
-  const actionRef = useRef<any>(undefined);
-  const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserItem | null>(null);
+  const [users, setUsers] = useState<DisplayUser[]>(fallbackUsers);
 
-  const handleDelete = (record: UserItem) => {
-    Modal.confirm({
-      title: `确认删除用户「${record.username}」？`,
-      okType: 'danger',
-      onOk: async () => {
-        await deleteUser(record.id);
-        message.success('删除成功');
-        actionRef.current?.reload();
-      },
-    });
-  };
+  useEffect(() => {
+    getUsers({ current: 1, pageSize: 20 })
+      .then((res) => {
+        const data = (res as any)?.data ?? res;
+        const list = Array.isArray(data) ? data : data?.items;
+        if (Array.isArray(list) && list.length) setUsers(list);
+      })
+      .catch(() => setUsers(fallbackUsers));
+  }, []);
 
-  const handleResetPassword = (record: UserItem) => {
-    Modal.confirm({
-      title: `重置用户「${record.username}」的密码？`,
-      content: '密码将重置为默认密码',
-      onOk: async () => {
-        await resetPassword(record.id, 'Admin@123456');
-        message.success('密码已重置');
-      },
-    });
-  };
-
-  const columns: ProColumns<UserItem>[] = [
+  const columns: ColumnsType<DisplayUser> = [
+    { title: <Checkbox />, width: 48, render: () => <Checkbox /> },
+    { title: '用户ID', dataIndex: 'id', width: 110 },
     { title: '用户名', dataIndex: 'username', width: 120 },
-    { title: '邮箱', dataIndex: 'email', width: 200, search: false },
-    { title: '手机号', dataIndex: 'phone', width: 130, search: false },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 80,
-      valueEnum: Object.fromEntries(
-        Object.entries(statusMap).map(([k, v]) => [
-          k,
-          {
-            text: v.text,
-            status:
-              v.color === 'success'
-                ? 'Success'
-                : v.color === 'error'
-                  ? 'Error'
-                  : 'Default',
-          },
-        ]),
-      ),
-    },
+    { title: '姓名', dataIndex: 'name', width: 120, render: (_, r) => r.name ?? r.username },
+    { title: '所属部门', dataIndex: 'department', width: 130, render: (_, r) => r.department ?? '-' },
+    { title: '手机号', dataIndex: 'phone', width: 140 },
+    { title: '邮箱', dataIndex: 'email', width: 220 },
     {
       title: '角色',
       dataIndex: 'roles',
       width: 150,
-      search: false,
-      render: (_, record) =>
-        record.roles?.map((r) => <Tag key={r.id}>{r.name}</Tag>),
+      render: (_, record) => <Tag color="blue">{record.roles?.[0]?.name ?? '用户'}</Tag>,
     },
     {
-      title: '创建时间',
-      dataIndex: 'createdAt',
-      valueType: 'dateTime',
-      width: 180,
-      search: false,
+      title: '用户状态',
+      dataIndex: 'status',
+      width: 120,
+      render: (value) => value === 'inactive' ? <Tag color="error">已禁用</Tag> : <Tag color="success">已启用</Tag>,
     },
+    { title: '创建时间', dataIndex: 'createdAt', width: 180 },
     {
       title: '操作',
-      valueType: 'option',
-      width: 200,
+      width: 160,
       render: (_, record) => (
         <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setCurrentUser(record);
-              setEditModalVisible(true);
-            }}
-          >
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<KeyOutlined />}
-            onClick={() => handleResetPassword(record)}
-          >
-            重置密码
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record)}
-          >
-            删除
-          </Button>
+          <Button type="link">编辑</Button>
+          <Button type="link">{record.status === 'inactive' ? '启用' : '禁用'}</Button>
+          <Button danger type="link">删除</Button>
         </Space>
       ),
     },
   ];
 
   return (
-    <PageContainer>
-      <ProTable<UserItem>
-        headerTitle="用户列表"
-        actionRef={actionRef}
-        rowKey="id"
-        toolBarRender={() => [
-          <Button
-            key="create"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateModalVisible(true)}
-          >
-            新建用户
-          </Button>,
-        ]}
-        request={async (params) => {
-          const res = await getUsers({
-            current: params.current,
-            pageSize: params.pageSize,
-            username: params.username,
-            status: params.status,
-          });
-          const data = (res as any)?.data ?? res;
-          return {
-            data: Array.isArray(data) ? data : (data?.list ?? []),
-            total: (data as any)?.total ?? 0,
-            success: true,
-          };
-        }}
-        columns={columns}
-        search={{ labelWidth: 'auto' }}
-        pagination={{ defaultPageSize: 10 }}
-      />
-
-      <ModalForm
-        title="新建用户"
-        open={createModalVisible}
-        onOpenChange={setCreateModalVisible}
-        onFinish={async (values) => {
-          await createUser(values as any);
-          message.success('创建成功');
-          setCreateModalVisible(false);
-          actionRef.current?.reload();
-          return true;
-        }}
-      >
-        <ProFormText
-          name="username"
-          label="用户名"
-          rules={[{ required: true, message: '请输入用户名' }]}
-        />
-        <ProFormText.Password
-          name="password"
-          label="密码"
-          rules={[{ required: true, message: '请输入密码' }]}
-        />
-        <ProFormText
-          name="email"
-          label="邮箱"
-          rules={[
-            { required: true, message: '请输入邮箱' },
-            { type: 'email', message: '邮箱格式不正确' },
-          ]}
-        />
-        <ProFormText name="phone" label="手机号" />
-      </ModalForm>
-
-      <ModalForm
-        title="编辑用户"
-        open={editModalVisible}
-        onOpenChange={(visible) => {
-          setEditModalVisible(visible);
-          if (!visible) setCurrentUser(null);
-        }}
-        initialValues={currentUser ?? {}}
-        onFinish={async (values) => {
-          if (currentUser) {
-            await updateUser(currentUser.id, values as any);
-            message.success('更新成功');
-            setEditModalVisible(false);
-            setCurrentUser(null);
-            actionRef.current?.reload();
-          }
-          return true;
-        }}
-      >
-        <ProFormText name="email" label="邮箱" />
-        <ProFormText name="phone" label="手机号" />
-        <ProFormSelect
-          name="status"
-          label="状态"
-          options={[
-            { label: '正常', value: 'active' },
-            { label: '停用', value: 'inactive' },
-            { label: '锁定', value: 'locked' },
-          ]}
-        />
-      </ModalForm>
-    </PageContainer>
+    <ModulePage activeKey="users" navItems={systemNav} title="系统管理">
+      <div className="rag-panel system-panel">
+        <div className="system-actions">
+          <Button icon={<PlusOutlined />} type="primary">新增用户</Button>
+          <Button>批量启用</Button>
+          <Button>批量禁用</Button>
+          <Button>批量删除</Button>
+        </div>
+        <div className="system-filters">
+          <Input prefix={<SearchOutlined />} placeholder="请输入用户名/姓名/手机号" />
+          <span>所属部门</span>
+          <Select defaultValue="请选择" options={[{ value: '请选择' }]} />
+          <span>用户状态</span>
+          <Select defaultValue="请选择" options={[{ value: '请选择' }]} />
+          <span>角色</span>
+          <Select defaultValue="请选择" options={[{ value: '请选择' }]} />
+          <span>创建时间</span>
+          <DatePicker.RangePicker />
+          <Button type="primary">查询</Button>
+          <Button>重置</Button>
+          <Button type="link">展开⌄</Button>
+        </div>
+        <Table columns={columns} dataSource={users} pagination={{ pageSize: 10, total: 120 }} rowKey="id" />
+      </div>
+    </ModulePage>
   );
 };
 

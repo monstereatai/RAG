@@ -74,8 +74,8 @@
     "@umijs/max": "4.6.67",
     "@umijs/max-plugin-openapi": "2.0.3",
     "@umijs/request-record": "1.1.4",
-    "@vitest/coverage-v8": "4.1.8",
-    "@vitest/ui": "4.1.8",
+    "@vitest/coverage-v8": "0.34.6",
+    "@vitest/ui": "0.34.6",
     "cross-env": "10.1.0",
     "express": "5.2.1",
     "geojson": "0.5.0",
@@ -90,7 +90,10 @@
     "tailwindcss": "4.3.1",
     "ts-node": "10.9.2",
     "typescript": "6.0.3",
-    "vitest": "4.1.8"
+    "vitest": "0.34.6"
+  },
+  "optionalDependencies": {
+    "@oxc-parser/binding-darwin-arm64": "0.137.0"
   },
   "overrides": {
     "@umijs/plugins": {

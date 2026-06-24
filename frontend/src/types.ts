@@ -41,6 +41,26 @@ export interface ChatResponse {
   retrievalReason?: string;
 }
 
+export type AguiEventType =
+  | 'RUN_STARTED'
+  | 'RUN_FINISHED'
+  | 'RUN_ERROR'
+  | 'TEXT_MESSAGE_START'
+  | 'TEXT_MESSAGE_CONTENT'
+  | 'TEXT_MESSAGE_END'
+  | 'TOOL_CALL_START'
+  | 'TOOL_CALL_ARGS'
+  | 'TOOL_CALL_END'
+  | 'STATE_DELTA'
+  | 'CUSTOM';
+
+export interface AguiEvent {
+  type: AguiEventType;
+  runId: string;
+  timestamp: string;
+  data?: Record<string, unknown>;
+}
+
 // Debug 相关
 export interface DebugChunk {
   id: string;
@@ -69,4 +89,3 @@ export interface UserInfo {
   username: string;
   role: string;
 }
-

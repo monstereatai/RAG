@@ -183,6 +183,16 @@ export const configuration = () => ({
     rerankEnabled: process.env.AGENTIC_RERANK_ENABLED !== 'false',
   },
 
+  // LangSmith 评测与追踪（可选）
+  langsmith: {
+    tracing: process.env.LANGSMITH_TRACING === 'true',
+    apiKey: process.env.LANGSMITH_API_KEY ?? '',
+    project: process.env.LANGSMITH_PROJECT ?? 'rag-evaluation',
+    endpoint:
+      process.env.LANGSMITH_ENDPOINT ?? 'https://api.smith.langchain.com',
+    dataset: process.env.LANGSMITH_DATASET ?? 'rag-smoke',
+  },
+
   // 知识图谱（Neo4j，可选）
   neo4j: {
     enabled: process.env.GRAPH_RAG_ENABLED === 'true',

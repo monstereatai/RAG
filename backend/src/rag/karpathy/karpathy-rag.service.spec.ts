@@ -58,18 +58,20 @@ describe('KarpathyRagService exception scenarios', () => {
 
   it('returns a friendly answer when the knowledge base is empty', async () => {
     const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce('今天是星期三。');
 
     await expect(service.answer('anything')).resolves.toEqual({
-      answer: '未找到相关内容，请先上传文档。',
+      answer: '今天是星期三。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '没有检索到候选片段',
+      retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
     });
-    expect(llmInvoke).not.toHaveBeenCalled();
+    expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
 
   it('returns a friendly answer when no related document is found', async () => {
     const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce('量子物理研究微观粒子的行为。');
     service.indexChunks(
       [
         {
@@ -85,12 +87,12 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('quantum physics', [], 'user-1'),
     ).resolves.toEqual({
-      answer: '未找到相关内容，请先上传文档。',
+      answer: '量子物理研究微观粒子的行为。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '没有检索到候选片段',
+      retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
     });
-    expect(llmInvoke).not.toHaveBeenCalled();
+    expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
 
   it('returns an answer only when retrieval and citation support pass', async () => {
@@ -250,7 +252,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.answer).toContain('[片段1]');
   });
 
-  it('rejects vector-only hits with no query token overlap', async () => {
+  it('uses model fallback for vector-only hits with no query token overlap', async () => {
     const { service, llmInvoke } = createService({
       vectorStoreProvider: {
         similaritySearch: jest.fn().mockResolvedValue([
@@ -264,6 +266,7 @@ describe('KarpathyRagService exception scenarios', () => {
         ]),
       },
     });
+    llmInvoke.mockResolvedValueOnce('量子物理关注微观粒子和能量的行为。');
     service.indexChunks(
       [
         {
@@ -279,16 +282,18 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('quantum physics', [], 'user-1'),
     ).resolves.toEqual({
-      answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
+      answer: '量子物理关注微观粒子和能量的行为。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '检索片段与问题关键词重合数 0 低于阈值 1',
+      retrievalReason:
+        '检索片段与问题关键词重合数 0 低于阈值 1；已使用模型兜底回答',
     });
-    expect(llmInvoke).not.toHaveBeenCalled();
+    expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects weak Chinese overlap when only a generic word matches', async () => {
+  it('uses model fallback for weak Chinese overlap when only a generic word matches', async () => {
     const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce('公司宠物医疗报销额度需要以公司福利制度为准。');
     service.indexChunks(
       [
         {
@@ -304,11 +309,12 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('公司宠物医疗报销额度是多少？', [], 'user-1'),
     ).resolves.toMatchObject({
-      answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
+      answer: '公司宠物医疗报销额度需要以公司福利制度为准。',
       references: [],
       retrievalSufficient: false,
+      retrievalReason: expect.stringContaining('已使用模型兜底回答'),
     });
-    expect(llmInvoke).not.toHaveBeenCalled();
+    expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to BM25 when vector search is unavailable', async () => {

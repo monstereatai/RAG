@@ -86,11 +86,15 @@ npm run dev
 * **聊天与检索（按 userId 隔离）**
   * `POST /api/chat`：非流式聊天（常用于 simple 模式）
   * `GET /api/chat/stream?query=...&mode=...&threadId=...`：流式 SSE 聊天推送事件链
+  * `GET /api/agui/stream?query=...&mode=...&threadId=...`：AG-UI 协议流式问答（用户端）
+  * `GET /api/agui/admin/stream?query=...&mode=...&userId=...`：AG-UI 内部服务流式问答（管理后台代理使用，需 `RAG_SERVICE_TOKEN`）
   * `GET /api/chat/conversations`：获取用户的会话历史列表
   * `GET /api/chat/conversations/:threadId`：获取单条会话及详细消息历史
   * `DELETE /api/chat/conversations/:threadId`：删除会话并失效 Redis 中的缓存
 * **调试与可观测**
   * `GET /api/debug/chunks?query=...`：查看当前查询在检索召回时的 BM25 分、余弦分及融合加权总分
+
+AG-UI 用户端与管理后台接入说明见 [AGUI_INTEGRATION.md](./AGUI_INTEGRATION.md)。
 
 ---
 

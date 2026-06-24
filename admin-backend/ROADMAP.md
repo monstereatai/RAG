@@ -99,4 +99,13 @@
   - 单元测试新增 rag-client.service.spec.ts（9 tests）、search-ops.controller.spec.ts（8 tests），总计 43 tests 全部通过。
   - gRPC 模块已禁用（proto 文件缺失），使用 HTTP rag-client 替代。
 - 2026-06-24：**E2E 场景补充完成**：新增 `test/operations.e2e-spec.ts` 独立测试套件，覆盖 search-ops、qa-ops、graph-ops、dashboard overview、documents management、notifications、system config 及权限控制；10 个测试用例全部通过。
+- 2026-06-24：**QA AG-UI 流式代理完成**：新增 `GET /api/admin/qa-ops/agui/stream`，由管理后台鉴权后通过 `RAG_SERVICE_TOKEN` 转发到 rag-backend `GET /api/v1/agui/admin/stream`；`LoginGuard` 支持 EventSource `?token=` 鉴权；`RagClientService.streamAgui()` 固化 upstream URL、service token header 与 AbortSignal。验证通过：`npm run build`、`npm test -- --runInBand`（7 suites / 45 tests）。
+- 2026-06-24：**AG-UI 配置与异常兜底补齐**：`.env.example` 增加 `RAG_SERVICE_BASE_URL/RAG_SERVICE_TIMEOUT_MS/RAG_SERVICE_TOKEN`；`QaOpsController.streamAgui()` 捕获 upstream 连接、状态异常和 reader 读取异常，失败时输出 `RUN_ERROR` SSE 并关闭连接；README 增加管理后台 AG-UI 代理说明。验证通过：`npm run build`、`npm test -- --runInBand`。
   - 内存模式用户初始化补齐 permissions 字段，admin 用户拥有全部 22 个权限。
+- 2026-06-24：**QA AG-UI 代理友好兜底完成**：`QaOpsController.streamAgui()` 将 rag-backend 不可达、upstream 401/token 不匹配等代理层异常从 `RUN_ERROR` 升级为正常 AG-UI 消息流，返回 `RUN_STARTED`、`TEXT_MESSAGE_CONTENT`、`RUN_FINISHED` 和 `route=proxy-fallback`，避免 `/qa-ops` 页面直接展示 `错误：fetch failed`；admin 前端 EventSource 网络错误文案补充为 admin-backend 未启动或代理不可访问的明确提示。验证通过：`pnpm run build`、`pnpm exec jest --runInBand`（7 suites / 45 tests）、`cd ../admin && pnpm run lint`（通过，保留既有 dashboard 未使用变量 warning）；真实 curl 验证 rag-backend 3000 未监听时，`GET /api/admin/qa-ops/agui/stream?...` 返回友好提示和 `RUN_FINISHED`，未返回 `RUN_ERROR`。
+- 2026-06-24：**AG-UI 真实代理链路复验完成**：
+  - rag-backend 在 3000 端口运行，`GET /api/v1/health` 返回 200。
+  - admin-backend 在 3001 端口运行，`GET /health` 返回 200，内存模式默认用户 `admin/Admin@123` 登录成功。
+  - `GET /api/admin/qa-ops/agui/stream?query=...&mode=simple&token=...` 真实代理到 rag-backend `GET /api/v1/agui/admin/stream`。
+  - SSE 返回 `RUN_STARTED`、`TEXT_MESSAGE_START`、`STATE_DELTA`、`CUSTOM(rag.final)`、`TEXT_MESSAGE_END`、`RUN_FINISHED`，证明 EventSource query token、管理后台 JWT、内部 `RAG_SERVICE_TOKEN` 三段鉴权链路均可用。
+- 2026-06-24：**QA AG-UI SSE 超时断流修复完成**：定位 `/qa-ops` 查询 `nestjs` 时只输出到 `retrieval/sufficiency` 后报 `AG-UI 流式连接失败` 的根因是 `CircuitBreakerInterceptor` 对所有请求统一 `timeout(5000)`，长耗时 SSE 在生成阶段被 admin-backend 自己截断；已对 `Accept: text/event-stream` 和 `/agui/stream` 请求跳过 5 秒超时，普通 API 仍保留熔断超时保护。验证通过：`pnpm run build`、`pnpm exec jest --runInBand`（7 suites / 45 tests）、统一 `RAG_SERVICE_TOKEN` 后通过 `localhost:8000/api/admin/qa-ops/agui/stream?query=nestjs&mode=agentic` 验证输出 `TEXT_MESSAGE_CONTENT -> rag.final -> TEXT_MESSAGE_END -> RUN_FINISHED`，不再断流。

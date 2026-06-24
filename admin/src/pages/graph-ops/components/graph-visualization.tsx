@@ -1,6 +1,6 @@
 import { Empty, Spin } from 'antd';
 import * as d3 from 'd3';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { GraphEdge, GraphNode } from '../service';
 
 interface GraphVisualizationProps {
@@ -15,6 +15,9 @@ const typeColorMap: Record<string, string> = {
   Organization: '#722ed1',
   Technology: '#13c2c2',
   Concept: '#52c41a',
+  Document: '#1677ff',
+  Category: '#fa8c16',
+  Tag: '#9254de',
   Location: '#fa8c16',
   Event: '#eb2f96',
 };

@@ -1,0 +1,203 @@
+.rag-admin-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+  color: #111827;
+}
+
+.rag-admin-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 268px 1fr auto;
+  align-items: center;
+  height: 68px;
+  padding: 0 20px 0 28px;
+  background: #fff;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.rag-admin-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.rag-admin-brand:hover {
+  color: #111827;
+}
+
+.rag-admin-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, #1677ff 0%, #2f8cff 45%, #69b1ff 100%);
+  position: relative;
+  box-shadow: 0 10px 20px rgb(22 119 255 / 18%);
+}
+
+.rag-admin-logo::before,
+.rag-admin-logo::after {
+  position: absolute;
+  content: '';
+  left: 8px;
+  width: 16px;
+  height: 5px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 92%);
+}
+
+.rag-admin-logo::before {
+  top: 9px;
+  transform: skewY(-28deg);
+}
+
+.rag-admin-logo::after {
+  top: 18px;
+  transform: skewY(28deg);
+}
+
+.rag-admin-main-nav {
+  display: flex;
+  justify-content: center;
+  gap: 42px;
+  height: 100%;
+}
+
+.rag-admin-main-nav a {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  border-bottom: 3px solid transparent;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rag-admin-main-nav a.active,
+.rag-admin-main-nav a:hover {
+  color: #1677ff;
+  border-bottom-color: #1677ff;
+}
+
+.rag-admin-userbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.rag-admin-bell {
+  color: #1f2937;
+  font-size: 20px;
+}
+
+.rag-admin-avatar {
+  color: #1f2937;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.rag-admin-main {
+  min-height: calc(100vh - 68px);
+}
+
+.rag-module-page {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: calc(100vh - 68px);
+}
+
+.rag-module-side {
+  position: sticky;
+  top: 68px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 68px);
+  padding: 28px 14px 18px;
+  background: #fff;
+  border-right: 1px solid #e8edf5;
+}
+
+.rag-module-side h2 {
+  margin: 0 10px 24px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.rag-module-side-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rag-module-side-list a,
+.rag-module-side-list button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  gap: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #374151;
+  cursor: pointer;
+  font-size: 16px;
+  text-align: left;
+}
+
+.rag-module-side-list a.active,
+.rag-module-side-list button.active {
+  background: #eaf2ff;
+  color: #1677ff;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.rag-collapse-btn {
+  justify-content: flex-start;
+  margin-top: auto;
+  color: #4b5563;
+}
+
+.rag-module-content {
+  min-width: 0;
+  padding: 16px 24px;
+}
+
+.rag-panel {
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgb(15 23 42 / 4%);
+}
+
+.rag-page-grid {
+  display: grid;
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .rag-admin-topbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .rag-admin-main-nav {
+    display: none;
+  }
+
+  .rag-module-page {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-module-side {
+    position: relative;
+    top: 0;
+    height: auto;
+  }
+}

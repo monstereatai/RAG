@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { chat, chatStream, synthesizeSpeechStream } from '../api';
-import type { ChatMode, ReferenceChunk } from '../types';
+import { aguiStream, chat, synthesizeSpeechStream } from '../api';
+import type { AguiEvent, ChatMode, ChatResponse, ReferenceChunk } from '../types';
 import ReferenceList from './ReferenceList';
 
 interface SpeechRecognitionLike {
@@ -138,79 +138,68 @@ function ChatPage() {
         });
       };
 
-      chatStream(
+      aguiStream(
         query,
         m,
         (event) => {
-          const { type, data } = event;
+          const { type } = event;
           updateMsg((msg) => ({
             ...msg,
             events: [...(msg.events ?? []), type],
           }));
 
           switch (type) {
-            case 'routing': {
-              const route = (data as { route?: string }).route;
-              updateMsg((msg) => ({ ...msg, route }));
-              break;
-            }
-            case 'token': {
-              const token =
-                typeof data === 'string'
-                  ? data
-                  : ((data as { token?: string }).token ?? '');
-              updateMsg((msg) => ({ ...msg, content: msg.content + token }));
-              break;
-            }
-            case 'citation': {
-              const refs = Array.isArray(data)
-                ? (data as ReferenceChunk[])
-                : ((data as { references?: ReferenceChunk[] }).references ?? []);
-              updateMsg((msg) => ({ ...msg, references: refs }));
-              break;
-            }
-            case 'reflection': {
-              const r = data as { confidence?: number; retryCount?: number };
+            case 'RUN_STARTED': {
+              const input = event.data?.input as { mode?: ChatMode } | undefined;
               updateMsg((msg) => ({
                 ...msg,
-                confidence: r.confidence,
-                retryCount: r.retryCount,
+                route: input?.mode,
               }));
               break;
             }
-            case 'sufficiency': {
-              const s = data as { sufficient?: boolean; reason?: string };
+            case 'TEXT_MESSAGE_CONTENT': {
+              const delta =
+                typeof event.data?.delta === 'string' ? event.data.delta : '';
               updateMsg((msg) => ({
                 ...msg,
-                retrievalSufficient: s.sufficient,
-                retrievalReason: s.reason,
+                content: msg.content + delta,
               }));
               break;
             }
-            case 'final': {
-              const f = data as {
-                answer?: string;
-                references?: ReferenceChunk[];
-                retrievalSufficient?: boolean;
-                retrievalReason?: string;
-              };
+            case 'STATE_DELTA': {
+              applyAguiStateDelta(event, updateMsg);
+              break;
+            }
+            case 'CUSTOM': {
+              applyAguiCustomEvent(event, updateMsg);
+              break;
+            }
+            case 'RUN_FINISHED': {
+              const output = event.data?.output as ChatResponse | undefined;
               updateMsg((msg) => ({
                 ...msg,
-                content: f.answer ?? msg.content,
-                references: f.references ?? msg.references,
+                content: output?.answer ?? msg.content,
+                references: output?.references ?? msg.references,
+                route: output?.route ?? msg.route,
+                confidence: output?.confidence ?? msg.confidence,
+                retryCount: output?.retryCount ?? msg.retryCount,
                 retrievalSufficient:
-                  f.retrievalSufficient ?? msg.retrievalSufficient,
-                retrievalReason: f.retrievalReason ?? msg.retrievalReason,
+                  output?.retrievalSufficient ?? msg.retrievalSufficient,
+                retrievalReason:
+                  output?.retrievalReason ?? msg.retrievalReason,
                 status: 'done',
               }));
               resolve();
               break;
             }
-            case 'error': {
-              const e = data as { message?: string };
+            case 'RUN_ERROR': {
+              const message =
+                typeof event.data?.message === 'string'
+                  ? event.data.message
+                  : '未知错误';
               updateMsg((msg) => ({
                 ...msg,
-                content: `错误: ${e.message ?? '未知错误'}`,
+                content: `错误: ${message}`,
                 status: 'error',
               }));
               resolve();
@@ -236,6 +225,76 @@ function ChatPage() {
       );
     });
   };
+
+  const applyAguiStateDelta = (
+    event: AguiEvent,
+    updateMsg: (updater: (msg: Message) => Message) => void,
+  ) => {
+    const delta = event.data?.delta;
+    if (!Array.isArray(delta)) return;
+
+    for (const patch of delta) {
+      if (!isRecord(patch)) continue;
+      const value = patch.value;
+      if (patch.path === '/routing' && isRecord(value)) {
+        updateMsg((msg) => ({
+          ...msg,
+          route:
+            typeof value.route === 'string'
+              ? value.route
+              : msg.route,
+        }));
+      }
+      if (patch.path === '/sufficiency' && isRecord(value)) {
+        updateMsg((msg) => ({
+          ...msg,
+          retrievalSufficient:
+            typeof value.sufficient === 'boolean'
+              ? value.sufficient
+              : msg.retrievalSufficient,
+          retrievalReason:
+            typeof value.reason === 'string'
+              ? value.reason
+              : msg.retrievalReason,
+        }));
+      }
+    }
+  };
+
+  const applyAguiCustomEvent = (
+    event: AguiEvent,
+    updateMsg: (updater: (msg: Message) => Message) => void,
+  ) => {
+    const name = event.data?.name;
+    const value = event.data?.value;
+
+    if (name === 'rag.citation') {
+      const refs = Array.isArray(value)
+        ? (value as ReferenceChunk[])
+        : isRecord(value) && Array.isArray(value.references)
+          ? (value.references as ReferenceChunk[])
+          : [];
+      updateMsg((msg) => ({ ...msg, references: refs }));
+      return;
+    }
+
+    if (name === 'rag.reflection' && isRecord(value)) {
+      updateMsg((msg) => ({
+        ...msg,
+        confidence:
+          typeof value.confidence === 'number'
+            ? value.confidence
+            : msg.confidence,
+        retryCount:
+          typeof value.retryCount === 'number'
+            ? value.retryCount
+            : msg.retryCount,
+      }));
+    }
+  };
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

@@ -1,4 +1,30 @@
-<h1 align="center">Ant Design Pro</h1>
+<h1 align="center">RAG 管理后台</h1>
+
+> 基于 Ant Design Pro / Umi Max 的企业知识库管理后台。当前项目使用 **pnpm** 和 `pnpm-lock.yaml`，本地开发命令以 `pnpm` 为准。
+
+## RAG AG-UI 流式问答
+
+AI 问答页面已接入 AG-UI 流式协议，链路为：
+
+```text
+admin/src/pages/qa-ops
+  -> /api/admin/qa-ops/agui/stream
+  -> admin-backend
+  -> rag-backend /api/v1/agui/admin/stream
+```
+
+本地联调前确认：
+
+- `rag-backend` 已启动并配置 `RAG_SERVICE_TOKEN`
+- `admin-backend` 已启动，`RAG_SERVICE_BASE_URL` 指向 `http://localhost:3000/api/v1`
+- `admin-backend` 的 `RAG_SERVICE_TOKEN` 与 `rag-backend` 一致
+
+验证命令：
+
+```bash
+pnpm run lint
+pnpm run build
+```
 
 <div align="center">
 

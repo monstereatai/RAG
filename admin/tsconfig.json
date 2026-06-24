@@ -20,5 +20,14 @@
     }
   },
   "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/.umi", "src/.umi-production", "src/.umi-test", "cloudflare-worker", "node_modules", "dist"]
+  "exclude": [
+    "src/.umi/**",
+    "src/.umi-production/**",
+    "src/.umi-test/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "cloudflare-worker",
+    "node_modules",
+    "dist"
+  ]
 }

@@ -4,7 +4,8 @@ import type { RequestConfig, RunTimeLayoutConfig } from '@umijs/max';
 import { history, Link } from '@umijs/max';
 import React from 'react';
 
-import { ErrorBoundary, Footer } from '@/components';
+import { ErrorBoundary } from '@/components';
+import { AdminShell } from '@/components/AdminShell';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -67,6 +68,9 @@ export const layout: RunTimeLayoutConfig = ({
   setInitialState,
 }) => {
   return {
+    headerRender: false,
+    menuRender: false,
+    menuHeaderRender: false,
     menuItemRender: (item, dom) => {
       if (item.path) {
         return (
@@ -98,7 +102,7 @@ export const layout: RunTimeLayoutConfig = ({
         </span>
       ),
     },
-    footerRender: () => <Footer />,
+    footerRender: false,
     onPageChange: () => {
       const { location } = history;
       if (!initialState?.currentUser && location.pathname !== loginPath) {
@@ -108,12 +112,11 @@ export const layout: RunTimeLayoutConfig = ({
       }
     },
     ErrorBoundary,
-    menuHeaderRender: undefined,
     childrenRender: (children) => {
       return (
-        <>
+        <AdminShell currentUser={initialState?.currentUser}>
           {children}
-          <SettingDrawer
+          {isDev && <SettingDrawer
             disableUrlParams
             enableDarkTheme
             collapse={initialState?.settingDrawerOpen}
@@ -130,8 +133,8 @@ export const layout: RunTimeLayoutConfig = ({
                 settings,
               }));
             }}
-          />
-        </>
+          />}
+        </AdminShell>
       );
     },
     ...initialState?.settings,

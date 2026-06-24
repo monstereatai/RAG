@@ -5,6 +5,7 @@ import type {
   DocumentItem,
   ChatResponse,
   ChatMode,
+  AguiEvent,
   DebugResponse,
   LoginResponse,
   UserInfo,
@@ -92,6 +93,41 @@ export function chatStream(
     eventSource.close();
     onClose();
   });
+}
+
+// AG-UI 协议流式聊天
+export function aguiStream(
+  query: string,
+  mode: ChatMode,
+  onEvent: (event: AguiEvent) => void,
+  onError: (err: Error) => void,
+  onClose: () => void,
+): void {
+  const token = localStorage.getItem('token');
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  const url = `/api/v1/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
+  const eventSource = new EventSource(url);
+  let finished = false;
+
+  eventSource.onmessage = (e) => {
+    try {
+      const event = JSON.parse(e.data) as AguiEvent;
+      onEvent(event);
+      if (event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR') {
+        finished = true;
+        eventSource.close();
+        onClose();
+      }
+    } catch {
+      // 忽略解析失败的事件
+    }
+  };
+
+  eventSource.onerror = () => {
+    if (finished) return;
+    onError(new Error('AG-UI SSE connection error'));
+    eventSource.close();
+  };
 }
 
 // TTS SSE：接收 base64 音频块，完成后返回可播放 Blob

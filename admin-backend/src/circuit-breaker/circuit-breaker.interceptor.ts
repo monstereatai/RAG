@@ -13,6 +13,10 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
     const method = request.method;
     const key = `${method}:${path}`;
 
+    if (this.isSseRequest(request)) {
+      return next.handle();
+    }
+
     return next.handle().pipe(
       timeout(5000), // 5秒超时
       catchError(error => {
@@ -31,5 +35,11 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
         return throwError(() => error);
       })
     );
+  }
+
+  private isSseRequest(request: { headers?: Record<string, unknown>; path?: string; originalUrl?: string }): boolean {
+    const accept = String(request.headers?.accept ?? '');
+    const path = request.path ?? request.originalUrl ?? '';
+    return accept.includes('text/event-stream') || path.includes('/agui/stream');
   }
 }

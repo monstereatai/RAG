@@ -81,10 +81,8 @@ const DocumentDetail: React.FC = () => {
     );
   }
 
-  const status = statusMap[doc.status] ?? {
-    color: 'default',
-    text: doc.status,
-  };
+  const statusKey = doc.status ?? 'pending';
+  const status = statusMap[statusKey] ?? { color: 'default', text: '未知' };
   const meta = doc.metadata;
 
   return (

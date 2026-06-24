@@ -36,14 +36,13 @@ export class LoginGuard implements CanActivate {
       return true;
     }
 
-    const authorization = request.headers.authorization;
+    const token = this.extractToken(request);
 
-    if (!authorization) {
+    if (!token) {
       throw new UnauthorizedException('用户未登录');
     }
 
     try {
-      const token = authorization.split(' ')[1];
       const data = this.jwtService.verify(token);
 
       (request as any).user = {
@@ -56,5 +55,22 @@ export class LoginGuard implements CanActivate {
     } catch (e) {
       throw new UnauthorizedException('token 失效，请重新登录');
     }
+  }
+
+  private extractToken(request: Request): string | null {
+    const authorization = request.headers.authorization;
+    if (authorization) {
+      const [type, token] = authorization.split(' ');
+      if (type === 'Bearer' && token) {
+        return token;
+      }
+    }
+
+    const queryToken = request.query?.token;
+    if (typeof queryToken === 'string' && queryToken) {
+      return queryToken;
+    }
+
+    return null;
   }
 }

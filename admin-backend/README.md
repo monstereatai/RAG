@@ -176,6 +176,25 @@ npm run perf:k6
 | RABBITMQ_URL | RabbitMQ连接URL | amqp://localhost:5672 |
 | RAG_SERVICE_BASE_URL | 独立 RAG 服务 API 地址，仅后台 RAG 运营入口使用 | http://localhost:3000/api/v1 |
 | RAG_SERVICE_TIMEOUT_MS | 后台调用 RAG 服务超时时间 | 2000 |
+| RAG_SERVICE_TOKEN | 后台调用 RAG 内部 AG-UI / 运营接口的服务 token，必须与 rag-backend 一致 | - |
+
+### RAG AG-UI 流式问答代理
+
+管理后台前端不直接连 `rag-backend`，而是通过 admin-backend 代理：
+
+```text
+admin 页面 /api/admin/qa-ops/agui/stream
+  -> admin-backend RagClientService
+  -> rag-backend /api/v1/agui/admin/stream
+```
+
+本地联调需要同时配置：
+
+- `admin-backend/.env`：`RAG_SERVICE_BASE_URL=http://localhost:3000/api/v1`
+- `admin-backend/.env`：`RAG_SERVICE_TOKEN=<与 rag-backend 相同的内部 token>`
+- `backend/.env`：`RAG_SERVICE_TOKEN=<同一个内部 token>`
+
+浏览器 `EventSource` 不能携带自定义 header，admin 前端会把后台 JWT 作为 `?token=` 传给 admin-backend；admin-backend 验证后再用内部服务 token 调用 rag-backend。
 
 ### 安全配置
 

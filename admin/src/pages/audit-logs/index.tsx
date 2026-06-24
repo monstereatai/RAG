@@ -43,7 +43,7 @@ const AuditLogs: React.FC = () => {
           });
           const data = (res as any)?.data ?? res;
           return {
-            data: Array.isArray(data) ? data : (data?.list ?? []),
+            data: Array.isArray(data) ? data : (data?.items ?? []),
             total: (data as any)?.total ?? 0,
             success: true,
           };

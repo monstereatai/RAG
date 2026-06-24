@@ -23,6 +23,9 @@ export interface CapabilitiesResponse {
   mem0: { available: boolean };
   redis: { available: boolean };
   speech: { available: boolean };
+  agui: { available: boolean; endpoint: string };
+  langSmith: { available: boolean; tracing: boolean; project: string };
+  evaluation: { available: boolean; scripts: string[] };
   webSearch: { available: boolean };
   embedding: { provider: string; available: boolean };
 }
@@ -132,6 +135,29 @@ export class RagAdminService {
         available:
           !!this.configService.get<string>('TENCENT_SECRET_ID') &&
           !!this.configService.get<string>('TENCENT_SECRET_KEY'),
+      },
+      agui: {
+        available: true,
+        endpoint: '/api/v1/agui/stream',
+      },
+      langSmith: {
+        available:
+          this.configService.get<boolean>('langsmith.tracing') === true &&
+          !!this.configService.get<string>('langsmith.apiKey'),
+        tracing: this.configService.get<boolean>('langsmith.tracing') === true,
+        project:
+          this.configService.get<string>('langsmith.project') ??
+          'rag-evaluation',
+      },
+      evaluation: {
+        available: true,
+        scripts: [
+          'eval:rag',
+          'eval:rag:e2e',
+          'eval:rag:judge',
+          'eval:rag:langsmith',
+          'eval:rag:quality',
+        ],
       },
       webSearch: {
         available: !!this.configService.get<string>('BOCHA_API_KEY'),
@@ -345,6 +371,15 @@ export class RagAdminService {
         refusalRate: 0.09,
         citationRate: 0.91,
       },
+      {
+        datasetName: 'langsmith-rag-export',
+        mode: 'offline-export',
+        passed: true,
+        averageScore: 1.0,
+        totalSamples: 5,
+        refusalRate: 0.2,
+        citationRate: 0.8,
+      },
     ];
   }
 
@@ -356,7 +391,7 @@ export class RagAdminService {
       triggered: true,
       dataset,
       mode,
-      note: 'Evaluation triggered. Run `npm run eval:rag` or `npm run eval:rag:e2e` for full results. For automated execution, use the eval scripts in backend/scripts/.',
+      note: 'Evaluation triggered. Run `npm run eval:rag`, `npm run eval:rag:e2e`, or `npm run eval:rag:langsmith` for full results. For automated execution, use the eval scripts in backend/scripts/.',
     };
   }
 

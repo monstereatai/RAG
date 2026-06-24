@@ -149,6 +149,34 @@ describe('RagClientService', () => {
       expect(result.available).toBe(true);
     });
 
+    it('should call AG-UI admin stream with service token', async () => {
+      const controller = new AbortController();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: {},
+      });
+
+      await service.streamAgui(
+        {
+          query: '测试 AG-UI',
+          mode: 'agentic',
+          userId: 'admin-user',
+        },
+        controller.signal,
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/agui/admin/stream?query=%E6%B5%8B%E8%AF%95+AG-UI&mode=agentic&userId=admin-user',
+        expect.objectContaining({
+          headers: {
+            Authorization: 'Bearer test-token',
+          },
+          signal: controller.signal,
+        }),
+      );
+    });
+
     it('should call graph schema', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

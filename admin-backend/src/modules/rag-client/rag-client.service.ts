@@ -1,6 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RagClientResult, RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
+import {
+  RagClientResult,
+  RagDocumentQueryDto,
+  RagEvaluationRunDto,
+} from './dto/rag-admin.dto';
+
+export interface RagAguiStreamQuery {
+  query: string;
+  mode?: 'simple' | 'agentic' | 'auto';
+  userId?: string;
+  threadId?: string;
+}
 
 @Injectable()
 export class RagClientService {
@@ -109,6 +120,25 @@ export class RagClientService {
 
   getQaCostSummary() {
     return this.getJson<Record<string, unknown>>('/rag/admin/qa/cost-summary');
+  }
+
+  streamAgui(query: RagAguiStreamQuery, signal: AbortSignal) {
+    const params = new URLSearchParams({
+      query: query.query,
+      mode: query.mode ?? 'agentic',
+      userId: query.userId || 'admin-backend',
+    });
+    if (query.threadId) {
+      params.set('threadId', query.threadId);
+    }
+    const headers: Record<string, string> = {};
+    if (this.serviceToken) {
+      headers.Authorization = `Bearer ${this.serviceToken}`;
+    }
+    return fetch(`${this.baseUrl}/agui/admin/stream?${params.toString()}`, {
+      headers,
+      signal,
+    });
   }
 
   // ─── Graph Operations ───────────────────────────────────────
