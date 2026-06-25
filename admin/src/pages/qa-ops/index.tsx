@@ -1,12 +1,14 @@
 import {
   DeleteOutlined,
+  EllipsisOutlined,
   FileWordOutlined,
+  MenuOutlined,
   PaperClipOutlined,
   PlusOutlined,
   SendOutlined,
 } from '@ant-design/icons';
 import { ModulePage, qaNav } from '@/components/AdminShell';
-import { Avatar, Button, Input } from 'antd';
+import { Avatar, Button, Dropdown, Input } from 'antd';
 import React from 'react';
 import {
   type AguiEvent,
@@ -47,6 +49,14 @@ const QaOps: React.FC = () => {
   const [convPage, setConvPage] = React.useState(1);
   const PAGE_SIZE = 10;
   const abortRef = React.useRef<AbortController | null>(null);
+  const chatBodyRef = React.useRef<HTMLDivElement>(null);
+
+  // 自动滚动到底部
+  React.useEffect(() => {
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   // 同步 threadId 到 ref，避免闭包过期
   React.useEffect(() => {
@@ -362,7 +372,32 @@ const QaOps: React.FC = () => {
         <aside className="rag-panel qa-list">
           <div className="panel-head">
             <h3>会话列表</h3>
-            <Button type="text">☰</Button>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'sortNewest',
+                    label: '按时间排序',
+                  },
+                  {
+                    key: 'sortCount',
+                    label: '按消息数排序',
+                  },
+                ],
+                onClick: ({ key }) => {
+                  const sorted = [...conversations];
+                  if (key === 'sortNewest') {
+                    sorted.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+                  } else if (key === 'sortCount') {
+                    sorted.sort((a, b) => b.messageCount - a.messageCount);
+                  }
+                  setConversations(sorted);
+                },
+              }}
+              placement="bottomRight"
+            >
+              <Button type="text" icon={<MenuOutlined />} />
+            </Dropdown>
           </div>
           <Button
             block
@@ -381,16 +416,56 @@ const QaOps: React.FC = () => {
               <div className="empty-conversations">暂无对话</div>
             ) : (
               conversations.slice(0, convPage * PAGE_SIZE).map((item) => (
-                <button
-                  className={item.threadId === threadId ? 'active' : ''}
+                <div
+                  className={`conv-item${item.threadId === threadId ? ' active' : ''}`}
                   key={item.threadId}
                   onClick={() => handleSelectConversation(item)}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSelectConversation(item)}
                 >
                   <strong>{item.title}</strong>
                   <span>{formatTime(item.updatedAt)}</span>
                   <p>{item.messageCount} 条消息</p>
-                </button>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'delete',
+                          label: '删除会话',
+                          danger: true,
+                          icon: <DeleteOutlined />,
+                        },
+                      ],
+                      onClick: async ({ domEvent }) => {
+                        domEvent.stopPropagation();
+                        try {
+                          await deleteConversation(item.threadId);
+                          setConversations((prev) => prev.filter((c) => c.threadId !== item.threadId));
+                          if (threadId === item.threadId) {
+                            setMessages([]);
+                            setThreadId(undefined);
+                            setActiveTitle('');
+                          }
+                        } catch {
+                          // 删除失败
+                        }
+                      },
+                    }}
+                    placement="bottomRight"
+                    trigger={['click']}
+                  >
+                    <span
+                      className="conv-more-btn"
+                      onClick={(e) => e.stopPropagation()}
+                      role="button"
+                      tabIndex={-1}
+                      onKeyDown={() => {}}
+                    >
+                      <EllipsisOutlined />
+                    </span>
+                  </Dropdown>
+                </div>
               ))
             )}
             {conversations.length > convPage * PAGE_SIZE && (
@@ -414,7 +489,7 @@ const QaOps: React.FC = () => {
               清空对话
             </Button>
           </div>
-          <div className="chat-body">
+          <div className="chat-body" ref={chatBodyRef}>
             {messages.map((message) =>
               message.role === 'user' ? (
                 <div className="message user" key={message.id}>
@@ -422,7 +497,11 @@ const QaOps: React.FC = () => {
                     <p>{message.content}</p>
                     <span>{message.createdAt}</span>
                   </div>
-                  <Avatar />
+                  <Avatar style={{ background: '#f0f2f5', color: '#8c8c8c' }}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
+                  </Avatar>
                 </div>
               ) : (
                 <div className="message assistant" key={message.id}>
@@ -485,20 +564,22 @@ const QaOps: React.FC = () => {
               ),
             )}
           </div>
-          <div className="suggestions">
-            <strong>你可能还想问</strong>
-            {[
-              '差旅报销需要哪些票据?',
-              '报销申请提交后多久能到账?',
-              '差旅报销的审批流程是怎样的?',
-              '特殊情况如何申请超标准报销?',
-            ].map((item) => (
-              <Button key={item} onClick={() => setInput(item)}>
-                {item}
-              </Button>
-            ))}
-            <Button type="link">换一批</Button>
-          </div>
+          {messages.length === 0 && (
+            <div className="suggestions">
+              <strong>你可能还想问</strong>
+              {[
+                '差旅报销需要哪些票据?',
+                '报销申请提交后多久能到账?',
+                '差旅报销的审批流程是怎样的?',
+                '特殊情况如何申请超标准报销?',
+              ].map((item) => (
+                <Button key={item} onClick={() => setInput(item)}>
+                  {item}
+                </Button>
+              ))}
+              <Button type="link">换一批</Button>
+            </div>
+          )}
           <div className="chat-input">
             <Input.TextArea
               autoSize={{ minRows: 2, maxRows: 3 }}

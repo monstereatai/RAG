@@ -47,7 +47,7 @@ export class QaOpsController {
 
   @Delete('conversations/:threadId')
   @ApiOperation({ summary: '删除会话' })
-  @RequirePermission('admin:qa-ops:write')
+  @RequirePermission('admin:qa-ops:read')
   async deleteConversation(
     @Param('threadId') threadId: string,
   ) {

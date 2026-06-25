@@ -43,8 +43,10 @@ export class QwenLlmProvider implements ILLMProvider {
     );
     try {
       const promise = this.model.invoke(messages);
+      const timeoutMs =
+        this.config.get<number>('llm.qwen.timeoutMs') ?? 30000;
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout calling LLM API')), 3000),
+        setTimeout(() => reject(new Error('Timeout calling LLM API')), timeoutMs),
       );
       const response = await Promise.race([promise, timeoutPromise]);
       const answer =

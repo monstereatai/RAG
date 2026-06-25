@@ -344,8 +344,9 @@ canvas {
 }
 
 .qa-list {
-  min-height: calc(100vh - 136px);
+  height: calc(100vh - 136px);
   padding: 20px;
+  overflow-y: auto;
 }
 
 .conversation-list {
@@ -357,20 +358,23 @@ canvas {
   overflow-y: auto;
 }
 
-.conversation-list button {
+.conv-item {
   position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
   padding: 11px 12px;
-  border: 0;
   border-bottom: 1px solid #edf1f7;
-  background: transparent;
   cursor: pointer;
   text-align: left;
+  transition: background 0.15s;
 }
 
-.conversation-list button.active {
+.conv-item:hover {
+  background: #f5f7fa;
+}
+
+.conv-item.active {
   border-radius: 6px;
   background: #eaf2ff;
   color: #1677ff;
@@ -382,10 +386,35 @@ canvas {
   color: #667085;
 }
 
+.conv-more-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #8a94a6;
+  font-size: 16px;
+}
+
+.conv-item:hover .conv-more-btn {
+  display: inline-flex;
+}
+
+.conv-more-btn:hover {
+  background: #e3e9f2;
+  color: #1f2937;
+}
+
 .qa-chat {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 136px);
+  height: calc(100vh - 136px);
   overflow: hidden;
 }
 
@@ -417,6 +446,13 @@ canvas {
 
 .message.user {
   justify-content: flex-end;
+  align-items: center;
+}
+
+.message.user .ant-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .message.user p {
@@ -502,6 +538,7 @@ canvas {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  flex-shrink: 0;
   gap: 10px;
   margin: 0 26px 8px;
   padding: 8px 10px;
@@ -510,6 +547,7 @@ canvas {
 }
 
 .chat-input {
+  flex-shrink: 0;
   margin: 0 26px 10px;
   padding: 7px;
   border: 1px solid #1677ff;

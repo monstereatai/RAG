@@ -92,6 +92,7 @@ export const configuration = () => ({
         process.env.QWEN_BASE_URL ??
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
       model: process.env.QWEN_MODEL ?? 'qwen-plus',
+      timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '20000', 10),
     },
     openai: {
       apiKey: process.env.OPENAI_API_KEY ?? '',
