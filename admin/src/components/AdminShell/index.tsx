@@ -83,9 +83,9 @@ export const qaNav: SideNavItem[] = [
 
 export const graphNav: SideNavItem[] = [
   { key: 'global', label: '全局图谱', icon: <NodeIndexOutlined />, path: '/graph-ops' },
-  { key: 'nodes', label: '节点管理', icon: <ApartmentOutlined /> },
-  { key: 'relations', label: '关系检索', icon: <SearchOutlined /> },
-  { key: 'stats', label: '图谱统计', icon: <PieChartOutlined /> },
+  { key: 'nodes', label: '节点管理', icon: <ApartmentOutlined />, path: '/graph-ops/nodes' },
+  { key: 'relations', label: '关系检索', icon: <SearchOutlined />, path: '/graph-ops/relations' },
+  { key: 'stats', label: '图谱统计', icon: <PieChartOutlined />, path: '/graph-ops/stats' },
 ];
 
 export const accountNav: SideNavItem[] = [

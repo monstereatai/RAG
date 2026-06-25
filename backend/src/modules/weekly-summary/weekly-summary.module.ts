@@ -9,7 +9,11 @@ import { WeeklySummaryController } from './weekly-summary.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WeeklySummaryEntity, ConversationEntity, MessageEntity]),
+    TypeOrmModule.forFeature([
+      WeeklySummaryEntity,
+      ConversationEntity,
+      MessageEntity,
+    ]),
     LlmModule,
   ],
   controllers: [WeeklySummaryController],

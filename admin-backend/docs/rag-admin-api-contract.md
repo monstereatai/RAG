@@ -147,7 +147,9 @@ GET /rag/admin/qa/cost-summary
 ```text
 GET /rag/admin/graph/schema
 GET /rag/admin/graph/entities
+GET /rag/admin/graph/entities/:id
 GET /rag/admin/graph/relationships
+GET /rag/admin/graph/search
 GET /rag/admin/graph/orphans
 GET /rag/admin/graph/conflicts
 ```
@@ -156,7 +158,9 @@ GET /rag/admin/graph/conflicts
 
 - GraphRAG schema
 - 实体列表
+- 实体详情
 - 关系列表
+- 图谱搜索结果（nodes + edges）
 - 孤立节点
 - 冲突关系
 

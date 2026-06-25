@@ -80,8 +80,28 @@ export class GraphOpsMockService {
       id: e.id,
       label: e.name,
       type: e.type,
+      aliases: [],
+      sourceId: 'mock-seed',
+      relationshipCount: MOCK_RELATIONSHIPS.filter(
+        (r) => r.source === e.id || r.target === e.id,
+      ).length,
+      confidence: 1,
+      updatedAt: '',
       properties: e.properties,
     }));
+  }
+
+  getNodeDetail(id: string) {
+    const node = this.getNodes().find((item) => item.id === id);
+    if (!node) {
+      return null;
+    }
+    return {
+      ...node,
+      relations: this.getRelations().filter(
+        (item) => item.source === id || item.target === id,
+      ),
+    };
   }
 
   getSchema() {
@@ -113,14 +133,59 @@ export class GraphOpsMockService {
         id: e.id,
         label: e.name,
         type: e.type,
+        aliases: [],
+        sourceId: 'mock-seed',
+        relationshipCount: MOCK_RELATIONSHIPS.filter(
+          (r) => r.source === e.id || r.target === e.id,
+        ).length,
+        confidence: 1,
+        updatedAt: '',
         properties: e.properties,
       })),
-      edges: matchedEdges.map((r) => ({
+      edges: this.mapRelations(matchedEdges),
+    };
+  }
+
+  getRelations() {
+    return this.mapRelations(MOCK_RELATIONSHIPS);
+  }
+
+  searchRelations(query?: string) {
+    const q = (query || '').toLowerCase();
+    if (!q) {
+      return this.getRelations();
+    }
+    return this.mapRelations(
+      MOCK_RELATIONSHIPS.filter((rel) => {
+        const source = MOCK_ENTITIES.find((entity) => entity.id === rel.source);
+        const target = MOCK_ENTITIES.find((entity) => entity.id === rel.target);
+        return (
+          rel.type.toLowerCase().includes(q) ||
+          source?.name.toLowerCase().includes(q) ||
+          target?.name.toLowerCase().includes(q)
+        );
+      }),
+    );
+  }
+
+  private mapRelations(relations: typeof MOCK_RELATIONSHIPS) {
+    return relations.map((r) => {
+      const source = MOCK_ENTITIES.find((entity) => entity.id === r.source);
+      const target = MOCK_ENTITIES.find((entity) => entity.id === r.target);
+      return {
         id: r.id,
         source: r.source,
+        sourceLabel: source?.name ?? r.source,
+        sourceType: source?.type ?? 'entity',
         target: r.target,
+        targetLabel: target?.name ?? r.target,
+        targetType: target?.type ?? 'entity',
         label: r.type,
-      })),
-    };
+        confidence: 1,
+        sourceId: 'mock-seed',
+        updatedAt: '',
+        properties: {},
+      };
+    });
   }
 }

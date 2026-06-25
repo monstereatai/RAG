@@ -1,6 +1,6 @@
 # RAG 管理后台前端 - ROADMAP
 
-## 当前阶段：后台管理端效果图对齐与工程验证完成，待 Node 22 环境复验/部署验证
+## 当前阶段：后台管理端效果图对齐与工程验证完成；`/graph-ops` 三个二级菜单已实现并完成接口联调
 
 ## 技术栈
 
@@ -95,10 +95,11 @@
 - [x] 将 Vitest 调整到兼容 Umi 4 / Vite 4 的 0.34.6 版本
 - [x] 对齐 RBAC 权限测试与请求错误提示测试断言
 - [x] 补齐 antd CLI 在 macOS arm64 下需要的 oxc parser 可选原生绑定
+- [x] `/graph-ops` 三个二级菜单实现：`节点管理`、`关系检索`、`图谱统计`，包含子路由、筛选栏、表格、详情抽屉、局部图谱、统计分布和 demo 状态提示。
 
 ## 进行中
 
-- 无
+- [ ] `/graph-ops` 三个二级菜单浏览器截图复验：当前已完成路径 200 和接口联调，尚未做 Puppeteer/Playwright 视觉截图。
 
 ## 待办
 
@@ -109,9 +110,22 @@
 
 - 当前 shell Node.js 为 v20.18.0，项目 package.json 要求 >=22.0.0；`pnpm run lint`、`pnpm run test`、`pnpm run build` 均可通过但会提示 engine warning，建议切到 Node 22+ 后做最终复验。
 - `pnpm exec antd lint ./src` 在 Node 20 下会触发 `oxc-parser` 的 CJS/ESM 加载错误；使用 Node 24 执行同一 antd CLI 已通过。
+- 2026-06-25：`pnpm run build` 本轮被现有 `utoo pack dev` 进程持有的 `.turbopack/lock` 阻塞；未停止主人正在运行的 8000 dev server。
+- 真实 Neo4j 图谱当前为空时，`/graph-ops` 页面会展示 `meta.demo=true` 的演示数据提示，不把演示数据当真实数据。
 
 ## 最近验证
 
+- 2026-06-25：`/graph-ops` 三个二级菜单实现与联调完成
+  - 新增路径：`/graph-ops/nodes`、`/graph-ops/relations`、`/graph-ops/stats`
+  - 页面完成：节点管理表格与详情抽屉、关系检索表格与局部图谱、图谱统计指标与类型分布
+  - service 完成：`getGraphNodeDetail`、`getGraphRelations`、`searchGraphRelations`，并补齐 `meta.demo/available/source`
+  - 验证通过：`pnpm run lint`
+  - 路径验证：`http://localhost:8000/graph-ops/nodes`、`/relations`、`/stats` 均返回 200 HTML
+  - 未完成：`pnpm run build` 被现有 8000 dev server 的 `.turbopack/lock` 阻塞；未做浏览器截图复验
+- 2026-06-25：`/graph-ops` 三个二级菜单实施计划完成
+  - 新增 `admin/docs/graph-ops-menu-implementation-plan.md`
+  - 明确节点管理、关系检索、图谱统计 UI 草图、接口契约、编码 checklist、红线与验收标准
+  - 本次未编码，未运行前端构建验证
 - 2026-06-24：工程验证链路复验
   - `pnpm run lint` 通过（biome + `tsc --noEmit`）
   - `pnpm run test` 通过（3 files / 25 tests）

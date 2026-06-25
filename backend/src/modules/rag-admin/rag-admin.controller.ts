@@ -176,17 +176,45 @@ export class RagAdminController {
 
   @Get('graph/schema')
   getGraphSchema() {
-    return this.ragAdminService.getGraphEntities();
+    return this.ragAdminService.getGraphSchema();
   }
 
   @Get('graph/entities')
-  getGraphEntities() {
-    return this.ragAdminService.getGraphEntities();
+  getGraphEntities(
+    @Query() query: { keyword?: string; type?: string; limit?: number },
+  ) {
+    return this.ragAdminService.getGraphEntities(query);
+  }
+
+  @Get('graph/entities/:id')
+  getGraphEntityDetail(@Param('id') id: string) {
+    return this.ragAdminService.getGraphEntityDetail(id);
   }
 
   @Get('graph/relationships')
-  getGraphRelationships() {
-    return this.ragAdminService.getGraphRelationships();
+  getGraphRelationships(
+    @Query()
+    query: {
+      query?: string;
+      relationType?: string;
+      conflictOnly?: boolean;
+      limit?: number;
+    },
+  ) {
+    return this.ragAdminService.getGraphRelationships(query);
+  }
+
+  @Get('graph/search')
+  searchGraph(
+    @Query()
+    query: {
+      query?: string;
+      relationType?: string;
+      conflictOnly?: boolean;
+      limit?: number;
+    },
+  ) {
+    return this.ragAdminService.searchGraph(query);
   }
 
   @Get('graph/orphans')

@@ -537,6 +537,14 @@ canvas {
   grid-template-columns: minmax(260px, 1fr) auto 150px auto 150px auto 190px auto auto auto;
 }
 
+.graph-manage-filter {
+  grid-template-columns: minmax(280px, 1fr) auto 150px auto 150px auto 130px auto auto;
+}
+
+.graph-relation-filter {
+  grid-template-columns: minmax(300px, 1fr) auto 150px auto 120px auto auto;
+}
+
 .graph-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 346px;
@@ -655,6 +663,101 @@ canvas {
   font-size: 13px;
 }
 
+.graph-empty {
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.graph-empty h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.graph-empty p,
+.muted {
+  color: #8a94a6;
+}
+
+.graph-table-panel {
+  padding: 18px;
+}
+
+.graph-relation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.75fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.graph-mini-panel {
+  padding: 18px;
+}
+
+.graph-mini-panel > div:last-child {
+  border: 0 !important;
+}
+
+.graph-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.graph-stat-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.graph-type-panel {
+  padding: 18px;
+}
+
+.graph-type-panel p {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0;
+  color: #374151;
+}
+
+.graph-type-panel strong {
+  color: #111827;
+}
+
+.graph-detail dl {
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 12px;
+  margin: 0 0 20px;
+}
+
+.graph-detail dt {
+  color: #667085;
+}
+
+.graph-detail dd {
+  margin: 0;
+  color: #111827;
+}
+
+.graph-detail h3 {
+  margin: 18px 0 10px;
+  font-size: 15px;
+}
+
+.graph-detail pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
 .account-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
@@ -741,6 +844,22 @@ ol {
 }
 
 @media (max-width: 768px) {
+  .graph-layout,
+  .graph-relation-layout,
+  .graph-stat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .graph-filter,
+  .graph-manage-filter,
+  .graph-relation-filter {
+    grid-template-columns: 1fr;
+  }
+
   .ant-table {
     width: 100%;
     overflow-x: auto;

@@ -11,7 +11,10 @@ import { QueryLogService } from './query-log.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
-import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-ops-api.dto';
+import {
+  RagDocumentQueryDto,
+  RagEvaluationRunDto,
+} from './dto/rag-ops-api.dto';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -205,9 +208,7 @@ export class RagOpsApiService {
       title: doc.title ?? null,
       author: doc.author ?? null,
       summary: doc.summary ?? null,
-      keywords: doc.keywords
-        ? (JSON.parse(doc.keywords) as string[])
-        : [],
+      keywords: doc.keywords ? (JSON.parse(doc.keywords) as string[]) : [],
       language: doc.language ?? null,
       category: doc.category ?? '其他',
       sourceAuthority: doc.sourceAuthority ?? 'normal',
@@ -296,8 +297,7 @@ export class RagOpsApiService {
     const metricType =
       this.configService.get<string>('MILVUS_METRIC_TYPE') ?? 'COSINE';
     const collectionName =
-      this.configService.get<string>('MILVUS_COLLECTION_NAME') ??
-      'rag_chunks';
+      this.configService.get<string>('MILVUS_COLLECTION_NAME') ?? 'rag_chunks';
     const bm25Stats = this.karpathyRagService.getStats();
     const dbChunkCount = await this.chunkRepo.count();
 

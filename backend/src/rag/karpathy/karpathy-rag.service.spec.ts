@@ -293,7 +293,9 @@ describe('KarpathyRagService exception scenarios', () => {
 
   it('uses model fallback for weak Chinese overlap when only a generic word matches', async () => {
     const { service, llmInvoke } = createService();
-    llmInvoke.mockResolvedValueOnce('公司宠物医疗报销额度需要以公司福利制度为准。');
+    llmInvoke.mockResolvedValueOnce(
+      '公司宠物医疗报销额度需要以公司福利制度为准。',
+    );
     service.indexChunks(
       [
         {

@@ -9,87 +9,148 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import { ModulePage, graphNav } from '@/components/AdminShell';
-import { Button, DatePicker, Input, Select, Skeleton } from 'antd';
-import React, { useEffect, useState } from 'react';
+import { useLocation } from '@umijs/max';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Drawer,
+  Input,
+  Select,
+  Skeleton,
+  Statistic,
+  Table,
+  Tag,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import React, { useEffect, useMemo, useState } from 'react';
 import GraphVisualization from './components/graph-visualization';
-import { getGraphStats, searchGraph, type GraphEdge, type GraphNode, type GraphStats } from './service';
+import {
+  getGraphNodeDetail,
+  getGraphNodes,
+  getGraphRelations,
+  getGraphStats,
+  searchGraph,
+  searchGraphRelations,
+  type GraphEdge,
+  type GraphNode,
+  type GraphResponseMeta,
+  type GraphStats,
+} from './service';
 
 type GraphState = 'loading' | 'data' | 'empty' | 'disabled' | 'error';
+type GraphView = 'global' | 'nodes' | 'relations' | 'stats';
+
+const getActiveView = (pathname: string): GraphView => {
+  if (pathname.endsWith('/nodes')) return 'nodes';
+  if (pathname.endsWith('/relations')) return 'relations';
+  if (pathname.endsWith('/stats')) return 'stats';
+  return 'global';
+};
+
+const asPayload = <T,>(res: any): T => ((res?.data ?? res) || {}) as T;
+const asArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? value : []);
+
+const isGraphDisabled = (value: any) =>
+  value?.statusCode === 503 ||
+  value?.disabled ||
+  value?.available === false ||
+  String(value?.message ?? value?.error ?? '').includes('GraphRAG is disabled');
+
+const DemoAlert: React.FC<{ meta?: GraphResponseMeta }> = ({ meta }) =>
+  meta?.demo ? (
+    <Alert
+      message="当前展示的是演示图谱数据，尚未接入真实 Neo4j 图谱。"
+      showIcon
+      style={{ marginBottom: 12 }}
+      type="warning"
+    />
+  ) : null;
+
+const EmptyBlock: React.FC<{
+  title: string;
+  desc: string;
+  action?: React.ReactNode;
+  panel?: boolean;
+}> = ({
+  title,
+  desc,
+  action,
+  panel = true,
+}) => (
+  <div className={`${panel ? 'rag-panel ' : ''}graph-empty`}>
+    <h3>{title}</h3>
+    <p>{desc}</p>
+    {action}
+  </div>
+);
 
 const GraphOps: React.FC = () => {
+  const location = useLocation();
+  const activeView = getActiveView(location.pathname);
+
+  return (
+    <ModulePage activeKey={activeView} navItems={graphNav} title="知识图谱">
+      {activeView === 'global' && <GlobalGraphView />}
+      {activeView === 'nodes' && <NodeManagementView />}
+      {activeView === 'relations' && <RelationSearchView />}
+      {activeView === 'stats' && <GraphStatsView />}
+    </ModulePage>
+  );
+};
+
+const GlobalGraphView: React.FC = () => {
   const [graphState, setGraphState] = useState<GraphState>('loading');
   const [stats, setStats] = useState<GraphStats | null>(null);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
 
-  useEffect(() => {
+  const fetchGraph = () => {
     setGraphState('loading');
-
-    Promise.all([
-      getGraphStats(),
-      searchGraph('知识图谱'),
-    ])
+    Promise.all([getGraphStats(), searchGraph('知识图谱')])
       .then(([statsRes, searchRes]) => {
-        const statsData = ((statsRes as any)?.data ?? statsRes) || {};
+        const statsPayload = asPayload<{ data?: GraphStats; meta?: GraphResponseMeta }>(statsRes);
+        const searchPayload = asPayload<{
+          data?: { nodes?: GraphNode[]; edges?: GraphEdge[] };
+          meta?: GraphResponseMeta;
+        }>(searchRes);
 
-        // Check if Neo4j is disabled (503 response or disabled flag)
-        if (statsData.statusCode === 503 || statsData.disabled || statsData.message?.includes('disabled')) {
+        if (isGraphDisabled(statsPayload) || isGraphDisabled(statsPayload.data)) {
           setGraphState('disabled');
           return;
         }
 
-        if (statsData.nodeCount > 0) {
-          setStats(statsData);
-        }
+        const statsData = statsPayload.data ?? (statsPayload as GraphStats);
+        const graphData = searchPayload.data ?? { nodes: [], edges: [] };
+        const graphNodes = asArray<GraphNode>(graphData.nodes);
+        const graphEdges = asArray<GraphEdge>(graphData.edges);
 
-        const searchData = (searchRes as any)?.data ?? searchRes;
-        if (searchData?.nodes?.length > 0) {
-          setNodes(searchData.nodes);
-          setEdges(searchData.edges ?? []);
-        }
-
-        if (statsData?.nodeCount > 0 || (searchData?.nodes?.length ?? 0) > 0) {
-          setGraphState('data');
-        } else {
-          setGraphState('empty');
-        }
+        setStats(statsData);
+        setNodes(graphNodes);
+        setEdges(graphEdges);
+        setMeta(searchPayload.meta ?? statsPayload.meta);
+        setGraphState((statsData?.nodeCount ?? 0) > 0 || graphNodes.length > 0 ? 'data' : 'empty');
       })
-      .catch((err) => {
-        const errMsg = (err as any)?.message ?? '';
-        if (errMsg.includes('disabled') || errMsg.includes('503') || errMsg.includes('GraphRAG')) {
-          setGraphState('disabled');
-        } else {
-          setGraphState('error');
-        }
-      });
+      .catch(() => setGraphState('error'));
+  };
+
+  useEffect(() => {
+    fetchGraph();
   }, []);
 
   return (
-    <ModulePage activeKey="global" navItems={graphNav} title="知识图谱">
-      <div className="rag-panel graph-filter">
-        <Input prefix={<SearchOutlined />} placeholder="请输入关键词搜索图谱..." />
-        <span>节点类型</span>
-        <Select defaultValue="全部" options={[{ value: '全部' }]} />
-        <span>业务分类</span>
-        <Select defaultValue="全部" options={[{ value: '全部' }]} />
-        <span>创建时间</span>
-        <DatePicker.RangePicker />
-        <Button>重置</Button>
-        <Button type="primary">搜索</Button>
-        <Button icon={<DownloadOutlined />}>导出图谱</Button>
-      </div>
+    <>
+      <GraphFilterBar onSearch={fetchGraph} />
+      <DemoAlert meta={meta} />
 
       {graphState === 'disabled' && (
-        <div className="rag-panel" style={{ textAlign: 'center', padding: '80px 0' }}>
-          <h3>知识图谱未启用</h3>
-          <p style={{ color: '#999', margin: '12px 0 8px' }}>
-            Neo4j 知识图谱功能当前未启用。如需使用，请在 rag-backend 设置
-            <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4, margin: '0 4px' }}>
-              GRAPH_RAG_ENABLED=true
-            </code>
-            并确保 Neo4j 服务正在运行。
-          </p>
-        </div>
+        <EmptyBlock
+          desc="Neo4j 知识图谱功能当前未启用。请在 rag-backend 启用 GRAPH_RAG_ENABLED=true 并确保 Neo4j 服务运行。"
+          title="知识图谱未启用"
+        />
       )}
 
       {graphState === 'loading' && (
@@ -104,36 +165,26 @@ const GraphOps: React.FC = () => {
       )}
 
       {graphState === 'empty' && (
-        <div className="rag-panel" style={{ textAlign: 'center', padding: '80px 0' }}>
-          <h3>图谱为空</h3>
-          <p style={{ color: '#999', marginTop: 8 }}>知识图谱尚未生成，请先上传文档并执行实体关系抽取。</p>
-        </div>
+        <EmptyBlock desc="知识图谱尚未生成，请先上传文档并执行实体关系抽取。" title="图谱为空" />
       )}
 
       {graphState === 'error' && (
-        <div className="rag-panel" style={{ textAlign: 'center', padding: '80px 0' }}>
-          <h3>加载失败</h3>
-          <p style={{ color: '#999', margin: '12px 0 24px' }}>
-            无法加载图谱数据，请确认 Neo4j 和 rag-backend 服务正常运行。
-          </p>
-          <Button icon={<ReloadOutlined />} onClick={() => window.location.reload()} type="primary">
-            重新加载
-          </Button>
-        </div>
+        <EmptyBlock
+          action={
+            <Button icon={<ReloadOutlined />} onClick={fetchGraph} type="primary">
+              重新加载
+            </Button>
+          }
+          desc="无法加载图谱数据，请确认 Neo4j、rag-backend 和 admin-backend 服务正常运行。"
+          title="加载失败"
+        />
       )}
 
       {graphState === 'data' && (
         <div className="graph-layout">
           <div className="rag-panel graph-canvas">
             <GraphVisualization edges={edges} height={620} nodes={nodes} />
-            <div className="graph-legend">
-              <span><i className="blue" />文档</span>
-              <span><i className="green" />知识点</span>
-              <span><i className="purple" />标签</span>
-              <span><i className="orange" />业务分类</span>
-              <span>— 关联</span>
-              <span>→ 引用</span>
-            </div>
+            <GraphLegend />
             <div className="graph-controls">
               <Button icon={<FullscreenOutlined />} />
               <Button icon={<MinusOutlined />} />
@@ -141,36 +192,471 @@ const GraphOps: React.FC = () => {
               <Button icon={<PlusOutlined />} />
             </div>
           </div>
-          <aside className="graph-side">
-            <div className="rag-panel graph-stats">
-              <h3>图谱数据统计</h3>
-              <div>
-                {[
-                  { label: '节点总数', value: stats?.nodeCount ?? 0, Icon: NodeIndexOutlined },
-                  { label: '关系总数', value: stats?.edgeCount ?? 0, Icon: NodeIndexOutlined },
-                ].map(({ label, value, Icon }) => (
-                  <article key={label}>
-                    <span>{label}</span>
-                    <strong>{Number(value).toLocaleString()}</strong>
-                    <Icon />
-                  </article>
-                ))}
-              </div>
-            </div>
-            <div className="rag-panel graph-list">
-              <h3>当前图谱节点 ({nodes.length})</h3>
-              {nodes.slice(0, 8).map((node) => (
-                <p key={node.id}>
-                  <FileTextOutlined /> {node.label}
-                  <span style={{ color: '#999', fontSize: 12 }}> ({node.type})</span>
-                </p>
-              ))}
-            </div>
-          </aside>
+          <GraphSide stats={stats} nodes={nodes} />
         </div>
       )}
-    </ModulePage>
+    </>
   );
 };
+
+const NodeManagementView: React.FC = () => {
+  const [state, setState] = useState<GraphState>('loading');
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [total, setTotal] = useState(0);
+  const [keyword, setKeyword] = useState('');
+  const [nodeType, setNodeType] = useState<string | undefined>();
+  const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
+  const [activeNode, setActiveNode] = useState<(GraphNode & { relations?: GraphEdge[] }) | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const fetchNodes = () => {
+    setState('loading');
+    getGraphNodes({
+      keyword: keyword || undefined,
+      type: nodeType,
+      page: 1,
+      pageSize: 50,
+    })
+      .then((res) => {
+        const payload = asPayload<{ data?: GraphNode[]; total?: number; meta?: GraphResponseMeta }>(res);
+        if (isGraphDisabled(payload)) {
+          setState('disabled');
+          return;
+        }
+        const items = asArray<GraphNode>(payload.data);
+        setNodes(items);
+        setTotal(Number(payload.total ?? items.length));
+        setMeta(payload.meta);
+        setState(items.length > 0 ? 'data' : 'empty');
+      })
+      .catch(() => setState('error'));
+  };
+
+  useEffect(() => {
+    fetchNodes();
+  }, []);
+
+  const openNode = (node: GraphNode) => {
+    setDetailLoading(true);
+    setActiveNode(node);
+    getGraphNodeDetail(node.id)
+      .then((res) => {
+        const payload = asPayload<{ data?: GraphNode & { relations?: GraphEdge[] } }>(res);
+        setActiveNode(payload.data ?? node);
+      })
+      .finally(() => setDetailLoading(false));
+  };
+
+  const typeOptions = useMemo(
+    () =>
+      Array.from(new Set(nodes.map((node) => node.type).filter(Boolean))).map((type) => ({
+        label: type,
+        value: type,
+      })),
+    [nodes],
+  );
+
+  const columns: ColumnsType<GraphNode> = [
+    {
+      title: '节点名称',
+      dataIndex: 'label',
+      render: (value, record) => (
+        <Button onClick={() => openNode(record)} type="link">
+          {value}
+        </Button>
+      ),
+    },
+    { title: '类型', dataIndex: 'type', width: 140, render: (value) => <Tag color="blue">{value}</Tag> },
+    {
+      title: '关联关系数',
+      dataIndex: 'relationshipCount',
+      width: 130,
+      render: (value) => Number(value ?? 0),
+    },
+    { title: '来源', dataIndex: 'sourceId', width: 180, render: (value) => value || '-' },
+    {
+      title: '置信度',
+      dataIndex: 'confidence',
+      width: 110,
+      render: (value) => (typeof value === 'number' ? value.toFixed(2) : '-'),
+    },
+    { title: '最近更新', dataIndex: 'updatedAt', width: 180, render: (value) => value || '-' },
+    {
+      title: '操作',
+      width: 90,
+      render: (_, record) => (
+        <Button onClick={() => openNode(record)} size="small">
+          详情
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <div className="rag-panel graph-filter graph-manage-filter">
+        <Input
+          allowClear
+          onChange={(event) => setKeyword(event.target.value)}
+          onPressEnter={fetchNodes}
+          placeholder="搜索节点名称、别名、属性..."
+          prefix={<SearchOutlined />}
+          value={keyword}
+        />
+        <span>节点类型</span>
+        <Select
+          allowClear
+          onChange={setNodeType}
+          options={typeOptions}
+          placeholder="全部"
+          value={nodeType}
+        />
+        <span>业务分类</span>
+        <Select disabled placeholder="待接入" />
+        <span>是否孤立</span>
+        <Select disabled placeholder="全部" />
+        <Button onClick={() => {
+          setKeyword('');
+          setNodeType(undefined);
+        }}>
+          重置
+        </Button>
+        <Button onClick={fetchNodes} type="primary">搜索</Button>
+      </div>
+      <DemoAlert meta={meta} />
+      <div className="rag-panel graph-table-panel">
+        {state === 'loading' && <Skeleton active paragraph={{ rows: 10 }} />}
+        {state === 'disabled' && <EmptyBlock desc="Neo4j 未启用，节点列表不可用。" panel={false} title="知识图谱未启用" />}
+        {state === 'error' && <EmptyBlock desc="节点列表加载失败，请检查服务状态。" panel={false} title="加载失败" />}
+        {state === 'empty' && <EmptyBlock desc="当前没有可管理的图谱节点。" panel={false} title="暂无节点" />}
+        {state === 'data' && (
+          <Table columns={columns} dataSource={nodes} pagination={{ pageSize: 10, total }} rowKey="id" />
+        )}
+      </div>
+      <Drawer
+        loading={detailLoading}
+        onClose={() => setActiveNode(null)}
+        open={!!activeNode}
+        title={activeNode?.label ?? '节点详情'}
+        width={520}
+      >
+        {activeNode && <NodeDetail node={activeNode} />}
+      </Drawer>
+    </>
+  );
+};
+
+const RelationSearchView: React.FC = () => {
+  const [state, setState] = useState<GraphState>('loading');
+  const [relations, setRelations] = useState<GraphEdge[]>([]);
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
+  const [keyword, setKeyword] = useState('');
+  const [relationType, setRelationType] = useState<string | undefined>();
+  const [conflictOnly, setConflictOnly] = useState(false);
+  const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
+
+  const fetchRelations = () => {
+    setState('loading');
+    Promise.all([
+      getGraphRelations({
+        query: keyword || undefined,
+        relationType,
+        conflictOnly,
+        limit: 50,
+      }),
+      searchGraphRelations({
+        query: keyword || undefined,
+        relationType,
+        conflictOnly,
+        limit: 50,
+      }),
+    ])
+      .then(([relationRes, graphRes]) => {
+        const relationPayload = asPayload<{ data?: GraphEdge[]; meta?: GraphResponseMeta }>(relationRes);
+        const graphPayload = asPayload<{
+          data?: { nodes?: GraphNode[]; edges?: GraphEdge[] };
+          meta?: GraphResponseMeta;
+        }>(graphRes);
+        if (isGraphDisabled(relationPayload)) {
+          setState('disabled');
+          return;
+        }
+        const edges = asArray<GraphEdge>(relationPayload.data);
+        setRelations(edges);
+        setGraphNodes(asArray<GraphNode>(graphPayload.data?.nodes));
+        setMeta(graphPayload.meta ?? relationPayload.meta);
+        setState(edges.length > 0 ? 'data' : 'empty');
+      })
+      .catch(() => setState('error'));
+  };
+
+  useEffect(() => {
+    fetchRelations();
+  }, []);
+
+  const relationOptions = useMemo(
+    () =>
+      Array.from(new Set(relations.map((item) => item.label).filter(Boolean))).map((type) => ({
+        label: type,
+        value: type,
+      })),
+    [relations],
+  );
+
+  const columns: ColumnsType<GraphEdge> = [
+    { title: '来源节点', dataIndex: 'sourceLabel', render: (value, record) => value || record.source },
+    { title: '关系', dataIndex: 'label', width: 140, render: (value) => <Tag color="green">{value}</Tag> },
+    { title: '目标节点', dataIndex: 'targetLabel', render: (value, record) => value || record.target },
+    {
+      title: '置信度',
+      dataIndex: 'confidence',
+      width: 110,
+      render: (value) => (typeof value === 'number' ? value.toFixed(2) : '-'),
+    },
+    { title: '来源', dataIndex: 'sourceId', width: 180, render: (value) => value || '-' },
+    { title: '更新时间', dataIndex: 'updatedAt', width: 180, render: (value) => value || '-' },
+  ];
+
+  return (
+    <>
+      <div className="rag-panel graph-filter graph-relation-filter">
+        <Input
+          allowClear
+          onChange={(event) => setKeyword(event.target.value)}
+          onPressEnter={fetchRelations}
+          placeholder="搜索起点、终点、关系或属性..."
+          prefix={<SearchOutlined />}
+          value={keyword}
+        />
+        <span>关系类型</span>
+        <Select
+          allowClear
+          onChange={setRelationType}
+          options={relationOptions}
+          placeholder="全部"
+          value={relationType}
+        />
+        <span>路径深度</span>
+        <Select defaultValue={1} options={[{ value: 1, label: '1 跳' }, { value: 2, label: '2 跳' }]} />
+        <Checkbox checked={conflictOnly} onChange={(event) => setConflictOnly(event.target.checked)}>
+          仅冲突关系
+        </Checkbox>
+        <Button onClick={fetchRelations} type="primary">搜索</Button>
+      </div>
+      <DemoAlert meta={meta} />
+      <div className="graph-relation-layout">
+        <div className="rag-panel graph-table-panel">
+          {state === 'loading' && <Skeleton active paragraph={{ rows: 10 }} />}
+          {state === 'disabled' && <EmptyBlock desc="Neo4j 未启用，关系检索不可用。" panel={false} title="知识图谱未启用" />}
+          {state === 'error' && <EmptyBlock desc="关系检索加载失败，请检查服务状态。" panel={false} title="加载失败" />}
+          {state === 'empty' && <EmptyBlock desc="没有匹配的图谱关系。" panel={false} title="暂无关系" />}
+          {state === 'data' && (
+            <Table columns={columns} dataSource={relations} pagination={{ pageSize: 10 }} rowKey="id" />
+          )}
+        </div>
+        <div className="rag-panel graph-mini-panel">
+          <div className="panel-head">
+            <h3>局部图谱</h3>
+            <Tag>{graphNodes.length} 节点 / {relations.length} 关系</Tag>
+          </div>
+          <GraphVisualization edges={relations} height={430} nodes={graphNodes} />
+        </div>
+      </div>
+    </>
+  );
+};
+
+const GraphStatsView: React.FC = () => {
+  const [state, setState] = useState<GraphState>('loading');
+  const [stats, setStats] = useState<GraphStats | null>(null);
+  const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
+
+  const fetchStats = () => {
+    setState('loading');
+    getGraphStats()
+      .then((res) => {
+        const payload = asPayload<{ data?: GraphStats; meta?: GraphResponseMeta }>(res);
+        if (isGraphDisabled(payload) || isGraphDisabled(payload.data)) {
+          setState('disabled');
+          return;
+        }
+        const data = payload.data ?? (payload as GraphStats);
+        setStats(data);
+        setMeta(payload.meta);
+        setState((data?.nodeCount ?? 0) > 0 || (data?.edgeCount ?? 0) > 0 ? 'data' : 'empty');
+      })
+      .catch(() => setState('error'));
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  if (state === 'loading') {
+    return <Skeleton active paragraph={{ rows: 12 }} />;
+  }
+  if (state === 'disabled') {
+    return <EmptyBlock desc="Neo4j 未启用，统计不可用。" title="知识图谱未启用" />;
+  }
+  if (state === 'error') {
+    return (
+      <EmptyBlock
+        action={<Button onClick={fetchStats} type="primary">重新加载</Button>}
+        desc="图谱统计加载失败，请检查服务状态。"
+        title="加载失败"
+      />
+    );
+  }
+  if (state === 'empty' || !stats) {
+    return <EmptyBlock desc="当前没有可统计的图谱数据。" title="暂无统计数据" />;
+  }
+
+  return (
+    <>
+      <DemoAlert meta={meta} />
+      <div className="graph-stat-grid">
+        {[
+          { label: '节点总数', value: stats.nodeCount },
+          { label: '关系总数', value: stats.edgeCount },
+          { label: '孤立节点', value: stats.orphanCount ?? 0 },
+          { label: '冲突关系', value: stats.conflictCount ?? 0 },
+          { label: '节点类型', value: stats.entityTypes?.length ?? 0 },
+          { label: '关系类型', value: stats.relationTypes?.length ?? 0 },
+        ].map((item) => (
+          <Card key={item.label} size="small">
+            <Statistic title={item.label} value={item.value} />
+          </Card>
+        ))}
+      </div>
+      <div className="graph-stat-layout">
+        <GraphTypePanel items={stats.entityTypes ?? []} title="节点类型分布" />
+        <GraphTypePanel items={stats.relationTypes ?? []} title="关系类型分布" />
+        <GraphNodeList nodes={stats.popularNodes ?? []} title="热门节点 Top 10" />
+        <GraphNodeList nodes={stats.orphanNodes ?? []} title="孤立节点治理" />
+      </div>
+    </>
+  );
+};
+
+const GraphFilterBar: React.FC<{ onSearch: () => void }> = ({ onSearch }) => (
+  <div className="rag-panel graph-filter">
+    <Input prefix={<SearchOutlined />} placeholder="请输入关键词搜索图谱..." />
+    <span>节点类型</span>
+    <Select defaultValue="全部" options={[{ value: '全部' }]} />
+    <span>业务分类</span>
+    <Select defaultValue="全部" options={[{ value: '全部' }]} />
+    <span>创建时间</span>
+    <DatePicker.RangePicker />
+    <Button>重置</Button>
+    <Button onClick={onSearch} type="primary">搜索</Button>
+    <Button icon={<DownloadOutlined />}>导出图谱</Button>
+  </div>
+);
+
+const GraphLegend = () => (
+  <div className="graph-legend">
+    <span><i className="blue" />文档</span>
+    <span><i className="green" />知识点</span>
+    <span><i className="purple" />标签</span>
+    <span><i className="orange" />业务分类</span>
+    <span>— 关联</span>
+    <span>→ 引用</span>
+  </div>
+);
+
+const GraphSide: React.FC<{ stats: GraphStats | null; nodes: GraphNode[] }> = ({ stats, nodes }) => (
+  <aside className="graph-side">
+    <div className="rag-panel graph-stats">
+      <h3>图谱数据统计</h3>
+      <div>
+        {[
+          { label: '节点总数', value: stats?.nodeCount ?? nodes.length, Icon: NodeIndexOutlined },
+          { label: '关系总数', value: stats?.edgeCount ?? 0, Icon: NodeIndexOutlined },
+        ].map(({ label, value, Icon }) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{Number(value).toLocaleString()}</strong>
+            <Icon />
+          </article>
+        ))}
+      </div>
+    </div>
+    <div className="rag-panel graph-list">
+      <h3>当前图谱节点 ({nodes.length})</h3>
+      {nodes.slice(0, 8).map((node) => (
+        <p key={node.id}>
+          <FileTextOutlined /> {node.label}
+          <span>({node.type})</span>
+        </p>
+      ))}
+    </div>
+  </aside>
+);
+
+const NodeDetail: React.FC<{ node: GraphNode & { relations?: GraphEdge[] } }> = ({ node }) => (
+  <div className="graph-detail">
+    <dl>
+      <dt>节点 ID</dt>
+      <dd>{node.id}</dd>
+      <dt>节点类型</dt>
+      <dd><Tag color="blue">{node.type}</Tag></dd>
+      <dt>来源</dt>
+      <dd>{node.sourceId || '-'}</dd>
+      <dt>别名</dt>
+      <dd>{node.aliases?.length ? node.aliases.join('、') : '-'}</dd>
+    </dl>
+    <h3>属性</h3>
+    <pre>{JSON.stringify(node.properties ?? {}, null, 2)}</pre>
+    <h3>相关关系</h3>
+    {(node.relations ?? []).length > 0 ? (
+      (node.relations ?? []).map((rel) => (
+        <p key={rel.id}>
+          {rel.sourceLabel || rel.source} <Tag color="green">{rel.label}</Tag> {rel.targetLabel || rel.target}
+        </p>
+      ))
+    ) : (
+      <p className="muted">暂无相关关系</p>
+    )}
+  </div>
+);
+
+const GraphTypePanel: React.FC<{ title: string; items: { type: string; count: number }[] }> = ({
+  title,
+  items,
+}) => (
+  <div className="rag-panel graph-type-panel">
+    <div className="panel-head">
+      <h3>{title}</h3>
+    </div>
+    {items.length > 0 ? (
+      items.map((item) => (
+        <p key={item.type}>
+          <span>{item.type}</span>
+          <strong>{item.count}</strong>
+        </p>
+      ))
+    ) : (
+      <p className="muted">暂无数据</p>
+    )}
+  </div>
+);
+
+const GraphNodeList: React.FC<{ title: string; nodes: GraphNode[] }> = ({ title, nodes }) => (
+  <div className="rag-panel graph-type-panel">
+    <div className="panel-head">
+      <h3>{title}</h3>
+    </div>
+    {nodes.length > 0 ? (
+      nodes.slice(0, 10).map((node) => (
+        <p key={node.id}>
+          <span>{node.label}</span>
+          <Tag>{node.type}</Tag>
+        </p>
+      ))
+    ) : (
+      <p className="muted">暂无数据</p>
+    )}
+  </div>
+);
 
 export default GraphOps;

@@ -46,6 +46,33 @@ export interface GraphSchemaSummary {
   relationshipTypes: string[];
 }
 
+export interface GraphAdminNode {
+  id: string;
+  label: string;
+  type: string;
+  aliases: string[];
+  sourceId: string;
+  relationshipCount: number;
+  confidence: number;
+  updatedAt: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphAdminRelationship {
+  id: string;
+  source: string;
+  sourceLabel: string;
+  sourceType: string;
+  target: string;
+  targetLabel: string;
+  targetType: string;
+  label: string;
+  confidence: number;
+  sourceId: string;
+  updatedAt: string;
+  properties: Record<string, unknown>;
+}
+
 @Injectable()
 export class GraphService {
   private readonly logger = new Logger(GraphService.name);
@@ -135,11 +162,151 @@ export class GraphService {
 
     return {
       enabled: true,
-      nodeCount: Number(summary?.nodeCount ?? 0),
-      relationshipCount: Number(summary?.relationshipCount ?? 0),
+      nodeCount: this.toNumber(summary?.nodeCount),
+      relationshipCount: this.toNumber(summary?.relationshipCount),
       labels: (summary?.labels ?? []).filter(Boolean),
       relationshipTypes: (summary?.relationshipTypes ?? []).filter(Boolean),
     };
+  }
+
+  async listEntities(
+    userId: string,
+    options: { keyword?: string; type?: string; limit?: number } = {},
+  ): Promise<GraphAdminNode[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const keyword = options.keyword?.trim();
+    const rows = await this.neo4jProvider.executeRead<Record<string, unknown>>(
+      `
+      MATCH (n:GraphEntity {userId: $userId})
+      WHERE ($type = '' OR n.label = $type)
+        AND (
+          $keyword = ''
+          OR toLower(n.id) CONTAINS toLower($keyword)
+          OR toLower(n.label) CONTAINS toLower($keyword)
+          OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS toLower($keyword))
+          OR toLower(coalesce(n.properties, '')) CONTAINS toLower($keyword)
+        )
+      OPTIONAL MATCH (n)-[r:GRAPH_RELATION {userId: $userId}]-(:GraphEntity {userId: $userId})
+      RETURN
+        n.id AS id,
+        n.label AS label,
+        coalesce(n.aliases, []) AS aliases,
+        coalesce(n.sourceId, '') AS sourceId,
+        coalesce(n.properties, '{}') AS properties,
+        coalesce(toString(n.updatedAt), '') AS updatedAt,
+        count(DISTINCT r) AS relationshipCount
+      ORDER BY relationshipCount DESC, id ASC
+      LIMIT toInteger($limit)
+      `,
+      {
+        userId,
+        keyword: keyword ?? '',
+        type: options.type ?? '',
+        limit: this.normalizeLimit(options.limit),
+      },
+    );
+
+    return rows.map((row) => this.toAdminNode(row));
+  }
+
+  async getEntityDetail(
+    userId: string,
+    id: string,
+  ): Promise<
+    (GraphAdminNode & { relations: GraphAdminRelationship[] }) | null
+  > {
+    const [node] = await this.listEntities(userId, { keyword: id, limit: 1 });
+    if (!node || node.id !== id) {
+      return null;
+    }
+
+    const relations = await this.listRelationships(userId, {
+      query: id,
+      limit: 50,
+    });
+    return { ...node, relations };
+  }
+
+  async listRelationships(
+    userId: string,
+    options: {
+      query?: string;
+      relationType?: string;
+      conflictOnly?: boolean;
+      limit?: number;
+    } = {},
+  ): Promise<GraphAdminRelationship[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const query = options.query?.trim();
+    const rows = await this.neo4jProvider.executeRead<Record<string, unknown>>(
+      `
+      MATCH (source:GraphEntity {userId: $userId})-[r:GRAPH_RELATION {userId: $userId}]->(target:GraphEntity {userId: $userId})
+      WHERE ($relationType = '' OR r.type = $relationType)
+        AND (
+          $query = ''
+          OR toLower(source.id) CONTAINS toLower($query)
+          OR toLower(source.label) CONTAINS toLower($query)
+          OR toLower(target.id) CONTAINS toLower($query)
+          OR toLower(target.label) CONTAINS toLower($query)
+          OR toLower(r.type) CONTAINS toLower($query)
+          OR toLower(coalesce(r.properties, '')) CONTAINS toLower($query)
+        )
+      RETURN
+        elementId(r) AS id,
+        source.id AS source,
+        source.label AS sourceType,
+        target.id AS target,
+        target.label AS targetType,
+        r.type AS label,
+        coalesce(r.confidence, 1.0) AS confidence,
+        coalesce(r.sourceId, '') AS sourceId,
+        coalesce(r.properties, '{}') AS properties,
+        coalesce(toString(r.updatedAt), '') AS updatedAt
+      ORDER BY updatedAt DESC, source ASC, target ASC
+      LIMIT toInteger($limit)
+      `,
+      {
+        userId,
+        query: query ?? '',
+        relationType: options.relationType ?? '',
+        limit: this.normalizeLimit(options.limit),
+      },
+    );
+
+    return rows.map((row) => this.toAdminRelationship(row));
+  }
+
+  async getOrphanEntities(
+    userId: string,
+    limit = 100,
+  ): Promise<GraphAdminNode[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const rows = await this.neo4jProvider.executeRead<Record<string, unknown>>(
+      `
+      MATCH (n:GraphEntity {userId: $userId})
+      WHERE NOT (n)-[:GRAPH_RELATION {userId: $userId}]-(:GraphEntity {userId: $userId})
+      RETURN
+        n.id AS id,
+        n.label AS label,
+        coalesce(n.aliases, []) AS aliases,
+        coalesce(n.sourceId, '') AS sourceId,
+        coalesce(n.properties, '{}') AS properties,
+        coalesce(toString(n.updatedAt), '') AS updatedAt,
+        0 AS relationshipCount
+      ORDER BY id ASC
+      LIMIT toInteger($limit)
+      `,
+      { userId, limit: this.normalizeLimit(limit) },
+    );
+    return rows.map((row) => this.toAdminNode(row));
   }
 
   private async writeGraph(
@@ -253,6 +420,93 @@ export class GraphService {
       return 1;
     }
     return Math.min(Math.max(parsed, 0), 1);
+  }
+
+  private toAdminNode(row: Record<string, unknown>): GraphAdminNode {
+    return {
+      id: this.toText(row.id),
+      label: this.toText(row.id),
+      type: this.toText(row.label, 'entity'),
+      aliases: Array.isArray(row.aliases)
+        ? row.aliases.map((item) => this.toText(item)).filter(Boolean)
+        : [],
+      sourceId: this.toText(row.sourceId),
+      relationshipCount: this.toNumber(row.relationshipCount),
+      confidence: 1,
+      updatedAt: this.toText(row.updatedAt),
+      properties: this.parseProperties(row.properties),
+    };
+  }
+
+  private toAdminRelationship(
+    row: Record<string, unknown>,
+  ): GraphAdminRelationship {
+    const source = this.toText(row.source);
+    const target = this.toText(row.target);
+    const label = this.toText(row.label, 'REL');
+    return {
+      id: this.toText(row.id, `${source}-${label}-${target}`),
+      source,
+      sourceLabel: source,
+      sourceType: this.toText(row.sourceType, 'entity'),
+      target,
+      targetLabel: target,
+      targetType: this.toText(row.targetType, 'entity'),
+      label,
+      confidence: this.toNumber(row.confidence, 1),
+      sourceId: this.toText(row.sourceId),
+      updatedAt: this.toText(row.updatedAt),
+      properties: this.parseProperties(row.properties),
+    };
+  }
+
+  private parseProperties(value: unknown): Record<string, unknown> {
+    if (!value) {
+      return {};
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value !== 'string') {
+      return {};
+    }
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private toNumber(value: unknown, fallback = 0): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+    if (value && typeof value === 'object' && 'toNumber' in value) {
+      return Number((value as { toNumber: () => number }).toNumber());
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private toText(value: unknown, fallback = ''): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    return fallback;
+  }
+
+  private normalizeLimit(value: unknown): number {
+    const parsed = Number(value ?? 100);
+    if (!Number.isFinite(parsed)) {
+      return 100;
+    }
+    return Math.min(Math.max(Math.trunc(parsed), 1), 500);
   }
 
   private async extractQueryEntities(query: string): Promise<string[]> {

@@ -62,7 +62,27 @@ export default [
     path: '/graph-ops',
     name: 'graph-ops',
     icon: 'apartment',
-    component: './graph-ops',
+    routes: [
+      {
+        path: '/graph-ops',
+        component: './graph-ops',
+      },
+      {
+        path: '/graph-ops/nodes',
+        name: 'graph-ops-nodes',
+        component: './graph-ops',
+      },
+      {
+        path: '/graph-ops/relations',
+        name: 'graph-ops-relations',
+        component: './graph-ops',
+      },
+      {
+        path: '/graph-ops/stats',
+        name: 'graph-ops-stats',
+        component: './graph-ops',
+      },
+    ],
   },
   {
     path: '/system',

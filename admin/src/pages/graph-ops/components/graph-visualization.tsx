@@ -44,12 +44,15 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
 
     const width = containerRef.current?.clientWidth ?? 800;
 
+    const graphNodes = nodes.map((node) => ({ ...node }));
+    const graphEdges = edges.map((edge) => ({ ...edge }));
+
     const simulation = d3
-      .forceSimulation(nodes as d3.SimulationNodeDatum[])
+      .forceSimulation(graphNodes as d3.SimulationNodeDatum[])
       .force(
         'link',
         d3
-          .forceLink(edges)
+          .forceLink(graphEdges)
           .id((d: any) => d.id)
           .distance(100),
       )
@@ -71,7 +74,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const link = g
       .append('g')
       .selectAll('line')
-      .data(edges)
+      .data(graphEdges)
       .join('line')
       .attr('stroke', '#d9d9d9')
       .attr('stroke-width', 1.5)
@@ -81,7 +84,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const linkLabel = g
       .append('g')
       .selectAll('text')
-      .data(edges)
+      .data(graphEdges)
       .join('text')
       .text((d) => d.label)
       .attr('font-size', 10)
@@ -89,7 +92,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       .attr('text-anchor', 'middle');
 
     // Nodes
-    const node = g.append('g').selectAll('g').data(nodes).join('g') as any;
+    const node = g.append('g').selectAll('g').data(graphNodes).join('g') as any;
 
     const dragBehavior = d3
       .drag<SVGGElement, any>()

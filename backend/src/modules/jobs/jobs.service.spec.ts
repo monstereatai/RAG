@@ -61,7 +61,12 @@ describe('JobsService', () => {
         answer: 'done',
       }),
     };
-    service = new JobsService(scheduler, mockJobRepo, mockExecutionRepo as any, mockSupervisorService);
+    service = new JobsService(
+      scheduler,
+      mockJobRepo,
+      mockExecutionRepo as any,
+      mockSupervisorService,
+    );
   });
 
   afterEach(async () => {

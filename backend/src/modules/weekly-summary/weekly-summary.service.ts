@@ -24,7 +24,9 @@ export class WeeklySummaryService {
   /**
    * 为指定用户生成上周对话总结
    */
-  async generateLastWeekSummary(userId?: string): Promise<WeeklySummaryEntity | null> {
+  async generateLastWeekSummary(
+    userId?: string,
+  ): Promise<WeeklySummaryEntity | null> {
     // 计算上周起始（周一）和结束（周日）
     const now = new Date();
     const dayOfWeek = now.getDay();
@@ -44,7 +46,9 @@ export class WeeklySummaryService {
       where: { userId: userId ?? undefined, weekStart: weekStartStr },
     });
     if (existing && existing.status === 'completed') {
-      this.logger.log(`Summary already exists for week ${weekStartStr}, userId=${userId ?? 'null'}`);
+      this.logger.log(
+        `Summary already exists for week ${weekStartStr}, userId=${userId ?? 'null'}`,
+      );
       return existing;
     }
 
@@ -58,7 +62,9 @@ export class WeeklySummaryService {
     });
 
     if (conversations.length === 0) {
-      this.logger.log(`No conversations found for week ${weekStartStr}, userId=${userId ?? 'null'}`);
+      this.logger.log(
+        `No conversations found for week ${weekStartStr}, userId=${userId ?? 'null'}`,
+      );
       return null;
     }
     const conversationIds = conversations.map((c) => c.id);
@@ -75,9 +81,14 @@ export class WeeklySummaryService {
     // 构建对话文本给 LLM
     const conversationText = conversations
       .map((conv) => {
-        const convMessages = messages.filter((m) => m.conversationId === conv.id);
+        const convMessages = messages.filter(
+          (m) => m.conversationId === conv.id,
+        );
         const msgText = convMessages
-          .map((m) => `[${m.role === 'human' ? '用户' : 'AI'}]: ${m.content.slice(0, 300)}`)
+          .map(
+            (m) =>
+              `[${m.role === 'human' ? '用户' : 'AI'}]: ${m.content.slice(0, 300)}`,
+          )
           .join('\n');
         return `对话 ${conv.title || '(无标题)'}:\n${msgText}`;
       })
@@ -96,9 +107,10 @@ export class WeeklySummaryService {
         { role: 'human', content: conversationText.slice(0, 8000) },
       ]);
 
-      const summaryText = typeof response.content === 'string'
-        ? response.content
-        : JSON.stringify(response.content);
+      const summaryText =
+        typeof response.content === 'string'
+          ? response.content
+          : JSON.stringify(response.content);
 
       const entity = this.summaryRepo.create({
         id: randomUUID(),
@@ -111,10 +123,14 @@ export class WeeklySummaryService {
       });
 
       const saved = await this.summaryRepo.save(entity);
-      this.logger.log(`Weekly summary generated: week=${weekStartStr}, convs=${conversations.length}`);
+      this.logger.log(
+        `Weekly summary generated: week=${weekStartStr}, convs=${conversations.length}`,
+      );
       return saved;
     } catch (err) {
-      this.logger.error(`Failed to generate weekly summary: ${(err as Error).message}`);
+      this.logger.error(
+        `Failed to generate weekly summary: ${(err as Error).message}`,
+      );
       // Record failure
       const entity = this.summaryRepo.create({
         id: randomUUID(),
@@ -134,7 +150,10 @@ export class WeeklySummaryService {
   /**
    * 获取用户的历史总结列表
    */
-  async getSummaries(userId?: string, limit = 10): Promise<WeeklySummaryEntity[]> {
+  async getSummaries(
+    userId?: string,
+    limit = 10,
+  ): Promise<WeeklySummaryEntity[]> {
     const where: any = {};
     if (userId) where.userId = userId;
     return this.summaryRepo.find({

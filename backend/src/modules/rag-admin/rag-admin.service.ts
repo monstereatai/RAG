@@ -454,33 +454,158 @@ export class RagAdminService {
 
   // ─── Graph Operations ─────────────────────────────────────────
 
-  async getGraphEntities() {
+  async getGraphSchema() {
     if (!this.graphService.isEnabled()) {
-      return { available: false, data: [], error: 'GraphRAG is disabled' };
+      return {
+        available: false,
+        data: {
+          enabled: false,
+          nodeCount: 0,
+          relationshipCount: 0,
+          labels: [],
+          relationshipTypes: [],
+        },
+        error: 'GraphRAG is disabled',
+      };
     }
     const schema = await this.graphService.getSchema('admin');
     return {
       available: true,
-      nodeCount: schema.nodeCount,
-      relationshipCount: schema.relationshipCount,
-      labels: schema.labels,
-      relationshipTypes: schema.relationshipTypes,
-      note: 'Detailed entity/relationship listing requires direct Neo4j query. Use /api/v1/graph/schema for schema overview.',
+      data: schema,
     };
   }
 
-  async getGraphRelationships() {
-    return this.getGraphEntities();
-  }
-
-  getGraphOrphans() {
+  async getGraphEntities(
+    query: { keyword?: string; type?: string; limit?: number } = {},
+  ) {
     if (!this.graphService.isEnabled()) {
-      return { available: false, data: [], error: 'GraphRAG is disabled' };
+      return {
+        available: false,
+        data: [],
+        total: 0,
+        error: 'GraphRAG is disabled',
+      };
     }
+    const items = await this.graphService.listEntities('admin', query);
     return {
       available: true,
-      data: [],
-      note: 'Orphan detection requires direct Neo4j query for nodes without relationships.',
+      data: items,
+      total: items.length,
+    };
+  }
+
+  async getGraphEntityDetail(id: string) {
+    if (!this.graphService.isEnabled()) {
+      return { available: false, data: null, error: 'GraphRAG is disabled' };
+    }
+    const data = await this.graphService.getEntityDetail('admin', id);
+    return {
+      available: true,
+      data,
+    };
+  }
+
+  async getGraphRelationships(
+    query: {
+      query?: string;
+      relationType?: string;
+      conflictOnly?: boolean;
+      limit?: number;
+    } = {},
+  ) {
+    if (!this.graphService.isEnabled()) {
+      return {
+        available: false,
+        data: [],
+        total: 0,
+        error: 'GraphRAG is disabled',
+      };
+    }
+    const items = await this.graphService.listRelationships('admin', query);
+    return {
+      available: true,
+      data: items,
+      total: items.length,
+    };
+  }
+
+  async searchGraph(
+    query: {
+      query?: string;
+      relationType?: string;
+      conflictOnly?: boolean;
+      limit?: number;
+    } = {},
+  ) {
+    if (!this.graphService.isEnabled()) {
+      return {
+        available: false,
+        data: { nodes: [], edges: [] },
+        error: 'GraphRAG is disabled',
+      };
+    }
+
+    const [nodes, edges] = await Promise.all([
+      this.graphService.listEntities('admin', {
+        keyword: query.query,
+        limit: query.limit ?? 100,
+      }),
+      this.graphService.listRelationships('admin', query),
+    ]);
+
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    for (const edge of edges) {
+      if (!nodeMap.has(edge.source)) {
+        nodeMap.set(edge.source, {
+          id: edge.source,
+          label: edge.sourceLabel,
+          type: edge.sourceType,
+          aliases: [],
+          sourceId: edge.sourceId,
+          relationshipCount: 1,
+          confidence: edge.confidence,
+          updatedAt: edge.updatedAt,
+          properties: {},
+        });
+      }
+      if (!nodeMap.has(edge.target)) {
+        nodeMap.set(edge.target, {
+          id: edge.target,
+          label: edge.targetLabel,
+          type: edge.targetType,
+          aliases: [],
+          sourceId: edge.sourceId,
+          relationshipCount: 1,
+          confidence: edge.confidence,
+          updatedAt: edge.updatedAt,
+          properties: {},
+        });
+      }
+    }
+
+    return {
+      available: true,
+      data: {
+        nodes: Array.from(nodeMap.values()),
+        edges,
+      },
+    };
+  }
+
+  async getGraphOrphans() {
+    if (!this.graphService.isEnabled()) {
+      return {
+        available: false,
+        data: [],
+        total: 0,
+        error: 'GraphRAG is disabled',
+      };
+    }
+    const items = await this.graphService.getOrphanEntities('admin');
+    return {
+      available: true,
+      data: items,
+      total: items.length,
     };
   }
 
@@ -493,8 +618,14 @@ export class RagAdminService {
     return {
       available: true,
       total: conflicts.length,
-      items: conflicts.map((c) => ({
+      data: conflicts.map((c) => ({
         id: c.id,
+        source: c.subject,
+        sourceLabel: c.subject,
+        target: c.conflictingValue,
+        targetLabel: c.conflictingValue,
+        label: c.predicate,
+        confidence: 1,
         docId: c.docId,
         subject: c.subject,
         predicate: c.predicate,

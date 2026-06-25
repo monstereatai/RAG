@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -54,26 +54,38 @@ export class GraphOpsController {
   @ApiOperation({ summary: '图谱统计（前端 graph-ops 页面）' })
   @RequirePermission('admin:graph-ops:read')
   async getStats() {
-    const [entities, relationships] = await Promise.all([
+    const [entitiesRes, relationshipsRes, orphansRes, conflictsRes] = await Promise.all([
       this.ragClient.getGraphEntities(),
       this.ragClient.getGraphRelationships(),
+      this.ragClient.getGraphOrphans(),
+      this.ragClient.getGraphConflicts(),
     ]);
-    const entityList = Array.isArray(entities.data) ? entities.data : [];
-    const relList = Array.isArray(relationships.data) ? relationships.data : [];
+    const entities = this.unwrapRagResult(entitiesRes);
+    const relationships = this.unwrapRagResult(relationshipsRes);
+    const orphans = this.unwrapRagResult(orphansRes);
+    const conflicts = this.unwrapRagResult(conflictsRes);
+    const entityList = this.asArray((entities as any)?.data);
+    const relList = this.asArray((relationships as any)?.data);
 
     // 上游无数据时 fallback 到 mock
     if (entityList.length === 0 && relList.length === 0) {
-      return { data: this.mockService.getStats() };
+      return this.withMeta(this.mockService.getStats(), true);
     }
 
-    return {
-      data: {
-        nodeCount: entityList.length,
-        edgeCount: relList.length,
-        entityTypes: [],
-        relationTypes: [],
-      },
-    };
+    return this.withMeta({
+      nodeCount: entityList.length,
+      edgeCount: relList.length,
+      entityTypes: this.countBy(entityList, 'type'),
+      relationTypes: this.countBy(relList, 'label'),
+      orphanCount: this.asArray((orphans as any)?.data).length,
+      conflictCount: this.asArray((conflicts as any)?.data).length,
+      popularNodes: entityList
+        .slice()
+        .sort((a: any, b: any) => Number(b.relationshipCount ?? 0) - Number(a.relationshipCount ?? 0))
+        .slice(0, 10),
+      orphanNodes: this.asArray((orphans as any)?.data).slice(0, 10),
+      conflictRelationships: this.asArray((conflicts as any)?.data).slice(0, 10),
+    });
   }
 
   @Get('schema')
@@ -81,17 +93,19 @@ export class GraphOpsController {
   @RequirePermission('admin:graph-ops:read')
   async getSchema() {
     const result = await this.ragClient.getGraphSchema();
+    const upstream = this.unwrapRagResult(result);
+    const schemaData = (upstream as any)?.data ?? upstream;
     const schema = {
-      nodeLabels: (result.data as any)?.nodeLabels ?? [],
-      edgeTypes: (result.data as any)?.edgeTypes ?? [],
-      properties: (result.data as any)?.properties ?? {},
+      nodeLabels: (schemaData as any)?.nodeLabels ?? (schemaData as any)?.labels ?? [],
+      edgeTypes: (schemaData as any)?.edgeTypes ?? (schemaData as any)?.relationshipTypes ?? [],
+      properties: (schemaData as any)?.properties ?? {},
     };
 
     if (schema.nodeLabels.length === 0 && schema.edgeTypes.length === 0) {
-      return { data: this.mockService.getSchema() };
+      return this.withMeta(this.mockService.getSchema(), true);
     }
 
-    return { data: schema };
+    return this.withMeta(schema);
   }
 
   @Get('nodes')
@@ -99,20 +113,76 @@ export class GraphOpsController {
   @RequirePermission('admin:graph-ops:read')
   async getNodes(@Query() query: any) {
     const entities = await this.ragClient.getGraphEntities();
-    const items = (Array.isArray(entities.data) ? entities.data : []) as any[];
+    const upstream = this.unwrapRagResult(entities);
+    const items = this.asArray((upstream as any)?.data) as any[];
 
     // 上游无数据时 fallback 到 mock
     if (items.length === 0) {
-      return { data: this.mockService.getNodes() };
+      return {
+        ...this.withMeta(this.mockService.getNodes(), true),
+        total: this.mockService.getNodes().length,
+      };
     }
 
     return {
-      data: items.map((item: any, index: number) => ({
-        id: item.id ?? String(index + 1),
-        label: item.name ?? item.label ?? '',
-        type: item.type ?? 'entity',
-        properties: item.properties ?? {},
-      })),
+      data: this.filterNodes(items, query),
+      total: items.length,
+      meta: this.realMeta(),
+    };
+  }
+
+  @Get('nodes/:id')
+  @ApiOperation({ summary: '图谱节点详情（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async getNodeDetail(@Param('id') id: string) {
+    const result = await this.ragClient.getGraphEntityDetail(id);
+    const upstream = this.unwrapRagResult(result);
+    const item = (upstream as any)?.data;
+    if (item) {
+      return this.withMeta(item);
+    }
+    return this.withMeta(this.mockService.getNodeDetail(id), true);
+  }
+
+  @Get('relations/search')
+  @ApiOperation({ summary: '图谱关系检索（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async searchRelations(@Query() query: any) {
+    const result = await this.ragClient.searchGraph(query);
+    const upstream = this.unwrapRagResult(result);
+    const data = (upstream as any)?.data;
+    if (data?.nodes?.length || data?.edges?.length) {
+      return this.withMeta(data);
+    }
+    const relations = this.mockService.searchRelations(query.query);
+    return this.withMeta(
+      {
+        nodes: this.mockService.search(query.query).nodes,
+        edges: relations,
+      },
+      true,
+    );
+  }
+
+  @Get('relations')
+  @ApiOperation({ summary: '图谱关系列表（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:read')
+  async getRelations(@Query() query: any) {
+    const result = await this.ragClient.searchGraphRelationships(query);
+    const upstream = this.unwrapRagResult(result);
+    const items = this.asArray((upstream as any)?.data);
+    if (items.length > 0) {
+      return {
+        data: items,
+        total: items.length,
+        meta: this.realMeta(),
+      };
+    }
+    const fallback = this.mockService.searchRelations(query.query);
+    return {
+      data: fallback,
+      total: fallback.length,
+      meta: this.demoMeta(),
     };
   }
 
@@ -120,34 +190,16 @@ export class GraphOpsController {
   @ApiOperation({ summary: '图谱搜索（前端 graph-ops 页面）' })
   @RequirePermission('admin:graph-ops:read')
   async search(@Query('query') query?: string) {
-    const [entities, relationships] = await Promise.all([
-      this.ragClient.getGraphEntities(),
-      this.ragClient.getGraphRelationships(),
-    ]);
-    const entityList = Array.isArray(entities.data) ? entities.data : [];
-    const relList = Array.isArray(relationships.data) ? relationships.data : [];
+    const result = await this.ragClient.searchGraph({ query, limit: 100 });
+    const upstream = this.unwrapRagResult(result);
+    const data = (upstream as any)?.data;
 
     // 上游无数据时 fallback 到 mock
-    if (entityList.length === 0 && relList.length === 0) {
-      return { data: this.mockService.search(query) };
+    if (!data?.nodes?.length && !data?.edges?.length) {
+      return this.withMeta(this.mockService.search(query), true);
     }
 
-    return {
-      data: {
-        nodes: entityList.map((item: any, index: number) => ({
-          id: item.id ?? String(index + 1),
-          label: item.name ?? item.label ?? '',
-          type: item.type ?? 'entity',
-          properties: item.properties ?? {},
-        })),
-        edges: relList.map((item: any, index: number) => ({
-          id: item.id ?? String(index + 1),
-          source: item.source ?? item.from ?? '',
-          target: item.target ?? item.to ?? '',
-          label: item.type ?? item.label ?? '',
-        })),
-      },
-    };
+    return this.withMeta(data);
   }
 
   @Get('entities')
@@ -176,5 +228,65 @@ export class GraphOpsController {
   @RequirePermission('admin:graph-ops:read')
   async getConflicts() {
     return this.ragClient.getGraphConflicts();
+  }
+
+  private unwrapRagResult(result: any): unknown {
+    const payload = result?.data ?? result;
+    if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {
+      return (payload as any).data;
+    }
+    return payload;
+  }
+
+  private asArray(value: unknown): any[] {
+    return Array.isArray(value) ? value : [];
+  }
+
+  private withMeta(data: unknown, demo = false) {
+    return {
+      data,
+      meta: demo ? this.demoMeta() : this.realMeta(),
+    };
+  }
+
+  private realMeta() {
+    return {
+      available: true,
+      source: 'rag-backend',
+      demo: false,
+      message: '',
+    };
+  }
+
+  private demoMeta() {
+    return {
+      available: true,
+      source: 'mock',
+      demo: true,
+      message: '当前展示的是演示图谱数据，真实 Neo4j 图谱为空或不可用。',
+    };
+  }
+
+  private countBy(items: any[], key: string) {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const value = String(item?.[key] ?? 'unknown');
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
+  }
+
+  private filterNodes(items: any[], query: any) {
+    const keyword = String(query?.keyword ?? '').toLowerCase();
+    const type = query?.type ? String(query.type) : '';
+    return items.filter((item) => {
+      const matchesType = !type || item.type === type;
+      const matchesKeyword =
+        !keyword ||
+        String(item.label ?? item.id ?? '').toLowerCase().includes(keyword) ||
+        String(item.type ?? '').toLowerCase().includes(keyword) ||
+        JSON.stringify(item.properties ?? {}).toLowerCase().includes(keyword);
+      return matchesType && matchesKeyword;
+    });
   }
 }

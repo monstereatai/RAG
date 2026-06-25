@@ -10,7 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { RagOpsApiService } from './rag-ops-api.service';
-import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-ops-api.dto';
+import {
+  RagDocumentQueryDto,
+  RagEvaluationRunDto,
+} from './dto/rag-ops-api.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 
 @Controller('rag/ops-api')

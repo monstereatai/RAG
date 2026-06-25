@@ -59,6 +59,7 @@
 ### P2 — 运营体验与长期能力
 
 - [x] **GraphRAG 空态与不可用态分离**（2026-06-24）：GraphOps 页面处理 5 种独立状态：`disabled`（Neo4j 未启用，显示配置指引）、`empty`（图谱为空）、`error`（API 不可达，含重试按钮）、`loading`（骨架屏）、`data`（真实图谱）。后端接口已在 rag-admin 中正确返回 `available: false` 和 `error: 'GraphRAG is disabled'`；前端 GraphOps 页面据此判断状态。
+- [x] **管理后台 Graph Ops 三菜单实现**（2026-06-25）：已实现 `节点管理`、`关系检索`、`图谱统计` 三个二级菜单，补齐 admin 子路由、页面 UI、前端 service、admin-backend 接口和 rag-backend graph schema/entities/relationships/search 运营 API。真实联调通过：临时启动 rag-backend `3003`、admin-backend `3004`，登录后请求 stats/nodes/relations/relations-search/search 均返回 200，rag-backend 上游 entities/relationships/search 日志均为 200；`http://localhost:8000/graph-ops/nodes|relations|stats` 均返回 200 HTML。限制：真实 Neo4j 图谱当前为空，页面展示 `meta.demo=true` 演示数据；admin `pnpm run build` 被现有 8000 dev server 的 `.turbopack/lock` 阻塞，未停止用户进程；未做浏览器截图复验。
 - [ ] **真实私有业务毒题集**：在现有 120 条内置业务评测、项目级仿真实评测之外，补充 50-100 条真实问题，覆盖应答、拒答、跨文档冲突、时效版本、表格/制度条款等类型。（阻塞：需要主人提供真实业务问题与标准答案）
 - [x] **核心协议边界测试密度提升**（2026-06-24）：补充 rag-client.service.spec.ts 11 个新用例：malformed JSON、network failure、503 错误、reindex/delete/archive/batch 文档操作、run evaluation、graph disabled/empty 状态、AbortError 超时。验证：8 suites / 65 tests ✓。
 
@@ -1160,3 +1161,5 @@
 | 2026-06-23 | **管理后台独立项目方案改版**：根据最新决策，将 `SERVICE_BOUNDARIES.md` 从“一个 NestJS 后端内部分域”改为 `rag-backend` + `admin-backend` 两个独立后端项目；`ADMIN_FEATURES.md` 补充后台独立项目实现边界；`ROADMAP.md` 新增服务拆分决策与管理后台独立项目待办。当前只改文档，不改代码结构，不删除过渡代码。 |
 | 2026-06-23 | **暂不抽 shared 包决策补充**：明确管理后台与 RAG 服务先不创建 `packages/shared`，避免两个业务模型因为共享 DTO/API client 重新耦合；`admin-backend` 自己维护 `rag-client/dto`，`rag-backend` 自己维护接口 DTO，双方只通过 HTTP API 契约对齐。 |
 | 2026-06-24 | **AG-UI + LangSmith 企业级收口验证完成**：`eval:rag:langsmith` 从离线导出升级为可选 LangSmith Dataset/Experiment 上传，默认 `LANGSMITH_UPLOAD=false` 保持本地门禁稳定，`LANGSMITH_UPLOAD_REQUIRED=true` 可用于 CI 严格门禁；导出数据补齐 query、reference answer、expected claims、引用/拒答/冲突期望。修复 rag-backend 运行时 `thrift -> uuid@13` CJS/ESM 兼容问题，pnpm override 固定 `thrift@0.23.0>uuid@9.0.1`。验证通过：`cd backend && pnpm run build`、`pnpm test -- agui.service.spec.ts --runInBand`、`pnpm run eval:rag:langsmith`、`LANGSMITH_UPLOAD=true pnpm run eval:rag:langsmith`（无 key 时只报告 uploadError，不失败）；`cd admin && pnpm run build` 通过；本地三段服务真实启动通过，端口为 rag-backend 3000、admin-backend 3001、admin 8000/8001；管理后台 SSE 代理返回 `RUN_STARTED -> TEXT_MESSAGE_START -> STATE_DELTA -> CUSTOM -> RUN_FINISHED`。 |
+| 2026-06-25 | **最新真实面试 7 问口径补齐**：根据当天面试追问，在 `INTERVIEW_PLAYBOOK.md` 新增“最新面试 7 问回答口径”，覆盖项目如何做 RAG、向量/ES/图谱流程、多 Agent 协调、工具调用、RAG 落地问题、情感分析边界与 AI Coding 使用方式；明确情感分析不是当前项目独立模块，不能硬报准确率。 |
+| 2026-06-25 | **AI Agent / RAG 核心知识底层框架补齐**：在 `AI_AGENT_CORE_KNOWLEDGE.md` 新增“万变不离其宗的底层框架”，把 AI 应用本质、RAG 主链路、向量/ES/图谱分工、Agent 状态机、工具调用边界、GraphRAG 使用边界、评测指标和 AI Coding 方法沉淀为可迁移框架；同步扩展最小复习清单。 |

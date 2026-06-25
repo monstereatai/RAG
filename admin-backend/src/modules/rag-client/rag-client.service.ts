@@ -149,8 +149,26 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>('/rag/admin/graph/entities');
   }
 
+  getGraphEntityDetail(id: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/graph/entities/${encodeURIComponent(id)}`,
+    );
+  }
+
   getGraphRelationships() {
     return this.getJson<Record<string, unknown>>('/rag/admin/graph/relationships');
+  }
+
+  searchGraphRelationships(query: Record<string, unknown>) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/graph/relationships${this.toQueryString(query)}`,
+    );
+  }
+
+  searchGraph(query: Record<string, unknown>) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/graph/search${this.toQueryString(query)}`,
+    );
   }
 
   getGraphOrphans() {
@@ -251,10 +269,10 @@ export class RagClientService {
     }
   }
 
-  private toQueryString(query: RagDocumentQueryDto): string {
+  private toQueryString(query: object): string {
     const params = new URLSearchParams();
 
-    for (const [key, value] of Object.entries(query)) {
+    for (const [key, value] of Object.entries(query as Record<string, unknown>)) {
       if (value !== undefined && value !== null && value !== '' && key !== 'current') {
         params.set(key, String(value));
       }

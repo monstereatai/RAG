@@ -60,7 +60,10 @@ export class JobsService implements OnModuleInit {
   }
 
   /** 获取某任务的执行历史 */
-  async getExecutions(jobId: string, limit = 20): Promise<JobExecutionEntity[]> {
+  async getExecutions(
+    jobId: string,
+    limit = 20,
+  ): Promise<JobExecutionEntity[]> {
     return this.executionRepo.find({
       where: { jobId },
       order: { startedAt: 'DESC' },

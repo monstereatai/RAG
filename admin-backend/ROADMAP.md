@@ -41,6 +41,7 @@
 - [x] 智能搜索运营入口完成：`GET /admin/search-ops/overview` 返回 required RAG APIs 和 blocked 状态。
 - [x] AI 问答运营入口完成：`GET /admin/qa-ops/overview` 返回 required RAG APIs 和 blocked 状态。
 - [x] 知识图谱运营入口完成：`GET /admin/graph-ops/overview` 返回 required RAG APIs 和 blocked 状态。
+- [x] 知识图谱运营三个二级菜单接口补齐：`GET /api/admin/graph-ops/nodes/:id`、`GET /api/admin/graph-ops/relations`、`GET /api/admin/graph-ops/relations/search`、`GET /api/admin/graph-ops/search` 已接入 rag-backend，并在真实图谱为空时返回显式 `meta.demo=true` 演示数据。
 
 ## P0 当前必须补齐
 
@@ -64,18 +65,30 @@
 - [x] 智能搜索运营页：后台入口已完成；真实数据依赖 `rag-backend` 搜索运营 API。
 - [x] AI 问答运营页：后台入口已完成；真实数据依赖 `rag-backend` 问答运营 API。
 - [x] 知识图谱运营页：后台入口已完成；真实数据依赖 `rag-backend` 图谱运营 API。
+- [x] 知识图谱运营三个二级菜单接口补齐：按 `admin/docs/graph-ops-menu-implementation-plan.md` 补 `nodes/:id`、`relations`、`relations/search`，并为 demo/mock 数据返回显式 meta，避免静默冒充真实图谱。
 
 ## 阻塞与红线
 
 - 数据库 schema 变更、迁移、真实数据迁移：需要主人确认后才能做。
 - `.env`、密钥、token、CI/CD、生产部署：不直接修改。
-- `rag-backend` 运营 API 已完整就绪（含 query_logs 驱动的搜索/问答分析）。
+- `rag-backend` 搜索/问答运营 API 已就绪；Graph Ops 的 schema/entities/relationships/search 已补齐。当前真实 Neo4j 图谱为空时，admin-backend 会按显式 demo meta 返回演示数据。
 - 忘记密码、MFA 需要外部通道（邮件/SMS），已按主人要求先放一放。
 - 菜单持久化、菜单排序需要数据库 schema，已按主人要求先放一放。
 - 当前不抽 `packages/shared`，`admin-backend` 自己维护 `rag-client/dto`。
 
 ## 最近验证
 
+- 2026-06-25：**Graph Ops 三个二级菜单接口完成并联调**
+  - admin-backend 新增/补齐：`GET /api/admin/graph-ops/nodes/:id`、`GET /api/admin/graph-ops/relations`、`GET /api/admin/graph-ops/relations/search`、`GET /api/admin/graph-ops/search`
+  - `GraphOpsMockService` 补齐节点详情、关系列表、关系检索数据，并统一返回 `meta.demo=true`
+  - `RagClientService` 补齐 graph entity detail、relationships search、graph search 调用
+  - 真实联调：临时启动 rag-backend `3003`、admin-backend `3004`，登录后请求 stats/nodes/relations/relations-search/search 均返回 200；rag-backend 日志确认 entities/relationships/search 上游均为 200
+  - 验证通过：`pnpm run build`、`pnpm run lint`、`pnpm exec jest --runInBand`（8 suites / 68 tests）、`pnpm run migration:check`
+  - 未通过项：`npm run verify` 被既有 Jest 参数传递问题阻塞；全量 e2e 仍受既有 `/users`、`/auth/login` 与 `/api/*` 路径差异影响
+- 2026-06-25：`/graph-ops` 三个二级菜单接口计划完成
+  - 计划文件：`admin/docs/graph-ops-menu-implementation-plan.md`
+  - 明确 admin-backend 需补 `nodes/:id`、`relations`、`relations/search`
+  - 本次仅更新文档，未编码，未运行 `npm run verify`
 - 2026-06-23：`naming-ok`、`package-name-ok`、`clean-ok` 通过。
 - 2026-06-23：`npm ci` 成功安装本地依赖；存在 class-validator peer warning 和若干 deprecated warning，但命令成功。
 - 2026-06-23：`npm run build` 通过。
