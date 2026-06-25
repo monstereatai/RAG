@@ -11,11 +11,13 @@ import React from 'react';
 import {
   type AguiEvent,
   type ChatMode,
+  type ConversationSummary,
   type ReferenceChunk,
+  deleteConversation,
+  getConversation,
+  getConversations,
   streamAguiAnswer,
 } from './service';
-
-const conversations: { title: string; desc: string; time: string }[] = [];
 
 interface ChatMessage {
   id: string;
@@ -32,15 +34,42 @@ interface ChatMessage {
   events?: string[];
 }
 
-const initialMessages: ChatMessage[] = [];
-
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState('');
   const [mode, setMode] = React.useState<ChatMode>('agentic');
-  const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [activeTitle, setActiveTitle] = React.useState('');
   const [loading, setLoading] = React.useState(false);
+  const [threadId, setThreadId] = React.useState<string | undefined>(undefined);
+  const threadIdRef = React.useRef<string | undefined>(undefined);
+  const [conversations, setConversations] = React.useState<ConversationSummary[]>([]);
+  const [sidebarLoading, setSidebarLoading] = React.useState(false);
+  const [convPage, setConvPage] = React.useState(1);
+  const PAGE_SIZE = 10;
   const abortRef = React.useRef<AbortController | null>(null);
+
+  // 同步 threadId 到 ref，避免闭包过期
+  React.useEffect(() => {
+    threadIdRef.current = threadId;
+  }, [threadId]);
+
+  // 加载会话列表
+  const loadConversations = React.useCallback(async () => {
+    setSidebarLoading(true);
+    try {
+      const res = await getConversations();
+      setConversations(res.data ?? []);
+      setConvPage(1);
+    } catch {
+      // 静默失败，保留上次列表
+    } finally {
+      setSidebarLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadConversations();
+  }, [loadConversations]);
 
   React.useEffect(() => {
     return () => abortRef.current?.abort();
@@ -55,6 +84,63 @@ const QaOps: React.FC = () => {
     );
   };
 
+  const handleNewConversation = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setMessages([]);
+    setThreadId(undefined);
+    setActiveTitle('');
+  };
+
+  const handleClearConversation = async () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (threadId) {
+      try {
+        await deleteConversation(threadId);
+        await loadConversations();
+      } catch {
+        // 静默失败
+      }
+    }
+    setMessages([]);
+    setThreadId(undefined);
+    setActiveTitle('');
+  };
+
+  const handleSelectConversation = async (item: ConversationSummary) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(true);
+    try {
+      const res = await getConversation(item.threadId);
+      const detail = res.data;
+      if (!detail) return;
+
+      setThreadId(detail.threadId);
+      setActiveTitle(detail.title);
+
+      // 将后端的消息列表转为前端 ChatMessage 格式
+      const chatMessages: ChatMessage[] = detail.messages.map((m, i) => ({
+        id: `${m.role}-${i}`,
+        role: m.role === 'human' ? 'user' : 'assistant',
+        content: m.content,
+        createdAt: m.createdAt
+          ? new Date(m.createdAt).toLocaleTimeString('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '',
+        status: 'done' as const,
+      }));
+      setMessages(chatMessages);
+    } catch {
+      // 加载失败
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSend = () => {
     const query = input.trim();
     if (!query || loading) return;
@@ -62,7 +148,9 @@ const QaOps: React.FC = () => {
     abortRef.current?.abort();
     abortRef.current = null;
     setInput('');
-    setActiveTitle(query);
+    if (!activeTitle) {
+      setActiveTitle(query);
+    }
     setLoading(true);
 
     const now = new Date().toLocaleTimeString('zh-CN', {
@@ -100,7 +188,12 @@ const QaOps: React.FC = () => {
         }));
         setLoading(false);
       },
-      () => setLoading(false),
+      () => {
+        setLoading(false);
+        // 流结束后刷新会话列表（使用 ref 获取最新 threadId）
+        void loadConversations();
+      },
+      threadId,
     ).then((controller) => {
       abortRef.current = controller;
     });
@@ -113,6 +206,13 @@ const QaOps: React.FC = () => {
     }));
 
     if (event.type === 'RUN_STARTED') {
+      // 保存后端返回的 threadId
+      const eventThreadId =
+        typeof event.data?.threadId === 'string' ? event.data.threadId : undefined;
+      if (eventThreadId) {
+        setThreadId(eventThreadId);
+      }
+
       const inputData = event.data?.input;
       if (isRecord(inputData) && typeof inputData.mode === 'string') {
         const route = inputData.mode;
@@ -243,6 +343,19 @@ const QaOps: React.FC = () => {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
 
+  const formatTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  };
+
   return (
     <ModulePage activeKey="new" navItems={qaNav} title="AI问答">
       <div className="qa-workspace">
@@ -255,46 +368,48 @@ const QaOps: React.FC = () => {
             block
             ghost
             icon={<PlusOutlined />}
-            onClick={() => {
-              abortRef.current?.abort();
-              abortRef.current = null;
-              setMessages([]);
-              setActiveTitle('新建对话');
-            }}
+            onClick={handleNewConversation}
             size="large"
             type="primary"
           >
             新建对话
           </Button>
           <div className="conversation-list">
-            {conversations.length === 0 ? (
+            {sidebarLoading ? (
+              <div className="empty-conversations">加载中...</div>
+            ) : conversations.length === 0 ? (
               <div className="empty-conversations">暂无对话</div>
             ) : (
-              conversations.map((item, index) => (
+              conversations.slice(0, convPage * PAGE_SIZE).map((item) => (
                 <button
-                  className={index === 0 ? 'active' : ''}
-                  key={item.title}
+                  className={item.threadId === threadId ? 'active' : ''}
+                  key={item.threadId}
+                  onClick={() => handleSelectConversation(item)}
                   type="button"
                 >
                   <strong>{item.title}</strong>
-                  <span>{item.time}</span>
-                  <p>{item.desc}</p>
+                  <span>{formatTime(item.updatedAt)}</span>
+                  <p>{item.messageCount} 条消息</p>
                 </button>
               ))
             )}
+            {conversations.length > convPage * PAGE_SIZE && (
+              <Button
+                block
+                type="link"
+                onClick={() => setConvPage((p) => p + 1)}
+              >
+                查看更多会话（{conversations.length - convPage * PAGE_SIZE}）⌄
+              </Button>
+            )}
           </div>
-          <Button type="link">查看更多会话⌄</Button>
         </aside>
         <section className="rag-panel qa-chat">
           <div className="chat-head">
-            <h2>{activeTitle}</h2>
+            <h2>{activeTitle || 'AI 智能问答'}</h2>
             <Button
               icon={<DeleteOutlined />}
-              onClick={() => {
-                abortRef.current?.abort();
-                abortRef.current = null;
-                setMessages([]);
-              }}
+              onClick={handleClearConversation}
             >
               清空对话
             </Button>

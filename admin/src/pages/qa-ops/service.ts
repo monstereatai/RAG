@@ -44,6 +44,52 @@ export interface AguiEvent {
   data?: Record<string, unknown>;
 }
 
+/* ───── 会话管理（聊天记录持久化） ───── */
+
+export interface ConversationSummary {
+  threadId: string;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationMessage {
+  role: 'human' | 'ai';
+  content: string;
+  createdAt: string;
+}
+
+export interface ConversationDetail {
+  threadId: string;
+  title: string;
+  messages: ConversationMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 获取会话列表 */
+export async function getConversations() {
+  return authRequest<{ data: ConversationSummary[] }>(
+    '/api/admin/qa-ops/conversations',
+  );
+}
+
+/** 获取单个会话的消息 */
+export async function getConversation(threadId: string) {
+  return authRequest<{ data: ConversationDetail }>(
+    `/api/admin/qa-ops/conversations/${threadId}`,
+  );
+}
+
+/** 删除会话 */
+export async function deleteConversation(threadId: string) {
+  return authRequest<{ success: boolean }>(
+    `/api/admin/qa-ops/conversations/${threadId}`,
+    { method: 'DELETE' },
+  );
+}
+
 export async function getQaRecords(params?: {
   current?: number;
   pageSize?: number;
@@ -81,10 +127,14 @@ export async function streamAguiAnswer(
   onEvent: (event: AguiEvent) => void,
   onError: (error: Error) => void,
   onClose: () => void,
+  threadId?: string,
 ): Promise<AbortController> {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
-  const url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}`;
+  let url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}`;
+  if (threadId) {
+    url += `&threadId=${encodeURIComponent(threadId)}`;
+  }
 
   (async () => {
     try {

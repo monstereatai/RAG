@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Query,
@@ -17,7 +19,42 @@ import { RagClientService } from '../rag-client/rag-client.service';
 @ApiBearerAuth()
 @Controller('admin/qa-ops')
 export class QaOpsController {
+  private readonly logger = new Logger(QaOpsController.name);
+
   constructor(private readonly ragClient: RagClientService) {}
+
+  // ─── Conversation CRUD ───────────────────────────────────────
+
+  @Get('conversations')
+  @ApiOperation({ summary: '会话列表' })
+  @RequirePermission('admin:qa-ops:read')
+  async listConversations() {
+    // admin QA Ops 展示所有会话，不按 userId 过滤
+    const result = await this.ragClient.getConversations();
+    return { data: (result.data as any)?.data ?? [] };
+  }
+
+  @Get('conversations/:threadId')
+  @ApiOperation({ summary: '会话详情（含消息）' })
+  @RequirePermission('admin:qa-ops:read')
+  async getConversation(
+    @Param('threadId') threadId: string,
+  ) {
+    // admin QA Ops 可查看任意会话，不按 userId 过滤
+    const result = await this.ragClient.getConversation(threadId);
+    return { data: (result.data as any)?.data ?? null };
+  }
+
+  @Delete('conversations/:threadId')
+  @ApiOperation({ summary: '删除会话' })
+  @RequirePermission('admin:qa-ops:write')
+  async deleteConversation(
+    @Param('threadId') threadId: string,
+  ) {
+    // admin QA Ops 可删除任意会话，不按 userId 过滤
+    await this.ragClient.deleteConversation(threadId);
+    return { success: true };
+  }
 
   @Get('overview')
   @ApiOperation({ summary: 'AI 问答运营概览' })
@@ -163,6 +200,11 @@ export class QaOpsController {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;
     return user?.userId ?? user?.sub ?? 'admin-backend';
+  }
+
+  /** 获取管理后台上下文用户标识用于会话隔离 */
+  private getAdminUserId(): string {
+    return 'admin-backend';
   }
 
   private writeAguiFallback(res: Response, message: string) {

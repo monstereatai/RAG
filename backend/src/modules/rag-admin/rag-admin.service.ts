@@ -409,6 +409,22 @@ export class RagAdminService {
     }));
   }
 
+  async getConversation(threadId: string, userId?: string) {
+    const conv = await this.conversationService.get(threadId, userId);
+    if (!conv) return null;
+    return {
+      threadId: conv.threadId,
+      title: conv.title,
+      messages: conv.messages,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+    };
+  }
+
+  async deleteConversation(threadId: string, userId?: string): Promise<boolean> {
+    return this.conversationService.delete(threadId, userId);
+  }
+
   // ─── Search Operations ───────────────────────────────────────
 
   async getSearchPopularQueries() {

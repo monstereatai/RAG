@@ -134,8 +134,38 @@ export class RagAdminController {
   // ─── Conversations ──────────────────────────────────────────
 
   @Get('conversations')
-  async listConversations() {
-    return this.ragAdminService.listConversations();
+  async listConversations(@Query('userId') userId?: string) {
+    return this.ragAdminService.listConversations(userId || undefined);
+  }
+
+  @Get('conversations/:threadId')
+  async getConversation(
+    @Param('threadId') threadId: string,
+    @Query('userId') userId?: string,
+  ) {
+    const conv = await this.ragAdminService.getConversation(
+      threadId,
+      userId || undefined,
+    );
+    if (!conv) {
+      throw new NotFoundException(`conversation ${threadId} not found`);
+    }
+    return conv;
+  }
+
+  @Post('conversations/:threadId/delete')
+  async deleteConversation(
+    @Param('threadId') threadId: string,
+    @Query('userId') userId?: string,
+  ) {
+    const deleted = await this.ragAdminService.deleteConversation(
+      threadId,
+      userId || undefined,
+    );
+    if (!deleted) {
+      throw new NotFoundException(`conversation ${threadId} not found`);
+    }
+    return { success: true };
   }
 
   // ─── Search Operations ──────────────────────────────────────

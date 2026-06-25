@@ -34,6 +34,7 @@ import { GraphModule } from './modules/graph/graph.module';
 import { RagAdminModule } from './modules/rag-admin/rag-admin.module';
 import { GrpcModule } from './modules/grpc/rag-grpc.module';
 import { AguiModule } from './modules/agui/agui.module';
+import { QaOpsModule } from './modules/qa-ops/qa-ops.module';
 import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.module';
 
 @Module({
@@ -81,6 +82,7 @@ import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.mod
     GrpcModule,
     AguiModule,
     WeeklySummaryModule,
+    QaOpsModule,
   ],
   providers: [
     {

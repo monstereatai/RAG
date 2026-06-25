@@ -135,12 +135,15 @@ export class ConversationService {
     await this.messageRepo.save(msg);
     this.logger.log(`Message saved to DB: threadId=${threadId}, role=${role}`);
 
-    // 清除 Redis 缓存
+    // 清除 Redis 缓存（同时清 userId 版和无 userId 版，避免脏读）
     if (this.redisProvider.isEnabled()) {
       const cacheKey = userId
         ? `conv:messages:${userId}:${threadId}`
         : `conv:messages:${threadId}`;
       await this.redisProvider.del(cacheKey);
+      if (userId) {
+        await this.redisProvider.del(`conv:messages:${threadId}`);
+      }
     }
   }
 
@@ -201,6 +204,12 @@ export class ConversationService {
         updatedAt: (lastMsg?.createdAt ?? conv.createdAt).toISOString(),
       });
     }
+
+    // 按最后更新时间降序排列（最新对话排最前）
+    results.sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
+
     return results;
   }
 

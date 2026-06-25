@@ -71,8 +71,24 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>('/rag/admin/evaluations');
   }
 
-  getConversations() {
-    return this.getJson<Record<string, unknown>>('/rag/admin/conversations');
+  getConversations(userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.getJson<Record<string, unknown>>(`/rag/admin/conversations${params}`);
+  }
+
+  getConversation(threadId: string, userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/conversations/${encodeURIComponent(threadId)}${params}`,
+    );
+  }
+
+  deleteConversation(threadId: string, userId?: string) {
+    const params = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/conversations/${encodeURIComponent(threadId)}/delete${params}`,
+      {},
+    );
   }
 
   reindexDocument(docId: string) {

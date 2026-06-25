@@ -9,5 +9,6 @@ import { AguiService } from './agui.service';
   imports: [AgenticRagModule, ChatModule, MemoryModule],
   controllers: [AguiController],
   providers: [AguiService],
+  exports: [AguiService],
 })
 export class AguiModule {}
