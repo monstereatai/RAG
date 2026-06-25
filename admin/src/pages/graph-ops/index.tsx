@@ -123,15 +123,14 @@ const GlobalGraphView: React.FC = () => {
           return;
         }
 
-        const statsData = statsPayload.data ?? (statsPayload as GraphStats);
-        const graphData = searchPayload.data ?? { nodes: [], edges: [] };
-        const graphNodes = asArray<GraphNode>(graphData.nodes);
-        const graphEdges = asArray<GraphEdge>(graphData.edges);
+        const statsData = (statsPayload as any).data ?? (statsPayload as GraphStats);
+        const graphNodes = asArray<GraphNode>((searchPayload as any)?.nodes ?? []);
+        const graphEdges = asArray<GraphEdge>((searchPayload as any)?.edges ?? []);
 
         setStats(statsData);
         setNodes(graphNodes);
         setEdges(graphEdges);
-        setMeta(searchPayload.meta ?? statsPayload.meta);
+        setMeta((searchPayload as any)?.meta);
         setGraphState((statsData?.nodeCount ?? 0) > 0 || graphNodes.length > 0 ? 'data' : 'empty');
       })
       .catch(() => setGraphState('error'));
@@ -223,10 +222,10 @@ const NodeManagementView: React.FC = () => {
           setState('disabled');
           return;
         }
-        const items = asArray<GraphNode>(payload.data);
+        const items = asArray<GraphNode>(payload ?? []);
         setNodes(items);
-        setTotal(Number(payload.total ?? items.length));
-        setMeta(payload.meta);
+        setTotal(items.length);
+        setMeta(undefined);
         setState(items.length > 0 ? 'data' : 'empty');
       })
       .catch(() => setState('error'));
@@ -381,10 +380,10 @@ const RelationSearchView: React.FC = () => {
           setState('disabled');
           return;
         }
-        const edges = asArray<GraphEdge>(relationPayload.data);
+        const edges = asArray<GraphEdge>(relationPayload ?? []);
         setRelations(edges);
-        setGraphNodes(asArray<GraphNode>(graphPayload.data?.nodes));
-        setMeta(graphPayload.meta ?? relationPayload.meta);
+        setGraphNodes(asArray<GraphNode>((graphPayload as any)?.nodes ?? []));
+        setMeta(undefined);
         setState(edges.length > 0 ? 'data' : 'empty');
       })
       .catch(() => setState('error'));
@@ -476,14 +475,14 @@ const GraphStatsView: React.FC = () => {
     getGraphStats()
       .then((res) => {
         const payload = asPayload<{ data?: GraphStats; meta?: GraphResponseMeta }>(res);
-        if (isGraphDisabled(payload) || isGraphDisabled(payload.data)) {
+        if (isGraphDisabled(payload) || isGraphDisabled((payload as any)?.data)) {
           setState('disabled');
           return;
         }
-        const data = payload.data ?? (payload as GraphStats);
-        setStats(data);
-        setMeta(payload.meta);
-        setState((data?.nodeCount ?? 0) > 0 || (data?.edgeCount ?? 0) > 0 ? 'data' : 'empty');
+        const statsData = (payload as any)?.data ?? payload;
+        setStats(statsData as GraphStats);
+        setMeta(undefined);
+        setState((statsData?.nodeCount ?? 0) > 0 || (statsData?.edgeCount ?? 0) > 0 ? 'data' : 'empty');
       })
       .catch(() => setState('error'));
   };
