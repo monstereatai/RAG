@@ -38,6 +38,10 @@ import { JobExecutionEntity } from './entities/job-execution.entity';
             'mysql://root:root@localhost:3306/rag');
 
         const nodeEnv = config.get<string>('nodeEnv') ?? 'development';
+        const synchronize =
+          process.env.TYPEORM_SYNCHRONIZE === 'true' ||
+          (process.env.TYPEORM_SYNCHRONIZE !== 'false' &&
+            nodeEnv === 'development');
 
         return {
           type: isPostgres ? 'postgres' : 'mysql',
@@ -54,7 +58,7 @@ import { JobExecutionEntity } from './entities/job-execution.entity';
             WeeklySummaryEntity,
             JobExecutionEntity,
           ],
-          synchronize: nodeEnv === 'development', // 开发环境自动同步 schema
+          synchronize,
           logging: nodeEnv === 'development',
           retryAttempts: 3,
           retryDelay: 3000,

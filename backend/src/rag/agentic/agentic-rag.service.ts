@@ -33,8 +33,10 @@ import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-
 @Injectable()
 export class AgenticRagService {
   private readonly logger = new Logger(AgenticRagService.name);
-  private deepAgent: { invoke: (input: unknown) => Promise<unknown> } | null =
-    null;
+  private readonly deepAgents = new Map<
+    string,
+    { invoke: (input: unknown) => Promise<unknown> }
+  >();
   private app: any;
 
   private readonly confidenceThreshold: number;
@@ -1141,8 +1143,10 @@ export class AgenticRagService {
   private async getDeepAgent(): Promise<{
     invoke: (input: unknown) => Promise<unknown>;
   }> {
-    if (this.deepAgent) {
-      return this.deepAgent;
+    const modelName = this.llmProvider.getActiveProviderName();
+    const cached = this.deepAgents.get(modelName);
+    if (cached) {
+      return cached;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -1157,12 +1161,13 @@ export class AgenticRagService {
     }>;
     const { createDeepAgent } = await dynamicImport('deepagents');
 
-    this.deepAgent = createDeepAgent({
+    const deepAgent = createDeepAgent({
       model: this.llmProvider.getModel(),
       systemPrompt: deepAgentQueryPlanSystemPrompt,
     });
 
-    return this.deepAgent;
+    this.deepAgents.set(modelName, deepAgent);
+    return deepAgent;
   }
 
   private extractQueriesFromDeepAgentResult(result: unknown): string[] {

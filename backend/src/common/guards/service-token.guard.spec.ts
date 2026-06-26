@@ -1,4 +1,4 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ServiceTokenGuard } from './service-token.guard';
@@ -39,21 +39,13 @@ describe('ServiceTokenGuard', () => {
     });
   });
 
-  it('does not accept the local dev service token in production when no token is configured', async () => {
+  it('fails fast in production when no service token is configured', () => {
     delete process.env.RAG_SERVICE_TOKEN;
     process.env.NODE_ENV = 'production';
-    const jwtService = {
-      verifyAsync: jest.fn().mockRejectedValue(new Error('bad token')),
-    } as unknown as JwtService;
-    const guard = createGuard(undefined, jwtService);
 
-    await expect(
-      guard.canActivate(
-        createContext({
-          headers: { authorization: 'Bearer local-rag-service-token' },
-        }),
-      ),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(() => createGuard()).toThrow(
+      'RAG_SERVICE_TOKEN is required when NODE_ENV=production',
+    );
   });
 
   it('uses configured service token before JWT verification', () => {

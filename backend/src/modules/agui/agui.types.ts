@@ -1,4 +1,5 @@
 import type { ChatMode } from '../chat/chat.dto';
+import type { LlmModelProvider } from '../../providers/llm/llm-provider.interface';
 
 export type AguiEventType =
   | 'RUN_STARTED'
@@ -25,4 +26,5 @@ export interface AguiStreamOptions {
   mode: ChatMode;
   userId: string;
   threadId?: string;
+  model?: LlmModelProvider;
 }

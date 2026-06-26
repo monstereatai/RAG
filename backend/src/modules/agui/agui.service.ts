@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import { LlmProvider } from '../../providers/llm/llm.provider';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
@@ -13,6 +14,7 @@ export class AguiService {
     private readonly agenticRagService: AgenticRagService,
     private readonly conversationService: ConversationService,
     private readonly memoryService: MemoryService,
+    private readonly llmProvider: LlmProvider,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -39,6 +41,7 @@ export class AguiService {
         };
 
         try {
+          const selectedModel = options.model ?? 'qwen';
           const activeThreadId =
             options.threadId ??
             (await this.conversationService.create(
@@ -66,21 +69,25 @@ export class AguiService {
 
           emit('RUN_STARTED', {
             threadId: activeThreadId,
-            input: { query, mode: options.mode },
+            input: { query, mode: options.mode, model: selectedModel },
           });
           emit('TEXT_MESSAGE_START', {
             messageId,
             role: 'assistant',
           });
 
-          const result = await this.agenticRagService.run(
-            query,
-            options.mode,
-            (event) => this.emitAguiEvent(event, emit, messageId),
-            history,
-            activeThreadId,
-            options.userId,
-            memoryMessages,
+          const result = await this.llmProvider.runWithModel(
+            selectedModel,
+            () =>
+              this.agenticRagService.run(
+                query,
+                options.mode,
+                (event) => this.emitAguiEvent(event, emit, messageId),
+                history,
+                activeThreadId,
+                options.userId,
+                memoryMessages,
+              ),
           );
 
           await this.conversationService.addMessage(
@@ -105,7 +112,7 @@ export class AguiService {
           emit('TEXT_MESSAGE_END', { messageId });
           emit('RUN_FINISHED', {
             threadId: activeThreadId,
-            output: result,
+            output: { ...result, model: selectedModel },
           });
           subscriber.complete();
         } catch (error) {

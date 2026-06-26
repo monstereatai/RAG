@@ -38,10 +38,17 @@ describe('AguiService', () => {
       searchMemory: () => Promise.resolve({}),
       classifyAndPersist: () => undefined,
     };
+    const llmProvider = {
+      runWithModel: (
+        _model: string | undefined,
+        callback: () => Promise<unknown>,
+      ) => callback(),
+    };
     const service = new AguiService(
       agenticRagService as never,
       conversationService as never,
       memoryService as never,
+      llmProvider as never,
     );
 
     const events = await firstValueFrom(

@@ -56,7 +56,17 @@ export default [
     path: '/qa-ops',
     name: 'qa-ops',
     icon: 'comment',
-    component: './qa-ops',
+    routes: [
+      {
+        path: '/qa-ops',
+        component: './qa-ops',
+      },
+      {
+        path: '/qa-ops/model',
+        name: 'qa-ops-model',
+        component: './qa-ops/model',
+      },
+    ],
   },
   {
     path: '/graph-ops',

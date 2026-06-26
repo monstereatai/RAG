@@ -13,9 +13,12 @@ import React from 'react';
 import {
   type AguiEvent,
   type ChatMode,
+  type ChatModel,
   type ConversationSummary,
   type ReferenceChunk,
   deleteConversation,
+  getEnabledQaModelOptions,
+  getQaModelConfig,
   getConversation,
   getConversations,
   streamAguiAnswer,
@@ -30,6 +33,7 @@ interface ChatMessage {
   route?: string;
   confidence?: number;
   retryCount?: number;
+  model?: ChatModel;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
   references?: ReferenceChunk[];
@@ -39,6 +43,14 @@ interface ChatMessage {
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState('');
   const [mode, setMode] = React.useState<ChatMode>('agentic');
+  const modelConfig = React.useMemo(() => getQaModelConfig(), []);
+  const modelOptions = React.useMemo(
+    () => getEnabledQaModelOptions(modelConfig),
+    [modelConfig],
+  );
+  const [model, setModel] = React.useState<ChatModel>(
+    modelConfig.defaultModel,
+  );
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [activeTitle, setActiveTitle] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -189,6 +201,7 @@ const QaOps: React.FC = () => {
     streamAguiAnswer(
       query,
       mode,
+      model,
       (event) => applyAguiEvent(event, assistantId),
       (error) => {
         updateMessage(assistantId, (message) => ({
@@ -229,6 +242,13 @@ const QaOps: React.FC = () => {
         updateMessage(messageId, (message) => ({
           ...message,
           route,
+        }));
+      }
+      const inputModel = isRecord(inputData) ? inputData.model : undefined;
+      if (isChatModel(inputModel)) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          model: inputModel,
         }));
       }
       return;
@@ -272,6 +292,7 @@ const QaOps: React.FC = () => {
             typeof output.retryCount === 'number'
               ? output.retryCount
               : message.retryCount,
+          model: isChatModel(output.model) ? output.model : message.model,
           retrievalSufficient:
             typeof output.retrievalSufficient === 'boolean'
               ? output.retrievalSufficient
@@ -352,6 +373,9 @@ const QaOps: React.FC = () => {
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
+
+  const isChatModel = (value: unknown): value is ChatModel =>
+    value === 'qwen' || value === 'deepseek';
 
   const formatTime = (iso: string) => {
     try {
@@ -528,6 +552,12 @@ const QaOps: React.FC = () => {
                         {message.retryCount !== undefined && (
                           <span>重试：{message.retryCount}</span>
                         )}
+                        {message.model && (
+                          <span>
+                            模型：
+                            {message.model === 'qwen' ? '通义千问' : 'DeepSeek'}
+                          </span>
+                        )}
                       </div>
                     )}
                     {message.retrievalReason && (
@@ -603,6 +633,17 @@ const QaOps: React.FC = () => {
                 <option value="agentic">agentic</option>
                 <option value="auto">auto</option>
                 <option value="simple">simple</option>
+              </select>
+              <select
+                aria-label="模型"
+                onChange={(event) => setModel(event.target.value as ChatModel)}
+                value={model}
+              >
+                {modelOptions.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
               <span>{input.length} / 2000</span>
               <Button disabled={loading} icon={<PaperClipOutlined />} />

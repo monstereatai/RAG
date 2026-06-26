@@ -78,7 +78,7 @@ export const qaNav: SideNavItem[] = [
   { key: 'new', label: '新建对话', icon: <CommentOutlined />, path: '/qa-ops' },
   { key: 'history', label: '历史会话', icon: <HistoryOutlined /> },
   { key: 'records', label: '问答记录', icon: <FileTextOutlined /> },
-  { key: 'model', label: '模型配置', icon: <DatabaseOutlined /> },
+  { key: 'model', label: '模型配置', icon: <DatabaseOutlined />, path: '/qa-ops/model' },
 ];
 
 export const graphNav: SideNavItem[] = [

@@ -61,6 +61,7 @@
 - 多租户隔离：PostgreSQL、Redis、Milvus、BM25 等层面按 `userId` 隔离。
 - 可观测：Prometheus 指标、traceparent、查询日志、RAG 运营分析。
 - 管理后台：Dashboard、Documents、SearchOps、QaOps、GraphOps、Account、System、Notification、Audit 等主要模块。
+- 管理后台 AI 问答：默认使用通义千问，可在 AI 问答页切换 DeepSeek，按单次请求透传模型选择到 RAG AG-UI 链路；AI 问答侧栏的“模型配置”已可配置默认模型和可选模型。
 - 面试知识沉淀：`INTERVIEW_PLAYBOOK.md` 和 `AI_AGENT_CORE_KNOWLEDGE.md` 已覆盖最近真实面试追问。
 
 ## 当前开放事项
@@ -91,6 +92,22 @@
 - 当前 shell Node.js 曾显示为 v20.18.0，部分 admin 工具链要求 Node 22+；最终构建建议在 Node 22+ 复验。
 
 ## 最近验证
+
+### 2026-06-26
+
+- **管理后台 AI 问答模型切换完成**：
+  - admin AI 问答页新增模型选择，默认 `qwen`，可切换 `deepseek`。
+  - admin AI 问答侧栏“模型配置”落地为 `/qa-ops/model` 页面，支持保存默认模型、启用/隐藏可选模型、查看 Qwen/DeepSeek 后端环境变量说明；仅保存非敏感 localStorage 偏好，不写入 `.env` 或 API Key。
+  - admin -> admin-backend -> rag-backend AG-UI 链路新增 `model=qwen|deepseek` 参数透传。
+  - rag-backend 新增 DeepSeek OpenAI-compatible LLM provider，默认 DeepSeek 模型为 `deepseek-v4-flash`，不修改真实 `.env`。
+  - LLM provider 支持请求级模型上下文，避免后台切换模型影响其他请求默认千问。
+  - 实际启动补齐：`AguiModule` 显式引入 `LlmModule`，避免 `AguiService` 运行时注入不到 `LlmProvider`。
+  - token 复现根因修复：之前为避免 development 自动 `synchronize` 而用 `NODE_ENV=production` 启动 backend，导致本地服务 token 兜底失效并返回 401；现新增 `TYPEORM_SYNCHRONIZE=false` 开关和 `backend npm run start:local:safe`，可在 development 模式禁用 schema 同步，同时保留本地服务 token 兜底。
+  - token 防复发约束：backend 与 admin-backend 在 `NODE_ENV=production` 且缺少 `RAG_SERVICE_TOKEN` 时直接启动失败，不再静默启动后让页面请求返回 401。
+  - 验证通过：`backend npm run build`、`backend npm test -- agui.service.spec.ts --runInBand`、`backend npm test -- service-token.guard.spec.ts --runInBand`、`admin-backend ./node_modules/.bin/tsc -p tsconfig.json`、`admin-backend ./node_modules/.bin/jest src/modules/qa-ops/qa-ops.controller.spec.ts --runInBand`、`admin-backend ./node_modules/.bin/jest src/modules/rag-client/rag-client.service.spec.ts --runInBand`、`admin ./node_modules/.bin/tsc --noEmit`、`curl -I http://localhost:8000/qa-ops/model` 返回 200 HTML。
+  - 浏览器验证：未登录态访问 `/qa-ops/model` 会按预期跳转 `/user/login?redirect=%2Fqa-ops%2Fmodel`，需要登录态做最终视觉点击复验。
+  - 启动验证：`admin-backend` 已在 `http://localhost:3001` 启动，`/health` 返回 200；`admin` 已在 `http://localhost:8000` 启动并返回 200 HTML；`backend` 已用 `NODE_ENV=development TYPEORM_SYNCHRONIZE=false PORT=3000 GRPC_ENABLED=false node dist/src/main.js` 启动，`/api/v1/health` 返回 200，带本地服务 token 调用 `/api/v1/rag/admin/conversations` 返回 200。
+  - 未完成全量 lint：admin 全量 `biome lint` 被既有 account/system/qa-ops a11y 与未使用代码问题阻塞；admin-backend 全量 eslint 被既有 3 个 unused warning 阻塞；backend 全量 eslint 仍有既有格式/unsafe 问题。
 
 ### 2026-06-25
 

@@ -14,6 +14,7 @@ import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { AguiService } from '../agui/agui.service';
 import type { AguiEvent } from '../agui/agui.types';
 import type { ChatMode } from '../chat/chat.dto';
+import type { LlmModelProvider } from '../../providers/llm/llm-provider.interface';
 import { ConversationService } from '../chat/conversation.service';
 import { QaOpsService } from './qa-ops.service';
 
@@ -73,16 +74,25 @@ export class QaOpsController {
     @Query('query') query: string,
     @Query('mode') mode?: ChatMode,
     @Query('threadId') threadId?: string,
+    @Query('model') model?: LlmModelProvider,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'agentic';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
       throw new NotFoundException('mode must be one of: simple, agentic, auto');
     }
+    const chatModel = this.parseModel(model);
     return this.aguiService.stream({
       query,
       mode: chatMode,
       threadId,
       userId: this.qaOpsService.getAdminUserId(),
+      model: chatModel,
     });
+  }
+
+  private parseModel(model?: string): LlmModelProvider {
+    if (!model) return 'qwen';
+    if (model === 'qwen' || model === 'deepseek') return model;
+    throw new NotFoundException('model must be one of: qwen, deepseek');
   }
 }

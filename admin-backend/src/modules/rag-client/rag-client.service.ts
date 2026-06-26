@@ -10,6 +10,7 @@ import { resolveRagServiceToken } from './rag-service-token';
 export interface RagAguiStreamQuery {
   query: string;
   mode?: 'simple' | 'agentic' | 'auto';
+  model?: 'qwen' | 'deepseek';
   userId?: string;
   threadId?: string;
 }
@@ -140,6 +141,7 @@ export class RagClientService {
     const params = new URLSearchParams({
       query: query.query,
       mode: query.mode ?? 'agentic',
+      model: query.model ?? 'qwen',
       userId: query.userId || 'admin-backend',
     });
     if (query.threadId) {

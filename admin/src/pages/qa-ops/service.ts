@@ -13,6 +13,103 @@ export interface QaRecord {
 }
 
 export type ChatMode = 'simple' | 'agentic' | 'auto';
+export type ChatModel = 'qwen' | 'deepseek';
+
+const QA_MODEL_CONFIG_KEY = 'qa_ops_model_config';
+
+export interface QaModelOption {
+  key: ChatModel;
+  label: string;
+  provider: string;
+  defaultModel: string;
+  baseUrl: string;
+  apiKeyEnv: string;
+  timeoutEnv: string;
+  description: string;
+}
+
+export interface QaModelConfig {
+  defaultModel: ChatModel;
+  enabledModels: ChatModel[];
+}
+
+export const qaModelOptions: QaModelOption[] = [
+  {
+    key: 'qwen',
+    label: '通义千问',
+    provider: 'DashScope OpenAI Compatible',
+    defaultModel: 'qwen-plus',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKeyEnv: 'QWEN_API_KEY',
+    timeoutEnv: 'QWEN_TIMEOUT_MS',
+    description: '默认问答模型，适合中文企业知识库问答。',
+  },
+  {
+    key: 'deepseek',
+    label: 'DeepSeek',
+    provider: 'DeepSeek OpenAI Compatible',
+    defaultModel: 'deepseek-v4-flash',
+    baseUrl: 'https://api.deepseek.com',
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+    timeoutEnv: 'DEEPSEEK_TIMEOUT_MS',
+    description: '可选问答模型，适合在后台按需切换对比回答效果。',
+  },
+];
+
+export const defaultQaModelConfig: QaModelConfig = {
+  defaultModel: 'qwen',
+  enabledModels: ['qwen', 'deepseek'],
+};
+
+export function getQaModelConfig(): QaModelConfig {
+  if (typeof window === 'undefined') return defaultQaModelConfig;
+  const raw = window.localStorage.getItem(QA_MODEL_CONFIG_KEY);
+  if (!raw) return defaultQaModelConfig;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<QaModelConfig>;
+    const enabledModels = Array.isArray(parsed.enabledModels)
+      ? parsed.enabledModels.filter(isChatModel)
+      : defaultQaModelConfig.enabledModels;
+    const defaultModel = isChatModel(parsed.defaultModel)
+      ? parsed.defaultModel
+      : defaultQaModelConfig.defaultModel;
+    return {
+      defaultModel: enabledModels.includes(defaultModel)
+        ? defaultModel
+        : enabledModels[0] ?? 'qwen',
+      enabledModels: enabledModels.length
+        ? enabledModels
+        : defaultQaModelConfig.enabledModels,
+    };
+  } catch {
+    return defaultQaModelConfig;
+  }
+}
+
+export function saveQaModelConfig(config: QaModelConfig): QaModelConfig {
+  const enabledModels = config.enabledModels.filter(isChatModel);
+  const normalized: QaModelConfig = {
+    defaultModel: enabledModels.includes(config.defaultModel)
+      ? config.defaultModel
+      : enabledModels[0] ?? 'qwen',
+    enabledModels: enabledModels.length
+      ? enabledModels
+      : defaultQaModelConfig.enabledModels,
+  };
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(QA_MODEL_CONFIG_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
+}
+
+export function getEnabledQaModelOptions(config = getQaModelConfig()) {
+  return qaModelOptions.filter((item) => config.enabledModels.includes(item.key));
+}
+
+function isChatModel(value: unknown): value is ChatModel {
+  return value === 'qwen' || value === 'deepseek';
+}
 
 export interface ReferenceChunk {
   id: string;
@@ -124,6 +221,7 @@ export async function updateQaFeedback(id: string, feedback: string) {
 export async function streamAguiAnswer(
   query: string,
   mode: ChatMode,
+  model: ChatModel,
   onEvent: (event: AguiEvent) => void,
   onError: (error: Error) => void,
   onClose: () => void,
@@ -131,7 +229,7 @@ export async function streamAguiAnswer(
 ): Promise<AbortController> {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
-  let url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}`;
+  let url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}&model=${model}`;
   if (threadId) {
     url += `&threadId=${encodeURIComponent(threadId)}`;
   }

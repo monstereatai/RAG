@@ -94,6 +94,12 @@ export const configuration = () => ({
       model: process.env.QWEN_MODEL ?? 'qwen-plus',
       timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '20000', 10),
     },
+    deepseek: {
+      apiKey: process.env.DEEPSEEK_API_KEY ?? '',
+      baseUrl: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
+      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
+      timeoutMs: parseInt(process.env.DEEPSEEK_TIMEOUT_MS ?? '30000', 10),
+    },
     openai: {
       apiKey: process.env.OPENAI_API_KEY ?? '',
       baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',

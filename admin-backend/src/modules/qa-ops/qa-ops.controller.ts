@@ -127,6 +127,7 @@ export class QaOpsController {
   async streamAgui(
     @Query('query') query: string,
     @Query('mode') mode: 'simple' | 'agentic' | 'auto' = 'agentic',
+    @Query('model') model: 'qwen' | 'deepseek' = 'qwen',
     @Query('threadId') threadId: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
@@ -149,6 +150,7 @@ export class QaOpsController {
         {
           query,
           mode,
+          model: this.parseModel(model),
           threadId,
           userId: this.getUserId(req),
         },
@@ -200,6 +202,12 @@ export class QaOpsController {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;
     return user?.userId ?? user?.sub ?? 'admin-backend';
+  }
+
+  private parseModel(model?: string): 'qwen' | 'deepseek' {
+    if (!model) return 'qwen';
+    if (model === 'qwen' || model === 'deepseek') return model;
+    return 'qwen';
   }
 
   /** 获取管理后台上下文用户标识用于会话隔离 */

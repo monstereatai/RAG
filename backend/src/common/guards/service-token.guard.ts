@@ -8,6 +8,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
 const LOCAL_DEV_RAG_SERVICE_TOKEN = 'local-rag-service-token';
+const MISSING_PRODUCTION_TOKEN_MESSAGE =
+  'RAG_SERVICE_TOKEN is required when NODE_ENV=production';
 
 interface AuthenticatedRequest {
   headers: Record<string, string | string[] | undefined>;
@@ -88,10 +90,11 @@ export class ServiceTokenGuard implements CanActivate {
 
     const nodeEnv =
       this.configService.get<string>('nodeEnv') ??
+      this.configService.get<string>('NODE_ENV') ??
       process.env.NODE_ENV ??
       'development';
     if (nodeEnv === 'production') {
-      return '';
+      throw new Error(MISSING_PRODUCTION_TOKEN_MESSAGE);
     }
 
     return LOCAL_DEV_RAG_SERVICE_TOKEN;

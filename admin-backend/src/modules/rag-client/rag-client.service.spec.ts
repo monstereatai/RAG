@@ -166,7 +166,7 @@ describe('RagClientService', () => {
       );
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3000/api/v1/agui/admin/stream?query=%E6%B5%8B%E8%AF%95+AG-UI&mode=agentic&userId=admin-user',
+        'http://localhost:3000/api/v1/agui/admin/stream?query=%E6%B5%8B%E8%AF%95+AG-UI&mode=agentic&model=qwen&userId=admin-user',
         expect.objectContaining({
           headers: {
             Authorization: 'Bearer test-token',
@@ -440,13 +440,15 @@ describe('resolveRagServiceToken', () => {
     expect(resolveRagServiceToken(config)).toBe('local-rag-service-token');
   });
 
-  it('does not invent a token in production', () => {
+  it('fails fast in production when token is missing', () => {
     delete process.env.RAG_SERVICE_TOKEN;
     process.env.NODE_ENV = 'production';
     const config = {
       get: jest.fn(() => undefined),
     } as unknown as ConfigService;
 
-    expect(resolveRagServiceToken(config)).toBe('');
+    expect(() => resolveRagServiceToken(config)).toThrow(
+      'RAG_SERVICE_TOKEN is required when NODE_ENV=production',
+    );
   });
 });

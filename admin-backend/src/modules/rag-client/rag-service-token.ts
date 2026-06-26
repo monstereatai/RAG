@@ -1,6 +1,8 @@
 import { ConfigService } from '@nestjs/config';
 
 const LOCAL_DEV_RAG_SERVICE_TOKEN = 'local-rag-service-token';
+const MISSING_PRODUCTION_TOKEN_MESSAGE =
+  'RAG_SERVICE_TOKEN is required when NODE_ENV=production';
 
 export function resolveRagServiceToken(configService: ConfigService): string {
   const configured =
@@ -12,11 +14,12 @@ export function resolveRagServiceToken(configService: ConfigService): string {
   }
 
   const nodeEnv =
+    configService.get<string>('nodeEnv') ??
     configService.get<string>('NODE_ENV') ??
     process.env.NODE_ENV ??
     'development';
   if (nodeEnv === 'production') {
-    return '';
+    throw new Error(MISSING_PRODUCTION_TOKEN_MESSAGE);
   }
 
   return LOCAL_DEV_RAG_SERVICE_TOKEN;

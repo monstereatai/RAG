@@ -1,0 +1,4 @@
+allowBuilds:
+  '@nestjs/core': set this to true or false
+  msgpackr-extract: set this to true or false
+  protobufjs: set this to true or false

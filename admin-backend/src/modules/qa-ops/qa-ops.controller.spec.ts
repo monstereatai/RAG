@@ -48,7 +48,7 @@ describe('QaOpsController — SSE Streaming', () => {
 
   describe('query validation', () => {
     it('should return 400 when query is empty', async () => {
-      await controller.streamAgui('', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({ message: 'query is required' });
@@ -56,7 +56,7 @@ describe('QaOpsController — SSE Streaming', () => {
     });
 
     it('should return 400 when query is whitespace', async () => {
-      await controller.streamAgui('   ', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('   ', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
     });
@@ -65,7 +65,7 @@ describe('QaOpsController — SSE Streaming', () => {
       const mockReadable = createMockReadable(['data: {"type":"RUN_FINISHED","runId":"1"}\n\n']);
       ragClient.streamAgui.mockResolvedValue({ ok: true, body: mockReadable } as any);
 
-      await controller.streamAgui('你好', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('你好', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       expect(mockRes.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream; charset=utf-8');
       expect(mockRes.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-transform');
@@ -81,7 +81,7 @@ describe('QaOpsController — SSE Streaming', () => {
         body: null,
       } as any);
 
-      await controller.streamAgui('test', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('test', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       expect(mockRes.write).toHaveBeenCalled();
       expect(mockRes.end).toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe('QaOpsController — SSE Streaming', () => {
     it('should write friendly fallback on fetch failure', async () => {
       ragClient.streamAgui.mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
 
-      await controller.streamAgui('test', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('test', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       const writeCalls = mockRes.write.mock.calls.map((c) => String(c[0])).join('');
       expect(writeCalls).toContain('rag-backend');
@@ -114,7 +114,7 @@ describe('QaOpsController — SSE Streaming', () => {
         body: null,
       } as any);
 
-      await controller.streamAgui('test', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('test', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       const writeCalls = mockRes.write.mock.calls.map((c) => String(c[0])).join('');
       expect(writeCalls).toContain('rag service returned 502');
@@ -132,7 +132,7 @@ describe('QaOpsController — SSE Streaming', () => {
       const mockReadable = createMockReadable(chunks);
       ragClient.streamAgui.mockResolvedValue({ ok: true, body: mockReadable } as any);
 
-      await controller.streamAgui('你好', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('你好', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       const writeCalls = mockRes.write.mock.calls.map((c) => String(c[0])).join('');
       expect(writeCalls).toContain('RUN_STARTED');
@@ -150,7 +150,7 @@ describe('QaOpsController — SSE Streaming', () => {
       ragClient.streamAgui.mockResolvedValue({ ok: true, body: mockReadable } as any);
 
       // First call
-      await controller.streamAgui('测试', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('测试', 'simple', 'qwen', undefined, mockReq as any, mockRes);
       expect(mockRes.end).toHaveBeenCalledTimes(1);
 
       // Reset mocks to simulate clean second request
@@ -159,7 +159,7 @@ describe('QaOpsController — SSE Streaming', () => {
       (mockRes as any)._ended = false;
 
       // Second call
-      await controller.streamAgui('测试', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('测试', 'simple', 'qwen', undefined, mockReq as any, mockRes);
       expect(mockRes.end).toHaveBeenCalledTimes(1);
     });
   });
@@ -182,7 +182,7 @@ describe('QaOpsController — SSE Streaming', () => {
         },
       );
 
-      await controller.streamAgui('test', 'simple', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('test', 'simple', 'qwen', undefined, mockReq as any, mockRes);
 
       expect(abortSignal?.aborted).toBe(true);
       expect(mockRes.end).toHaveBeenCalled();
