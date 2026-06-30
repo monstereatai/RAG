@@ -12,6 +12,9 @@ import { ElasticsearchModule } from './providers/elasticsearch/elasticsearch.mod
 import { RedisModule } from './providers/redis/redis.module';
 import { McpModule } from './providers/mcp/mcp.module';
 import { Mem0Module } from './providers/mem0/mem0.module';
+import { ObjectStorageModule } from './providers/object-storage/object-storage.module';
+import { VisionModule } from './providers/vision/vision.module';
+import { ObservabilityModule } from './providers/observability/observability.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { DocumentModule } from './modules/document/document.module';
@@ -60,6 +63,9 @@ import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.mod
     RedisModule,
     McpModule,
     Mem0Module,
+    ObjectStorageModule,
+    ObservabilityModule,
+    VisionModule,
     AuthModule,
     HealthModule,
     DocumentModule,

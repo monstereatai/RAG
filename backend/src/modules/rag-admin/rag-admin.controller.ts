@@ -92,24 +92,32 @@ export class RagAdminController {
   }
 
   @Post('documents/:docId/permissions')
-  updateDocumentPermissions(@Param('docId') docId: string) {
-    return {
+  updateDocumentPermissions(
+    @Param('docId') docId: string,
+    @Body()
+    body: {
+      subjects?: Array<{
+        type: 'user' | 'role' | 'department' | 'public';
+        id: string;
+      }>;
+    },
+  ) {
+    return this.ragAdminService.updateDocumentPermissions(
       docId,
-      updated: false,
-      blocked: true,
-      reason:
-        'Document-level permission requires ACL schema. Currently not implemented.',
-    };
+      body.subjects ?? [],
+    );
   }
 
   @Post('documents/batch')
-  batchDocumentOperation() {
-    return {
-      processed: 0,
-      blocked: true,
-      reason:
-        'Batch operations require async job queue. Currently not implemented.',
-    };
+  batchDocumentOperation(
+    @Body()
+    body: {
+      action?: 'reindex' | 'delete' | 'status';
+      docIds?: string[];
+      userId?: string;
+    },
+  ) {
+    return this.ragAdminService.batchDocumentOperation(body);
   }
 
   // ─── Vector Index ───────────────────────────────────────────

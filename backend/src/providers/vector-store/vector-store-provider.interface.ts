@@ -28,6 +28,16 @@ export interface VectorIndexInfo {
   params: Record<string, number | string>;
 }
 
+export interface VectorStoreRuntimeStatus {
+  status: 'healthy' | 'degraded' | 'unavailable';
+  available: boolean;
+  circuitState: 'closed' | 'open' | 'half_open';
+  consecutiveFailures: number;
+  lastFailureAt: string | null;
+  lastFailureMessage: string | null;
+  circuitOpenUntil: string | null;
+}
+
 export interface IVectorStoreProvider {
   /**
    * 初始化集合（不存在则创建 + 建索引 + load）
@@ -57,4 +67,9 @@ export interface IVectorStoreProvider {
    * 返回当前索引配置，用于调试和验收。
    */
   getIndexInfo(): VectorIndexInfo;
+
+  /**
+   * 返回运行时状态，用于运营后台展示降级和熔断原因。
+   */
+  getRuntimeStatus(): VectorStoreRuntimeStatus;
 }

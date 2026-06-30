@@ -91,6 +91,7 @@ export const graphNav: SideNavItem[] = [
 export const accountNav: SideNavItem[] = [
   { key: 'profile', label: '个人信息', icon: <UserOutlined />, path: '/account/center' },
   { key: 'password', label: '密码修改', icon: <LockOutlined />, path: '/account-security' },
+  { key: 'memories', label: '长期记忆', icon: <DatabaseOutlined />, path: '/account/memories' },
   { key: 'records', label: '登录记录', icon: <ClockCircleOutlined /> },
   { key: 'permissions', label: '权限查询', icon: <AuditOutlined /> },
 ];

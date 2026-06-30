@@ -178,6 +178,12 @@ export default [
         path: '/account/settings',
         component: './account/settings',
       },
+      {
+        name: 'memories',
+        icon: 'database',
+        path: '/account/memories',
+        component: './account/memories',
+      },
     ],
   },
   {

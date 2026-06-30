@@ -226,6 +226,8 @@ export default defineConfig({
   define: {
     'process.env.CI': process.env.CI,
     'process.env.COMMIT_HASH': commitHash,
+    'process.env.REACT_APP_RAG_WS_BASE_URL':
+      process.env.REACT_APP_RAG_WS_BASE_URL || 'ws://localhost:3000',
     __APP_VERSION__: require('./../package.json').version,
     __UMI_VERSION__: require('@umijs/max/package.json').version,
     __UTOO_VERSION__: require('@utoo/pack/package.json').version,

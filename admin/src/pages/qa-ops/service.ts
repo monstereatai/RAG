@@ -313,6 +313,18 @@ export async function streamAguiAnswer(
   return controller;
 }
 
+export function createTtsWebSocket(text: string): WebSocket {
+  const configured = process.env.REACT_APP_RAG_WS_BASE_URL;
+  const fallback =
+    typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? `wss://${window.location.hostname}:3000`
+      : `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3000`;
+  const baseUrl = (configured || fallback).replace(/\/$/, '');
+  const url = new URL(`${baseUrl}/api/v1/speech/tts/ws`);
+  url.searchParams.set('text', text);
+  return new WebSocket(url.toString());
+}
+
 function handleSseFrame(
   frame: string,
   onEvent: (event: AguiEvent) => void,

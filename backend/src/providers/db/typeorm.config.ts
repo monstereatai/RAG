@@ -23,6 +23,9 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
 import { DocumentChunkEntity } from './entities/document-chunk.entity';
 import { FactConflictEntity } from './entities/fact-conflict.entity';
 import { ScheduledJobEntity } from './entities/job.entity';
+import { DocumentTaskEntity } from './entities/document-task.entity';
+import { DocumentResourceEntity } from './entities/document-resource.entity';
+import { DocumentPermissionEntity } from './entities/document-permission.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -43,6 +46,9 @@ export default new DataSource({
     DocumentChunkEntity,
     FactConflictEntity,
     ScheduledJobEntity,
+    DocumentTaskEntity,
+    DocumentResourceEntity,
+    DocumentPermissionEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

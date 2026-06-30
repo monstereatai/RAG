@@ -5,6 +5,7 @@ import {
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
+  VectorStoreRuntimeStatus,
 } from './vector-store-provider.interface';
 import { MilvusVectorStoreProvider } from './milvus.vector-store';
 
@@ -55,5 +56,9 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
 
   getIndexInfo(): VectorIndexInfo {
     return this.provider.getIndexInfo();
+  }
+
+  getRuntimeStatus(): VectorStoreRuntimeStatus {
+    return this.provider.getRuntimeStatus();
   }
 }

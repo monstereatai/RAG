@@ -1,0 +1,3956 @@
+{
+  "version": "private-sanitized-2026-06-30",
+  "description": "脱敏私有企业模拟数据集（增强版）：包含标准 QA、版本冲突检测、拒答场景、跨部门协作、多步推理等测试用例。所有数据均为通用行业模拟，不包含任何真实公司私密信息。替换为真实私密样本时保持同一 schema。",
+  "total": 103,
+  "items": [
+    {
+      "id": "pv-hr-policy-01",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "按制度回答：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 1
+    },
+    {
+      "id": "pv-hr-policy-02",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "只基于知识库回答：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 2
+    },
+    {
+      "id": "pv-hr-policy-03",
+      "category": "poison-grounding",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "不要猜，查一下：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 3
+    },
+    {
+      "id": "pv-hr-policy-04",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "审批前确认：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 4
+    },
+    {
+      "id": "pv-hr-policy-05",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "给我可引用结论：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 5
+    },
+    {
+      "id": "pv-hr-policy-06",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "业务同学问：一线城市住宿报销上限是多少，发票多久内提交？",
+      "referenceAnswer": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元，费用必须在发票开具后 30 天内提交。",
+          "supportKeywords": [
+            "650 元",
+            "30 天",
+            "发票"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "30 天",
+        "发票"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-policy",
+        "title": "差旅制度",
+        "content": "差旅制度：一线城市住宿报销上限为 650 元，二线城市为 480 元，费用必须在发票开具后 30 天内提交。",
+        "referenceIndex": 1
+      },
+      "ordinal": 6
+    },
+    {
+      "id": "pv-finance-sop-01",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "按制度回答：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 7
+    },
+    {
+      "id": "pv-finance-sop-02",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "只基于知识库回答：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 8
+    },
+    {
+      "id": "pv-finance-sop-03",
+      "category": "poison-grounding",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "不要猜，查一下：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 9
+    },
+    {
+      "id": "pv-finance-sop-04",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "审批前确认：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 10
+    },
+    {
+      "id": "pv-finance-sop-05",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "给我可引用结论：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 11
+    },
+    {
+      "id": "pv-finance-sop-06",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "sop",
+      "query": "业务同学问：发票开具后多久内要提交费用报销？超过时限怎么办？",
+      "referenceAnswer": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-sop-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "费用报销需要在发票开具后 30 天内提交；超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+          "supportKeywords": [
+            "30 天",
+            "60 天",
+            "部门负责人",
+            "审批说明"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "30 天",
+        "60 天",
+        "部门负责人",
+        "审批说明"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-sop",
+        "title": "费用报销",
+        "content": "费用报销：需要在发票开具后 30 天内提交，超过 30 天需要部门负责人补充审批说明，超过 60 天不予报销。",
+        "referenceIndex": 1
+      },
+      "ordinal": 12
+    },
+    {
+      "id": "pv-legal-contract-guideline-01",
+      "category": "private-business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "按制度回答：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 13
+    },
+    {
+      "id": "pv-legal-contract-guideline-02",
+      "category": "private-business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "只基于知识库回答：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 14
+    },
+    {
+      "id": "pv-legal-contract-guideline-03",
+      "category": "poison-grounding",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "不要猜，查一下：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 15
+    },
+    {
+      "id": "pv-legal-contract-guideline-04",
+      "category": "private-business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "审批前确认：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 16
+    },
+    {
+      "id": "pv-legal-contract-guideline-05",
+      "category": "private-business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "给我可引用结论：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 17
+    },
+    {
+      "id": "pv-legal-contract-guideline-06",
+      "category": "private-business-qa",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "业务同学问：超过 50 万元的采购合同需要哪些复核？",
+      "referenceAnswer": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-legal-contract-guideline-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。",
+          "supportKeywords": [
+            "50 万元",
+            "法务复核",
+            "财务复核"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万元",
+        "法务复核",
+        "财务复核"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-contract-guideline",
+        "title": "合同审批",
+        "content": "合同审批：金额超过 50 万元的采购合同必须经过法务复核和财务复核，缺一不可。涉及关联交易的还需合规委员会审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 18
+    },
+    {
+      "id": "pv-it-permission-policy-01",
+      "category": "private-business-qa",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "按制度回答：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 19
+    },
+    {
+      "id": "pv-it-permission-policy-02",
+      "category": "private-business-qa",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "只基于知识库回答：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 20
+    },
+    {
+      "id": "pv-it-permission-policy-03",
+      "category": "poison-grounding",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "不要猜，查一下：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 21
+    },
+    {
+      "id": "pv-it-permission-policy-04",
+      "category": "private-business-qa",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "审批前确认：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 22
+    },
+    {
+      "id": "pv-it-permission-policy-05",
+      "category": "private-business-qa",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "给我可引用结论：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 23
+    },
+    {
+      "id": "pv-it-permission-policy-06",
+      "category": "private-business-qa",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "业务同学问：生产系统权限默认有效期多久？到期了怎么办？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-it-permission-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+          "supportKeywords": [
+            "90 天",
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-permission-policy",
+        "title": "权限管理",
+        "content": "权限管理：生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。离职权限在离职当日 18:00 统一回收。",
+        "referenceIndex": 1
+      },
+      "ordinal": 24
+    },
+    {
+      "id": "pv-sales-deal-desk-01",
+      "category": "private-business-qa",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "按制度回答：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 25
+    },
+    {
+      "id": "pv-sales-deal-desk-02",
+      "category": "private-business-qa",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "只基于知识库回答：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 26
+    },
+    {
+      "id": "pv-sales-deal-desk-03",
+      "category": "poison-grounding",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "不要猜，查一下：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 27
+    },
+    {
+      "id": "pv-sales-deal-desk-04",
+      "category": "private-business-qa",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "审批前确认：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 28
+    },
+    {
+      "id": "pv-sales-deal-desk-05",
+      "category": "private-business-qa",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "给我可引用结论：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 29
+    },
+    {
+      "id": "pv-sales-deal-desk-06",
+      "category": "private-business-qa",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "业务同学问：低于 8 折的客户折扣怎么审批？8 折以内谁审批？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-sales-deal-desk-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk",
+            "销售总监"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "8 折",
+        "Deal Desk",
+        "销售总监"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-desk",
+        "title": "折扣审批",
+        "content": "折扣审批：低于 8 折的客户折扣必须提交 Deal Desk 评审，8 折以内由销售总监审批。Deal Desk 评审需要法务和财务确认。",
+        "referenceIndex": 1
+      },
+      "ordinal": 30
+    },
+    {
+      "id": "pv-customer-success-sla-01",
+      "category": "private-business-qa",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "按制度回答：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 31
+    },
+    {
+      "id": "pv-customer-success-sla-02",
+      "category": "private-business-qa",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "只基于知识库回答：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 32
+    },
+    {
+      "id": "pv-customer-success-sla-03",
+      "category": "poison-grounding",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "不要猜，查一下：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 33
+    },
+    {
+      "id": "pv-customer-success-sla-04",
+      "category": "private-business-qa",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "审批前确认：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 34
+    },
+    {
+      "id": "pv-customer-success-sla-05",
+      "category": "private-business-qa",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "给我可引用结论：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 35
+    },
+    {
+      "id": "pv-customer-success-sla-06",
+      "category": "private-business-qa",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "业务同学问：企业版客户一级工单多久内首次响应？普通版客户呢？",
+      "referenceAnswer": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-customer-success-sla-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。",
+          "supportKeywords": [
+            "企业版",
+            "一级工单",
+            "1 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "企业版",
+        "一级工单",
+        "1 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-customer-success-sla",
+        "title": "客户 SLA",
+        "content": "客户 SLA：企业版客户的一级工单需要 1 小时内首次响应，普通版客户为 4 小时内首次响应。P1 工单 1 小时未解决由值班经理介入。",
+        "referenceIndex": 1
+      },
+      "ordinal": 36
+    },
+    {
+      "id": "pv-security-data-policy-01",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "按制度回答：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 37
+    },
+    {
+      "id": "pv-security-data-policy-02",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "只基于知识库回答：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 38
+    },
+    {
+      "id": "pv-security-data-policy-03",
+      "category": "poison-grounding",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "不要猜，查一下：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 39
+    },
+    {
+      "id": "pv-security-data-policy-04",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "审批前确认：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 40
+    },
+    {
+      "id": "pv-security-data-policy-05",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "给我可引用结论：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 41
+    },
+    {
+      "id": "pv-security-data-policy-06",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "业务同学问：哪些字段属于高敏感数据？导出前要做什么？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-data-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。",
+          "supportKeywords": [
+            "身份证号",
+            "手机号",
+            "数据脱敏",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "身份证号",
+        "手机号",
+        "数据脱敏",
+        "安全审批"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-data-policy",
+        "title": "数据分级",
+        "content": "数据分级：身份证号、手机号、银行卡号属于高敏感数据，导出前必须完成数据脱敏和安全审批。个人数据存储期限不超过业务必要期限 + 180 天。",
+        "referenceIndex": 1
+      },
+      "ordinal": 42
+    },
+    {
+      "id": "pv-ops-incident-sop-01",
+      "category": "private-business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "按制度回答：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 43
+    },
+    {
+      "id": "pv-ops-incident-sop-02",
+      "category": "private-business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "只基于知识库回答：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 44
+    },
+    {
+      "id": "pv-ops-incident-sop-03",
+      "category": "poison-grounding",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "不要猜，查一下：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 45
+    },
+    {
+      "id": "pv-ops-incident-sop-04",
+      "category": "private-business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "审批前确认：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 46
+    },
+    {
+      "id": "pv-ops-incident-sop-05",
+      "category": "private-business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "给我可引用结论：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 47
+    },
+    {
+      "id": "pv-ops-incident-sop-06",
+      "category": "private-business-qa",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "业务同学问：P1 故障多久内要响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-ops-incident-sop-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+          "supportKeywords": [
+            "15 分钟",
+            "2 小时",
+            "3 个工作日"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident-sop",
+        "title": "故障响应",
+        "content": "故障响应：P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。P1 事件自动通知安全负责人和值班经理。",
+        "referenceIndex": 1
+      },
+      "ordinal": 48
+    },
+    {
+      "id": "pv-product-release-policy-01",
+      "category": "private-business-qa",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "按制度回答：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 49
+    },
+    {
+      "id": "pv-product-release-policy-02",
+      "category": "private-business-qa",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "只基于知识库回答：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 50
+    },
+    {
+      "id": "pv-product-release-policy-03",
+      "category": "poison-grounding",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "不要猜，查一下：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 51
+    },
+    {
+      "id": "pv-product-release-policy-04",
+      "category": "private-business-qa",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "审批前确认：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 52
+    },
+    {
+      "id": "pv-product-release-policy-05",
+      "category": "private-business-qa",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "给我可引用结论：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 53
+    },
+    {
+      "id": "pv-product-release-policy-06",
+      "category": "private-business-qa",
+      "department": "product",
+      "documentType": "release-policy",
+      "query": "业务同学问：新功能灰度发布的流量顺序是什么？",
+      "referenceAnswer": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-product-release-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。",
+          "supportKeywords": [
+            "内部员工",
+            "5%",
+            "24 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "内部员工",
+        "5%",
+        "24 小时"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-product-release-policy",
+        "title": "灰度发布",
+        "content": "灰度发布：新功能灰度发布必须先覆盖内部员工，再覆盖 5% 外部用户，核心指标稳定 24 小时后才能扩大流量。任一阶段指标异常立即回滚。",
+        "referenceIndex": 1
+      },
+      "ordinal": 54
+    },
+    {
+      "id": "pv-procurement-procurement-policy-01",
+      "category": "private-business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "按制度回答：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 55
+    },
+    {
+      "id": "pv-procurement-procurement-policy-02",
+      "category": "private-business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "只基于知识库回答：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 56
+    },
+    {
+      "id": "pv-procurement-procurement-policy-03",
+      "category": "poison-grounding",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "不要猜，查一下：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 57
+    },
+    {
+      "id": "pv-procurement-procurement-policy-04",
+      "category": "private-business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "审批前确认：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 58
+    },
+    {
+      "id": "pv-procurement-procurement-policy-05",
+      "category": "private-business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "给我可引用结论：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 59
+    },
+    {
+      "id": "pv-procurement-procurement-policy-06",
+      "category": "private-business-qa",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "query": "业务同学问：新供应商准入需要哪些材料？",
+      "referenceAnswer": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-procurement-procurement-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺一不可。",
+          "supportKeywords": [
+            "营业执照",
+            "对公账户证明",
+            "合规承诺书"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "营业执照",
+        "对公账户证明",
+        "合规承诺书"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-procurement-procurement-policy",
+        "title": "供应商准入",
+        "content": "供应商准入：新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书，缺少任一材料不得建档。",
+        "referenceIndex": 1
+      },
+      "ordinal": 60
+    },
+    {
+      "id": "pv-data-data-governance-01",
+      "category": "private-business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "按制度回答：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 61
+    },
+    {
+      "id": "pv-data-data-governance-02",
+      "category": "private-business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "只基于知识库回答：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 62
+    },
+    {
+      "id": "pv-data-data-governance-03",
+      "category": "poison-grounding",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "不要猜，查一下：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 63
+    },
+    {
+      "id": "pv-data-data-governance-04",
+      "category": "private-business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "审批前确认：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 64
+    },
+    {
+      "id": "pv-data-data-governance-05",
+      "category": "private-business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "给我可引用结论：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 65
+    },
+    {
+      "id": "pv-data-data-governance-06",
+      "category": "private-business-qa",
+      "department": "data",
+      "documentType": "data-governance",
+      "query": "业务同学问：MAU 的统计口径是什么？哪些账号不纳入？",
+      "referenceAnswer": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-data-data-governance-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+          "supportKeywords": [
+            "自然月",
+            "去重用户",
+            "测试账号"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "自然月",
+        "去重用户",
+        "测试账号"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-data-data-governance",
+        "title": "指标口径",
+        "content": "指标口径：MAU 统计自然月内至少登录一次的去重用户，不包含测试账号和内部压测账号。",
+        "referenceIndex": 1
+      },
+      "ordinal": 66
+    },
+    {
+      "id": "pv-hr-leave-policy-01",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "按制度回答：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 67
+    },
+    {
+      "id": "pv-hr-leave-policy-02",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "只基于知识库回答：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 68
+    },
+    {
+      "id": "pv-hr-leave-policy-03",
+      "category": "poison-grounding",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "不要猜，查一下：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 69
+    },
+    {
+      "id": "pv-hr-leave-policy-04",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "审批前确认：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 70
+    },
+    {
+      "id": "pv-hr-leave-policy-05",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "给我可引用结论：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 71
+    },
+    {
+      "id": "pv-hr-leave-policy-06",
+      "category": "private-business-qa",
+      "department": "hr",
+      "documentType": "leave-policy",
+      "query": "业务同学问：工龄 5 年能休几天年假？当年没休完怎么办？",
+      "referenceAnswer": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-hr-leave-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "工龄 4-7 年可休 10 天年假。当年未休完可结转最多 5 天至次年，离职时未休年假按日工资 300% 折算补偿。",
+          "supportKeywords": [
+            "10 天",
+            "5 天",
+            "结转",
+            "300%"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "10 天",
+        "5 天",
+        "结转",
+        "300%"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-leave-policy",
+        "title": "年假制度",
+        "content": "年假制度：工龄 4-7 年可休 10 天年假，当年未休完可结转最多 5 天至次年。离职时未休年假按日工资 300% 折算补偿。",
+        "referenceIndex": 1
+      },
+      "ordinal": 72
+    },
+    {
+      "id": "pv-finance-budget-policy-01",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "按制度回答：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 73
+    },
+    {
+      "id": "pv-finance-budget-policy-02",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "只基于知识库回答：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 74
+    },
+    {
+      "id": "pv-finance-budget-policy-03",
+      "category": "poison-grounding",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "不要猜，查一下：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 75
+    },
+    {
+      "id": "pv-finance-budget-policy-04",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "审批前确认：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 76
+    },
+    {
+      "id": "pv-finance-budget-policy-05",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "给我可引用结论：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 77
+    },
+    {
+      "id": "pv-finance-budget-policy-06",
+      "category": "private-business-qa",
+      "department": "finance",
+      "documentType": "budget-policy",
+      "query": "业务同学问：部门预算审批权限怎么划分？200 万的预算谁审批？",
+      "referenceAnswer": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-finance-budget-policy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200 万以上需要 VP 审批。",
+          "supportKeywords": [
+            "50 万",
+            "200 万",
+            "财务负责人",
+            "VP"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "50 万",
+        "200 万",
+        "财务负责人",
+        "VP"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-finance-budget-policy",
+        "title": "预算管理",
+        "content": "预算管理：预算审批按金额划分：50 万以下部门负责人审批，50-200 万财务负责人 + 部门负责人，200-500 万 VP + 财务负责人，500 万以上 CEO。",
+        "referenceIndex": 1
+      },
+      "ordinal": 78
+    },
+    {
+      "id": "pv-marketing-brand-guideline-01",
+      "category": "private-business-qa",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "按制度回答：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 79
+    },
+    {
+      "id": "pv-marketing-brand-guideline-02",
+      "category": "private-business-qa",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "只基于知识库回答：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 80
+    },
+    {
+      "id": "pv-marketing-brand-guideline-03",
+      "category": "poison-grounding",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "不要猜，查一下：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 81
+    },
+    {
+      "id": "pv-marketing-brand-guideline-04",
+      "category": "private-business-qa",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "审批前确认：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 82
+    },
+    {
+      "id": "pv-marketing-brand-guideline-05",
+      "category": "private-business-qa",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "给我可引用结论：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 83
+    },
+    {
+      "id": "pv-marketing-brand-guideline-06",
+      "category": "private-business-qa",
+      "department": "marketing",
+      "documentType": "brand-guideline",
+      "query": "业务同学问：对外宣传材料需要哪些审核？品牌色调的标准是什么？",
+      "referenceAnswer": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-marketing-brand-guideline-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+          "supportKeywords": [
+            "市场部",
+            "#0052CC",
+            "法务",
+            "合规"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "市场部",
+        "#0052CC",
+        "法务",
+        "合规"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-marketing-brand-guideline",
+        "title": "品牌规范",
+        "content": "品牌规范：对外宣传材料必须经过市场部审核，品牌主色调为蓝色（#0052CC），所有对外材料需法务合规审核。",
+        "referenceIndex": 1
+      },
+      "ordinal": 84
+    },
+    {
+      "id": "pv-engineering-coding-standards-01",
+      "category": "private-business-qa",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "按制度回答：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 85
+    },
+    {
+      "id": "pv-engineering-coding-standards-02",
+      "category": "private-business-qa",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "只基于知识库回答：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 86
+    },
+    {
+      "id": "pv-engineering-coding-standards-03",
+      "category": "poison-grounding",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "不要猜，查一下：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 87
+    },
+    {
+      "id": "pv-engineering-coding-standards-04",
+      "category": "private-business-qa",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "审批前确认：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 88
+    },
+    {
+      "id": "pv-engineering-coding-standards-05",
+      "category": "private-business-qa",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "给我可引用结论：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 89
+    },
+    {
+      "id": "pv-engineering-coding-standards-06",
+      "category": "private-business-qa",
+      "department": "engineering",
+      "documentType": "coding-standards",
+      "query": "业务同学问：代码审查必须多少人通过？生产环境部署有什么要求？",
+      "referenceAnswer": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-engineering-coding-standards-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+          "supportKeywords": [
+            "Senior",
+            "代码审查",
+            "10:00",
+            "16:00",
+            "测试环境"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Senior",
+        "代码审查",
+        "10:00",
+        "16:00",
+        "测试环境"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-engineering-coding-standards",
+        "title": "编码规范",
+        "content": "编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。",
+        "referenceIndex": 1
+      },
+      "ordinal": 90
+    },
+    {
+      "id": "pv-conflict-travel-01",
+      "category": "policy-conflict",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "按制度回答：2025 版差旅制度一线城市住宿报销上限是多少？",
+      "referenceAnswer": "2025 版差旅制度规定一线城市住宿报销上限为 600 元，但 2026 版已更新为 650 元，2026 版优先生效。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-conflict-travel-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "2025 版差旅制度规定一线城市住宿报销上限为 600 元",
+          "supportKeywords": [
+            "2025",
+            "600 元"
+          ]
+        },
+        {
+          "text": "2026 版已更新为 650 元，2026 版优先生效",
+          "supportKeywords": [
+            "2026",
+            "650 元",
+            "优先生效"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "2025",
+        "600 元",
+        "2026",
+        "650 元"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "expectConflictHandling": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-travel-conflict",
+        "title": "差旅制度版本冲突说明",
+        "content": "2025 版（v2.0）规定一线城市住宿报销上限为 600 元，2026 版已更新为 650 元。版本冲突时以最新版本为准，2026 版优先生效。",
+        "referenceIndex": 1
+      },
+      "ordinal": 91
+    },
+    {
+      "id": "pv-conflict-sla-01",
+      "category": "policy-conflict",
+      "department": "customer-success",
+      "documentType": "sla",
+      "query": "按制度回答：企业版客户一级工单多久内首次响应？注意检查不同版本。",
+      "referenceAnswer": "v2.0 规定企业版客户 P1 工单 1 小时内首次响应。此前 v1.0 规定为 2 小时，v2.0 优先生效。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-conflict-sla-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "v2.0 规定企业版客户 P1 工单 1 小时内首次响应",
+          "supportKeywords": [
+            "v2.0",
+            "1 小时"
+          ]
+        },
+        {
+          "text": "v1.0 规定为 2 小时",
+          "supportKeywords": [
+            "v1.0",
+            "2 小时"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "v2.0",
+        "1 小时",
+        "v1.0",
+        "2 小时"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "expectConflictHandling": true,
+      "sourceDocument": {
+        "id": "pv-doc-cs-sla-conflict",
+        "title": "SLA 版本冲突说明",
+        "content": "v1.0 规定企业版 P1 工单 2 小时内首次响应，v2.0 已更新为 1 小时。版本冲突时以最新版本为准。",
+        "referenceIndex": 1
+      },
+      "ordinal": 92
+    },
+    {
+      "id": "pv-conflict-discount-01",
+      "category": "policy-conflict",
+      "department": "sales",
+      "documentType": "deal-desk",
+      "query": "按制度回答：低于 8 折的客户折扣怎么审批？涉及哪些部门？",
+      "referenceAnswer": "低于 8 折的客户折扣必须提交 Deal Desk 评审。评审内容包括法务风险确认和财务利润模型（毛利率不低于 20%）。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-conflict-discount-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "低于 8 折必须提交 Deal Desk 评审",
+          "supportKeywords": [
+            "8 折",
+            "Deal Desk"
+          ]
+        },
+        {
+          "text": "需要法务风险确认和财务利润模型",
+          "supportKeywords": [
+            "法务",
+            "财务",
+            "毛利率"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Deal Desk",
+        "法务",
+        "财务",
+        "8 折"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "crossDepartment": true,
+      "sourceDocument": {
+        "id": "pv-doc-sales-deal-cross",
+        "title": "折扣审批跨部门流程",
+        "content": "低于 8 折的客户折扣必须提交 Deal Desk 评审，评审需法务确认风险和财务确认利润模型（毛利率不低于 20%）。",
+        "referenceIndex": 1
+      },
+      "ordinal": 93
+    },
+    {
+      "id": "pv-conflict-incident-01",
+      "category": "policy-consistency",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "query": "按制度回答：P1 故障需要在多长时间内响应和复盘？",
+      "referenceAnswer": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-conflict-incident-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "P1 故障 15 分钟内响应",
+          "supportKeywords": [
+            "15 分钟",
+            "响应"
+          ]
+        },
+        {
+          "text": "2 小时内提交初步复盘，3 个工作日内正式复盘",
+          "supportKeywords": [
+            "2 小时",
+            "初步复盘",
+            "3 个工作日",
+            "正式复盘"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "15 分钟",
+        "2 小时",
+        "3 个工作日",
+        "初步复盘",
+        "正式复盘"
+      ],
+      "minKeywordCoverage": 0.6,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-ops-incident",
+        "title": "故障应急响应制度",
+        "content": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
+        "referenceIndex": 1
+      },
+      "ordinal": 94
+    },
+    {
+      "id": "pv-refusal-personal-01",
+      "category": "refusal",
+      "department": "general",
+      "documentType": "general",
+      "query": "帮我写一份竞品分析报告，对比最近三个季度的市场份额变化。",
+      "referenceAnswer": "知识库中未包含竞品分析报告或市场份额数据，无法回答此问题。",
+      "referenceReferences": [
+        {
+          "id": "pv-refusal-personal-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "知识库中未包含竞品分析报告",
+          "supportKeywords": [
+            "未包含",
+            "竞品分析"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "未包含",
+        "知识库"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": false,
+      "expectRefusal": true,
+      "ordinal": 95
+    },
+    {
+      "id": "pv-refusal-stock-01",
+      "category": "refusal",
+      "department": "general",
+      "documentType": "general",
+      "query": "今天公司股价是多少？最近有什么利好消息？",
+      "referenceAnswer": "知识库中没有股票价格或市场信息，无法回答此问题。",
+      "referenceReferences": [
+        {
+          "id": "pv-refusal-stock-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "知识库中没有股票价格",
+          "supportKeywords": [
+            "股票",
+            "知识库"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "知识库",
+        "没有"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": false,
+      "expectRefusal": true,
+      "ordinal": 96
+    },
+    {
+      "id": "pv-refusal-outside-01",
+      "category": "refusal",
+      "department": "general",
+      "documentType": "general",
+      "query": "帮我预约后天的会议室，20 人以上，需要投影和白板。",
+      "referenceAnswer": "知识库中不包含会议室实时预订信息，无法执行预订操作。建议手动通过企业微信预订。",
+      "referenceReferences": [
+        {
+          "id": "pv-refusal-outside-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "不包含会议室实时预订信息",
+          "supportKeywords": [
+            "会议室",
+            "预订"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "会议室",
+        "预订",
+        "操作"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": false,
+      "expectRefusal": true,
+      "ordinal": 97
+    },
+    {
+      "id": "pv-refusal-personal-02",
+      "category": "refusal",
+      "department": "general",
+      "documentType": "general",
+      "query": "你觉得 AI 会取代程序员吗？给我一个客观的分析。",
+      "referenceAnswer": "知识库中没有关于 AI 行业趋势或职业发展的信息，无法回答此问题。请基于知识库内容提问。",
+      "referenceReferences": [
+        {
+          "id": "pv-refusal-personal-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "知识库中没有关于 AI 行业趋势的信息",
+          "supportKeywords": [
+            "AI",
+            "行业趋势",
+            "知识库"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "知识库",
+        "没有"
+      ],
+      "minKeywordCoverage": 0.4,
+      "requireCitation": false,
+      "expectRefusal": true,
+      "ordinal": 98
+    },
+    {
+      "id": "pv-cross-contract-01",
+      "category": "cross-department",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "query": "请按制度回答：超过 50 万元的采购合同有哪些审批环节？涉及哪些部门？",
+      "referenceAnswer": "采购合同超过 50 万元时，需要法务复核和财务复核，缺一不可。采购负责人提交合同后，法务负责人确认条款风险，财务负责人确认预算。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-cross-contract-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "需要法务复核和财务复核",
+          "supportKeywords": [
+            "法务复核",
+            "财务复核"
+          ]
+        },
+        {
+          "text": "法务负责人确认条款风险",
+          "supportKeywords": [
+            "法务负责人",
+            "条款风险"
+          ]
+        },
+        {
+          "text": "财务负责人确认预算",
+          "supportKeywords": [
+            "财务负责人",
+            "预算"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "法务复核",
+        "财务复核",
+        "法务负责人",
+        "财务负责人",
+        "预算"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "crossDepartment": true,
+      "sourceDocument": {
+        "id": "pv-doc-legal-cross-contract",
+        "title": "合同审批跨部门协作",
+        "content": "超过 50 万元的采购合同需要法务复核和财务复核。法务负责人确认条款风险，财务负责人确认预算。",
+        "referenceIndex": 1
+      },
+      "ordinal": 99
+    },
+    {
+      "id": "pv-cross-security-01",
+      "category": "cross-department",
+      "department": "security",
+      "documentType": "data-policy",
+      "query": "按制度回答：高敏感数据导出需要哪些审批？哪些部门参与？",
+      "referenceAnswer": "身份证号、手机号、银行卡号属于高敏感数据。高敏感数据导出前必须完成数据脱敏和安全审批。安全团队负责安全审批，数据所属部门负责人确认导出必要性。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-cross-security-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "高敏感数据导出前必须完成数据脱敏和安全审批",
+          "supportKeywords": [
+            "数据脱敏",
+            "安全审批"
+          ]
+        },
+        {
+          "text": "安全团队负责安全审批",
+          "supportKeywords": [
+            "安全团队",
+            "安全审批"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "数据脱敏",
+        "安全审批",
+        "安全团队",
+        "高敏感数据"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "crossDepartment": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-cross",
+        "title": "数据导出跨部门审批",
+        "content": "身份证号、手机号、银行卡号属于高敏感数据。导出前必须完成数据脱敏和安全审批。安全团队负责安全审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 100
+    },
+    {
+      "id": "pv-cross-onboard-01",
+      "category": "cross-department",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "按制度回答：新员工入职后，权限申请需要经过哪些流程？",
+      "referenceAnswer": "新员工入职后由直属主管在 IT 系统中提交权限申请。默认生产系统权限有效期为 90 天。岗位变动后 48 小时内更新权限。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-cross-onboard-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "直属主管在 IT 系统提交权限申请",
+          "supportKeywords": [
+            "直属主管",
+            "权限申请"
+          ]
+        },
+        {
+          "text": "生产系统权限默认有效期为 90 天",
+          "supportKeywords": [
+            "90 天",
+            "生产系统权限"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "直属主管",
+        "权限申请",
+        "90 天"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-onboard",
+        "title": "员工入转调离权限流程",
+        "content": "新员工入职后由直属主管在 IT 系统中提交权限申请。默认生产系统权限有效期为 90 天。岗位变动后 48 小时内更新权限。",
+        "referenceIndex": 1
+      },
+      "ordinal": 101
+    },
+    {
+      "id": "pv-multihop-travel-01",
+      "category": "multi-hop",
+      "department": "hr",
+      "documentType": "policy",
+      "query": "按制度回答：我要去上海出差 3 天，住宿和伙食补贴一共能报销多少？",
+      "referenceAnswer": "一线城市（上海）住宿上限为 650 元/晚，3 晚住宿报销上限 1,950 元。国内出差伙食补贴每日 150 元，3 天共 450 元。合计可报销/补贴上限 2,400 元。[片段1][片段2]",
+      "referenceReferences": [
+        {
+          "id": "pv-multihop-travel-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "一线城市住宿报销上限为 650 元/晚",
+          "supportKeywords": [
+            "650 元",
+            "一线城市"
+          ]
+        },
+        {
+          "text": "国内出差伙食补贴每日 150 元",
+          "supportKeywords": [
+            "150 元",
+            "伙食补贴"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "650 元",
+        "150 元",
+        "住宿",
+        "伙食补贴"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-hr-multihop",
+        "title": "出差综合费用标准",
+        "content": "一线城市住宿报销上限为 650 元/晚，国内出差伙食补贴每日 150 元。",
+        "referenceIndex": 1
+      },
+      "ordinal": 102
+    },
+    {
+      "id": "pv-multihop-permission-01",
+      "category": "multi-hop",
+      "department": "it",
+      "documentType": "permission-policy",
+      "query": "按制度回答：我入职 6 个月，权限马上到期了，接下来要做什么？",
+      "referenceAnswer": "生产系统权限默认有效期为 90 天。入职 6 个月权限应该已经到期或即将到期。到期后需要重新提交权限申请并经过直属主管审批。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-multihop-permission-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "生产系统权限默认有效期为 90 天",
+          "supportKeywords": [
+            "90 天",
+            "有效期"
+          ]
+        },
+        {
+          "text": "重新提交权限申请并经过直属主管审批",
+          "supportKeywords": [
+            "权限申请",
+            "直属主管"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "90 天",
+        "权限申请",
+        "直属主管",
+        "到期"
+      ],
+      "minKeywordCoverage": 0.5,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-it-multihop",
+        "title": "权限有效期操作指引",
+        "content": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
+        "referenceIndex": 1
+      },
+      "ordinal": 103
+    }
+  ]
+}

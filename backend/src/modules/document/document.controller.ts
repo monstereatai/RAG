@@ -11,23 +11,34 @@ import {
   HttpStatus,
   Logger,
   UseGuards,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentService } from './document.service';
+import { DocumentQueueService } from './document-queue.service';
 import {
   detectDocumentKind,
   extractDocumentText,
+  extractUrlContent,
+  SupportedDocumentKind,
 } from './document-parser.util';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
+import { VisionProvider } from '../../providers/vision/vision.provider';
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
 export class DocumentController {
   private readonly logger = new Logger(DocumentController.name);
 
-  constructor(private readonly documentService: DocumentService) {}
+  constructor(
+    private readonly documentService: DocumentService,
+    private readonly speechProvider: TencentSpeechProvider,
+    private readonly visionProvider: VisionProvider,
+    private readonly documentQueue: DocumentQueueService,
+  ) {}
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
@@ -39,7 +50,7 @@ export class DocumentController {
       throw new BadRequestException('file is required');
     }
     const kind = detectDocumentKind(file.originalname);
-    const content = (await extractDocumentText(file.buffer, kind)).trim();
+    const content = (await this.extractUploadContent(file, kind)).trim();
     if (!content) {
       throw new BadRequestException('document text is empty');
     }
@@ -47,7 +58,75 @@ export class DocumentController {
     this.logger.log(
       `Received ${file.originalname}, user=${user.username}, ${content.length} chars`,
     );
-    return this.documentService.upload(file.originalname, content, user.userId);
+    return this.documentService.upload(
+      file.originalname,
+      content,
+      user.userId,
+      {
+        originalBuffer: file.buffer,
+        contentType: file.mimetype,
+      },
+    );
+  }
+
+  @Post('upload/async')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadAsync(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    const task = await this.documentService.createQueuedTask(
+      file.originalname,
+      user.userId,
+    );
+
+    setImmediate(() => {
+      void this.processAsyncUpload(file, user.userId, task.id);
+    });
+
+    return {
+      taskId: task.id,
+      status: task.status,
+      stage: task.stage,
+      progress: task.progress,
+    };
+  }
+
+  @Post('url')
+  async uploadUrl(@Body('url') url: string, @CurrentUser() user: JwtPayload) {
+    const extracted = await extractUrlContent(url);
+    const content = extracted.content.trim();
+    if (!content) {
+      throw new BadRequestException('url content is empty');
+    }
+
+    this.logger.log(
+      `Received url ${url}, user=${user.username}, ${content.length} chars`,
+    );
+    return this.documentService.upload(
+      this.getUrlSnapshotFilename(extracted.finalUrl),
+      content,
+      user.userId,
+      {
+        originalBuffer: extracted.snapshot,
+        contentType: extracted.contentType || 'text/plain',
+      },
+    );
+  }
+
+  @Get('tasks/:taskId')
+  async getTask(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const task = await this.documentService.getTask(taskId, user.userId);
+    if (!task) {
+      throw new BadRequestException(`task ${taskId} not found`);
+    }
+    return task;
   }
 
   @Get()
@@ -72,5 +151,136 @@ export class DocumentController {
   async delete(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
     await this.documentService.delete(docId, user.userId);
     return { message: `doc ${docId} deleted` };
+  }
+
+  private async processAsyncUpload(
+    file: Express.Multer.File,
+    userId: string,
+    taskId: string,
+  ): Promise<void> {
+    const kind = detectDocumentKind(file.originalname);
+    const content = (await this.extractUploadContent(file, kind)).trim();
+    await this.documentService.upload(file.originalname, content, userId, {
+      taskId,
+      originalBuffer: file.buffer,
+      contentType: file.mimetype,
+    });
+  }
+
+  /**
+   * 获取文档处理队列状态（管理后台用）
+   */
+  @Get('queue/status')
+  async getQueueStatus() {
+    const caps = this.visionProvider.getCapabilities();
+    return {
+      documentQueue: await this.documentQueue.getStatus(),
+      vision: caps,
+    };
+  }
+
+  private async extractUploadContent(
+    file: Express.Multer.File,
+    kind: SupportedDocumentKind,
+  ): Promise<string> {
+    if (kind === 'audio') {
+      try {
+        const format =
+          file.originalname.split('.').pop()?.toLowerCase() ?? 'wav';
+        const transcript = await this.speechProvider.transcribe(
+          file.buffer,
+          format === 'm4a' ? 'mp4' : format,
+        );
+        return [
+          '# Audio Transcript',
+          '',
+          transcript || 'ASR returned an empty transcript.',
+        ].join('\n');
+      } catch (err) {
+        this.logger.warn(
+          `Audio ASR failed for ${file.originalname}: ${
+            (err as Error).message
+          }`,
+        );
+      }
+    }
+
+    // 图片：调用视觉 provider 做 OCR / 图像理解
+    if (kind === 'image') {
+      try {
+        const caps = this.visionProvider.getCapabilities();
+        const blocks: string[] = ['# Image Document', ''];
+
+        if (caps.ocr) {
+          const ocrResult = await this.visionProvider.ocr(
+            file.buffer,
+            file.mimetype,
+          );
+          blocks.push('## OCR 识别文字', '', ocrResult.text || '(无文字)', '');
+        }
+
+        if (caps.imageUnderstanding) {
+          const desc = await this.visionProvider.describeImage(
+            file.buffer,
+            file.mimetype,
+          );
+          blocks.push('## 图像描述', '', desc.description, '');
+          if (desc.tags.length > 0) {
+            blocks.push('标签：' + desc.tags.join('、'));
+          }
+        }
+
+        return blocks.join('\n');
+      } catch (err) {
+        this.logger.warn(
+          `Vision processing failed for image ${file.originalname}: ${
+            (err as Error).message
+          }`,
+        );
+        // 降级到默认 fallback
+      }
+    }
+
+    // 视频：调用视觉 provider 做视频理解
+    if (kind === 'video') {
+      try {
+        if (this.visionProvider.getCapabilities().videoUnderstanding) {
+          const videoDesc = await this.visionProvider.describeVideo(
+            file.buffer,
+            file.mimetype,
+          );
+          return [
+            '# Video Document',
+            '',
+            '## 视频摘要',
+            '',
+            videoDesc.summary,
+            '',
+            videoDesc.transcript
+              ? ['## 音频转写', '', videoDesc.transcript].join('\n')
+              : '',
+          ].join('\n');
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Vision processing failed for video ${file.originalname}: ${
+            (err as Error).message
+          }`,
+        );
+        // 降级到默认 fallback
+      }
+    }
+
+    return extractDocumentText(file.buffer, kind);
+  }
+
+  private getUrlSnapshotFilename(url: string): string {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname.replace(/\/$/, '') || '/index';
+      return `${parsed.hostname}${path}.url.md`.replace(/[^\w./-]+/g, '_');
+    } catch {
+      return 'url-snapshot.md';
+    }
   }
 }

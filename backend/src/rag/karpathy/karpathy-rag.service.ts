@@ -63,6 +63,25 @@ export interface RetrieveOptions {
   vectorSearch?: boolean;
 }
 
+type RankedRetrievalHit = {
+  id: string;
+  score: number;
+  content: string;
+  docId: string;
+  chunkIndex: number;
+  parentChunkId?: string | null;
+  headingPath?: string[];
+  sectionId?: string | null;
+  clauseId?: string | null;
+  tableRef?: string | null;
+  sourceStart?: number | null;
+  sourceEnd?: number | null;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+  sourceAuthority?: string;
+};
+
 /**
  * Karpathy-Style RAG：BM25 + Cosine 混合检索 + LLM 生成
  * BM25 索引持久化到 workspace/bm25-index.json，重启自动恢复。
@@ -101,6 +120,7 @@ export class KarpathyRagService implements OnModuleInit {
   // 混合检索权重
   private readonly bm25Weight = 0.3;
   private readonly cosineWeight = 0.7;
+  private readonly rrfK = 60;
   private readonly topK = 5;
   private readonly unsupportedAnswer =
     '知识库片段不足以支撑可靠回答，暂不生成确定结论。';
@@ -305,24 +325,7 @@ export class KarpathyRagService implements OnModuleInit {
     const normalizedQuery = this.normalizeQuery(query);
 
     // 1. BM25 检索 topK*2（多召回一些用于融合）
-    let bm25Hits: Array<{
-      id: string;
-      score: number;
-      content: string;
-      docId: string;
-      chunkIndex: number;
-      parentChunkId?: string | null;
-      headingPath?: string[];
-      sectionId?: string | null;
-      clauseId?: string | null;
-      tableRef?: string | null;
-      sourceStart?: number | null;
-      sourceEnd?: number | null;
-      docVersion?: string | null;
-      effectiveAt?: string | null;
-      expiredAt?: string | null;
-      sourceAuthority?: string;
-    }> = [];
+    let bm25Hits: RankedRetrievalHit[] = [];
 
     if (this.elasticsearchProvider.isEnabled()) {
       bm25Hits = await this.elasticsearchProvider.search(
@@ -348,7 +351,6 @@ export class KarpathyRagService implements OnModuleInit {
         })
         .filter((h): h is NonNullable<typeof h> => h !== null);
     }
-    const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
     this.metricsService.observeRetrievalHits(
       this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
       vectorSearch ? 'hybrid' : 'keyword',
@@ -370,61 +372,25 @@ export class KarpathyRagService implements OnModuleInit {
         cosineHits = this.filterActiveVectorHits(cosineHits, userId);
       } catch (err) {
         this.logger.warn(
-          `Vector search failed, fallback to BM25 only: ${(err as Error).message}`,
+          `Vector search failed, fallback to BM25 only: ${
+            (err as Error).message
+          }`,
         );
       }
     }
-    const cosineMaxScore = Math.max(...cosineHits.map((h) => h.score), 1);
     this.metricsService.observeRetrievalHits(
       'milvus',
       vectorSearch ? 'hybrid' : 'keyword',
       cosineHits.length,
     );
 
-    // 3. 加权融合（归一化后加权）
-    const fusedMap = new Map<string, RetrievedChunk>();
+    // 3. RRF 排名融合：分数只用于展示和质量闸门，排序由 reciprocal rank 决定
+    const fused = this.fuseByRrf(bm25Hits, cosineHits);
 
-    for (const hit of bm25Hits) {
-      const normalizedBm25 = hit.score / bm25MaxScore;
-      fusedMap.set(hit.id, {
-        id: hit.id,
-        content: hit.content,
-        docId: hit.docId,
-        chunkIndex: hit.chunkIndex,
-        ...this.pickChunkMetadata(hit),
-        bm25Score: normalizedBm25,
-        cosineScore: 0,
-        totalScore: normalizedBm25 * this.bm25Weight,
-      });
-    }
-
-    for (const hit of cosineHits) {
-      const normalizedCosine = hit.score / cosineMaxScore;
-      const metadata = this.pickChunkMetadata(this.chunkMeta.get(hit.id) ?? {});
-      const existing = fusedMap.get(hit.id);
-      if (existing) {
-        existing.cosineScore = normalizedCosine;
-        existing.totalScore =
-          existing.bm25Score * this.bm25Weight +
-          normalizedCosine * this.cosineWeight;
-      } else {
-        fusedMap.set(hit.id, {
-          id: hit.id,
-          content: hit.content,
-          docId: hit.docId,
-          chunkIndex: hit.chunkIndex,
-          ...metadata,
-          bm25Score: 0,
-          cosineScore: normalizedCosine,
-          totalScore: normalizedCosine * this.cosineWeight,
-        });
-      }
-    }
-
-    // 4. 按总分排序，取 topK；可选叠加来源权威权重
-    const results = this.applySourceAuthority(
-      Array.from(fusedMap.values()),
-    ).sort((a, b) => b.totalScore - a.totalScore);
+    // 4. 按 RRF 总分排序，取 topK；可选叠加来源权威权重
+    const results = this.applySourceAuthority(fused).sort(
+      (a, b) => b.totalScore - a.totalScore,
+    );
     return results.slice(0, this.topK);
   }
 
@@ -437,24 +403,7 @@ export class KarpathyRagService implements OnModuleInit {
     userId?: string,
   ): Promise<RetrievedChunk[]> {
     const normalizedQuery = this.normalizeQuery(query);
-    let bm25Hits: Array<{
-      id: string;
-      score: number;
-      content: string;
-      docId: string;
-      chunkIndex: number;
-      parentChunkId?: string | null;
-      headingPath?: string[];
-      sectionId?: string | null;
-      clauseId?: string | null;
-      tableRef?: string | null;
-      sourceStart?: number | null;
-      sourceEnd?: number | null;
-      docVersion?: string | null;
-      effectiveAt?: string | null;
-      expiredAt?: string | null;
-      sourceAuthority?: string;
-    }> = [];
+    let bm25Hits: RankedRetrievalHit[] = [];
 
     if (this.elasticsearchProvider.isEnabled()) {
       bm25Hits = await this.elasticsearchProvider.search(
@@ -481,15 +430,15 @@ export class KarpathyRagService implements OnModuleInit {
         .filter((h): h is NonNullable<typeof h> => h !== null);
     }
 
-    const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
     this.metricsService.observeRetrievalHits(
       this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
       'keyword',
       bm25Hits.length,
     );
 
+    const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
     return bm25Hits
-      .map((hit) => {
+      .map((hit, index) => {
         const normalizedBm25 = hit.score / bm25MaxScore;
         return {
           id: hit.id,
@@ -499,7 +448,7 @@ export class KarpathyRagService implements OnModuleInit {
           ...this.pickChunkMetadata(hit),
           bm25Score: normalizedBm25,
           cosineScore: 0,
-          totalScore: normalizedBm25 * this.bm25Weight,
+          totalScore: this.rankScore(index) * this.bm25Weight,
         } satisfies RetrievedChunk;
       })
       .map((chunk) => this.applySourceAuthorityToChunk(chunk))
@@ -795,6 +744,59 @@ ${historyText || '无'}
     return chunks.map((chunk) => this.applySourceAuthorityToChunk(chunk));
   }
 
+  private fuseByRrf(
+    bm25Hits: RankedRetrievalHit[],
+    cosineHits: Awaited<ReturnType<VectorStoreProvider['similaritySearch']>>,
+  ): RetrievedChunk[] {
+    const bm25MaxScore = Math.max(...bm25Hits.map((hit) => hit.score), 1);
+    const cosineMaxScore = Math.max(...cosineHits.map((hit) => hit.score), 1);
+    const fusedMap = new Map<string, RetrievedChunk>();
+
+    bm25Hits.forEach((hit, index) => {
+      const normalizedBm25 = hit.score / bm25MaxScore;
+      fusedMap.set(hit.id, {
+        id: hit.id,
+        content: hit.content,
+        docId: hit.docId,
+        chunkIndex: hit.chunkIndex,
+        ...this.pickChunkMetadata(hit),
+        bm25Score: normalizedBm25,
+        cosineScore: 0,
+        totalScore: this.rankScore(index) * this.bm25Weight,
+      });
+    });
+
+    cosineHits.forEach((hit, index) => {
+      const normalizedCosine = hit.score / cosineMaxScore;
+      const metadata = this.pickChunkMetadata(this.chunkMeta.get(hit.id) ?? {});
+      const rrfScore = this.rankScore(index) * this.cosineWeight;
+      const existing = fusedMap.get(hit.id);
+
+      if (existing) {
+        existing.cosineScore = normalizedCosine;
+        existing.totalScore += rrfScore;
+        return;
+      }
+
+      fusedMap.set(hit.id, {
+        id: hit.id,
+        content: hit.content,
+        docId: hit.docId,
+        chunkIndex: hit.chunkIndex,
+        ...metadata,
+        bm25Score: 0,
+        cosineScore: normalizedCosine,
+        totalScore: rrfScore,
+      });
+    });
+
+    return Array.from(fusedMap.values());
+  }
+
+  private rankScore(index: number): number {
+    return (this.rrfK + 1) / (this.rrfK + index + 1);
+  }
+
   private applySourceAuthorityToChunk(chunk: RetrievedChunk): RetrievedChunk {
     const weight = this.resolveSourceAuthorityWeight(chunk);
     if (weight === 1) {
@@ -959,7 +961,9 @@ ${historyText || '无'}
     if (coverage < minCoverage) {
       return {
         sufficient: false,
-        reason: `答案内容被引用片段覆盖率 ${coverage.toFixed(2)} 低于阈值 ${minCoverage}`,
+        reason: `答案内容被引用片段覆盖率 ${coverage.toFixed(
+          2,
+        )} 低于阈值 ${minCoverage}`,
       };
     }
 

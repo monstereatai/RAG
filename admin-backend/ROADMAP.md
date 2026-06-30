@@ -42,6 +42,7 @@
 - [x] AI 问答运营入口完成：`GET /admin/qa-ops/overview` 返回 required RAG APIs 和 blocked 状态。
 - [x] 知识图谱运营入口完成：`GET /admin/graph-ops/overview` 返回 required RAG APIs 和 blocked 状态。
 - [x] 知识图谱运营三个二级菜单接口补齐：`GET /api/admin/graph-ops/nodes/:id`、`GET /api/admin/graph-ops/relations`、`GET /api/admin/graph-ops/relations/search`、`GET /api/admin/graph-ops/search` 已接入 rag-backend，并在真实图谱为空时返回显式 `meta.demo=true` 演示数据。
+- [x] 组织权限联调基础接口完成：`GET /api/admin/organizations` 返回脱敏部门、岗位和树形数据，供文档权限主体选择使用；不涉及数据库 schema 变更。
 
 ## P0 当前必须补齐
 
@@ -78,13 +79,18 @@
 
 ## 最近验证
 
+- 2026-06-30：**组织权限联调基础接口完成**
+  - 新增 `AdminOrganizationsController`，`GET /api/admin/organizations` 返回 4 个部门、4 个岗位和树形结构。
+  - admin Documents 权限弹窗已接入该接口，部门主体从下拉选择，不再只手输 ID。
+  - live 验证：登录 admin-backend 后请求 `/api/admin/organizations` 返回 200，`departments=4`、`positions=4`、`tree=4`。
+  - 验证通过：`admin-backend npm run build`。
 - 2026-06-25：**Graph Ops 三个二级菜单接口完成并联调**
   - admin-backend 新增/补齐：`GET /api/admin/graph-ops/nodes/:id`、`GET /api/admin/graph-ops/relations`、`GET /api/admin/graph-ops/relations/search`、`GET /api/admin/graph-ops/search`
   - `GraphOpsMockService` 补齐节点详情、关系列表、关系检索数据，并统一返回 `meta.demo=true`
   - `RagClientService` 补齐 graph entity detail、relationships search、graph search 调用
   - 真实联调：临时启动 rag-backend `3003`、admin-backend `3004`，登录后请求 stats/nodes/relations/relations-search/search 均返回 200；rag-backend 日志确认 entities/relationships/search 上游均为 200
   - 验证通过：`pnpm run build`、`pnpm run lint`、`pnpm exec jest --runInBand`（8 suites / 68 tests）、`pnpm run migration:check`
-  - 未通过项：`npm run verify` 被既有 Jest 参数传递问题阻塞；全量 e2e 仍受既有 `/users`、`/auth/login` 与 `/api/*` 路径差异影响
+  - 2026-06-30 更新：`npm run verify` 已修复并通过；脚本改用 npm 执行，`UserService` 内存默认用户初始化竞态已消除，build/lint/unit/e2e/migration check 全链路通过。
 - 2026-06-25：`/graph-ops` 三个二级菜单接口计划完成
   - 计划文件：`admin/docs/graph-ops-menu-implementation-plan.md`
   - 明确 admin-backend 需补 `nodes/:id`、`relations`、`relations/search`

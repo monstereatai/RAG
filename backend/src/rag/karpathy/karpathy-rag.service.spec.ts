@@ -308,14 +308,18 @@ describe('KarpathyRagService exception scenarios', () => {
       'user-1',
     );
 
-    await expect(
-      service.answer('公司宠物医疗报销额度是多少？', [], 'user-1'),
-    ).resolves.toMatchObject({
+    const result = await service.answer(
+      '公司宠物医疗报销额度是多少？',
+      [],
+      'user-1',
+    );
+
+    expect(result).toMatchObject({
       answer: '公司宠物医疗报销额度需要以公司福利制度为准。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: expect.stringContaining('已使用模型兜底回答'),
     });
+    expect(result.retrievalReason).toContain('已使用模型兜底回答');
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
 
@@ -347,6 +351,55 @@ describe('KarpathyRagService exception scenarios', () => {
     });
     expect(results[0].bm25Score).toBeGreaterThan(0);
     expect(observeRetrievalHits).toHaveBeenCalledWith('bm25', 'hybrid', 1);
+  });
+
+  it('uses RRF so chunks found by both keyword and vector rank first', async () => {
+    const { service } = createService({
+      vectorStoreProvider: {
+        similaritySearch: jest.fn().mockResolvedValue([
+          {
+            id: 'vector-only',
+            content: 'Unrelated active chunk',
+            docId: 'doc-vector',
+            chunkIndex: 0,
+            score: 0.99,
+          },
+          {
+            id: 'overlap',
+            content: 'Alpha policy keyword',
+            docId: 'doc-overlap',
+            chunkIndex: 0,
+            score: 0.8,
+          },
+        ]),
+      },
+    });
+    service.indexChunks(
+      [
+        {
+          id: 'overlap',
+          content: 'Alpha policy keyword',
+          docId: 'doc-overlap',
+          chunkIndex: 0,
+        },
+        {
+          id: 'vector-only',
+          content: 'Unrelated active chunk',
+          docId: 'doc-vector',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    const results = await service.retrieve('Alpha policy', {}, 'user-1');
+
+    expect(results[0]).toMatchObject({
+      id: 'overlap',
+      docId: 'doc-overlap',
+    });
+    expect(results[0].bm25Score).toBeGreaterThan(0);
+    expect(results[0].cosineScore).toBeGreaterThan(0);
   });
 
   it('normalizes known Chinese typo terms before retrieval', async () => {

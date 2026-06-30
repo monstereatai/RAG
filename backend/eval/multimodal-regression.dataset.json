@@ -1,0 +1,50 @@
+{
+  "version": "2026-06-30",
+  "description": "Multimodal RAG regression scaffold aligned with the project PDF. Replace sample assets with private business files before using as a release gate.",
+  "documents": [
+    {
+      "id": "sample-pdf-policy",
+      "type": "pdf",
+      "filename": "sample-policy.pdf",
+      "status": "placeholder",
+      "expectedModalities": ["text", "table"]
+    },
+    {
+      "id": "sample-audio-meeting",
+      "type": "audio",
+      "filename": "sample-meeting.wav",
+      "status": "placeholder",
+      "expectedModalities": ["speech", "text"]
+    },
+    {
+      "id": "sample-pptx-training",
+      "type": "pptx",
+      "filename": "sample-training.pptx",
+      "status": "placeholder",
+      "expectedModalities": ["text", "layout"]
+    }
+  ],
+  "queries": [
+    {
+      "id": "table-fact",
+      "query": "表格里的报销上限是多少？",
+      "expectedKeywords": ["报销", "上限"],
+      "requireCitation": true,
+      "sourceDocumentIds": ["sample-pdf-policy"]
+    },
+    {
+      "id": "audio-summary",
+      "query": "会议录音里最终确认的行动项是什么？",
+      "expectedKeywords": ["行动项"],
+      "requireCitation": true,
+      "sourceDocumentIds": ["sample-audio-meeting"]
+    },
+    {
+      "id": "cross-modal",
+      "query": "培训材料和会议录音对审批流程的说法是否一致？",
+      "expectedKeywords": ["审批", "一致"],
+      "requireCitation": true,
+      "sourceDocumentIds": ["sample-pptx-training", "sample-audio-meeting"]
+    }
+  ]
+}

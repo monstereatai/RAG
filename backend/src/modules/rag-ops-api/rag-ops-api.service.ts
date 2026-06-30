@@ -7,6 +7,7 @@ import { GraphService } from '../graph/graph.service';
 import { ConversationService } from '../chat/conversation.service';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
+import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { QueryLogService } from './query-log.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
@@ -37,6 +38,12 @@ export interface VectorIndexResponse {
   metricType: string;
   chunkCount: number;
   status: 'healthy' | 'degraded' | 'unavailable';
+  statusReason: string | null;
+  circuitState: 'closed' | 'open' | 'half_open';
+  consecutiveFailures: number;
+  lastFailureAt: string | null;
+  circuitOpenUntil: string | null;
+  params: Record<string, number | string>;
 }
 
 export interface EvaluationSummary {
@@ -82,6 +89,7 @@ export class RagOpsApiService {
     private readonly conversationService: ConversationService,
     private readonly karpathyRagService: KarpathyRagService,
     private readonly elasticsearchProvider: ElasticsearchProvider,
+    private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly queryLogService: QueryLogService,
     @InjectRepository(DocumentChunkEntity)
     private readonly chunkRepo: Repository<DocumentChunkEntity>,
@@ -104,7 +112,7 @@ export class RagOpsApiService {
     return {
       vectorStore: {
         provider: vsProvider,
-        available: true,
+        available: this.vectorStoreProvider.getRuntimeStatus().available,
       },
       bm25: {
         available: true,
@@ -287,27 +295,96 @@ export class RagOpsApiService {
     }
   }
 
+  async updateDocumentPermissions(
+    docId: string,
+    subjects: Array<{
+      type: 'user' | 'role' | 'department' | 'public';
+      id: string;
+    }>,
+  ) {
+    const doc = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!doc) {
+      return { docId, updated: false, reason: 'document not found' };
+    }
+    await this.documentService.setPermissions(docId, subjects);
+    return {
+      docId,
+      updated: true,
+      subjectCount: subjects.length,
+    };
+  }
+
+  async batchDocumentOperation(body: {
+    action?: 'reindex' | 'delete' | 'status';
+    docIds?: string[];
+    userId?: string;
+  }) {
+    const action = body.action ?? 'status';
+    const docIds = body.docIds ?? [];
+    const results: Array<Record<string, unknown>> = [];
+
+    for (const docId of docIds) {
+      if (action === 'reindex') {
+        results.push(
+          (await this.reindexDocument(docId)) ?? {
+            docId,
+            reindexed: false,
+            reason: 'document not found',
+          },
+        );
+        continue;
+      }
+
+      if (action === 'delete') {
+        const doc = await this.docMetaRepo.findOne({ where: { docId } });
+        if (!doc) {
+          results.push({ docId, deleted: false, reason: 'document not found' });
+          continue;
+        }
+        await this.documentService.delete(
+          docId,
+          body.userId ?? doc.userId ?? 'system',
+        );
+        results.push({ docId, deleted: true });
+        continue;
+      }
+
+      const doc = await this.docMetaRepo.findOne({ where: { docId } });
+      results.push({
+        docId,
+        exists: !!doc,
+        chunkCount: doc?.chunkCount ?? 0,
+      });
+    }
+
+    return {
+      action,
+      processed: results.length,
+      results,
+    };
+  }
+
   // ─── Vector Index ────────────────────────────────────────────
 
   async getVectorIndex(): Promise<VectorIndexResponse> {
-    const provider =
-      this.configService.get<string>('vectorStore.provider') ?? 'milvus';
-    const indexType =
-      this.configService.get<string>('MILVUS_INDEX_TYPE') ?? 'HNSW';
-    const metricType =
-      this.configService.get<string>('MILVUS_METRIC_TYPE') ?? 'COSINE';
-    const collectionName =
-      this.configService.get<string>('MILVUS_COLLECTION_NAME') ?? 'rag_chunks';
+    const indexInfo = this.vectorStoreProvider.getIndexInfo();
+    const runtimeStatus = this.vectorStoreProvider.getRuntimeStatus();
     const bm25Stats = this.karpathyRagService.getStats();
     const dbChunkCount = await this.chunkRepo.count();
 
     return {
-      provider,
-      collectionName,
-      indexType,
-      metricType,
+      provider: indexInfo.provider,
+      collectionName: indexInfo.collection,
+      indexType: indexInfo.indexType,
+      metricType: indexInfo.metricType,
       chunkCount: dbChunkCount || bm25Stats.totalChunks || 0,
-      status: 'healthy' as const,
+      status: runtimeStatus.status,
+      statusReason: runtimeStatus.lastFailureMessage,
+      circuitState: runtimeStatus.circuitState,
+      consecutiveFailures: runtimeStatus.consecutiveFailures,
+      lastFailureAt: runtimeStatus.lastFailureAt,
+      circuitOpenUntil: runtimeStatus.circuitOpenUntil,
+      params: indexInfo.params,
     };
   }
 

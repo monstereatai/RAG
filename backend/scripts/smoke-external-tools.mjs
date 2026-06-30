@@ -5,7 +5,7 @@ const qwenBaseUrl = (
 ).replace(/\/$/, '');
 const rerankBaseUrl = (
   process.env.RERANK_BASE_URL ??
-  'https://dashscope-intl.aliyuncs.com/compatible-api/v1/reranks'
+  'https://dashscope.aliyuncs.com/compatible-api/v1/reranks'
 ).replace(/\/$/, '');
 const requireKeys =
   process.env.EXTERNAL_SMOKE_REQUIRE_KEYS === 'true' ||
@@ -54,7 +54,7 @@ async function smokeBocha() {
   }
 
   const payload = await response.json();
-  const pages = payload?.webPages?.value ?? [];
+  const pages = payload?.webPages?.value ?? payload?.data?.webPages?.value ?? [];
   return {
     ok: pages.length > 0,
     status: response.status,
@@ -64,8 +64,8 @@ async function smokeBocha() {
 }
 
 async function smokeRerank() {
-  const apiKey = process.env.RERANK_API_KEY;
-  if (!apiKey) return skippedOrMissing('RERANK_API_KEY is empty');
+  const apiKey = process.env.RERANK_API_KEY || process.env.QWEN_API_KEY;
+  if (!apiKey) return skippedOrMissing('RERANK_API_KEY and QWEN_API_KEY are empty');
 
   const documents = [
     'RAG 会先检索知识库片段，再把相关上下文交给大模型生成答案。',

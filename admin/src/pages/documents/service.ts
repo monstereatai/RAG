@@ -20,6 +20,12 @@ export interface DocumentItem {
   };
 }
 
+export interface DocumentPermissionInput {
+  subjectType: 'user' | 'role' | 'department' | 'public';
+  subjectId?: string;
+  scope?: 'read';
+}
+
 export async function getDocuments(params?: {
   current?: number;
   pageSize?: number;
@@ -35,6 +41,14 @@ export async function getDocuments(params?: {
 
 export async function getUsers() {
   return authRequest<any>('/api/admin/users');
+}
+
+export async function getRoles() {
+  return authRequest<any>('/api/admin/roles');
+}
+
+export async function getOrganizations() {
+  return authRequest<any>('/api/admin/organizations');
 }
 
 export async function deleteDocument(id: string) {
@@ -69,4 +83,14 @@ export async function getDocumentChunks(
     `/api/admin/documents/${id}/chunks`,
     { params },
   );
+}
+
+export async function updateDocumentPermissions(
+  id: string,
+  permissions: DocumentPermissionInput[],
+) {
+  return authRequest(`/api/admin/documents/${id}/permissions`, {
+    method: 'POST',
+    data: { permissions },
+  });
 }

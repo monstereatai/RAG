@@ -1,0 +1,13 @@
+{
+  "policy": "data-classification",
+  "highSensitiveFields": [
+    "身份证号",
+    "手机号",
+    "银行卡号"
+  ],
+  "exportControls": [
+    "数据脱敏",
+    "安全审批"
+  ],
+  "retentionDays": 180
+}

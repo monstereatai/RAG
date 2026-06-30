@@ -145,6 +145,38 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * 设置 key 过期时间（秒）
+   */
+  async expire(key: string, seconds: number): Promise<void> {
+    if (!this.enabled) return;
+    try {
+      await this.client.expire(key, seconds);
+    } catch (err) {
+      this.logger.warn(
+        `Redis EXPIRE failed for key=${key}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * 删除并返回有序集合中指定排名范围的成员
+   */
+  async zremrangebyrank(
+    key: string,
+    start: number,
+    stop: number,
+  ): Promise<void> {
+    if (!this.enabled) return;
+    try {
+      await this.client.zremrangebyrank(key, start, stop);
+    } catch (err) {
+      this.logger.warn(
+        `Redis ZREMRANGEBYRANK failed for key=${key}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   async keys(pattern: string): Promise<string[]> {
     if (!this.enabled) return [];
     try {

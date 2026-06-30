@@ -1,0 +1,4 @@
+category,rule,owner
+expense,发票开具后 30 天内提交,finance
+contract,超过 50 万元需要法务复核和财务复核,legal
+discount,低于 8 折必须提交 Deal Desk 评审,sales

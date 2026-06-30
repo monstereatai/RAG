@@ -2,6 +2,10 @@ import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import {
+  LangfuseProvider,
+  type RagTraceEvent,
+} from '../../providers/observability/langfuse.provider';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
@@ -15,6 +19,7 @@ export class AguiService {
     private readonly conversationService: ConversationService,
     private readonly memoryService: MemoryService,
     private readonly llmProvider: LlmProvider,
+    private readonly langfuseProvider: LangfuseProvider,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -27,6 +32,8 @@ export class AguiService {
       void (async () => {
         const runId = randomUUID();
         const messageId = randomUUID();
+        const startTime = Date.now();
+        const traceEvents: RagTraceEvent[] = [];
 
         const emit = (
           type: AguiEvent['type'],
@@ -71,6 +78,11 @@ export class AguiService {
             threadId: activeThreadId,
             input: { query, mode: options.mode, model: selectedModel },
           });
+          traceEvents.push({
+            type: 'run_started',
+            data: { mode: options.mode, model: selectedModel },
+            timestamp: new Date().toISOString(),
+          });
           emit('TEXT_MESSAGE_START', {
             messageId,
             role: 'assistant',
@@ -82,7 +94,10 @@ export class AguiService {
               this.agenticRagService.run(
                 query,
                 options.mode,
-                (event) => this.emitAguiEvent(event, emit, messageId),
+                (event) => {
+                  traceEvents.push(this.toTraceEvent(event));
+                  this.emitAguiEvent(event, emit, messageId);
+                },
                 history,
                 activeThreadId,
                 options.userId,
@@ -110,6 +125,19 @@ export class AguiService {
           );
 
           emit('TEXT_MESSAGE_END', { messageId });
+          this.traceAnswer({
+            userId: options.userId,
+            threadId: activeThreadId,
+            query,
+            answer: result.answer,
+            mode: options.mode,
+            route: result.route,
+            model: selectedModel,
+            startTime,
+            references: result.references ?? [],
+            refused: result.retrievalSufficient === false,
+            events: traceEvents,
+          });
           emit('RUN_FINISHED', {
             threadId: activeThreadId,
             output: { ...result, model: selectedModel },
@@ -208,5 +236,60 @@ export class AguiService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
+  }
+
+  private traceAnswer(params: {
+    userId: string;
+    threadId: string;
+    query: string;
+    answer: string;
+    mode: string;
+    route: string;
+    model: string;
+    startTime: number;
+    references: Array<{
+      docId: string;
+      chunkIndex: number;
+      totalScore?: number;
+    }>;
+    refused: boolean;
+    events: RagTraceEvent[];
+  }): void {
+    const inputTokens = this.langfuseProvider.estimateTextTokens(params.query);
+    const outputTokens = this.langfuseProvider.estimateTextTokens(
+      params.answer,
+    );
+    this.langfuseProvider.traceRagAnswer({
+      userId: params.userId,
+      threadId: params.threadId,
+      query: params.query,
+      answer: params.answer,
+      mode: params.mode,
+      route: params.route,
+      model: params.model,
+      latencyMs: Date.now() - params.startTime,
+      citationCount: params.references.length,
+      refused: params.refused,
+      references: params.references.map((ref) => ({
+        docId: ref.docId,
+        chunkIndex: ref.chunkIndex,
+        totalScore: ref.totalScore ?? 0,
+      })),
+      events: params.events,
+      inputTokensEstimated: inputTokens,
+      outputTokensEstimated: outputTokens,
+      costUsdEstimated: this.langfuseProvider.estimateCostUsd(
+        inputTokens,
+        outputTokens,
+      ),
+    });
+  }
+
+  private toTraceEvent(event: SseEvent): RagTraceEvent {
+    return {
+      type: event.type,
+      data: event.type === 'token' ? undefined : event.data,
+      timestamp: new Date().toISOString(),
+    };
   }
 }

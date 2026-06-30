@@ -1,0 +1,326 @@
+{
+  "version": "private-sanitized-2026-06-30",
+  "departments": [
+    {
+      "id": "dept-exec",
+      "name": "高管团队",
+      "parentId": null
+    },
+    {
+      "id": "dept-sales",
+      "name": "销售部",
+      "parentId": null
+    },
+    {
+      "id": "dept-cs",
+      "name": "客户成功部",
+      "parentId": null
+    },
+    {
+      "id": "dept-product",
+      "name": "产品部",
+      "parentId": null
+    },
+    {
+      "id": "dept-hr",
+      "name": "人力资源部",
+      "parentId": null
+    },
+    {
+      "id": "dept-finance",
+      "name": "财务部",
+      "parentId": null
+    },
+    {
+      "id": "dept-legal",
+      "name": "法务部",
+      "parentId": null
+    },
+    {
+      "id": "dept-security",
+      "name": "安全部",
+      "parentId": null
+    },
+    {
+      "id": "dept-it",
+      "name": "信息技术部",
+      "parentId": null
+    },
+    {
+      "id": "dept-ops",
+      "name": "运维部",
+      "parentId": null
+    },
+    {
+      "id": "dept-admin",
+      "name": "行政部",
+      "parentId": null
+    },
+    {
+      "id": "dept-sales-east",
+      "name": "华东销售团队",
+      "parentId": "dept-sales"
+    },
+    {
+      "id": "dept-sales-west",
+      "name": "西部销售团队",
+      "parentId": "dept-sales"
+    },
+    {
+      "id": "dept-ops-sre",
+      "name": "SRE 组",
+      "parentId": "dept-ops"
+    },
+    {
+      "id": "dept-ops-noc",
+      "name": "NOC 值班组",
+      "parentId": "dept-ops"
+    }
+  ],
+  "positions": [
+    {
+      "id": "pos-ceo",
+      "name": "CEO",
+      "departmentId": "dept-exec"
+    },
+    {
+      "id": "pos-vp-sales",
+      "name": "销售 VP",
+      "departmentId": "dept-sales"
+    },
+    {
+      "id": "pos-sales-dir",
+      "name": "销售总监",
+      "departmentId": "dept-sales"
+    },
+    {
+      "id": "pos-vp-product",
+      "name": "产品 VP",
+      "departmentId": "dept-product"
+    },
+    {
+      "id": "pos-pm-lead",
+      "name": "PM 负责人",
+      "departmentId": "dept-product"
+    },
+    {
+      "id": "pos-hr-owner",
+      "name": "HR 负责人",
+      "departmentId": "dept-hr"
+    },
+    {
+      "id": "pos-finance-owner",
+      "name": "财务负责人",
+      "departmentId": "dept-finance"
+    },
+    {
+      "id": "pos-legal-owner",
+      "name": "法务负责人",
+      "departmentId": "dept-legal"
+    },
+    {
+      "id": "pos-security-owner",
+      "name": "安全负责人",
+      "departmentId": "dept-security"
+    },
+    {
+      "id": "pos-security-reviewer",
+      "name": "安全审批人",
+      "departmentId": "dept-security"
+    },
+    {
+      "id": "pos-ciso",
+      "name": "CISO",
+      "departmentId": "dept-security"
+    },
+    {
+      "id": "pos-it-owner",
+      "name": "IT 负责人",
+      "departmentId": "dept-it"
+    },
+    {
+      "id": "pos-ops-owner",
+      "name": "运维负责人",
+      "departmentId": "dept-ops"
+    },
+    {
+      "id": "pos-duty-manager",
+      "name": "值班经理",
+      "departmentId": "dept-cs"
+    },
+    {
+      "id": "pos-cs-owner",
+      "name": "客户成功负责人",
+      "departmentId": "dept-cs"
+    },
+    {
+      "id": "pos-procurement",
+      "name": "采购负责人",
+      "departmentId": "dept-finance"
+    },
+    {
+      "id": "pos-admin-owner",
+      "name": "行政负责人",
+      "departmentId": "dept-admin"
+    }
+  ],
+  "users": [
+    {
+      "id": "1",
+      "username": "admin",
+      "departmentId": "dept-finance",
+      "positionId": "pos-finance-owner",
+      "roles": [
+        "admin"
+      ]
+    },
+    {
+      "id": "2",
+      "username": "user",
+      "departmentId": "dept-cs",
+      "positionId": "pos-duty-manager",
+      "roles": [
+        "user"
+      ]
+    },
+    {
+      "id": "3",
+      "username": "zhangsan",
+      "departmentId": "dept-sales",
+      "positionId": "pos-sales-dir",
+      "roles": [
+        "user"
+      ]
+    },
+    {
+      "id": "4",
+      "username": "lisi",
+      "departmentId": "dept-legal",
+      "positionId": "pos-legal-owner",
+      "roles": [
+        "knowledge-manager"
+      ]
+    },
+    {
+      "id": "5",
+      "username": "wangwu",
+      "departmentId": "dept-it",
+      "positionId": "pos-it-owner",
+      "roles": [
+        "user"
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "id": "admin",
+      "name": "管理员",
+      "inherits": [
+        "knowledge-manager",
+        "security-auditor"
+      ]
+    },
+    {
+      "id": "knowledge-manager",
+      "name": "知识库管理员",
+      "inherits": [
+        "user"
+      ]
+    },
+    {
+      "id": "security-auditor",
+      "name": "安全审计员",
+      "inherits": [
+        "user"
+      ]
+    },
+    {
+      "id": "user",
+      "name": "普通用户",
+      "inherits": []
+    }
+  ],
+  "permissionExpectations": [
+    {
+      "docId": "private-hr-travel-policy",
+      "readableBy": [
+        {
+          "subjectType": "role",
+          "subjectId": "knowledge-manager"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-finance"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-hr"
+        }
+      ]
+    },
+    {
+      "docId": "private-cs-sla-v2",
+      "readableBy": [
+        {
+          "subjectType": "role",
+          "subjectId": "user"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-cs"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-sales"
+        }
+      ]
+    },
+    {
+      "docId": "private-legal-contract",
+      "readableBy": [
+        {
+          "subjectType": "role",
+          "subjectId": "knowledge-manager"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-legal"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-finance"
+        }
+      ]
+    },
+    {
+      "docId": "private-security-incident",
+      "readableBy": [
+        {
+          "subjectType": "role",
+          "subjectId": "security-auditor"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-security"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-ops"
+        }
+      ]
+    },
+    {
+      "docId": "private-sales-deal",
+      "readableBy": [
+        {
+          "subjectType": "role",
+          "subjectId": "user"
+        },
+        {
+          "subjectType": "department",
+          "subjectId": "dept-sales"
+        }
+      ]
+    }
+  ]
+}

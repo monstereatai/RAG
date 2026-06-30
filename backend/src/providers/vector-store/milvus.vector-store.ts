@@ -11,6 +11,7 @@ import {
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
+  VectorStoreRuntimeStatus,
 } from './vector-store-provider.interface';
 
 /**
@@ -35,7 +36,12 @@ export class MilvusVectorStoreProvider
   private readonly deleteTimeoutMs: number;
   private readonly warmupTimeoutMs: number;
   private readonly circuitOpenMs: number;
+  private readonly circuitFailureThreshold: number;
   private circuitOpenUntil = 0;
+  private connected = false;
+  private consecutiveFailures = 0;
+  private lastFailureAt: Date | null = null;
+  private lastFailureMessage: string | null = null;
 
   constructor(private readonly config: ConfigService) {
     this.host =
@@ -61,6 +67,9 @@ export class MilvusVectorStoreProvider
       this.config.get<number>('vectorStore.milvus.warmupTimeoutMs') ?? 1_500;
     this.circuitOpenMs =
       this.config.get<number>('vectorStore.milvus.circuitOpenMs') ?? 30_000;
+    this.circuitFailureThreshold =
+      this.config.get<number>('vectorStore.milvus.circuitFailureThreshold') ??
+      2;
   }
 
   async onModuleInit(): Promise<void> {
@@ -70,6 +79,8 @@ export class MilvusVectorStoreProvider
     });
     try {
       await this.client.connectPromise;
+      this.connected = true;
+      this.recordSuccess();
       this.logger.log(`Milvus connected at ${this.host}:${this.port}`);
       await this.ensureCollection();
       // 预热：触发 Milvus 加载索引到内存，避免首次 search 超时
@@ -79,6 +90,8 @@ export class MilvusVectorStoreProvider
       this.logger.error(
         `Milvus connection failed at ${this.host}:${this.port}: ${(err as Error).message}`,
       );
+      this.connected = false;
+      this.recordFailure(err);
       this.logger.warn(
         'Service will start but Milvus-related APIs will fail until Milvus is available',
       );
@@ -102,8 +115,10 @@ export class MilvusVectorStoreProvider
         output_fields: ['id'],
         timeout: this.warmupTimeoutMs,
       });
+      this.recordSuccess();
       this.logger.log('Milvus warmup search done');
     } catch (err) {
+      this.recordFailure(err);
       this.logger.warn(`Milvus warmup failed: ${(err as Error).message}`);
     }
   }
@@ -243,8 +258,9 @@ export class MilvusVectorStoreProvider
         this.searchTimeoutMs + 200,
         'Milvus similarity search',
       );
+      this.recordSuccess();
     } catch (err) {
-      this.openCircuit();
+      this.recordFailure(err);
       throw err;
     }
 
@@ -283,9 +299,10 @@ export class MilvusVectorStoreProvider
         this.deleteTimeoutMs + 200,
         'Milvus delete by docId',
       );
+      this.recordSuccess();
       this.logger.log(`Deleted chunks for doc_id=${docId}`);
     } catch (err) {
-      this.openCircuit();
+      this.recordFailure(err);
       this.logger.warn(
         `Milvus delete timed out for doc_id=${docId}; continuing with other indexes: ${(err as Error).message}`,
       );
@@ -308,7 +325,31 @@ export class MilvusVectorStoreProvider
         deleteTimeoutMs: this.deleteTimeoutMs,
         warmupTimeoutMs: this.warmupTimeoutMs,
         circuitOpenMs: this.circuitOpenMs,
+        circuitFailureThreshold: this.circuitFailureThreshold,
       },
+    };
+  }
+
+  getRuntimeStatus(): VectorStoreRuntimeStatus {
+    const circuitState = this.getCircuitState();
+    const available = this.connected && circuitState !== 'open';
+    const status = !this.connected
+      ? 'unavailable'
+      : circuitState === 'open' || this.consecutiveFailures > 0
+        ? 'degraded'
+        : 'healthy';
+
+    return {
+      status,
+      available,
+      circuitState,
+      consecutiveFailures: this.consecutiveFailures,
+      lastFailureAt: this.lastFailureAt?.toISOString() ?? null,
+      lastFailureMessage: this.lastFailureMessage,
+      circuitOpenUntil:
+        this.circuitOpenUntil > Date.now()
+          ? new Date(this.circuitOpenUntil).toISOString()
+          : null,
     };
   }
 
@@ -336,6 +377,36 @@ export class MilvusVectorStoreProvider
 
   private isCircuitOpen(): boolean {
     return Date.now() < this.circuitOpenUntil;
+  }
+
+  private getCircuitState(): 'closed' | 'open' | 'half_open' {
+    if (this.circuitOpenUntil === 0) return 'closed';
+    return this.isCircuitOpen() ? 'open' : 'half_open';
+  }
+
+  private recordSuccess(): void {
+    this.consecutiveFailures = 0;
+    this.circuitOpenUntil = 0;
+  }
+
+  private recordFailure(err: unknown): void {
+    this.consecutiveFailures += 1;
+    this.lastFailureAt = new Date();
+    this.lastFailureMessage = this.formatErrorMessage(err);
+    if (this.consecutiveFailures >= this.circuitFailureThreshold) {
+      this.openCircuit();
+    }
+  }
+
+  private formatErrorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === 'string') return err;
+    if (err === null || err === undefined) return 'unknown error';
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return 'unserializable error';
+    }
   }
 
   private openCircuit(): void {

@@ -6,6 +6,7 @@ import {
   PaperClipOutlined,
   PlusOutlined,
   SendOutlined,
+  SoundOutlined,
 } from '@ant-design/icons';
 import { ModulePage, qaNav } from '@/components/AdminShell';
 import { Avatar, Button, Dropdown, Input } from 'antd';
@@ -16,6 +17,7 @@ import {
   type ChatModel,
   type ConversationSummary,
   type ReferenceChunk,
+  createTtsWebSocket,
   deleteConversation,
   getEnabledQaModelOptions,
   getQaModelConfig,
@@ -61,6 +63,8 @@ const QaOps: React.FC = () => {
   const [convPage, setConvPage] = React.useState(1);
   const PAGE_SIZE = 10;
   const abortRef = React.useRef<AbortController | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const ttsRef = React.useRef<WebSocket | null>(null);
   const chatBodyRef = React.useRef<HTMLDivElement>(null);
 
   // 自动滚动到底部
@@ -94,7 +98,13 @@ const QaOps: React.FC = () => {
   }, [loadConversations]);
 
   React.useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      ttsRef.current?.close();
+      if (audioRef.current) {
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+    };
   }, []);
 
   const updateMessage = (
@@ -161,6 +171,39 @@ const QaOps: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePlayTts = (text: string) => {
+    const content = text.trim();
+    if (!content) return;
+
+    ttsRef.current?.close();
+    const chunks: BlobPart[] = [];
+    const ws = createTtsWebSocket(content.slice(0, 800));
+    ttsRef.current = ws;
+    ws.onmessage = (event) => {
+      if (typeof event.data !== 'string') return;
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'audio' && typeof payload.data === 'string') {
+          const binary = atob(payload.data);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          chunks.push(bytes);
+        }
+        if (payload.type === 'end') {
+          const blob = new Blob(chunks, { type: 'audio/wav' });
+          if (audioRef.current) URL.revokeObjectURL(audioRef.current.src);
+          const audio = new Audio(URL.createObjectURL(blob));
+          audioRef.current = audio;
+          void audio.play();
+        }
+      } catch {
+        // Ignore non-json websocket frames.
+      }
+    };
   };
 
   const handleSend = () => {
@@ -440,12 +483,11 @@ const QaOps: React.FC = () => {
               <div className="empty-conversations">暂无对话</div>
             ) : (
               conversations.slice(0, convPage * PAGE_SIZE).map((item) => (
-                <div
+                <button
                   className={`conv-item${item.threadId === threadId ? ' active' : ''}`}
                   key={item.threadId}
                   onClick={() => handleSelectConversation(item)}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   onKeyDown={(e) => e.key === 'Enter' && handleSelectConversation(item)}
                 >
                   <strong>{item.title}</strong>
@@ -482,14 +524,11 @@ const QaOps: React.FC = () => {
                     <span
                       className="conv-more-btn"
                       onClick={(e) => e.stopPropagation()}
-                      role="button"
-                      tabIndex={-1}
-                      onKeyDown={() => {}}
                     >
                       <EllipsisOutlined />
                     </span>
                   </Dropdown>
-                </div>
+                </button>
               ))
             )}
             {conversations.length > convPage * PAGE_SIZE && (
@@ -523,6 +562,7 @@ const QaOps: React.FC = () => {
                   </div>
                   <Avatar style={{ background: '#f0f2f5', color: '#8c8c8c' }}>
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                      <title>用户</title>
                       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
                     </svg>
                   </Avatar>
@@ -537,6 +577,17 @@ const QaOps: React.FC = () => {
                           ? '正在通过 AG-UI 协议生成回答...'
                           : '')}
                     </p>
+                    {message.status === 'done' && message.content && (
+                      <Button
+                        className="answer-voice-btn"
+                        icon={<SoundOutlined />}
+                        onClick={() => handlePlayTts(message.content)}
+                        size="small"
+                        type="text"
+                      >
+                        播放
+                      </Button>
+                    )}
                     {message.route && (
                       <div className="answer-meta">
                         <span>路由：{message.route}</span>

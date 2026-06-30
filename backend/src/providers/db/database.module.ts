@@ -11,6 +11,9 @@ import { ScheduledJobEntity } from './entities/job.entity';
 import { QueryLogEntity } from './entities/query-log.entity';
 import { WeeklySummaryEntity } from './entities/weekly-summary.entity';
 import { JobExecutionEntity } from './entities/job-execution.entity';
+import { DocumentTaskEntity } from './entities/document-task.entity';
+import { DocumentResourceEntity } from './entities/document-resource.entity';
+import { DocumentPermissionEntity } from './entities/document-permission.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -57,6 +60,9 @@ import { JobExecutionEntity } from './entities/job-execution.entity';
             QueryLogEntity,
             WeeklySummaryEntity,
             JobExecutionEntity,
+            DocumentTaskEntity,
+            DocumentResourceEntity,
+            DocumentPermissionEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -78,6 +84,9 @@ import { JobExecutionEntity } from './entities/job-execution.entity';
       QueryLogEntity,
       WeeklySummaryEntity,
       JobExecutionEntity,
+      DocumentTaskEntity,
+      DocumentResourceEntity,
+      DocumentPermissionEntity,
     ]),
   ],
   exports: [TypeOrmModule],

@@ -240,6 +240,16 @@ canvas {
   padding: 0 18px 14px;
 }
 
+.permission-doc-title {
+  margin: 0 0 16px;
+  color: #4b5563;
+}
+
+.document-permission-list {
+  display: grid;
+  gap: 10px;
+}
+
 .file-icon {
   display: inline-flex;
   align-items: center;
@@ -363,9 +373,14 @@ canvas {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+  width: 100%;
   padding: 11px 12px;
+  border: 0;
   border-bottom: 1px solid #edf1f7;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
+  font: inherit;
   text-align: left;
   transition: background 0.15s;
 }
@@ -396,7 +411,9 @@ canvas {
   justify-content: center;
   width: 28px;
   height: 28px;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   cursor: pointer;
   color: #8a94a6;
   font-size: 16px;
@@ -475,6 +492,11 @@ canvas {
   border-radius: 8px;
   color: #1f2937;
   line-height: 1.68;
+}
+
+.answer-voice-btn {
+  margin: -4px 0 8px;
+  padding-inline: 0;
 }
 
 .answer-card ol {

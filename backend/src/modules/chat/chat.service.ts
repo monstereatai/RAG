@@ -7,9 +7,15 @@ import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
 import { MemoryService } from '../memory/memory.service';
+import { ShortTermMemoryService } from '../memory/short-term-memory.service';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { ChatDto, type ChatMode } from './chat.dto';
 import type { ChatResponse } from './chat.dto';
+import {
+  LangfuseProvider,
+  type RagTraceEvent,
+} from '../../providers/observability/langfuse.provider';
+import type { SseEvent } from '../../rag/agentic/sse-event';
 
 @Injectable()
 export class ChatService {
@@ -21,6 +27,8 @@ export class ChatService {
     private readonly conversationService: ConversationService,
     private readonly conversationEmbeddingService: ConversationEmbeddingService,
     private readonly memoryService: MemoryService,
+    private readonly shortTermMemory: ShortTermMemoryService,
+    private readonly langfuseProvider: LangfuseProvider,
     @InjectRepository(QueryLogEntity)
     private readonly queryLogRepo: Repository<QueryLogEntity>,
   ) {}
@@ -56,6 +64,20 @@ export class ChatService {
       this.logger.debug(
         `Memory injected: user=${memoryResult.userMemories.length}, session=${memoryResult.sessionMemories.length}`,
       );
+    }
+
+    // Redis 短期记忆注入：最近 N 轮对话 + 历史摘要
+    if (threadId) {
+      const stmContext = await this.shortTermMemory.getContext(threadId);
+      if (stmContext.systemMessage) {
+        memoryMessages.push({
+          role: 'system',
+          content: stmContext.systemMessage.content as string,
+        });
+        this.logger.debug(
+          `Short-term memory injected: ${stmContext.recentTurns.length} recent turns, truncated=${stmContext.truncatedHistory}`,
+        );
+      }
     }
 
     // 对话历史向量化搜索：检索相关的历史对话作为上下文
@@ -102,6 +124,10 @@ export class ChatService {
         userId,
       );
 
+      // Redis 短期记忆写入：异步记录本轮对话
+      void this.shortTermMemory.addTurn(threadId, 'user', req.query);
+      void this.shortTermMemory.addTurn(threadId, 'assistant', result.answer);
+
       // Mem0 分类写入：chat 后异步持久化有价值的记忆
       void this.memoryService.classifyAndPersist(
         userId,
@@ -130,6 +156,30 @@ export class ChatService {
         citationCount: result.references.length,
         hasAnswer: result.answer.length > 0,
       });
+      this.traceAnswer({
+        userId,
+        query: req.query,
+        mode,
+        route: 'simple',
+        threadId,
+        startTime,
+        answer: result.answer,
+        references: result.references,
+        refused:
+          result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
+        events: [
+          {
+            type: 'citation',
+            data: result.references,
+            timestamp: new Date().toISOString(),
+          },
+          {
+            type: 'final',
+            data: { route: 'simple', referenceCount: result.references.length },
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
 
       return {
         ...result,
@@ -140,10 +190,11 @@ export class ChatService {
     }
 
     // agentic / auto 模式走 AgenticRagService
+    const traceEvents: RagTraceEvent[] = [];
     const result = await this.agenticRagService.run(
       req.query,
       mode,
-      undefined,
+      (event) => traceEvents.push(this.toTraceEvent(event)),
       history,
       threadId,
       userId,
@@ -163,6 +214,10 @@ export class ChatService {
       result.answer,
       userId,
     );
+
+    // Redis 短期记忆写入：异步记录本轮对话
+    void this.shortTermMemory.addTurn(threadId, 'user', req.query);
+    void this.shortTermMemory.addTurn(threadId, 'assistant', result.answer);
 
     // Mem0 分类写入
     void this.memoryService.classifyAndPersist(
@@ -191,6 +246,19 @@ export class ChatService {
         result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
       citationCount: result.references?.length ?? 0,
       hasAnswer: result.answer.length > 0,
+    });
+    this.traceAnswer({
+      userId,
+      query: req.query,
+      mode,
+      route: result.route,
+      threadId,
+      startTime,
+      answer: result.answer,
+      references: result.references ?? [],
+      refused:
+        result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
+      events: traceEvents,
     });
 
     return {
@@ -233,5 +301,58 @@ export class ChatService {
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
     }
+  }
+
+  private traceAnswer(params: {
+    userId: string;
+    query: string;
+    mode: string;
+    route: string;
+    threadId: string;
+    startTime: number;
+    answer: string;
+    references: Array<{
+      docId: string;
+      chunkIndex: number;
+      totalScore: number;
+    }>;
+    refused: boolean;
+    events?: RagTraceEvent[];
+  }): void {
+    const inputTokens = this.langfuseProvider.estimateTextTokens(params.query);
+    const outputTokens = this.langfuseProvider.estimateTextTokens(
+      params.answer,
+    );
+    this.langfuseProvider.traceRagAnswer({
+      userId: params.userId,
+      threadId: params.threadId,
+      query: params.query,
+      answer: params.answer,
+      mode: params.mode,
+      route: params.route,
+      latencyMs: Date.now() - params.startTime,
+      citationCount: params.references.length,
+      refused: params.refused,
+      references: params.references.map((ref) => ({
+        docId: ref.docId,
+        chunkIndex: ref.chunkIndex,
+        totalScore: ref.totalScore,
+      })),
+      events: params.events,
+      inputTokensEstimated: inputTokens,
+      outputTokensEstimated: outputTokens,
+      costUsdEstimated: this.langfuseProvider.estimateCostUsd(
+        inputTokens,
+        outputTokens,
+      ),
+    });
+  }
+
+  private toTraceEvent(event: SseEvent): RagTraceEvent {
+    return {
+      type: event.type,
+      data: event.type === 'token' ? undefined : event.data,
+      timestamp: new Date().toISOString(),
+    };
   }
 }

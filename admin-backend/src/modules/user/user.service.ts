@@ -15,15 +15,15 @@ export class UserService {
     private readonly userRepository?: Repository<User>,
   ) {
     // 内存模式下初始化默认测试用户
-    if (!this.userRepository) {
+    if (!this.userRepository && process.env.NODE_ENV !== 'test') {
       this.initDefaultUsers();
     }
   }
 
-  private async initDefaultUsers() {
+  private initDefaultUsers() {
     const now = new Date();
-    const adminPassword = await bcrypt.hash('Admin@123', 10);
-    const userPassword = await bcrypt.hash('User@123', 10);
+    const adminPassword = bcrypt.hashSync('Admin@123', 10);
+    const userPassword = bcrypt.hashSync('User@123', 10);
 
     // 内存模式下，admin 用户拥有所有权限
     const adminPermissions = [

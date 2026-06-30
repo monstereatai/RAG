@@ -50,6 +50,10 @@ export const configuration = () => ({
         process.env.MILVUS_CIRCUIT_OPEN_MS ?? '30000',
         10,
       ),
+      circuitFailureThreshold: parseInt(
+        process.env.MILVUS_CIRCUIT_FAILURE_THRESHOLD ?? '2',
+        10,
+      ),
     },
     pgvector: {
       url:
@@ -77,10 +81,33 @@ export const configuration = () => ({
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
   },
 
+  // 对象存储（业务原始文件与解析资源）
+  objectStorage: {
+    provider: process.env.OBJECT_STORAGE_PROVIDER ?? 'local',
+    endpoint: process.env.OBJECT_STORAGE_ENDPOINT ?? '127.0.0.1',
+    port: parseInt(process.env.OBJECT_STORAGE_PORT ?? '9000', 10),
+    useSSL: process.env.OBJECT_STORAGE_USE_SSL === 'true',
+    accessKey: process.env.OBJECT_STORAGE_ACCESS_KEY ?? 'minioadmin',
+    secretKey: process.env.OBJECT_STORAGE_SECRET_KEY ?? 'minioadmin',
+    bucket: process.env.OBJECT_STORAGE_BUCKET ?? 'rag-documents',
+    publicBaseUrl: process.env.OBJECT_STORAGE_PUBLIC_BASE_URL ?? '',
+  },
+
   // Elasticsearch（全文检索）
   elasticsearch: {
     node: process.env.ES_NODE ?? 'http://localhost:9200',
     apiKey: process.env.ES_API_KEY ?? '',
+  },
+
+  // 视觉 / 视频理解（可选，VISION_PROVIDER=mock 时可降级运行）
+  vision: {
+    provider: (process.env.VISION_PROVIDER ?? 'mock') as 'mock' | 'openai-compatible',
+    baseUrl:
+      process.env.VISION_BASE_URL ??
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: process.env.VISION_MODEL ?? 'qwen-vl-max',
+    apiKey: process.env.VISION_API_KEY ?? '',
+    qwenVlApiKey: process.env.QWEN_VL_API_KEY ?? '',
   },
 
   // LLM（通义千问 + OpenAI 兼容）
@@ -138,11 +165,11 @@ export const configuration = () => ({
   // Rerank（DashScope）
   rerank: {
     provider: process.env.RERANK_PROVIDER ?? 'dashscope',
-    apiKey: process.env.RERANK_API_KEY ?? '',
+    apiKey: process.env.RERANK_API_KEY ?? process.env.QWEN_API_KEY ?? '',
     model: process.env.RERANK_MODEL ?? 'qwen3-rerank',
     baseUrl:
       process.env.RERANK_BASE_URL ??
-      'https://dashscope-intl.aliyuncs.com/compatible-api/v1/reranks',
+      'https://dashscope.aliyuncs.com/compatible-api/v1/reranks',
   },
 
   // RAG 质量闸门
@@ -198,6 +225,18 @@ export const configuration = () => ({
     endpoint:
       process.env.LANGSMITH_ENDPOINT ?? 'https://api.smith.langchain.com',
     dataset: process.env.LANGSMITH_DATASET ?? 'rag-smoke',
+  },
+
+  // LangFuse 线上观测（可选）
+  langfuse: {
+    enabled: process.env.LANGFUSE_ENABLED === 'true',
+    publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? '',
+    secretKey: process.env.LANGFUSE_SECRET_KEY ?? '',
+    baseUrl: process.env.LANGFUSE_BASE_URL ?? 'https://cloud.langfuse.com',
+    inputCostUsdPer1k: Number(process.env.LANGFUSE_INPUT_COST_USD_PER_1K ?? 0),
+    outputCostUsdPer1k: Number(
+      process.env.LANGFUSE_OUTPUT_COST_USD_PER_1K ?? 0,
+    ),
   },
 
   // 知识图谱（Neo4j，可选）

@@ -15,6 +15,7 @@ Run from `backend/`.
 - `npm run smoke:external`: real Bocha, DashScope Rerank, and Qwen judge calls when keys exist; otherwise reports skipped checks.
 - `npm run smoke:external:required`: same checks as `smoke:external`, but missing keys fail the run. Use this after Bocha/Rerank/Qwen keys are filled.
 - `npm run smoke:milvus`: checks Milvus collection/schema/index metadata, loadCollection, load state, loading progress, SDK/server versions, and a bounded warmup search. Use this when first vector retrieval emits timeout warnings. A failing search with healthy/indexed/loaded metadata points to Milvus runtime/version/segment state rather than RAG answer logic.
+- `npm run smoke:vision-video`: validates the private multimodal dataset has image/audio/video files and audio/video transcript sidecars. Set `VISION_VIDEO_REQUIRE_PROVIDER=true` only when a real OCR/video provider key must be mandatory.
 - `npm run smoke:redis-checkpointer`: verifies checkpoint storage can be read by a separate Node process.
 - `npm run smoke:hybrid`: uploads fixed Chinese regression documents, checks debug retrieval, then deletes the uploaded docs.
 - `npm run eval:rag:judge`: optional Qwen LLM-as-Judge check for claim support. It skips when `QWEN_API_KEY` is not set.
@@ -24,5 +25,10 @@ Run from `backend/`.
 - `npm run eval:rag:quality`: stable local gate. It always runs offline RAG eval, the 120-case business dataset check, and the local maturity gate. Set `EVAL_RAG_JUDGE_REQUIRED=true` to make Qwen LLM-as-Judge mandatory.
 - `npm run eval:business-dataset`: checks the generated 120-case business regression dataset shape and coverage.
 - `npm run eval:business-import -- --input eval/business-regression.import.example.json`: validates a real business regression dataset import file. Add `-- --input <path> --write --min-cases 100` only after the private dataset is sanitized and ready to overwrite `eval/business-regression.dataset.json`.
+- `npm run fixtures:private:prepare`: generates the sanitized private fixture pack: 50 business poison questions, multimodal files, GraphRAG seed docs, and organization permission data.
+- `npm run fixtures:private:check`: validates the generated private fixture pack exists and has the expected coverage.
+- `npm run eval:business-private`: validates `eval/private-business-regression.dataset.json` with at least 50 cases.
+- `npm run eval:rag:multimodal:private`: validates `eval/private-multimodal.dataset.json` in strict asset mode.
+- `npm run graph:import-private`: dry-runs `eval/private-graph-business.seed.json`.
 
 Backend service checks default to `http://localhost:3001`.

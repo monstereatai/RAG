@@ -12,6 +12,7 @@ import { AdminDashboardService } from './admin-dashboard.service';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminRolesController } from './admin-roles.controller';
 import { AdminPermissionsController } from './admin-permissions.controller';
+import { AdminOrganizationsController } from './admin-organizations.controller';
 
 const databaseEnabled = isDatabaseEnabled();
 
@@ -28,6 +29,7 @@ const databaseEnabled = isDatabaseEnabled();
     AdminUsersController,
     AdminRolesController,
     AdminPermissionsController,
+    AdminOrganizationsController,
   ],
   providers: [RoleService, AdminDashboardService],
   exports: [RoleService],

@@ -43,6 +43,7 @@ export default {
   'menu.account': 'Account',
   'menu.account.center': 'Account Center',
   'menu.account.settings': 'Account Settings',
+  'menu.account.memories': 'Long-term Memory',
   'menu.account.trigger': 'Trigger Error',
   'menu.account.logout': 'Logout',
   'menu.editor': 'Graphic Editor',
