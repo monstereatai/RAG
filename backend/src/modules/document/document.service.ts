@@ -251,6 +251,16 @@ export class DocumentService {
     return this.taskRepo.findOne({ where: { id: taskId, userId } });
   }
 
+  async markTaskFailed(taskId: string, errorMessage: string): Promise<void> {
+    await this.updateTask(taskId, {
+      status: 'failed',
+      stage: 'failed',
+      progress: 100,
+      errorMessage,
+      finishedAt: new Date(),
+    });
+  }
+
   setPermissions(docId: string, subjects: PermissionSubject[]): Promise<void> {
     return this.permissionService.setPermissions(docId, subjects);
   }

@@ -10,9 +10,7 @@
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, QueueEvents, Worker } from 'bullmq';
-import { randomUUID } from 'node:crypto';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 
@@ -20,8 +18,7 @@ export interface DocumentProcessingJob {
   taskId: string;
   userId: string;
   filename: string;
-  content: string;
-  originalBuffer?: Buffer;
+  originalBufferBase64: string;
   contentType?: string;
 }
 
@@ -32,12 +29,17 @@ export interface DocumentProcessingResult {
   error?: string;
 }
 
+export type DocumentProcessingProcessor = (
+  job: DocumentProcessingJob,
+) => Promise<{ chunkCount?: number } | void>;
+
 @Injectable()
 export class DocumentQueueService implements OnModuleDestroy {
   private readonly logger = new Logger(DocumentQueueService.name);
   private readonly queue: Queue<DocumentProcessingJob>;
   private readonly queueEvents: QueueEvents;
   private readonly worker: Worker<DocumentProcessingJob>;
+  private processor: DocumentProcessingProcessor | null = null;
   readonly enabled: boolean;
 
   constructor(config: ConfigService) {
@@ -73,13 +75,14 @@ export class DocumentQueueService implements OnModuleDestroy {
       DOCUMENT_PROCESSING_QUEUE,
       async (job) => {
         this.logger.log(`Processing document: ${job.data.filename} (task=${job.data.taskId})`);
-        // NOTE: The actual processing (chunking, embedding, indexing)
-        // will be wired up when the worker service is fully implemented.
-        // For now, the queue infrastructure is ready.
+        if (!this.processor) {
+          throw new Error('Document queue processor is not registered.');
+        }
+        const result = await this.processor(job.data);
         return {
           taskId: job.data.taskId,
           status: 'completed' as const,
-          chunkCount: 0,
+          chunkCount: result?.chunkCount ?? 0,
         };
       },
       {
@@ -99,6 +102,10 @@ export class DocumentQueueService implements OnModuleDestroy {
     });
 
     this.logger.log('Document processing queue initialized');
+  }
+
+  registerProcessor(processor: DocumentProcessingProcessor): void {
+    this.processor = processor;
   }
 
   /**
@@ -142,7 +149,7 @@ export class DocumentQueueService implements OnModuleDestroy {
           clearTimeout(timer);
           resolve({
             taskId,
-            status: 'failed' in event ? 'failed' : 'completed',
+            status: event.failedReason ? 'failed' : 'completed',
             error: (event as { failedReason?: string }).failedReason,
           });
         }

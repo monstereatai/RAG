@@ -38,7 +38,19 @@ export class DocumentController {
     private readonly speechProvider: TencentSpeechProvider,
     private readonly visionProvider: VisionProvider,
     private readonly documentQueue: DocumentQueueService,
-  ) {}
+  ) {
+    this.documentQueue.registerProcessor(async (job) => {
+      return this.processAsyncUpload(
+        {
+          originalname: job.filename,
+          mimetype: job.contentType ?? 'application/octet-stream',
+          buffer: Buffer.from(job.originalBufferBase64, 'base64'),
+        } as Express.Multer.File,
+        job.userId,
+        job.taskId,
+      );
+    });
+  }
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
@@ -83,15 +95,26 @@ export class DocumentController {
       user.userId,
     );
 
-    setImmediate(() => {
-      void this.processAsyncUpload(file, user.userId, task.id);
-    });
+    if (this.documentQueue.enabled) {
+      await this.documentQueue.enqueue({
+        taskId: task.id,
+        userId: user.userId,
+        filename: file.originalname,
+        originalBufferBase64: file.buffer.toString('base64'),
+        contentType: file.mimetype,
+      });
+    } else {
+      setImmediate(() => {
+        void this.processAsyncUpload(file, user.userId, task.id);
+      });
+    }
 
     return {
       taskId: task.id,
       status: task.status,
       stage: task.stage,
       progress: task.progress,
+      queueEnabled: this.documentQueue.enabled,
     };
   }
 
@@ -129,20 +152,6 @@ export class DocumentController {
     return task;
   }
 
-  @Get()
-  list(@CurrentUser() user: JwtPayload) {
-    return this.documentService.listDocs(user.userId);
-  }
-
-  @Get(':docId')
-  async get(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
-    const meta = await this.documentService.getDocMeta(docId, user.userId);
-    if (!meta) {
-      throw new BadRequestException(`doc ${docId} not found`);
-    }
-    return meta;
-  }
-
   /**
    * 删除文档（Milvus chunks + BM25 索引同步删除）
    */
@@ -157,14 +166,19 @@ export class DocumentController {
     file: Express.Multer.File,
     userId: string,
     taskId: string,
-  ): Promise<void> {
+  ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
     const content = (await this.extractUploadContent(file, kind)).trim();
-    await this.documentService.upload(file.originalname, content, userId, {
+    if (!content) {
+      await this.documentService.markTaskFailed(taskId, 'document text is empty');
+      throw new BadRequestException('document text is empty');
+    }
+    const result = await this.documentService.upload(file.originalname, content, userId, {
       taskId,
       originalBuffer: file.buffer,
       contentType: file.mimetype,
     });
+    return { chunkCount: result.chunkCount };
   }
 
   /**
@@ -177,6 +191,20 @@ export class DocumentController {
       documentQueue: await this.documentQueue.getStatus(),
       vision: caps,
     };
+  }
+
+  @Get()
+  list(@CurrentUser() user: JwtPayload) {
+    return this.documentService.listDocs(user.userId);
+  }
+
+  @Get(':docId')
+  async get(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
+    const meta = await this.documentService.getDocMeta(docId, user.userId);
+    if (!meta) {
+      throw new BadRequestException(`doc ${docId} not found`);
+    }
+    return meta;
   }
 
   private async extractUploadContent(

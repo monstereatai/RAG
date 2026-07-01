@@ -615,8 +615,8 @@ export class AgenticRagService {
         reason,
         history,
         memoryMessages,
+        (token) => onEvent?.({ type: 'token', data: token }),
       );
-      onEvent?.({ type: 'token', data: ans });
       onEvent?.({ type: 'citation', data: [] });
       return {
         answer: ans,
@@ -929,6 +929,7 @@ export class AgenticRagService {
         history,
         userId,
         memoryMessages,
+        (token) => onEvent?.({ type: 'token', data: token }),
       );
       onEvent?.({ type: 'citation', data: result.references });
       onEvent?.({ type: 'final', data: result });
@@ -948,6 +949,7 @@ export class AgenticRagService {
         reason,
         history,
         memoryMessages,
+        (token) => onEvent?.({ type: 'token', data: token }),
       );
       const result = {
         answer,

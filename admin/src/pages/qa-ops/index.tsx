@@ -8,6 +8,8 @@ import {
   SendOutlined,
   SoundOutlined,
 } from '@ant-design/icons';
+import { XMarkdown } from '@ant-design/x-markdown';
+import '@ant-design/x-markdown/es/XMarkdown/index.css';
 import { ModulePage, qaNav } from '@/components/AdminShell';
 import { Avatar, Button, Dropdown, Input } from 'antd';
 import React from 'react';
@@ -39,8 +41,110 @@ interface ChatMessage {
   retrievalSufficient?: boolean;
   retrievalReason?: string;
   references?: ReferenceChunk[];
-  events?: string[];
+  media?: AnswerMedia[];
+  events?: EventTraceItem[];
 }
+
+interface AnswerMedia {
+  id: string;
+  type: 'image';
+  url: string;
+  alt?: string;
+  title?: string;
+}
+
+interface EventTraceItem {
+  type: string;
+  count: number;
+}
+
+type TtsStatus = 'connecting' | 'synthesizing' | 'playing' | 'error';
+
+const normalizeAssistantMarkdown = (content: string, status?: ChatMessage['status']) => {
+  const normalized = content
+    .replace(/\r\n/g, '\n')
+    .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, '```$1\n');
+  const fenceCount = normalized.match(/```/g)?.length ?? 0;
+  if (status === 'done' && fenceCount % 2 === 1) {
+    return `${normalized}\n\`\`\``;
+  }
+  return normalized;
+};
+
+const toAnswerMedia = (value: unknown): AnswerMedia[] => {
+  const items = Array.isArray(value) ? value : value ? [value] : [];
+  return items
+    .map((item, index): AnswerMedia | null => {
+      if (typeof item === 'string') {
+        return {
+          id: `image-${index}-${item}`,
+          type: 'image',
+          url: item,
+        };
+      }
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const url =
+        typeof record.url === 'string'
+          ? record.url
+          : typeof record.src === 'string'
+            ? record.src
+            : '';
+      if (!url) return null;
+      const type = typeof record.type === 'string' ? record.type : 'image';
+      const mimeType =
+        typeof record.mimeType === 'string' ? record.mimeType : '';
+      if (type !== 'image' && !mimeType.startsWith('image/')) return null;
+      return {
+        id:
+          typeof record.id === 'string'
+            ? record.id
+            : `image-${index}-${url}`,
+        type: 'image',
+        url,
+        alt: typeof record.alt === 'string' ? record.alt : undefined,
+        title: typeof record.title === 'string' ? record.title : undefined,
+      };
+    })
+    .filter((item): item is AnswerMedia => Boolean(item));
+};
+
+const mergeMedia = (
+  current: AnswerMedia[] | undefined,
+  next: AnswerMedia[],
+) => {
+  const merged = [...(current ?? [])];
+  const seen = new Set(merged.map((item) => item.id || item.url));
+  for (const item of next) {
+    const key = item.id || item.url;
+    if (!seen.has(key)) {
+      merged.push(item);
+      seen.add(key);
+    }
+  }
+  return merged;
+};
+
+const appendEventTrace = (
+  events: EventTraceItem[] | undefined,
+  type: string,
+) => {
+  const next = [...(events ?? [])];
+  const last = next[next.length - 1];
+  if (last?.type === type) {
+    next[next.length - 1] = { ...last, count: last.count + 1 };
+    return next;
+  }
+  next.push({ type, count: 1 });
+  return next;
+};
+
+const formatEventTrace = (events: EventTraceItem[]) =>
+  events
+    .map((event) =>
+      event.count > 1 ? `${event.type} × ${event.count}` : event.type,
+    )
+    .join(' → ');
 
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState('');
@@ -65,6 +169,9 @@ const QaOps: React.FC = () => {
   const abortRef = React.useRef<AbortController | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const ttsRef = React.useRef<WebSocket | null>(null);
+  const [ttsStatusByMessageId, setTtsStatusByMessageId] = React.useState<
+    Record<string, TtsStatus>
+  >({});
   const chatBodyRef = React.useRef<HTMLDivElement>(null);
 
   // 自动滚动到底部
@@ -119,6 +226,8 @@ const QaOps: React.FC = () => {
   const handleNewConversation = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    ttsRef.current?.close();
+    setTtsStatusByMessageId({});
     setMessages([]);
     setThreadId(undefined);
     setActiveTitle('');
@@ -127,6 +236,8 @@ const QaOps: React.FC = () => {
   const handleClearConversation = async () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    ttsRef.current?.close();
+    setTtsStatusByMessageId({});
     if (threadId) {
       try {
         await deleteConversation(threadId);
@@ -143,6 +254,8 @@ const QaOps: React.FC = () => {
   const handleSelectConversation = async (item: ConversationSummary) => {
     abortRef.current?.abort();
     abortRef.current = null;
+    ttsRef.current?.close();
+    setTtsStatusByMessageId({});
     setLoading(true);
     try {
       const res = await getConversation(item.threadId);
@@ -173,14 +286,39 @@ const QaOps: React.FC = () => {
     }
   };
 
-  const handlePlayTts = (text: string) => {
+  const setTtsStatus = (messageId: string, status?: TtsStatus) => {
+    setTtsStatusByMessageId((prev) => {
+      const next = { ...prev };
+      if (status) {
+        next[messageId] = status;
+      } else {
+        delete next[messageId];
+      }
+      return next;
+    });
+  };
+
+  const getTtsButtonText = (status?: TtsStatus) => {
+    if (status === 'connecting') return '连接中';
+    if (status === 'synthesizing') return '合成中';
+    if (status === 'playing') return '播放中';
+    if (status === 'error') return '重试';
+    return '播放';
+  };
+
+  const handlePlayTts = (messageId: string, text: string) => {
     const content = text.trim();
     if (!content) return;
 
     ttsRef.current?.close();
+    setTtsStatusByMessageId({});
+    setTtsStatus(messageId, 'connecting');
     const chunks: BlobPart[] = [];
     const ws = createTtsWebSocket(content.slice(0, 800));
     ttsRef.current = ws;
+    ws.onopen = () => {
+      setTtsStatus(messageId, 'synthesizing');
+    };
     ws.onmessage = (event) => {
       if (typeof event.data !== 'string') return;
       try {
@@ -194,14 +332,29 @@ const QaOps: React.FC = () => {
           chunks.push(bytes);
         }
         if (payload.type === 'end') {
+          if (chunks.length === 0) {
+            setTtsStatus(messageId, 'error');
+            return;
+          }
           const blob = new Blob(chunks, { type: 'audio/wav' });
           if (audioRef.current) URL.revokeObjectURL(audioRef.current.src);
           const audio = new Audio(URL.createObjectURL(blob));
           audioRef.current = audio;
-          void audio.play();
+          audio.onplay = () => setTtsStatus(messageId, 'playing');
+          audio.onended = () => setTtsStatus(messageId);
+          audio.onerror = () => setTtsStatus(messageId, 'error');
+          void audio.play().catch(() => setTtsStatus(messageId, 'error'));
         }
       } catch {
         // Ignore non-json websocket frames.
+      }
+    };
+    ws.onerror = () => {
+      setTtsStatus(messageId, 'error');
+    };
+    ws.onclose = () => {
+      if (ttsRef.current === ws) {
+        ttsRef.current = null;
       }
     };
   };
@@ -268,7 +421,7 @@ const QaOps: React.FC = () => {
   const applyAguiEvent = (event: AguiEvent, messageId: string) => {
     updateMessage(messageId, (message) => ({
       ...message,
-      events: [...(message.events ?? []), event.type],
+      events: appendEventTrace(message.events, event.type),
     }));
 
     if (event.type === 'RUN_STARTED') {
@@ -319,13 +472,22 @@ const QaOps: React.FC = () => {
     if (event.type === 'RUN_FINISHED') {
       const output = event.data?.output;
       if (isRecord(output)) {
+        const outputAnswer =
+          typeof output.answer === 'string' ? output.answer : undefined;
         updateMessage(messageId, (message) => ({
           ...message,
-          content:
-            typeof output.answer === 'string' ? output.answer : message.content,
+          content: outputAnswer ?? message.content,
           references: Array.isArray(output.references)
             ? (output.references as ReferenceChunk[])
             : message.references,
+          media: mergeMedia(
+            message.media,
+            [
+              ...toAnswerMedia(output.images),
+              ...toAnswerMedia(output.media),
+              ...toAnswerMedia(output.attachments),
+            ],
+          ),
           route: typeof output.route === 'string' ? output.route : message.route,
           confidence:
             typeof output.confidence === 'number'
@@ -411,6 +573,15 @@ const QaOps: React.FC = () => {
             ? value.retryCount
             : message.retryCount,
       }));
+    }
+    if (name === 'rag.media' || name === 'rag.image' || name === 'rag.images') {
+      const media = toAnswerMedia(value);
+      if (media.length > 0) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          media: mergeMedia(message.media, media),
+        }));
+      }
     }
   };
 
@@ -571,22 +742,59 @@ const QaOps: React.FC = () => {
                 <div className="message assistant" key={message.id}>
                   <Avatar>AI</Avatar>
                   <div className="answer-card">
-                    <p>
-                      {message.content ||
-                        (message.status === 'streaming'
-                          ? '正在通过 AG-UI 协议生成回答...'
-                          : '')}
-                    </p>
+                    {message.content ? (
+                      <>
+                        <XMarkdown
+                          className="answer-markdown"
+                          content={normalizeAssistantMarkdown(
+                            message.content,
+                            message.status,
+                          )}
+                          escapeRawHtml
+                          openLinksInNewTab
+                          paragraphTag="div"
+                        />
+                        {message.status === 'streaming' && (
+                          <span className="answer-typing-caret" />
+                        )}
+                      </>
+                    ) : (
+                      message.status === 'streaming' && (
+                        <p className="answer-loading">
+                          正在通过 AG-UI 协议生成回答...
+                        </p>
+                      )
+                    )}
                     {message.status === 'done' && message.content && (
                       <Button
                         className="answer-voice-btn"
                         icon={<SoundOutlined />}
-                        onClick={() => handlePlayTts(message.content)}
+                        loading={
+                          ttsStatusByMessageId[message.id] === 'connecting' ||
+                          ttsStatusByMessageId[message.id] === 'synthesizing'
+                        }
+                        onClick={() => handlePlayTts(message.id, message.content)}
                         size="small"
                         type="text"
                       >
-                        播放
+                        {getTtsButtonText(ttsStatusByMessageId[message.id])}
                       </Button>
+                    )}
+                    {message.media && message.media.length > 0 && (
+                      <div className="answer-media-grid">
+                        {message.media.map((item) => (
+                          <figure key={item.id}>
+                            <img
+                              alt={item.alt ?? item.title ?? '回答图片'}
+                              loading="lazy"
+                              src={item.url}
+                            />
+                            {(item.title || item.alt) && (
+                              <figcaption>{item.title ?? item.alt}</figcaption>
+                            )}
+                          </figure>
+                        ))}
+                      </div>
                     )}
                     {message.route && (
                       <div className="answer-meta">
@@ -618,7 +826,7 @@ const QaOps: React.FC = () => {
                     )}
                     {message.events && message.events.length > 0 && (
                       <p className="event-trace">
-                        AG-UI：{message.events.join(' → ')}
+                        AG-UI：{formatEventTrace(message.events)}
                       </p>
                     )}
                     {message.references && message.references.length > 0 && (

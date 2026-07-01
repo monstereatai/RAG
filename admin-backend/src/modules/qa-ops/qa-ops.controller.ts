@@ -31,7 +31,7 @@ export class QaOpsController {
   async listConversations() {
     // admin QA Ops 展示所有会话，不按 userId 过滤
     const result = await this.ragClient.getConversations();
-    return { data: (result.data as any)?.data ?? [] };
+    return { data: this.unwrapList(result.data) };
   }
 
   @Get('conversations/:threadId')
@@ -42,7 +42,7 @@ export class QaOpsController {
   ) {
     // admin QA Ops 可查看任意会话，不按 userId 过滤
     const result = await this.ragClient.getConversation(threadId);
-    return { data: (result.data as any)?.data ?? null };
+    return { data: this.unwrapObject(result.data) };
   }
 
   @Delete('conversations/:threadId')
@@ -264,6 +264,18 @@ export class QaOpsController {
     }
 
     return `当前管理后台调用 RAG 后端失败：${message}。请检查 rag-backend 服务状态、RAG_SERVICE_BASE_URL 和 RAG_SERVICE_TOKEN。`;
+  }
+
+  private unwrapList(payload: unknown): unknown[] {
+    if (Array.isArray(payload)) return payload;
+    const data = (payload as { data?: unknown } | null)?.data;
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
+  private unwrapObject(payload: unknown): unknown | null {
+    const data = (payload as { data?: unknown } | null)?.data;
+    return data ?? payload ?? null;
   }
 
   @Get('negative-feedback')

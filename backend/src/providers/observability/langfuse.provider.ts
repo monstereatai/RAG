@@ -62,6 +62,22 @@ export class LangfuseProvider implements OnModuleDestroy {
     return !!this.client;
   }
 
+  getStatus(): {
+    enabled: boolean;
+    baseUrl: string;
+    hasPublicKey: boolean;
+    hasSecretKey: boolean;
+  } {
+    return {
+      enabled: this.isEnabled(),
+      baseUrl:
+        this.config.get<string>('langfuse.baseUrl') ??
+        'https://cloud.langfuse.com',
+      hasPublicKey: Boolean(this.config.get<string>('langfuse.publicKey')),
+      hasSecretKey: Boolean(this.config.get<string>('langfuse.secretKey')),
+    };
+  }
+
   traceRagAnswer(payload: RagTracePayload): void {
     if (!this.client) return;
 

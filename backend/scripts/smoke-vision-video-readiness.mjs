@@ -16,9 +16,13 @@ const videoDocs = documents.filter((doc) => doc.type === 'video');
 const audioDocs = documents.filter((doc) => doc.type === 'audio');
 const missingFiles = [];
 const missingTranscripts = [];
+const missingOcrSidecars = [];
 
 for (const doc of [...imageDocs, ...videoDocs, ...audioDocs]) {
   if (!(await exists(doc.path))) missingFiles.push(doc.path);
+  if (doc.type === 'image' && !(await exists(doc.ocrPath))) {
+    missingOcrSidecars.push(doc.ocrPath ?? `${doc.id}: ocrPath missing`);
+  }
   if ((doc.type === 'video' || doc.type === 'audio') && !(await exists(doc.transcriptPath))) {
     missingTranscripts.push(doc.transcriptPath ?? `${doc.id}: transcriptPath missing`);
   }
@@ -35,6 +39,7 @@ const datasetReady =
   imageDocs.length > 0 &&
   videoDocs.length > 0 &&
   missingFiles.length === 0 &&
+  missingOcrSidecars.length === 0 &&
   missingTranscripts.length === 0;
 const ok = datasetReady && (providerConfigured || !requireProvider);
 
@@ -52,6 +57,7 @@ console.log(
       audioDocuments: audioDocs.length,
       missingFiles,
       missingTranscripts,
+      missingOcrSidecars,
       nextStep: providerConfigured
         ? 'Vision/video provider is configured; wire live OCR/video embedding calls into ingestion.'
         : 'Dataset and sidecar transcripts are ready. Configure VISION_PROVIDER plus VISION_API_KEY or QWEN_VL_API_KEY to run true OCR/video understanding.',

@@ -115,6 +115,77 @@
       ]
     },
     {
+      "id": "private-api-standard",
+      "type": "markdown",
+      "filename": "engineering-api-standard.md",
+      "path": "eval/private-fixtures/documents/engineering-api-standard.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table",
+        "checklist"
+      ]
+    },
+    {
+      "id": "private-frontend-quality",
+      "type": "markdown",
+      "filename": "engineering-frontend-quality-gate.md",
+      "path": "eval/private-fixtures/documents/engineering-frontend-quality-gate.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table",
+        "metrics"
+      ]
+    },
+    {
+      "id": "private-permission-matrix",
+      "type": "markdown",
+      "filename": "security-permission-matrix.md",
+      "path": "eval/private-fixtures/documents/security-permission-matrix.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table",
+        "permission"
+      ]
+    },
+    {
+      "id": "private-revenue-recognition",
+      "type": "markdown",
+      "filename": "finance-revenue-recognition.md",
+      "path": "eval/private-fixtures/documents/finance-revenue-recognition.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table"
+      ]
+    },
+    {
+      "id": "private-change-management",
+      "type": "markdown",
+      "filename": "ops-change-management.md",
+      "path": "eval/private-fixtures/documents/ops-change-management.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table",
+        "workflow"
+      ]
+    },
+    {
+      "id": "private-renewal-playbook",
+      "type": "markdown",
+      "filename": "customer-renewal-playbook.md",
+      "path": "eval/private-fixtures/documents/customer-renewal-playbook.md",
+      "status": "ready",
+      "expectedModalities": [
+        "text",
+        "table",
+        "cross-department"
+      ]
+    },
+    {
       "id": "private-meeting-audio",
       "type": "audio",
       "filename": "meeting-action-items.wav",
@@ -135,7 +206,8 @@
       "expectedModalities": [
         "image",
         "ocr"
-      ]
+      ],
+      "ocrPath": "eval/private-fixtures/documents/dashboard-screenshot-ocr.md"
     },
     {
       "id": "private-approval-video",
@@ -238,6 +310,45 @@
       "requireCitation": true,
       "sourceDocumentIds": [
         "private-approval-video"
+      ]
+    },
+    {
+      "id": "private-api-taskid",
+      "query": "异步写操作为什么要返回 taskId？",
+      "expectedKeywords": [
+        "异步任务",
+        "taskId",
+        "分页接口"
+      ],
+      "requireCitation": true,
+      "sourceDocumentIds": [
+        "private-api-standard"
+      ]
+    },
+    {
+      "id": "private-permission-inheritance",
+      "query": "部门权限和角色权限继承时，拒绝规则优先级如何处理？",
+      "expectedKeywords": [
+        "子部门继承",
+        "拒绝规则",
+        "允许规则"
+      ],
+      "requireCitation": true,
+      "sourceDocumentIds": [
+        "private-permission-matrix"
+      ]
+    },
+    {
+      "id": "private-change-c3",
+      "query": "涉及数据库 schema 的生产变更属于什么等级？需要谁审批？",
+      "expectedKeywords": [
+        "C3",
+        "运维负责人",
+        "研发负责人"
+      ],
+      "requireCitation": true,
+      "sourceDocumentIds": [
+        "private-change-management"
       ]
     }
   ]

@@ -1,6 +1,163 @@
 {
   "version": "private-sanitized-2026-06-30",
   "description": "脱敏 GraphRAG 业务图谱种子（增强版），包含跨部门实体关系、别名和职责链。可 dry-run 校验或导入本地 Neo4j。",
+  "schema": {
+    "entityTypes": [
+      "Department",
+      "Team",
+      "Role",
+      "Position",
+      "Policy",
+      "Process",
+      "System",
+      "DataCategory",
+      "Document",
+      "Metric"
+    ],
+    "relationshipTypes": [
+      "BELONGS_TO",
+      "OWNS",
+      "APPROVES",
+      "REVIEWS",
+      "ESCALATES_TO",
+      "REQUIRES",
+      "GOVERNS",
+      "USES",
+      "DEPENDS_ON",
+      "INHERITS"
+    ],
+    "aliasRules": [
+      {
+        "canonical": "客户成功部",
+        "aliases": [
+          "CS",
+          "CSM 团队",
+          "客户成功团队"
+        ]
+      },
+      {
+        "canonical": "安全部",
+        "aliases": [
+          "安全团队",
+          "Security",
+          "信息安全"
+        ]
+      },
+      {
+        "canonical": "研发团队",
+        "aliases": [
+          "研发部",
+          "工程团队",
+          "Engineering"
+        ]
+      },
+      {
+        "canonical": "财务部",
+        "aliases": [
+          "Finance",
+          "财务团队"
+        ]
+      },
+      {
+        "canonical": "法务部",
+        "aliases": [
+          "Legal",
+          "法务团队"
+        ]
+      },
+      {
+        "canonical": "生产权限",
+        "aliases": [
+          "prod 权限",
+          "线上权限"
+        ]
+      }
+    ]
+  },
+  "initialEntities": [
+    {
+      "id": "dept-cs",
+      "name": "客户成功部",
+      "type": "Department"
+    },
+    {
+      "id": "dept-security",
+      "name": "安全部",
+      "type": "Department"
+    },
+    {
+      "id": "dept-finance",
+      "name": "财务部",
+      "type": "Department"
+    },
+    {
+      "id": "dept-legal",
+      "name": "法务部",
+      "type": "Department"
+    },
+    {
+      "id": "dept-engineering",
+      "name": "研发团队",
+      "type": "Team"
+    },
+    {
+      "id": "role-duty-manager",
+      "name": "值班经理",
+      "type": "Position"
+    },
+    {
+      "id": "role-security-reviewer",
+      "name": "安全审批人",
+      "type": "Position"
+    },
+    {
+      "id": "policy-permission-matrix",
+      "name": "权限矩阵与数据分级规范",
+      "type": "Policy"
+    },
+    {
+      "id": "process-change-management",
+      "name": "生产变更流程",
+      "type": "Process"
+    },
+    {
+      "id": "system-rag-kb",
+      "name": "企业智能知识库系统",
+      "type": "System"
+    }
+  ],
+  "initialRelationships": [
+    {
+      "from": "role-duty-manager",
+      "type": "BELONGS_TO",
+      "to": "dept-cs"
+    },
+    {
+      "from": "role-security-reviewer",
+      "type": "BELONGS_TO",
+      "to": "dept-security"
+    },
+    {
+      "from": "policy-permission-matrix",
+      "type": "OWNS",
+      "to": "dept-security"
+    },
+    {
+      "from": "process-change-management",
+      "type": "REQUIRES",
+      "to": "dept-engineering"
+    },
+    {
+      "from": "process-change-management",
+      "type": "REVIEWS",
+      "to": "dept-security"
+    },
+    {
+      "from": "system-rag-kb",
+      "type": "USES",
+      "to": "policy-permission-matrix"
+    }
+  ],
   "documents": [
     {
       "sourceId": "private-graph-customer-sla",
@@ -61,6 +218,36 @@
       "title": "数据主体权利响应流程",
       "text": "数据查阅请求 15 个工作日内响应，由法务部处理。数据删除请求 30 个工作日内完成。拒绝处理需法务部书面意见。个人数据存储期限不超过业务必要期限加 180 天。员工离职后 30 天内删除或匿名化所有个人数据。",
       "query": "数据主体权利请求的响应时间由哪些部门负责？"
+    },
+    {
+      "sourceId": "private-graph-api-governance",
+      "title": "API 治理与审计关系",
+      "text": "异步写操作返回 taskId。影响权限、账务、审批的接口必须记录审计日志。API 版本治理由研发效能组负责。OpenAPI 文档随接口变更同步。错误码由前端架构组和研发效能组共同维护。",
+      "query": "哪些接口必须记录审计日志，API 治理由谁负责？"
+    },
+    {
+      "sourceId": "private-graph-permission-inheritance",
+      "title": "权限继承与回显关系",
+      "text": "部门权限默认向子部门继承。角色权限允许继承。拒绝规则优先级高于允许规则。权限配置页面必须回显用户、角色、部门、岗位、是否继承、授权来源、最后变更人。安全部负责权限矩阵规范。",
+      "query": "权限继承和权限回显涉及哪些实体？"
+    },
+    {
+      "sourceId": "private-graph-change-management",
+      "title": "生产变更审批图谱",
+      "text": "涉及数据库 schema 或核心链路的变更属于 C3。C3 变更需要运维负责人和研发负责人审批。标准变更窗口是每周二、周四 20:00-22:00。未通过回滚演练的变更不得进入生产。",
+      "query": "C3 生产变更需要哪些审批和前置条件？"
+    },
+    {
+      "sourceId": "private-graph-revenue-risk",
+      "title": "收入确认与异常池关系",
+      "text": "SaaS 订阅收入按服务期间线性确认。专业服务收入按里程碑确认。合同金额、回款金额、开票金额三者不一致时进入异常池。异常池由财务负责人确认。非标折扣开票需要 Deal Desk 结论和法务确认。",
+      "query": "收入确认异常池由谁确认，非标折扣开票需要什么？"
+    },
+    {
+      "sourceId": "private-graph-renewal-risk",
+      "title": "续约风险跨部门协作",
+      "text": "连续 14 天关键用户未登录属于续约风险信号。30 天内 P1/P2 工单超过 3 个属于续约风险信号。高风险由客户成功负责人牵头挽留。涉及产品缺口同步产品部，涉及价格折扣同步销售部和财务部，涉及合同条款同步法务部。",
+      "query": "客户续约高风险需要哪些部门协作？"
     }
   ]
 }

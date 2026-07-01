@@ -494,6 +494,161 @@ function buildDocumentFiles() {
 - 数据延迟不超过 15 分钟
 - 指标定义变更需数据治理委员会审批
 `,
+    // ── More realistic raw business source documents ───────────────
+    'engineering-api-standard.md': `# API 设计与版本治理规范
+
+> 版本：3.0 | 生效日期：2026-03-01 | 责任部门：研发效能组
+
+## 一、REST API 命名
+
+- 资源路径必须使用复数名词，例如 /documents、/users、/permissions。
+- 写操作必须具备幂等键或业务唯一键；异步任务返回 taskId。
+- 分页接口统一使用 page、pageSize、total，不允许返回无上限数组。
+
+## 二、版本策略
+
+| 版本类型 | 变更示例 | 兼容要求 |
+|---------|---------|---------|
+| patch | 新增可选字段 | 必须兼容 |
+| minor | 新增资源或新枚举 | 必须兼容 |
+| major | 删除字段或修改语义 | 需新路径 /api/v{n} |
+
+## 三、发布闸门
+
+- OpenAPI 文档必须随接口变更同步。
+- 错误码需可被前端稳定处理，不允许直接透出底层异常。
+- 影响权限、账务、审批的接口必须记录审计日志。
+`,
+    'engineering-frontend-quality-gate.md': `# 前端质量门禁规范
+
+> 版本：1.8 | 生效日期：2026-02-15 | 责任部门：前端架构组
+
+## 一、构建门禁
+
+- TypeScript 不允许新增 error。
+- Lint warning 不阻断灰度，但新增 warning 必须登记来源。
+- 核心页面首屏 JS 体积超过 350KB 需拆包说明。
+
+## 二、体验门禁
+
+| 指标 | 阈值 | 处理 |
+|------|------|------|
+| LCP | <= 2.5s | 超出需优化图片/拆包 |
+| INP | <= 200ms | 超出需定位长任务 |
+| CLS | <= 0.1 | 超出需固定尺寸 |
+
+## 三、回归要求
+
+- 管理后台表格必须覆盖空态、加载态、错误态。
+- 文档/问答/图谱页面不得出现横向溢出。
+- 涉及音频播放、流式输出、导出下载的功能必须有可见状态反馈。
+`,
+    'security-permission-matrix.md': `# 权限矩阵与数据分级规范
+
+> 版本：2.4 | 生效日期：2026-01-20 | 责任部门：安全部
+
+## 一、数据分级
+
+| 等级 | 示例 | 默认权限 |
+|------|------|---------|
+| L1 公开 | 产品介绍、公开帮助文档 | 全员可读 |
+| L2 内部 | 流程制度、培训材料 | 员工可读 |
+| L3 受限 | 客户合同、财务报销、工单 SLA | 部门/角色授权 |
+| L4 高敏 | 身份证号、银行卡、源代码密钥 | 最小权限 + 审计 |
+
+## 二、权限继承
+
+- 部门权限默认向子部门继承。
+- 角色权限允许继承，但拒绝规则优先级高于允许规则。
+- 文档 owner 默认拥有管理权限，不代表拥有分享给外部的权限。
+
+## 三、回显要求
+
+权限配置页面必须回显：用户、角色、部门、岗位、是否继承、授权来源、最后变更人。
+`,
+    'finance-revenue-recognition.md': `# 收入确认与开票流程
+
+> 版本：1.2 | 生效日期：2026-04-01 | 责任部门：财务部
+
+## 一、收入确认
+
+- SaaS 订阅收入按服务期间线性确认。
+- 专业服务收入按里程碑确认，未交付部分不得提前确认。
+- 退款、折让和坏账准备必须在当月财务关账前完成调整。
+
+## 二、开票规则
+
+| 场景 | 开票前置条件 | 审批人 |
+|------|-------------|--------|
+| 标准订阅 | 合同归档 + 回款确认 | 财务专员 |
+| 大客户预付款 | 合同归档 + 销售负责人确认 | 财务负责人 |
+| 非标折扣 | Deal Desk 结论 + 法务确认 | 财务负责人 |
+
+## 三、异常处理
+
+合同金额、回款金额、开票金额三者不一致时，必须进入异常池并由财务负责人确认。
+`,
+    'ops-change-management.md': `# 生产变更管理规范
+
+> 版本：2.0 | 生效日期：2026-03-10 | 责任部门：运维部
+
+## 一、变更等级
+
+| 等级 | 范围 | 审批 |
+|------|------|------|
+| C1 | 只影响单租户配置 | 值班经理 |
+| C2 | 影响多租户但可快速回滚 | 运维负责人 |
+| C3 | 涉及数据库 schema 或核心链路 | 运维负责人 + 研发负责人 |
+
+## 二、变更窗口
+
+- 标准变更窗口为每周二、周四 20:00-22:00。
+- 紧急安全修复可走加急流程，但必须补充复盘。
+- 未通过回滚演练的变更不得进入生产。
+
+## 三、记录要求
+
+变更单必须记录变更内容、影响范围、回滚方案、验证人、开始时间、结束时间。
+`,
+    'customer-renewal-playbook.md': `# 客户续约风险识别手册
+
+> 版本：1.0 | 生效日期：2026-02-01 | 责任部门：客户成功部
+
+## 一、风险信号
+
+- 连续 14 天关键用户未登录。
+- 30 天内 P1/P2 工单超过 3 个。
+- 决策人变更且未完成新关系建立。
+- 合同到期前 60 天仍未确认预算。
+
+## 二、响应动作
+
+| 风险等级 | 触发条件 | 动作 |
+|---------|----------|------|
+| 高 | 两个以上风险信号 | 客户成功负责人牵头挽留 |
+| 中 | 一个核心风险信号 | CSM 制定 14 天行动计划 |
+| 低 | 使用轻微下降 | 发送健康报告 |
+
+## 三、跨部门协作
+
+涉及产品缺口时同步产品部；涉及价格折扣时同步销售部和财务部；涉及合同条款时同步法务部。
+`,
+    'dashboard-screenshot-ocr.md': `# Dashboard Screenshot OCR Sidecar
+
+## OCR 识别文字
+
+- 企业智能知识库系统
+- 知识图谱
+- 当前图谱节点
+- SLA
+- P1 工单
+- 关系总数
+- 节点总数
+
+## 图像描述
+
+这是一张管理后台知识图谱页面截图，左侧是知识图谱菜单，中心为节点关系图，右侧为节点与关系统计。
+`,
   };
 }
 
@@ -1264,6 +1419,54 @@ function makeMultimodalDataset() {
         expectedModalities: ['text', 'structured'],
       },
       {
+        id: 'private-api-standard',
+        type: 'markdown',
+        filename: 'engineering-api-standard.md',
+        path: 'eval/private-fixtures/documents/engineering-api-standard.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table', 'checklist'],
+      },
+      {
+        id: 'private-frontend-quality',
+        type: 'markdown',
+        filename: 'engineering-frontend-quality-gate.md',
+        path: 'eval/private-fixtures/documents/engineering-frontend-quality-gate.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table', 'metrics'],
+      },
+      {
+        id: 'private-permission-matrix',
+        type: 'markdown',
+        filename: 'security-permission-matrix.md',
+        path: 'eval/private-fixtures/documents/security-permission-matrix.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table', 'permission'],
+      },
+      {
+        id: 'private-revenue-recognition',
+        type: 'markdown',
+        filename: 'finance-revenue-recognition.md',
+        path: 'eval/private-fixtures/documents/finance-revenue-recognition.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table'],
+      },
+      {
+        id: 'private-change-management',
+        type: 'markdown',
+        filename: 'ops-change-management.md',
+        path: 'eval/private-fixtures/documents/ops-change-management.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table', 'workflow'],
+      },
+      {
+        id: 'private-renewal-playbook',
+        type: 'markdown',
+        filename: 'customer-renewal-playbook.md',
+        path: 'eval/private-fixtures/documents/customer-renewal-playbook.md',
+        status: 'ready',
+        expectedModalities: ['text', 'table', 'cross-department'],
+      },
+      {
         id: 'private-meeting-audio',
         type: 'audio',
         filename: 'meeting-action-items.wav',
@@ -1279,6 +1482,7 @@ function makeMultimodalDataset() {
         path: 'eval/private-fixtures/media/dashboard-screenshot.png',
         status: 'ready',
         expectedModalities: ['image', 'ocr'],
+        ocrPath: 'eval/private-fixtures/documents/dashboard-screenshot-ocr.md',
       },
       {
         id: 'private-approval-video',
@@ -1344,6 +1548,27 @@ function makeMultimodalDataset() {
         requireCitation: true,
         sourceDocumentIds: ['private-approval-video'],
       },
+      {
+        id: 'private-api-taskid',
+        query: '异步写操作为什么要返回 taskId？',
+        expectedKeywords: ['异步任务', 'taskId', '分页接口'],
+        requireCitation: true,
+        sourceDocumentIds: ['private-api-standard'],
+      },
+      {
+        id: 'private-permission-inheritance',
+        query: '部门权限和角色权限继承时，拒绝规则优先级如何处理？',
+        expectedKeywords: ['子部门继承', '拒绝规则', '允许规则'],
+        requireCitation: true,
+        sourceDocumentIds: ['private-permission-matrix'],
+      },
+      {
+        id: 'private-change-c3',
+        query: '涉及数据库 schema 的生产变更属于什么等级？需要谁审批？',
+        expectedKeywords: ['C3', '运维负责人', '研发负责人'],
+        requireCitation: true,
+        sourceDocumentIds: ['private-change-management'],
+      },
     ],
   };
 }
@@ -1357,6 +1582,60 @@ function makeGraphSeed() {
     version: 'private-sanitized-2026-06-30',
     description:
       '脱敏 GraphRAG 业务图谱种子（增强版），包含跨部门实体关系、别名和职责链。可 dry-run 校验或导入本地 Neo4j。',
+    schema: {
+      entityTypes: [
+        'Department',
+        'Team',
+        'Role',
+        'Position',
+        'Policy',
+        'Process',
+        'System',
+        'DataCategory',
+        'Document',
+        'Metric',
+      ],
+      relationshipTypes: [
+        'BELONGS_TO',
+        'OWNS',
+        'APPROVES',
+        'REVIEWS',
+        'ESCALATES_TO',
+        'REQUIRES',
+        'GOVERNS',
+        'USES',
+        'DEPENDS_ON',
+        'INHERITS',
+      ],
+      aliasRules: [
+        { canonical: '客户成功部', aliases: ['CS', 'CSM 团队', '客户成功团队'] },
+        { canonical: '安全部', aliases: ['安全团队', 'Security', '信息安全'] },
+        { canonical: '研发团队', aliases: ['研发部', '工程团队', 'Engineering'] },
+        { canonical: '财务部', aliases: ['Finance', '财务团队'] },
+        { canonical: '法务部', aliases: ['Legal', '法务团队'] },
+        { canonical: '生产权限', aliases: ['prod 权限', '线上权限'] },
+      ],
+    },
+    initialEntities: [
+      { id: 'dept-cs', name: '客户成功部', type: 'Department' },
+      { id: 'dept-security', name: '安全部', type: 'Department' },
+      { id: 'dept-finance', name: '财务部', type: 'Department' },
+      { id: 'dept-legal', name: '法务部', type: 'Department' },
+      { id: 'dept-engineering', name: '研发团队', type: 'Team' },
+      { id: 'role-duty-manager', name: '值班经理', type: 'Position' },
+      { id: 'role-security-reviewer', name: '安全审批人', type: 'Position' },
+      { id: 'policy-permission-matrix', name: '权限矩阵与数据分级规范', type: 'Policy' },
+      { id: 'process-change-management', name: '生产变更流程', type: 'Process' },
+      { id: 'system-rag-kb', name: '企业智能知识库系统', type: 'System' },
+    ],
+    initialRelationships: [
+      { from: 'role-duty-manager', type: 'BELONGS_TO', to: 'dept-cs' },
+      { from: 'role-security-reviewer', type: 'BELONGS_TO', to: 'dept-security' },
+      { from: 'policy-permission-matrix', type: 'OWNS', to: 'dept-security' },
+      { from: 'process-change-management', type: 'REQUIRES', to: 'dept-engineering' },
+      { from: 'process-change-management', type: 'REVIEWS', to: 'dept-security' },
+      { from: 'system-rag-kb', type: 'USES', to: 'policy-permission-matrix' },
+    ],
     documents: [
       {
         sourceId: 'private-graph-customer-sla',
@@ -1418,6 +1697,36 @@ function makeGraphSeed() {
         text: '数据查阅请求 15 个工作日内响应，由法务部处理。数据删除请求 30 个工作日内完成。拒绝处理需法务部书面意见。个人数据存储期限不超过业务必要期限加 180 天。员工离职后 30 天内删除或匿名化所有个人数据。',
         query: '数据主体权利请求的响应时间由哪些部门负责？',
       },
+      {
+        sourceId: 'private-graph-api-governance',
+        title: 'API 治理与审计关系',
+        text: '异步写操作返回 taskId。影响权限、账务、审批的接口必须记录审计日志。API 版本治理由研发效能组负责。OpenAPI 文档随接口变更同步。错误码由前端架构组和研发效能组共同维护。',
+        query: '哪些接口必须记录审计日志，API 治理由谁负责？',
+      },
+      {
+        sourceId: 'private-graph-permission-inheritance',
+        title: '权限继承与回显关系',
+        text: '部门权限默认向子部门继承。角色权限允许继承。拒绝规则优先级高于允许规则。权限配置页面必须回显用户、角色、部门、岗位、是否继承、授权来源、最后变更人。安全部负责权限矩阵规范。',
+        query: '权限继承和权限回显涉及哪些实体？',
+      },
+      {
+        sourceId: 'private-graph-change-management',
+        title: '生产变更审批图谱',
+        text: '涉及数据库 schema 或核心链路的变更属于 C3。C3 变更需要运维负责人和研发负责人审批。标准变更窗口是每周二、周四 20:00-22:00。未通过回滚演练的变更不得进入生产。',
+        query: 'C3 生产变更需要哪些审批和前置条件？',
+      },
+      {
+        sourceId: 'private-graph-revenue-risk',
+        title: '收入确认与异常池关系',
+        text: 'SaaS 订阅收入按服务期间线性确认。专业服务收入按里程碑确认。合同金额、回款金额、开票金额三者不一致时进入异常池。异常池由财务负责人确认。非标折扣开票需要 Deal Desk 结论和法务确认。',
+        query: '收入确认异常池由谁确认，非标折扣开票需要什么？',
+      },
+      {
+        sourceId: 'private-graph-renewal-risk',
+        title: '续约风险跨部门协作',
+        text: '连续 14 天关键用户未登录属于续约风险信号。30 天内 P1/P2 工单超过 3 个属于续约风险信号。高风险由客户成功负责人牵头挽留。涉及产品缺口同步产品部，涉及价格折扣同步销售部和财务部，涉及合同条款同步法务部。',
+        query: '客户续约高风险需要哪些部门协作？',
+      },
     ],
   };
 }
@@ -1444,11 +1753,16 @@ function makeOrganizationFixture() {
       { id: 'dept-it', name: '信息技术部', parentId: null },
       { id: 'dept-ops', name: '运维部', parentId: null },
       { id: 'dept-admin', name: '行政部', parentId: null },
+      { id: 'dept-engineering', name: '研发部', parentId: null },
+      { id: 'dept-data', name: '数据平台部', parentId: null },
       // Sub-departments
       { id: 'dept-sales-east', name: '华东销售团队', parentId: 'dept-sales' },
       { id: 'dept-sales-west', name: '西部销售团队', parentId: 'dept-sales' },
       { id: 'dept-ops-sre', name: 'SRE 组', parentId: 'dept-ops' },
       { id: 'dept-ops-noc', name: 'NOC 值班组', parentId: 'dept-ops' },
+      { id: 'dept-eng-frontend', name: '前端架构组', parentId: 'dept-engineering' },
+      { id: 'dept-eng-backend', name: '后端平台组', parentId: 'dept-engineering' },
+      { id: 'dept-eng-efficiency', name: '研发效能组', parentId: 'dept-engineering' },
     ],
     positions: [
       { id: 'pos-ceo', name: 'CEO', departmentId: 'dept-exec' },
@@ -1468,6 +1782,11 @@ function makeOrganizationFixture() {
       { id: 'pos-cs-owner', name: '客户成功负责人', departmentId: 'dept-cs' },
       { id: 'pos-procurement', name: '采购负责人', departmentId: 'dept-finance' },
       { id: 'pos-admin-owner', name: '行政负责人', departmentId: 'dept-admin' },
+      { id: 'pos-rd-owner', name: '研发负责人', departmentId: 'dept-engineering' },
+      { id: 'pos-frontend-arch', name: '前端架构师', departmentId: 'dept-eng-frontend' },
+      { id: 'pos-backend-arch', name: '后端架构师', departmentId: 'dept-eng-backend' },
+      { id: 'pos-dev-efficiency', name: '研发效能负责人', departmentId: 'dept-eng-efficiency' },
+      { id: 'pos-data-owner', name: '数据负责人', departmentId: 'dept-data' },
     ],
     users: [
       { id: '1', username: 'admin', departmentId: 'dept-finance', positionId: 'pos-finance-owner', roles: ['admin'] },
@@ -1475,12 +1794,62 @@ function makeOrganizationFixture() {
       { id: '3', username: 'zhangsan', departmentId: 'dept-sales', positionId: 'pos-sales-dir', roles: ['user'] },
       { id: '4', username: 'lisi', departmentId: 'dept-legal', positionId: 'pos-legal-owner', roles: ['knowledge-manager'] },
       { id: '5', username: 'wangwu', departmentId: 'dept-it', positionId: 'pos-it-owner', roles: ['user'] },
+      { id: '6', username: 'zhaoliu', departmentId: 'dept-eng-frontend', positionId: 'pos-frontend-arch', roles: ['user', 'knowledge-manager'] },
+      { id: '7', username: 'sunqi', departmentId: 'dept-security', positionId: 'pos-security-reviewer', roles: ['security-auditor'] },
+      { id: '8', username: 'zhouba', departmentId: 'dept-data', positionId: 'pos-data-owner', roles: ['user'] },
     ],
     roles: [
       { id: 'admin', name: '管理员', inherits: ['knowledge-manager', 'security-auditor'] },
       { id: 'knowledge-manager', name: '知识库管理员', inherits: ['user'] },
       { id: 'security-auditor', name: '安全审计员', inherits: ['user'] },
       { id: 'user', name: '普通用户', inherits: [] },
+    ],
+    sourceSystem: {
+      name: 'Mock-OA-Directory',
+      syncMode: 'full-and-incremental',
+      primaryKey: 'id',
+      fields: [
+        'id',
+        'username',
+        'departmentId',
+        'positionId',
+        'roles',
+        'managerId',
+        'status',
+        'updatedAt',
+      ],
+    },
+    inheritanceRules: [
+      { type: 'department', rule: 'parent department grants are inherited by child departments unless explicitly denied' },
+      { type: 'role', rule: 'role grants include inherited roles recursively' },
+      { type: 'position', rule: 'position grants do not inherit across departments by default' },
+      { type: 'deny', rule: 'deny has higher priority than allow' },
+    ],
+    permissionEchoSamples: [
+      {
+        userId: '6',
+        docId: 'private-api-standard',
+        decision: 'allow',
+        matchedSubjects: [
+          { subjectType: 'department', subjectId: 'dept-engineering', inheritedBy: 'dept-eng-frontend' },
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+        ],
+      },
+      {
+        userId: '7',
+        docId: 'private-security-incident',
+        decision: 'allow',
+        matchedSubjects: [
+          { subjectType: 'role', subjectId: 'security-auditor' },
+          { subjectType: 'department', subjectId: 'dept-security' },
+        ],
+      },
+      {
+        userId: '2',
+        docId: 'private-legal-contract',
+        decision: 'deny',
+        matchedSubjects: [],
+      },
     ],
     permissionExpectations: [
       {
@@ -1522,6 +1891,27 @@ function makeOrganizationFixture() {
           { subjectType: 'department', subjectId: 'dept-sales' },
         ],
       },
+      {
+        docId: 'private-api-standard',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+          { subjectType: 'department', subjectId: 'dept-engineering' },
+        ],
+      },
+      {
+        docId: 'private-permission-matrix',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'security-auditor' },
+          { subjectType: 'department', subjectId: 'dept-security' },
+        ],
+      },
+      {
+        docId: 'private-change-management',
+        readableBy: [
+          { subjectType: 'department', subjectId: 'dept-ops' },
+          { subjectType: 'department', subjectId: 'dept-engineering' },
+        ],
+      },
     ],
   };
 }
@@ -1561,6 +1951,17 @@ async function checkFixtures() {
   const multimodalDocs = multimodal.documents ?? [];
   const graphDocs = graph.documents ?? [];
   const departments = organization.departments ?? [];
+  const graphSchemaReady =
+    Array.isArray(graph.schema?.entityTypes) &&
+    graph.schema.entityTypes.length >= 8 &&
+    Array.isArray(graph.schema?.relationshipTypes) &&
+    graph.schema.relationshipTypes.length >= 8 &&
+    Array.isArray(graph.aliasRules ?? graph.schema?.aliasRules);
+  const organizationRulesReady =
+    Array.isArray(organization.inheritanceRules) &&
+    organization.inheritanceRules.length >= 4 &&
+    Array.isArray(organization.permissionEchoSamples) &&
+    organization.permissionEchoSamples.length >= 3;
 
   // Validate enhanced dataset expectations
   const hasConflict = businessItems.some((i) => i.expectConflictHandling);
@@ -1571,9 +1972,11 @@ async function checkFixtures() {
     ok:
       missing.length === 0 &&
       businessItems.length >= 130 &&
-      multimodalDocs.length >= 10 &&
-      graphDocs.length >= 8 &&
-      departments.length >= 10 &&
+      multimodalDocs.length >= 18 &&
+      graphDocs.length >= 15 &&
+      graphSchemaReady &&
+      departments.length >= 18 &&
+      organizationRulesReady &&
       hasConflict &&
       hasRefusal &&
       hasCrossDept,
@@ -1582,7 +1985,9 @@ async function checkFixtures() {
     businessCases: businessItems.length,
     multimodalDocuments: multimodalDocs.length,
     graphDocuments: graphDocs.length,
+    graphSchemaReady,
     departments: departments.length,
+    organizationRulesReady,
     hasConflictScenarios: hasConflict,
     hasRefusalScenarios: hasRefusal,
     hasCrossDepartmentScenarios: hasCrossDept,

@@ -68,6 +68,19 @@ export class MemoryService {
     return this.mem0Provider.isEnabled();
   }
 
+  getStatus(): {
+    enabled: boolean;
+    scopes: Array<'user' | 'session'>;
+    writePolicy: string;
+  } {
+    return {
+      enabled: this.mem0Provider.isEnabled(),
+      scopes: ['user', 'session'],
+      writePolicy:
+        'LLM classifier writes durable profile/preferences to user scope and temporary task context to session scope.',
+    };
+  }
+
   /**
    * 搜索用户 + 会话层记忆，构建 SystemMessage
    *
@@ -172,6 +185,22 @@ export class MemoryService {
    */
   async listMemories(userId: string): Promise<Mem0MemoryResult[]> {
     return this.mem0Provider.getAll(userId);
+  }
+
+  async listSessionMemories(
+    userId: string,
+    conversationId: string,
+  ): Promise<Mem0MemoryResult[]> {
+    return this.mem0Provider.getAll(userId, conversationId);
+  }
+
+  async searchMemories(
+    query: string,
+    userId: string,
+    conversationId?: string,
+    topK = 5,
+  ): Promise<MemorySearchResult> {
+    return this.searchMemory(query, userId, conversationId, topK);
   }
 
   /**

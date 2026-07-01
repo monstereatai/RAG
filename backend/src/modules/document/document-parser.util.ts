@@ -29,6 +29,32 @@ export interface UrlExtractionResult {
   contentType: string;
   fetchedAt: string;
   snapshot: Buffer;
+  extractionMode: 'static' | 'dynamic';
+  renderError?: string;
+}
+
+interface PlaywrightModule {
+  chromium: {
+    launch(options: { headless: boolean }): Promise<PlaywrightBrowser>;
+  };
+}
+
+interface PlaywrightBrowser {
+  newPage(): Promise<PlaywrightPage>;
+  close(): Promise<void>;
+}
+
+interface PlaywrightPage {
+  goto(
+    url: string,
+    options: {
+      waitUntil: 'load' | 'domcontentloaded' | 'networkidle';
+      timeout: number;
+    },
+  ): Promise<unknown>;
+  waitForTimeout(ms: number): Promise<void>;
+  content(): Promise<string>;
+  url(): string;
 }
 
 export function detectDocumentKind(filename: string): SupportedDocumentKind {
@@ -140,6 +166,38 @@ export async function extractUrlContent(
     throw new BadRequestException('only http and https urls are supported');
   }
 
+  const dynamicEnabled = process.env.URL_EXTRACT_DYNAMIC_ENABLED === 'true';
+  if (dynamicEnabled) {
+    try {
+      const rendered = await renderDynamicUrl(parsed.toString());
+      return buildHtmlUrlExtraction({
+        html: rendered.html,
+        sourceUrl: url,
+        finalUrl: rendered.finalUrl,
+        contentType: 'text/html; rendered=playwright',
+        extractionMode: 'dynamic',
+      });
+    } catch (err) {
+      if (process.env.URL_EXTRACT_DYNAMIC_REQUIRED === 'true') {
+        throw new BadRequestException(
+          `dynamic url rendering failed: ${(err as Error).message}`,
+        );
+      }
+      const fallback = await extractStaticUrlContent(parsed, url);
+      return {
+        ...fallback,
+        renderError: (err as Error).message,
+      };
+    }
+  }
+
+  return extractStaticUrlContent(parsed, url);
+}
+
+async function extractStaticUrlContent(
+  parsed: URL,
+  sourceUrl: string,
+): Promise<UrlExtractionResult> {
   const response = await fetch(parsed, {
     headers: {
       accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.8',
@@ -170,66 +228,130 @@ export async function extractUrlContent(
     return {
       content: withUrlMetadata({
         body: jsonToMarkdown(text),
-        sourceUrl: url,
+        sourceUrl,
         finalUrl,
         fetchedAt,
         contentType,
+        extractionMode: 'static',
       }),
       finalUrl,
       contentType,
       fetchedAt,
       snapshot,
+      extractionMode: 'static',
     };
   }
   if (contentType.includes('text/csv')) {
     return {
       content: withUrlMetadata({
         body: csvToMarkdown(text),
-        sourceUrl: url,
+        sourceUrl,
         finalUrl,
         fetchedAt,
         contentType,
+        extractionMode: 'static',
       }),
       finalUrl,
       contentType,
       fetchedAt,
       snapshot,
+      extractionMode: 'static',
     };
   }
   if (contentType.includes('text/html')) {
-    const extracted = htmlToText(text);
-    const metadata = extractHtmlMetadata(text);
-    return {
-      content: withUrlMetadata({
-        body: extracted,
-        sourceUrl: url,
-        finalUrl,
-        fetchedAt,
-        contentType,
-        title: metadata.title,
-        description: metadata.description,
-      }),
-      title: metadata.title,
-      description: metadata.description,
+    return buildHtmlUrlExtraction({
+      html: text,
+      sourceUrl,
       finalUrl,
       contentType,
-      fetchedAt,
-      snapshot,
-    };
+      extractionMode: 'static',
+    });
   }
   return {
     content: withUrlMetadata({
       body: text,
-      sourceUrl: url,
+      sourceUrl,
       finalUrl,
       fetchedAt,
       contentType,
+      extractionMode: 'static',
     }),
     finalUrl,
     contentType,
     fetchedAt,
     snapshot,
+    extractionMode: 'static',
   };
+}
+
+function buildHtmlUrlExtraction(params: {
+  html: string;
+  sourceUrl: string;
+  finalUrl: string;
+  contentType: string;
+  extractionMode: 'static' | 'dynamic';
+}): UrlExtractionResult {
+  const snapshot = Buffer.from(params.html, 'utf-8');
+  if (snapshot.length > 5 * 1024 * 1024) {
+    throw new BadRequestException('url content is too large');
+  }
+  const fetchedAt = new Date().toISOString();
+  const extracted = htmlToText(params.html);
+  const metadata = extractHtmlMetadata(params.html);
+  return {
+    content: withUrlMetadata({
+      body: extracted,
+      sourceUrl: params.sourceUrl,
+      finalUrl: params.finalUrl,
+      fetchedAt,
+      contentType: params.contentType,
+      title: metadata.title,
+      description: metadata.description,
+      extractionMode: params.extractionMode,
+    }),
+    title: metadata.title,
+    description: metadata.description,
+    finalUrl: params.finalUrl,
+    contentType: params.contentType,
+    fetchedAt,
+    snapshot,
+    extractionMode: params.extractionMode,
+  };
+}
+
+async function renderDynamicUrl(url: string): Promise<{
+  html: string;
+  finalUrl: string;
+}> {
+  const dynamicImport = new Function(
+    'specifier',
+    'return import(specifier)',
+  ) as (specifier: string) => Promise<PlaywrightModule>;
+  const playwright = await dynamicImport('playwright');
+  const browser = await playwright.chromium.launch({
+    headless: true,
+  });
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, {
+      waitUntil:
+        (process.env.URL_EXTRACT_DYNAMIC_WAIT_UNTIL as
+          | 'load'
+          | 'domcontentloaded'
+          | 'networkidle') ?? 'networkidle',
+      timeout: Number(process.env.URL_EXTRACT_DYNAMIC_TIMEOUT_MS ?? 15_000),
+    });
+    const settleMs = Number(process.env.URL_EXTRACT_DYNAMIC_SETTLE_MS ?? 500);
+    if (settleMs > 0) {
+      await page.waitForTimeout(settleMs);
+    }
+    return {
+      html: await page.content(),
+      finalUrl: page.url(),
+    };
+  } finally {
+    await browser.close();
+  }
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
@@ -427,6 +549,7 @@ function withUrlMetadata(params: {
   finalUrl: string;
   fetchedAt: string;
   contentType: string;
+  extractionMode: 'static' | 'dynamic';
   title?: string;
   description?: string;
 }): string {
@@ -439,6 +562,7 @@ function withUrlMetadata(params: {
     `- Final URL: ${params.finalUrl}`,
     `- Fetched At: ${params.fetchedAt}`,
     `- Content-Type: ${params.contentType || 'unknown'}`,
+    `- Extraction Mode: ${params.extractionMode}`,
     '',
     params.body,
   ]

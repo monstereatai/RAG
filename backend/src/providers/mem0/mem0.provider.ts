@@ -161,13 +161,16 @@ export class Mem0Provider implements OnModuleInit {
   /**
    * 列出用户所有记忆
    */
-  async getAll(userId: string): Promise<Mem0MemoryResult[]> {
+  async getAll(userId: string, runId?: string): Promise<Mem0MemoryResult[]> {
     if (!this._isEnabled) return [];
 
     try {
+      const filters = runId
+        ? { AND: [{ user_id: userId }, { run_id: runId }] }
+        : { user_id: userId };
       if (this.cloudClient) {
         const result = await this.cloudClient.getAll({
-          filters: { user_id: userId },
+          filters,
           pageSize: 50,
         });
         return (result.results ?? []).map((m) => ({
@@ -179,9 +182,9 @@ export class Mem0Provider implements OnModuleInit {
       }
 
       // local mode
-      const result = await this.localRequest(
-        `/memories?user_id=${encodeURIComponent(userId)}`,
-      );
+      const params = new URLSearchParams({ user_id: userId });
+      if (runId) params.set('run_id', runId);
+      const result = await this.localRequest(`/memories?${params.toString()}`);
       const items =
         (result.results as Record<string, unknown>[] | undefined) ??
         (Array.isArray(result) ? (result as Record<string, unknown>[]) : []);

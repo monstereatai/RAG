@@ -465,6 +465,7 @@ export class KarpathyRagService implements OnModuleInit {
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     userId?: string,
     memoryMessages: Array<{ role: string; content: string }> = [],
+    onToken?: (token: string) => void,
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
     const chunks = await this.retrieve(normalizedQuery, {}, userId);
@@ -475,6 +476,7 @@ export class KarpathyRagService implements OnModuleInit {
         '没有检索到候选片段',
         history,
         memoryMessages,
+        onToken,
       );
       return {
         answer,
@@ -491,6 +493,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalGate.reason,
         history,
         memoryMessages,
+        onToken,
       );
       return {
         answer,
@@ -511,7 +514,16 @@ export class KarpathyRagService implements OnModuleInit {
       history,
       memory: memoryMessages,
     });
-    const rawAnswer = await this.llmProvider.invoke(messages);
+    const stream = await this.llmProvider.getModel().stream(messages);
+    let rawAnswer = '';
+    for await (const chunk of stream) {
+      const token =
+        typeof chunk.content === 'string'
+          ? chunk.content
+          : JSON.stringify(chunk.content);
+      rawAnswer += token;
+      onToken?.(token);
+    }
     const answer = this.addVersionConflictNotice(rawAnswer, chunks);
     const citationGate = this.assessCitationSupport(answer, chunks);
     if (!citationGate.sufficient) {
@@ -588,6 +600,7 @@ export class KarpathyRagService implements OnModuleInit {
     reason: string,
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     memoryMessages: Array<{ role: string; content: string }> = [],
+    onToken?: (token: string) => void,
   ): Promise<string> {
     const today = new Intl.DateTimeFormat('zh-CN', {
       timeZone: 'Asia/Shanghai',
@@ -604,7 +617,7 @@ export class KarpathyRagService implements OnModuleInit {
       .map((item) => `${item.role}：${item.content}`)
       .join('\n');
 
-    const answer = await this.llmProvider.invoke(`你是一个可靠的中文 AI 助手。
+    const prompt = `你是一个可靠的中文 AI 助手。
 当前日期：${today}
 
 知识库检索不足，原因：${reason}
@@ -623,9 +636,25 @@ ${historyText || '无'}
 
 用户问题：${query}
 
-回答：`);
+回答：`;
 
-    return answer.trim();
+    try {
+      const stream = await this.llmProvider.getModel().stream(prompt);
+      let answer = '';
+      for await (const chunk of stream) {
+        const token =
+          typeof chunk.content === 'string'
+            ? chunk.content
+            : JSON.stringify(chunk.content);
+        answer += token;
+        onToken?.(token);
+      }
+      return answer.trim();
+    } catch (err) {
+      const answer = await this.llmProvider.invoke(prompt);
+      onToken?.(answer);
+      return answer.trim();
+    }
   }
 
   addVersionConflictNotice(answer: string, chunks: RetrievedChunk[]): string {
