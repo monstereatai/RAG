@@ -1,6 +1,6 @@
 {
   "version": "2026-06-21",
-  "description": "仿真实项目级业务评测集：多部门、多文档、多版本、跨文档、无答案拒答、缩写别名、引用和冲突处理。数据为项目内置模拟业务材料，不包含真实公司私密数据。",
+  "description": "仿真实项目级业务评测集（含软件工程）：覆盖 HR/Finance/Legal/IT/Ops/Security/CS/Product/前端/后端/DevOps 等。含版本冲突、跨文档、拒答、缩写别名、技术规范等场景。",
   "documents": [
     {
       "id": "hr-travel-policy-2026",
@@ -41,6 +41,21 @@
       "id": "data-retention-policy",
       "title": "数据保留与删除制度",
       "content": "# 数据保留与删除制度\n## 保留期限\n客户行为日志默认保留 180 天，用于问题排查、产品分析和安全审计。财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。\n## 删除流程\n删除请求必须记录申请人、审批人、删除范围和执行时间。涉及审计凭证的数据不得绕过财务保留期限直接删除。"
+    },
+    {
+      "id": "web-frontend-react",
+      "title": "React 前端开发规范",
+      "content": "# React 前端开发规范\n## 组件模式\nReact 使用函数组件 + Hooks，容器组件与展示组件分离。\n## 状态管理\n服务端数据用 React Query 自动缓存和重新获取。跨组件共享用 Zustand。全局 UI 状态用 Context。\n## 性能\n列表超过 100 项使用虚拟滚动（react-window）。首屏 JS Bundle 不超过 300KB。代码分割用 React.lazy + Suspense。\n## SSR\nNext.js App Router 服务端组件默认。loading.js + Suspense 流式渲染。"
+    },
+    {
+      "id": "nestjs-backend",
+      "title": "NestJS 后端开发规范",
+      "content": "# NestJS 后端开发规范\n## 模块结构\n每个业务模块独立目录：module/service/controller/dto/entity。共享模块放在 common/ 目录。\n## Provider 模式\n关键组件通过 interface 抽象，不同实现在 Module 的 providers 注入切换。ConfigService 统一管理环境变量。\n## API 设计\n资源名用复数名词，/api/v1/users。响应格式 { code, message, data }。分页 { items, total, page, pageSize } 默认 20 最大 100。"
+    },
+    {
+      "id": "cicd-workflow",
+      "title": "CI/CD 流水线规范",
+      "content": "# CI/CD 流水线规范\n## 分支策略\nmain 生产分支。feat/* 功能分支。禁止直接 push main，必须走 PR。\n## PR 要求\nConventional Commits 标题格式：<type>(<scope>): <desc>。至少 1 名 Senior 工程师 Code Review 通过。\n## CI 流程\ngit push 触发 GitHub Actions：Lint → Type Check → Unit Test → Build → E2E。通过后合并到 main 并自动部署 staging。"
     }
   ],
   "queries": [
@@ -48,7 +63,13 @@
       "id": "travel-current-limit",
       "category": "version-conflict",
       "query": "2026 年一线城市住宿报销上限是多少？如果 2025 版写的是 500 元怎么办？",
-      "expectedKeywords": ["2026", "650 元", "2025", "500 元", "优先"],
+      "expectedKeywords": [
+        "2026",
+        "650 元",
+        "2025",
+        "500 元",
+        "优先"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true,
       "expectConflictHandling": true
@@ -57,7 +78,11 @@
       "id": "travel-over-limit-approval",
       "category": "workflow",
       "query": "住宿费用超过标准时，需要谁审批？",
-      "expectedKeywords": ["直属负责人", "财务 BP", "双重审批"],
+      "expectedKeywords": [
+        "直属负责人",
+        "财务 BP",
+        "双重审批"
+      ],
       "minKeywordHits": 2,
       "requireCitation": true
     },
@@ -65,7 +90,12 @@
       "id": "procurement-payment-conditions",
       "category": "cross-doc-risk",
       "query": "PO 超过 10 万付款前必须完成哪些动作？",
-      "expectedKeywords": ["预算审批", "法务合同归档", "供应商准入", "发票"],
+      "expectedKeywords": [
+        "预算审批",
+        "法务合同归档",
+        "供应商准入",
+        "发票"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -73,7 +103,12 @@
       "id": "legal-review-scope",
       "category": "policy",
       "query": "什么合同必须进入法务审查？",
-      "expectedKeywords": ["个人信息", "跨境数据", "排他条款", "违约金"],
+      "expectedKeywords": [
+        "个人信息",
+        "跨境数据",
+        "排他条款",
+        "违约金"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -81,7 +116,12 @@
       "id": "akb-alias",
       "category": "alias",
       "query": "AKB、企业知识库、知识中台是不是一个系统？",
-      "expectedKeywords": ["Atlas Knowledge Base", "AKB", "企业知识库", "知识中台"],
+      "expectedKeywords": [
+        "Atlas Knowledge Base",
+        "AKB",
+        "企业知识库",
+        "知识中台"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -89,7 +129,12 @@
       "id": "service-hub-sla",
       "category": "alias-sla",
       "query": "SH 里的企业版客户 P1 工单多久内首次响应？",
-      "expectedKeywords": ["Service Hub", "SH", "P1", "30 分钟"],
+      "expectedKeywords": [
+        "Service Hub",
+        "SH",
+        "P1",
+        "30 分钟"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -97,7 +142,13 @@
       "id": "alpha-audit",
       "category": "cross-section",
       "query": "Alpha 项目的审批动作要记录哪些审计字段？",
-      "expectedKeywords": ["审批人", "审批时间", "申请单号", "审批结果", "traceparent"],
+      "expectedKeywords": [
+        "审批人",
+        "审批时间",
+        "申请单号",
+        "审批结果",
+        "traceparent"
+      ],
       "minKeywordHits": 4,
       "requireCitation": true
     },
@@ -105,7 +156,12 @@
       "id": "security-p0-response",
       "category": "incident",
       "query": "P0 安全事件需要多快通知谁？",
-      "expectedKeywords": ["15 分钟", "安全负责人", "值班负责人", "业务负责人"],
+      "expectedKeywords": [
+        "15 分钟",
+        "安全负责人",
+        "值班负责人",
+        "业务负责人"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -113,7 +169,12 @@
       "id": "data-retention",
       "category": "retention",
       "query": "客户行为日志和财务审计凭证分别保留多久？",
-      "expectedKeywords": ["180 天", "10 年", "客户行为日志", "财务审计凭证"],
+      "expectedKeywords": [
+        "180 天",
+        "10 年",
+        "客户行为日志",
+        "财务审计凭证"
+      ],
       "minKeywordHits": 3,
       "requireCitation": true
     },
@@ -121,7 +182,9 @@
       "id": "no-answer-pet",
       "category": "negative",
       "query": "公司宠物医疗报销额度是多少？",
-      "expectedKeywords": ["宠物医疗"],
+      "expectedKeywords": [
+        "宠物医疗"
+      ],
       "minKeywordHits": 0,
       "requireCitation": false,
       "expectRefusal": true
@@ -130,10 +193,57 @@
       "id": "no-answer-stock",
       "category": "negative",
       "query": "2026 年员工股票归属比例是多少？",
-      "expectedKeywords": ["股票归属"],
+      "expectedKeywords": [
+        "股票归属"
+      ],
       "minKeywordHits": 0,
       "requireCitation": false,
       "expectRefusal": true
+    },
+    {
+      "id": "swe-react-state",
+      "category": "tech",
+      "query": "按规范回答：React 组件状态管理应该怎么选？",
+      "referenceAnswer": "React 状态管理：服务端数据用 React Query 自动缓存和重新获取。跨组件共享用 Zustand。全局 UI 状态用 Context。[片段1]",
+      "expectedKeywords": [
+        "状态管理",
+        "组件"
+      ],
+      "minKeywordHits": 1,
+      "requireCitation": true,
+      "sourceDocumentIds": [
+        "web-frontend-react"
+      ]
+    },
+    {
+      "id": "swe-nestjs-provider",
+      "category": "tech",
+      "query": "只基于知识库回答：NestJS 的 Provider 模式怎么实现？",
+      "referenceAnswer": "关键组件通过 interface 定义抽象，不同实现在 Module 的 providers 注入切换。ConfigService 统一管理环境变量。[片段1]",
+      "expectedKeywords": [
+        "NestJS",
+        "模块"
+      ],
+      "minKeywordHits": 1,
+      "requireCitation": true,
+      "sourceDocumentIds": [
+        "nestjs-backend"
+      ]
+    },
+    {
+      "id": "swe-ci-steps",
+      "category": "tech",
+      "query": "CI 流程包含哪些步骤？",
+      "referenceAnswer": "CI 流程包含：Lint → Type Check → Unit Test → Build → E2E。通过后合并到 main 并自动部署 staging。[片段1]",
+      "expectedKeywords": [
+        "CI",
+        "持续集成"
+      ],
+      "minKeywordHits": 1,
+      "requireCitation": false,
+      "sourceDocumentIds": [
+        "cicd-workflow"
+      ]
     }
   ]
 }

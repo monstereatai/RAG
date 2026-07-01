@@ -27,15 +27,15 @@ function hasData<T>(body: ApiEnvelope<T> | T): body is ApiEnvelope<T> {
     body !== null &&
     typeof body === 'object' &&
     'data' in body &&
-    body.data !== undefined
+    (body as ApiEnvelope<T>).data !== undefined
   );
 }
 
-function unwrap<T>(body: ApiEnvelope<T> | T): T {
-  if (hasData(body)) {
-    return body.data;
+function unwrap<T>(body: unknown): T {
+  if (body !== null && typeof body === 'object' && 'data' in body) {
+    return (body as { data: T }).data;
   }
-  return body;
+  return body as T;
 }
 
 function responseData<T>(body: unknown): T {

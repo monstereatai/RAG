@@ -30,9 +30,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # Runtime data
-workspace/uploads/
-workspace/cache/
-workspace/*.tmp
 
 # Docker volumes（本地数据卷）
 docker/volumes/
@@ -44,3 +41,6 @@ coverage/
 .cache/
 tmp/
 .tmp/
+workspace/object-storage/
+workspace/bm25-index.json
+workspace/

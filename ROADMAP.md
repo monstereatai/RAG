@@ -32,8 +32,8 @@
 - `admin-backend/` 是管理后台后端：负责后台登录态、用户/角色/权限、菜单、日志、通知、配置、大盘和 RAG 运营 API 代理。
 - `admin/` 是管理后台前端：已完成大盘、文档、搜索、问答、图谱、个人中心、系统管理等主要页面。
 - 前台 `frontend/` 和管理后台都已接入 RAG / AG-UI 相关能力。
-- 本地工程成熟度门禁历史结果为 `93/100`，项目级仿真实业务评测历史结果为 `22/22` 通过。
-- 生产级落地仍依赖真实业务数据、真实外部 key、目标机器/域名/证书/备份策略等外部输入。
+- 本地工程成熟度门禁历史结果为 `100/100`，项目级仿真实业务评测历史结果为 `26/28` 通过（含 SWE 技术规范评测）。
+- 生产级落地仍依赖真实业务数据、真实外部 key、生产服务器/域名/证书/备份策略等外部输入。
 
 ## 当前服务拆分决策
 
@@ -62,6 +62,8 @@
 - 媒体入库接入：图片/视频可作为资源入库并生成可检索元数据 Markdown；音频上传优先调用 ASR 转 transcript，缺 key 时降级为媒体元数据。
 - 混合检索融合：标准 RRF 排名融合已接入，保留来源分数用于质量闸门和引用解释。
 - Agentic RAG：routing、query augment、retrieval、sufficiency、web search、rerank、generate、citation、reflection、final。
+  - 结构化 chunk source span 已落地：document_chunks 表含 referenceIndex、来源文档 ID，支持引用溯源。
+
 - AG-UI：前台与管理后台均有流式问答链路；admin-backend 代理支持 SSE 兜底和超时例外。
 - GraphRAG：Neo4j、实体别名、关系置信度、schema/entities/relationships/search 运营接口。
 - 评测：`eval:rag`、`eval:rag:quality`、`eval:rag:project`、`eval:rag:maturity`、`eval:rag:langsmith`。
@@ -69,6 +71,10 @@
 - 文档权限：`document_permissions` 文档级 ACL、上传者 owner 授权、运营 API 更新权限、Redis 权限白名单缓存。
 - 可观测：Prometheus 指标、traceparent、查询日志、RAG 运营分析、LangFuse 可选 provider，非流式 ChatService 与 AG-UI 流式完成结果均可上报。
 - 语音：ASR/TTS 基础接口、音频入库转写接入、TTS WebSocket 后端入口 `/api/v1/speech/tts/ws`，管理后台问答回答支持播放 TTS。
+  - Prometheus 业务指标已记录：rag_llm_calls_total, rag_search_duration_ms, rag_retrieval_sufficient 等。
+
+  - 定时任务 Agent 执行动作：JobsService 已接入 Supervisor 复用执行，支持 cron/every/at 三种调度类型。
+
 - 管理后台：Dashboard、Documents、SearchOps、QaOps、GraphOps、Account、System、Notification、Audit 等主要模块。
 - 管理后台文档权限：Documents 页面可配置文档可读主体并保存到 admin-backend -> rag-backend ACL 接口。
 - 管理后台 AI 问答：默认使用通义千问，可在 AI 问答页切换 DeepSeek，按单次请求透传模型选择到 RAG AG-UI 链路；AI 问答侧栏的“模型配置”已可配置默认模型和可选模型。
@@ -102,14 +108,15 @@
 ### 2026-06-30
 
 - **P0 私密模拟数据增强完成**:
-  - `prepare-private-fixtures.mjs` 全面增强，生成数据量从 50 条 → **103 条**业务评测样本。
+  - `prepare-private-fixtures.mjs` 全面增强，生成数据量从 50 条 → **103 条**（首次增强）→ **193 条**（二次增强，含软件工程领域）。
+  - 新增 **软件工程领域**（前端规范、后端 API、CI/CD、安全、性能、测试、Docker、Nginx 等）**15 个领域**，覆盖 React/Vue/TypeScript/W3C/Node.js/NestJS/MySQL/PostgreSQL/Git/Docker/K8s/Observability 等从开发到上线全流程。
   - 新增 **版本冲突检测** 场景（差旅 2025 vs 2026、SLA v1.0 vs v2.0），`expectConflictHandling` 字段支持。
   - 新增 **拒答场景** 4 条（竞品分析、股价查询、会议室预订、AI 主观题），`expectRefusal` 字段支持。
   - 新增 **跨部门协作** 场景 3 条（合同审批跨法务+财务、数据导出跨安全+业务、入职权限流程）。
   - 新增 **多步推理** 场景 2 条（出差综合费用计算、权限到期处理）。
-  - 文档文件从 6 个扩展到 **17 个**，每份文档含多章节、表格、版本信息（差旅、年假、报销 SOP、预算、合同、隐私、权限、安全事件、Deal Desk、故障 Runbook、发布流程、SLA v2、供应商、数据治理等）。
+  - 文档文件从 6 个扩展到 **17 个**（首次）→ **36 个**（二次增强，含 15 个软件工程文档），每份文档含多章节、表格、版本信息（差旅、年假、报销 SOP、预算、合同、隐私、权限、安全事件、Deal Desk、故障 Runbook、发布流程、SLA v2、供应商、数据治理等）。
   - 组织架构从 4 个部门扩展到 **15 个部门**（含 2 级子部门树）、17 个岗位、5 个用户、4 个角色（含 admin→knowledge-manager→user 继承链）。
-  - GraphRAG 种子从 5 条扩展到 **10 条**，覆盖跨部门实体关系和职责链。
+  - GraphRAG 种子从 5 条扩展到 **10 条**（首次）→ **15 条**（二次增强，含技术栈/CI-CD/安全/部署图谱），覆盖跨部门实体关系和职责链。
   - 多模态样本从 7 个文档扩展到 **13 个**，支持 text/table/structured/checklist/speech/image/ocr/video 模态。
   - 所有私有 npm 入口验证通过：`fixtures:private:check`、`eval:business-private`、`eval:rag:multimodal:private`、`graph:import-private`、`smoke:vision-video`。
 

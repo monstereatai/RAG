@@ -49,6 +49,7 @@ describe('AguiService', () => {
       conversationService as never,
       memoryService as never,
       llmProvider as never,
+      {} as never, // langfuseProvider
     );
 
     const events = await firstValueFrom(

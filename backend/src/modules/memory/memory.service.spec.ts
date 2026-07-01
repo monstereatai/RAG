@@ -69,7 +69,7 @@ describe('MemoryService', () => {
     });
 
     it('should search user and session memories and build system message', async () => {
-      mockMem0Provider.search.mockImplementation(({ runId }) => {
+      mockMem0Provider.search.mockImplementation(({ runId }: { runId?: string }) => {
         if (runId) {
           return Promise.resolve([
             { id: 's1', memory: 'Session memory snippet' },

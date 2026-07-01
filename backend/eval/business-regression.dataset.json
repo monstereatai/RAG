@@ -1,6 +1,6 @@
 {
   "version": "2026-06-21",
-  "description": "120 条企业业务评测样本，覆盖 HR/Finance/Legal/IT/Sales/Ops/Security/Product/CS/Data/Procurement/Admin。样本为项目内置业务回归数据，不包含真实公司私密数据。",
+  "description": "193 条企业业务与软件工程混合评测样本，覆盖 HR/Finance/Legal/IT/Sales/Ops/Security/Product/CS/Data/Procurement/Admin 及前端/后端/DevOps/安全/性能/QA 等 19 个领域。含冲突检测、拒答、跨部门协作、多步推理等场景。",
   "total": 120,
   "items": [
     {

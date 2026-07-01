@@ -1,5 +1,35 @@
 /**
- * prepare-private-fixtures.mjs
+ *
+    {
+      sourceId: "private-graph-tech-stack",
+      title: "技术栈关系",
+      text: "NestJS 用 TypeORM 连 PostgreSQL。Milvus 向量检索。Redis 缓存+BullMQ 队列。ES 全文检索。前端 React 调 REST API。",
+      query: "NestJS 使用了哪些技术栈？",
+    },
+    {
+      sourceId: "private-graph-ci-cd",
+      title: "CI/CD 流程",
+      text: "GitHub Actions 执行 CI。Lint → TypeCheck → Test → Build → E2E。合并 main 后自动部署 staging。Nginx 反向代理。",
+      query: "CI/CD 流程包含哪些步骤？",
+    },
+    {
+      sourceId: "private-graph-security",
+      title: "安全防护",
+      text: "CSP 防 XSS。SameSite 防 CSRF。参数化查询防 SQL 注入。JWT+Refresh 认证。bcrypt 哈希。X-Frame-Options 防点击劫持。",
+      query: "Web 安全体系有哪些防护措施？",
+    },
+    {
+      sourceId: "private-graph-perf",
+      title: "性能优化",
+      text: "React.lazy 代码分割。WebP 图片 CDN。Brotli 压缩。Performance Observer 采集 Web Vitals。退化超 10% 阻断发布。",
+      query: "前端性能优化涉及哪些技术？",
+    },
+    {
+      sourceId: "private-graph-deploy",
+      title: "部署架构",
+      text: "Docker 多阶段构建。Compose 编排服务。healthcheck 检查。数据卷持久化 PG/Redis。Nginx 代理前端和 API。",
+      query: "Docker 部署包含哪些组件？",
+    }, prepare-private-fixtures.mjs
  *
  * 生成脱敏的私有企业模拟数据集，用于本地严格校验和端到端评测链路验证。
  * 所有数据均为通用行业模拟，不包含任何真实公司私密信息。
@@ -990,6 +1020,156 @@ function buildDomains() {
       fact: '编码规范：代码审查至少需要 1 名 Senior 工程师通过。生产环境部署必须在工作日 10:00-16:00 进行，且必须经过测试环境验证。',
       keywords: ['Senior', '代码审查', '10:00', '16:00', '测试环境'],
     },
+    {
+      department: "frontend",
+      documentType: "react",
+      docTitle: "React 规范",
+      ask: "React 组件有哪些模式？",
+      answer: "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      cleanAnswer: "React 用函数组件 + Hooks，React Query + Zustand。",
+      fact: "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+      keywords: ["Hooks", "React Query", "Zustand"],
+    },
+    {
+      department: "frontend",
+      documentType: "vue",
+      docTitle: "Vue 规范",
+      ask: "Vue 3 推荐用哪种 API？",
+      answer: "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      cleanAnswer: "Composition API + setup script，Pinia 管理状态。",
+      fact: "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+      keywords: ["Composition API", "Pinia", "Nuxt"],
+    },
+    {
+      department: "frontend",
+      documentType: "typescript",
+      docTitle: "TS 规范",
+      ask: "TypeScript strict 模式有什么设置？",
+      answer: "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      cleanAnswer: "strict 模式禁止 any，noUncheckedIndexedAccess。",
+      fact: "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+      keywords: ["strict", "noUncheckedIndexedAccess", "satisfies"],
+    },
+    {
+      department: "frontend",
+      documentType: "web-standards",
+      docTitle: "Web 标准",
+      ask: "HTML 语义标签有哪些？WCAG 分级？",
+      answer: "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      cleanAnswer: "header/nav/main/article/section，WCAG A/AA/AAA。",
+      fact: "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+      keywords: ["header", "nav", "WCAG"],
+    },
+    {
+      department: "backend",
+      documentType: "node",
+      docTitle: "Node.js 规范",
+      ask: "Node.js CPU 密集任务怎么处理？",
+      answer: "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      cleanAnswer: "Worker Threads CPU 密集，Stream 大文件。",
+      fact: "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+      keywords: ["Worker Threads", "Stream", "helmet"],
+    },
+    {
+      department: "backend",
+      documentType: "nestjs",
+      docTitle: "NestJS 规范",
+      ask: "NestJS 怎么实现可插拔 Provider？",
+      answer: "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      cleanAnswer: "interface 抽象 + Module providers 切换。",
+      fact: "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+      keywords: ["Provider", "interface", "@Global"],
+    },
+    {
+      department: "backend",
+      documentType: "api",
+      docTitle: "API 设计",
+      ask: "RESTful 分页格式是什么？",
+      answer: "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      cleanAnswer: "{ items, total, page, pageSize }。默认 20。",
+      fact: "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+      keywords: ["pageSize", "items", "total"],
+    },
+    {
+      department: "backend",
+      documentType: "database",
+      docTitle: "数据库规范",
+      ask: "MySQL 大分页怎么优化？",
+      answer: "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      cleanAnswer: "MySQL Cursor 分页。PG tsvector 全文检索。",
+      fact: "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+      keywords: ["Cursor", "tsvector", "GIN"],
+    },
+    {
+      department: "devops",
+      documentType: "cicd",
+      docTitle: "CI/CD 流程",
+      ask: "PR 合并前 CI 步骤有哪些？",
+      answer: "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      cleanAnswer: "Lint→TypeCheck→UnitTest→Build→E2E。",
+      fact: "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+      keywords: ["Lint", "TypeCheck", "UnitTest"],
+    },
+    {
+      department: "devops",
+      documentType: "deploy",
+      docTitle: "Docker 部署",
+      ask: "多阶段构建有什么好处？",
+      answer: "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      cleanAnswer: "减小镜像体积。healthcheck。",
+      fact: "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+      keywords: ["multi-stage", "healthcheck"],
+    },
+    {
+      department: "devops",
+      documentType: "nginx",
+      docTitle: "Nginx 配置",
+      ask: "Nginx 安全配置有哪些？",
+      answer: "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      cleanAnswer: "server_tokens off。HSTS/CSP。HTTPS。",
+      fact: "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+      keywords: ["HSTS", "CSP", "server_tokens"],
+    },
+    {
+      department: "qa",
+      documentType: "testing",
+      docTitle: "测试规范",
+      ask: "各层级测试最低覆盖率？",
+      answer: "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      cleanAnswer: "单元 80% 组件 70%。API Mock。",
+      fact: "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+      keywords: ["80%", "70%", "Mock"],
+    },
+    {
+      department: "security",
+      documentType: "owasp",
+      docTitle: "安全规范",
+      ask: "XSS 和 CSRF 怎么防？",
+      answer: "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      cleanAnswer: "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+      fact: "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+      keywords: ["CSP", "SameSite", "CSRF"],
+    },
+    {
+      department: "perf",
+      documentType: "web-vitals",
+      docTitle: "性能指标",
+      ask: "Core Web Vitals 是哪三个？",
+      answer: "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      cleanAnswer: "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+      fact: "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+      keywords: ["FCP", "LCP", "CLS"],
+    },
+    {
+      department: "perf",
+      documentType: "optimization",
+      docTitle: "性能优化",
+      ask: "前端有哪些优化策略？",
+      answer: "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      cleanAnswer: "React.lazy 分割。WebP + CDN + Brotli。",
+      fact: "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+      keywords: ["React.lazy", "WebP", "CDN"],
+    },
   ];
 }
 
@@ -1390,7 +1570,7 @@ async function checkFixtures() {
   const report = {
     ok:
       missing.length === 0 &&
-      businessItems.length >= 85 &&
+      businessItems.length >= 130 &&
       multimodalDocs.length >= 10 &&
       graphDocs.length >= 8 &&
       departments.length >= 10 &&

@@ -1,7 +1,7 @@
 {
   "version": "private-sanitized-2026-06-30",
   "description": "脱敏私有企业模拟数据集（增强版）：包含标准 QA、版本冲突检测、拒答场景、跨部门协作、多步推理等测试用例。所有数据均为通用行业模拟，不包含任何真实公司私密信息。替换为真实私密样本时保持同一 schema。",
-  "total": 103,
+  "total": 193,
   "items": [
     {
       "id": "pv-hr-policy-01",
@@ -3418,6 +3418,3324 @@
       "ordinal": 90
     },
     {
+      "id": "pv-frontend-react-01",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "按制度回答：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 91
+    },
+    {
+      "id": "pv-frontend-react-02",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "只基于知识库回答：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 92
+    },
+    {
+      "id": "pv-frontend-react-03",
+      "category": "poison-grounding",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "不要猜，查一下：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 93
+    },
+    {
+      "id": "pv-frontend-react-04",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "审批前确认：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 94
+    },
+    {
+      "id": "pv-frontend-react-05",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "给我可引用结论：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 95
+    },
+    {
+      "id": "pv-frontend-react-06",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "react",
+      "query": "业务同学问：React 组件有哪些模式？",
+      "referenceAnswer": "React 使用函数组件 + Hooks。服务端数据用 React Query，全局 UI 用 Context，跨组件用 Zustand。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-react-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React 用函数组件 + Hooks，React Query + Zustand。",
+          "supportKeywords": [
+            "Hooks",
+            "React Query",
+            "Zustand"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Hooks",
+        "React Query",
+        "Zustand"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-react",
+        "title": "React 规范",
+        "content": "React 规范：函数组件 + Hooks，React Query 服务端，Zustand 客户端。Next.js App Router 服务端组件。",
+        "referenceIndex": 1
+      },
+      "ordinal": 96
+    },
+    {
+      "id": "pv-frontend-vue-01",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "按制度回答：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 97
+    },
+    {
+      "id": "pv-frontend-vue-02",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "只基于知识库回答：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 98
+    },
+    {
+      "id": "pv-frontend-vue-03",
+      "category": "poison-grounding",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "不要猜，查一下：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 99
+    },
+    {
+      "id": "pv-frontend-vue-04",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "审批前确认：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 100
+    },
+    {
+      "id": "pv-frontend-vue-05",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "给我可引用结论：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 101
+    },
+    {
+      "id": "pv-frontend-vue-06",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "vue",
+      "query": "业务同学问：Vue 3 推荐用哪种 API？",
+      "referenceAnswer": "Vue 3 推荐 Composition API + setup script，状态管理用 Pinia。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-vue-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Composition API + setup script，Pinia 管理状态。",
+          "supportKeywords": [
+            "Composition API",
+            "Pinia",
+            "Nuxt"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Composition API",
+        "Pinia",
+        "Nuxt"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-vue",
+        "title": "Vue 规范",
+        "content": "Vue 3：Composition API + setup script，ref/reactive，Pinia 替代 Vuex，Nuxt SSR。",
+        "referenceIndex": 1
+      },
+      "ordinal": 102
+    },
+    {
+      "id": "pv-frontend-typescript-01",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "按制度回答：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 103
+    },
+    {
+      "id": "pv-frontend-typescript-02",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "只基于知识库回答：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 104
+    },
+    {
+      "id": "pv-frontend-typescript-03",
+      "category": "poison-grounding",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "不要猜，查一下：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 105
+    },
+    {
+      "id": "pv-frontend-typescript-04",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "审批前确认：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 106
+    },
+    {
+      "id": "pv-frontend-typescript-05",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "给我可引用结论：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 107
+    },
+    {
+      "id": "pv-frontend-typescript-06",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "typescript",
+      "query": "业务同学问：TypeScript strict 模式有什么设置？",
+      "referenceAnswer": "strict 包含 strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes。禁止 any。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-typescript-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "strict 模式禁止 any，noUncheckedIndexedAccess。",
+          "supportKeywords": [
+            "strict",
+            "noUncheckedIndexedAccess",
+            "satisfies"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "strict",
+        "noUncheckedIndexedAccess",
+        "satisfies"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-typescript",
+        "title": "TS 规范",
+        "content": "TypeScript：strict 模式禁止 any，satisfies 替代 as，Partial/Pick/Omit/Record 工具类型。",
+        "referenceIndex": 1
+      },
+      "ordinal": 108
+    },
+    {
+      "id": "pv-frontend-web-standards-01",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "按制度回答：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 109
+    },
+    {
+      "id": "pv-frontend-web-standards-02",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "只基于知识库回答：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 110
+    },
+    {
+      "id": "pv-frontend-web-standards-03",
+      "category": "poison-grounding",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "不要猜，查一下：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 111
+    },
+    {
+      "id": "pv-frontend-web-standards-04",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "审批前确认：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 112
+    },
+    {
+      "id": "pv-frontend-web-standards-05",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "给我可引用结论：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 113
+    },
+    {
+      "id": "pv-frontend-web-standards-06",
+      "category": "private-business-qa",
+      "department": "frontend",
+      "documentType": "web-standards",
+      "query": "业务同学问：HTML 语义标签有哪些？WCAG 分级？",
+      "referenceAnswer": "语义标签：header/nav/main/article/section。WCAG 三级 A（必须）/AA（推荐）/AAA（尽量）。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-frontend-web-standards-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "header/nav/main/article/section，WCAG A/AA/AAA。",
+          "supportKeywords": [
+            "header",
+            "nav",
+            "WCAG"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "header",
+        "nav",
+        "WCAG"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-frontend-web-standards",
+        "title": "Web 标准",
+        "content": "Web 标准：语义标签 header/nav/main/article/section。WCAG 三级。img alt 属性。表单 label 关联。",
+        "referenceIndex": 1
+      },
+      "ordinal": 114
+    },
+    {
+      "id": "pv-backend-node-01",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "node",
+      "query": "按制度回答：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 115
+    },
+    {
+      "id": "pv-backend-node-02",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "node",
+      "query": "只基于知识库回答：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 116
+    },
+    {
+      "id": "pv-backend-node-03",
+      "category": "poison-grounding",
+      "department": "backend",
+      "documentType": "node",
+      "query": "不要猜，查一下：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 117
+    },
+    {
+      "id": "pv-backend-node-04",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "node",
+      "query": "审批前确认：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 118
+    },
+    {
+      "id": "pv-backend-node-05",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "node",
+      "query": "给我可引用结论：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 119
+    },
+    {
+      "id": "pv-backend-node-06",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "node",
+      "query": "业务同学问：Node.js CPU 密集任务怎么处理？",
+      "referenceAnswer": "CPU 密集用 Worker Threads。大文件用 Stream API。安全用 helmet + cors。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-node-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Worker Threads CPU 密集，Stream 大文件。",
+          "supportKeywords": [
+            "Worker Threads",
+            "Stream",
+            "helmet"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Worker Threads",
+        "Stream",
+        "helmet"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-node",
+        "title": "Node.js 规范",
+        "content": "Node.js：22 LTS ES Modules。Worker Threads CPU 密集。Stream 大文件。helmet + cors + rate-limiter。",
+        "referenceIndex": 1
+      },
+      "ordinal": 120
+    },
+    {
+      "id": "pv-backend-nestjs-01",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "按制度回答：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 121
+    },
+    {
+      "id": "pv-backend-nestjs-02",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "只基于知识库回答：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 122
+    },
+    {
+      "id": "pv-backend-nestjs-03",
+      "category": "poison-grounding",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "不要猜，查一下：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 123
+    },
+    {
+      "id": "pv-backend-nestjs-04",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "审批前确认：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 124
+    },
+    {
+      "id": "pv-backend-nestjs-05",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "给我可引用结论：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 125
+    },
+    {
+      "id": "pv-backend-nestjs-06",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "nestjs",
+      "query": "业务同学问：NestJS 怎么实现可插拔 Provider？",
+      "referenceAnswer": "interface 定义抽象，Module 的 providers 注入切换不同实现。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-nestjs-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "interface 抽象 + Module providers 切换。",
+          "supportKeywords": [
+            "Provider",
+            "interface",
+            "@Global"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Provider",
+        "interface",
+        "@Global"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-nestjs",
+        "title": "NestJS 规范",
+        "content": "NestJS：模块化目录。@Controller/@Body/@UseGuards。Provider 模式 interface + Module 注入。ConfigService。",
+        "referenceIndex": 1
+      },
+      "ordinal": 126
+    },
+    {
+      "id": "pv-backend-api-01",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "api",
+      "query": "按制度回答：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 127
+    },
+    {
+      "id": "pv-backend-api-02",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "api",
+      "query": "只基于知识库回答：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 128
+    },
+    {
+      "id": "pv-backend-api-03",
+      "category": "poison-grounding",
+      "department": "backend",
+      "documentType": "api",
+      "query": "不要猜，查一下：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 129
+    },
+    {
+      "id": "pv-backend-api-04",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "api",
+      "query": "审批前确认：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 130
+    },
+    {
+      "id": "pv-backend-api-05",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "api",
+      "query": "给我可引用结论：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 131
+    },
+    {
+      "id": "pv-backend-api-06",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "api",
+      "query": "业务同学问：RESTful 分页格式是什么？",
+      "referenceAnswer": "{ items, total, page, pageSize }。默认 20 最大 100。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-api-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "{ items, total, page, pageSize }。默认 20。",
+          "supportKeywords": [
+            "pageSize",
+            "items",
+            "total"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "pageSize",
+        "items",
+        "total"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-api",
+        "title": "API 设计",
+        "content": "API：复数名词 URL。{ code, message, data } 响应。400-500 错误码。分页 items/total/page/pageSize。",
+        "referenceIndex": 1
+      },
+      "ordinal": 132
+    },
+    {
+      "id": "pv-backend-database-01",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "database",
+      "query": "按制度回答：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 133
+    },
+    {
+      "id": "pv-backend-database-02",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "database",
+      "query": "只基于知识库回答：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 134
+    },
+    {
+      "id": "pv-backend-database-03",
+      "category": "poison-grounding",
+      "department": "backend",
+      "documentType": "database",
+      "query": "不要猜，查一下：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 135
+    },
+    {
+      "id": "pv-backend-database-04",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "database",
+      "query": "审批前确认：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 136
+    },
+    {
+      "id": "pv-backend-database-05",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "database",
+      "query": "给我可引用结论：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 137
+    },
+    {
+      "id": "pv-backend-database-06",
+      "category": "private-business-qa",
+      "department": "backend",
+      "documentType": "database",
+      "query": "业务同学问：MySQL 大分页怎么优化？",
+      "referenceAnswer": "MySQL 用 Cursor 替代 OFFSET。PG 用 tsvector/tsquery 全文检索。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-backend-database-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "MySQL Cursor 分页。PG tsvector 全文检索。",
+          "supportKeywords": [
+            "Cursor",
+            "tsvector",
+            "GIN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Cursor",
+        "tsvector",
+        "GIN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-backend-database",
+        "title": "数据库规范",
+        "content": "数据库：MySQL InnoDB utf8mb4 + Cursor 分页。PG JSONB GIN 索引 + tsvector。UUID v7 主键。软删除。",
+        "referenceIndex": 1
+      },
+      "ordinal": 138
+    },
+    {
+      "id": "pv-devops-cicd-01",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "按制度回答：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 139
+    },
+    {
+      "id": "pv-devops-cicd-02",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "只基于知识库回答：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 140
+    },
+    {
+      "id": "pv-devops-cicd-03",
+      "category": "poison-grounding",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "不要猜，查一下：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 141
+    },
+    {
+      "id": "pv-devops-cicd-04",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "审批前确认：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 142
+    },
+    {
+      "id": "pv-devops-cicd-05",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "给我可引用结论：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 143
+    },
+    {
+      "id": "pv-devops-cicd-06",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "cicd",
+      "query": "业务同学问：PR 合并前 CI 步骤有哪些？",
+      "referenceAnswer": "Lint → TypeCheck → UnitTest → Build → E2E。合并部署 staging。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-cicd-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "Lint→TypeCheck→UnitTest→Build→E2E。",
+          "supportKeywords": [
+            "Lint",
+            "TypeCheck",
+            "UnitTest"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "Lint",
+        "TypeCheck",
+        "UnitTest"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-cicd",
+        "title": "CI/CD 流程",
+        "content": "CI/CD：GitHub Actions 自动 Lint→TypeCheck→UnitTest→Build→E2E。Conventional Commits。自动部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 144
+    },
+    {
+      "id": "pv-devops-deploy-01",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "按制度回答：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 145
+    },
+    {
+      "id": "pv-devops-deploy-02",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "只基于知识库回答：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 146
+    },
+    {
+      "id": "pv-devops-deploy-03",
+      "category": "poison-grounding",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "不要猜，查一下：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 147
+    },
+    {
+      "id": "pv-devops-deploy-04",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "审批前确认：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 148
+    },
+    {
+      "id": "pv-devops-deploy-05",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "给我可引用结论：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 149
+    },
+    {
+      "id": "pv-devops-deploy-06",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "deploy",
+      "query": "业务同学问：多阶段构建有什么好处？",
+      "referenceAnswer": "多阶段构建减小最终镜像。Compose healthcheck 健康检查。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-deploy-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "减小镜像体积。healthcheck。",
+          "supportKeywords": [
+            "multi-stage",
+            "healthcheck"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "multi-stage",
+        "healthcheck"
+      ],
+      "minKeywordCoverage": 1,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-deploy",
+        "title": "Docker 部署",
+        "content": "Docker：多阶段构建。slim/alpine 基础镜像。Compose 数据卷持久化。healthcheck。蓝绿部署。",
+        "referenceIndex": 1
+      },
+      "ordinal": 150
+    },
+    {
+      "id": "pv-devops-nginx-01",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "按制度回答：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 151
+    },
+    {
+      "id": "pv-devops-nginx-02",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "只基于知识库回答：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 152
+    },
+    {
+      "id": "pv-devops-nginx-03",
+      "category": "poison-grounding",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "不要猜，查一下：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 153
+    },
+    {
+      "id": "pv-devops-nginx-04",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "审批前确认：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 154
+    },
+    {
+      "id": "pv-devops-nginx-05",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "给我可引用结论：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 155
+    },
+    {
+      "id": "pv-devops-nginx-06",
+      "category": "private-business-qa",
+      "department": "devops",
+      "documentType": "nginx",
+      "query": "业务同学问：Nginx 安全配置有哪些？",
+      "referenceAnswer": "server_tokens off。HSTS + CSP 安全头。HTTPS 强制跳转。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-devops-nginx-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "server_tokens off。HSTS/CSP。HTTPS。",
+          "supportKeywords": [
+            "HSTS",
+            "CSP",
+            "server_tokens"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "HSTS",
+        "CSP",
+        "server_tokens"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-devops-nginx",
+        "title": "Nginx 配置",
+        "content": "Nginx：server_tokens off 隐藏版本。HSTS + CSP。HTTPS 跳转。proxy_pass 代理。WebSocket Upgrade。",
+        "referenceIndex": 1
+      },
+      "ordinal": 156
+    },
+    {
+      "id": "pv-qa-testing-01",
+      "category": "private-business-qa",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "按制度回答：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 157
+    },
+    {
+      "id": "pv-qa-testing-02",
+      "category": "private-business-qa",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "只基于知识库回答：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 158
+    },
+    {
+      "id": "pv-qa-testing-03",
+      "category": "poison-grounding",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "不要猜，查一下：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 159
+    },
+    {
+      "id": "pv-qa-testing-04",
+      "category": "private-business-qa",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "审批前确认：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 160
+    },
+    {
+      "id": "pv-qa-testing-05",
+      "category": "private-business-qa",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "给我可引用结论：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 161
+    },
+    {
+      "id": "pv-qa-testing-06",
+      "category": "private-business-qa",
+      "department": "qa",
+      "documentType": "testing",
+      "query": "业务同学问：各层级测试最低覆盖率？",
+      "referenceAnswer": "单元 >= 80%。组件 >= 70%。外部 API 必须 Mock。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-qa-testing-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "单元 80% 组件 70%。API Mock。",
+          "supportKeywords": [
+            "80%",
+            "70%",
+            "Mock"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "80%",
+        "70%",
+        "Mock"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-qa-testing",
+        "title": "测试规范",
+        "content": "测试：单元 >= 80% 组件 >= 70%。外部 API Mock。DB Mock Repository。Lint+TypeCheck+Test+Build 门禁。",
+        "referenceIndex": 1
+      },
+      "ordinal": 162
+    },
+    {
+      "id": "pv-security-owasp-01",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "按制度回答：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 163
+    },
+    {
+      "id": "pv-security-owasp-02",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "只基于知识库回答：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 164
+    },
+    {
+      "id": "pv-security-owasp-03",
+      "category": "poison-grounding",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "不要猜，查一下：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 165
+    },
+    {
+      "id": "pv-security-owasp-04",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "审批前确认：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 166
+    },
+    {
+      "id": "pv-security-owasp-05",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "给我可引用结论：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 167
+    },
+    {
+      "id": "pv-security-owasp-06",
+      "category": "private-business-qa",
+      "department": "security",
+      "documentType": "owasp",
+      "query": "业务同学问：XSS 和 CSRF 怎么防？",
+      "referenceAnswer": "XSS：CSP + 输出编码 + HttpOnly。CSRF：SameSite Cookie + Token。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-security-owasp-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "CSP+编码防 XSS。SameSite+Token 防 CSRF。",
+          "supportKeywords": [
+            "CSP",
+            "SameSite",
+            "CSRF"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "CSP",
+        "SameSite",
+        "CSRF"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-security-owasp",
+        "title": "安全规范",
+        "content": "安全：CSP+编码+HttpOnly 防 XSS。SameSite+Token 防 CSRF。参数化查询防注入。JWT+Refresh。bcrypt。",
+        "referenceIndex": 1
+      },
+      "ordinal": 168
+    },
+    {
+      "id": "pv-perf-web-vitals-01",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "按制度回答：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 169
+    },
+    {
+      "id": "pv-perf-web-vitals-02",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "只基于知识库回答：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 170
+    },
+    {
+      "id": "pv-perf-web-vitals-03",
+      "category": "poison-grounding",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "不要猜，查一下：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 171
+    },
+    {
+      "id": "pv-perf-web-vitals-04",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "审批前确认：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 172
+    },
+    {
+      "id": "pv-perf-web-vitals-05",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "给我可引用结论：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 173
+    },
+    {
+      "id": "pv-perf-web-vitals-06",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "web-vitals",
+      "query": "业务同学问：Core Web Vitals 是哪三个？",
+      "referenceAnswer": "FCP < 1.0s 首次内容绘制。LCP < 2.0s 最大内容绘制。CLS < 0.1。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-web-vitals-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "FCP < 1.0s, LCP < 2.0s, CLS < 0.1。",
+          "supportKeywords": [
+            "FCP",
+            "LCP",
+            "CLS"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "FCP",
+        "LCP",
+        "CLS"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-web-vitals",
+        "title": "性能指标",
+        "content": "性能：FCP < 1.0s LCP < 2.0s CLS < 0.1。首屏 JS < 150KB。API P95 < 200ms。退化超 10% 阻断。",
+        "referenceIndex": 1
+      },
+      "ordinal": 174
+    },
+    {
+      "id": "pv-perf-optimization-01",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "按制度回答：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-01-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 175
+    },
+    {
+      "id": "pv-perf-optimization-02",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "只基于知识库回答：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-02-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 176
+    },
+    {
+      "id": "pv-perf-optimization-03",
+      "category": "poison-grounding",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "不要猜，查一下：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-03-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 177
+    },
+    {
+      "id": "pv-perf-optimization-04",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "审批前确认：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-04-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 178
+    },
+    {
+      "id": "pv-perf-optimization-05",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "给我可引用结论：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-05-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 179
+    },
+    {
+      "id": "pv-perf-optimization-06",
+      "category": "private-business-qa",
+      "department": "perf",
+      "documentType": "optimization",
+      "query": "业务同学问：前端有哪些优化策略？",
+      "referenceAnswer": "React.lazy 代码分割。WebP 图片。CDN 一年缓存。Brotli 压缩。[片段1]",
+      "referenceReferences": [
+        {
+          "id": "pv-perf-optimization-06-ref"
+        }
+      ],
+      "expectedClaims": [
+        {
+          "text": "React.lazy 分割。WebP + CDN + Brotli。",
+          "supportKeywords": [
+            "React.lazy",
+            "WebP",
+            "CDN"
+          ]
+        }
+      ],
+      "expectedKeywords": [
+        "React.lazy",
+        "WebP",
+        "CDN"
+      ],
+      "minKeywordCoverage": 0.6666666666666666,
+      "requireCitation": true,
+      "sourceDocument": {
+        "id": "pv-doc-perf-optimization",
+        "title": "性能优化",
+        "content": "优化：React.lazy 代码分割。WebP/AVIF 懒加载。CDN max-age 一年。Nginx Brotli 压缩。",
+        "referenceIndex": 1
+      },
+      "ordinal": 180
+    },
+    {
       "id": "pv-conflict-travel-01",
       "category": "policy-conflict",
       "department": "hr",
@@ -3461,7 +6779,7 @@
         "content": "2025 版（v2.0）规定一线城市住宿报销上限为 600 元，2026 版已更新为 650 元。版本冲突时以最新版本为准，2026 版优先生效。",
         "referenceIndex": 1
       },
-      "ordinal": 91
+      "ordinal": 181
     },
     {
       "id": "pv-conflict-sla-01",
@@ -3506,7 +6824,7 @@
         "content": "v1.0 规定企业版 P1 工单 2 小时内首次响应，v2.0 已更新为 1 小时。版本冲突时以最新版本为准。",
         "referenceIndex": 1
       },
-      "ordinal": 92
+      "ordinal": 182
     },
     {
       "id": "pv-conflict-discount-01",
@@ -3552,7 +6870,7 @@
         "content": "低于 8 折的客户折扣必须提交 Deal Desk 评审，评审需法务确认风险和财务确认利润模型（毛利率不低于 20%）。",
         "referenceIndex": 1
       },
-      "ordinal": 93
+      "ordinal": 183
     },
     {
       "id": "pv-conflict-incident-01",
@@ -3599,7 +6917,7 @@
         "content": "P1 故障必须在 15 分钟内响应，2 小时内提交初步复盘，3 个工作日内提交正式复盘。",
         "referenceIndex": 1
       },
-      "ordinal": 94
+      "ordinal": 184
     },
     {
       "id": "pv-refusal-personal-01",
@@ -3629,7 +6947,7 @@
       "minKeywordCoverage": 0.5,
       "requireCitation": false,
       "expectRefusal": true,
-      "ordinal": 95
+      "ordinal": 185
     },
     {
       "id": "pv-refusal-stock-01",
@@ -3659,7 +6977,7 @@
       "minKeywordCoverage": 0.5,
       "requireCitation": false,
       "expectRefusal": true,
-      "ordinal": 96
+      "ordinal": 186
     },
     {
       "id": "pv-refusal-outside-01",
@@ -3690,7 +7008,7 @@
       "minKeywordCoverage": 0.4,
       "requireCitation": false,
       "expectRefusal": true,
-      "ordinal": 97
+      "ordinal": 187
     },
     {
       "id": "pv-refusal-personal-02",
@@ -3721,7 +7039,7 @@
       "minKeywordCoverage": 0.4,
       "requireCitation": false,
       "expectRefusal": true,
-      "ordinal": 98
+      "ordinal": 188
     },
     {
       "id": "pv-cross-contract-01",
@@ -3774,7 +7092,7 @@
         "content": "超过 50 万元的采购合同需要法务复核和财务复核。法务负责人确认条款风险，财务负责人确认预算。",
         "referenceIndex": 1
       },
-      "ordinal": 99
+      "ordinal": 189
     },
     {
       "id": "pv-cross-security-01",
@@ -3819,7 +7137,7 @@
         "content": "身份证号、手机号、银行卡号属于高敏感数据。导出前必须完成数据脱敏和安全审批。安全团队负责安全审批。",
         "referenceIndex": 1
       },
-      "ordinal": 100
+      "ordinal": 190
     },
     {
       "id": "pv-cross-onboard-01",
@@ -3862,7 +7180,7 @@
         "content": "新员工入职后由直属主管在 IT 系统中提交权限申请。默认生产系统权限有效期为 90 天。岗位变动后 48 小时内更新权限。",
         "referenceIndex": 1
       },
-      "ordinal": 101
+      "ordinal": 191
     },
     {
       "id": "pv-multihop-travel-01",
@@ -3906,7 +7224,7 @@
         "content": "一线城市住宿报销上限为 650 元/晚，国内出差伙食补贴每日 150 元。",
         "referenceIndex": 1
       },
-      "ordinal": 102
+      "ordinal": 192
     },
     {
       "id": "pv-multihop-permission-01",
@@ -3950,7 +7268,7 @@
         "content": "生产系统权限默认有效期为 90 天，到期后需要重新提交权限申请并经过直属主管审批。",
         "referenceIndex": 1
       },
-      "ordinal": 103
+      "ordinal": 193
     }
   ]
 }
