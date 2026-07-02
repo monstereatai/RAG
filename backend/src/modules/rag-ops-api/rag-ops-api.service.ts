@@ -12,6 +12,7 @@ import { QueryLogService } from './query-log.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
+import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
 import {
   RagDocumentQueryDto,
   RagEvaluationRunDto,
@@ -76,6 +77,8 @@ export interface DocumentAdminItem {
   effectiveAt: string | null;
   expiredAt: string | null;
   createdAt: string;
+  obsidianPath?: string | null;
+  obsidianStatus?: 'linked' | 'missing';
 }
 
 @Injectable()
@@ -91,6 +94,7 @@ export class RagOpsApiService {
     private readonly elasticsearchProvider: ElasticsearchProvider,
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly queryLogService: QueryLogService,
+    private readonly obsidianKnowledge: ObsidianKnowledgeService,
     @InjectRepository(DocumentChunkEntity)
     private readonly chunkRepo: Repository<DocumentChunkEntity>,
     @InjectRepository(DocumentMetaEntity)
@@ -187,19 +191,28 @@ export class RagOpsApiService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const start = (page - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize).map((doc) => ({
-      docId: doc.docId,
-      filename: doc.filename,
-      chunkCount: doc.chunkCount,
-      userId: doc.userId ?? 'unknown',
-      category: doc.category ?? '其他',
-      sourceAuthority: doc.sourceAuthority ?? 'normal',
-      docVersion: doc.docVersion ?? 'unknown',
-      effectiveAt: doc.effectiveAt?.toISOString() ?? null,
-      expiredAt: doc.expiredAt?.toISOString() ?? null,
-      title: doc.title ?? null,
-      createdAt: doc.createdAt.toISOString(),
-    }));
+    const items = await Promise.all(
+      filtered.slice(start, start + pageSize).map(async (doc) => {
+        const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(
+          doc.docId,
+        );
+        return {
+          docId: doc.docId,
+          filename: doc.filename,
+          chunkCount: doc.chunkCount,
+          userId: doc.userId ?? 'unknown',
+          category: doc.category ?? '其他',
+          sourceAuthority: doc.sourceAuthority ?? 'normal',
+          docVersion: doc.docVersion ?? 'unknown',
+          effectiveAt: doc.effectiveAt?.toISOString() ?? null,
+          expiredAt: doc.expiredAt?.toISOString() ?? null,
+          title: doc.title ?? null,
+          createdAt: doc.createdAt.toISOString(),
+          obsidianPath,
+          obsidianStatus: obsidianPath ? 'linked' : 'missing',
+        };
+      }),
+    );
 
     return { total, page, pageSize, items };
   }
@@ -208,6 +221,7 @@ export class RagOpsApiService {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc) return null;
 
+    const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(docId);
     return {
       docId: doc.docId,
       filename: doc.filename,
@@ -220,6 +234,8 @@ export class RagOpsApiService {
       language: doc.language ?? null,
       category: doc.category ?? '其他',
       sourceAuthority: doc.sourceAuthority ?? 'normal',
+      obsidianPath,
+      obsidianStatus: obsidianPath ? 'linked' : 'missing',
       docVersion: doc.docVersion ?? 'unknown',
       effectiveAt: doc.effectiveAt?.toISOString() ?? null,
       expiredAt: doc.expiredAt?.toISOString() ?? null,

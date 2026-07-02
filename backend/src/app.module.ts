@@ -39,6 +39,7 @@ import { GrpcModule } from './modules/grpc/rag-grpc.module';
 import { AguiModule } from './modules/agui/agui.module';
 import { QaOpsModule } from './modules/qa-ops/qa-ops.module';
 import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.module';
+import { OfficialDocsSyncModule } from './modules/official-docs-sync/official-docs-sync.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.mod
     AguiModule,
     WeeklySummaryModule,
     QaOpsModule,
+    OfficialDocsSyncModule,
   ],
   providers: [
     {

@@ -18,6 +18,8 @@ export interface DocumentItem {
     language?: string;
     category?: string;
   };
+  obsidianPath?: string | null;
+  obsidianStatus?: 'linked' | 'missing';
 }
 
 export interface DocumentPermissionInput {

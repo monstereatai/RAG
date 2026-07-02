@@ -918,11 +918,33 @@ export class AgenticRagService {
     retryCount: number;
     retrievalSufficient?: boolean;
     retrievalReason?: string;
+    obsidianPaths?: string[];
     interrupted?: boolean;
   }> {
+    const fastPathGate =
+      mode === 'auto'
+        ? await this.karpathyRagService.assessFastPath(query, userId)
+        : null;
     const route =
-      mode === 'simple' ? 'simple' : this.classifyRoute(query, mode);
+      mode === 'simple'
+        ? 'simple'
+        : mode === 'auto'
+          ? fastPathGate?.sufficient
+            ? 'simple'
+            : 'agentic'
+          : this.classifyRoute(query, mode);
     onEvent?.({ type: 'routing', data: { mode, route } });
+    if (fastPathGate) {
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: fastPathGate.sufficient,
+          reason: fastPathGate.reason,
+          obsidianPaths: fastPathGate.obsidianHits.map((hit) => hit.path),
+          ragReferences: fastPathGate.chunks.map((chunk) => chunk.id),
+        },
+      });
+    }
 
     if (route === 'simple') {
       const result = await this.karpathyRagService.answer(
@@ -940,7 +962,29 @@ export class AgenticRagService {
         route: 'simple',
         confidence: 1,
         retryCount: 0,
+        retrievalSufficient: result.retrievalSufficient,
+        retrievalReason: result.retrievalReason,
+        obsidianPaths: result.obsidianPaths,
       };
+    }
+
+    const obsidianContext = await this.karpathyRagService
+      .getObsidianContext(query)
+      .catch(() => ({ hits: [], context: '' }));
+    if (obsidianContext.context) {
+      memoryMessages = [
+        ...memoryMessages,
+        {
+          role: 'system',
+          content: `Obsidian 长期知识优先上下文：\n${obsidianContext.context}`,
+        },
+      ];
+      onEvent?.({
+        type: 'meta',
+        data: {
+          obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
+        },
+      });
     }
 
     if (!this.karpathyRagService.hasIndexedChunks(userId)) {
@@ -960,6 +1004,7 @@ export class AgenticRagService {
         retryCount: 0,
         retrievalSufficient: false,
         retrievalReason: `${reason}；已使用模型兜底回答`,
+        obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
       };
       onEvent?.({ type: 'retrieval', data: [] });
       onEvent?.({
@@ -1024,6 +1069,7 @@ export class AgenticRagService {
         retryCount: 0,
         retrievalSufficient: finalState.retrievalSufficient,
         retrievalReason: finalState.retrievalReason,
+        obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
         interrupted: true,
       };
     }
@@ -1036,6 +1082,7 @@ export class AgenticRagService {
       retryCount: finalState.retryCount,
       retrievalSufficient: finalState.retrievalSufficient,
       retrievalReason: finalState.retrievalReason,
+      obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
     };
     onEvent?.({ type: 'final', data: result });
     return result;

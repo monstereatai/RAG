@@ -14,7 +14,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
-import { Button, Checkbox, Form, Input, Modal, Select, Skeleton, Space, Table, Tag, message } from 'antd';
+import { Button, Checkbox, Form, Input, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useEffect, useState } from 'react';
 import {
@@ -120,6 +120,8 @@ const Documents: React.FC = () => {
               createdAt: item.createdAt,
               updatedAt: item.createdAt,
               metadata: { category: item.category, title: item.title },
+              obsidianPath: item.obsidianPath,
+              obsidianStatus: item.obsidianStatus,
             })),
           );
           setTotal(Number(rawTotal) || items.length);
@@ -205,6 +207,18 @@ const Documents: React.FC = () => {
       title: '权限范围',
       width: 150,
       render: (_, record) => <Tag color="blue">{record.metadata?.category ?? '部门可见'}</Tag>,
+    },
+    {
+      title: 'Obsidian',
+      width: 150,
+      render: (_, record) =>
+        record.obsidianStatus === 'linked' ? (
+          <Tooltip title={record.obsidianPath}>
+            <Tag color="green">已关联</Tag>
+          </Tooltip>
+        ) : (
+          <Tag>未关联</Tag>
+        ),
     },
     {
       title: '操作',

@@ -263,6 +263,29 @@ export const configuration = () => ({
       path.resolve(process.cwd(), '../workspace/mcp-servers.yaml'),
   },
 
+  // 官方技术文档夜间同步（默认关闭）
+  officialDocsSync: {
+    enabled: process.env.OFFICIAL_DOCS_SYNC_ENABLED === 'true',
+    hour: parseInt(process.env.OFFICIAL_DOCS_SYNC_HOUR ?? '1', 10),
+    runOnStart: process.env.OFFICIAL_DOCS_SYNC_RUN_ON_START === 'true',
+    userId: process.env.OFFICIAL_DOCS_SYNC_USER_ID ?? 'system-official-docs',
+    maxPagesPerSource: parseInt(
+      process.env.OFFICIAL_DOCS_SYNC_MAX_PAGES_PER_SOURCE ?? '12',
+      10,
+    ),
+    timeoutMs: parseInt(
+      process.env.OFFICIAL_DOCS_SYNC_TIMEOUT_MS ?? '15000',
+      10,
+    ),
+  },
+
+  // Obsidian 本地知识库
+  obsidian: {
+    vaultDir:
+      process.env.OBSIDIAN_VAULT_DIR ??
+      path.resolve(process.cwd(), '../workspace/obsidian'),
+  },
+
   // 工作区
   workspace: {
     uploadDir:

@@ -9,6 +9,10 @@ import { LlmProvider } from '../../providers/llm/llm.provider';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MetricsService } from '../../modules/metrics/metrics.service';
+import {
+  ObsidianKnowledgeService,
+  ObsidianSearchHit,
+} from '../../modules/obsidian/obsidian-knowledge.service';
 
 export interface RetrievedChunk {
   id: string;
@@ -57,6 +61,8 @@ export interface KarpathyRagResult {
   }>;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
+  obsidianPaths?: string[];
+  obsidianHits?: ObsidianSearchHit[];
 }
 
 export interface RetrieveOptions {
@@ -142,6 +148,7 @@ export class KarpathyRagService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly elasticsearchProvider: ElasticsearchProvider,
     private readonly metricsService: MetricsService,
+    private readonly obsidianKnowledge: ObsidianKnowledgeService,
   ) {}
 
   /**
@@ -468,12 +475,43 @@ export class KarpathyRagService implements OnModuleInit {
     onToken?: (token: string) => void,
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
-    const chunks = await this.retrieve(normalizedQuery, {}, userId);
+    const [chunks, obsidianHits] = await Promise.all([
+      this.retrieve(normalizedQuery, {}, userId),
+      this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
+        this.logger.warn(
+          `Obsidian fast path failed: ${(error as Error).message}`,
+        );
+        return [] as ObsidianSearchHit[];
+      }),
+    ]);
+    const obsidianGate = this.obsidianKnowledge.assessHits(
+      normalizedQuery,
+      obsidianHits,
+    );
+    const obsidianChunks = this.toObsidianChunks(obsidianHits);
+    const evidenceChunks = [...obsidianChunks, ...chunks];
 
     if (chunks.length === 0) {
+      if (obsidianGate.sufficient) {
+        const answer = await this.generateObsidianAnswer(
+          query,
+          obsidianHits,
+          history,
+          memoryMessages,
+          onToken,
+        );
+        return {
+          answer,
+          references: this.toReferences(obsidianChunks),
+          retrievalSufficient: true,
+          retrievalReason: obsidianGate.reason,
+          obsidianPaths: obsidianHits.map((hit) => hit.path),
+          obsidianHits,
+        };
+      }
       const answer = await this.generateModelFallbackAnswer(
         query,
-        '没有检索到候选片段',
+        `没有检索到候选片段；${obsidianGate.reason}`,
         history,
         memoryMessages,
         onToken,
@@ -482,15 +520,17 @@ export class KarpathyRagService implements OnModuleInit {
         answer,
         references: [],
         retrievalSufficient: false,
-        retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
+        retrievalReason: `没有检索到候选片段；${obsidianGate.reason}；已使用模型兜底回答`,
+        obsidianPaths: obsidianHits.map((hit) => hit.path),
+        obsidianHits,
       };
     }
 
     const retrievalGate = this.assessRetrievalQuality(normalizedQuery, chunks);
-    if (!retrievalGate.sufficient) {
+    if (!retrievalGate.sufficient && !obsidianGate.sufficient) {
       const answer = await this.generateModelFallbackAnswer(
         query,
-        retrievalGate.reason,
+        `${retrievalGate.reason}；${obsidianGate.reason}`,
         history,
         memoryMessages,
         onToken,
@@ -499,15 +539,19 @@ export class KarpathyRagService implements OnModuleInit {
         answer,
         references: [],
         retrievalSufficient: false,
-        retrievalReason: `${retrievalGate.reason}；已使用模型兜底回答`,
+        retrievalReason: `${retrievalGate.reason}；${obsidianGate.reason}；已使用模型兜底回答`,
+        obsidianPaths: obsidianHits.map((hit) => hit.path),
+        obsidianHits,
       };
     }
 
-    const context = chunks
+    const context = evidenceChunks
       .map((c, i) => `[片段 ${i + 1}]\n${c.content}`)
       .join('\n\n---\n\n');
 
-    this.logger.log(`Generating answer with ${chunks.length} chunks`);
+    this.logger.log(
+      `Generating answer with ${chunks.length} RAG chunks and ${obsidianChunks.length} Obsidian chunks`,
+    );
     const messages = await generateAnswerPrompt.formatMessages({
       context,
       query: this.normalizePromptQuery(query),
@@ -526,20 +570,25 @@ export class KarpathyRagService implements OnModuleInit {
       onToken?.(token);
     }
     const answer = this.addVersionConflictNotice(rawAnswer, chunks);
-    const citationGate = this.assessCitationSupport(answer, chunks);
+    const citationGate = this.assessCitationSupport(answer, evidenceChunks);
     if (!citationGate.sufficient) {
       const fallbackAnswer = this.buildExtractiveAnswer(
         normalizedQuery,
-        chunks,
+        evidenceChunks,
       );
       if (fallbackAnswer) {
-        const fallbackGate = this.assessCitationSupport(fallbackAnswer, chunks);
+        const fallbackGate = this.assessCitationSupport(
+          fallbackAnswer,
+          evidenceChunks,
+        );
         if (fallbackGate.sufficient) {
           return {
             answer: fallbackAnswer,
-            references: this.toReferences(chunks),
+            references: this.toReferences(evidenceChunks),
             retrievalSufficient: true,
             retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+            obsidianPaths: obsidianHits.map((hit) => hit.path),
+            obsidianHits,
           };
         }
       }
@@ -549,14 +598,20 @@ export class KarpathyRagService implements OnModuleInit {
         references: [],
         retrievalSufficient: false,
         retrievalReason: citationGate.reason,
+        obsidianPaths: obsidianHits.map((hit) => hit.path),
+        obsidianHits,
       };
     }
 
     return {
       answer,
-      references: this.toReferences(chunks),
+      references: this.toReferences(evidenceChunks),
       retrievalSufficient: true,
-      retrievalReason: '检索片段和答案引用通过本地质量闸门',
+      retrievalReason: obsidianGate.sufficient
+        ? `Obsidian fast path 命中；检索片段和答案引用通过本地质量闸门`
+        : '检索片段和答案引用通过本地质量闸门',
+      obsidianPaths: obsidianHits.map((hit) => hit.path),
+      obsidianHits,
     };
   }
 
@@ -576,6 +631,58 @@ export class KarpathyRagService implements OnModuleInit {
 
   hasIndexedChunks(userId?: string): boolean {
     return this.persistedEntries.some((entry) => entry.userId === userId);
+  }
+
+  async assessFastPath(
+    query: string,
+    userId?: string,
+  ): Promise<{
+    sufficient: boolean;
+    reason: string;
+    chunks: RetrievedChunk[];
+    obsidianHits: ObsidianSearchHit[];
+  }> {
+    const normalizedQuery = this.normalizeQuery(query);
+    const [chunks, obsidianHits] = await Promise.all([
+      this.retrieve(normalizedQuery, {}, userId).catch((error) => {
+        this.logger.warn(
+          `Fast path RAG retrieval failed: ${(error as Error).message}`,
+        );
+        return [] as RetrievedChunk[];
+      }),
+      this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
+        this.logger.warn(
+          `Fast path Obsidian retrieval failed: ${(error as Error).message}`,
+        );
+        return [] as ObsidianSearchHit[];
+      }),
+    ]);
+    const ragGate =
+      chunks.length === 0
+        ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
+        : this.assessRetrievalQuality(normalizedQuery, chunks);
+    const obsidianGate = this.obsidianKnowledge.assessHits(
+      normalizedQuery,
+      obsidianHits,
+    );
+
+    return {
+      sufficient: ragGate.sufficient || obsidianGate.sufficient,
+      reason: `RAG: ${ragGate.reason}; Obsidian: ${obsidianGate.reason}`,
+      chunks,
+      obsidianHits,
+    };
+  }
+
+  async getObsidianContext(query: string): Promise<{
+    hits: ObsidianSearchHit[];
+    context: string;
+  }> {
+    const hits = await this.obsidianKnowledge.search(this.normalizeQuery(query));
+    return {
+      hits,
+      context: this.obsidianKnowledge.formatHitsForPrompt(hits),
+    };
   }
 
   assessRetrievedChunks(
@@ -653,6 +760,69 @@ ${historyText || '无'}
       }
       return answer.trim();
     } catch (err) {
+      const answer = await this.llmProvider.invoke(prompt);
+      onToken?.(answer);
+      return answer.trim();
+    }
+  }
+
+  private async generateObsidianAnswer(
+    query: string,
+    hits: ObsidianSearchHit[],
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    memoryMessages: Array<{ role: string; content: string }> = [],
+    onToken?: (token: string) => void,
+  ): Promise<string> {
+    const historyText = history
+      .slice(-6)
+      .map(
+        (item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+      )
+      .join('\n');
+    const memoryText = memoryMessages
+      .slice(-6)
+      .map((item) => `${item.role}：${item.content}`)
+      .join('\n');
+    const context = hits
+      .map(
+        (hit, index) =>
+          `[片段 ${index + 1}]\n${hit.title}\npath: ${hit.path}\n${hit.content}`,
+      )
+      .join('\n\n---\n\n');
+    const prompt = `你是一个严谨的个人知识库助手。请只基于 Obsidian 长期知识上下文回答。
+
+要求：
+1. 不要编造上下文没有的信息。
+2. 涉及事实判断时，在句末标注 [片段N]。
+3. 回答自然、简洁，适合聊天 UI。
+
+长期记忆上下文：
+${memoryText || '无'}
+
+最近对话：
+${historyText || '无'}
+
+Obsidian 长期知识上下文：
+${context}
+
+用户问题：${query}
+
+回答：`;
+
+    try {
+      const stream = await this.llmProvider.getModel().stream(prompt);
+      let answer = '';
+      for await (const chunk of stream) {
+        const token =
+          typeof chunk.content === 'string'
+            ? chunk.content
+            : JSON.stringify(chunk.content);
+        if (!token) continue;
+        answer += token;
+        onToken?.(token);
+      }
+      return answer.trim();
+    } catch {
       const answer = await this.llmProvider.invoke(prompt);
       onToken?.(answer);
       return answer.trim();
@@ -737,6 +907,27 @@ ${historyText || '无'}
       effectiveAt: c.effectiveAt,
       expiredAt: c.expiredAt,
       sourceAuthority: c.sourceAuthority,
+    }));
+  }
+
+  private toObsidianChunks(hits: ObsidianSearchHit[]): RetrievedChunk[] {
+    return hits.map((hit, index) => ({
+      id: `obsidian:${hit.path}`,
+      content: [
+        hit.title,
+        `path: ${hit.path}`,
+        hit.sourceUrl ? `source: ${hit.sourceUrl}` : '',
+        hit.content,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      docId: hit.ragDocId ?? hit.path,
+      chunkIndex: index,
+      bm25Score: 0,
+      cosineScore: 0,
+      totalScore: hit.score,
+      sourceAuthority: 'obsidian',
+      headingPath: [hit.type, hit.title],
     }));
   }
 

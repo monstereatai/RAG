@@ -5,10 +5,12 @@ import { DocumentService } from './document.service';
 import { DocumentMetadataExtractor } from './document-metadata.extractor';
 import { DocumentPermissionService } from './document-permission.service';
 import { DocumentQueueService } from './document-queue.service';
+import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
 import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
 import { LlmModule } from '../../providers/llm/llm.module';
+import { ObsidianKnowledgeModule } from '../obsidian/obsidian-knowledge.module';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
@@ -30,6 +32,7 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
     VectorStoreModule,
     KarpathyRagModule,
     LlmModule,
+    ObsidianKnowledgeModule,
   ],
   controllers: [DocumentController],
   providers: [
@@ -37,7 +40,13 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
     DocumentMetadataExtractor,
     DocumentPermissionService,
     DocumentQueueService,
+    KarpathyObsidianIngestService,
   ],
-  exports: [DocumentService, DocumentPermissionService, DocumentQueueService],
+  exports: [
+    DocumentService,
+    DocumentPermissionService,
+    DocumentQueueService,
+    KarpathyObsidianIngestService,
+  ],
 })
 export class DocumentModule {}

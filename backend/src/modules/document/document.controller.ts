@@ -27,6 +27,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { VisionProvider } from '../../providers/vision/vision.provider';
+import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
@@ -38,6 +39,7 @@ export class DocumentController {
     private readonly speechProvider: TencentSpeechProvider,
     private readonly visionProvider: VisionProvider,
     private readonly documentQueue: DocumentQueueService,
+    private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
       return this.processAsyncUpload(
@@ -70,15 +72,16 @@ export class DocumentController {
     this.logger.log(
       `Received ${file.originalname}, user=${user.username}, ${content.length} chars`,
     );
-    return this.documentService.upload(
-      file.originalname,
+    const result = await this.karpathyObsidianIngest.ingestText({
+      title: file.originalname,
       content,
-      user.userId,
-      {
-        originalBuffer: file.buffer,
-        contentType: file.mimetype,
-      },
-    );
+      userId: user.userId,
+      filename: file.originalname,
+      sourceType: 'document',
+      contentType: file.mimetype,
+      originalBuffer: file.buffer,
+    });
+    return { ...result.rag, obsidian: result.obsidian };
   }
 
   @Post('upload/async')
@@ -129,15 +132,38 @@ export class DocumentController {
     this.logger.log(
       `Received url ${url}, user=${user.username}, ${content.length} chars`,
     );
-    return this.documentService.upload(
-      this.getUrlSnapshotFilename(extracted.finalUrl),
-      content,
-      user.userId,
-      {
-        originalBuffer: extracted.snapshot,
-        contentType: extracted.contentType || 'text/plain',
-      },
-    );
+    const result = await this.karpathyObsidianIngest.ingestUrl({
+      url,
+      extracted,
+      userId: user.userId,
+      filename: this.getUrlSnapshotFilename(extracted.finalUrl),
+    });
+    return { ...result.rag, obsidian: result.obsidian };
+  }
+
+  @Post('manual')
+  async uploadManual(
+    @Body('title') title: string,
+    @Body('content') content: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const normalizedTitle = title?.trim() || 'Manual Note';
+    const normalizedContent = content?.trim();
+    if (!normalizedContent) {
+      throw new BadRequestException('content is required');
+    }
+
+    const filename = `${normalizedTitle.replace(/[\\/:*?"<>|#\[\]\n\r\t]+/g, ' ').trim() || 'manual-note'}.md`;
+    const result = await this.karpathyObsidianIngest.ingestText({
+      title: normalizedTitle,
+      content: normalizedContent,
+      userId: user.userId,
+      filename,
+      sourceType: 'manual',
+      contentType: 'text/markdown',
+      originalBuffer: Buffer.from(normalizedContent, 'utf8'),
+    });
+    return { ...result.rag, obsidian: result.obsidian };
   }
 
   @Get('tasks/:taskId')
@@ -170,15 +196,23 @@ export class DocumentController {
     const kind = detectDocumentKind(file.originalname);
     const content = (await this.extractUploadContent(file, kind)).trim();
     if (!content) {
-      await this.documentService.markTaskFailed(taskId, 'document text is empty');
+      await this.documentService.markTaskFailed(
+        taskId,
+        'document text is empty',
+      );
       throw new BadRequestException('document text is empty');
     }
-    const result = await this.documentService.upload(file.originalname, content, userId, {
-      taskId,
-      originalBuffer: file.buffer,
+    const result = await this.karpathyObsidianIngest.ingestText({
+      title: file.originalname,
+      content,
+      userId,
+      filename: file.originalname,
+      sourceType: 'document',
       contentType: file.mimetype,
+      originalBuffer: file.buffer,
+      taskId,
     });
-    return { chunkCount: result.chunkCount };
+    return { chunkCount: result.rag.chunkCount };
   }
 
   /**
