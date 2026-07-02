@@ -17,14 +17,19 @@ import {
   Checkbox,
   DatePicker,
   Drawer,
+  Form,
   Input,
+  Modal,
   Select,
   Skeleton,
+  Space,
   Statistic,
   Table,
   Tag,
+  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { FormInstance } from 'antd';
 import React, { useEffect, useMemo, useState } from 'react';
 import GraphVisualization from './components/graph-visualization';
 import {
@@ -38,6 +43,7 @@ import {
   type GraphNode,
   type GraphResponseMeta,
   type GraphStats,
+  updateGraphNode,
 } from './service';
 
 type GraphState = 'loading' | 'data' | 'empty' | 'disabled' | 'error';
@@ -102,11 +108,14 @@ const GraphOps: React.FC = () => {
 };
 
 const GlobalGraphView: React.FC = () => {
+  const [form] = Form.useForm();
   const [graphState, setGraphState] = useState<GraphState>('loading');
   const [stats, setStats] = useState<GraphStats | null>(null);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
+  const [editingNode, setEditingNode] = useState<GraphNode | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const fetchGraph = () => {
     setGraphState('loading');
@@ -139,6 +148,35 @@ const GlobalGraphView: React.FC = () => {
   useEffect(() => {
     fetchGraph();
   }, []);
+
+  const openEditNode = (node: GraphNode) => {
+    setEditingNode(node);
+    form.setFieldsValue(toNodeFormValues(node));
+  };
+
+  const handleSaveNode = async () => {
+    if (!editingNode) return;
+    const values = await form.validateFields();
+    const payload = parseNodeFormValues(values);
+    if (!payload) return;
+
+    setSaving(true);
+    try {
+      const res = await updateGraphNode(editingNode.id, payload);
+      const response = asPayload<{ data?: GraphNode & { relations?: GraphEdge[] } }>(res);
+      const updated = response.data;
+      if (updated) {
+        setNodes((prev) => prev.map((node) => (node.id === updated.id ? { ...node, ...updated } : node)));
+      }
+      setEditingNode(null);
+      message.success('节点已更新');
+      fetchGraph();
+    } catch {
+      message.error('节点更新失败，请检查 Neo4j 图谱服务状态');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <>
@@ -182,7 +220,12 @@ const GlobalGraphView: React.FC = () => {
       {graphState === 'data' && (
         <div className="graph-layout">
           <div className="rag-panel graph-canvas">
-            <GraphVisualization edges={edges} height={620} nodes={nodes} />
+            <GraphVisualization
+              edges={edges}
+              height={620}
+              nodes={nodes}
+              onNodeEdit={openEditNode}
+            />
             <GraphLegend />
             <div className="graph-controls">
               <Button icon={<FullscreenOutlined />} />
@@ -194,11 +237,19 @@ const GlobalGraphView: React.FC = () => {
           <GraphSide stats={stats} nodes={nodes} />
         </div>
       )}
+      <GraphNodeEditModal
+        form={form}
+        node={editingNode}
+        onCancel={() => setEditingNode(null)}
+        onOk={handleSaveNode}
+        saving={saving}
+      />
     </>
   );
 };
 
 const NodeManagementView: React.FC = () => {
+  const [form] = Form.useForm();
   const [state, setState] = useState<GraphState>('loading');
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [total, setTotal] = useState(0);
@@ -207,6 +258,8 @@ const NodeManagementView: React.FC = () => {
   const [meta, setMeta] = useState<GraphResponseMeta | undefined>();
   const [activeNode, setActiveNode] = useState<(GraphNode & { relations?: GraphEdge[] }) | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [editingNode, setEditingNode] = useState<GraphNode | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const fetchNodes = () => {
     setState('loading');
@@ -246,6 +299,36 @@ const NodeManagementView: React.FC = () => {
       .finally(() => setDetailLoading(false));
   };
 
+  const openEditNode = (node: GraphNode) => {
+    setEditingNode(node);
+    form.setFieldsValue(toNodeFormValues(node));
+  };
+
+  const handleSaveNode = async () => {
+    if (!editingNode) return;
+    const values = await form.validateFields();
+    const payload = parseNodeFormValues(values);
+    if (!payload) return;
+
+    setSaving(true);
+    try {
+      const res = await updateGraphNode(editingNode.id, payload);
+      const response = asPayload<{ data?: GraphNode & { relations?: GraphEdge[] } }>(res);
+      const updated = response.data;
+      if (updated) {
+        setNodes((prev) => prev.map((node) => (node.id === updated.id ? { ...node, ...updated } : node)));
+        setActiveNode((prev) => (prev?.id === updated.id ? updated : prev));
+      }
+      setEditingNode(null);
+      message.success('节点已更新');
+      fetchNodes();
+    } catch {
+      message.error('节点更新失败，请检查 Neo4j 图谱服务状态');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const typeOptions = useMemo(
     () =>
       Array.from(new Set(nodes.map((node) => node.type).filter(Boolean))).map((type) => ({
@@ -282,11 +365,16 @@ const NodeManagementView: React.FC = () => {
     { title: '最近更新', dataIndex: 'updatedAt', width: 180, render: (value) => value || '-' },
     {
       title: '操作',
-      width: 90,
+      width: 150,
       render: (_, record) => (
-        <Button onClick={() => openNode(record)} size="small">
-          详情
-        </Button>
+        <Space size={6}>
+          <Button onClick={() => openNode(record)} size="small">
+            详情
+          </Button>
+          <Button onClick={() => openEditNode(record)} size="small" type="primary">
+            编辑
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -339,8 +427,15 @@ const NodeManagementView: React.FC = () => {
         title={activeNode?.label ?? '节点详情'}
         width={520}
       >
-        {activeNode && <NodeDetail node={activeNode} />}
+        {activeNode && <NodeDetail node={activeNode} onEdit={() => openEditNode(activeNode)} />}
       </Drawer>
+      <GraphNodeEditModal
+        form={form}
+        node={editingNode}
+        onCancel={() => setEditingNode(null)}
+        onOk={handleSaveNode}
+        saving={saving}
+      />
     </>
   );
 };
@@ -592,8 +687,99 @@ const GraphSide: React.FC<{ stats: GraphStats | null; nodes: GraphNode[] }> = ({
   </aside>
 );
 
-const NodeDetail: React.FC<{ node: GraphNode & { relations?: GraphEdge[] } }> = ({ node }) => (
+const toNodeFormValues = (node: GraphNode) => ({
+  label: node.label,
+  type: node.type,
+  aliases: node.aliases?.join('、') ?? '',
+  sourceId: node.sourceId,
+  properties: JSON.stringify(node.properties ?? {}, null, 2),
+});
+
+const parseNodeFormValues = (values: any) => {
+  let properties: Record<string, any> = {};
+  try {
+    properties = values.properties?.trim()
+      ? JSON.parse(values.properties)
+      : {};
+  } catch {
+    message.error('属性必须是合法 JSON 对象');
+    return null;
+  }
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    message.error('属性必须是合法 JSON 对象');
+    return null;
+  }
+
+  return {
+    type: values.type?.trim(),
+    aliases: String(values.aliases ?? '')
+      .split(/[,，、\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    sourceId: values.sourceId?.trim(),
+    properties,
+  };
+};
+
+const GraphNodeEditModal: React.FC<{
+  form: FormInstance;
+  node: GraphNode | null;
+  onCancel: () => void;
+  onOk: () => void;
+  saving: boolean;
+}> = ({ form, node, onCancel, onOk, saving }) => (
+  <Modal
+    confirmLoading={saving}
+    destroyOnHidden
+    okText="保存"
+    onCancel={onCancel}
+    onOk={onOk}
+    open={!!node}
+    title="编辑节点"
+    width={640}
+  >
+    <Form form={form} layout="vertical">
+      <Form.Item label="节点名称" name="label">
+        <Input disabled />
+      </Form.Item>
+      <Form.Item
+        label="节点类型"
+        name="type"
+        rules={[{ required: true, message: '请输入节点类型' }]}
+      >
+        <Input placeholder="例如 Framework / Database / LLM" />
+      </Form.Item>
+      <Form.Item label="别名" name="aliases">
+        <Input.TextArea
+          autoSize={{ minRows: 2, maxRows: 4 }}
+          placeholder="多个别名用逗号、顿号或换行分隔"
+        />
+      </Form.Item>
+      <Form.Item label="来源" name="sourceId">
+        <Input placeholder="来源文档或导入批次" />
+      </Form.Item>
+      <Form.Item
+        label="属性 JSON"
+        name="properties"
+        rules={[{ required: true, message: '请输入属性 JSON' }]}
+      >
+        <Input.TextArea
+          autoSize={{ minRows: 8, maxRows: 14 }}
+          spellCheck={false}
+        />
+      </Form.Item>
+    </Form>
+  </Modal>
+);
+
+const NodeDetail: React.FC<{
+  node: GraphNode & { relations?: GraphEdge[] };
+  onEdit?: () => void;
+}> = ({ node, onEdit }) => (
   <div className="graph-detail">
+    <Button onClick={onEdit} style={{ marginBottom: 12 }} type="primary">
+      编辑节点
+    </Button>
     <dl>
       <dt>节点 ID</dt>
       <dd>{node.id}</dd>

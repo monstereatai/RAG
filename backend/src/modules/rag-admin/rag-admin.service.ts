@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -589,6 +589,28 @@ export class RagAdminService {
       return { available: false, data: null, error: 'GraphRAG is disabled' };
     }
     const data = await this.graphService.getEntityDetail('admin', id);
+    return {
+      available: true,
+      data,
+    };
+  }
+
+  async updateGraphEntity(
+    id: string,
+    input: {
+      type?: string;
+      aliases?: string[];
+      sourceId?: string;
+      properties?: Record<string, unknown>;
+    },
+  ) {
+    if (!this.graphService.isEnabled()) {
+      return { available: false, data: null, error: 'GraphRAG is disabled' };
+    }
+    const data = await this.graphService.updateEntity('admin', id, input);
+    if (!data) {
+      throw new NotFoundException(`graph entity ${id} not found`);
+    }
     return {
       available: true,
       data,

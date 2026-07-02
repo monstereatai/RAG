@@ -32,6 +32,7 @@
     "eval:business-dataset": "node scripts/build-business-regression-dataset.mjs --check",
     "eval:business-private": "node scripts/import-business-regression-dataset.mjs --input eval/private-business-regression.dataset.json --min-cases 50",
     "eval:business-import": "node scripts/import-business-regression-dataset.mjs",
+    "enterprise:readiness": "node scripts/check-enterprise-readiness.mjs",
     "fixtures:private:prepare": "node scripts/prepare-private-fixtures.mjs",
     "fixtures:private:check": "node scripts/prepare-private-fixtures.mjs --check",
     "perf:rag": "node scripts/benchmark-rag.mjs",
@@ -66,7 +67,7 @@
     "@langchain/quickjs": "0.4.0",
     "@langchain/textsplitters": "1.0.1",
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@nestjs/bullmq": "^11.0.4",
+    "@nestjs/bullmq": "11.0.4",
     "@nestjs/common": "11.1.27",
     "@nestjs/config": "4.0.4",
     "@nestjs/core": "11.1.27",
@@ -79,7 +80,7 @@
     "@nestjs/typeorm": "11.0.2",
     "@node-rs/jieba": "2.0.1",
     "@zilliz/milvus2-sdk-node": "2.6.17",
-    "bullmq": "^5.79.2",
+    "bullmq": "5.79.2",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
     "cron": "4.4.0",
@@ -164,14 +165,6 @@
     "p-retry": "4.6.2",
     "@langchain/langgraph-sdk": {
       "p-queue": "6.6.2"
-    }
-  },
-  "pnpm": {
-    "overrides": {
-      "uuid": "9.0.1",
-      "thrift@0.23.0>uuid": "9.0.1",
-      "p-retry": "4.6.2",
-      "@langchain/langgraph-sdk>p-queue": "6.6.2"
     }
   }
 }

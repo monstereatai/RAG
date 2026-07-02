@@ -148,7 +148,7 @@ const formatEventTrace = (events: EventTraceItem[]) =>
 
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState('');
-  const [mode, setMode] = React.useState<ChatMode>('agentic');
+  const [mode, setMode] = React.useState<ChatMode>('auto');
   const modelConfig = React.useMemo(() => getQaModelConfig(), []);
   const modelOptions = React.useMemo(
     () => getEnabledQaModelOptions(modelConfig),
@@ -889,9 +889,9 @@ const QaOps: React.FC = () => {
                 onChange={(event) => setMode(event.target.value as ChatMode)}
                 value={mode}
               >
-                <option value="agentic">agentic</option>
                 <option value="auto">auto</option>
                 <option value="simple">simple</option>
+                <option value="agentic">agentic</option>
               </select>
               <select
                 aria-label="模型"

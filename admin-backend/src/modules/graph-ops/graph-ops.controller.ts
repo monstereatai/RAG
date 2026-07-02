@@ -1,4 +1,13 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Query,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -142,6 +151,31 @@ export class GraphOpsController {
       return this.withMeta(item);
     }
     return this.withMeta(this.mockService.getNodeDetail(id), true);
+  }
+
+  @Patch('nodes/:id')
+  @ApiOperation({ summary: '更新图谱节点（前端 graph-ops 页面）' })
+  @RequirePermission('admin:graph-ops:write')
+  async updateNode(@Param('id') id: string, @Body() body: any) {
+    const result = await this.ragClient.updateGraphEntity(id, {
+      type: body?.type,
+      aliases: Array.isArray(body?.aliases) ? body.aliases : [],
+      sourceId: body?.sourceId,
+      properties: body?.properties && typeof body.properties === 'object'
+        ? body.properties
+        : {},
+    });
+    if (!result.available) {
+      throw new ServiceUnavailableException(
+        result.error || 'GraphRAG is disabled or unavailable',
+      );
+    }
+    const upstream = this.unwrapRagResult(result);
+    const item = (upstream as any)?.data ?? upstream;
+    if (!item) {
+      throw new NotFoundException(`graph node ${id} not found`);
+    }
+    return this.withMeta(item);
   }
 
   @Get('relations/search')

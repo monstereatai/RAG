@@ -90,6 +90,24 @@ export async function getGraphNodeDetail(id: string) {
   );
 }
 
+export async function updateGraphNode(
+  id: string,
+  data: {
+    type?: string;
+    aliases?: string[];
+    sourceId?: string;
+    properties?: Record<string, any>;
+  },
+) {
+  return authRequest<GraphDataResponse<GraphNode & { relations?: GraphEdge[] }>>(
+    `/api/admin/graph-ops/nodes/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      data,
+    },
+  );
+}
+
 export async function getGraphRelations(params?: {
   query?: string;
   source?: string;

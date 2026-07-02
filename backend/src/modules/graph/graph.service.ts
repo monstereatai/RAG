@@ -73,6 +73,13 @@ export interface GraphAdminRelationship {
   properties: Record<string, unknown>;
 }
 
+export interface GraphAdminNodeUpdate {
+  type?: string;
+  aliases?: string[];
+  sourceId?: string;
+  properties?: Record<string, unknown>;
+}
+
 @Injectable()
 export class GraphService {
   private readonly logger = new Logger(GraphService.name);
@@ -228,6 +235,52 @@ export class GraphService {
       limit: 50,
     });
     return { ...node, relations };
+  }
+
+  async updateEntity(
+    userId: string,
+    id: string,
+    input: GraphAdminNodeUpdate,
+  ): Promise<(GraphAdminNode & { relations: GraphAdminRelationship[] }) | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const type = input.type?.trim();
+    const aliases = Array.isArray(input.aliases)
+      ? input.aliases.map(String).map((item) => item.trim()).filter(Boolean)
+      : [];
+    const sourceId = input.sourceId?.trim() ?? '';
+    const properties =
+      input.properties && typeof input.properties === 'object' && !Array.isArray(input.properties)
+        ? input.properties
+        : {};
+
+    const rows = await this.neo4jProvider.executeWrite<Record<string, unknown>>(
+      `
+      MATCH (n:GraphEntity {id: $id, userId: $userId})
+      SET n.label = $type,
+          n.aliases = $aliases,
+          n.sourceId = $sourceId,
+          n.properties = $properties,
+          n.updatedAt = datetime()
+      RETURN n.id AS id
+      `,
+      {
+        userId,
+        id,
+        type: type || 'entity',
+        aliases,
+        sourceId,
+        properties: JSON.stringify(properties),
+      },
+    );
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    return this.getEntityDetail(userId, id);
   }
 
   async listRelationships(

@@ -8,12 +8,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "china-division": "^2.7.0",
-    "hono": "^4.6.0"
+    "china-division": "2.7.0",
+    "hono": "4.6.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241127.0",
-    "typescript": "^5.7.2",
-    "wrangler": "^4.0.0"
+    "@cloudflare/workers-types": "4.20241127.0",
+    "typescript": "5.7.2",
+    "wrangler": "4.0.0"
   }
 }

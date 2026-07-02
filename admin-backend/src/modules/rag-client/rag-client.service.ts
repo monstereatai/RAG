@@ -173,6 +173,13 @@ export class RagClientService {
     );
   }
 
+  updateGraphEntity(id: string, body: Record<string, unknown>) {
+    return this.patchJson<Record<string, unknown>>(
+      `/rag/admin/graph/entities/${encodeURIComponent(id)}`,
+      body,
+    );
+  }
+
   getGraphRelationships() {
     return this.getJson<Record<string, unknown>>('/rag/admin/graph/relationships');
   }
@@ -240,6 +247,14 @@ export class RagClientService {
   private async postJson<T>(path: string, body: unknown): Promise<RagClientResult<T>> {
     return this.request<T>(path, {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  private async patchJson<T>(path: string, body: unknown): Promise<RagClientResult<T>> {
+    return this.request<T>(path, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });

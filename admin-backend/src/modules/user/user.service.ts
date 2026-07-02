@@ -43,6 +43,7 @@ export class UserService {
       'admin:search-ops:read',
       'admin:qa-ops:read',
       'admin:graph-ops:read',
+      'admin:graph-ops:write',
       'admin:rag:read',
       'admin:rag:write',
       'admin:notifications:read',

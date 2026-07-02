@@ -521,6 +521,7 @@ export class KarpathyRagService implements OnModuleInit {
         typeof chunk.content === 'string'
           ? chunk.content
           : JSON.stringify(chunk.content);
+      if (!token) continue;
       rawAnswer += token;
       onToken?.(token);
     }
@@ -646,6 +647,7 @@ ${historyText || '无'}
           typeof chunk.content === 'string'
             ? chunk.content
             : JSON.stringify(chunk.content);
+        if (!token) continue;
         answer += token;
         onToken?.(token);
       }

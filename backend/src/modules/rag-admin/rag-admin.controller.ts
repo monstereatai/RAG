@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Patch,
   Post,
   Param,
   Query,
@@ -227,6 +228,20 @@ export class RagAdminController {
   @Get('graph/entities/:id')
   getGraphEntityDetail(@Param('id') id: string) {
     return this.ragAdminService.getGraphEntityDetail(id);
+  }
+
+  @Patch('graph/entities/:id')
+  updateGraphEntity(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      type?: string;
+      aliases?: string[];
+      sourceId?: string;
+      properties?: Record<string, unknown>;
+    },
+  ) {
+    return this.ragAdminService.updateGraphEntity(id, body);
   }
 
   @Get('graph/relationships')

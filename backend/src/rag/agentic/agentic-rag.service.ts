@@ -644,6 +644,7 @@ export class AgenticRagService {
         typeof chunk.content === 'string'
           ? chunk.content
           : JSON.stringify(chunk.content);
+      if (!token) continue;
       answer += token;
       onEvent?.({ type: 'token', data: token });
     }
@@ -973,6 +974,17 @@ export class AgenticRagService {
       return result;
     }
 
+    const fastFallback = await this.tryFastInsufficientFallback(
+      query,
+      onEvent,
+      history,
+      userId,
+      memoryMessages,
+    );
+    if (fastFallback) {
+      return fastFallback;
+    }
+
     // 通过 LangGraph StateGraph 执行 agentic 流程
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
@@ -1025,6 +1037,73 @@ export class AgenticRagService {
       retrievalSufficient: finalState.retrievalSufficient,
       retrievalReason: finalState.retrievalReason,
     };
+    onEvent?.({ type: 'final', data: result });
+    return result;
+  }
+
+  private async tryFastInsufficientFallback(
+    query: string,
+    onEvent: SseCallback | undefined,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+    userId: string | undefined,
+    memoryMessages: Array<{ role: string; content: string }>,
+  ): Promise<{
+    answer: string;
+    references: RetrievedChunk[];
+    route: 'agentic';
+    confidence: number;
+    retryCount: number;
+    retrievalSufficient: false;
+    retrievalReason: string;
+  } | null> {
+    let chunks: RetrievedChunk[] = [];
+    try {
+      chunks = await this.karpathyRagService.retrieve(query, {}, userId);
+    } catch (err) {
+      this.logger.warn(
+        `Fast insufficient retrieval failed, continue full agentic graph: ${(err as Error).message}`,
+      );
+      return null;
+    }
+
+    const gate =
+      chunks.length === 0
+        ? {
+            sufficient: false,
+            reason: '原始问题没有检索到候选片段',
+          }
+        : this.karpathyRagService.assessRetrievedChunks(query, chunks);
+
+    if (gate.sufficient) {
+      return null;
+    }
+
+    onEvent?.({ type: 'retrieval', data: chunks });
+    onEvent?.({
+      type: 'sufficiency',
+      data: {
+        sufficient: false,
+        reason: gate.reason,
+      },
+    });
+
+    const answer = await this.karpathyRagService.generateModelFallbackAnswer(
+      query,
+      gate.reason,
+      history,
+      memoryMessages,
+      (token) => onEvent?.({ type: 'token', data: token }),
+    );
+    const result = {
+      answer,
+      references: [],
+      route: 'agentic' as const,
+      confidence: 1,
+      retryCount: 0,
+      retrievalSufficient: false as const,
+      retrievalReason: `${gate.reason}；已跳过查询扩展并使用模型兜底回答`,
+    };
+    onEvent?.({ type: 'citation', data: [] });
     onEvent?.({ type: 'final', data: result });
     return result;
   }

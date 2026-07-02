@@ -1,0 +1,8 @@
+packages:
+  - .
+
+overrides:
+  uuid: 9.0.1
+  thrift@0.23.0>uuid: 9.0.1
+  p-retry: 4.6.2
+  '@langchain/langgraph-sdk>p-queue': 6.6.2

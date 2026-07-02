@@ -8,6 +8,7 @@ interface GraphVisualizationProps {
   edges: GraphEdge[];
   loading?: boolean;
   height?: number;
+  onNodeEdit?: (node: GraphNode) => void;
 }
 
 const typeColorMap: Record<string, string> = {
@@ -29,6 +30,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   edges,
   loading = false,
   height = 500,
+  onNodeEdit,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -112,6 +114,18 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       });
 
     node.call(dragBehavior);
+    node
+      .style('cursor', onNodeEdit ? 'pointer' : 'grab')
+      .on('dblclick', (event: MouseEvent, d: GraphNode) => {
+        event.stopPropagation();
+        onNodeEdit?.(d);
+      });
+
+    node
+      .append('title')
+      .text((d: GraphNode) =>
+        onNodeEdit ? `双击编辑：${d.label}` : d.label,
+      );
 
     node
       .append('circle')
@@ -145,7 +159,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges, height]);
+  }, [nodes, edges, height, onNodeEdit]);
 
   if (loading) {
     return (

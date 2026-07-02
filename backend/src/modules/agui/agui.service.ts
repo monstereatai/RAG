@@ -56,24 +56,6 @@ export class AguiService {
               options.mode,
               options.userId,
             ));
-          const history = await this.conversationService.getRecentHistory(
-            activeThreadId,
-            5,
-            options.userId,
-          );
-          const memoryResult = await this.memoryService.searchMemory(
-            query,
-            options.userId,
-            activeThreadId,
-          );
-          const memoryMessages: Array<{ role: string; content: string }> = [];
-          if (memoryResult.systemMessage) {
-            memoryMessages.push({
-              role: 'system',
-              content: memoryResult.systemMessage.content as string,
-            });
-          }
-
           emit('RUN_STARTED', {
             threadId: activeThreadId,
             input: { query, mode: options.mode, model: selectedModel },
@@ -87,6 +69,30 @@ export class AguiService {
             messageId,
             role: 'assistant',
           });
+
+          const [history, memoryResult] = await Promise.all([
+            this.conversationService.getRecentHistory(
+              activeThreadId,
+              5,
+              options.userId,
+            ),
+            this.withTimeout(
+              this.memoryService.searchMemory(
+                query,
+                options.userId,
+                activeThreadId,
+              ),
+              600,
+              { userMemories: [], sessionMemories: [], systemMessage: null },
+            ),
+          ]);
+          const memoryMessages: Array<{ role: string; content: string }> = [];
+          if (memoryResult.systemMessage) {
+            memoryMessages.push({
+              role: 'system',
+              content: memoryResult.systemMessage.content as string,
+            });
+          }
 
           const result = await this.llmProvider.runWithModel(
             selectedModel,
@@ -236,6 +242,22 @@ export class AguiService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    fallback: T,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private traceAnswer(params: {
