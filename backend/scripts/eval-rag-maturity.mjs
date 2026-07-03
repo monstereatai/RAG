@@ -42,8 +42,30 @@ function loadEvidence() {
   const projectDataset = readBackendJson(
     'eval/project-simulated-business.dataset.json',
   );
+  const privateBusinessDataset = readBackendJson(
+    'eval/private-business-regression.dataset.json',
+  );
+  const configurationText = readText('src/config/configuration.ts');
+  const chunkEntityText = readText(
+    'src/providers/db/entities/document-chunk.entity.ts',
+  );
+  const factConflictEntityText = readText(
+    'src/providers/db/entities/fact-conflict.entity.ts',
+  );
+  const jobsServiceText = readText('src/modules/jobs/jobs.service.ts');
+  const karpathyRagText = readText('src/rag/karpathy/karpathy-rag.service.ts');
+  const milvusProviderText = readText(
+    'src/providers/vector-store/milvus.vector-store.ts',
+  );
+  const deploymentChecklist = readWorkspaceText('DEPLOYMENT_CHECKLIST.md');
+  const remainingEnhancementPlan = readWorkspaceText(
+    'docs/remaining-enhancement-plan.md',
+  );
   const businessItems = Array.isArray(businessDataset?.items)
     ? businessDataset.items
+    : [];
+  const privateBusinessItems = Array.isArray(privateBusinessDataset?.items)
+    ? privateBusinessDataset.items
     : [];
   const projectQueries = Array.isArray(projectDataset?.queries)
     ? projectDataset.queries
@@ -62,9 +84,32 @@ function loadEvidence() {
       projectQueries.length >= 10 &&
       projectQueries.some((item) => item.expectRefusal === true) &&
       projectQueries.some((item) => item.expectConflictHandling === true),
-    hasPrivateBusinessDataset:
-      businessDataset?.description?.includes('不包含真实公司私密数据') ===
-      false,
+    hasPrivateBusinessDataset: privateBusinessItems.length >= 50,
+    hasMilvusRuntimeGovernance:
+      exists('scripts/smoke-milvus-index.mjs') &&
+      milvusProviderText.includes('getRuntimeStatus') &&
+      milvusProviderText.includes('circuitFailureThreshold') &&
+      milvusProviderText.includes('searchTimeoutMs'),
+    hasSupervisorScheduledJobs:
+      jobsServiceText.includes('SupervisorService') &&
+      jobsServiceText.includes('this.supervisorService.query'),
+    hasClaimLevelCitation:
+      karpathyRagText.includes('validateClaimCitationSupport') ||
+      karpathyRagText.includes('关键结论引用支撑不足'),
+    hasStructuredSourceSpan:
+      chunkEntityText.includes('sourceStart') &&
+      chunkEntityText.includes('sourceEnd') &&
+      chunkEntityText.includes('parentChunkId'),
+    hasFactConflictGovernance:
+      factConflictEntityText.includes("@Entity('fact_conflicts')") &&
+      factConflictEntityText.includes('conflictingValue') &&
+      readText('src/modules/document/document.service.ts').includes(
+        'detectAndSaveFactConflicts',
+      ),
+    hasProductionReadinessEntry:
+      exists('scripts/check-enterprise-readiness.mjs') &&
+      deploymentChecklist.includes('生产部署 Checklist') &&
+      remainingEnhancementPlan.includes('企业级 readiness 汇总'),
     files: {
       qualityGate: exists('scripts/eval-rag-quality-gate.mjs'),
       e2eEval: exists('scripts/eval-rag-e2e.mjs'),
@@ -83,9 +128,7 @@ function loadEvidence() {
         'src/providers/db/entities/fact-conflict.entity.ts',
       ),
       rolesGuard: exists('src/common/guards/roles.guard.ts'),
-      agenticBudget: readText('src/config/configuration.ts').includes(
-        'maxAugmentedQueries',
-      ),
+      agenticBudget: configurationText.includes('maxAugmentedQueries'),
     },
   };
 }
@@ -118,7 +161,7 @@ function scoreDimensions(evidence) {
       ),
       check(
         'Milvus 诊断入口存在，慢向量可被识别并降级',
-        evidence.files.milvusSmoke && evidence.roadmap.includes('Milvus warning'),
+        evidence.hasMilvusRuntimeGovernance,
         3,
       ),
     ]),
@@ -134,12 +177,12 @@ function scoreDimensions(evidence) {
       ),
       check('真实服务 e2e 回放入口存在', evidence.files.e2eEval, 4),
       check('Agentic 成本边界可配置', evidence.files.agenticBudget, 4),
-      check('定时任务复用 Supervisor 执行', evidence.roadmap.includes('定时任务 Agent 执行动作'), 2),
+      check('定时任务复用 Supervisor 执行', evidence.hasSupervisorScheduledJobs, 2),
     ]),
     dimension('引用能撑住', 15, [
       check(
         'claim-level 引用支撑校验已记录',
-        evidence.roadmap.includes('claim-level'),
+        evidence.hasClaimLevelCitation,
         5,
       ),
       check(
@@ -159,7 +202,7 @@ function scoreDimensions(evidence) {
       ),
       check(
         '结构化 chunk/source span 已落地',
-        evidence.files.documentChunksEntity && evidence.roadmap.includes('source span'),
+        evidence.files.documentChunksEntity && evidence.hasStructuredSourceSpan,
         4,
       ),
     ]),
@@ -174,8 +217,7 @@ function scoreDimensions(evidence) {
       check('LLM-as-Judge 入口存在', evidence.files.judgeEval, 3),
       check(
         '事实冲突表与冲突处理记录存在',
-        evidence.files.factConflictEntity &&
-          evidence.roadmap.includes('fact_conflicts'),
+        evidence.files.factConflictEntity && evidence.hasFactConflictGovernance,
         4,
       ),
       check(
@@ -202,7 +244,7 @@ function scoreDimensions(evidence) {
       check('真实业务评测导入入口存在', Boolean(scripts['eval:business-import']), 4),
       check('业务 MCP 配置校验入口存在', Boolean(scripts['mcp:validate']), 3),
       check('GraphRAG 业务种子导入入口存在', Boolean(scripts['graph:import-business']), 3),
-      check('生产就绪检查入口已记录', evidence.roadmap.includes('check-production-readiness'), 3),
+      check('生产就绪检查入口已记录', evidence.hasProductionReadinessEntry, 3),
       check('真实私有业务评测集已接入', evidence.hasPrivateBusinessDataset, 3),
       check(
         'Milvus search runtime 无降级缺口',

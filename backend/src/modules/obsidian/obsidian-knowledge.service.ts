@@ -567,6 +567,7 @@ export class ObsidianKnowledgeService {
       conclusion: string;
       risks: string;
       acceptance: string;
+      openQuestions: string;
     }> = [];
     const noteRecords: Array<{
       title: string;
@@ -611,6 +612,12 @@ export class ObsidianKnowledgeService {
           conclusion,
           risks: this.extractSection(note.content, '落地风险'),
           acceptance: this.extractSection(note.content, '验收口径'),
+          openQuestions: [
+            this.extractSection(note.content, '反对意见'),
+            this.extractSection(note.content, '适用边界'),
+          ]
+            .filter(Boolean)
+            .join('\n'),
         });
       }
     }
@@ -812,6 +819,13 @@ export class ObsidianKnowledgeService {
           '## 待确认',
           '',
           '- 该实体的版本、边界、依赖和上下游关系需要在真实项目中继续校验。',
+          '- 如果多份资料对该实体给出不同定义、职责或状态，以最新 source note 和真实业务 owner 确认为准。',
+          '',
+          '## 开放问题',
+          '',
+          '- 该实体是否有权威 owner、最新版本和废弃版本？',
+          '- 该实体与其他实体的上下游关系是否需要写入 GraphRAG？',
+          '- 该实体是否涉及权限、合规或跨部门例外规则？',
           '',
         ].join('\n'),
         'utf8',
@@ -831,6 +845,7 @@ export class ObsidianKnowledgeService {
       conclusion: string;
       risks: string;
       acceptance: string;
+      openQuestions: string;
     }>,
   ): Promise<void> {
     const dir = resolve(this.compiledDir(), 'conclusions');
@@ -883,7 +898,16 @@ export class ObsidianKnowledgeService {
           '',
           '## 版本/矛盾检查',
           '',
-          ...this.detectVersionConflicts(list.map((item) => item.conclusion)),
+          ...this.detectVersionConflicts([
+            ...list.map((item) => item.conclusion),
+            ...list.map((item) => item.risks),
+            ...list.map((item) => item.acceptance),
+            ...list.map((item) => item.openQuestions),
+          ]),
+          '',
+          '## 开放问题',
+          '',
+          ...this.mergeSectionItems(list.map((item) => item.openQuestions)),
           '',
         ].join('\n'),
         'utf8',
@@ -1370,13 +1394,36 @@ export class ObsidianKnowledgeService {
   }
 
   private detectVersionConflicts(lines: string[]): string[] {
-    const years = new Set(lines.flatMap((line) => line.match(/20\d{2}/g) ?? []));
-    if (years.size >= 2) {
-      return [
-        `- 检测到多个年份/版本信号：${[...years].join('、')}，需要人工确认当前生效版本。`,
-      ];
+    const normalizedLines = lines
+      .flatMap((line) => line.split('\n'))
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const years = new Set(
+      normalizedLines.flatMap((line) => line.match(/20\d{2}/g) ?? []),
+    );
+    const conflictSignals: string[] = [];
+    const pairs: Array<[RegExp, RegExp, string]> = [
+      [/推荐|建议|应该|必须|采用|允许|可以/, /不推荐|不建议|不应该|禁止|避免|不可|不能/, '同一结论附近同时出现正反决策词'],
+      [/生效|最新|优先|当前/, /历史|废弃|过期|失效|旧版/, '同一结论附近同时出现新旧版本词'],
+      [/必须|强制|required/i, /可选|非必须|optional/i, '同一结论附近同时出现强制和可选词'],
+    ];
+    for (const [positive, negative, reason] of pairs) {
+      if (
+        normalizedLines.some((line) => positive.test(line)) &&
+        normalizedLines.some((line) => negative.test(line))
+      ) {
+        conflictSignals.push(`- ${reason}，需要回到 source note 核对上下文。`);
+      }
     }
-    return ['- 暂未检测到明显版本冲突。'];
+
+    if (years.size >= 2) {
+      conflictSignals.unshift(
+        `- 检测到多个年份/版本信号：${[...years].join('、')}，需要人工确认当前生效版本。`,
+      );
+    }
+    return conflictSignals.length > 0
+      ? [...new Set(conflictSignals)]
+      : ['- 暂未检测到明显版本或语义冲突。'];
   }
 
   private addGraphNode(

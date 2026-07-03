@@ -395,7 +395,7 @@ IngestInput
 - [x] 实体页基础版：按 source note frontmatter `entities` 聚合同一人/产品/公司/技术资料到 `compiled/entities/{entity}.md`，并刷新 `index/entities.md`。
 - [x] 结论页基础版：按 source note 的“关键结论”沉淀到 `compiled/conclusions/{conclusion}.md`，聚合证据、风险和验收口径，并刷新 `index/conclusions.md`。
 - [x] 每次新增资料后，自动刷新 `index/sources.md`、`index/tags.md`、`index/entities.md`、`index/conclusions.md`、tag/entity/conclusion compiled 页和 graph seed。
-- [x] 版本差异基础检查：结论页会检测多个年份/版本信号并标记需人工确认；复杂语义矛盾仍需要后续评测和人工复核。
+- [x] 版本/语义差异基础检查：结论页会检测多个年份/版本信号，以及推荐/不推荐、采用/避免、必须/可选等冲突信号并标记需人工确认；复杂语义矛盾仍需要后续评测和人工复核。
 
 ### P2：Karpathy 统一取用流
 
@@ -464,7 +464,7 @@ IngestInput
 
 - tag compiled 页面包含 source note 列表和摘要。
 - 新资料能触发对应 compiled/index 刷新。
-- entity/conclusion 页面、矛盾和开放问题仍是后续增强项。
+- entity/conclusion 页面会生成证据、风险、验收、开放问题和基础矛盾检查；复杂语义矛盾仍需真实数据评测和人工复核。
 
 ### M4：取用闭环
 
@@ -513,4 +513,4 @@ IngestInput
 - [x] 已实现双向 `related` 基础版、reason/score 日志。
 - [x] 已接入 Admin 文档列表展示 `obsidian_path` 关联状态。
 - [x] 已实现项目决策编排 API 和 Obsidian 输出：方案选择、技术选型、ADR、任务拆解。
-- [x] 已实现 entity/conclusion 编译页基础版、版本信号检查和 GraphRAG seed 只读导出。
+- [x] 已实现 entity/conclusion 编译页基础版、开放问题、版本/语义冲突信号检查和 GraphRAG seed 只读导出。

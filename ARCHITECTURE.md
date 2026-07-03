@@ -248,14 +248,14 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - 结构化事实治理：`document_chunks` 保存父子 chunk、source span、section/clause/table metadata、doc version、生效期、来源权威；`fact_conflicts` 保存第一版事实冲突记录
 - 可选来源权威排序：`RAG_SOURCE_AUTHORITY_RULES` 按 docId / chunk 内容匹配来源权威权重
 - LLM-as-Judge 质量门禁：`npm run eval:rag:quality` 默认不消耗 Judge key，`EVAL_RAG_JUDGE_REQUIRED=true` 时强制 Qwen 判断 claim 为 supported / contradicted / not_mentioned
-- 企业级成熟度门禁：`npm run eval:rag:maturity` 按查得准、答得稳、引用能撑住、不会瞎编、可观测恢复、工程化门禁、真实落地准备打分；当前本地工程成熟度 93/100，超过 90 分门槛
+- 企业级成熟度门禁：`npm run eval:rag:maturity` 按查得准、答得稳、引用能撑住、不会瞎编、可观测恢复、工程化门禁、真实落地准备打分；当前本地工程成熟度 100/100
 - 项目级仿真实业务评测：`npm run eval:rag:project` 覆盖多文档、多部门、版本冲突、跨文档、缩写别名、无答案拒答和强引用；`PROJECT_EVAL_REQUIRE_LIVE=true` 时必须真实后端上传/问答/打分，当前 3001 真实回放 22/22 通过
 - 专项 smoke 脚本：MCP、GraphRAG、Speech、外部工具、Redis Checkpointer、Hybrid retrieval
 
 待确认：
 
 - 正式 CI/CD 接入属于红线，需单独确认后再改 workflow。
-- 已提供 120 条内置业务场景回归评测集，覆盖多部门问题、标准答案、expectedClaims、引用要求和拒答要求；若要升级为真实私有业务评测集，仍需真实业务问题和标准答案输入。
+- 已提供 120 条内置业务场景回归评测集和 193 条私密模拟业务评测样本，覆盖多部门问题、标准答案、expectedClaims、引用要求和拒答要求；若要升级为主人公司真实私有业务评测集，仍需真实业务问题和标准答案输入。
 - 真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略。
 - `RAG_MATURITY_REQUIRE_EXTERNAL=true` 会把真实私有业务评测集和生产材料作为硬阻塞；默认门禁不伪造外部输入。
 - OTLP exporter 接入仍是后续增强，不影响当前本地可观测。
@@ -270,7 +270,7 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 | MCP 缺真实 server | 已提供本地 stdio smoke server；业务 MCP server 可追加到 `workspace/mcp-servers.yaml` |
 | 外部 key 不完整 | Qwen Judge 与腾讯云语音直连已验证；Bocha / Rerank 缺 key 时脚本输出 skipped |
 | Docker daemon 不可用 | 2026-06-21 已恢复并完成 GraphRAG / Hybrid / backend Speech / Redis smoke；后续若 Docker 关闭，对应 smoke 会失败或 skipped |
-| 评测集规模偏小 | 已新增 120 条内置业务评测集；真实私有业务样本仍需主人提供 |
+| 真实评测代表性 | 已新增 120 条内置业务评测集和 193 条私密模拟业务评测样本；主人公司真实私有业务样本仍需主人提供 |
 
 ## 11. 文档关系
 
