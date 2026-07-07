@@ -34,6 +34,33 @@ export class KarpathyObsidianIngestService {
       content,
     );
     if (duplicate?.ragDocId) {
+      const hasCurrentRagDoc = await this.documentService.hasDoc(
+        duplicate.ragDocId,
+        params.userId,
+      );
+      if (!hasCurrentRagDoc) {
+        const rag = await this.documentService.upload(
+          params.filename,
+          content,
+          params.userId,
+          {
+            originalBuffer: params.extracted.snapshot,
+            contentType: params.extracted.contentType || 'text/plain',
+          },
+        );
+        return {
+          rag,
+          obsidian: {
+            status: 'duplicate',
+            notePath: duplicate.notePath,
+            title: duplicate.title,
+            tags: duplicate.tags,
+            contentHash: duplicate.contentHash,
+            ragDocId: rag.docId,
+          },
+        };
+      }
+
       return {
         rag: {
           docId: duplicate.ragDocId,
@@ -88,6 +115,35 @@ export class KarpathyObsidianIngestService {
       params.content,
     );
     if (duplicate?.ragDocId) {
+      const hasCurrentRagDoc = await this.documentService.hasDoc(
+        duplicate.ragDocId,
+        params.userId,
+      );
+      if (!hasCurrentRagDoc) {
+        const rag = await this.documentService.upload(
+          params.filename,
+          params.content,
+          params.userId,
+          {
+            taskId: params.taskId,
+            originalBuffer:
+              params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
+            contentType: params.contentType ?? 'text/markdown',
+          },
+        );
+        return {
+          rag,
+          obsidian: {
+            status: 'duplicate',
+            notePath: duplicate.notePath,
+            title: duplicate.title,
+            tags: duplicate.tags,
+            contentHash: duplicate.contentHash,
+            ragDocId: rag.docId,
+          },
+        };
+      }
+
       return {
         rag: {
           docId: duplicate.ragDocId,

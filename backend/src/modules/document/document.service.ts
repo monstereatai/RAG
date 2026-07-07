@@ -251,6 +251,11 @@ export class DocumentService {
     return this.taskRepo.findOne({ where: { id: taskId, userId } });
   }
 
+  async hasDoc(docId: string, userId: string): Promise<boolean> {
+    const count = await this.docMetaRepo.count({ where: { docId, userId } });
+    return count > 0;
+  }
+
   async markTaskFailed(taskId: string, errorMessage: string): Promise<void> {
     await this.updateTask(taskId, {
       status: 'failed',

@@ -20,7 +20,7 @@ Run from `backend/`.
 - `npm run smoke:hybrid`: uploads fixed Chinese regression documents, checks debug retrieval, then deletes the uploaded docs.
 - `npm run eval:rag:judge`: optional Qwen LLM-as-Judge check for claim support. It skips when `QWEN_API_KEY` is not set.
 - `npm run eval:rag:langsmith`: runs the stable local RAG evaluation and writes a LangSmith-friendly JSON export to `.tmp/langsmith-rag-eval.json`. Set `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT` to let LangChain/DeepAgents calls emit LangSmith traces during the run. Set `LANGSMITH_UPLOAD=true` to upload Dataset/Experiment data through LangSmith REST API; add `LANGSMITH_UPLOAD_REQUIRED=true` only when upload failure should fail CI.
-- `npm run eval:rag:maturity`: local enterprise maturity score. It checks the four core standards, business eval coverage, smoke entrypoints, governance evidence, and explicit external blockers. Default threshold is `RAG_MATURITY_MIN_SCORE=90`; set `RAG_MATURITY_REQUIRE_EXTERNAL=true` only when private business data and production materials must block the gate.
+- `npm run eval:rag:maturity`: local enterprise maturity score. It checks the four core standards, business eval coverage, smoke entrypoints, governance evidence, and explicit external blockers. Default threshold is `RAG_MATURITY_MIN_SCORE=90`; set `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` only after production target/cert/backup inputs are confirmed, and set `RAG_MATURITY_REQUIRE_EXTERNAL=true` only when private business data and production materials must block the gate.
 - `npm run eval:rag:project`: project-like business evaluation. It validates `eval/project-simulated-business.dataset.json`; when the backend is running, it uploads simulated business documents and scores live simple/auto answers. Set `PROJECT_EVAL_REQUIRE_LIVE=true` to fail instead of skipping when the backend is unavailable.
 - `npm run eval:rag:quality`: stable local gate. It always runs offline RAG eval, the 120-case business dataset check, and the local maturity gate. Set `EVAL_RAG_JUDGE_REQUIRED=true` to make Qwen LLM-as-Judge mandatory.
 - `npm run eval:business-dataset`: checks the generated 120-case business regression dataset shape and coverage.
@@ -31,4 +31,4 @@ Run from `backend/`.
 - `npm run eval:rag:multimodal:private`: validates `eval/private-multimodal.dataset.json` in strict asset mode.
 - `npm run graph:import-private`: dry-runs `eval/private-graph-business.seed.json`.
 
-Backend service checks default to `http://localhost:3001`.
+Backend service checks default to `http://localhost:3000`.

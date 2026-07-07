@@ -14,7 +14,7 @@ export function registerSearchCommand(program: Command, deps: CommandDeps): void
     await runCommand(async () => {
       const limit = parsePositiveInt(rawOptions.limit, 'limit');
       const result = await withSpinner(runtime.options, 'Searching knowledge base', () =>
-        runtime.apiClient.debugChunks(query, limit),
+        runtime.apiClient.search(query, limit),
       );
       const chunks = result.chunks ?? result.results ?? [];
       if (chunks.length === 0) {

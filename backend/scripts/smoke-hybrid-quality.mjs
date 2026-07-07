@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const baseUrl = (process.env.HYBRID_SMOKE_BASE_URL ?? 'http://localhost:3001')
+const baseUrl = (process.env.HYBRID_SMOKE_BASE_URL ?? 'http://localhost:3000')
   .replace(/\/$/, '');
 const datasetPath =
   process.env.HYBRID_SMOKE_DATASET ?? 'eval/hybrid-regression.dataset.json';

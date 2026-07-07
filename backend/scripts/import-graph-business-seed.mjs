@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
-const baseUrl = (process.env.GRAPH_SMOKE_BASE_URL ?? 'http://localhost:3001').replace(/\/$/, '');
+const baseUrl = (process.env.GRAPH_SMOKE_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 const datasetPath = resolve(
   args.input ?? process.env.GRAPH_BUSINESS_SEED ?? 'eval/graph-business.seed.example.json',
 );

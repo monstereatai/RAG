@@ -1,4 +1,4 @@
-const baseUrl = (process.env.SPEECH_SMOKE_BASE_URL ?? 'http://localhost:3001')
+const baseUrl = (process.env.SPEECH_SMOKE_BASE_URL ?? 'http://localhost:3000')
   .replace(/\/$/, '');
 const text = process.env.SPEECH_SMOKE_TEXT ?? '你好，RAG 语音联调。';
 

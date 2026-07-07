@@ -69,11 +69,26 @@ rag config get
 rag config set baseUrl http://localhost:3000/api/v1
 rag search "query"
 rag ask "question" --mode auto
+rag ask "question" --stream
 rag context "coding task" --format json
 rag skill match "task"
 rag doc list
+rag admin search --kind popular
+rag graph query "which systems depend on Milvus?"
+rag eval status
+rag eval run --dataset rag-smoke --mode offline
 rag doctor --format json
 ```
+
+Current backend alignment:
+
+- `rag ask` supports the Karpathy + Obsidian response shape: `answer`, `references`, `retrievalSufficient`, `retrievalReason`, `obsidianPaths`, `mode`, `route`, and `threadId`.
+- Markdown output prints the answer first, then retrieval status, sources, and Obsidian paths. JSON output keeps the full backend payload.
+- `rag context` first reads debug chunks. If no chunks are returned, it falls back to `ask auto` and only treats the result as usable context when the backend returns references, Obsidian paths, or `retrievalSufficient=true`.
+- `rag search` and `rag context` prefer the formal `/rag/search` and `/rag/context` APIs, then conservatively fall back when talking to an older backend.
+- `rag ask --stream` consumes backend SSE directly. It does not simulate a typewriter effect on the client.
+- `rag admin search`, `rag graph query`, `rag eval status`, and `rag eval run` expose existing backend operation, GraphRAG, and evaluation entrypoints.
+- The CLI does not manage Milvus, databases, production configs, or keys. Current project-level status is recorded in the root `ROADMAP.md`: maturity `96/100`, project RAG eval `28/28`; Milvus runtime timeout remains a backend/runtime blocker.
 
 ## Output Contract
 

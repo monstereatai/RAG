@@ -5,8 +5,10 @@ import type {
   DocumentItem,
   LoginResult,
   ProfileResult,
+  ContextResult,
   SearchResult,
   SkillMatch,
+  SseEvent,
 } from './schemas.js';
 
 export interface ApiClientOptions {
@@ -46,10 +48,143 @@ export class RagApiClient {
     return this.request<SearchResult>(`/debug/chunks?${params.toString()}`);
   }
 
+  async search(query: string, limit: number): Promise<SearchResult> {
+    try {
+      return await this.request<SearchResult>('/rag/search', {
+        method: 'POST',
+        body: { query, limit },
+      });
+    } catch (error) {
+      if (error instanceof CliError && error.code === 'not_found') {
+        return this.debugChunks(query, limit);
+      }
+      throw error;
+    }
+  }
+
+  async contextPackage(input: {
+    task: string;
+    limit: number;
+    includeRoadmap?: boolean;
+    matchSkill?: boolean;
+    skillLimit?: number;
+  }): Promise<ContextResult> {
+    return this.request<ContextResult>('/rag/context', {
+      method: 'POST',
+      body: input,
+    });
+  }
+
   async ask(input: { query: string; mode: ChatMode; threadId?: string }): Promise<AskResult> {
     return this.request<AskResult>('/chat', {
       method: 'POST',
       body: input,
+    });
+  }
+
+  async *streamChat(input: {
+    query: string;
+    mode: ChatMode;
+    threadId?: string;
+  }): AsyncGenerator<SseEvent> {
+    if (!this.options.token) {
+      throw new CliError('unauthorized', 'missing token, please run rag auth login', {
+        recoverable: true,
+      });
+    }
+
+    const params = new URLSearchParams({
+      query: input.query,
+      mode: input.mode,
+    });
+    if (input.threadId) {
+      params.set('threadId', input.threadId);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(
+        `${this.options.baseUrl}/chat/stream?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'text/event-stream',
+            Authorization: `Bearer ${this.options.token}`,
+          },
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok) {
+        const payload = await safeReadErrorPayload(response);
+        throw httpError(response.status, payload);
+      }
+      if (!response.body) {
+        throw new CliError('server_error', 'stream response body is empty');
+      }
+
+      let buffer = '';
+      const decoder = new TextDecoder();
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const event = parseSseEvent(part);
+          if (event) {
+            yield event;
+          }
+        }
+      }
+      buffer += decoder.decode();
+      const tail = parseSseEvent(buffer);
+      if (tail) {
+        yield tail;
+      }
+    } catch (error) {
+      if (error instanceof CliError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new CliError('service_unavailable', `request timeout after ${this.timeoutMs}ms`, {
+          recoverable: true,
+        });
+      }
+      if (error instanceof TypeError) {
+        throw new CliError('service_unavailable', `service unavailable: ${error.message}`, {
+          recoverable: true,
+        });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async adminSearch(kind: 'popular' | 'no-result' | 'recall-issues'): Promise<unknown> {
+    const pathByKind = {
+      popular: '/rag/admin/search/queries/popular',
+      'no-result': '/rag/admin/search/queries/no-result',
+      'recall-issues': '/rag/admin/search/recall-issues',
+    } as const;
+    return this.request<unknown>(pathByKind[kind]);
+  }
+
+  async evalStatus(): Promise<unknown> {
+    return this.request<unknown>('/rag/admin/evaluations');
+  }
+
+  async evalRun(input: { dataset?: string; mode?: string }): Promise<unknown> {
+    return this.request<unknown>('/rag/admin/evaluations/run', {
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  async graphQuery(query: string): Promise<unknown> {
+    return this.request<unknown>('/graph/query', {
+      method: 'POST',
+      body: { query },
     });
   }
 
@@ -136,6 +271,51 @@ export class RagApiClient {
   }
 }
 
+async function safeReadErrorPayload(response: Response): Promise<unknown> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  return response.text();
+}
+
+function parseSseEvent(raw: string): SseEvent | null {
+  const lines = raw.split(/\r?\n/);
+  let eventType: string | undefined;
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      eventType = line.slice('event:'.length).trim();
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice('data:'.length).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0 && !eventType) {
+    return null;
+  }
+
+  const dataText = dataLines.join('\n');
+  let data: unknown = dataText;
+  if (dataText) {
+    try {
+      data = JSON.parse(dataText);
+    } catch {
+      data = dataText;
+    }
+  }
+  const inferredType =
+    eventType ?? (data && typeof data === 'object' && 'type' in data ? String((data as { type: unknown }).type) : undefined);
+
+  return {
+    type: inferredType,
+    data,
+  };
+}
+
 function unwrapResponse<T>(payload: unknown): T {
   if (
     payload &&
@@ -172,4 +352,3 @@ function extractMessage(payload: unknown): string | undefined {
   if (Array.isArray(message)) return message.join(', ');
   return undefined;
 }
-

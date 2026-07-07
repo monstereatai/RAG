@@ -161,8 +161,21 @@ node dist/src/bin.js ask "这个项目的 RAG 链路是怎么工作的"
 指定回答模式：
 
 ```bash
-node dist/src/bin.js ask "帮我解释检索链路" --mode strict
+node dist/src/bin.js ask "帮我解释检索链路" --mode auto
 ```
+
+真实 SSE 流式输出：
+
+```bash
+node dist/src/bin.js ask "帮我解释检索链路" --mode auto --stream
+```
+
+当前 `ask` 已对齐后端 Karpathy + Obsidian 双链路响应：
+
+- Markdown 模式先输出答案，再输出检索状态、`retrievalReason`、引用来源和 Obsidian 路径。
+- JSON 模式保留完整字段：`answer`、`references`、`retrievalSufficient`、`retrievalReason`、`obsidianPaths`、`mode`、`route`、`threadId`。
+- `simple` 适合 Karpathy + Obsidian Fast Path；`auto` 会先走 Fast Path，再由后端判断是否升级 Agentic；`agentic` 适合复杂多步问题。
+- `--stream` 直接消费后端 SSE，不在 CLI 前端做延迟拆字模拟；JSON 模式会按行输出事件 envelope。
 
 生成代码上下文包：
 
@@ -198,6 +211,27 @@ node dist/src/bin.js doc list
 
 ```bash
 node dist/src/bin.js doc show <document-id>
+```
+
+查看搜索运营状态：
+
+```bash
+node dist/src/bin.js admin search --kind popular
+node dist/src/bin.js admin search --kind no-result
+node dist/src/bin.js admin search --kind recall-issues
+```
+
+查询 GraphRAG：
+
+```bash
+node dist/src/bin.js graph query "哪些系统依赖 Milvus"
+```
+
+查看或触发评测：
+
+```bash
+node dist/src/bin.js eval status
+node dist/src/bin.js eval run --dataset rag-smoke --mode offline
 ```
 
 ## 输出格式
@@ -255,8 +289,12 @@ Agent 可以读取返回的结构化内容：
 
 - `task`：本次任务描述。
 - `knowledge`：RAG 返回的知识片段。
+- `answer`：当 debug chunks 为空但 `ask auto` 找到可靠上下文时，返回后端生成的答案。
+- `retrieval`：后端检索状态，包括是否充分、原因、路由和 Obsidian 路径。
 - `citations`：引用来源。
 - `guidance`：建议执行步骤和验证命令。
+
+`context` 的兜底规则是保守的：只有后端返回 references、Obsidian 路径或 `retrievalSufficient=true` 时才认为上下文可用；纯模型兜底答案不会被包装成可靠知识。
 
 代码生成流程建议：
 
@@ -273,7 +311,9 @@ Agent 可以读取返回的结构化内容：
 - CI 中先跑 `rag doctor --format json`，失败时根据 `error.code` 分类处理。
 - 不把 token 写入仓库、日志或 README 示例。
 - 不让 CLI 直接访问数据库、向量库或缓存，只通过 RAG 后端 API。
+- `search` 和 `context` 优先调用正式 `/rag/search`、`/rag/context`，连接旧后端时才保守降级。
 - 不在 CLI 里写业务绕过逻辑，认证、权限和审计由后端负责。
+- Milvus runtime timeout、生产机器、证书、备份策略等属于后端/运行环境事项，CLI 只展示或消费状态，不直接治理。
 
 ## 常见问题
 

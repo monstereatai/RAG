@@ -45,6 +45,11 @@ export interface SearchChunk {
   source?: Record<string, unknown>;
 }
 
+export interface RagReference extends SearchChunk {
+  headingPath?: string[];
+  sourceAuthority?: string;
+}
+
 export interface SearchResult {
   query: string;
   topK?: number;
@@ -53,12 +58,41 @@ export interface SearchResult {
   status?: string;
 }
 
+export interface ContextResult {
+  task: string;
+  status: 'ok' | 'insufficient_context';
+  knowledge?: SearchChunk[];
+  matchedSkills?: SkillMatch[];
+  citations?: Array<{
+    id: number;
+    docId?: string;
+    chunkId?: string;
+    title?: string;
+    score?: number;
+  }>;
+  codingGuidance?: unknown;
+  riskFlags?: string[];
+  [key: string]: unknown;
+}
+
 export interface AskResult {
   answer?: string;
-  references?: unknown[];
+  references?: RagReference[];
   route?: string;
   confidence?: number;
   retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
+  obsidianPaths?: string[];
+  obsidianHits?: Array<{
+    path: string;
+    type?: string;
+    title?: string;
+    score?: number;
+    tags?: string[];
+  }>;
+  mode?: ChatMode;
+  threadId?: string;
   [key: string]: unknown;
 }
 
@@ -84,3 +118,7 @@ export interface DocumentItem {
   [key: string]: unknown;
 }
 
+export interface SseEvent {
+  type?: string;
+  data?: unknown;
+}

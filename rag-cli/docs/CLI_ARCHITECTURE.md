@@ -156,6 +156,8 @@ CLI 只做三件事：
 2. 调用 RAG 后端 API，统一鉴权、错误、超时和输出。
 3. 生成适合人类、脚本、Agent、Skill 消费的上下文包。
 
+当前后端 RAG 主链路已经包含 Karpathy + Obsidian Fast Path、BM25/ES/Milvus 混合检索、引用校验和 Agentic RAG 升级路径。CLI 不复制这些能力，只透传并格式化后端返回的 `answer`、`references`、`retrievalSufficient`、`retrievalReason`、`obsidianPaths`、`route` 和 `threadId`。
+
 CLI 不做：
 
 - 不直接访问 PostgreSQL、Milvus、Elasticsearch、Redis、Neo4j。
@@ -163,6 +165,7 @@ CLI 不做：
 - 不绕过 JWT / service token / 多租户隔离。
 - 不自动修改代码、commit、push、部署。
 - 不把 Skill 作为必要前提；Skill 只是调用方之一。
+- 不治理 Milvus runtime timeout、证书、备份、生产机器等运行环境问题；这些状态由后端/部署文档维护，CLI 只消费 API 结果。
 
 ## 5. 目录结构
 
@@ -213,7 +216,7 @@ rag-cli/
 - `core/terminal.ts` 只负责颜色、TTY 检测和 human/json 输出隔离。
 - `core/prompts.ts` 只负责交互式输入，不允许在 `--format json` 或 CI 模式下阻塞。
 - `core/spinner.ts` 只负责 loading，不允许污染 stdout JSON。
-- `context/` 负责把 search、skill match、roadmap/doc 元数据合成上下文包。
+- `context/` 负责把 search、ask fallback、skill match、roadmap/doc 元数据合成上下文包；只有 references、Obsidian 路径或 `retrievalSufficient=true` 的 fallback 才能进入上下文。
 - 任何命令不得直接 `fetch` 后端；必须走 `RagApiClient`。
 
 ## 6. 分层设计
@@ -242,8 +245,11 @@ flowchart TD
 | `rag auth status` | `AuthCommand` | `GET /api/auth/profile` |
 | `rag search` | `SearchCommand` | MVP 可用 `GET /api/debug/chunks`，Phase 2 改正式 search API |
 | `rag ask` | `AskCommand` | `POST /api/chat` / `GET /api/chat/stream` |
-| `rag context` | `ContextCommand` | 组合 search、skill match、profile，后续迁到 `POST /api/rag/context` |
+| `rag context` | `ContextCommand` | 优先 `POST /api/rag/context`；旧后端降级组合 search、ask fallback、skill match |
 | `rag skill match` | `SkillCommand` | `GET /api/skills/match` |
+| `rag admin search` | `AdminCommand` | `GET /api/rag/admin/search/*` |
+| `rag graph query` | `GraphCommand` | `POST /api/graph/query` |
+| `rag eval status/run` | `EvalCommand` | `GET/POST /api/rag/admin/evaluations*` |
 | `rag doctor` | `DoctorCommand` | health/profile/skills/search 探测 |
 
 ### 7.2 命令注册方式
@@ -289,8 +295,13 @@ interface RagApiClient {
   profile(): Promise<ProfileResult>;
   health(): Promise<HealthResult>;
   search(input: SearchInput): Promise<SearchResult>;
+  context(input: ContextInput): Promise<ContextResult>;
   ask(input: AskInput): Promise<AskResult>;
   askStream(input: AskInput, onEvent: (event: RagSseEvent) => void): Promise<void>;
+  adminSearch(input: AdminSearchInput): Promise<AdminSearchResult>;
+  graphQuery(input: GraphQueryInput): Promise<GraphQueryResult>;
+  evalStatus(): Promise<EvalStatusResult>;
+  evalRun(input: EvalRunInput): Promise<EvalRunResult>;
   matchSkills(input: SkillMatchInput): Promise<SkillMatchResult>;
   listDocs(): Promise<DocumentListResult>;
 }

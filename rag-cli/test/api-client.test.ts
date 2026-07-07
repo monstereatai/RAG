@@ -36,3 +36,31 @@ test('RagApiClient maps 401 to unauthorized CliError', async () => {
   });
 });
 
+test('RagApiClient parses chat SSE events with CRLF delimiters', async () => {
+  const client = new RagApiClient({
+    baseUrl: 'http://example.test/api/v1',
+    token: 'token',
+    fetchImpl: async () =>
+      new Response(
+        [
+          'data: {"type":"token","data":"你"}\r\n\r\n',
+          'data: {"type":"token","data":"好"}\r\n\r\n',
+          'data: {"type":"final","data":{"answer":"你好"}}\r\n\r\n',
+        ].join(''),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      ),
+  });
+
+  const events = [];
+  for await (const event of client.streamChat({ query: 'hi', mode: 'auto' })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['token', 'token', 'final'],
+  );
+});

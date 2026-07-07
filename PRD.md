@@ -177,7 +177,7 @@
 | Rerank | 需 `RERANK_API_KEY` 才能真实重排 |
 | Tencent ASR/TTS | 腾讯云 TTS→ASR 直连已验证，后端 TTS SSE → ASR endpoint smoke 已验证 |
 | 真实业务评测集 | 已生成并校验 120 条内置业务场景评测样本和 193 条私密模拟业务评测样本；主人公司真实私有业务问题和标准答案仍需主人提供 |
-| 企业级成熟度 | `npm run eval:rag:maturity` 当前本地工程成熟度 100/100；真实外部输入可用 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 纳入硬门禁 |
+| 企业级成熟度 | `npm run eval:rag:maturity` 当前本地工程成熟度 96/100；Milvus search runtime 降级和生产目标机器/证书/备份策略未确认各扣 2 分；生产材料需显式确认后才可用 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 计入，本地真实外部输入可用 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 纳入硬门禁 |
 | 项目级仿真实评测 | `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在 3001 真实后端完成 simple/auto 22/22 通过；它模拟真实项目问题，但不冒充主人公司私有真实数据 |
 | 结构化事实治理 | 第一版已完成：`document_chunks` / `fact_conflicts` / docVersion / effectiveAt / expiredAt / sourceAuthority / GraphRAG aliases+confidence；后续复杂审核流和 UI 另立阶段 |
 | 部署目标 | 已固定 Docker Compose；真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略 |

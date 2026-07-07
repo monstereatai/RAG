@@ -8,6 +8,7 @@ import {
 import { SseCallback } from './sse-event';
 import { AgenticRagState, type AgenticRagStateType } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
+import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
 import {
   queryAugmentPrompt,
   reflectionPrompt,
@@ -627,7 +628,7 @@ export class AgenticRagService {
     }
 
     const context = state.retrievedChunks
-      .map((c, i) => `[片段 ${i + 1}]\n${c.content}`)
+      .map((c, i) => `[片段 ${i + 1}]\n${sanitizeUntrustedContext(c.content)}`)
       .join('\n\n---\n\n');
 
     const model = this.llmProvider.getModel();

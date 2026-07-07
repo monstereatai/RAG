@@ -9,7 +9,7 @@
 简历上可以写：
 
 ```text
-主导设计并实现企业级 Agentic RAG 知识库系统，基于 NestJS + React + LangGraph.js + Milvus + Elasticsearch + PostgreSQL + Redis + Neo4j，完成文档解析、混合检索、引用校验、Agentic 工作流、GraphRAG、MCP 工具调用、多租户隔离、Prometheus 指标和自动化评测门禁；本地工程成熟度门禁 93/100，项目级仿真实业务评测 22/22 通过。
+主导设计并实现企业级 Agentic RAG 知识库系统，基于 NestJS + React + LangGraph.js + Milvus + Elasticsearch + PostgreSQL + Redis + Neo4j，完成文档解析、混合检索、引用校验、Agentic 工作流、GraphRAG、MCP 工具调用、多租户隔离、Prometheus 指标和自动化评测门禁；本地工程成熟度门禁 96/100，项目级仿真实业务评测 28/28 通过。
 ```
 
 不要写成：
@@ -67,12 +67,12 @@
 - 如何设计评测集。
 - 为什么要有拒答题、冲突题、版本题、别名题、跨文档题。
 - 为什么合成评测不能冒充真实业务评测。
-- 93/100 代表什么，不代表什么。
+- 96/100 代表什么，不代表什么。
 
 建议讲法：
 
 ```text
-我做了两层评测：一层是内置业务回归集，覆盖 claim、citation、refusal、conflict；另一层是项目级仿真实业务评测，会真实启动后端，上传模拟业务文档，分别用 simple 和 auto 提问，再评分并清理。现在本地工程成熟度是 93/100，项目级仿真实业务评测 22/22 通过。但我不会把它吹成生产业务 90 分，因为还缺公司真实私有题库和真实标准答案。
+我做了两层评测：一层是内置业务回归集，覆盖 claim、citation、refusal、conflict；另一层是项目级仿真实业务评测，会真实启动后端，上传模拟业务文档，分别用 simple 和 auto 提问，再评分并清理。现在本地工程成熟度是 96/100，项目级仿真实业务评测 28/28 通过。但我不会把它吹成生产业务 90 分，因为还缺公司真实私有题库和真实标准答案。
 ```
 
 ### 4. 引用与幻觉控制
@@ -579,7 +579,7 @@ BM25 对关键词、缩写、编号、金额、版本、制度名很稳定，而
 回答重点：
 
 ```text
-我不用主观 demo 证明。项目里有 eval:rag:quality 质量门禁，包括 smoke、业务回归集、项目级仿真实业务评测和成熟度评分。项目级评测会真实上传模拟业务文档，用 simple 和 auto 提问，评分后清理。目前 22/22 通过，本地工程成熟度 93/100。但我也明确承认，没有真实私有业务题库前，不能宣称真实生产业务 90 分。
+我不用主观 demo 证明。项目里有 eval:rag:quality 质量门禁，包括 smoke、业务回归集、项目级仿真实业务评测和成熟度评分。项目级评测会真实上传模拟业务文档，用 simple 和 auto 提问，评分后清理。目前 28/28 通过，本地工程成熟度 96/100。但我也明确承认，没有真实私有业务题库前，不能宣称真实生产业务 90 分。
 ```
 
 ### 如果模型答错了，你怎么定位？
@@ -714,8 +714,8 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 
 可写：
 
-- 本地工程成熟度门禁 `93/100`。
-- 项目级仿真实业务评测 `22/22` 通过。
+- 本地工程成熟度门禁 `96/100`。
+- 项目级仿真实业务评测 `28/28` 通过。
 - 业务回归评测集 `120` 条。
 - 支持 simple / agentic / auto 三种 RAG 模式。
 - 支持 Markdown/TXT/PDF/DOCX 上传解析。
@@ -741,25 +741,73 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 
 工程化上，我做了 JWT 和多租户隔离，数据隔离覆盖 PostgreSQL、Redis、Milvus 和 BM25；还有 Prometheus 指标、traceparent、Docker Compose、MCP 工具接入、GraphRAG、腾讯云 ASR/TTS 和 Redis Checkpointer。
 
-质量上，项目不是靠 demo 证明，而是有 eval:rag:quality 门禁，包含 120 条业务回归集、项目级仿真实业务评测和成熟度评分。当前本地工程成熟度是 93/100，项目级仿真实业务评测 22/22 通过。但我也明确区分工程分和真实业务分，真正生产级还需要接入公司真实私有题库和生产环境材料。
+质量上，项目不是靠 demo 证明，而是有 eval:rag:quality 门禁，包含 120 条业务回归集、项目级仿真实业务评测和成熟度评分。当前本地工程成熟度是 96/100，项目级仿真实业务评测 28/28 通过。但我也明确区分工程分和真实业务分，真正生产级还需要接入公司真实私有题库和生产环境材料。
 ```
 
 ## 讲项目的 30 秒版本
 
 ```text
-我做了一个企业级 Agentic RAG 知识库系统，后端 NestJS，前端 React，检索层结合 Milvus、BM25、Elasticsearch 和 Rerank，复杂问题走 LangGraph Agentic 工作流，普通问题走稳定 simple RAG。系统重点解决企业知识库里的召回准确性、引用支撑、拒答边界、多租户隔离、外部依赖降级和评测门禁。本地工程成熟度 93/100，项目级仿真实业务评测 22/22 通过。
+我做了一个企业级 Agentic RAG 知识库系统，后端 NestJS，前端 React，检索层结合 Milvus、BM25、Elasticsearch 和 Rerank，复杂问题走 LangGraph Agentic 工作流，普通问题走稳定 simple RAG。系统重点解决企业知识库里的召回准确性、引用支撑、拒答边界、多租户隔离、外部依赖降级和评测门禁。本地工程成熟度 96/100，项目级仿真实业务评测 28/28 通过。
 ```
 
 ## 最新面试 7 问回答口径
 
 > 场景：面试官连续追问 RAG 实现、向量/ES/图谱、多 Agent、工具调用、项目问题、情感分析、AI Coding 使用方式。回答原则是讲真实闭环，不把没做的模块硬说成做了。
 
+### 面试先记这一页
+
+这 7 个问题本质上都在考同一件事：你是不是只会调 LLM，还是能把 AI 应用做成可验证、可运维、可解释的工程系统。
+
+回答骨架固定用这 6 层：
+
+```text
+输入资料
+  -> 解析/清洗/切片/metadata
+  -> 多路索引：Milvus 向量 + BM25/ES 关键词 + Neo4j 图谱 + Obsidian/Karpathy 编译层
+  -> 查询路由：simple / auto / agentic
+  -> 检索增强：query normalize、hybrid retrieval、GraphRAG、Web Search、Rerank
+  -> 生成治理：引用校验、claim support、低相关拒答、reflection
+  -> 运营闭环：日志、指标、评测集、失败样本、ROADMAP
+```
+
+面试现场优先讲这几个判断：
+
+- 企业 RAG 的关键不是“能回答”，而是“证据能撑住”。
+- 向量不是万能，中文企业知识库一定要关键词检索、metadata 和 rerank。
+- Agentic 不是默认路径，普通问题走稳定链路，复杂问题才升级。
+- 工具调用不是模型直接执行，必须由宿主系统做 schema、权限、超时、审计。
+- 没有真实业务题库，不要报真实业务准确率。
+- 情感分析没做就直说没做，转到 QA 质量分析和可扩展方案。
+- AI Coding 不是自动驾驶，必须靠规则、验证和边界控制。
+
+### 30 秒总回答
+
+```text
+这个项目是企业级 Agentic RAG 知识库系统。我做的不是单纯向量问答，而是完整的知识工程链路：文档解析、结构化切片、Milvus 向量索引、BM25/ES 中文关键词索引、Neo4j GraphRAG、Karpathy + Obsidian 知识编译层、Rerank、引用校验和低相关拒答。
+
+简单问题走 simple，也就是稳定 hybrid retrieval；复杂问题走 auto/agentic，由 LangGraph 状态机编排 query augment、retrieval、sufficiency、web search、rerank、generate、reflection。工程上有多租户隔离、AG-UI/SSE 流式输出、后台运营、Prometheus 指标和评测门禁。本地工程成熟度 96/100，项目级仿真实业务评测 28/28，但我不会把它说成真实生产准确率，因为还需要公司真实题库和生产环境验证。
+```
+
+### 2 分钟展开版
+
+```text
+这个项目从架构上分成两条互补链路。
+
+第一条是传统企业 RAG 链路：文件或 URL 进入系统后，先做解析、清洗、结构化切片，切片会带 docId、chunkId、userId、章节、来源、生效期、权限等 metadata。之后同一份 chunk 同步进入 Milvus 向量索引、BM25/Elasticsearch 关键词索引和数据库元数据。查询时先做 query normalize，再做向量召回和关键词召回，用融合排序和 rerank 选证据，最后生成答案并做引用校验、claim support 和拒答判断。
+
+第二条是 Karpathy + Obsidian 知识编译链路。URL、文件、手动输入、官方文档同步都会同时进入 RAG 索引层和 Obsidian 知识层。simple 模式优先读已经沉淀的 compiled/index/notes，再补 RAG evidence；auto 模式先跑 fast path，如果证据不足再升级 agentic；agentic 也不会绕开 Obsidian，而是把它当高优先级上下文源。
+
+复杂问题会进入 LangGraph 编排，但我没有让所有问题默认走 Agent。Agentic 节点包括 routing、query augment、retrieval、sufficiency、web search、rerank、generate、citation、reflection、final，每个节点都有状态、预算和可观测事件。这样能控制成本，也能定位慢在哪里、错在哪里。
+
+质量上，我用 eval:rag:quality、eval:rag:project、eval:rag:maturity 做门禁。本地工程成熟度 96/100，项目级仿真实业务评测 28/28。这个分数说明工程闭环成熟，但不是生产 SLA，也不是公司真实业务准确率。真实生产还需要真实私有题库、真实组织权限、真实图谱数据源、真实 Milvus/ES 压测和生产运维材料。
+```
+
 ### 1. 项目怎么做 RAG
 
 可以这样答：
 
 ```text
-这个项目是企业知识库 RAG，不是简单的“向量召回 + LLM 总结”。完整链路是文档上传、解析、结构化切片、Embedding、Milvus 向量索引、BM25/ES 关键词索引、查询归一化、混合检索、Rerank、生成回答、引用校验和低相关拒答。
+这个项目是企业知识库 RAG，不是简单的“向量召回 + LLM 总结”。完整链路是文档上传、URL 抓取或手动输入，进入解析、清洗、结构化切片、metadata 补全，然后同一份 chunk 同步进入 PostgreSQL 元数据、Milvus 向量索引、BM25/ES 关键词索引和 Karpathy/Obsidian 知识层。查询时先做 query normalize，再做混合检索、Rerank、生成回答、引用校验和低相关拒答。
 
 我重点处理的是企业知识库里的可信问题：中文召回、引用支撑、低相关拒答、空库兜底、版本冲突、GraphRAG 关系检索和后台运营可观测。
 ```
@@ -768,6 +816,12 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 
 ```text
 我们做的是 hybrid retrieval RAG。向量负责语义召回，BM25/ES 负责关键词和精确匹配，GraphRAG 负责关系型问题，最后通过 rerank、引用校验和拒答策略保证答案可信。
+```
+
+面试官追问“为什么不直接用向量库”时：
+
+```text
+因为企业知识库里很多问题依赖精确词，比如制度编号、金额、版本号、系统名、部门名、缩写和否定条件。纯向量容易找语义相近但事实不对的片段。向量负责语义泛化，BM25/ES 负责精确命中，metadata 负责权限和版本，rerank 负责把真正相关的证据排到前面。
 ```
 
 ### 2. 向量、ES、图谱实现流程
@@ -800,12 +854,27 @@ ES / BM25 流程：
 GraphRAG 不是让模型看一堆关系就直接回答，而是把实体关系变成可解释的检索线索，最后答案仍然要落回文档证据。
 ```
 
+可以补一张脑内流程图：
+
+```text
+写入侧：
+Document -> Chunk -> Embedding -> Milvus
+                 -> BM25/ES
+                 -> Entity/Relation -> Neo4j
+                 -> Raw/Note/Compiled -> Obsidian
+
+查询侧：
+Query -> normalize -> vector recall + keyword recall + graph hints
+      -> fusion/rerank -> evidence pack -> LLM
+      -> citation/claim check -> answer/refusal
+```
+
 ### 3. 多 Agent 怎么协调
 
 不要说“多个 Agent 自己协作”。建议说：
 
 ```text
-我这里的多 Agent 更准确地说是 LangGraph/状态机式编排，不是自由聊天式多 Agent。核心节点包括 routing、query augment、retrieval、sufficiency、web search、graph search、rerank、generate、citation、reflection 和 final。
+我这里的多 Agent 更准确地说是 LangGraph/状态机式编排，不是自由聊天式多 Agent。它不是让几个 Agent 随便聊天，而是把复杂 RAG 拆成确定节点：routing、query augment、retrieval、sufficiency、web search、graph search、rerank、generate、citation、reflection 和 final。
 
 每个节点只负责一个明确决策，通过共享 state 传递 query、候选文档、引用、置信度、路由结果和错误原因。这样好处是可观测、可回放、可限流，也方便给每个节点设置超时、重试和成本预算。
 ```
@@ -822,6 +891,12 @@ GraphRAG 不是让模型看一堆关系就直接回答，而是把实体关系�
 - `citation/reflection`：检查引用是否存在、关键 claim 是否被证据支撑。
 - `final`：输出答案、引用和 trace。
 
+追问“怎么避免 Agent 失控”时：
+
+```text
+我主要靠状态机和预算控制，而不是只靠 prompt。比如限制 query 扩展数量、检索查询数、web search 结果数、rerank topN、最大重试次数、最大上下文 chunk 数；如果检索不足或引用撑不住，就拒答或回退片段抽取式回答。Agentic 是增强路径，不是默认黑盒路径。
+```
+
 ### 4. 工具怎么调用
 
 可以这样答：
@@ -837,6 +912,12 @@ GraphRAG 不是让模型看一堆关系就直接回答，而是把实体关系�
 - 有明显实体关系时才考虑 Graph Search。
 - 工具失败不能拖死主链路，要降级或返回明确错误。
 - 所有工具调用都要进入 trace，方便定位一次回答慢在哪里、失败在哪里。
+
+再补一层工程细节：
+
+```text
+每个工具都要定义输入 schema、输出 schema、超时、错误码和降级策略。比如 Web Search 没 key 就跳过，不阻塞主链路；Rerank 失败就用融合排序结果；Milvus 超时就走 BM25/ES 回退；MCP server 未启用时不能影响后端启动。
+```
 
 容易踩坑：
 
@@ -858,6 +939,8 @@ GraphRAG 不是让模型看一堆关系就直接回答，而是把实体关系�
 第四个问题是 GraphRAG 的真实数据和可用态。Neo4j 不可用、图谱为空、接口错误、演示数据都必须区分，后台不能静默 mock。
 
 第五个问题是 SSE/AG-UI 流式链路。真实 SSE 有多行 frame、代理超时、token 传递和断流问题，所以我改成 fetch stream 解析，并让 admin-backend 对 SSE 跳过普通 API 的 5 秒熔断。
+
+第六个问题是索引一致性。同一份资料会进入数据库、Milvus、ES/BM25、Neo4j 和 Obsidian，如果重复入库、删除、权限变更不同步，就会出现“搜得到但不该看”或“Obsidian 有但 RAG 没有”的问题。所以我用 content_hash、rag_doc_id、userId 和补偿写入逻辑保证 RAG 索引层和 Obsidian 知识层互补而不是互相吞数据。
 ```
 
 总结句：
@@ -874,6 +957,12 @@ RAG 最难的不是接 LLM，而是让检索证据、生成答案、引用、拒
 这个项目没有单独做通用情感分析，因为业务重点是企业知识库问答，不是舆情或客服情绪识别。我们做的是 QA 运营质量分析：记录用户反馈、低置信度、无引用、引用失败、召回不足、拒答等信号，用这些指标判断回答质量问题。
 
 所以这里没有“情感分析准确率”这个指标。我更关注的是引用支撑率、拒答准确性、召回命中率、无结果率、负反馈率和评测集通过率。
+```
+
+如果面试官强行问“那你们页面上的负反馈算不算情感分析”，可以这样答：
+
+```text
+不算。负反馈、无引用、低置信度、无结果率是运营质量信号，不等于情绪分类。它们能帮助我们定位回答质量问题，但不能直接推导用户情绪。如果要做情绪识别，必须单独定义标签、标注数据、做评测。
 ```
 
 如果面试官追问“如果要加怎么做”，可以说：
@@ -912,11 +1001,343 @@ AI 主要帮我做重复性代码、接口适配、测试补齐、文档同步�
 我主要负责把 RAG 从 demo 做成可运营系统：包括文档入库、混合检索、GraphRAG、Agentic workflow、AG-UI 流式问答、后台运营、质量评测和工程验证。重点不是堆模型能力，而是把召回、生成、引用、拒答、观测和后台治理做成闭环。
 ```
 
+### 7 问压缩成背诵卡片
+
+| 问题 | 一句话回答 | 追问时展开 |
+|---|---|---|
+| RAG 怎么做 | 不是纯向量问答，是解析、切片、多路索引、混合检索、rerank、引用校验、拒答闭环 | chunk metadata、query normalize、citation/claim check |
+| 向量/ES/图谱 | 向量管语义，ES/BM25 管精确词，图谱管关系型问题 | Milvus + ES/BM25 + Neo4j + Obsidian，各自职责清楚 |
+| 多 Agent | 更准确是 LangGraph 状态机编排，不是自由聊天 | routing/query augment/retrieval/sufficiency/rerank/generate/reflection |
+| 工具调用 | 模型提工具名和参数，宿主做校验、权限、超时、审计后执行 | Web Search、Rerank、Graph、MCP、ASR/TTS 都要可降级 |
+| RAG 问题 | 难点是中文召回、引用支撑、低相关拒答、索引一致性、流式链路 | 用 hybrid、rerank、claim check、content_hash、SSE 解析解决 |
+| 情感分析 | 没做独立情感分析，做的是 QA 运营质量分析 | 不报准确率；若要加，用标注集评 precision/recall/F1 |
+| AI Coding | 当协作工具，不当自动驾驶 | CLAUDE/ROADMAP 约束、红线、验证、文档同步 |
+
+## 还应该准备的追问
+
+下面这些不是每场都会问，但一旦问到，能明显拉开“做过 demo”和“做过工程闭环”的差距。
+
+### 1. 为什么选 NestJS，而不是 Python/FastAPI？
+
+```text
+这个项目有管理后台、权限、任务队列、审计、运营 API、SSE、gRPC、定时任务和多模块边界，NestJS 的模块化、依赖注入、Guard/Interceptor/Pipe、TypeORM 集成更适合做企业后台工程。Python 在模型实验和数据处理上更强，但这个项目不是算法训练平台，而是长期运行的企业应用服务。
+
+如果团队是算法团队主导，FastAPI 也成立；但我这里更看重工程结构、权限治理、前后端 TypeScript 协作和可维护性，所以选 NestJS。
+```
+
+追问时补一句：
+
+```text
+模型能力通过 Provider 抽象接入，后端语言不绑定模型生态。真正重要的是服务边界、可观测、评测和降级，而不是某个框架天然更 AI。
+```
+
+### 2. 为什么不用现成 Dify / Coze / LangFlow？
+
+```text
+Dify/Coze 适合快速搭应用和验证流程，但企业知识库落地时会遇到权限隔离、索引一致性、引用支撑、评测门禁、后台运营、私有部署、定制 GraphRAG 和工程调试的问题。这个项目的目标不是快速搭一个 bot，而是掌握核心链路并能按业务要求深度定制。
+
+我会把这类平台当参考或内部效率工具，但核心知识库系统还是自己控制索引、权限、评测和运维边界。
+```
+
+边界：
+
+- 不要贬低 Dify/Coze。
+- 要说“适用场景不同”，不是“平台不行”。
+
+### 3. 怎么做权限过滤？
+
+```text
+权限不能只在前端或 controller 层做。文档入库时要带 userId、部门、角色、权限主体、来源和可见范围；检索时在 PostgreSQL 元数据、Milvus metadata、BM25/ES 查询和后台 API 都要带权限条件。答案引用也只能来自当前用户可见片段。
+
+权限变更或文档删除后，要同步让向量、ES/BM25、图谱和缓存失效；否则会出现用户看不到文档但还能通过 RAG 问出来的问题。
+```
+
+面试官追问“向量库怎么做权限”：
+
+```text
+向量记录 metadata 里带 userId/docId/permission scope，检索时加过滤条件；如果向量库过滤能力不足，也要在召回后基于 active docId 和权限表做二次过滤。不能把权限押在 prompt 上。
+```
+
+### 4. 怎么处理文档更新、删除和索引一致性？
+
+```text
+企业知识库最怕旧版本残留。我的处理是每个文档有 docId、version、content_hash、effectiveAt、expiredAt、sourceAuthority。更新时要么生成新版本，要么触发 reindex；删除时清理元数据、chunk、BM25/ES、Milvus 和图谱关联，并在检索阶段用 active docId 过滤残留。
+
+Obsidian/Karpathy 链路里也用 content_hash 和 rag_doc_id 做去重和补偿，避免 Obsidian 已经有笔记但当前用户 RAG 索引没写入，或者重复资料反复入库。
+```
+
+可以说的取舍：
+
+```text
+一致性上我优先选择最终一致。因为向量库、ES、图谱、Obsidian 都是不同介质，不现实每次都做强事务。工程上要有任务状态、失败重试、对账脚本和后台可见状态。
+```
+
+### 5. 怎么做性能优化？
+
+```text
+我会先拆链路耗时，而不是盲目换模型。RAG 的耗时通常来自解析、embedding、向量检索、ES 检索、rerank、LLM 首 token、流式代理。系统里通过 SSE 事件、Prometheus 指标和 traceparent 把阶段拆开。
+
+优化策略上，写入侧异步化，上传后进 BullMQ；检索侧限制 topK、rerank topN、query 扩展数量和 web search 结果数；生成侧尽早流式输出；外部依赖如 Milvus、Rerank、Web Search 都要有 timeout 和降级。
+```
+
+追问“为什么之前觉得慢”：
+
+```text
+之前 admin 问答兜底场景首字慢，是因为会话创建、记忆检索、质量闸门和兜底生成串行阻塞。我做过优化：RUN_STARTED/TEXT_MESSAGE_START 提前发，长期记忆检索最多等 600ms，检索不足时跳过不必要 query augment，空 token 不下发。优化后首字从用户感知约 5-11 秒降到约 2 秒量级。
+```
+
+### 6. 怎么保证答案不会乱编？
+
+```text
+不能保证模型永远不乱编，只能通过工程边界降低概率并让错误可发现。我的策略是检索质量闸门、低相关拒答、引用编号校验、claim support 检查、引用不足时回退片段抽取式回答，以及把失败样本进入评测集。
+
+核心原则是：没有证据就不做确定性回答；有答案也必须能回到 chunk 证据。
+```
+
+不要说：
+
+- “完全消除幻觉。”
+- “我们 prompt 写得好，所以不会胡说。”
+
+### 7. 如果上线到大公司，还差什么？
+
+```text
+技术架构已经具备企业级原型基础，但进一线大厂生产还差真实材料和组织流程，不是再堆几个模型。主要差真实私有业务题库、真实组织权限系统、真实 GraphRAG 数据源、真实多模态样本、真实 Milvus/ES 压测、生产域名证书备份监控、安全合规审计和发布回滚流程。
+
+所以我会把当前状态定义为本地工程成熟度 96/100，而不是生产 SLA。生产化要用真实业务数据和真实运行环境重新打分。
+```
+
+这段非常重要，能体现你不虚吹。
+
+### 8. 前端负责人怎么讲这个项目？
+
+```text
+如果从前端负责人视角讲，我的重点不是“写了几个页面”，而是把 AI 能力产品化和运营化。用户侧要解决上传、问答、引用、流式输出、错误态和语音交互；管理后台要解决文档治理、搜索运营、问答运营、图谱运营、用户权限、审计日志和系统配置。
+
+AI 问答页面不是普通 chat UI，它要支持 AG-UI/SSE 真实流式事件、Markdown/代码块/表格/图片输出、引用展示、路由状态、检索充分性、错误兜底和历史会话。图谱页面要支持节点管理、关系检索、图谱统计和图上编辑，同时不能把 demo 数据伪装成真实数据。
+```
+
+追问“前端难点是什么”：
+
+```text
+难点在异步状态和可信表达。AI 输出是流式的，可能有 token、final、error、custom event、media event；页面要边流式渲染边保持 Markdown 结构、图片尺寸、代码块样式和事件轨迹。另一个难点是不要让用户误以为兜底答案或 demo 图谱是真实结果，所以 UI 要明确展示 route、retrievalSufficient、demo meta 和错误来源。
+```
+
+### 9. 怎么设计管理后台指标？
+
+```text
+我会把后台指标分成四类。第一类是知识资产：文档数、chunk 数、解析失败率、索引状态、权限覆盖。第二类是检索质量：无结果率、召回问题、热门 query、rerank 命中、引用失败。第三类是问答质量：负反馈、拒答率、引用支撑率、成本和延迟。第四类是系统健康：Milvus/ES/Redis/Neo4j/LLM provider 状态、队列堆积、外部工具失败率。
+```
+
+一句话：
+
+```text
+管理后台不是摆数据大屏，而是让失败样本能被发现、被定位、被回流到评测集。
+```
+
+### 10. 怎么做评测集建设？
+
+```text
+评测集不能只有“能答出来”的正例。企业 RAG 至少要覆盖事实题、版本题、别名题、跨文档题、冲突题、权限题、多轮追问和无答案拒答题。每条题目要有标准答案、来源文档、期望引用、expectedClaims 和是否应该拒答。
+
+上线后每次线上失败都应该进入回归集，形成持续评测，而不是项目上线时测一次就结束。
+```
+
+追问“为什么不用 accuracy”：
+
+```text
+RAG 不能只看 accuracy。召回层看 Recall@K、Hit Rate、MRR；排序层看 NDCG/MRR；答案层看 faithfulness、citation accuracy、claim support；拒答题看 false positive/false negative。单一 accuracy 会掩盖“答对但没证据”和“无答案乱答”的风险。
+```
+
+### 11. 怎么讲一个真实排障案例？
+
+准备这个 STAR 版本：
+
+```text
+背景：Admin AI 问答回答输出一开始很丑，后来接 AG-UI/SSE 后又出现事件轨迹重复、历史会话消失和首字延迟过高。
+
+动作：我没有只改 UI，而是沿链路排查：admin 页面 -> admin-backend SSE proxy -> rag-backend AG-UI stream -> RAG 生成链路。输出格式上改成 Markdown/代码块/图片结构化渲染；事件轨迹上把连续 TEXT_MESSAGE_CONTENT 折叠成 EVENT x N；历史会话问题修正 admin-backend 对 conversations 返回结构的解包；首字延迟则把 RUN_STARTED/TEXT_MESSAGE_START 前置，记忆检索设置 600ms 上限，检索不足时跳过不必要 query augment。
+
+结果：页面输出从纯文本堆叠变成类 ChatGPT/DeepSeek/Codex 的结构化回答，事件轨迹不再刷屏，历史会话恢复，兜底问题首字延迟从用户感知约 5-11 秒降到约 2 秒量级。
+```
+
+这个案例适合回答：
+
+- “你遇到过最难的问题是什么？”
+- “你怎么排查线上问题？”
+- “你怎么优化 AI 应用体验？”
+
+### 12. 怎么反问面试官？
+
+可以准备这些问题，显得你真的懂落地：
+
+- 你们现在 RAG 的主要问题是召回不准、答案幻觉、权限过滤，还是评测体系不足？
+- 你们有没有真实业务题库和标准答案？失败样本会不会进入回归集？
+- 现在知识库索引是纯向量，还是 hybrid retrieval？
+- 文档权限变更后，向量索引和 ES 索引怎么同步失效？
+- 线上是否有 citation accuracy、refusal accuracy、无结果率、负反馈率这些指标？
+- Agent 工具调用有没有权限、超时、审计和成本预算？
+- 多模态是真实 OCR/视觉向量检索，还是只把图片转成文本 metadata？
+
+## 公开 JD 对照补强
+
+> 2026-07-06 抽样看了字节、百度、美团、腾讯，以及公开 AI Agent / 大模型应用开发 JD。BOSS 直聘类页面有登录和反爬限制，所以这里按可公开访问 JD 和搜索结果摘要归纳，不把单个 JD 当完整行业结论。
+
+公开样本：[字节 AI Agent 研发](https://jobs.bytedance.com/experienced/m/position/detail/7428873140916554010?recomId=c3d5e497-1e0c-11f1-9ed4-fa163e47e78a&sourceJobId=7263011409558210874&utm_source=ld246.com)、[美团 AI Agent 应用架构](https://zhaopin.meituan.com/web/position/detail?highlightType=social&jobUnionId=4428189649)、[百度 AIDU 智能体算法/Agent 应用全栈](https://talent.baidu.com/jobs/list?recommendCode=IS96J8&recruitType=GRADUATE)、[腾讯 LLM Application Engineer](https://www.linkedin.com/jobs/view/sr-llm-application-engineer-ai-agents-at-tencent-4414642626)、[阿里 AI Agent 优化](https://campus-talent.alibaba.com/campus/position/199907160001)、[BOSS 美团相关摘要](https://www.zhipin.com/zhaopin/f754f635db6b33f81ndz3NS_Fw~~/)。
+
+### 大厂 JD 共性要求
+
+| JD 高频要求 | 面试官实际想确认 | 你项目里的对应点 | 还要怎么讲 |
+|---|---|---|---|
+| RAG / Agent 融合 | 不是只会调接口，而是能让知识理解和任务执行结合 | simple / auto / agentic 三模式，RAG 证据不足再升级 Agentic | 强调 Agentic 不是默认路径，复杂任务才升级 |
+| Planning / Acting / Reflection | 会不会设计 Agent 执行闭环 | LangGraph 节点：routing、query augment、retrieval、sufficiency、generate、reflection | 不要说“Agent 自己想办法”，要说状态机 + 预算 |
+| Tool Calling / MCP / Function Calling | 工具调用是否安全、可控、可观测 | Web Search、Rerank、Graph、MCP、ASR/TTS 接入和降级 | 重点讲 schema、权限、超时、审计、降级 |
+| Memory 长短期记忆 | Agent 是否能跨轮次、跨任务沉淀上下文 | 会话记忆、Karpathy + Obsidian compiled/index/notes | 区分 conversation memory、semantic memory、artifact memory |
+| Eval / Benchmark | 能不能证明效果，而不是只演示 | eval:rag:quality、project eval、maturity gate、失败样本回流 | 讲 Recall@K、citation accuracy、tool success、latency、cost |
+| Observability | 出错能不能定位 | SSE 事件、traceparent、Prometheus、后台运营状态 | 讲一次回答可追踪到检索、rerank、LLM、工具 |
+| 多模态 | 文档、图片、音频、视频是否能进入知识库 | 已有 OCR/ASR/视频 sidecar 和元数据链路 | 诚实说真实视觉向量和视频理解要等模型 key/样本 |
+| 生产工程 | 高可用、低延迟、容器化、监控、灰度、限流 | Docker Compose、本地服务、timeout、fallback、队列化写入 | 不把本地工程分说成生产 SLA |
+| 成本与延迟 | 能不能商业化运营 | topK/topN、query expand、web search、rerank、首字优化 | 讲 token budget、cache、routing、fallback |
+| 数据合规 / 私有化 | 企业客户能不能用 | 多租户隔离、权限 metadata、引用过滤、红线不碰生产配置 | 金融/证券岗位要主动讲审计、留痕、权限和合规边界 |
+
+### 按公司类型怎么调整讲法
+
+#### 阿里 / 腾讯 / 百度 / 字节 / 美团
+
+```text
+这些公司更看重规模化落地，不只问你 RAG 怎么跑，还会追问 Agent 成功率、延迟、成本、工具调用可靠性、评测体系和业务闭环。
+
+我的讲法是：项目不是 demo bot，而是有 simple/auto/agentic 路由、混合检索、GraphRAG、工具调用、流式输出、评测门禁和后台运营的完整系统。普通问题走稳定链路，复杂任务才走 Agentic；每个节点有 timeout、降级、指标和 trace。
+```
+
+可以主动补：
+
+- 百度类 JD 会问感知-决策-执行闭环、长期记忆、推理机制、Agent 评测。
+- 字节类 JD 会问 RAG、MCP、HTTP/WebSocket、LangChain/LangGraph、后端高可用。
+- 美团类 JD 会问任务规划、Tool Use/MCP、记忆管理、多 Agent 协同。
+- 腾讯游戏/内容生产类 JD 会问 Agent 如何嵌入研发、策划、美术、测试、运营流程。
+
+#### 小米 / 大疆 / 高德
+
+```text
+这类岗位常把 AI Agent 和具体业务系统结合得更深。小米可能更偏智能硬件、IoT、用户助手；大疆可能更偏多模态、设备、视觉、低延迟和边缘场景；高德可能更偏地图、出行、POI、路径规划、实时数据和位置服务。
+
+我的项目可以迁移的部分是：RAG 负责私域知识，Agent 负责任务编排，工具层对接业务 API，评测层衡量任务成功率和延迟。真正要补的是接入它们的真实业务 API、实时数据和领域评测集。
+```
+
+回答时别硬说做过车载、无人机或地图生产系统。可以说：
+
+```text
+我没把这个项目部署到硬件或地图生产链路里，但 Agent 架构上的任务规划、工具调用、权限、观测、评测和降级是可迁移的。区别在于业务工具、实时数据、端侧约束和评测集要重新建设。
+```
+
+#### 微信 / DeepSeek
+
+```text
+微信类场景更关注超大用户规模、消息链路、权限边界、内容安全、插件生态和用户体验；DeepSeek 类公司更关注模型理解、推理效率、训练/推理基础、评测方法和模型能力边界。
+
+我的优势更偏 AI 应用工程和 Agent/RAG 系统落地。遇到模型底层岗位时，要承认我不是训练算法主责，但能讲清楚模型 API 接入、RAG/Agent 架构、评测、推理成本、流式体验和工程可观测。
+```
+
+#### 中信 / 平安 / 证券公司
+
+```text
+金融类 AI 应用最核心不是“炫技”，而是安全、合规、可审计、可解释、权限隔离和结果可追溯。RAG 系统必须做到用户只能检索自己有权限的资料，答案必须有引用，工具调用必须有审计，敏感数据不能进日志，模型输出要能拒答。
+
+我的项目里可以重点讲多租户隔离、metadata 权限过滤、引用校验、拒答、评测门禁、失败样本回流和后台审计思路。不能说已经满足金融生产合规，只能说架构上预留了合规落地点，真实落地要接入公司的 IAM、DLP、审计、脱敏和审批流程。
+```
+
+金融面试最容易问：
+
+- 如果制度文档有新旧版本冲突，怎么回答？
+- 如果用户没权限看某份材料，向量库已经召回了怎么办？
+- 如果模型调用外部 API，会不会泄露客户信息？
+- 如果投资建议答错，责任边界怎么控制？
+- 怎么保留审计日志，又不把敏感内容写进日志？
+
+建议回答：
+
+```text
+金融场景里我不会让模型直接给确定性投资建议。RAG 只能回答制度、流程、产品说明、已授权知识；涉及投资建议、风控结论、客户隐私和监管敏感内容，要进入拒答、转人工或审批工作流。
+```
+
+### 还要补的知识点
+
+这些不一定都要编码进项目，但面试前要能讲清楚：
+
+1. **Agent Memory 分类**
+
+```text
+短期记忆是当前会话上下文，长期记忆是跨会话沉淀的用户偏好、业务事实或项目资产，工具记忆是外部系统返回的结构化结果，artifact memory 是 Obsidian/Karpathy 这种可复用知识产物。记忆必须可过期、可删除、可追溯，不能把所有聊天记录无限塞上下文。
+```
+
+2. **Agent 任务成功率怎么评估**
+
+```text
+Agent 不只看答案对不对，还要看任务是否完成、工具调用是否成功、步骤是否合理、是否越权、是否超预算、是否需要人工介入。指标包括 task success rate、tool success rate、step accuracy、latency、cost、human handoff rate、unsafe action rate。
+```
+
+3. **MCP / A2A / Function Calling 区别**
+
+```text
+Function Calling 是模型输出结构化函数调用意图，宿主执行；MCP 更像统一工具和上下文接入协议，让模型应用用标准方式连接外部工具和资源；A2A 更偏 Agent 之间的通信与协作协议。面试里不要把它们混成一个概念。
+```
+
+4. **Agent 安全护栏**
+
+```text
+工具白名单、参数 schema、权限校验、敏感字段脱敏、速率限制、预算控制、危险动作二次确认、审计日志、输出安全检查、prompt injection 检测。尤其是工具调用不能只靠 prompt 约束。
+```
+
+5. **Prompt 工程版本化**
+
+```text
+Prompt 不是临时字符串，要有版本、适用场景、输入输出契约、评测集、回滚策略和变更记录。一次 prompt 修改应该能通过离线评测再上线。
+```
+
+6. **模型路由**
+
+```text
+不是所有问题都用最强模型。简单 FAQ 用快模型或本地知识编译结果，复杂推理用强模型，需要工具的走 Agentic，敏感问题走拒答或人工。模型路由要同时看质量、延迟、成本和安全。
+```
+
+7. **上下文工程**
+
+```text
+上下文工程不是把资料越塞越多，而是选择哪些证据、按什么顺序、用什么结构交给模型。要控制 token、去重、压缩、分组、保留来源和冲突信息。
+```
+
+8. **Prompt Injection 防护**
+
+```text
+RAG 文档里可能包含“忽略之前指令”这类恶意内容。防护上要把 system/developer 指令和检索内容隔离，检索内容只当证据，不当指令；工具调用前再做权限和参数校验。
+```
+
+9. **Human-in-the-loop**
+
+```text
+高风险动作不能全自动。比如金融建议、审批、删除数据、外部系统写操作，都应该有人工确认、审批流或只读预演。Agent 的价值是辅助决策和执行低风险步骤，不是替代所有责任边界。
+```
+
+10. **从前端负责人角度补一句**
+
+```text
+AI 应用的前端不是聊天框，而是状态机可视化、人机协同界面和可信输出界面。要把 thinking、tool call、evidence、citation、error、handoff、history、media output 都设计成用户能理解的产品状态。
+```
+
+### JD 对照后的简历补强句
+
+可以在简历或面试开场里换成这个版本：
+
+```text
+主导企业级 Agentic RAG 知识库系统，覆盖文档解析、Hybrid Search、GraphRAG、Karpathy + Obsidian 知识编译、LangGraph Agentic Workflow、Tool Calling/MCP 接入、AG-UI/SSE 流式输出、权限过滤、引用校验、拒答策略、评测门禁和后台运营。项目对齐 AI 应用开发、Agent 开发和企业知识库落地场景，重点解决 Agent 成功率、检索可信度、工具调用安全、延迟成本和可观测问题。
+```
+
 ## 面试时最好主动承认的边界
 
 主动说这些，反而显得懂行：
 
-- 93/100 是本地工程成熟度，不是生产 SLA。
+- 96/100 是本地工程成熟度，不是生产 SLA。
 - 仿真实业务题不能替代公司真实私有题库。
 - Milvus 本机 Docker search warning 已降级，但还值得从容器版本、segment、资源配置继续治理。
 - GraphRAG 和 MCP 的工程入口已有，但真实业务价值取决于数据源和工具质量。
@@ -939,7 +1360,7 @@ AI 主要帮我做重复性代码、接口适配、测试补齐、文档同步�
 - “Agentic 是复杂问题增强，不是默认路径。”
 - “关键词检索在中文企业知识库里非常关键。”
 - “GraphRAG 适合关系型问题，价值依赖真实图谱数据。”
-- “当前本地工程成熟度 93/100，真实业务分要接真实题库后才能打。”
+- “当前本地工程成熟度 96/100，真实业务分要接真实题库后才能打。”
 - “系统具备生产化基础，但发布仍需要目标环境、证书、备份、密钥注入策略。”
 
 ## 推荐复盘顺序

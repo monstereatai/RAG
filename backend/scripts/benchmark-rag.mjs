@@ -1,4 +1,4 @@
-const baseUrl = (process.env.PERF_RAG_BASE_URL ?? 'http://localhost:3001')
+const baseUrl = (process.env.PERF_RAG_BASE_URL ?? 'http://localhost:3000')
   .replace(/\/$/, '');
 const samples = Number(process.env.PERF_RAG_SAMPLES ?? '3');
 const enforce = process.env.PERF_RAG_ENFORCE === 'true';

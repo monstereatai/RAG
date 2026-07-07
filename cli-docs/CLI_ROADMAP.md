@@ -6,26 +6,27 @@
 
 - **CLI PRD 已完成并优化**（2026-06-24）：`CLI_PRD.md` 已补充飞书 CLI 产品形态参考、脚手架调研图映射、交互体验规范、`rag init` 配置初始化和脚手架能力边界。
 - **CLI 架构设计已完成并优化**（2026-06-24）：`CLI_ARCHITECTURE.md` 已补充 Commander.js、飞书官方 CLI、yargs、oclif、cac、stricli 以及常见脚手架工具链对比，第一版选择 Commander.js + TypeScript。
-- **CLI 代码实现未开始**。
+- **CLI 代码 MVP 已迁移到 `rag-cli/`**（2026-06-24）：本目录作为旧文档归档副本保留，不作为实现项目。
+- **Karpathy + Obsidian 后端响应已对齐**（2026-07-04）：`rag ask` human 输出展示答案、检索状态、Sources、Obsidian 路径；JSON 输出保留完整后端字段；`rag context` 在 debug chunks 为空时可用 `ask auto` 可靠兜底，但纯模型兜底仍返回 `insufficient_context`。
+- **正式后端 API 与高级命令已对齐**（2026-07-05）：`rag search` / `rag context` 优先调用正式 `/rag/search`、`/rag/context`；`rag ask --stream` 消费后端 SSE；新增 `rag admin search`、`rag graph query`、`rag eval status`、`rag eval run`。本目录是归档副本，代码实现在 `rag-cli/`。
+- **当前主项目真实口径**（2026-07-04）：项目级 RAG 评测 28/28；成熟度 96/100；Milvus search runtime 降级和生产目标机器/证书/备份策略未确认仍是后端/运行环境阻塞，CLI 只消费状态，不直接治理。
 
 ## 当前选型
 
 - CLI 框架：Commander.js。
 - 语言：TypeScript。
 - 运行时：Node.js 20+。
-- 交互：Inquirer 系列。
+- 交互：Node readline。
 - 输出美化：Chalk。
-- Loading：Ora。
+- Loading：自定义 stderr spinner。
 - 校验：Zod。
 - HTTP：Node fetch，必要时再引入 Undici。
 
 ## 下一步
 
-1. 创建独立 `cli/` 实现项目，并先写 `cli/CLAUDE.md`。
-2. 建立 `rag --help`、`rag --version`、`rag init`、`rag doctor` 骨架。
-3. 实现 `RagApiClient`、`ConfigStore`、`OutputFormatter`、`ContextBuilder`。
-4. 实现 P0 命令：`auth`、`search`、`ask`、`context`、`skill match`、`doctor`。
-5. 后续视真实使用情况决定是否增加正式后端 `POST /api/rag/search` 和 `POST /api/rag/context`。
+1. 增加更多真实后端联调 smoke，覆盖 `ask --stream`、`graph query`、`eval run`。
+2. 视后端状态 API 成熟度，把主项目成熟度、Milvus runtime 降级、项目级评测结果并入 `rag eval status`。
+3. 根据真实使用情况再扩展更多 admin/graph/eval 子命令，避免一次性做成大而全平台。
 
 ## 阻塞与红线
 
@@ -34,4 +35,3 @@
 - 不改 CI/CD。
 - 不改数据库 schema 或迁移。
 - 不修改 RAG 服务生产配置。
-

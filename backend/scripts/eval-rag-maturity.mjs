@@ -3,6 +3,8 @@ import { join } from 'node:path';
 
 const threshold = Number(process.env.RAG_MATURITY_MIN_SCORE ?? '90');
 const requireExternal = process.env.RAG_MATURITY_REQUIRE_EXTERNAL === 'true';
+const productionMaterialsConfirmed =
+  process.env.RAG_PRODUCTION_MATERIALS_CONFIRMED === 'true';
 
 const cwd = process.cwd();
 const workspaceRoot = existsSync(join(cwd, 'ROADMAP.md')) ? cwd : join(cwd, '..');
@@ -253,7 +255,7 @@ function scoreDimensions(evidence) {
       ),
       check(
         '生产目标机器/证书/备份策略已确认',
-        !evidence.roadmap.includes('目标机器'),
+        productionMaterialsConfirmed,
         2,
       ),
     ]),
@@ -291,9 +293,9 @@ function collectBlockers(evidence, requireExternal) {
     },
     {
       name: '生产发布材料',
-      status: evidence.roadmap.includes('目标机器') ? 'missing' : 'unknown',
-      blocksGate: requireExternal,
-      note: '生产部署、证书、备份、密钥注入策略不在本地工程门禁内。',
+      status: productionMaterialsConfirmed ? 'ready' : 'missing',
+      blocksGate: requireExternal && !productionMaterialsConfirmed,
+      note: '生产部署、证书、备份、密钥注入策略需要显式确认；可用 RAG_PRODUCTION_MATERIALS_CONFIRMED=true 纳入本地门禁。',
     },
   ];
 }

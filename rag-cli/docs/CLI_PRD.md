@@ -13,7 +13,7 @@
 5. `rag skill` 负责匹配和查看本地 Skill，属于可选增强，不是 CLI 的前置条件。
 6. `rag eval` / `rag doctor` 负责验证知识库与服务状态。
 
-CLI 的核心价值不是“替代 Agent 写代码”，而是把 RAG 知识库变成本地终端里的稳定能力：人可以直接查，脚本可以直接调，Agent 和 Skill 也可以在写代码前先拿到项目知识、引用片段、接口约束、历史决策和可验证命令。
+CLI 的核心价值不是“替代 Agent 写代码”，而是把 RAG 知识库变成本地终端里的稳定能力：人可以直接查，脚本可以直接调，Agent 和 Skill 也可以在写代码前先拿到项目知识、引用片段、接口约束、历史决策和可验证命令。当前后端已形成 Karpathy + Obsidian Fast Path 与 Agentic RAG 互补链路，CLI 必须保留 `retrievalSufficient`、`retrievalReason`、`references`、`obsidianPaths` 等字段，不把纯模型兜底包装成可靠知识。
 
 产品形态参考飞书官方 CLI：同一套命令既服务人类，也服务 AI Agent。技术实现参考成熟 Node CLI 生态：命令框架、交互输入、颜色输出、loading、配置文件和稳定 JSON 输出分层处理。
 
@@ -54,12 +54,13 @@ CLI 的核心价值不是“替代 Agent 写代码”，而是把 RAG 知识库�
 - 不绕过 JWT / service token / 多租户隔离。
 - 不承诺 CLI 直接修改代码。代码修改由 Codex/Claude Code 等 Agent 执行，CLI 只提供上下文和建议。
 - 不把所有外部知识源一次性接入。第一版只对接当前 RAG 后端。
+- 不治理 Milvus runtime timeout、生产机器、证书、备份策略等运行环境事项；这些由后端和部署流程处理，CLI 只消费状态和接口结果。
 
 ## 6. 成功标准
 
 - 人类、脚本、Agent 或 Skill 可以通过一条命令拿到 JSON 上下文包。
 - 上下文包包含问题、相关知识片段、引用、风险提示、建议验证命令；如果启用 Skill 匹配，再附带匹配结果。
-- 检索为空或低相关时，CLI 明确返回 `insufficient_context`，不伪造答案。
+- 检索为空或低相关时，CLI 明确返回 `insufficient_context`，不伪造答案；如果使用 `ask auto` 兜底，必须有 references、Obsidian 路径或 `retrievalSufficient=true` 才能作为上下文包输出。
 - 本地服务未启动、token 失效、权限不足时，错误信息可操作。
 - CLI 命令可被脚本稳定调用，退出码明确。
 - 不修改 `.env`，只读取用户显式传入的环境变量或配置文件。
@@ -73,6 +74,7 @@ CLI 的核心价值不是“替代 Agent 写代码”，而是把 RAG 知识库�
 | `rag auth logout` | 清除本地 token | P1 |
 | `rag search` | 检索知识库片段 | P0 |
 | `rag ask` | 基于知识库提问 | P0 |
+| `rag ask --stream` | 消费后端真实 SSE 流式问答 | P1 |
 | `rag context` | 生成结构化上下文包 | P0 |
 | `rag init` | 交互式初始化本地 CLI 配置 | P1 |
 | `rag skill list` | 列出可用 Skill | P1 |
@@ -82,6 +84,7 @@ CLI 的核心价值不是“替代 Agent 写代码”，而是把 RAG 知识库�
 | `rag admin search` | 查询运营侧热门/无结果/召回问题 | P2 |
 | `rag graph query` | 查询 GraphRAG 关系型问题 | P2 |
 | `rag eval run` | 触发已有 RAG 评测脚本或 API | P2 |
+| `rag eval status` | 查看后端评测状态 | P2 |
 | `rag doctor` | 检查服务、鉴权、索引和依赖状态 | P0 |
 | `rag config get/set` | 管理 CLI 本地配置 | P1 |
 
@@ -146,7 +149,7 @@ rag search "Agentic RAG 主链路是什么" --limit 5 --format json
 
 行为：
 
-- 第一版优先复用现有 `debug/chunks` 或新增薄封装检索 API。
+- 优先调用正式 `POST /api/v1/rag/search`；连接旧后端且接口不存在时，才保守降级到 `debug/chunks`。
 - 默认只返回当前用户有权限的内容。
 - 支持 `--format json|markdown|table`。
 - 支持 `--mode simple|auto`，默认 `simple`。
@@ -171,14 +174,14 @@ rag ask "这个项目改完代码后要跑哪些验证？" --mode auto
 
 - 调用现有 chat API。
 - 默认非流式输出最终答案。
-- `--stream` 时展示 SSE 阶段事件。
+- `--stream` 时直接消费后端真实 SSE，不做客户端延迟拆字模拟。
 - 答案必须保留引用信息。
 
 验收：
 
 - simple/auto/agentic 三种模式可选。
 - 低相关、引用失败、知识不足时输出明确拒答。
-- `--format json` 输出完整 answer/references/route/confidence。
+- Markdown 模式输出答案、检索状态、来源和 Obsidian 路径；`--format json` 输出完整 `answer/references/retrievalSufficient/retrievalReason/obsidianPaths/route/threadId`。
 
 ### 8.4 `rag context`
 
@@ -233,7 +236,8 @@ rag context "为 RAG 项目新增 CLI，先写 PRD" \
 
 行为：
 
-- 内部组合 `skill match` + `search` + 规则提取。
+- 优先调用正式 `POST /api/v1/rag/context`；连接旧后端且接口不可用时，才在 CLI 内组合 `skill match` + `search` + 规则提取。
+- `search/debug chunks` 为空时可调用 `ask auto` 作为 Karpathy + Obsidian 兜底；纯模型兜底答案不能算可靠上下文。
 - `skill match` 是可选增强；未启用 Skill 时仍可只基于 RAG 检索生成上下文包。
 - 只返回事实和约束，不直接改代码。
 - 支持 `--max-tokens` 控制输出体积。

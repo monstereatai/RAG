@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const baseUrl = (process.env.EVAL_RAG_E2E_BASE_URL ?? 'http://localhost:3001')
+const baseUrl = (process.env.EVAL_RAG_E2E_BASE_URL ?? 'http://localhost:3000')
   .replace(/\/$/, '');
 const datasetPath =
   process.env.EVAL_RAG_E2E_DATASET ?? 'eval/hybrid-regression.dataset.json';

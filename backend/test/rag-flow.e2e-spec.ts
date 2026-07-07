@@ -1,6 +1,6 @@
 import request from 'supertest';
 
-const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3001';
+const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 
 interface ApiEnvelope<T> {
   code?: number;

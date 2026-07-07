@@ -22,6 +22,10 @@
 | 性能基准脚手架 | simple/agentic p50/p95 基准脚本 | `npm run perf:rag` |
 | 部署清单 | 基础设施、Nginx、备份、监控、回滚 checklist 模板 | `DEPLOYMENT_CHECKLIST.md` |
 | 企业级 readiness 汇总 | 统一检查数据、脚本、文档、外部阻塞 | `npm run enterprise:readiness` |
+| Prompt Injection 基础防护 | 检索片段本地检测/高风险行脱敏、prompt 边界、专项评测集 | `npm run eval:prompt-injection` |
+| Prompt Registry 基础版 | prompt name/version/owner/evals/rollback 代码级登记 | `npm run prompt:registry:check` |
+| Tool Registry 基础版 | 工具 risk/permission/timeout/audit/fallback/owner 代码级登记 | `npm run tools:registry:check` |
+| Agent 任务评测脚手架 | retrieval/refusal/conflict/citation/tool_degrade 覆盖检查，支持 live gate | `npm run eval:agent-tasks` |
 
 ## 必须外部输入
 
