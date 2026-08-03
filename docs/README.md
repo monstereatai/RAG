@@ -31,6 +31,9 @@
 | 文档 | 用途 |
 |---|---|
 | `interview/interview-docs-usage.md` | 面试文档使用说明和阅读顺序 |
+| `interview/AI_TOOLING_INTERVIEW_GUIDE.md` | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 的解释、伪代码、业务场景、设计和评测 |
+| `interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md` | Agent 平台总架构图、十一类单／多 Agent 方案、优缺点、业务场景、决策树和项目选型 |
+| `interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md` | 主人问过的 RAG、Agent、多 Agent、Tool／MCP／Skill、架构与岗位问题总清单，以及待补问题 |
 | `interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md` | 七项 Agent／RAG 核心难点的背景、方案对比、实现效果、口述稿、追问答案和项目代码地图 |
 | `interview/SENIOR_AGENT_INTERVIEW_READINESS.md` | 高级／资深／Staff 岗位判断、真实业务补数、稳定性回放、架构决策、故障与跨团队证据操作手册 |
 | `interview/agentguide-rag-interview-mapping.md` | AgentGuide 高频知识与项目能力对照 |

@@ -24,6 +24,9 @@ INTERVIEW_PLAYBOOK.md 负责“怎么说”，AI_AGENT_CORE_KNOWLEDGE.md 负责�
 
 | 文件 | 用途 | 什么时候看 |
 |---|---|---|
+| `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md` | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系、伪代码、业务场景、失败治理、评测和代码对照 | 面试官集中追问 Agent 架构、多 Agent 协作、外部能力、MCP 和 Skill 时 |
+| `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md` | Agent 平台总架构、方案图、Workflow／ReAct／Manager／Handoff／DAG／Supervisor 等模式对比、主流场景和选型 | 面试官追问“为什么这样设计、还有哪些架构、不同场景怎么选”时 |
+| `docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md` | 主人历次架构与面试问题按主题汇总，标注覆盖状态、答案入口、真实数据项和建议新增问题 | 面试复习前查漏补缺、决定下一步补什么时 |
 | `docs/interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md` | 七个 Agent／RAG 技术难点的业务背景、方案对比、项目选择、实现证据、口述稿和追问答案 | 面试前集中复习项目技术深度，或面试官追问“为什么这样设计”时 |
 | `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` | 高级／资深／Staff 岗位边界，真实业务、稳定性、性能、ADR、跨团队和事故证据的补数命令与验收线 | 判断项目能投什么级别、补简历数字、准备架构岗或 Staff 追问时 |
 | `AI_AGENT_CORE_KNOWLEDGE.md` | 高级 Agent / RAG 核心知识人话版：概念、方案、优缺点、项目取舍 | 系统复习、被深挖原理和方案选型时 |
