@@ -11,6 +11,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueEvents, Worker } from 'bullmq';
+import type { GameDocumentMetadata } from './document-profile.util';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 
@@ -20,6 +21,7 @@ export interface DocumentProcessingJob {
   filename: string;
   originalBufferBase64: string;
   contentType?: string;
+  businessMetadata?: Partial<GameDocumentMetadata>;
 }
 
 export interface DocumentProcessingResult {
@@ -69,12 +71,16 @@ export class DocumentQueueService implements OnModuleDestroy {
       },
     });
 
-    this.queueEvents = new QueueEvents(DOCUMENT_PROCESSING_QUEUE, { connection });
+    this.queueEvents = new QueueEvents(DOCUMENT_PROCESSING_QUEUE, {
+      connection,
+    });
 
     this.worker = new Worker<DocumentProcessingJob>(
       DOCUMENT_PROCESSING_QUEUE,
       async (job) => {
-        this.logger.log(`Processing document: ${job.data.filename} (task=${job.data.taskId})`);
+        this.logger.log(
+          `Processing document: ${job.data.filename} (task=${job.data.taskId})`,
+        );
         if (!this.processor) {
           throw new Error('Document queue processor is not registered.');
         }
@@ -92,7 +98,9 @@ export class DocumentQueueService implements OnModuleDestroy {
     );
 
     this.worker.on('completed', (job) => {
-      this.logger.log(`Document processed: ${job.data.filename} (task=${job.data.taskId})`);
+      this.logger.log(
+        `Document processed: ${job.data.filename} (task=${job.data.taskId})`,
+      );
     });
 
     this.worker.on('failed', (job, err) => {
@@ -144,7 +152,11 @@ export class DocumentQueueService implements OnModuleDestroy {
         resolve(null);
       }, timeoutMs);
 
-      const handler = (event: { jobId: string; returnvalue?: string; failedReason?: string }) => {
+      const handler = (event: {
+        jobId: string;
+        returnvalue?: string;
+        failedReason?: string;
+      }) => {
         if (event.jobId === taskId) {
           clearTimeout(timer);
           resolve({

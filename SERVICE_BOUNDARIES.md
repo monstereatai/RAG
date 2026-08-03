@@ -159,6 +159,7 @@ admin-backend/src/
 - 后台自己的用户、角色、权限、日志、通知由 `admin-backend` 自己管理。
 - 后台文档列表可以展示来自 `rag-backend` 的文档元数据，但不直接操作 RAG 数据库。
 - 后台触发重建索引、重跑评测、查看 chunk 等操作，通过 `rag-backend` 的运营 API 完成。
+- AI 岗位预设由 `rag-backend` 的 `role-presets.ts` 统一维护，`admin-backend` 只代理目录并透传 `rolePresetId`；它与后台用户、RBAC 角色、权限表是两套不同概念。
 
 ## rag-backend 后续改造
 

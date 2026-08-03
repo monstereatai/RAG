@@ -66,4 +66,116 @@ describe('MarkdownChunker', () => {
       contentChunk?.sourceStart ?? 0,
     );
   });
+
+  it('repeats the full heading path on every leaf chunk', async () => {
+    const chunker = new MarkdownChunker(55, 5);
+    const chunks = await chunker.split(
+      [
+        '# 周年庆活动',
+        '## 抽奖规则',
+        '第一段描述参与资格、活动时间和用户限制。',
+        '',
+        '第二段描述奖池库存、抽奖次数和奖励到账规则。',
+        '',
+        '第三段描述异常补偿、重复请求和客服处理方式。',
+      ].join('\n'),
+    );
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every((chunk) =>
+        chunk.startsWith('章节路径：周年庆活动 > 抽奖规则\n'),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps fenced code with pipes intact and does not parse it as a table', async () => {
+    const chunker = new MarkdownChunker(60, 5);
+    const chunks = await chunker.split(
+      [
+        '# 前端接口示例',
+        '```ts',
+        "const status = loading || retrying ? 'pending' : 'done';",
+        "fetch('/api/v1/activity/draw');",
+        '```',
+      ].join('\n'),
+    );
+    const joined = chunks.join('\n');
+
+    expect(joined).toContain('内容类型：代码或配置');
+    expect(joined).toContain(
+      "const status = loading || retrying ? 'pending' : 'done';",
+    );
+    expect(joined).not.toContain('表格列：');
+    expect(chunks.some((chunk) => chunk.includes('```ts'))).toBe(true);
+    expect(
+      chunks.some((chunk) => chunk.includes("fetch('/api/v1/activity/draw')")),
+    ).toBe(true);
+  });
+
+  it('splits long tables by complete rows and repeats table headers', async () => {
+    const chunker = new MarkdownChunker(95, 5);
+    const chunks = await chunker.split(
+      [
+        '# 抽奖配置',
+        '| 奖励 | 概率 | 地区 |',
+        '| --- | --- | --- |',
+        '| 金币 | 50% | 全部 |',
+        '| 皮肤 | 10% | 东南亚 |',
+        '| 礼包 | 40% | 台湾服 |',
+      ].join('\n'),
+    );
+    const tableChunks = chunks.filter((chunk) =>
+      chunk.includes('内容类型：配置表'),
+    );
+
+    expect(tableChunks.length).toBeGreaterThan(1);
+    expect(
+      tableChunks.every((chunk) =>
+        chunk.includes('表格列：奖励 / 概率 / 地区'),
+      ),
+    ).toBe(true);
+    expect(tableChunks.join('\n')).toContain(
+      '表格行：奖励=皮肤；概率=10%；地区=东南亚',
+    );
+  });
+
+  it('preserves empty cells and escaped pipes in configuration tables', async () => {
+    const chunker = new MarkdownChunker(500, 50);
+    const chunks = await chunker.split(
+      [
+        '# 多语言素材',
+        '| 组件 | 默认文案 | 地区说明 |',
+        '| --- | --- | --- |',
+        '| 抽奖按钮 |  | 泰语\\|德语预留 30% |',
+      ].join('\n'),
+    );
+
+    expect(chunks.join('\n')).toContain(
+      '表格行：组件=抽奖按钮；默认文案=；地区说明=泰语|德语预留 30%',
+    );
+  });
+
+  it('labels API, test, and version blocks for game production retrieval', async () => {
+    const chunker = new MarkdownChunker(500, 50);
+    const chunks = await chunker.split(
+      [
+        '# 活动交付',
+        'POST /api/v1/activity/draw',
+        '请求参数：activityId、userId。',
+        '',
+        '测试用例：重复领取',
+        '前置条件：用户已经领取奖励。',
+        '预期结果：返回错误码 40003。',
+        '',
+        '版本：V3',
+        '生效地区：东南亚服。',
+      ].join('\n'),
+    );
+    const joined = chunks.join('\n');
+
+    expect(joined).toContain('内容类型：接口契约');
+    expect(joined).toContain('内容类型：测试与验收');
+    expect(joined).toContain('内容类型：版本与地区规则');
+  });
 });

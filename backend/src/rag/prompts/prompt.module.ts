@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SemanticExampleSelector } from './semantic-example.selector';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
+import { BadCaseFlywheelService } from './bad-case-flywheel.service';
 
 /**
  * Prompt 工程模块
@@ -11,7 +12,7 @@ import { EmbeddingModule } from '../../providers/embedding/embedding.module';
  */
 @Module({
   imports: [ConfigModule, EmbeddingModule],
-  providers: [SemanticExampleSelector],
-  exports: [SemanticExampleSelector],
+  providers: [SemanticExampleSelector, BadCaseFlywheelService],
+  exports: [SemanticExampleSelector, BadCaseFlywheelService],
 })
 export class PromptModule {}

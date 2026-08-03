@@ -5,7 +5,7 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { Observable, tap } from 'rxjs';
+import { finalize, Observable } from 'rxjs';
 import { MetricsService } from './metrics.service';
 
 @Injectable()
@@ -22,12 +22,7 @@ export class MetricsInterceptor implements NestInterceptor {
     const res = http.getResponse<Response>();
     const start = process.hrtime.bigint();
 
-    return next.handle().pipe(
-      tap({
-        next: () => this.record(req, res, start),
-        error: () => this.record(req, res, start),
-      }),
-    );
+    return next.handle().pipe(finalize(() => this.record(req, res, start)));
   }
 
   private record(req: Request, res: Response, start: bigint): void {

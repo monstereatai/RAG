@@ -27,4 +27,5 @@ export interface AguiStreamOptions {
   userId: string;
   threadId?: string;
   model?: LlmModelProvider;
+  rolePresetId?: string;
 }

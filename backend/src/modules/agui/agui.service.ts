@@ -11,6 +11,9 @@ import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
 import { MemoryService } from '../memory/memory.service';
 import type { AguiEvent, AguiStreamOptions } from './agui.types';
+import { resolveRoleContext } from '../chat/role-presets';
+import { parseArtifactIntent } from '../artifacts/artifact-intent';
+import { ArtifactsService } from '../artifacts/artifacts.service';
 
 @Injectable()
 export class AguiService {
@@ -20,6 +23,7 @@ export class AguiService {
     private readonly memoryService: MemoryService,
     private readonly llmProvider: LlmProvider,
     private readonly langfuseProvider: LangfuseProvider,
+    private readonly artifactsService: ArtifactsService,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -49,6 +53,8 @@ export class AguiService {
 
         try {
           const selectedModel = options.model ?? 'qwen';
+          const roleContext = resolveRoleContext(options.rolePresetId);
+          const artifactIntent = parseArtifactIntent(query);
           const activeThreadId =
             options.threadId ??
             (await this.conversationService.create(
@@ -58,7 +64,12 @@ export class AguiService {
             ));
           emit('RUN_STARTED', {
             threadId: activeThreadId,
-            input: { query, mode: options.mode, model: selectedModel },
+            input: {
+              query,
+              mode: options.mode,
+              model: selectedModel,
+              rolePresetId: roleContext.preset.id,
+            },
           });
           traceEvents.push({
             type: 'run_started',
@@ -87,6 +98,16 @@ export class AguiService {
             ),
           ]);
           const memoryMessages: Array<{ role: string; content: string }> = [];
+          memoryMessages.push({
+            role: 'system',
+            content: roleContext.systemMessage,
+          });
+          if (artifactIntent) {
+            memoryMessages.push({
+              role: 'system',
+              content: `用户已明确要求生成${this.artifactKindLabel(artifactIntent.kind)}。请输出可直接写入文件的完整内容，不得声称无法创建或发送文件，也不要让用户复制粘贴；系统会在回答完成后自动创建附件。`,
+            });
+          }
           if (memoryResult.systemMessage) {
             memoryMessages.push({
               role: 'system',
@@ -108,6 +129,8 @@ export class AguiService {
                 activeThreadId,
                 options.userId,
                 memoryMessages,
+                false,
+                { scope: { role: roleContext.role } },
               ),
           );
 
@@ -130,6 +153,42 @@ export class AguiService {
             result.answer,
           );
 
+          let generatedArtifacts: unknown[] = [];
+          if (artifactIntent) {
+            const toolCallId = randomUUID();
+            emit('TOOL_CALL_START', {
+              toolCallId,
+              toolCallName: 'artifact_generate',
+            });
+            emit('TOOL_CALL_ARGS', {
+              toolCallId,
+              args: {
+                kind: artifactIntent.kind,
+                title: artifactIntent.title,
+              },
+            });
+            try {
+              const artifact = await this.artifactsService.create({
+                ownerUserId: options.userId,
+                threadId: activeThreadId,
+                title: artifactIntent.title,
+                kind: artifactIntent.kind,
+                sourceText: result.answer,
+                prompt: artifactIntent.kind === 'image' ? query : undefined,
+              });
+              generatedArtifacts = [artifact];
+              emit('TOOL_CALL_END', { toolCallId, result: artifact });
+            } catch (error) {
+              emit('TOOL_CALL_END', {
+                toolCallId,
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : '文件生成任务创建失败',
+              });
+            }
+          }
+
           emit('TEXT_MESSAGE_END', { messageId });
           this.traceAnswer({
             userId: options.userId,
@@ -146,7 +205,11 @@ export class AguiService {
           });
           emit('RUN_FINISHED', {
             threadId: activeThreadId,
-            output: { ...result, model: selectedModel },
+            output: {
+              ...result,
+              model: selectedModel,
+              artifacts: generatedArtifacts,
+            },
           });
           subscriber.complete();
         } catch (error) {
@@ -157,6 +220,18 @@ export class AguiService {
         }
       })();
     });
+  }
+
+  private artifactKindLabel(kind: string): string {
+    return (
+      {
+        markdown: ' Markdown 文件',
+        word: ' Word 文件',
+        excel: ' Excel 文件',
+        architecture: '架构图',
+        image: '图片',
+      }[kind] ?? '文件'
+    );
   }
 
   private emitAguiEvent(

@@ -56,7 +56,7 @@
 
 ## 后续
 
-- [ ] Milvus runtime 仍为服务端阻塞：CLI 只展示状态，不直接治理 Milvus、数据库或生产配置。
+- [x] Milvus runtime 本地阻塞已解除：服务端 `smoke:milvus` 和 `smoke:milvus:bad-case` 均通过；CLI 继续只展示状态，不直接治理数据库或生产配置。
 - [ ] 真实后端在线联调 `rag ask --stream`、`rag graph query`、`rag eval run`；本轮已完成正式 search/context 与 eval status 在线 smoke，生成型/图谱型命令仍建议在重启常驻 3000 后复验。
 
 ## 红线

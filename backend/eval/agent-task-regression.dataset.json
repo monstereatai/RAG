@@ -1,0 +1,79 @@
+{
+  "name": "game-production-agent-task-regression",
+  "version": "1.0.0",
+  "simulated": true,
+  "cases": [
+    {
+      "id": "workflow-happy-path",
+      "type": "workflow",
+      "passed": true,
+      "expectedSteps": ["product", "design+backend", "frontend", "qa", "operations"],
+      "actualSteps": ["product", "design+backend", "frontend", "qa", "operations"],
+      "toolCalls": [{ "name": "checkpoint", "success": true }],
+      "humanHandoff": false
+    },
+    {
+      "id": "workflow-reject-backtrack",
+      "type": "workflow",
+      "passed": true,
+      "expectedSteps": ["product", "design+backend", "backend"],
+      "actualSteps": ["product", "design+backend", "backend"],
+      "toolCalls": [{ "name": "checkpoint", "success": true }],
+      "humanHandoff": true
+    },
+    {
+      "id": "retrieval-hybrid",
+      "type": "retrieval",
+      "passed": true,
+      "expectedSteps": ["dense", "bm25", "rrf", "rerank"],
+      "actualSteps": ["dense", "bm25", "rrf", "rerank"],
+      "toolCalls": [{ "name": "milvus", "success": true }, { "name": "rerank", "success": true }],
+      "humanHandoff": false
+    },
+    {
+      "id": "badcase-reviewed-injection",
+      "type": "bad_case",
+      "passed": true,
+      "expectedSteps": ["review", "embed", "select", "inject"],
+      "actualSteps": ["review", "embed", "select", "inject"],
+      "toolCalls": [{ "name": "embedding", "success": true }, { "name": "milvus", "success": true }],
+      "humanHandoff": true
+    },
+    {
+      "id": "tool-degrade",
+      "type": "tool_degrade",
+      "passed": true,
+      "expectedSteps": ["tool", "fallback", "answer"],
+      "actualSteps": ["tool", "fallback", "answer"],
+      "toolCalls": [{ "name": "web_search", "success": true }],
+      "humanHandoff": false
+    },
+    {
+      "id": "citation-gate",
+      "type": "citation",
+      "passed": true,
+      "expectedSteps": ["generate", "citation_gate", "final"],
+      "actualSteps": ["generate", "citation_gate", "final"],
+      "toolCalls": [],
+      "humanHandoff": false
+    },
+    {
+      "id": "refusal-insufficient-evidence",
+      "type": "refusal",
+      "passed": true,
+      "expectedSteps": ["retrieve", "sufficiency", "refuse"],
+      "actualSteps": ["retrieve", "sufficiency", "refuse"],
+      "toolCalls": [{ "name": "retrieval", "success": true }],
+      "humanHandoff": false
+    },
+    {
+      "id": "memory-structured-compression",
+      "type": "memory",
+      "passed": true,
+      "expectedSteps": ["token_gate", "compress", "validate", "persist"],
+      "actualSteps": ["token_gate", "compress", "validate", "persist"],
+      "toolCalls": [{ "name": "llm", "success": true }, { "name": "redis", "success": true }],
+      "humanHandoff": false
+    }
+  ]
+}

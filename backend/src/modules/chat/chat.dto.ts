@@ -4,6 +4,7 @@ import {
   IsIn,
   ValidateNested,
   IsUUID,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -18,6 +19,40 @@ export class ChatMessageDto {
   content!: string;
 }
 
+export class RetrievalScopeDto {
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @IsString()
+  activityId?: string;
+
+  @IsOptional()
+  @IsString()
+  region?: string;
+
+  @IsOptional()
+  @IsString()
+  locale?: string;
+
+  @IsOptional()
+  @IsString()
+  channel?: string;
+
+  @IsOptional()
+  @IsString()
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  documentType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  includeDeprecated?: boolean;
+}
+
 export class ChatDto {
   @IsString()
   query!: string;
@@ -25,6 +60,11 @@ export class ChatDto {
   @IsOptional()
   @IsIn(['simple', 'agentic', 'auto'])
   mode?: ChatMode;
+
+  /** 岗位预设角色，默认 business-owner */
+  @IsOptional()
+  @IsString()
+  rolePresetId?: string;
 
   /**
    * 对话 threadId（可选）
@@ -40,6 +80,11 @@ export class ChatDto {
   @ValidateNested({ each: true })
   @Type(() => ChatMessageDto)
   history?: ChatMessageDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RetrievalScopeDto)
+  scope?: RetrievalScopeDto;
 }
 
 export interface ChatReference {
@@ -50,6 +95,16 @@ export interface ChatReference {
   totalScore: number;
   bm25Score: number;
   cosineScore: number;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  retrievalSource?: string;
+  contextRole?: string;
 }
 
 export interface ChatResponse {
@@ -63,4 +118,5 @@ export interface ChatResponse {
   retrievalReason?: string;
   /** 返回当前对话的 threadId（新建对话时为新生成的 ID） */
   threadId?: string;
+  queryLogId?: string;
 }

@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { aguiStream, chat, synthesizeSpeechStream } from '../api';
-import type { AguiEvent, ChatMode, ChatResponse, ReferenceChunk } from '../types';
+import { aguiStream, chat, getRolePresets, synthesizeSpeechStream } from '../api';
+import type {
+  AguiEvent,
+  ChatMode,
+  ChatResponse,
+  ReferenceChunk,
+  RolePreset,
+} from '../types';
 import ReferenceList from './ReferenceList';
 
 interface SpeechRecognitionLike {
@@ -49,6 +55,10 @@ function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<ChatMode>('simple');
+  const [roles, setRoles] = useState<RolePreset[]>([]);
+  const [rolePresetId, setRolePresetId] = useState(
+    () => localStorage.getItem('rolePresetId') ?? 'business-owner',
+  );
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState('');
@@ -62,10 +72,37 @@ function ChatPage() {
   }, [messages]);
 
   useEffect(() => {
+    void getRolePresets()
+      .then((catalog) => {
+        setRoles(catalog.roles);
+        const selectedExists = catalog.roles.some(
+          (role) => role.id === rolePresetId,
+        );
+        if (!selectedExists) {
+          setRolePresetId(catalog.defaultRolePresetId);
+          localStorage.setItem('rolePresetId', catalog.defaultRolePresetId);
+        }
+      })
+      .catch(() => setRoles([]));
+  }, [rolePresetId]);
+
+  useEffect(() => {
     return () => {
       recognitionRef.current?.stop();
     };
   }, []);
+
+  const activeRole =
+    roles.find((role) => role.id === rolePresetId) ?? roles[0];
+
+  const handleRoleChange = (nextRoleId: string) => {
+    setRolePresetId(nextRoleId);
+    localStorage.setItem('rolePresetId', nextRoleId);
+  };
+
+  const handleSuggestedQuestion = (question: string) => {
+    setInput(question);
+  };
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -88,7 +125,7 @@ function ChatPage() {
   // 非流式（simple 模式）
   const sendNonStream = async (query: string, m: ChatMode) => {
     try {
-      const res = await chat(query, m);
+      const res = await chat(query, m, rolePresetId);
       setMessages((prev) => [
         ...prev,
         {
@@ -141,6 +178,7 @@ function ChatPage() {
       aguiStream(
         query,
         m,
+        rolePresetId,
         (event) => {
           const { type } = event;
           updateMsg((msg) => ({
@@ -398,29 +436,95 @@ function ChatPage() {
 
   return (
     <div className="chat-page">
-      <div className="mode-switcher">
-        <label>模式：</label>
-        {(['simple', 'agentic', 'auto'] as ChatMode[]).map((m) => (
-          <button
-            key={m}
-            className={mode === m ? 'active' : ''}
-            onClick={() => setMode(m)}
+      <div className="chat-toolbar">
+        <div className="role-selector">
+          <label htmlFor="role-preset">我的岗位</label>
+          <select
+            id="role-preset"
+            value={rolePresetId}
+            onChange={(event) => handleRoleChange(event.target.value)}
+            disabled={loading || roles.length === 0}
           >
-            {m}
-          </button>
-        ))}
-        <span className="mode-hint">
-          {mode === 'simple' && '直接检索 + 生成（最快）'}
-          {mode === 'agentic' && '多轮检索 + 反思（SSE 流式，最慢）'}
-          {mode === 'auto' && '自动选择 simple/agentic（SSE 流式）'}
-        </span>
+            {roles.length === 0 && (
+              <option value="business-owner">业务负责人</option>
+            )}
+            {roles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.name}
+              </option>
+            ))}
+          </select>
+          {activeRole && <span className="role-summary">{activeRole.summary}</span>}
+        </div>
+        <div className="mode-switcher" aria-label="问答模式">
+          {(['simple', 'agentic', 'auto'] as ChatMode[]).map((m) => (
+            <button
+              key={m}
+              className={mode === m ? 'active' : ''}
+              onClick={() => setMode(m)}
+              title={
+                m === 'simple'
+                  ? '直接检索并回答'
+                  : m === 'agentic'
+                    ? '多轮检索和反思'
+                    : '自动选择处理方式'
+              }
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="messages">
         {messages.length === 0 && (
           <div className="empty-chat">
-            <p>输入问题开始对话</p>
-            <p className="hint">提示：先在"文档管理"上传 Markdown 文件</p>
+            <div className="role-intro">
+              <span className="role-mark">{activeRole?.shortName ?? '负责人'}</span>
+              <div>
+                <h2>{activeRole?.name ?? '业务负责人'}工作台</h2>
+                <p>{activeRole?.summary ?? '从全链路视角协助推进业务。'}</p>
+              </div>
+            </div>
+
+            {activeRole && (
+              <>
+                <section className="role-section" aria-labelledby="role-responsibilities">
+                  <h3 id="role-responsibilities">我会重点关注</h3>
+                  <div className="responsibility-list">
+                    {activeRole.responsibilities.map((item) => (
+                      <span key={item}>{item}</span>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="role-section" aria-labelledby="role-starters">
+                  <h3 id="role-starters">常用任务</h3>
+                  <div className="starter-task-list">
+                    {activeRole.starterTasks.map((task, index) => (
+                      <button
+                        key={task}
+                        onClick={() => handleSuggestedQuestion(activeRole.suggestedQuestions[index] ?? task)}
+                      >
+                        {task}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="role-section" aria-labelledby="role-questions">
+                  <h3 id="role-questions">可以直接这样问</h3>
+                  <div className="suggested-question-list">
+                    {activeRole.suggestedQuestions.map((question) => (
+                      <button key={question} onClick={() => handleSuggestedQuestion(question)}>
+                        <span>{question}</span>
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         )}
         {messages.map((msg, idx) => (

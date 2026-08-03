@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "evidenceLevel": "production",
+  "productionScale": {
+    "measurementWindow": "填写真实起止时间",
+    "requestCount": 0,
+    "activeUsers": 0,
+    "peakQps": 0,
+    "p95Ms": 0,
+    "errorRate": 0,
+    "costPerSuccessfulTask": 0,
+    "source": "填写 Prometheus／日志／账单报表位置"
+  },
+  "crossTeam": {
+    "teams": [],
+    "evidenceLinks": [],
+    "measuredOutcome": "填写交付周期、返工率、采用率等真实前后变化"
+  },
+  "incidents": [
+    {
+      "id": "INC-YYYY-NNN",
+      "realProductionIncident": false,
+      "severity": "SEV-2",
+      "detectedAt": "",
+      "recoveredAt": "",
+      "rootCause": "",
+      "postmortem": "",
+      "correctiveActions": []
+    }
+  ],
+  "organization": {
+    "standardOrPlatform": "填写沉淀的规范、平台或公共能力",
+    "adoptingTeams": 0,
+    "adoptionEvidence": "填写接入记录、周报或指标面板位置"
+  }
+}

@@ -42,6 +42,7 @@ export class UserService {
       'admin:permission:delete',
       'admin:search-ops:read',
       'admin:qa-ops:read',
+      'admin:qa-ops:write',
       'admin:graph-ops:read',
       'admin:graph-ops:write',
       'admin:rag:read',

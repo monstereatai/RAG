@@ -9,7 +9,7 @@
 - **CLI 代码 MVP 已迁移到 `rag-cli/`**（2026-06-24）：本目录作为旧文档归档副本保留，不作为实现项目。
 - **Karpathy + Obsidian 后端响应已对齐**（2026-07-04）：`rag ask` human 输出展示答案、检索状态、Sources、Obsidian 路径；JSON 输出保留完整后端字段；`rag context` 在 debug chunks 为空时可用 `ask auto` 可靠兜底，但纯模型兜底仍返回 `insufficient_context`。
 - **正式后端 API 与高级命令已对齐**（2026-07-05）：`rag search` / `rag context` 优先调用正式 `/rag/search`、`/rag/context`；`rag ask --stream` 消费后端 SSE；新增 `rag admin search`、`rag graph query`、`rag eval status`、`rag eval run`。本目录是归档副本，代码实现在 `rag-cli/`。
-- **当前主项目真实口径**（2026-07-04）：项目级 RAG 评测 28/28；成熟度 96/100；Milvus search runtime 降级和生产目标机器/证书/备份策略未确认仍是后端/运行环境阻塞，CLI 只消费状态，不直接治理。
+- **当前主项目真实口径**（2026-08-03）：项目级 RAG 评测 28/28；成熟度 93/100；Milvus search runtime 降级和生产材料未确认仍是后端/运行环境阻塞，CLI 只消费状态，不直接治理。
 
 ## 当前选型
 

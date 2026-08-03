@@ -25,6 +25,7 @@ import { MenusModule } from '../modules/menus/menus.module';
 import { SearchOpsModule } from '../modules/search-ops/search-ops.module';
 import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
 import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
+import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
 // import { GrpcModule } from '../modules/grpc/grpc.module';
 
 @Module({
@@ -55,6 +56,7 @@ import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,
+    AgentOpsModule,
     // GrpcModule, // disabled: proto file missing, use HTTP rag-client instead
   ],
   exports: [
@@ -84,6 +86,7 @@ import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,
+    AgentOpsModule,
     // GrpcModule,
   ],
 })

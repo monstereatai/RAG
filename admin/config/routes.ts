@@ -1,5 +1,10 @@
 export default [
   {
+    path: '/shared/artifacts/:token',
+    layout: false,
+    component: './shared-artifact',
+  },
+  {
     path: '/user',
     layout: false,
     routes: [
@@ -67,6 +72,12 @@ export default [
         component: './qa-ops/model',
       },
     ],
+  },
+  {
+    path: '/agent-ops',
+    name: 'agent-ops',
+    icon: 'branches',
+    component: './agent-ops',
   },
   {
     path: '/graph-ops',

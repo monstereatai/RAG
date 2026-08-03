@@ -19,6 +19,7 @@ export type SseEventType =
   | 'meta' // 元信息
   | 'partial' // 结构化流式部分结果
   | 'done' // 流式任务完成
+  | 'node_timing' // LangGraph 节点耗时与状态
   | 'error'; // 错误
 
 export interface SseEvent {

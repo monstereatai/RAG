@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import {
   KarpathyRagService,
+  RetrieveOptions,
   RetrievedChunk,
 } from '../karpathy/karpathy-rag.service';
 import { SseCallback } from './sse-event';
@@ -18,6 +19,7 @@ import {
 } from '../prompts/agentic.prompts';
 import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
 import { SemanticExampleSelector } from '../prompts/semantic-example.selector';
+import { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { StateGraph, START, END } from '@langchain/langgraph';
@@ -25,6 +27,8 @@ import { RunnableConfig } from '@langchain/core/runnables';
 import { ConfigService } from '@nestjs/config';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
+import { MetricsService } from '../../modules/metrics/metrics.service';
+import { TracingService } from '../../modules/tracing/tracing.service';
 
 /**
  * Agentic RAG 服务
@@ -58,6 +62,9 @@ export class AgenticRagService {
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
     private readonly semanticExampleSelector: SemanticExampleSelector,
+    private readonly badCaseFlywheel: BadCaseFlywheelService,
+    private readonly metricsService: MetricsService,
+    private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
   ) {
     this.confidenceThreshold = this.numberConfig(
@@ -111,14 +118,44 @@ export class AgenticRagService {
    */
   private initGraph() {
     const workflow = new StateGraph(AgenticRagState)
-      .addNode('queryAugment', this.queryAugmentNode.bind(this))
-      .addNode('retrieval', this.retrievalNode.bind(this))
-      .addNode('sufficiency', this.sufficiencyNode.bind(this))
-      .addNode('webSearchFallback', this.webSearchFallbackNode.bind(this))
-      .addNode('rerank', this.rerankNode.bind(this))
-      .addNode('generate', this.generateNode.bind(this))
-      .addNode('humanApprovalNode', this.humanApprovalNode.bind(this))
-      .addNode('reflection', this.reflectionNode.bind(this));
+      .addNode(
+        'queryAugment',
+        this.observedNode('queryAugment', this.queryAugmentNode.bind(this)),
+      )
+      .addNode(
+        'retrieval',
+        this.observedNode('retrieval', this.retrievalNode.bind(this)),
+      )
+      .addNode(
+        'sufficiency',
+        this.observedNode('sufficiency', this.sufficiencyNode.bind(this)),
+      )
+      .addNode(
+        'webSearchFallback',
+        this.observedNode(
+          'webSearchFallback',
+          this.webSearchFallbackNode.bind(this),
+        ),
+      )
+      .addNode(
+        'rerank',
+        this.observedNode('rerank', this.rerankNode.bind(this)),
+      )
+      .addNode(
+        'generate',
+        this.observedNode('generate', this.generateNode.bind(this)),
+      )
+      .addNode(
+        'humanApprovalNode',
+        this.observedNode(
+          'humanApprovalNode',
+          this.humanApprovalNode.bind(this),
+        ),
+      )
+      .addNode(
+        'reflection',
+        this.observedNode('reflection', this.reflectionNode.bind(this)),
+      );
 
     workflow.addEdge(START, 'queryAugment');
     workflow.addEdge('queryAugment', 'retrieval');
@@ -276,6 +313,8 @@ export class AgenticRagService {
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const userId = config?.configurable?.userId as string | undefined;
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
     const queries =
       state.augmentedQueries.length > 0
         ? [state.query, ...state.augmentedQueries]
@@ -291,8 +330,12 @@ export class AgenticRagService {
       try {
         const results =
           index === 0
-            ? await this.karpathyRagService.retrieve(q, {}, userId)
-            : await this.karpathyRagService.retrieveBm25Only(q, userId);
+            ? await this.karpathyRagService.retrieve(q, retrieveOptions, userId)
+            : await this.karpathyRagService.retrieveBm25Only(
+                q,
+                userId,
+                retrieveOptions.scope,
+              );
         allResults.push(results);
       } catch (err) {
         this.logger.warn(
@@ -321,6 +364,9 @@ export class AgenticRagService {
     );
 
     onEvent?.({ type: 'retrieval', data: chunks });
+    if (chunks.length === 0) {
+      this.metricsService.observeAgentEmptyRetrieval(state.route || 'agentic');
+    }
     return { retrievedChunks: chunks, answer: '', passed: false };
   }
 
@@ -605,6 +651,14 @@ export class AgenticRagService {
       role: string;
       content: string;
     }>;
+    const badCasePrompt = await this.withTimeout(
+      this.badCaseFlywheel.selectPrompt(state.query, 2),
+      2_000,
+      'Bad case selection',
+    ).catch(() => '');
+    const generationMemory = badCasePrompt
+      ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
+      : memoryMessages;
 
     if (state.retrievedChunks.length === 0 || !state.retrievalSufficient) {
       const reason =
@@ -615,7 +669,7 @@ export class AgenticRagService {
         state.query,
         reason,
         history,
-        memoryMessages,
+        generationMemory,
         (token) => onEvent?.({ type: 'token', data: token }),
       );
       onEvent?.({ type: 'citation', data: [] });
@@ -636,7 +690,7 @@ export class AgenticRagService {
       context,
       query: state.query,
       history,
-      memory: memoryMessages,
+      memory: generationMemory,
     });
     const stream = await model.stream(messages);
     let answer = '';
@@ -890,12 +944,15 @@ export class AgenticRagService {
    */
   reflectionRouter(state: AgenticRagStateType): 'retry' | 'end' {
     if (state.passed) {
+      this.metricsService.observeAgentLoopDecision('passed');
       return 'end';
     }
     if (state.retryCount >= this.maxRetries) {
       this.logger.warn(`Max retries (${this.maxRetries}) reached, ending`);
+      this.metricsService.observeAgentLoopDecision('max_retries');
       return 'end';
     }
+    this.metricsService.observeAgentLoopDecision('retry');
     return 'retry';
   }
 
@@ -911,6 +968,7 @@ export class AgenticRagService {
     userId?: string,
     memoryMessages: Array<{ role: string; content: string }> = [],
     enableInterrupt = false,
+    retrieveOptions: RetrieveOptions = {},
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -922,9 +980,34 @@ export class AgenticRagService {
     obsidianPaths?: string[];
     interrupted?: boolean;
   }> {
+    const requestStartedAt = Date.now();
+    const downstreamOnEvent = onEvent;
+    let firstTokenRecorded = false;
+    let observedRoute = mode;
+    onEvent = (event) => {
+      if (event.type === 'token' && !firstTokenRecorded) {
+        firstTokenRecorded = true;
+        this.metricsService.observeAgentFirstToken(
+          observedRoute,
+          (Date.now() - requestStartedAt) / 1000,
+        );
+      }
+      if (event.type === 'tool_call') {
+        const data = this.recordOf(event.data);
+        this.metricsService.observeAgentToolCall(
+          typeof data.name === 'string' ? data.name : 'unknown',
+          data.success !== false && !data.error,
+        );
+      }
+      downstreamOnEvent?.(event);
+    };
     const fastPathGate =
       mode === 'auto'
-        ? await this.karpathyRagService.assessFastPath(query, userId)
+        ? await this.karpathyRagService.assessFastPath(
+            query,
+            userId,
+            retrieveOptions,
+          )
         : null;
     const route =
       mode === 'simple'
@@ -934,6 +1017,7 @@ export class AgenticRagService {
             ? 'simple'
             : 'agentic'
           : this.classifyRoute(query, mode);
+    observedRoute = route;
     onEvent?.({ type: 'routing', data: { mode, route } });
     if (fastPathGate) {
       onEvent?.({
@@ -954,6 +1038,7 @@ export class AgenticRagService {
         userId,
         memoryMessages,
         (token) => onEvent?.({ type: 'token', data: token }),
+        retrieveOptions,
       );
       onEvent?.({ type: 'citation', data: result.references });
       onEvent?.({ type: 'final', data: result });
@@ -1026,6 +1111,7 @@ export class AgenticRagService {
       history,
       userId,
       memoryMessages,
+      retrieveOptions,
     );
     if (fastFallback) {
       return fastFallback;
@@ -1056,6 +1142,7 @@ export class AgenticRagService {
           userId,
           memoryMessages,
           enableInterrupt,
+          retrieveOptions,
         },
       },
     )) as AgenticRagStateType;
@@ -1089,12 +1176,96 @@ export class AgenticRagService {
     return result;
   }
 
+  private observedNode(
+    name: string,
+    handler: (
+      state: AgenticRagStateType,
+      config?: RunnableConfig,
+    ) => Promise<Partial<AgenticRagStateType>>,
+  ) {
+    return async (state: AgenticRagStateType, config?: RunnableConfig) => {
+      const startedAt = Date.now();
+      const startedAtDate = new Date();
+      const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+      try {
+        const result = await handler(state, config);
+        const durationMs = Date.now() - startedAt;
+        this.metricsService.observeAgentNode(
+          name,
+          'success',
+          durationMs / 1000,
+        );
+        this.recordAgentNodeTrace(
+          config,
+          name,
+          'success',
+          durationMs,
+          startedAtDate,
+        );
+        onEvent?.({
+          type: 'node_timing',
+          data: { node: name, status: 'success', durationMs },
+        });
+        return result;
+      } catch (error) {
+        const durationMs = Date.now() - startedAt;
+        this.metricsService.observeAgentNode(name, 'error', durationMs / 1000);
+        this.recordAgentNodeTrace(
+          config,
+          name,
+          'error',
+          durationMs,
+          startedAtDate,
+        );
+        onEvent?.({
+          type: 'node_timing',
+          data: {
+            node: name,
+            status: 'error',
+            durationMs,
+            error: (error as Error).message,
+          },
+        });
+        throw error;
+      }
+    };
+  }
+
+  private recordAgentNodeTrace(
+    config: RunnableConfig | undefined,
+    node: string,
+    status: 'success' | 'error',
+    durationMs: number,
+    startedAt: Date,
+  ): void {
+    const threadId = config?.configurable?.thread_id;
+    if (typeof threadId !== 'string' || !threadId) return;
+
+    const trace = this.tracingService.recordAgentNode({
+      threadId,
+      node,
+      status,
+      durationMs,
+      startedAt,
+    });
+    if (trace.alert === 'span_limit') {
+      this.metricsService.observeAgentLoopDecision('span_limit_warning');
+    }
+  }
+
+  private recordOf(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object'
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
   private async tryFastInsufficientFallback(
     query: string,
     onEvent: SseCallback | undefined,
     history: Array<{ role: 'human' | 'ai'; content: string }>,
     userId: string | undefined,
     memoryMessages: Array<{ role: string; content: string }>,
+    retrieveOptions: RetrieveOptions,
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -1106,7 +1277,11 @@ export class AgenticRagService {
   } | null> {
     let chunks: RetrievedChunk[] = [];
     try {
-      chunks = await this.karpathyRagService.retrieve(query, {}, userId);
+      chunks = await this.karpathyRagService.retrieve(
+        query,
+        retrieveOptions,
+        userId,
+      );
     } catch (err) {
       this.logger.warn(
         `Fast insufficient retrieval failed, continue full agentic graph: ${(err as Error).message}`,

@@ -11,6 +11,8 @@ import { errorConfig } from './requestErrorConfig';
 
 const isDev = process.env.NODE_ENV === 'development';
 const loginPath = '/user/login';
+const isPublicPath = (pathname: string) =>
+  pathname === loginPath || pathname.startsWith('/shared/artifacts/');
 
 /**
  * @see https://umijs.org/docs/api/runtime-config#getinitialstate
@@ -42,7 +44,7 @@ export async function getInitialState(): Promise<{
   };
 
   const { location } = history;
-  if (![loginPath].includes(location.pathname)) {
+  if (!isPublicPath(location.pathname)) {
     const currentUser = await fetchUserInfo();
     if (!currentUser) {
       history.replace(
@@ -105,7 +107,7 @@ export const layout: RunTimeLayoutConfig = ({
     footerRender: false,
     onPageChange: () => {
       const { location } = history;
-      if (!initialState?.currentUser && location.pathname !== loginPath) {
+      if (!initialState?.currentUser && !isPublicPath(location.pathname)) {
         history.replace(
           `${loginPath}?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`,
         );

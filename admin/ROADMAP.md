@@ -1,6 +1,6 @@
 # RAG 管理后台前端 - ROADMAP
 
-## 当前阶段：后台管理端效果图对齐与工程验证完成；`/graph-ops` 三个二级菜单已实现并完成接口联调
+## 当前阶段：核心功能与生产构建完成；等待登录后 E2E、Graph Ops 视觉复验和生产环境验收
 
 ## 技术栈
 
@@ -68,6 +68,12 @@
 - [x] 个人中心重做为个人资料、密码修改、登录记录、权限查询布局
 - [x] 系统用户管理重做为批量操作、筛选栏、用户表格与分页布局
 - [x] AI 问答页面接入 AG-UI 流式协议：`/api/admin/qa-ops/agui/stream` → admin-backend → rag-backend，支持 agentic/auto/simple 模式、事件轨迹、引用、路由、检索充分性、置信度与错误态
+- [x] AI 问答岗位预设：从 RAG 服务代理八个岗位目录，展示职责、常用任务和示例问题，本地记忆岗位选择并在 AG-UI 请求中透传 `rolePresetId`；与系统 RBAC 角色保持分离
+- [x] AI 问答产物中心：从当前输入或最近回答生成 Markdown、Word、Excel、SVG 架构图和 PNG，支持任务状态轮询、下载、内部／外部分享
+- [x] AI 问答直接生成附件：对话请求明确文件类型时，解析 AG-UI `output.artifacts`，在回答卡片内轮询状态并提供下载、分享按钮
+- [x] 外部分享页：`/shared/artifacts/:token` 无需登录，展示文件信息、有效期、下载次数并预览 PNG／SVG；390px 移动端无横向溢出
+- [x] Agent 运营工作台：`/agent-ops` 支持产研运工作流启动与人工审批、Agent 单案例评测、Bad Case 审核回灌和调用轨迹查询
+- [x] Agent 运营移动端：390px 下隐藏冗长品牌文字，表单、页签、按钮无横向溢出
 
 ### 工程验证
 - [x] pnpm install 成功
@@ -96,25 +102,59 @@
 - [x] 对齐 RBAC 权限测试与请求错误提示测试断言
 - [x] 补齐 antd CLI 在 macOS arm64 下需要的 oxc parser 可选原生绑定
 - [x] `/graph-ops` 三个二级菜单实现：`节点管理`、`关系检索`、`图谱统计`，包含子路由、筛选栏、表格、详情抽屉、局部图谱、统计分布和 demo 状态提示。
+- [x] 修复本地 admin 启动后 JS 资源返回 HTML 的问题：新增 `config/config.local.ts`，development 模式禁用异常的 Utoo dev server，回退到 webpack dev server。
 
 ## 进行中
 
 - [ ] `/graph-ops` 三个二级菜单浏览器截图复验：当前已完成路径 200 和接口联调，尚未做 Puppeteer/Playwright 视觉截图。
+- [ ] `/agent-ops` 登录后浏览器复验：当前无登录态访问会正确跳转登录页且控制台无错误，尚未复验工作流轮询、审批、局部重跑和产物交互。
 
 ## 待办
 
-- [ ] E2E 测试
+- [ ] Admin E2E：覆盖登录、Agent 工作流、QA 产物、外部分享和 Graph Ops 关键路径
 - [x] 生产构建验证（本地 `max build` 已通过；部署环境仍需在正式 Node 22+ 环境复验）
 
 ## 阻塞
 
-- 当前 shell Node.js 为 v20.18.0，项目 package.json 要求 >=22.0.0；`pnpm run lint`、`pnpm run test`、`pnpm run build` 均可通过但会提示 engine warning，建议切到 Node 22+ 后做最终复验。
+- 默认 shell 仍可能是 Node.js v20.18.0；项目要求 >=22.0.0。本轮已使用 Node v22.22.1 完成 backend 全量测试，admin 仍需在正式部署环境固定 Node 22+。
 - `pnpm exec antd lint ./src` 在 Node 20 下会触发 `oxc-parser` 的 CJS/ESM 加载错误；使用 Node 24 执行同一 antd CLI 已通过。
-- 2026-06-25：`pnpm run build` 本轮被现有 `utoo pack dev` 进程持有的 `.turbopack/lock` 阻塞；未停止主人正在运行的 8000 dev server。
+- 2026-07-07：Utoo dev server 在本机出现 `.turbopack/lock` 残留与 JS 路径 fallback 到 HTML 的问题；已用 development-only `config/config.local.ts` 回退 webpack，后续如要重新启用 Utoo 需先确认 Utoo/Node 版本兼容性。
 - 真实 Neo4j 图谱当前为空时，`/graph-ops` 页面会展示 `meta.demo=true` 的演示数据提示，不把演示数据当真实数据。
 
 ## 最近验证
 
+- 2026-08-03：Agent 运营工作台闭环
+  - admin-backend Agent Ops 代理接口支持工作流、评测、坏例和 trace，8 Suites／71 Tests 与 build 通过
+  - admin `/agent-ops` 真实加载 1 条已审核 Bad Case，单案例评测显示“评测通过”，调用轨迹表可分页查看
+  - 桌面 1440px 和移动 390px 均无横向溢出，移动端品牌栏已收敛
+  - 补齐 `menu.agent-ops` 中文文案并替换弃用的 `Alert.message`，生产 build 通过
+  - 当前 shell Node 20 仍有 package engine 警告，运行中的 admin dev server 使用 Node 22
+
+- 2026-08-03：QA 对话直接生成 Word 回归修复
+  - 意图解析和 AG-UI 自动附件单测 2 Suites／13 Tests 通过
+  - admin 生产构建通过
+  - 真实 Qwen SSE 返回 `artifact_generate` 工具事件且无“无法生成／复制粘贴”拒绝文案
+  - Word 任务最终 ready，下载 DOCX 10804 bytes，ZIP 文件头和 MIME 均有效
+
+- 2026-08-03：QA 产物与分享闭环
+  - admin TypeScript 与 `pnpm exec antd lint ./src` 通过，本次页面 0 新增 issue
+  - admin-backend build 通过，相关测试 2 Suites／37 Tests 通过
+  - 浏览器验证生成按钮、生成弹窗、文件入口和外部匿名分享页
+  - 桌面与 390px 移动端分享页无横向溢出，真实 DashScope 图片预览正常
+
+- 2026-08-03：管理后台岗位预设闭环
+  - `GET /api/admin/qa-ops/role-presets` 真实返回 8 个岗位，默认业务负责人
+  - 产品经理 `rolePresetId` 经 admin-backend AG-UI 代理进入 RAG `RUN_STARTED` 输入，流返回 200 且包含 `RUN_FINISHED`
+  - admin-backend：8 Suites／71 Tests、build、lint 通过（lint 仅 3 个既有 warning）
+  - admin：定向 Biome、TypeScript、生产 build 通过；Ant Design CLI 扫描 154 files，本次新增页面 0 issue（全项目保留 10 个既有 deprecated 提示）
+  - backend：Node 22 下 28 Suites／135 Tests、build 通过
+  - 浏览器验证岗位目录、职责、任务和示例问题正常显示，页面与聊天区无横向溢出
+
+- 2026-07-07：admin 本地启动修复
+  - 新增 `config/config.local.ts`，仅 development 读取，覆盖 `utoopack: false`
+  - 使用 Node v22.22.1 + 本地 `max setup` 生成 Umi 临时文件
+  - `http://localhost:8000/umi.js` 返回 `Content-Type: application/javascript`，正文为 webpack bootstrap，不再返回 HTML
+  - `http://localhost:8000/` 返回 200，admin 前端恢复可访问
 - 2026-06-25：`/graph-ops` 三个二级菜单实现与联调完成
   - 新增路径：`/graph-ops/nodes`、`/graph-ops/relations`、`/graph-ops/stats`
   - 页面完成：节点管理表格与详情抽屉、关系检索表格与局部图谱、图谱统计指标与类型分布

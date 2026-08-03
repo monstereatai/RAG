@@ -448,6 +448,143 @@ canvas {
   font-size: 19px;
 }
 
+.qa-role-toolbar {
+  display: grid;
+  grid-template-columns: auto 190px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 26px;
+  border-bottom: 1px solid #edf1f7;
+  background: #fafcff;
+}
+
+.qa-role-toolbar > span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.qa-role-toolbar p {
+  margin: 0;
+  overflow: hidden;
+  color: #667085;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-role-workspace {
+  padding: 8px 26px 18px;
+  border-top: 1px solid #edf1f7;
+}
+
+.qa-role-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.qa-role-intro strong {
+  display: block;
+  color: #182230;
+  font-size: 16px;
+}
+
+.qa-role-intro p {
+  margin: 2px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.qa-role-mark {
+  display: inline-flex;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qa-role-responsibilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.qa-role-responsibilities span {
+  padding: 4px 9px;
+  border: 1px solid #d7e5fb;
+  border-radius: 6px;
+  background: #f4f8ff;
+  color: #35577f;
+  font-size: 12px;
+}
+
+.qa-role-actions,
+.qa-role-questions {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.qa-role-actions > strong,
+.qa-role-questions > strong {
+  padding-top: 6px;
+  color: #344054;
+  font-size: 13px;
+}
+
+.qa-role-actions > div,
+.qa-role-questions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qa-role-questions button {
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.qa-role-questions button:hover {
+  color: #0958d9;
+  text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .qa-role-toolbar {
+    grid-template-columns: auto minmax(150px, 1fr);
+  }
+
+  .qa-role-toolbar p {
+    display: none;
+  }
+
+  .qa-role-actions,
+  .qa-role-questions {
+    grid-template-columns: 1fr;
+  }
+
+  .qa-role-actions > strong,
+  .qa-role-questions > strong {
+    padding-top: 0;
+  }
+}
+
 .chat-body {
   flex: 1;
   min-height: 0;
@@ -660,6 +797,45 @@ canvas {
   color: #667085;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.answer-artifacts {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.answer-artifacts article {
+  align-items: center;
+  background: #f7f9fc;
+  border: 1px solid #e5e9f0;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  padding: 10px 12px;
+}
+
+.answer-artifacts article > span:first-child {
+  color: #1677ff;
+  font-size: 18px;
+}
+
+.answer-artifacts article div {
+  display: grid;
+  min-width: 0;
+}
+
+.answer-artifacts article strong,
+.answer-artifacts article div span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-artifacts article div span {
+  color: #8c8c8c;
+  font-size: 12px;
 }
 
 .answer-card ol {
@@ -1131,4 +1307,164 @@ ol {
       }
     }
   }
+}
+/* QA 生成产物与外部分享页 */
+.agent-ops-page {
+  padding: 22px 26px 32px;
+}
+
+.agent-ops-page > header h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.agent-ops-page > header p {
+  margin: 6px 0 18px;
+  color: #667085;
+}
+
+.agent-ops-panel {
+  display: grid;
+  gap: 18px;
+  padding: 8px 0 24px;
+}
+
+.agent-ops-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
+  gap: 16px;
+}
+
+.agent-workflow-result,
+.agent-eval-result {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px solid #edf0f5;
+}
+
+.agent-stage-output {
+  padding: 14px 16px;
+  border-left: 3px solid #1677ff;
+  background: #f7f9fc;
+}
+
+.agent-stage-output p {
+  margin: 6px 0 0;
+  color: #596579;
+}
+
+.agent-stage-output pre {
+  max-height: 420px;
+  margin: 8px 0 14px;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #fff;
+  border: 1px solid #e8edf5;
+}
+
+.agent-approval-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(180px, 1fr) auto auto;
+  gap: 10px;
+}
+
+.agent-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+
+.agent-metric-grid > div {
+  min-width: 0;
+}
+
+.agent-metric-grid span {
+  display: block;
+  margin-bottom: 6px;
+  color: #475467;
+}
+
+@media (max-width: 800px) {
+  .agent-ops-page { padding: 16px; }
+  .agent-ops-form-grid,
+  .agent-approval-row,
+  .agent-metric-grid { grid-template-columns: 1fr; }
+}
+
+.artifact-list {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.artifact-item-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.artifact-item-main span,
+.artifact-item-main p {
+  margin: 0;
+  color: #7a8495;
+  overflow-wrap: anywhere;
+}
+
+.artifact-item-main p { color: #cf1322; }
+.artifact-item-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.artifact-empty { color: #8c8c8c; text-align: center; padding: 48px 0; }
+
+.shared-artifact-page {
+  min-height: 100vh;
+  padding: 48px 20px;
+  background: #f3f5f8;
+  color: #17233d;
+}
+
+.shared-artifact-loading { display: grid; place-items: center; }
+
+.shared-artifact-sheet {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 40px;
+  background: #fff;
+  border: 1px solid #e4e8ef;
+  border-radius: 8px;
+}
+
+.shared-artifact-icon { font-size: 32px; color: #1677ff; }
+.shared-artifact-heading h1 { margin: 16px 0 6px; font-size: 28px; letter-spacing: 0; }
+.shared-artifact-heading p { margin: 0 0 12px; color: #697386; overflow-wrap: anywhere; }
+.shared-artifact-preview { width: 100%; max-height: 560px; object-fit: contain; margin: 28px 0; border: 1px solid #e4e8ef; }
+.shared-artifact-sheet dl { display: flex; gap: 48px; margin: 28px 0; }
+.shared-artifact-sheet dl div { display: grid; gap: 4px; }
+.shared-artifact-sheet dt { color: #7a8495; }
+.shared-artifact-sheet dd { margin: 0; font-weight: 600; }
+
+@media (max-width: 640px) {
+  .artifact-item { align-items: flex-start; flex-direction: column; }
+  .answer-artifacts article {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .answer-artifacts article > .ant-tag {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .shared-artifact-page { padding: 16px; }
+  .shared-artifact-sheet { padding: 24px; }
+  .shared-artifact-sheet dl { flex-direction: column; gap: 12px; }
 }

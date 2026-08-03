@@ -15,6 +15,53 @@ export interface QaRecord {
 export type ChatMode = 'simple' | 'agentic' | 'auto';
 export type ChatModel = 'qwen' | 'deepseek';
 
+export interface RolePreset {
+  id: string;
+  name: string;
+  shortName: string;
+  summary: string;
+  responsibilities: string[];
+  starterTasks: string[];
+  suggestedQuestions: string[];
+}
+
+export interface RolePresetCatalog {
+  defaultRolePresetId: string;
+  roles: RolePreset[];
+}
+
+export type ArtifactKind =
+  | 'markdown'
+  | 'word'
+  | 'excel'
+  | 'architecture'
+  | 'image';
+
+export interface GeneratedArtifact {
+  id: string;
+  threadId?: string | null;
+  title: string;
+  kind: ArtifactKind;
+  status: 'queued' | 'generating' | 'ready' | 'failed';
+  filename: string;
+  contentType?: string | null;
+  size: number;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArtifactShare {
+  id: string;
+  artifactId: string;
+  visibility: 'internal' | 'external';
+  token?: string;
+  expiresAt?: string | null;
+  maxDownloads?: number | null;
+  downloadCount: number;
+  revokedAt?: string | null;
+}
+
 const QA_MODEL_CONFIG_KEY = 'qa_ops_model_config';
 
 export interface QaModelOption {
@@ -187,6 +234,61 @@ export async function deleteConversation(threadId: string) {
   );
 }
 
+export async function getRolePresets() {
+  return authRequest<{ data: RolePresetCatalog }>(
+    '/api/admin/qa-ops/role-presets',
+  );
+}
+
+export async function createArtifact(input: {
+  threadId?: string;
+  title: string;
+  kind: ArtifactKind;
+  sourceText: string;
+  prompt?: string;
+}) {
+  return authRequest<{ data: GeneratedArtifact; available: boolean; error?: string }>(
+    '/api/admin/qa-ops/artifacts',
+    { method: 'POST', data: input },
+  );
+}
+
+export async function getArtifacts(threadId?: string) {
+  return authRequest<{ data: GeneratedArtifact[]; available: boolean; error?: string }>(
+    '/api/admin/qa-ops/artifacts',
+    { params: threadId ? { threadId } : undefined },
+  );
+}
+
+export async function downloadArtifact(id: string, filename: string) {
+  const token = localStorage.getItem('access_token');
+  const response = await fetch(
+    `/api/admin/qa-ops/artifacts/${encodeURIComponent(id)}/download`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function createArtifactShare(
+  id: string,
+  input: {
+    visibility: 'internal' | 'external';
+    expiresInHours?: number;
+    maxDownloads?: number;
+  },
+) {
+  return authRequest<{ data: ArtifactShare; available: boolean; error?: string }>(
+    `/api/admin/qa-ops/artifacts/${encodeURIComponent(id)}/shares`,
+    { method: 'POST', data: input },
+  );
+}
+
 export async function getQaRecords(params?: {
   current?: number;
   pageSize?: number;
@@ -226,12 +328,16 @@ export async function streamAguiAnswer(
   onError: (error: Error) => void,
   onClose: () => void,
   threadId?: string,
+  rolePresetId?: string,
 ): Promise<AbortController> {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
   let url = `/api/admin/qa-ops/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}&model=${model}`;
   if (threadId) {
     url += `&threadId=${encodeURIComponent(threadId)}`;
+  }
+  if (rolePresetId) {
+    url += `&rolePresetId=${encodeURIComponent(rolePresetId)}`;
   }
 
   (async () => {

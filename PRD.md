@@ -45,6 +45,7 @@
 - 支持多租户知识库隔离。
 - 支持文档上传、列表、删除。
 - 支持 simple / agentic / auto 三种问答模式。
+- 支持业务负责人、产品、设计、前端、后端、测试、运营和项目管理岗位预设。
 - 支持 SSE 流式响应和过程事件展示。
 - 支持引用来源展示。
 - 支持 Debug 面板查看检索分数。
@@ -81,6 +82,10 @@
 
 - 支持 `.md` / `.txt` / `.pdf` / `.docx`。
 - 上传成功返回 `docId` 和 chunk 数量。
+- 结构化切片必须让每个叶子 Chunk 保留完整标题路径，代码围栏不得被当作表格解析，配置／概率表过长时按完整行切分并重复表头，空单元格和转义竖线不得造成列错位。
+- 接口契约、测试／验收、版本／地区规则必须保留可检索的内容类型语义，支持游戏官网和活动产研文档的精确召回。
+- 上传结果返回入库质量报告和文档策略类型；疑似乱码、异常超大块和高重复率必须给出告警。
+- 文档支持项目、活动、地区、语言、渠道、角色范围、文档类型和生命周期元数据；默认检索不得返回已废弃文档。
 - 文档列表能显示当前用户文档。
 - 删除文档后，元数据、BM25、ES、Milvus 检索结果不再进入回答。
 - Milvus 删除超时时不会阻塞主流程，并有重试和残留保护。
@@ -92,14 +97,23 @@
 验收标准：
 
 - simple 模式能快速检索和回答。
+- 默认以懂完整产研链路的业务负责人视角工作；用户可切换岗位预设，岗位选择必须真实影响回答结构和角色范围检索。
+- 每个岗位预设至少包含职责说明、3 个常用任务和 3 个可直接使用的示例问题，首次进入无需阅读使用手册即可开始。
+- 管理后台 QA 工作台同样提供岗位选择、职责、常用任务和示例问题，并记忆最近选择；后台不得复制一份角色 Prompt 或把岗位预设写入 RBAC 角色表。
+- 岗位预设不等于 RBAC 权限角色；业务负责人不缩窄检索范围，其他岗位只过滤文档明确声明且与当前岗位不匹配的 `roleScope`，公共文档保持可见。
 - agentic 模式能输出过程事件。
 - auto 模式能按问题复杂度选择路径。
 - Agentic 链路必须有可配置预算边界，覆盖最大重试、扩展查询数、检索查询数、返回 chunk 数、联网搜索数和 Rerank topN。
+- 产研运长流程必须按产品、设计、前端、后端、测试、运营顺序执行；每个节点只能输出自己的交付物，必须支持人工批准、驳回回退、状态恢复和最大步骤终止。
+- 长对话压缩不得只保留自由文本摘要；必须保存结构化事实、决策、版本、生效期、证据与开放问题，并保留最近原始对话。
 - 答案包含引用片段。
 - 关键结论需要逐句引用，引用编号必须存在，且内容能被引用片段支撑。
 - 检索为空、低相关、引用缺失或引用支撑不足时返回知识库不足说明，不生成确定性结论。
 - 多版本制度同时命中时需要提示版本差异，来源权威规则可通过配置影响排序。
+- 检索必须按问题类型自适应候选深度，支持同 Section／相邻 Chunk 扩展，并在进入模型前执行去重、来源多样性和上下文预算控制。
 - 无相关文档时返回友好提示。
+- 用户对回答的正负反馈、错误类型和补充说明必须持久化进入待审核 Bad Case 池，不能以“拒答日志”冒充真实反馈。
+- 只有人工审核、提供纠正答案且标记进入回归集的 Bad Case 才能进入动态 Few-Shot；相似坏例不得覆盖当前有效知识证据。
 
 ### 5.4 流式与过程可视化
 
@@ -110,6 +124,7 @@
 - SSE 输出 `routing`、`query_augment`、`retrieval`、`sufficiency`、`web_search`、`rerank`、`token`、`citation`、`reflection`、`final` 等事件。
 - 前端能展示思考/检索阶段和最终答案。
 - 出错时返回 `error` 事件，不让界面一直卡住。
+- 每个 Agent 节点输出独立耗时事件；循环达到预算、空召回和工具失败必须进入业务指标。
 
 ### 5.5 Debug 与可观测
 
@@ -154,17 +169,18 @@
 | 模块 | 功能 |
 |---|---|
 | Auth | 登录、JWT、profile |
-| Document | 上传、解析、列表、删除 |
-| Chat | simple / agentic / auto 问答 |
+| Document | 上传、解析、列表、删除、质量门禁、文档类型策略路由、游戏业务元数据、生命周期与替代关系 |
+| Chat | simple / agentic / auto 问答、8 个岗位预设、业务 scope、稳定引用、真实 queryLogId |
 | SSE | 流式问答和过程事件 |
-| Retrieval | BM25、Milvus、Elasticsearch、Rerank、Web Search |
+| Retrieval | BM25、Milvus、Elasticsearch、Rerank、Web Search、自适应候选、Section／相邻扩展、上下文去重与预算 |
+| QA Feedback | 用户反馈持久化、服务端召回快照、Bad Case 查询与审核、回归集标记 |
 | Memory | Mem0 cloud/local 接入 |
 | GraphRAG | Neo4j 接入、实体关系抽取、导入、查询、schema |
 | Speech | 浏览器语音输入、腾讯云 ASR/TTS、TTS SSE |
 | Debug | chunks 分数、vector index 信息 |
 | Observability | pino、metrics、traces、workflow Mermaid |
 | Deployment | dev / staging / prod Docker Compose |
-| Evaluation | RAG eval、E2E、LLM-as-Judge、perf 脚本、企业级成熟度评分、项目级仿真实业务评测 |
+| Evaluation | RAG eval、E2E、LLM-as-Judge、perf 脚本、企业级成熟度评分、项目级仿真实业务评测、游戏官网 96 问题专项检查 |
 
 ### 6.2 待确认 / 待补资源
 
@@ -177,8 +193,8 @@
 | Rerank | 需 `RERANK_API_KEY` 才能真实重排 |
 | Tencent ASR/TTS | 腾讯云 TTS→ASR 直连已验证，后端 TTS SSE → ASR endpoint smoke 已验证 |
 | 真实业务评测集 | 已生成并校验 120 条内置业务场景评测样本和 193 条私密模拟业务评测样本；主人公司真实私有业务问题和标准答案仍需主人提供 |
-| 企业级成熟度 | `npm run eval:rag:maturity` 当前本地工程成熟度 96/100；Milvus search runtime 降级和生产目标机器/证书/备份策略未确认各扣 2 分；生产材料需显式确认后才可用 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 计入，本地真实外部输入可用 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 纳入硬门禁 |
-| 项目级仿真实评测 | `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在 3001 真实后端完成 simple/auto 22/22 通过；它模拟真实项目问题，但不冒充主人公司私有真实数据 |
+| 企业级成熟度 | `npm run eval:rag:maturity` 当前本地工程成熟度 93/100；主要缺口为 Milvus search runtime 降级和生产材料未确认；生产材料需显式确认后才可用 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 计入，本地真实外部输入可用 `RAG_MATURITY_REQUIRE_EXTERNAL=true` 纳入硬门禁 |
+| 项目级仿真实评测 | `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在真实后端完成 simple/auto 28/28 通过；它模拟真实项目问题，但不冒充主人公司私有真实数据 |
 | 结构化事实治理 | 第一版已完成：`document_chunks` / `fact_conflicts` / docVersion / effectiveAt / expiredAt / sourceAuthority / GraphRAG aliases+confidence；后续复杂审核流和 UI 另立阶段 |
 | 部署目标 | 已固定 Docker Compose；真实生产发布仍需目标机器、域名、证书、备份和密钥注入策略 |
 
@@ -207,11 +223,16 @@
 能力：
 
 - 输入问题。
+- 切换业务负责人、产品、设计、前端、后端、测试、运营和项目管理岗位。
+- 展示当前岗位职责、常用任务和可点击示例问题。
 - 切换 simple / agentic / auto。
 - 流式展示回答。
 - 展示流程阶段。
 - 展示引用来源。
 - 支持语音输入和朗读。
+- 支持在 QA 对话中用自然语言直接生成 Markdown、Word、Excel、SVG 架构图和 PNG 图片，并在回答内展示任务状态、下载和分享入口；同时支持从当前输入或最近回答手动创建产物。
+- 管理个人生成文件并下载，创建需要登录的内部分享或可对外传播的匿名链接。
+- 外部链接支持有效期、最多下载次数、撤销和访问日志；PNG／SVG 支持页面预览。
 
 ### 7.4 Debug 页
 
@@ -232,6 +253,13 @@
 | 删除文档 | `DELETE /api/v1/documents/:docId` |
 | 非流式问答 | `POST /api/v1/chat` |
 | 流式问答 | `GET /api/v1/chat/stream` |
+| 岗位预设目录 | `GET /api/v1/chat/role-presets` |
+| 后台岗位预设目录 | `GET /api/admin/qa-ops/role-presets` → `GET /api/v1/rag/admin/role-presets` |
+| 创建生成文件 | `POST /api/admin/qa-ops/artifacts` → `POST /api/v1/rag/admin/artifacts` |
+| 生成文件列表 | `GET /api/admin/qa-ops/artifacts` → `GET /api/v1/rag/admin/artifacts` |
+| 下载生成文件 | `GET /api/admin/qa-ops/artifacts/:id/download` |
+| 创建／撤销分享 | `POST /api/admin/qa-ops/artifacts/:id/shares`、`POST /api/admin/qa-ops/artifacts/:id/shares/:shareId/revoke` |
+| 外部分享信息／预览／下载 | `GET /api/shared/artifacts/:token`、`/preview`、`/download` |
 | 会话列表 | `GET /api/v1/chat/conversations` |
 | Debug chunks | `GET /api/v1/debug/chunks` |
 | Vector index | `GET /api/v1/debug/vector-index` |

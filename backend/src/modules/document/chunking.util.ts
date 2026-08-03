@@ -8,6 +8,19 @@ interface Section {
   index: number;
 }
 
+type BusinessBlockKind =
+  | 'plain'
+  | 'code'
+  | 'table'
+  | 'api'
+  | 'test'
+  | 'version';
+
+interface BusinessBlock {
+  kind: BusinessBlockKind;
+  content: string;
+}
+
 export interface StructuredChunk {
   content: string;
   chunkIndex: number;
@@ -26,8 +39,12 @@ export interface StructuredChunk {
  */
 export class MarkdownChunker {
   private readonly splitter: RecursiveCharacterTextSplitter;
+  private readonly chunkSize: number;
+  private readonly chunkOverlap: number;
 
   constructor(chunkSize = 500, chunkOverlap = 50) {
+    this.chunkSize = chunkSize;
+    this.chunkOverlap = chunkOverlap;
     this.splitter = new RecursiveCharacterTextSplitter({
       chunkSize,
       chunkOverlap,
@@ -49,10 +66,10 @@ export class MarkdownChunker {
     const out: StructuredChunk[] = [];
 
     for (const section of sections) {
-      const body = this.renderSection(section);
+      const body = this.renderSectionBody(section);
       if (!body) continue;
 
-      const sectionChunks = await this.splitter.splitText(body);
+      const sectionChunks = await this.splitSection(section, body);
       const parentChunkId =
         section.headingPath.length > 0 ? `section-${section.index}` : null;
       for (const content of sectionChunks) {
@@ -79,8 +96,20 @@ export class MarkdownChunker {
     const lines = text.split('\n');
     const out: string[] = [];
     let tableHeader: string[] | null = null;
+    let fencedCode = false;
 
     for (const line of lines) {
+      if (/^\s*```/.test(line)) {
+        fencedCode = !fencedCode;
+        tableHeader = null;
+        out.push(line);
+        continue;
+      }
+      if (fencedCode) {
+        out.push(line);
+        continue;
+      }
+
       const cells = this.parseMarkdownTableRow(line);
       if (!cells) {
         tableHeader = null;
@@ -116,24 +145,196 @@ export class MarkdownChunker {
     if (!trimmed.includes('|')) {
       return null;
     }
-    const cells = trimmed
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split('|')
-      .map((cell) => cell.trim())
-      .filter((cell) => cell.length > 0);
-    return cells.length >= 2 ? cells : null;
+    const row = trimmed.replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+    const cells: string[] = [];
+    let cell = '';
+
+    for (let index = 0; index < row.length; index += 1) {
+      const char = row[index];
+      if (char === '\\' && row[index + 1] === '|') {
+        cell += '|';
+        index += 1;
+        continue;
+      }
+      if (char === '|') {
+        cells.push(cell.trim());
+        cell = '';
+        continue;
+      }
+      cell += char;
+    }
+    cells.push(cell.trim());
+
+    return cells.length >= 2 && cells.some((value) => value.length > 0)
+      ? cells
+      : null;
   }
 
-  private renderSection(section: Section): string {
-    const body = section.lines.join('\n').trim();
-    if (!body) return '';
+  private renderSectionBody(section: Section): string {
+    const lines = [...section.lines];
+    if (lines.length > 0 && /^(#{1,6})\s+/.test(lines[0].trim())) {
+      lines.shift();
+    }
+    return lines.join('\n').trim();
+  }
 
+  private async splitSection(
+    section: Section,
+    body: string,
+  ): Promise<string[]> {
     const prefix =
       section.headingPath.length > 0
         ? `章节路径：${section.headingPath.join(' > ')}\n`
         : '';
-    return `${prefix}${body}`;
+    const contentBudget = Math.max(1, this.chunkSize - prefix.length);
+    const blocks = this.collectBusinessBlocks(body);
+    const chunks: string[] = [];
+    let regularBlocks: string[] = [];
+
+    const flushRegularBlocks = async () => {
+      if (regularBlocks.length === 0) return;
+      const splitter =
+        prefix.length === 0
+          ? this.splitter
+          : new RecursiveCharacterTextSplitter({
+              chunkSize: contentBudget,
+              chunkOverlap: Math.min(
+                this.chunkOverlap,
+                Math.max(0, contentBudget - 1),
+              ),
+              separators: [
+                '\n\n',
+                '\n',
+                '。',
+                '！',
+                '？',
+                '.',
+                '!',
+                '?',
+                ' ',
+                '',
+              ],
+            });
+      const split = await splitter.splitText(regularBlocks.join('\n\n'));
+      chunks.push(...split.map((content) => `${prefix}${content}`));
+      regularBlocks = [];
+    };
+
+    for (const block of blocks) {
+      const decorated = this.decorateBusinessBlock(block);
+      if (block.kind === 'code' || block.kind === 'table') {
+        await flushRegularBlocks();
+        const protectedChunks =
+          block.kind === 'table'
+            ? this.splitTableBlock(decorated, contentBudget)
+            : [decorated];
+        chunks.push(...protectedChunks.map((content) => `${prefix}${content}`));
+        continue;
+      }
+      regularBlocks.push(decorated);
+    }
+
+    await flushRegularBlocks();
+    return chunks;
+  }
+
+  private collectBusinessBlocks(body: string): BusinessBlock[] {
+    const blocks: string[] = [];
+    let current: string[] = [];
+    let fencedCode = false;
+
+    const pushCurrent = () => {
+      const content = current.join('\n').trim();
+      if (content) blocks.push(content);
+      current = [];
+    };
+
+    for (const line of body.split('\n')) {
+      const fence = /^\s*```/.test(line);
+      if (!fencedCode && fence && current.length > 0) {
+        pushCurrent();
+      }
+      current.push(line);
+      if (fence) {
+        fencedCode = !fencedCode;
+        if (!fencedCode) pushCurrent();
+        continue;
+      }
+      if (!fencedCode && line.trim() === '') {
+        pushCurrent();
+      }
+    }
+    pushCurrent();
+
+    return blocks.map((content) => ({
+      content,
+      kind: this.detectBusinessBlockKind(content),
+    }));
+  }
+
+  private detectBusinessBlockKind(content: string): BusinessBlockKind {
+    if (/^\s*```/.test(content)) return 'code';
+    if (/^表格列：/m.test(content) || /^表格行：/m.test(content)) {
+      return 'table';
+    }
+    if (
+      /(?:测试用例|前置条件|操作步骤|预期结果|验收标准|回归范围)/.test(content)
+    ) {
+      return 'test';
+    }
+    if (
+      /(?:^|\n)\s*(?:GET|POST|PUT|PATCH|DELETE)\s+\/\S+/i.test(content) ||
+      /(?:请求参数|响应参数|返回字段|错误码|接口地址|API)/i.test(content)
+    ) {
+      return 'api';
+    }
+    if (
+      /(?:版本[：:]|生效(?:时间|日期|地区)?[：:]|适用地区[：:]|已废弃|失效时间[：:]|V\d+)/i.test(
+        content,
+      )
+    ) {
+      return 'version';
+    }
+    return 'plain';
+  }
+
+  private decorateBusinessBlock(block: BusinessBlock): string {
+    const labels: Record<Exclude<BusinessBlockKind, 'plain'>, string> = {
+      code: '代码或配置',
+      table: '配置表',
+      api: '接口契约',
+      test: '测试与验收',
+      version: '版本与地区规则',
+    };
+    if (block.kind === 'plain') return block.content;
+    return `内容类型：${labels[block.kind]}\n${block.content}`;
+  }
+
+  private splitTableBlock(content: string, contentBudget: number): string[] {
+    const lines = content.split('\n');
+    const label = lines.find((line) => line.startsWith('内容类型：'));
+    const header = lines.find((line) => line.startsWith('表格列：'));
+    const rows = lines.filter((line) => line.startsWith('表格行：'));
+    if (!header || rows.length === 0) return [content];
+
+    const baseLines = [label, header].filter((line): line is string => !!line);
+    const chunks: string[] = [];
+    let current = [...baseLines];
+
+    for (const row of rows) {
+      const candidate = [...current, row].join('\n');
+      if (
+        current.length > baseLines.length &&
+        candidate.length > contentBudget
+      ) {
+        chunks.push(current.join('\n'));
+        current = [...baseLines, row];
+      } else {
+        current.push(row);
+      }
+    }
+    if (current.length > baseLines.length) chunks.push(current.join('\n'));
+    return chunks.length > 0 ? chunks : [content];
   }
 
   private collectSections(text: string): Section[] {

@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   AuditOutlined,
+  BranchesOutlined,
   BellOutlined,
   ClockCircleOutlined,
   CommentOutlined,
@@ -37,6 +38,7 @@ const mainNav = [
   { label: '文档管理', path: '/documents' },
   { label: '智能搜索', path: '/search-ops' },
   { label: 'AI智能问答', path: '/qa-ops' },
+  { label: 'Agent运营', path: '/agent-ops' },
   { label: '知识图谱', path: '/graph-ops' },
   { label: '个人中心', path: '/account/center' },
   { label: '系统管理', path: '/system/users' },
@@ -47,6 +49,7 @@ const moduleMatchers: Record<string, string[]> = {
   '/documents': ['/documents'],
   '/search-ops': ['/search-ops'],
   '/qa-ops': ['/qa-ops'],
+  '/agent-ops': ['/agent-ops'],
   '/graph-ops': ['/graph-ops'],
   '/account/center': ['/account', '/account-security'],
   '/system/users': ['/system'],
@@ -79,6 +82,15 @@ export const qaNav: SideNavItem[] = [
   { key: 'history', label: '历史会话', icon: <HistoryOutlined /> },
   { key: 'records', label: '问答记录', icon: <FileTextOutlined /> },
   { key: 'model', label: '模型配置', icon: <DatabaseOutlined />, path: '/qa-ops/model' },
+];
+
+export const agentOpsNav: SideNavItem[] = [
+  {
+    key: 'workspace',
+    label: 'Agent 工作台',
+    icon: <BranchesOutlined />,
+    path: '/agent-ops',
+  },
 ];
 
 export const graphNav: SideNavItem[] = [

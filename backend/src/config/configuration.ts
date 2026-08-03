@@ -101,7 +101,9 @@ export const configuration = () => ({
 
   // 视觉 / 视频理解（可选，VISION_PROVIDER=mock 时可降级运行）
   vision: {
-    provider: (process.env.VISION_PROVIDER ?? 'mock') as 'mock' | 'openai-compatible',
+    provider: (process.env.VISION_PROVIDER ?? 'mock') as
+      | 'mock'
+      | 'openai-compatible',
     baseUrl:
       process.env.VISION_BASE_URL ??
       'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -119,7 +121,10 @@ export const configuration = () => ({
         process.env.QWEN_BASE_URL ??
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
       model: process.env.QWEN_MODEL ?? 'qwen-plus',
-      timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '20000', 10),
+      timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '60000', 10),
+      maxTokens: parseInt(process.env.QWEN_MAX_TOKENS ?? '4096', 10),
+      maxRetries: parseInt(process.env.QWEN_MAX_RETRIES ?? '2', 10),
+      temperature: parseFloat(process.env.QWEN_TEMPERATURE ?? '0.2'),
     },
     deepseek: {
       apiKey: process.env.DEEPSEEK_API_KEY ?? '',

@@ -26,6 +26,10 @@
 | Prompt Registry 基础版 | prompt name/version/owner/evals/rollback 代码级登记 | `npm run prompt:registry:check` |
 | Tool Registry 基础版 | 工具 risk/permission/timeout/audit/fallback/owner 代码级登记 | `npm run tools:registry:check` |
 | Agent 任务评测脚手架 | retrieval/refusal/conflict/citation/tool_degrade 覆盖检查，支持 live gate | `npm run eval:agent-tasks` |
+| 游戏活动/官网营销专项评测 | 8 篇业务模板文档 + 96 条问题，覆盖新角色抽奖、周年庆、充值返利、微信分享、游戏官网、版本专题、兑换码、回流活动 | `npm run eval:game-marketing` |
+| 产研协作 Agent 平台 | 六岗位 DAG、并行批次、风险审批、局部重跑、证据门禁、异步状态、产物和专项评测 | `npm run eval:production-workflow` |
+| Milvus Bad Case 闭环 | `2.4.19` 服务端 + `2.4.10` SDK，完成 insert、flush、向量检索、标量读回和清理 | `npm run smoke:milvus:bad-case` |
+| 资深岗位证据工程 | 真实业务逐题 API 评测、Agent 重复回放、p95／错误率性能门禁、运维 smoke 聚合、五份 ADR 和高级／Staff 证据汇总 | `npm run evidence:business`、`evidence:stability`、`perf:rag`、`evidence:operations`、`evidence:readiness` |
 
 ## 必须外部输入
 
@@ -33,13 +37,16 @@
 |--------|----------------------|----------|
 | 真实业务原件 | 模拟文档无法覆盖公司制度版本冲突、黑话、例外条款和真实引用责任 | 可脱敏 PDF/DOCX/XLSX/网页导出、版本号、所属部门、权限标签 |
 | 真实毒题集 | 模拟问题无法代表真实高频工单、灰度政策、跨部门冲突和拒答边界 | 50-100 条真实问题、标准答案、来源文档、期望引用 |
+| 真实游戏活动/官网营销资料 | 专项数据集已能证明业务建模方向，但不能代表真实项目的组件、埋点、接口、复盘事故和地区发行口径 | 历史活动复盘、游戏官网组件文档、埋点规范、接口契约、地区上线 checklist、测试问题单 |
 | 真实组织系统 | 权限继承、岗位兼任、离职转岗、外包账号需要和主数据系统一致 | 部门树、岗位、用户、角色、继承规则、同步方式、样例回显 |
 | 真实 GraphRAG 数据源 | 业务实体/关系/别名规则强依赖公司知识结构 | 实体类型、关系类型、别名规则、种子数据源、冲突合并规则 |
 | 真实视觉/视频模型 | sidecar 只能证明入库结构，不能证明 OCR/ASR/视频理解质量 | `VISION_PROVIDER`、模型 key、图片/视频/音频样本、准确率标准 |
-| Bocha/Rerank/Judge key | 无 key 只能验证降级，不能验证真实外部增强质量 | Bocha、DashScope/Qwen/Rerank/Judge key 和配额 |
+| 外部模型与工具长期稳定性 | Qwen 超时预算修复后连续三次完整 DAG 已达到 18／18 模型成功、0 降级；三次本地回放仍不能代表长期生产 SLA | Bocha、DashScope/Qwen/Rerank/Judge 的正式配额、SLA、限流、跨时间窗口回放和故障窗口 |
 | 真实 Milvus/ES 压测 | 本地小数据无法代表生产 collection、分片、索引、冷启动和熔断阈值 | 机器规格、数据量、并发目标、SLA、压测窗口 |
+| 登录后管理后台 E2E | 无登录态只能验证认证重定向，不能证明审批、下载和分享的完整交互 | 可用测试账号或自动化测试身份、目标浏览器和验收视口 |
 | 生产目标环境 | 触碰机器、域名、证书、备份、监控属于部署红线 | 目标机器、域名、证书、备份策略、监控接入方式、发布权限 |
 | 安全合规审计 | 代码可做技术防护，但合规需要组织规则和审计口径 | 数据分级、保留周期、脱敏规则、审计字段、等保/内审要求 |
+| 真实组织影响证据 | 代码能提供六岗位协作和证据模板，但不能虚构多个团队采用、交付收益和线上事故 | 团队接入记录、指标来源、真实事故复盘、改进项闭环和平台采纳证明 |
 
 ## 大厂验收口径
 
@@ -70,8 +77,10 @@
 
 ## 推荐下一步
 
-1. 用真实业务原件替换模拟 fixture，跑 `fixtures:private:prepare` 和 `eval:business-private`。
-2. 接入真实组织系统样例，验证权限过滤和权限回显。
-3. 配置 Bocha/Rerank/Judge/Vision key，跑 required smoke。
-4. 在目标规格机器跑 `perf:rag`、Milvus smoke 和长时间稳定性测试。
-5. 根据真实评测结果调整 chunk、retrieval、rerank、GraphRAG schema 和拒答阈值。
+1. 用真实业务原件和 50～100 条毒题替换模拟 fixture，运行真实质量门禁。
+2. 对六岗位完整 DAG 做至少 30 次跨时间窗口回放，确认当前连续三次 18／18 的结果可长期保持。
+3. 接入真实组织、GraphRAG 和视觉／视频数据源，验证权限、关系和多模态质量。
+4. 在目标规格机器运行 `perf:rag`、两条 Milvus smoke 和长时间稳定性测试。
+5. 使用登录后的管理后台 E2E 覆盖审批、局部重跑、产物下载和分享。
+6. 根据真实结果调整 chunk、retrieval、rerank、GraphRAG schema、模型路由和拒答阈值。
+7. 按 `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` 连续产出业务、稳定性、性能、运维和真实组织证据，再运行 `npm run evidence:readiness`；缺失项保持缺失，不用模拟结果补齐。

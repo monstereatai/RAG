@@ -8,6 +8,8 @@ run('node', ['scripts/build-business-regression-dataset.mjs', '--check'], {
 });
 run('node', ['scripts/eval-rag-project.mjs'], { inherit: true });
 run('node', ['scripts/eval-rag-maturity.mjs'], { inherit: true });
+run('node', ['scripts/eval-agent-task-metrics.mjs'], { inherit: true });
+run('node', ['scripts/eval-production-workflow.mjs'], { inherit: true });
 
 if (judgeRequired) {
   const judge = run('node', ['scripts/eval-rag-judge.mjs'], { inherit: false });

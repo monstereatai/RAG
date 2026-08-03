@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 export interface TraceSnapshot {
   traceId: string;
@@ -10,6 +10,8 @@ export interface TraceSnapshot {
   status: number;
   durationMs: number;
   startedAt: string;
+  kind?: 'http' | 'agent_node';
+  alert?: 'span_limit';
 }
 
 interface StartedTrace {
@@ -52,6 +54,7 @@ export class TracingService {
       status,
       durationMs: Number(durationMs.toFixed(2)),
       startedAt: trace.startedAt.toISOString(),
+      kind: 'http',
     };
 
     this.spans.push(snapshot);
@@ -59,6 +62,36 @@ export class TracingService {
       this.spans.splice(0, this.spans.length - this.maxSpans);
     }
 
+    return snapshot;
+  }
+
+  recordAgentNode(input: {
+    threadId: string;
+    node: string;
+    status: 'success' | 'error';
+    durationMs: number;
+    startedAt: Date;
+  }): TraceSnapshot {
+    const traceId = this.normalizeTraceId(input.threadId);
+    const nodeSpanCount = this.spans.filter(
+      (span) => span.traceId === traceId && span.kind === 'agent_node',
+    ).length;
+    const snapshot: TraceSnapshot = {
+      traceId,
+      spanId: randomBytes(8).toString('hex'),
+      method: 'AGENT',
+      route: input.node,
+      status: input.status === 'success' ? 200 : 500,
+      durationMs: Number(input.durationMs.toFixed(2)),
+      startedAt: input.startedAt.toISOString(),
+      kind: 'agent_node',
+      ...(nodeSpanCount + 1 > 15 ? { alert: 'span_limit' as const } : {}),
+    };
+
+    this.spans.push(snapshot);
+    if (this.spans.length > this.maxSpans) {
+      this.spans.splice(0, this.spans.length - this.maxSpans);
+    }
     return snapshot;
   }
 
@@ -84,5 +117,9 @@ export class TracingService {
       traceId: match[1].toLowerCase(),
       spanId: match[2].toLowerCase(),
     };
+  }
+
+  private normalizeTraceId(value: string): string {
+    return createHash('sha256').update(value).digest('hex').slice(0, 32);
   }
 }

@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from '../../modules/auth/auth.service';
+import { ApiTokenService } from '../../modules/auth/api-token.service';
 import { JwtPayload } from '../interfaces/api-response.interface';
 
 /**
@@ -17,7 +18,10 @@ import { JwtPayload } from '../interfaces/api-response.interface';
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly apiTokenService: ApiTokenService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
@@ -31,7 +35,12 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('missing or invalid bearer token');
     }
 
-    const payload = await this.authService.verifyToken(token);
+    let payload: JwtPayload;
+    try {
+      payload = await this.authService.verifyToken(token);
+    } catch {
+      payload = await this.apiTokenService.verifyApiToken(token);
+    }
     request.user = payload;
 
     return true;

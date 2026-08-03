@@ -15,6 +15,7 @@ describe('QaOpsController — SSE Streaming', () => {
       getQaNegativeFeedback: jest.fn(),
       getQaCitationFailures: jest.fn(),
       getQaCostSummary: jest.fn(),
+      getRolePresets: jest.fn(),
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -70,6 +71,54 @@ describe('QaOpsController — SSE Streaming', () => {
       expect(mockRes.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream; charset=utf-8');
       expect(mockRes.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-transform');
       expect(mockRes.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive');
+    });
+  });
+
+  describe('role presets', () => {
+    it('should proxy the RAG role catalog', async () => {
+      ragClient.getRolePresets.mockResolvedValue({
+        available: true,
+        status: 200,
+        data: {
+          defaultRolePresetId: 'business-owner',
+          roles: [{ id: 'business-owner', name: '业务负责人' }],
+        },
+      } as any);
+
+      const result = await controller.getRolePresets();
+
+      expect(ragClient.getRolePresets).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        data: {
+          defaultRolePresetId: 'business-owner',
+          roles: [{ id: 'business-owner', name: '业务负责人' }],
+        },
+      });
+    });
+
+    it('should pass rolePresetId to the AG-UI upstream', async () => {
+      const mockReadable = createMockReadable([
+        'data: {"type":"RUN_FINISHED","runId":"abc"}\n\n',
+      ]);
+      ragClient.streamAgui.mockResolvedValue({
+        ok: true,
+        body: mockReadable,
+      } as any);
+
+      await controller.streamAgui(
+        '梳理需求',
+        'auto',
+        'qwen',
+        undefined,
+        mockReq as any,
+        mockRes,
+        'product-manager',
+      );
+
+      expect(ragClient.streamAgui).toHaveBeenCalledWith(
+        expect.objectContaining({ rolePresetId: 'product-manager' }),
+        expect.any(AbortSignal),
+      );
     });
   });
 

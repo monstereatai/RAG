@@ -27,6 +27,7 @@ export class AguiController {
     @Query('mode') mode?: ChatMode,
     @Query('threadId') threadId?: string,
     @Query('model') model?: LlmModelProvider,
+    @Query('rolePresetId') rolePresetId?: string,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'agentic';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
@@ -41,6 +42,7 @@ export class AguiController {
       threadId,
       userId: user.userId,
       model: chatModel,
+      rolePresetId,
     });
   }
 
@@ -52,6 +54,7 @@ export class AguiController {
     @Query('userId') userId?: string,
     @Query('threadId') threadId?: string,
     @Query('model') model?: LlmModelProvider,
+    @Query('rolePresetId') rolePresetId?: string,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'agentic';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
@@ -66,6 +69,7 @@ export class AguiController {
       threadId,
       userId: userId?.trim() || 'admin-backend',
       model: chatModel,
+      rolePresetId,
     });
   }
 

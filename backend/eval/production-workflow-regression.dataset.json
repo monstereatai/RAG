@@ -1,0 +1,126 @@
+{
+  "name": "game-production-collaboration-workflow-regression",
+  "version": "1.0.0",
+  "simulated": true,
+  "cases": [
+    {
+      "id": "single-role-deliverable",
+      "type": "single_role",
+      "passed": true,
+      "expectedBatches": [["frontend"]],
+      "actualBatches": [["frontend"]],
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "full-dag-parallel",
+      "type": "dag_parallel",
+      "passed": true,
+      "expectedBatches": [
+        ["product"],
+        ["design", "backend"],
+        ["frontend"],
+        ["qa"],
+        ["operations"]
+      ],
+      "actualBatches": [
+        ["product"],
+        ["design", "backend"],
+        ["frontend"],
+        ["qa"],
+        ["operations"]
+      ],
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "role-selective-approval",
+      "type": "selective_approval",
+      "passed": true,
+      "expectedApprovalRoles": ["product", "qa"],
+      "actualApprovalRoles": ["product", "qa"],
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "high-risk-approval",
+      "type": "risk_approval",
+      "passed": true,
+      "expectedApprovalRoles": ["product"],
+      "actualApprovalRoles": ["product"],
+      "deliverableComplete": true,
+      "evidenceCoverage": 0,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "parallel-batch-local-rerun",
+      "type": "local_rerun",
+      "passed": true,
+      "expectedRerunRoles": ["backend"],
+      "actualRerunRoles": ["backend"],
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "invalid-evidence-downgrade",
+      "type": "evidence_gate",
+      "passed": true,
+      "unsupportedClaimStatus": "pending_confirmation",
+      "deliverableComplete": true,
+      "evidenceCoverage": 0,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "role-tool-budget",
+      "type": "tool_budget",
+      "passed": true,
+      "toolCalls": 1,
+      "toolBudget": 1,
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "retrieval-degraded-draft",
+      "type": "tool_degrade",
+      "passed": true,
+      "unsupportedClaimStatus": "pending_confirmation",
+      "toolDegraded": true,
+      "deliverableComplete": true,
+      "evidenceCoverage": 0,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "skipped-role-gap",
+      "type": "skipped_role_gap",
+      "passed": true,
+      "reportedMissingDependency": true,
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    },
+    {
+      "id": "owner-checkpoint-isolation",
+      "type": "owner_isolation",
+      "passed": true,
+      "ownerIsolation": true,
+      "deliverableComplete": true,
+      "evidenceCoverage": 1,
+      "artifactCreated": true,
+      "localRerun": true
+    }
+  ]
+}

@@ -23,15 +23,22 @@ export class QwenLlmProvider implements ILLMProvider {
     const apiKey = this.config.get<string>('llm.qwen.apiKey');
     const baseUrl = this.config.get<string>('llm.qwen.baseUrl');
     const modelName = this.config.get<string>('llm.qwen.model');
+    const timeoutMs = this.config.get<number>('llm.qwen.timeoutMs') ?? 60000;
+    const maxTokens = this.config.get<number>('llm.qwen.maxTokens') ?? 4096;
+    const maxRetries = this.config.get<number>('llm.qwen.maxRetries') ?? 2;
+    const temperature = this.config.get<number>('llm.qwen.temperature') ?? 0.2;
 
     if (!apiKey) {
       throw new Error('QWEN_API_KEY is required');
     }
 
     this.model = new ChatOpenAI({
-      temperature: 0.7,
+      temperature,
       model: modelName,
       apiKey,
+      timeout: timeoutMs,
+      maxTokens,
+      maxRetries,
       configuration: { baseURL: baseUrl },
     });
   }
@@ -42,13 +49,10 @@ export class QwenLlmProvider implements ILLMProvider {
       typeof messages === 'string' ? messages : JSON.stringify(messages),
     );
     try {
-      const promise = this.model.invoke(messages);
-      const timeoutMs =
-        this.config.get<number>('llm.qwen.timeoutMs') ?? 30000;
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout calling LLM API')), timeoutMs),
-      );
-      const response = await Promise.race([promise, timeoutPromise]);
+      const timeoutMs = this.config.get<number>('llm.qwen.timeoutMs') ?? 60000;
+      const response = await this.model.invoke(messages, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       const answer =
         typeof response.content === 'string'
           ? response.content

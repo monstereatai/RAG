@@ -16,6 +16,15 @@ import { DocumentResourceEntity } from '../../providers/db/entities/document-res
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { DocumentPermissionService } from './document-permission.service';
 import { PermissionSubject } from './document-permission.service';
+import {
+  assessIngestionQuality,
+  detectGameDocumentMetadata,
+  DocumentLifecycleStatus,
+  GameDocumentMetadata,
+  GameDocumentType,
+  getChunkStrategy,
+  IngestionQualityReport,
+} from './document-profile.util';
 
 export interface UploadResult {
   docId: string;
@@ -25,6 +34,16 @@ export interface UploadResult {
   effectiveAt?: string | null;
   expiredAt?: string | null;
   sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: GameDocumentType;
+  lifecycleStatus?: DocumentLifecycleStatus;
+  supersedesDocId?: string | null;
+  ingestionQuality?: IngestionQualityReport;
   metadata?: {
     title: string;
     author: string;
@@ -39,6 +58,7 @@ export interface UploadOptions {
   taskId?: string;
   originalBuffer?: Buffer;
   contentType?: string;
+  businessMetadata?: Partial<GameDocumentMetadata>;
 }
 
 export interface DocMeta extends UploadResult {
@@ -52,7 +72,6 @@ export interface DocMeta extends UploadResult {
 @Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
-  private readonly chunker = new MarkdownChunker(500, 50);
   private readonly pendingMilvusDeletes = new Map<string, number>();
 
   constructor(
@@ -106,9 +125,28 @@ export class DocumentService {
         });
       }
 
-      const structuredChunks = await this.chunker.splitStructured(content);
+      const detectedBusiness = detectGameDocumentMetadata(filename, content);
+      const business = this.mergeBusinessMetadata(
+        detectedBusiness,
+        options.businessMetadata,
+      );
+      const strategy = getChunkStrategy(business.documentType);
+      const structuredChunks = await new MarkdownChunker(
+        strategy.chunkSize,
+        strategy.chunkOverlap,
+      ).splitStructured(content);
       const chunks = structuredChunks.map((chunk) => chunk.content);
-      const governance = this.extractGovernanceMetadata(filename, content);
+      const ingestionQuality = assessIngestionQuality(
+        content,
+        structuredChunks,
+      );
+      const governance = {
+        ...this.extractGovernanceMetadata(filename, content),
+        ...business,
+      };
+      if (!ingestionQuality.accepted) {
+        throw new Error('document failed ingestion quality gate');
+      }
       this.logger.log(`Split into ${chunks.length} chunks`);
       await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
 
@@ -142,6 +180,15 @@ export class DocumentService {
         effectiveAt: governance.effectiveAt,
         expiredAt: governance.expiredAt,
         sourceAuthority: governance.sourceAuthority,
+        projectId: governance.projectId,
+        activityId: governance.activityId,
+        region: governance.region,
+        locale: governance.locale,
+        channel: governance.channel,
+        roleScope: governance.roleScope,
+        documentType: governance.documentType,
+        lifecycleStatus: governance.lifecycleStatus,
+        supersedesDocId: governance.supersedesDocId,
       }));
       this.karpathyRagService.indexChunks(chunkDocs, userId);
       await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
@@ -165,8 +212,27 @@ export class DocumentService {
         effectiveAt: governance.effectiveAt,
         expiredAt: governance.expiredAt,
         sourceAuthority: governance.sourceAuthority,
+        projectId: governance.projectId,
+        activityId: governance.activityId,
+        region: governance.region,
+        locale: governance.locale,
+        channel: governance.channel,
+        roleScope:
+          governance.roleScope.length > 0
+            ? JSON.stringify(governance.roleScope)
+            : null,
+        documentType: governance.documentType,
+        lifecycleStatus: governance.lifecycleStatus,
+        supersedesDocId: governance.supersedesDocId,
+        ingestionQuality: JSON.stringify(ingestionQuality),
       });
       await this.docMetaRepo.save(docMeta);
+      if (governance.supersedesDocId) {
+        await this.deprecateSupersededDocument(
+          governance.supersedesDocId,
+          userId,
+        );
+      }
       await this.permissionService.grantOwner(docId, userId);
       await this.saveChunkMetadata(
         docId,
@@ -219,6 +285,16 @@ export class DocumentService {
         effectiveAt: governance.effectiveAt?.toISOString() ?? null,
         expiredAt: governance.expiredAt?.toISOString() ?? null,
         sourceAuthority: governance.sourceAuthority,
+        projectId: governance.projectId,
+        activityId: governance.activityId,
+        region: governance.region,
+        locale: governance.locale,
+        channel: governance.channel,
+        roleScope: governance.roleScope,
+        documentType: governance.documentType,
+        lifecycleStatus: governance.lifecycleStatus,
+        supersedesDocId: governance.supersedesDocId,
+        ingestionQuality,
         metadata: metadata || undefined,
       };
     } catch (err) {
@@ -429,6 +505,18 @@ export class DocumentService {
       effectiveAt: meta.effectiveAt?.toISOString() ?? null,
       expiredAt: meta.expiredAt?.toISOString() ?? null,
       sourceAuthority: meta.sourceAuthority,
+      projectId: meta.projectId,
+      activityId: meta.activityId,
+      region: meta.region,
+      locale: meta.locale,
+      channel: meta.channel,
+      roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
+      documentType: meta.documentType as GameDocumentType,
+      lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      supersedesDocId: meta.supersedesDocId,
+      ingestionQuality: meta.ingestionQuality
+        ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
+        : undefined,
     };
   }
 
@@ -446,6 +534,18 @@ export class DocumentService {
       effectiveAt: meta.effectiveAt?.toISOString() ?? null,
       expiredAt: meta.expiredAt?.toISOString() ?? null,
       sourceAuthority: meta.sourceAuthority,
+      projectId: meta.projectId,
+      activityId: meta.activityId,
+      region: meta.region,
+      locale: meta.locale,
+      channel: meta.channel,
+      roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
+      documentType: meta.documentType as GameDocumentType,
+      lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      supersedesDocId: meta.supersedesDocId,
+      ingestionQuality: meta.ingestionQuality
+        ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
+        : undefined,
       metadata: meta.title
         ? {
             title: meta.title,
@@ -491,9 +591,52 @@ export class DocumentService {
         effectiveAt: governance.effectiveAt,
         expiredAt: governance.expiredAt,
         sourceAuthority: governance.sourceAuthority,
+        projectId: governance.projectId,
+        activityId: governance.activityId,
+        region: governance.region,
+        locale: governance.locale,
+        channel: governance.channel,
+        roleScope:
+          governance.roleScope.length > 0
+            ? JSON.stringify(governance.roleScope)
+            : null,
+        documentType: governance.documentType,
+        lifecycleStatus: governance.lifecycleStatus,
+        supersedesDocId: governance.supersedesDocId,
       });
     });
     await this.docChunkRepo.save(entities);
+  }
+
+  private async deprecateSupersededDocument(
+    docId: string,
+    userId: string,
+  ): Promise<void> {
+    const exists = await this.docMetaRepo.exist({ where: { docId, userId } });
+    if (!exists) {
+      this.logger.warn(`Superseded document not found: docId=${docId}`);
+      return;
+    }
+    await Promise.all([
+      this.docMetaRepo.update(
+        { docId, userId },
+        { lifecycleStatus: 'deprecated' },
+      ),
+      this.docChunkRepo.update(
+        { docId, userId },
+        { lifecycleStatus: 'deprecated' },
+      ),
+      this.elasticsearchProvider.updateDocumentLifecycle(
+        docId,
+        'deprecated',
+        userId,
+      ),
+    ]);
+    this.karpathyRagService.updateDocumentLifecycle(
+      docId,
+      'deprecated',
+      userId,
+    );
   }
 
   private async detectAndSaveFactConflicts(
@@ -558,7 +701,7 @@ export class DocumentService {
   private extractGovernanceMetadata(
     filename: string,
     content: string,
-  ): DocumentGovernanceMetadata {
+  ): Omit<DocumentGovernanceMetadata, keyof GameDocumentMetadata> {
     return {
       docVersion: this.extractDocVersion(filename, content),
       effectiveAt: this.extractDate(
@@ -601,9 +744,34 @@ export class DocumentService {
     if (/正式|官方|制度|policy|official/.test(haystack)) return 'official';
     return 'normal';
   }
+
+  private mergeBusinessMetadata(
+    detected: GameDocumentMetadata,
+    explicit?: Partial<GameDocumentMetadata>,
+  ): GameDocumentMetadata {
+    return {
+      projectId: explicit?.projectId?.trim() || detected.projectId,
+      activityId: explicit?.activityId?.trim() || detected.activityId,
+      region: explicit?.region?.trim() || detected.region,
+      locale: explicit?.locale?.trim() || detected.locale,
+      channel: explicit?.channel?.trim() || detected.channel,
+      roleScope:
+        explicit?.roleScope && explicit.roleScope.length > 0
+          ? [
+              ...new Set(
+                explicit.roleScope.map((item) => item.trim()).filter(Boolean),
+              ),
+            ]
+          : detected.roleScope,
+      documentType: explicit?.documentType ?? detected.documentType,
+      lifecycleStatus: explicit?.lifecycleStatus ?? detected.lifecycleStatus,
+      supersedesDocId:
+        explicit?.supersedesDocId?.trim() || detected.supersedesDocId,
+    };
+  }
 }
 
-interface DocumentGovernanceMetadata {
+interface DocumentGovernanceMetadata extends GameDocumentMetadata {
   docVersion: string | null;
   effectiveAt: Date | null;
   expiredAt: Date | null;

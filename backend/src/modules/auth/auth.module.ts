@@ -3,6 +3,7 @@ import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { ApiTokenService } from './api-token.service';
 
 @Global()
 @Module({
@@ -20,7 +21,7 @@ import { AuthController } from './auth.controller';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, ApiTokenService],
+  exports: [AuthService, ApiTokenService, JwtModule],
 })
 export class AuthModule {}

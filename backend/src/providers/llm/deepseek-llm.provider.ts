@@ -22,11 +22,14 @@ export class DeepseekLlmProvider implements ILLMProvider {
     const apiKey = this.config.get<string>('llm.deepseek.apiKey');
     const baseUrl = this.config.get<string>('llm.deepseek.baseUrl');
     const modelName = this.config.get<string>('llm.deepseek.model');
+    const timeoutMs =
+      this.config.get<number>('llm.deepseek.timeoutMs') ?? 30000;
 
     this.model = new ChatOpenAI({
       temperature: 0.7,
       model: modelName,
       apiKey: apiKey || 'missing-deepseek-api-key',
+      timeout: timeoutMs,
       configuration: { baseURL: baseUrl },
     });
   }

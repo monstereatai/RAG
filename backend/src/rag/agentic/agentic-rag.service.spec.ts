@@ -43,6 +43,19 @@ describe('AgenticRagService budget boundaries', () => {
       isEnabled: jest.fn().mockReturnValue(false),
     } as unknown as DashScopeRerankService;
     const semanticExampleSelector = {} as SemanticExampleSelector;
+    const badCaseFlywheel = {
+      selectPrompt: jest.fn().mockResolvedValue(''),
+    };
+    const metricsService = {
+      observeAgentNode: jest.fn(),
+      observeAgentFirstToken: jest.fn(),
+      observeAgentToolCall: jest.fn(),
+      observeAgentLoopDecision: jest.fn(),
+      observeAgentEmptyRetrieval: jest.fn(),
+    };
+    const tracingService = {
+      recordAgentNode: jest.fn().mockReturnValue({}),
+    };
     const redisProvider = {} as RedisProvider;
 
     const service = new AgenticRagService(
@@ -52,6 +65,9 @@ describe('AgenticRagService budget boundaries', () => {
       bochaSearchService,
       dashScopeRerankService,
       semanticExampleSelector,
+      badCaseFlywheel as never,
+      metricsService as never,
+      tracingService as never,
       redisProvider,
     );
 

@@ -1,6 +1,9 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Langfuse } from 'langfuse';
+import { createRequire } from 'node:module';
+import type { Langfuse as LangfuseClient } from 'langfuse';
+
+const nodeRequire = createRequire(__filename);
 
 export interface RagTracePayload {
   userId?: string;
@@ -29,7 +32,7 @@ export interface RagTraceEvent {
 @Injectable()
 export class LangfuseProvider implements OnModuleDestroy {
   private readonly logger = new Logger(LangfuseProvider.name);
-  private readonly client: Langfuse | null;
+  private readonly client: LangfuseClient | null;
   private readonly inputCostUsdPer1k: number;
   private readonly outputCostUsdPer1k: number;
 
@@ -50,6 +53,8 @@ export class LangfuseProvider implements OnModuleDestroy {
       return;
     }
 
+    // Keep the optional SDK out of disabled providers and Jest module loading.
+    const { Langfuse } = nodeRequire('langfuse') as typeof import('langfuse');
     this.client = new Langfuse({
       publicKey,
       secretKey,
@@ -168,7 +173,7 @@ export class LangfuseProvider implements OnModuleDestroy {
   }
 
   private recordEventSpans(
-    trace: ReturnType<Langfuse['trace']>,
+    trace: ReturnType<LangfuseClient['trace']>,
     events: RagTraceEvent[],
   ): void {
     for (const event of events) {
@@ -208,6 +213,7 @@ export class LangfuseProvider implements OnModuleDestroy {
       citation: 'rag.citation',
       reflection: 'rag.reflection',
       final: 'rag.final',
+      node_timing: 'rag.node',
     };
     return map[type] ?? `rag.${type}`;
   }

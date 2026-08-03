@@ -26,6 +26,11 @@ import { ScheduledJobEntity } from './entities/job.entity';
 import { DocumentTaskEntity } from './entities/document-task.entity';
 import { DocumentResourceEntity } from './entities/document-resource.entity';
 import { DocumentPermissionEntity } from './entities/document-permission.entity';
+import { QueryLogEntity } from './entities/query-log.entity';
+import { RagFeedbackEntity } from './entities/rag-feedback.entity';
+import { GeneratedArtifactEntity } from './entities/generated-artifact.entity';
+import { ArtifactShareEntity } from './entities/artifact-share.entity';
+import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -49,6 +54,11 @@ export default new DataSource({
     DocumentTaskEntity,
     DocumentResourceEntity,
     DocumentPermissionEntity,
+    QueryLogEntity,
+    RagFeedbackEntity,
+    GeneratedArtifactEntity,
+    ArtifactShareEntity,
+    ArtifactAccessLogEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

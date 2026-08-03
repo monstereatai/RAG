@@ -15,6 +15,8 @@ import { ConversationEmbeddingService } from '../modules/chat/conversation-embed
 import { MemoryService } from '../modules/memory/memory.service';
 import { QueryLogEntity } from '../providers/db/entities/query-log.entity';
 import { BadRequestException } from '@nestjs/common';
+import { ShortTermMemoryService } from '../modules/memory/short-term-memory.service';
+import { LangfuseProvider } from '../providers/observability/langfuse.provider';
 
 describe('ChatModes Integration', () => {
   let chatService: ChatService;
@@ -56,6 +58,19 @@ describe('ChatModes Integration', () => {
       save: jest.fn().mockResolvedValue(undefined),
       create: jest.fn().mockImplementation((data: unknown) => data),
     };
+    const mockShortTermMemory = {
+      getContext: jest.fn().mockResolvedValue({
+        systemMessage: null,
+        recentTurns: [],
+        truncatedHistory: false,
+      }),
+      addTurn: jest.fn().mockResolvedValue(undefined),
+    };
+    const mockLangfuseProvider = {
+      estimateTextTokens: jest.fn().mockReturnValue(1),
+      estimateCostUsd: jest.fn().mockReturnValue(0),
+      traceRagAnswer: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -68,6 +83,8 @@ describe('ChatModes Integration', () => {
           useValue: mockConversationEmbeddingService,
         },
         { provide: MemoryService, useValue: mockMemoryService },
+        { provide: ShortTermMemoryService, useValue: mockShortTermMemory },
+        { provide: LangfuseProvider, useValue: mockLangfuseProvider },
         {
           provide: getRepositoryToken(QueryLogEntity),
           useValue: mockQueryLogRepo,
@@ -106,6 +123,8 @@ describe('ChatModes Integration', () => {
       [],
       'user-1',
       expect.any(Array),
+      undefined,
+      { scope: { role: undefined } },
     );
     expect(agenticRagService.run).not.toHaveBeenCalled();
     expect(res.answer).toBe('I am simple RAG');
@@ -146,11 +165,13 @@ describe('ChatModes Integration', () => {
     expect(agenticRagService.run).toHaveBeenCalledWith(
       query,
       'agentic',
-      undefined,
+      expect.any(Function),
       [],
       'new-thread-123',
       'user-1',
       expect.any(Array),
+      false,
+      { scope: { role: undefined } },
     );
     expect(karpathyRagService.answer).not.toHaveBeenCalled();
     expect(res.answer).toBe('Quantum computing is...');
@@ -180,5 +201,30 @@ describe('ChatModes Integration', () => {
     expect(
       conversationEmbeddingService.formatHistoryContext,
     ).toHaveBeenCalled();
+  });
+
+  it('should apply the selected role to retrieval and answer context', async () => {
+    karpathyRagService.answer.mockResolvedValue({
+      answer: '已按产品经理视角整理',
+      references: [],
+    });
+
+    await chatService.chat(
+      {
+        query: '检查需求缺口',
+        mode: 'simple',
+        rolePresetId: 'product-manager',
+      },
+      'user-1',
+    );
+
+    const call = karpathyRagService.answer.mock.calls[0];
+    expect(call?.[0]).toBe('检查需求缺口');
+    expect(
+      call?.[3].some((message) =>
+        message.content.includes('当前服务对象岗位：产品经理'),
+      ),
+    ).toBe(true);
+    expect(call?.[5]).toEqual({ scope: { role: 'product-manager' } });
   });
 });

@@ -21,6 +21,23 @@ export interface DocumentItem {
 // 聊天相关
 export type ChatMode = 'simple' | 'agentic' | 'auto';
 
+export interface RolePreset {
+  id: string;
+  name: string;
+  shortName: string;
+  summary: string;
+  responsibilities: string[];
+  starterTasks: string[];
+  suggestedQuestions: string[];
+  roleScope?: string;
+  answerGuidance: string;
+}
+
+export interface RolePresetCatalog {
+  defaultRolePresetId: string;
+  roles: RolePreset[];
+}
+
 export interface ReferenceChunk {
   id: string;
   content: string;

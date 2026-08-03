@@ -41,6 +41,9 @@ import { QaOpsModule } from './modules/qa-ops/qa-ops.module';
 import { WeeklySummaryModule } from './modules/weekly-summary/weekly-summary.module';
 import { OfficialDocsSyncModule } from './modules/official-docs-sync/official-docs-sync.module';
 import { RagGatewayModule } from './modules/rag-gateway/rag-gateway.module';
+import { ArtifactsModule } from './modules/artifacts/artifacts.module';
+import { AgentEvalModule } from './modules/agent-evals/agent-eval.module';
+import { AgentOpsAdminModule } from './modules/agent-ops-admin/agent-ops-admin.module';
 
 @Module({
   imports: [
@@ -93,6 +96,9 @@ import { RagGatewayModule } from './modules/rag-gateway/rag-gateway.module';
     QaOpsModule,
     OfficialDocsSyncModule,
     RagGatewayModule,
+    ArtifactsModule,
+    AgentEvalModule,
+    AgentOpsAdminModule,
   ],
   providers: [
     {

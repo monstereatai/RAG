@@ -24,6 +24,15 @@ export interface Bm25PersistedEntry {
   effectiveAt?: string | null;
   expiredAt?: string | null;
   sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  supersedesDocId?: string | null;
 }
 
 export interface Bm25PersistedStore {

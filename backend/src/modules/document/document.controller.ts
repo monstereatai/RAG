@@ -28,6 +28,26 @@ import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { VisionProvider } from '../../providers/vision/vision.provider';
 import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
+import {
+  DocumentLifecycleStatus,
+  GameDocumentMetadata,
+  GameDocumentType,
+} from './document-profile.util';
+
+type DocumentUploadBody = Partial<
+  Record<
+    | 'projectId'
+    | 'activityId'
+    | 'region'
+    | 'locale'
+    | 'channel'
+    | 'roleScope'
+    | 'documentType'
+    | 'lifecycleStatus'
+    | 'supersedesDocId',
+    string | string[]
+  >
+>;
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
@@ -50,6 +70,7 @@ export class DocumentController {
         } as Express.Multer.File,
         job.userId,
         job.taskId,
+        job.businessMetadata,
       );
     });
   }
@@ -58,6 +79,7 @@ export class DocumentController {
   @UseInterceptors(FileInterceptor('file'))
   async upload(
     @UploadedFile() file: Express.Multer.File,
+    @Body() body: DocumentUploadBody,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!file) {
@@ -80,6 +102,7 @@ export class DocumentController {
       sourceType: 'document',
       contentType: file.mimetype,
       originalBuffer: file.buffer,
+      businessMetadata: this.parseBusinessMetadata(body),
     });
     return { ...result.rag, obsidian: result.obsidian };
   }
@@ -88,6 +111,7 @@ export class DocumentController {
   @UseInterceptors(FileInterceptor('file'))
   async uploadAsync(
     @UploadedFile() file: Express.Multer.File,
+    @Body() body: DocumentUploadBody,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!file) {
@@ -105,10 +129,16 @@ export class DocumentController {
         filename: file.originalname,
         originalBufferBase64: file.buffer.toString('base64'),
         contentType: file.mimetype,
+        businessMetadata: this.parseBusinessMetadata(body),
       });
     } else {
       setImmediate(() => {
-        void this.processAsyncUpload(file, user.userId, task.id);
+        void this.processAsyncUpload(
+          file,
+          user.userId,
+          task.id,
+          this.parseBusinessMetadata(body),
+        );
       });
     }
 
@@ -122,7 +152,11 @@ export class DocumentController {
   }
 
   @Post('url')
-  async uploadUrl(@Body('url') url: string, @CurrentUser() user: JwtPayload) {
+  async uploadUrl(
+    @Body('url') url: string,
+    @Body() body: DocumentUploadBody,
+    @CurrentUser() user: JwtPayload,
+  ) {
     const extracted = await extractUrlContent(url);
     const content = extracted.content.trim();
     if (!content) {
@@ -137,6 +171,7 @@ export class DocumentController {
       extracted,
       userId: user.userId,
       filename: this.getUrlSnapshotFilename(extracted.finalUrl),
+      businessMetadata: this.parseBusinessMetadata(body),
     });
     return { ...result.rag, obsidian: result.obsidian };
   }
@@ -145,6 +180,7 @@ export class DocumentController {
   async uploadManual(
     @Body('title') title: string,
     @Body('content') content: string,
+    @Body() body: DocumentUploadBody,
     @CurrentUser() user: JwtPayload,
   ) {
     const normalizedTitle = title?.trim() || 'Manual Note';
@@ -162,6 +198,7 @@ export class DocumentController {
       sourceType: 'manual',
       contentType: 'text/markdown',
       originalBuffer: Buffer.from(normalizedContent, 'utf8'),
+      businessMetadata: this.parseBusinessMetadata(body),
     });
     return { ...result.rag, obsidian: result.obsidian };
   }
@@ -192,6 +229,7 @@ export class DocumentController {
     file: Express.Multer.File,
     userId: string,
     taskId: string,
+    businessMetadata?: Partial<GameDocumentMetadata>,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
     const content = (await this.extractUploadContent(file, kind)).trim();
@@ -211,6 +249,7 @@ export class DocumentController {
       contentType: file.mimetype,
       originalBuffer: file.buffer,
       taskId,
+      businessMetadata,
     });
     return { chunkCount: result.rag.chunkCount };
   }
@@ -334,6 +373,40 @@ export class DocumentController {
     }
 
     return extractDocumentText(file.buffer, kind);
+  }
+
+  private parseBusinessMetadata(
+    body: DocumentUploadBody,
+  ): Partial<GameDocumentMetadata> | undefined {
+    const text = (key: keyof DocumentUploadBody): string | undefined => {
+      const value = body?.[key];
+      const normalized = Array.isArray(value) ? value[0] : value;
+      return normalized?.trim() || undefined;
+    };
+    const roleValue = body?.roleScope;
+    const roleScope = (
+      Array.isArray(roleValue) ? roleValue : roleValue?.split(',')
+    )
+      ?.map((item) => item.trim())
+      .filter(Boolean);
+    const metadata: Partial<GameDocumentMetadata> = {
+      projectId: text('projectId') ?? null,
+      activityId: text('activityId') ?? null,
+      region: text('region') ?? null,
+      locale: text('locale') ?? null,
+      channel: text('channel') ?? null,
+      roleScope,
+      documentType: text('documentType') as GameDocumentType | undefined,
+      lifecycleStatus: text('lifecycleStatus') as
+        | DocumentLifecycleStatus
+        | undefined,
+      supersedesDocId: text('supersedesDocId') ?? null,
+    };
+    return Object.values(metadata).some((value) =>
+      Array.isArray(value) ? value.length > 0 : value != null,
+    )
+      ? metadata
+      : undefined;
   }
 
   private getUrlSnapshotFilename(url: string): string {

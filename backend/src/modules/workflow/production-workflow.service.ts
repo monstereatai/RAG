@@ -1,0 +1,693 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { StateGraph, START, END } from '@langchain/langgraph';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { LlmProvider } from '../../providers/llm/llm.provider';
+import { RedisProvider } from '../../providers/redis/redis.provider';
+import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
+import { ArtifactsService } from '../artifacts/artifacts.service';
+import {
+  PRODUCTION_ROLES,
+  ProductionClaim,
+  ProductionDeliverable,
+  ProductionRole,
+  ProductionRiskLevel,
+  ProductionStageResult,
+  ProductionWorkflowState,
+  ProductionWorkflowStateType,
+} from './production-workflow.state';
+import {
+  ResumeProductionWorkflowDto,
+  StartProductionWorkflowDto,
+} from './production-workflow.dto';
+import {
+  buildProductionExecutionBatches,
+  dependenciesForProductionRole,
+  normalizeProductionRoles,
+} from './production-workflow.plan';
+import { ProductionWorkflowTools } from './production-workflow.tools';
+
+const roleSchema = z.object({
+  summary: z.string().min(1).max(4_000),
+  deliverables: z
+    .array(
+      z.object({
+        type: z.string().min(1).max(64),
+        title: z.string().min(1).max(256),
+        markdown: z.string().min(20).max(30_000),
+      }),
+    )
+    .min(1)
+    .max(4),
+  claims: z
+    .array(
+      z.object({
+        statement: z.string().min(1).max(2_000),
+        evidenceIds: z.array(z.string().min(1)).max(8),
+        status: z.enum(['supported', 'pending_confirmation']),
+      }),
+    )
+    .max(20),
+  issues: z.array(z.string().min(1)).max(12),
+  downstreamRisks: z.array(z.string().min(1)).max(12),
+  riskLevel: z.enum(['low', 'medium', 'high']),
+  readyForApproval: z.boolean(),
+});
+
+const ROLE_GUIDANCE: Record<ProductionRole, string> = {
+  product:
+    '校验目标、范围、规则、边界条件、地区版本和验收口径，输出 PRD 审查结论。',
+  design: '校验页面状态、交互闭环、尺寸规范、多语言适配和设计交付物。',
+  frontend: '校验组件拆分、接口依赖、状态管理、埋点、性能和异常降级。',
+  backend: '校验领域模型、接口契约、幂等、并发、资格校验、奖励发放和可观测性。',
+  qa: '校验测试范围、前置条件、输入输出、边界、兼容性、回归和上线门禁。',
+  operations: '校验发布计划、配置、灰度、监控、应急预案、客服口径和复盘指标。',
+};
+
+const RISK_RANK: Record<ProductionRiskLevel, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+const ROLE_LLM_TIMEOUT_MS = 75_000;
+const ROLE_LLM_RETRY_BACKOFF_MS = 1_000;
+
+@Injectable()
+export class ProductionWorkflowService {
+  private readonly logger = new Logger(ProductionWorkflowService.name);
+  private readonly checkpointer: RedisCheckpointer;
+  private readonly app: ReturnType<ProductionWorkflowService['buildGraph']>;
+  private readonly activeRuns = new Map<string, Promise<void>>();
+  private readonly pendingStates = new Map<
+    string,
+    ProductionWorkflowStateType
+  >();
+
+  constructor(
+    private readonly llmProvider: LlmProvider,
+    redisProvider: RedisProvider,
+    private readonly roleTools: ProductionWorkflowTools,
+    private readonly artifacts: ArtifactsService,
+  ) {
+    this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
+    this.app = this.buildGraph();
+  }
+
+  async start(dto: StartProductionWorkflowDto, userId: string) {
+    const threadId = dto.threadId ?? randomUUID();
+    const initialState = this.createInitialState(dto, userId, threadId);
+    const state = await this.app.invoke(initialState, this.config(threadId));
+    const settled = await this.runUntilSettled(threadId, state);
+    return this.view(threadId, settled, userId);
+  }
+
+  startAsync(dto: StartProductionWorkflowDto, userId: string) {
+    const threadId = dto.threadId ?? randomUUID();
+    const initialState = this.createInitialState(dto, userId, threadId);
+    this.pendingStates.set(threadId, initialState);
+    this.schedule(threadId, userId, () =>
+      this.start({ ...dto, threadId }, userId),
+    );
+    return this.view(threadId, initialState, userId);
+  }
+
+  async resume(
+    threadId: string,
+    dto: ResumeProductionWorkflowDto,
+    userId: string,
+  ) {
+    const current = await this.getOwnedState(threadId, userId);
+    if (current.status !== 'pending_approval') {
+      throw new Error(`workflow is not pending approval: ${current.status}`);
+    }
+    const state = await this.app.invoke(
+      {
+        approval: dto.approval,
+        feedback: dto.feedback?.trim() ?? '',
+        rerunRoles: dto.rerunRoles ?? [],
+      },
+      this.config(threadId),
+    );
+    const settled = await this.runUntilSettled(threadId, state);
+    return this.view(threadId, settled, userId);
+  }
+
+  async resumeAsync(
+    threadId: string,
+    dto: ResumeProductionWorkflowDto,
+    userId: string,
+  ) {
+    const current = await this.getOwnedState(threadId, userId);
+    if (current.status !== 'pending_approval') {
+      throw new Error(`workflow is not pending approval: ${current.status}`);
+    }
+    const pending = {
+      ...current,
+      status: 'running' as const,
+      approval: dto.approval,
+      feedback: dto.feedback?.trim() ?? '',
+      rerunRoles: dto.rerunRoles ?? [],
+    };
+    this.pendingStates.set(threadId, pending);
+    this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
+    return this.view(threadId, pending, userId);
+  }
+
+  async status(threadId: string, userId: string) {
+    let state: ProductionWorkflowStateType;
+    try {
+      state = await this.getOwnedState(threadId, userId);
+    } catch (error) {
+      const pending = this.pendingStates.get(threadId);
+      if (!pending || pending.userId !== userId) throw error;
+      state = pending;
+    }
+    if (state.status === 'running' && !this.activeRuns.has(threadId)) {
+      this.schedule(threadId, userId, () =>
+        this.runUntilSettled(threadId, state),
+      );
+    }
+    return this.view(threadId, state, userId);
+  }
+
+  private createInitialState(
+    dto: StartProductionWorkflowDto,
+    userId: string,
+    threadId: string,
+  ): ProductionWorkflowStateType {
+    const selectedRoles = normalizeProductionRoles(dto.roles);
+    return {
+      threadId,
+      projectId: dto.projectId.trim(),
+      userId,
+      brief: dto.brief.trim(),
+      currentRole: selectedRoles[0],
+      selectedRoles,
+      executionBatches: buildProductionExecutionBatches(selectedRoles),
+      batchIndex: 0,
+      currentBatch: [],
+      completedRoles: [],
+      stageIndex: 0,
+      stepCount: 0,
+      maxSteps: dto.maxSteps ?? 18,
+      approvalMode: dto.approvalMode ?? 'auto',
+      approvalRoles: normalizeProductionRoles(dto.approvalRoles).filter(
+        (role) => dto.approvalRoles?.includes(role),
+      ),
+      riskApprovalThreshold: dto.riskApprovalThreshold ?? 'high',
+      pendingApprovalRoles: [],
+      rerunRoles: [],
+      status: 'running',
+      approval: null,
+      feedback: '',
+      results: {},
+      error: '',
+    };
+  }
+
+  private schedule(
+    threadId: string,
+    userId: string,
+    task: () => Promise<unknown>,
+  ): void {
+    if (this.activeRuns.has(threadId)) return;
+    const run = Promise.resolve()
+      .then(task)
+      .then(() => undefined)
+      .catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`production workflow ${threadId} failed: ${message}`);
+        try {
+          await this.app.updateState(this.config(threadId), {
+            status: 'failed',
+            error: message,
+          });
+        } catch {
+          const pending = this.pendingStates.get(threadId);
+          if (pending?.userId === userId) {
+            this.pendingStates.set(threadId, {
+              ...pending,
+              status: 'failed',
+              error: message,
+            });
+          }
+        }
+      })
+      .finally(() => {
+        this.activeRuns.delete(threadId);
+        if (this.pendingStates.get(threadId)?.status !== 'failed') {
+          this.pendingStates.delete(threadId);
+        }
+      });
+    this.activeRuns.set(threadId, run);
+  }
+
+  private buildGraph() {
+    const graph = new StateGraph(ProductionWorkflowState)
+      .addNode('prepare', this.prepareNode.bind(this))
+      .addNode('executeBatch', this.executeBatchNode.bind(this));
+
+    graph.addEdge(START, 'prepare');
+    graph.addConditionalEdges(
+      'prepare',
+      (state) => (state.status === 'running' ? 'executeBatch' : END),
+      {
+        executeBatch: 'executeBatch',
+        [END]: END,
+      },
+    );
+    graph.addEdge('executeBatch', END);
+    return graph.compile({ checkpointer: this.checkpointer });
+  }
+
+  private prepareNode(
+    state: ProductionWorkflowStateType,
+  ): Partial<ProductionWorkflowStateType> {
+    if (state.status === 'completed' || state.status === 'failed') return {};
+    if (state.stepCount >= state.maxSteps) {
+      return {
+        status: 'failed',
+        error: `maximum workflow steps exceeded (${state.maxSteps})`,
+      };
+    }
+
+    let batchIndex = state.batchIndex;
+    let completedRoles = state.completedRoles;
+    if (state.status === 'pending_approval') {
+      if (!state.approval) return {};
+      if (state.approval === 'approved') {
+        completedRoles = this.unionRoles(completedRoles, state.currentBatch);
+        batchIndex += 1;
+      } else {
+        const requested = state.rerunRoles.length
+          ? state.rerunRoles.filter((role) => state.currentBatch.includes(role))
+          : state.currentBatch;
+        return {
+          status: 'running',
+          approval: null,
+          pendingApprovalRoles: [],
+          rerunRoles: requested.length ? requested : state.currentBatch,
+          stepCount: state.stepCount + 1,
+          error: '',
+        };
+      }
+    }
+    if (batchIndex >= state.executionBatches.length) {
+      return {
+        batchIndex,
+        stageIndex: completedRoles.length,
+        completedRoles,
+        status: 'completed',
+        approval: null,
+        feedback: '',
+        pendingApprovalRoles: [],
+        rerunRoles: [],
+      };
+    }
+    const currentBatch = state.executionBatches[batchIndex];
+    return {
+      batchIndex,
+      currentBatch,
+      currentRole: currentBatch[0],
+      completedRoles,
+      stageIndex: completedRoles.length,
+      status: 'running',
+      approval: null,
+      pendingApprovalRoles: [],
+      rerunRoles: [],
+      stepCount: state.stepCount + 1,
+      error: '',
+    };
+  }
+
+  private async executeBatchNode(
+    state: ProductionWorkflowStateType,
+  ): Promise<Partial<ProductionWorkflowStateType>> {
+    const rolesToRun = state.rerunRoles.length
+      ? state.rerunRoles
+      : state.currentBatch;
+    const entries = await Promise.all(
+      rolesToRun.map(
+        async (role) => [role, await this.runRole(role, state)] as const,
+      ),
+    );
+    const results = Object.fromEntries(entries) as Partial<
+      Record<ProductionRole, ProductionStageResult>
+    >;
+    const mergedResults = { ...state.results, ...results };
+    const pendingApprovalRoles = state.currentBatch.filter((role) => {
+      const result = mergedResults[role];
+      return result ? this.requiresRoleApproval(role, result, state) : false;
+    });
+    if (pendingApprovalRoles.length === 0) {
+      const completedRoles = this.unionRoles(
+        state.completedRoles,
+        state.currentBatch,
+      );
+      return {
+        currentRole: state.currentBatch[0],
+        batchIndex: state.batchIndex + 1,
+        stageIndex: completedRoles.length,
+        completedRoles,
+        status: 'running',
+        results,
+        rerunRoles: [],
+      };
+    }
+    return {
+      currentRole: pendingApprovalRoles[0],
+      status: 'pending_approval',
+      pendingApprovalRoles,
+      results,
+      rerunRoles: [],
+    };
+  }
+
+  private async runRole(
+    role: ProductionRole,
+    state: ProductionWorkflowStateType,
+  ): Promise<ProductionStageResult> {
+    const dependencies = dependenciesForProductionRole(
+      role,
+      state.selectedRoles,
+    );
+    const previousResults = dependencies
+      .map((item) => state.results[item])
+      .filter((result): result is ProductionStageResult => result !== undefined)
+      .map((result) => ({
+        role: result.role,
+        summary: result.summary,
+        deliverables: result.deliverables.map((deliverable) => ({
+          type: deliverable.type,
+          title: deliverable.title,
+          markdownExcerpt: deliverable.markdown.slice(0, 2_000),
+        })),
+        claims: result.claims,
+        issues: result.issues,
+        downstreamRisks: result.downstreamRisks,
+        riskLevel: result.riskLevel,
+      }));
+    const toolResult = await this.roleTools.gather(role, {
+      projectId: state.projectId,
+      brief: state.brief,
+      userId: state.userId,
+    });
+    const model = this.llmProvider.getModel();
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const modelStartedAt = Date.now();
+      try {
+        const output = await model
+          .withStructuredOutput(roleSchema, { method: 'jsonMode' })
+          .invoke(
+            [
+              {
+                role: 'system',
+                content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
+              },
+              {
+                role: 'user',
+                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
+              },
+            ],
+            { signal: AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS) },
+          );
+        toolResult.executions.push({
+          tool: 'role_structured_llm',
+          status: 'success',
+          durationMs: Date.now() - modelStartedAt,
+          evidenceCount: toolResult.evidence.length,
+        });
+        const claims = this.validateClaims(output.claims, toolResult.evidence);
+        const evidenceCoverage = this.evidenceCoverage(claims);
+        const result: ProductionStageResult = {
+          role,
+          ...output,
+          claims,
+          evidence: toolResult.evidence,
+          evidenceCoverage,
+          toolExecutions: toolResult.executions,
+          readyForApproval:
+            output.readyForApproval &&
+            output.deliverables.length > 0 &&
+            claims.every((claim) => claim.status === 'supported'),
+          completedAt: new Date().toISOString(),
+        };
+        result.generatedArtifact = await this.publishRoleArtifact(
+          state,
+          result,
+        );
+        return result;
+      } catch (error) {
+        lastError = error as Error;
+        toolResult.executions.push({
+          tool: 'role_structured_llm',
+          status: 'failed',
+          durationMs: Date.now() - modelStartedAt,
+          evidenceCount: toolResult.evidence.length,
+          error: lastError.message,
+        });
+        this.logger.warn(
+          `${role} structured output attempt ${attempt} failed: ${lastError.message}`,
+        );
+        if (attempt < 2) {
+          await this.sleep(ROLE_LLM_RETRY_BACKOFF_MS * 2 ** (attempt - 1));
+        }
+      }
+    }
+    const degraded = this.degradedRoleResult(
+      role,
+      state,
+      toolResult,
+      lastError,
+    );
+    degraded.generatedArtifact = await this.publishRoleArtifact(
+      state,
+      degraded,
+    );
+    return degraded;
+  }
+
+  private degradedRoleResult(
+    role: ProductionRole,
+    state: ProductionWorkflowStateType,
+    toolResult: Awaited<ReturnType<ProductionWorkflowTools['gather']>>,
+    error: Error | null,
+  ): ProductionStageResult {
+    const evidenceList = toolResult.evidence.length
+      ? toolResult.evidence
+          .map((item) => `- [${item.id}] ${item.docId}：${item.excerpt}`)
+          .join('\n')
+      : '- 当前没有检索到可用证据。';
+    return {
+      role,
+      summary: `${role} 节点模型调用失败，已生成证据保全版交付物，待人工补充。`,
+      deliverables: [
+        {
+          type: 'degraded-review',
+          title: `${state.projectId}-${role}-降级交付物`,
+          markdown: [
+            `# ${state.projectId} ${role} 降级交付物`,
+            '',
+            '## 当前状态',
+            '',
+            '结构化模型调用未在预算内完成。本文件只保留任务背景和已检索证据，不生成未经证实的业务结论。',
+            '',
+            '## 任务背景',
+            '',
+            state.brief,
+            '',
+            '## 已检索证据',
+            '',
+            evidenceList,
+            '',
+            '## 后续动作',
+            '',
+            '- 由当前岗位负责人核对证据并补齐结论。',
+            '- 修复模型调用后，只重跑当前岗位。',
+          ].join('\n'),
+        },
+      ],
+      claims: [
+        {
+          statement: '当前岗位结论尚未完成人工或模型确认。',
+          evidenceIds: [],
+          status: 'pending_confirmation',
+        },
+      ],
+      evidence: toolResult.evidence,
+      evidenceCoverage: 0,
+      issues: [error?.message ?? 'structured model output unavailable'],
+      downstreamRisks: ['下游不得把本岗位降级交付物视为已确认结论。'],
+      riskLevel: 'high',
+      toolExecutions: toolResult.executions,
+      readyForApproval: false,
+      completedAt: new Date().toISOString(),
+    };
+  }
+
+  private validateClaims(
+    claims: ProductionClaim[],
+    evidence: ProductionStageResult['evidence'],
+  ): ProductionClaim[] {
+    const allowedIds = new Set(evidence.map((item) => item.id));
+    return claims.map((claim) => {
+      const evidenceIds = claim.evidenceIds.filter((id) => allowedIds.has(id));
+      return {
+        ...claim,
+        evidenceIds,
+        status:
+          claim.status === 'supported' && evidenceIds.length > 0
+            ? 'supported'
+            : 'pending_confirmation',
+      };
+    });
+  }
+
+  private evidenceCoverage(claims: ProductionClaim[]): number {
+    if (claims.length === 0) return 1;
+    const supported = claims.filter(
+      (claim) => claim.status === 'supported',
+    ).length;
+    return Number((supported / claims.length).toFixed(4));
+  }
+
+  private sleep(durationMs: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, durationMs));
+  }
+
+  private async publishRoleArtifact(
+    state: ProductionWorkflowStateType,
+    result: ProductionStageResult,
+  ) {
+    const startedAt = Date.now();
+    const sourceText = this.renderDeliverables(
+      result.deliverables,
+      result.claims,
+    );
+    try {
+      const artifact = await this.artifacts.create({
+        ownerUserId: state.userId,
+        threadId: state.threadId,
+        title: `${state.projectId}-${result.role}-交付物`,
+        kind: 'markdown',
+        sourceText,
+      });
+      result.toolExecutions.push({
+        tool: 'artifact_generate',
+        status: 'success',
+        durationMs: Date.now() - startedAt,
+        evidenceCount: 0,
+      });
+      return {
+        id: String(artifact.id),
+        title: String(artifact.title),
+        kind: String(artifact.kind),
+        status: String(artifact.status),
+      };
+    } catch (error) {
+      result.toolExecutions.push({
+        tool: 'artifact_generate',
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        evidenceCount: 0,
+        fallback: '交付内容保留在工作流结果中，可稍后重新生成文件。',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  private renderDeliverables(
+    deliverables: ProductionDeliverable[],
+    claims: ProductionClaim[],
+  ): string {
+    const sections = deliverables.map(
+      (item) => `# ${item.title}\n\n${item.markdown}`,
+    );
+    const claimLines = claims.map(
+      (claim) =>
+        `- [${claim.status}] ${claim.statement}${
+          claim.evidenceIds.length
+            ? `（证据：${claim.evidenceIds.join('、')}）`
+            : ''
+        }`,
+    );
+    return [...sections, '# 事实声明与证据', ...claimLines].join('\n\n');
+  }
+
+  private requiresRoleApproval(
+    role: ProductionRole,
+    result: ProductionStageResult,
+    state: ProductionWorkflowStateType,
+  ): boolean {
+    if (state.approvalMode === 'required') return true;
+    if (state.approvalRoles.includes(role)) return true;
+    if (state.approvalMode !== 'risk_based') return false;
+    return (
+      RISK_RANK[result.riskLevel] >= RISK_RANK[state.riskApprovalThreshold]
+    );
+  }
+
+  private unionRoles(
+    current: ProductionRole[],
+    additions: ProductionRole[],
+  ): ProductionRole[] {
+    const included = new Set([...current, ...additions]);
+    return PRODUCTION_ROLES.filter((role) => included.has(role));
+  }
+
+  private async getOwnedState(threadId: string, userId: string) {
+    const snapshot = await this.app.getState(this.config(threadId));
+    const state = snapshot?.values as ProductionWorkflowStateType | undefined;
+    if (!state?.projectId) throw new Error('workflow not found');
+    if (state.userId !== userId) throw new Error('workflow not found');
+    return state;
+  }
+
+  private async runUntilSettled(
+    threadId: string,
+    initialState: ProductionWorkflowStateType,
+  ): Promise<ProductionWorkflowStateType> {
+    let state = initialState;
+    while (state.status === 'running') {
+      state = await this.app.invoke({}, this.config(threadId));
+    }
+    return state;
+  }
+
+  private config(threadId: string) {
+    return { configurable: { thread_id: `production:${threadId}` } };
+  }
+
+  private view(
+    threadId: string,
+    state: ProductionWorkflowStateType,
+    userId: string,
+  ) {
+    return {
+      threadId,
+      projectId: state.projectId,
+      userId,
+      currentRole: state.currentRole,
+      selectedRoles: state.selectedRoles,
+      executionBatches: state.executionBatches,
+      batchIndex: state.batchIndex,
+      currentBatch: state.currentBatch,
+      completedRoles: state.completedRoles,
+      stageIndex: state.stageIndex,
+      stepCount: state.stepCount,
+      maxSteps: state.maxSteps,
+      approvalMode: state.approvalMode,
+      approvalRoles: state.approvalRoles,
+      riskApprovalThreshold: state.riskApprovalThreshold,
+      pendingApprovalRoles: state.pendingApprovalRoles,
+      status: state.status,
+      feedback: state.feedback,
+      results: state.results,
+      error: state.error,
+      requiresApproval: state.status === 'pending_approval',
+    };
+  }
+}

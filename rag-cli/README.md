@@ -88,7 +88,7 @@ Current backend alignment:
 - `rag search` and `rag context` prefer the formal `/rag/search` and `/rag/context` APIs, then conservatively fall back when talking to an older backend.
 - `rag ask --stream` consumes backend SSE directly. It does not simulate a typewriter effect on the client.
 - `rag admin search`, `rag graph query`, `rag eval status`, and `rag eval run` expose existing backend operation, GraphRAG, and evaluation entrypoints.
-- The CLI does not manage Milvus, databases, production configs, or keys. Current project-level status is recorded in the root `ROADMAP.md`: maturity `96/100`, project RAG eval `28/28`; Milvus runtime timeout remains a backend/runtime blocker.
+- The CLI does not manage Milvus, databases, production configs, or keys. Current project-level status is recorded in the root `ROADMAP.md`: maturity `93/100`, project RAG eval `28/28`; Milvus runtime timeout remains a backend/runtime blocker.
 
 ## Output Contract
 

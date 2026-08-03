@@ -13,6 +13,10 @@ const checks = [
   jsonCheck('业务毒题模拟集', 'backend/eval/private-business-regression.dataset.json', [
     ['items', 50],
   ]),
+  jsonCheck('游戏活动/官网营销专项评测集', 'backend/eval/game-marketing-regression.dataset.json', [
+    ['documents', 8],
+    ['queries', 80],
+  ]),
   jsonCheck('GraphRAG 模拟种子', 'backend/eval/private-graph-business.seed.json', [
     ['documents', 10],
     ['initialEntities', 5],
@@ -30,7 +34,7 @@ const checks = [
     ['queries', 3],
   ]),
   fileCheck('部署 Checklist', 'DEPLOYMENT_CHECKLIST.md'),
-  fileCheck('一线大厂差距清单', 'docs/remaining-enhancement-plan.md'),
+  fileCheck('一线大厂差距清单', 'docs/plans/remaining-enhancement-plan.md'),
   fileCheck('外部工具 smoke', 'backend/scripts/smoke-external-tools.mjs'),
   fileCheck('视觉视频 readiness smoke', 'backend/scripts/smoke-vision-video-readiness.mjs'),
   fileCheck('Milvus smoke', 'backend/scripts/smoke-milvus-index.mjs'),

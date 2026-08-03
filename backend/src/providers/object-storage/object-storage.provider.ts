@@ -103,6 +103,24 @@ export class ObjectStorageProvider implements OnModuleInit {
     };
   }
 
+  async getObject(key: string): Promise<Buffer> {
+    const safeKey = key.replace(/^\/+/, '');
+    if (safeKey.split('/').includes('..')) {
+      throw new Error('Invalid object key.');
+    }
+
+    if (this.provider === 'minio' && this.client && this.minioReady) {
+      const stream = await this.client.getObject(this.bucket, safeKey);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk as Uint8Array));
+      }
+      return Buffer.concat(chunks);
+    }
+
+    return fs.readFile(path.join(this.localRoot, safeKey));
+  }
+
   private resolveMinioUrl(key: string): string {
     if (this.publicBaseUrl) {
       return `${this.publicBaseUrl.replace(/\/$/, '')}/${this.bucket}/${key}`;

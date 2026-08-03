@@ -1,4 +1,10 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+} from 'typeorm';
 
 /**
  * 文档元数据表
@@ -6,6 +12,8 @@ import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
  * 包含 LLM 自动抽取的元数据（title/author/summary/keywords/language/category）。
  */
 @Entity('documents_meta')
+@Index('IDX_documents_meta_project_activity', ['projectId', 'activityId'])
+@Index('IDX_documents_meta_lifecycle', ['lifecycleStatus'])
 export class DocumentMetaEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   docId!: string;
@@ -61,6 +69,36 @@ export class DocumentMetaEntity {
   /** 来源权威级别：official / draft / normal / deprecated */
   @Column({ type: 'varchar', length: 32, default: 'normal' })
   sourceAuthority!: string;
+
+  @Column({ type: 'varchar', length: 128, nullable: true, default: null })
+  projectId!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true, default: null })
+  activityId!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  region!: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true, default: null })
+  locale!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  channel!: string | null;
+
+  @Column({ type: 'varchar', length: 512, nullable: true, default: null })
+  roleScope!: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'general' })
+  documentType!: string;
+
+  @Column({ type: 'varchar', length: 32, default: 'effective' })
+  lifecycleStatus!: string;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  supersedesDocId!: string | null;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  ingestionQuality!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

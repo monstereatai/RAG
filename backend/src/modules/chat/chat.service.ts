@@ -16,6 +16,7 @@ import {
   type RagTraceEvent,
 } from '../../providers/observability/langfuse.provider';
 import type { SseEvent } from '../../rag/agentic/sse-event';
+import { resolveRoleContext } from './role-presets';
 
 @Injectable()
 export class ChatService {
@@ -56,6 +57,15 @@ export class ChatService {
       threadId,
     );
     const memoryMessages: Array<{ role: string; content: string }> = [];
+    const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
+    memoryMessages.push({
+      role: 'system',
+      content: roleContext.systemMessage,
+    });
+    const retrievalScope = {
+      ...req.scope,
+      role: roleContext.role,
+    };
     if (memoryResult.systemMessage) {
       memoryMessages.push({
         role: 'system',
@@ -108,6 +118,8 @@ export class ChatService {
         history,
         userId,
         memoryMessages,
+        undefined,
+        { scope: retrievalScope },
       );
 
       // 持久化本轮对话
@@ -144,8 +156,7 @@ export class ChatService {
         userId,
       );
 
-      // 查询日志（异步，不阻塞返回）
-      void this.logQuery({
+      const queryLogId = await this.logQuery({
         userId,
         query: req.query,
         mode,
@@ -155,6 +166,8 @@ export class ChatService {
           result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
         citationCount: result.references.length,
         hasAnswer: result.answer.length > 0,
+        answer: result.answer,
+        references: result.references,
       });
       this.traceAnswer({
         userId,
@@ -186,6 +199,7 @@ export class ChatService {
         mode: 'simple',
         route: 'simple',
         threadId,
+        queryLogId,
       };
     }
 
@@ -199,6 +213,8 @@ export class ChatService {
       threadId,
       userId,
       memoryMessages,
+      false,
+      { scope: retrievalScope },
     );
 
     // 持久化本轮对话
@@ -235,8 +251,7 @@ export class ChatService {
       userId,
     );
 
-    // 查询日志（异步，不阻塞返回）
-    void this.logQuery({
+    const queryLogId = await this.logQuery({
       userId,
       query: req.query,
       mode,
@@ -246,6 +261,8 @@ export class ChatService {
         result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
       citationCount: result.references?.length ?? 0,
       hasAnswer: result.answer.length > 0,
+      answer: result.answer,
+      references: result.references ?? [],
     });
     this.traceAnswer({
       userId,
@@ -271,10 +288,11 @@ export class ChatService {
       retrievalSufficient: result.retrievalSufficient,
       retrievalReason: result.retrievalReason,
       threadId,
+      queryLogId,
     };
   }
 
-  private async logQuery(params: {
+  async logQuery(params: {
     userId: string;
     query: string;
     mode: string;
@@ -283,11 +301,14 @@ export class ChatService {
     refused: boolean;
     citationCount: number;
     hasAnswer: boolean;
-  }): Promise<void> {
+    answer: string;
+    references: unknown[];
+  }): Promise<string | undefined> {
+    const id = randomUUID();
     try {
       await this.queryLogRepo.save(
         this.queryLogRepo.create({
-          id: randomUUID(),
+          id,
           userId: params.userId ?? null,
           query: params.query.slice(0, 2000),
           mode: params.mode as 'simple' | 'agentic' | 'auto',
@@ -296,10 +317,17 @@ export class ChatService {
           citationCount: params.citationCount,
           latencyMs: Date.now() - params.startTime,
           hasAnswer: params.hasAnswer,
+          answer: params.answer.slice(0, 20_000),
+          retrievalSnapshot: JSON.stringify(params.references).slice(
+            0,
+            100_000,
+          ),
         }),
       );
+      return id;
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
+      return undefined;
     }
   }
 

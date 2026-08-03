@@ -1,39 +1,79 @@
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EllipsisOutlined,
+  FileAddOutlined,
   FileWordOutlined,
+  FolderOpenOutlined,
   MenuOutlined,
   PaperClipOutlined,
   PlusOutlined,
   SendOutlined,
+  ShareAltOutlined,
   SoundOutlined,
-} from '@ant-design/icons';
-import { XMarkdown } from '@ant-design/x-markdown';
-import '@ant-design/x-markdown/es/XMarkdown/index.css';
-import { ModulePage, qaNav } from '@/components/AdminShell';
-import { Avatar, Button, Dropdown, Input } from 'antd';
-import React from 'react';
+} from "@ant-design/icons";
+import { XMarkdown } from "@ant-design/x-markdown";
+import "@ant-design/x-markdown/es/XMarkdown/index.css";
+import { ModulePage, qaNav } from "@/components/AdminShell";
+import {
+  Avatar,
+  Button,
+  Drawer,
+  Dropdown,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Tag,
+  message as antdMessage,
+} from "antd";
+import React from "react";
 import {
   type AguiEvent,
   type ChatMode,
   type ChatModel,
   type ConversationSummary,
+  type ArtifactKind,
+  type GeneratedArtifact,
   type ReferenceChunk,
+  type RolePreset,
   createTtsWebSocket,
+  createArtifact,
+  createArtifactShare,
   deleteConversation,
+  downloadArtifact,
   getEnabledQaModelOptions,
   getQaModelConfig,
   getConversation,
   getConversations,
+  getArtifacts,
+  getRolePresets,
   streamAguiAnswer,
-} from './service';
+} from "./service";
+
+const ROLE_PRESET_STORAGE_KEY = "qa_ops_role_preset";
+
+interface ArtifactFormValues {
+  title: string;
+  kind: ArtifactKind;
+  sourceText: string;
+  prompt?: string;
+}
+
+interface ShareFormValues {
+  visibility: "internal" | "external";
+  expiresInHours?: number;
+  maxDownloads?: number;
+}
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   createdAt: string;
-  status?: 'streaming' | 'done' | 'error';
+  status?: "streaming" | "done" | "error";
   route?: string;
   confidence?: number;
   retryCount?: number;
@@ -42,12 +82,13 @@ interface ChatMessage {
   retrievalReason?: string;
   references?: ReferenceChunk[];
   media?: AnswerMedia[];
+  artifacts?: GeneratedArtifact[];
   events?: EventTraceItem[];
 }
 
 interface AnswerMedia {
   id: string;
-  type: 'image';
+  type: "image";
   url: string;
   alt?: string;
   title?: string;
@@ -58,14 +99,17 @@ interface EventTraceItem {
   count: number;
 }
 
-type TtsStatus = 'connecting' | 'synthesizing' | 'playing' | 'error';
+type TtsStatus = "connecting" | "synthesizing" | "playing" | "error";
 
-const normalizeAssistantMarkdown = (content: string, status?: ChatMessage['status']) => {
+const normalizeAssistantMarkdown = (
+  content: string,
+  status?: ChatMessage["status"],
+) => {
   const normalized = content
-    .replace(/\r\n/g, '\n')
-    .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, '```$1\n');
+    .replace(/\r\n/g, "\n")
+    .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, "```$1\n");
   const fenceCount = normalized.match(/```/g)?.length ?? 0;
-  if (status === 'done' && fenceCount % 2 === 1) {
+  if (status === "done" && fenceCount % 2 === 1) {
     return `${normalized}\n\`\`\``;
   }
   return normalized;
@@ -75,35 +119,32 @@ const toAnswerMedia = (value: unknown): AnswerMedia[] => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
   return items
     .map((item, index): AnswerMedia | null => {
-      if (typeof item === 'string') {
+      if (typeof item === "string") {
         return {
           id: `image-${index}-${item}`,
-          type: 'image',
+          type: "image",
           url: item,
         };
       }
-      if (!item || typeof item !== 'object') return null;
+      if (!item || typeof item !== "object") return null;
       const record = item as Record<string, unknown>;
       const url =
-        typeof record.url === 'string'
+        typeof record.url === "string"
           ? record.url
-          : typeof record.src === 'string'
+          : typeof record.src === "string"
             ? record.src
-            : '';
+            : "";
       if (!url) return null;
-      const type = typeof record.type === 'string' ? record.type : 'image';
+      const type = typeof record.type === "string" ? record.type : "image";
       const mimeType =
-        typeof record.mimeType === 'string' ? record.mimeType : '';
-      if (type !== 'image' && !mimeType.startsWith('image/')) return null;
+        typeof record.mimeType === "string" ? record.mimeType : "";
+      if (type !== "image" && !mimeType.startsWith("image/")) return null;
       return {
-        id:
-          typeof record.id === 'string'
-            ? record.id
-            : `image-${index}-${url}`,
-        type: 'image',
+        id: typeof record.id === "string" ? record.id : `image-${index}-${url}`,
+        type: "image",
         url,
-        alt: typeof record.alt === 'string' ? record.alt : undefined,
-        title: typeof record.title === 'string' ? record.title : undefined,
+        alt: typeof record.alt === "string" ? record.alt : undefined,
+        title: typeof record.title === "string" ? record.title : undefined,
       };
     })
     .filter((item): item is AnswerMedia => Boolean(item));
@@ -125,6 +166,36 @@ const mergeMedia = (
   return merged;
 };
 
+const toAnswerArtifacts = (value: unknown): GeneratedArtifact[] => {
+  const items = Array.isArray(value) ? value : value ? [value] : [];
+  return items.filter((item): item is GeneratedArtifact => {
+    if (!item || typeof item !== "object") return false;
+    const record = item as Record<string, unknown>;
+    return (
+      typeof record.id === "string" &&
+      typeof record.title === "string" &&
+      typeof record.filename === "string" &&
+      ["markdown", "word", "excel", "architecture", "image"].includes(
+        String(record.kind),
+      ) &&
+      ["queued", "generating", "ready", "failed"].includes(
+        String(record.status),
+      )
+    );
+  });
+};
+
+const mergeArtifacts = (
+  current: GeneratedArtifact[] | undefined,
+  next: GeneratedArtifact[],
+) => {
+  const byId = new Map((current ?? []).map((item) => [item.id, item]));
+  next.forEach((item) => {
+    byId.set(item.id, item);
+  });
+  return [...byId.values()];
+};
+
 const appendEventTrace = (
   events: EventTraceItem[] | undefined,
   type: string,
@@ -144,25 +215,33 @@ const formatEventTrace = (events: EventTraceItem[]) =>
     .map((event) =>
       event.count > 1 ? `${event.type} × ${event.count}` : event.type,
     )
-    .join(' → ');
+    .join(" → ");
 
 const QaOps: React.FC = () => {
-  const [input, setInput] = React.useState('');
-  const [mode, setMode] = React.useState<ChatMode>('auto');
+  const [input, setInput] = React.useState("");
+  const [mode, setMode] = React.useState<ChatMode>("auto");
   const modelConfig = React.useMemo(() => getQaModelConfig(), []);
   const modelOptions = React.useMemo(
     () => getEnabledQaModelOptions(modelConfig),
     [modelConfig],
   );
-  const [model, setModel] = React.useState<ChatModel>(
-    modelConfig.defaultModel,
-  );
+  const [model, setModel] = React.useState<ChatModel>(modelConfig.defaultModel);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
-  const [activeTitle, setActiveTitle] = React.useState('');
+  const [rolePresets, setRolePresets] = React.useState<RolePreset[]>([]);
+  const [rolePresetId, setRolePresetId] = React.useState(() =>
+    typeof window === "undefined"
+      ? "business-owner"
+      : window.localStorage.getItem(ROLE_PRESET_STORAGE_KEY) ||
+        "business-owner",
+  );
+  const [rolePresetsLoading, setRolePresetsLoading] = React.useState(true);
+  const [activeTitle, setActiveTitle] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [threadId, setThreadId] = React.useState<string | undefined>(undefined);
   const threadIdRef = React.useRef<string | undefined>(undefined);
-  const [conversations, setConversations] = React.useState<ConversationSummary[]>([]);
+  const [conversations, setConversations] = React.useState<
+    ConversationSummary[]
+  >([]);
   const [sidebarLoading, setSidebarLoading] = React.useState(false);
   const [convPage, setConvPage] = React.useState(1);
   const PAGE_SIZE = 10;
@@ -173,6 +252,126 @@ const QaOps: React.FC = () => {
     Record<string, TtsStatus>
   >({});
   const chatBodyRef = React.useRef<HTMLDivElement>(null);
+  const [artifactForm] = Form.useForm<ArtifactFormValues>();
+  const [shareForm] = Form.useForm<ShareFormValues>();
+  const [artifactDrawerOpen, setArtifactDrawerOpen] = React.useState(false);
+  const [artifactModalOpen, setArtifactModalOpen] = React.useState(false);
+  const [shareModalOpen, setShareModalOpen] = React.useState(false);
+  const [artifacts, setArtifacts] = React.useState<GeneratedArtifact[]>([]);
+  const [artifactLoading, setArtifactLoading] = React.useState(false);
+  const [artifactSubmitting, setArtifactSubmitting] = React.useState(false);
+  const [selectedArtifact, setSelectedArtifact] =
+    React.useState<GeneratedArtifact | null>(null);
+
+  const loadArtifacts = React.useCallback(async () => {
+    setArtifactLoading(true);
+    try {
+      const result = await getArtifacts();
+      setArtifacts(result.data ?? []);
+    } catch (error) {
+      antdMessage.error(
+        error instanceof Error ? error.message : "文件列表加载失败",
+      );
+    } finally {
+      setArtifactLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!artifactDrawerOpen) return;
+    void loadArtifacts();
+    const timer = window.setInterval(() => void loadArtifacts(), 2500);
+    return () => window.clearInterval(timer);
+  }, [artifactDrawerOpen, loadArtifacts]);
+
+  const hasPendingMessageArtifact = messages.some((item) =>
+    item.artifacts?.some(
+      (artifact) =>
+        artifact.status === "queued" || artifact.status === "generating",
+    ),
+  );
+
+  React.useEffect(() => {
+    if (!hasPendingMessageArtifact) return;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const result = await getArtifacts(threadIdRef.current);
+        if (disposed) return;
+        const latest = result.data ?? [];
+        const byId = new Map(latest.map((item) => [item.id, item]));
+        setArtifacts(latest);
+        setMessages((current) =>
+          current.map((message) => ({
+            ...message,
+            artifacts: message.artifacts?.map(
+              (artifact) => byId.get(artifact.id) ?? artifact,
+            ),
+          })),
+        );
+      } catch {
+        // 文件中心仍可手动重试，轮询失败不打断当前回答。
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [hasPendingMessageArtifact]);
+
+  const openArtifactModal = (kind: ArtifactKind = "word") => {
+    const lastAnswer = [...messages]
+      .reverse()
+      .find((item) => item.role === "assistant" && item.content)?.content;
+    artifactForm.setFieldsValue({
+      title: activeTitle || "AI 问答产物",
+      kind,
+      sourceText: lastAnswer || input,
+      prompt: kind === "image" ? input : undefined,
+    });
+    setArtifactModalOpen(true);
+  };
+
+  const handleCreateArtifact = async () => {
+    const values = await artifactForm.validateFields();
+    setArtifactSubmitting(true);
+    try {
+      await createArtifact({ ...values, threadId });
+      antdMessage.success("已提交生成任务");
+      setArtifactModalOpen(false);
+      setArtifactDrawerOpen(true);
+      await loadArtifacts();
+    } finally {
+      setArtifactSubmitting(false);
+    }
+  };
+
+  const handleCreateShare = async () => {
+    if (!selectedArtifact) return;
+    const values = await shareForm.validateFields();
+    setArtifactSubmitting(true);
+    try {
+      const result = await createArtifactShare(selectedArtifact.id, values);
+      const token = result.data?.token;
+      if (!token) throw new Error(result.error || "分享链接创建失败");
+      const url = `${window.location.origin}/shared/artifacts/${encodeURIComponent(token)}`;
+      await navigator.clipboard.writeText(url);
+      antdMessage.success("分享链接已复制");
+      setShareModalOpen(false);
+    } finally {
+      setArtifactSubmitting(false);
+    }
+  };
+
+  const artifactKindLabel: Record<ArtifactKind, string> = {
+    markdown: "Markdown",
+    word: "Word",
+    excel: "Excel",
+    architecture: "架构图",
+    image: "图片",
+  };
 
   // 自动滚动到底部
   React.useEffect(() => {
@@ -205,6 +404,45 @@ const QaOps: React.FC = () => {
   }, [loadConversations]);
 
   React.useEffect(() => {
+    let active = true;
+    void getRolePresets()
+      .then((res) => {
+        if (!active) return;
+        const catalog = res.data;
+        const roles = Array.isArray(catalog?.roles) ? catalog.roles : [];
+        setRolePresets(roles);
+        setRolePresetId((currentRolePresetId) => {
+          if (roles.some((role) => role.id === currentRolePresetId)) {
+            return currentRolePresetId;
+          }
+          const nextRolePresetId =
+            catalog?.defaultRolePresetId || "business-owner";
+          window.localStorage.setItem(
+            ROLE_PRESET_STORAGE_KEY,
+            nextRolePresetId,
+          );
+          return nextRolePresetId;
+        });
+      })
+      .finally(() => {
+        if (active) setRolePresetsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const activeRolePreset = React.useMemo(
+    () => rolePresets.find((role) => role.id === rolePresetId),
+    [rolePresetId, rolePresets],
+  );
+
+  const handleRolePresetChange = (nextRolePresetId: string) => {
+    setRolePresetId(nextRolePresetId);
+    window.localStorage.setItem(ROLE_PRESET_STORAGE_KEY, nextRolePresetId);
+  };
+
+  React.useEffect(() => {
     return () => {
       abortRef.current?.abort();
       ttsRef.current?.close();
@@ -219,7 +457,9 @@ const QaOps: React.FC = () => {
     updater: (message: ChatMessage) => ChatMessage,
   ) => {
     setMessages((prev) =>
-      prev.map((message) => (message.id === messageId ? updater(message) : message)),
+      prev.map((message) =>
+        message.id === messageId ? updater(message) : message,
+      ),
     );
   };
 
@@ -230,7 +470,7 @@ const QaOps: React.FC = () => {
     setTtsStatusByMessageId({});
     setMessages([]);
     setThreadId(undefined);
-    setActiveTitle('');
+    setActiveTitle("");
   };
 
   const handleClearConversation = async () => {
@@ -248,7 +488,7 @@ const QaOps: React.FC = () => {
     }
     setMessages([]);
     setThreadId(undefined);
-    setActiveTitle('');
+    setActiveTitle("");
   };
 
   const handleSelectConversation = async (item: ConversationSummary) => {
@@ -268,15 +508,15 @@ const QaOps: React.FC = () => {
       // 将后端的消息列表转为前端 ChatMessage 格式
       const chatMessages: ChatMessage[] = detail.messages.map((m, i) => ({
         id: `${m.role}-${i}`,
-        role: m.role === 'human' ? 'user' : 'assistant',
+        role: m.role === "human" ? "user" : "assistant",
         content: m.content,
         createdAt: m.createdAt
-          ? new Date(m.createdAt).toLocaleTimeString('zh-CN', {
-              hour: '2-digit',
-              minute: '2-digit',
+          ? new Date(m.createdAt).toLocaleTimeString("zh-CN", {
+              hour: "2-digit",
+              minute: "2-digit",
             })
-          : '',
-        status: 'done' as const,
+          : "",
+        status: "done" as const,
       }));
       setMessages(chatMessages);
     } catch {
@@ -299,11 +539,11 @@ const QaOps: React.FC = () => {
   };
 
   const getTtsButtonText = (status?: TtsStatus) => {
-    if (status === 'connecting') return '连接中';
-    if (status === 'synthesizing') return '合成中';
-    if (status === 'playing') return '播放中';
-    if (status === 'error') return '重试';
-    return '播放';
+    if (status === "connecting") return "连接中";
+    if (status === "synthesizing") return "合成中";
+    if (status === "playing") return "播放中";
+    if (status === "error") return "重试";
+    return "播放";
   };
 
   const handlePlayTts = (messageId: string, text: string) => {
@@ -312,18 +552,18 @@ const QaOps: React.FC = () => {
 
     ttsRef.current?.close();
     setTtsStatusByMessageId({});
-    setTtsStatus(messageId, 'connecting');
+    setTtsStatus(messageId, "connecting");
     const chunks: BlobPart[] = [];
     const ws = createTtsWebSocket(content.slice(0, 800));
     ttsRef.current = ws;
     ws.onopen = () => {
-      setTtsStatus(messageId, 'synthesizing');
+      setTtsStatus(messageId, "synthesizing");
     };
     ws.onmessage = (event) => {
-      if (typeof event.data !== 'string') return;
+      if (typeof event.data !== "string") return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === 'audio' && typeof payload.data === 'string') {
+        if (payload.type === "audio" && typeof payload.data === "string") {
           const binary = atob(payload.data);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i += 1) {
@@ -331,26 +571,26 @@ const QaOps: React.FC = () => {
           }
           chunks.push(bytes);
         }
-        if (payload.type === 'end') {
+        if (payload.type === "end") {
           if (chunks.length === 0) {
-            setTtsStatus(messageId, 'error');
+            setTtsStatus(messageId, "error");
             return;
           }
-          const blob = new Blob(chunks, { type: 'audio/wav' });
+          const blob = new Blob(chunks, { type: "audio/wav" });
           if (audioRef.current) URL.revokeObjectURL(audioRef.current.src);
           const audio = new Audio(URL.createObjectURL(blob));
           audioRef.current = audio;
-          audio.onplay = () => setTtsStatus(messageId, 'playing');
+          audio.onplay = () => setTtsStatus(messageId, "playing");
           audio.onended = () => setTtsStatus(messageId);
-          audio.onerror = () => setTtsStatus(messageId, 'error');
-          void audio.play().catch(() => setTtsStatus(messageId, 'error'));
+          audio.onerror = () => setTtsStatus(messageId, "error");
+          void audio.play().catch(() => setTtsStatus(messageId, "error"));
         }
       } catch {
         // Ignore non-json websocket frames.
       }
     };
     ws.onerror = () => {
-      setTtsStatus(messageId, 'error');
+      setTtsStatus(messageId, "error");
     };
     ws.onclose = () => {
       if (ttsRef.current === ws) {
@@ -365,31 +605,31 @@ const QaOps: React.FC = () => {
 
     abortRef.current?.abort();
     abortRef.current = null;
-    setInput('');
+    setInput("");
     if (!activeTitle) {
       setActiveTitle(query);
     }
     setLoading(true);
 
-    const now = new Date().toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
+    const now = new Date().toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
     const assistantId = `assistant-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       {
         id: `user-${Date.now()}`,
-        role: 'user',
+        role: "user",
         content: query,
         createdAt: now,
       },
       {
         id: assistantId,
-        role: 'assistant',
-        content: '',
+        role: "assistant",
+        content: "",
         createdAt: now,
-        status: 'streaming',
+        status: "streaming",
         events: [],
       },
     ]);
@@ -403,7 +643,7 @@ const QaOps: React.FC = () => {
         updateMessage(assistantId, (message) => ({
           ...message,
           content: message.content || `错误：${error.message}`,
-          status: 'error',
+          status: "error",
         }));
         setLoading(false);
       },
@@ -413,6 +653,7 @@ const QaOps: React.FC = () => {
         void loadConversations();
       },
       threadId,
+      rolePresetId,
     ).then((controller) => {
       abortRef.current = controller;
     });
@@ -424,16 +665,18 @@ const QaOps: React.FC = () => {
       events: appendEventTrace(message.events, event.type),
     }));
 
-    if (event.type === 'RUN_STARTED') {
+    if (event.type === "RUN_STARTED") {
       // 保存后端返回的 threadId
       const eventThreadId =
-        typeof event.data?.threadId === 'string' ? event.data.threadId : undefined;
+        typeof event.data?.threadId === "string"
+          ? event.data.threadId
+          : undefined;
       if (eventThreadId) {
         setThreadId(eventThreadId);
       }
 
       const inputData = event.data?.input;
-      if (isRecord(inputData) && typeof inputData.mode === 'string') {
+      if (isRecord(inputData) && typeof inputData.mode === "string") {
         const route = inputData.mode;
         updateMessage(messageId, (message) => ({
           ...message,
@@ -450,8 +693,9 @@ const QaOps: React.FC = () => {
       return;
     }
 
-    if (event.type === 'TEXT_MESSAGE_CONTENT') {
-      const delta = typeof event.data?.delta === 'string' ? event.data.delta : '';
+    if (event.type === "TEXT_MESSAGE_CONTENT") {
+      const delta =
+        typeof event.data?.delta === "string" ? event.data.delta : "";
       updateMessage(messageId, (message) => ({
         ...message,
         content: message.content + delta,
@@ -459,64 +703,66 @@ const QaOps: React.FC = () => {
       return;
     }
 
-    if (event.type === 'STATE_DELTA') {
+    if (event.type === "STATE_DELTA") {
       applyStateDelta(event, messageId);
       return;
     }
 
-    if (event.type === 'CUSTOM') {
+    if (event.type === "CUSTOM") {
       applyCustomEvent(event, messageId);
       return;
     }
 
-    if (event.type === 'RUN_FINISHED') {
+    if (event.type === "RUN_FINISHED") {
       const output = event.data?.output;
       if (isRecord(output)) {
         const outputAnswer =
-          typeof output.answer === 'string' ? output.answer : undefined;
+          typeof output.answer === "string" ? output.answer : undefined;
         updateMessage(messageId, (message) => ({
           ...message,
           content: outputAnswer ?? message.content,
           references: Array.isArray(output.references)
             ? (output.references as ReferenceChunk[])
             : message.references,
-          media: mergeMedia(
-            message.media,
-            [
-              ...toAnswerMedia(output.images),
-              ...toAnswerMedia(output.media),
-              ...toAnswerMedia(output.attachments),
-            ],
+          media: mergeMedia(message.media, [
+            ...toAnswerMedia(output.images),
+            ...toAnswerMedia(output.media),
+            ...toAnswerMedia(output.attachments),
+          ]),
+          artifacts: mergeArtifacts(
+            message.artifacts,
+            toAnswerArtifacts(output.artifacts),
           ),
-          route: typeof output.route === 'string' ? output.route : message.route,
+          route:
+            typeof output.route === "string" ? output.route : message.route,
           confidence:
-            typeof output.confidence === 'number'
+            typeof output.confidence === "number"
               ? output.confidence
               : message.confidence,
           retryCount:
-            typeof output.retryCount === 'number'
+            typeof output.retryCount === "number"
               ? output.retryCount
               : message.retryCount,
           model: isChatModel(output.model) ? output.model : message.model,
           retrievalSufficient:
-            typeof output.retrievalSufficient === 'boolean'
+            typeof output.retrievalSufficient === "boolean"
               ? output.retrievalSufficient
               : message.retrievalSufficient,
           retrievalReason:
-            typeof output.retrievalReason === 'string'
+            typeof output.retrievalReason === "string"
               ? output.retrievalReason
               : message.retrievalReason,
-          status: 'done',
+          status: "done",
         }));
       }
       return;
     }
 
-    if (event.type === 'RUN_ERROR') {
+    if (event.type === "RUN_ERROR") {
       updateMessage(messageId, (message) => ({
         ...message,
-        content: `错误：${String(event.data?.message ?? '流式问答失败')}`,
-        status: 'error',
+        content: `错误：${String(event.data?.message ?? "流式问答失败")}`,
+        status: "error",
       }));
     }
   };
@@ -528,21 +774,21 @@ const QaOps: React.FC = () => {
     for (const patch of delta) {
       if (!isRecord(patch)) continue;
       const value = patch.value;
-      if (patch.path === '/routing' && isRecord(value)) {
+      if (patch.path === "/routing" && isRecord(value)) {
         updateMessage(messageId, (message) => ({
           ...message,
-          route: typeof value.route === 'string' ? value.route : message.route,
+          route: typeof value.route === "string" ? value.route : message.route,
         }));
       }
-      if (patch.path === '/sufficiency' && isRecord(value)) {
+      if (patch.path === "/sufficiency" && isRecord(value)) {
         updateMessage(messageId, (message) => ({
           ...message,
           retrievalSufficient:
-            typeof value.sufficient === 'boolean'
+            typeof value.sufficient === "boolean"
               ? value.sufficient
               : message.retrievalSufficient,
           retrievalReason:
-            typeof value.reason === 'string'
+            typeof value.reason === "string"
               ? value.reason
               : message.retrievalReason,
         }));
@@ -553,7 +799,7 @@ const QaOps: React.FC = () => {
   const applyCustomEvent = (event: AguiEvent, messageId: string) => {
     const name = event.data?.name;
     const value = event.data?.value;
-    if (name === 'rag.citation') {
+    if (name === "rag.citation") {
       updateMessage(messageId, (message) => ({
         ...message,
         references: Array.isArray(value)
@@ -561,20 +807,20 @@ const QaOps: React.FC = () => {
           : message.references,
       }));
     }
-    if (name === 'rag.reflection' && isRecord(value)) {
+    if (name === "rag.reflection" && isRecord(value)) {
       updateMessage(messageId, (message) => ({
         ...message,
         confidence:
-          typeof value.confidence === 'number'
+          typeof value.confidence === "number"
             ? value.confidence
             : message.confidence,
         retryCount:
-          typeof value.retryCount === 'number'
+          typeof value.retryCount === "number"
             ? value.retryCount
             : message.retryCount,
       }));
     }
-    if (name === 'rag.media' || name === 'rag.image' || name === 'rag.images') {
+    if (name === "rag.media" || name === "rag.image" || name === "rag.images") {
       const media = toAnswerMedia(value);
       if (media.length > 0) {
         updateMessage(messageId, (message) => ({
@@ -586,21 +832,21 @@ const QaOps: React.FC = () => {
   };
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null;
+    typeof value === "object" && value !== null;
 
   const isChatModel = (value: unknown): value is ChatModel =>
-    value === 'qwen' || value === 'deepseek';
+    value === "qwen" || value === "deepseek";
 
   const formatTime = (iso: string) => {
     try {
-      return new Date(iso).toLocaleDateString('zh-CN', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
+      return new Date(iso).toLocaleDateString("zh-CN", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
     } catch {
-      return '';
+      return "";
     }
   };
 
@@ -614,19 +860,23 @@ const QaOps: React.FC = () => {
               menu={{
                 items: [
                   {
-                    key: 'sortNewest',
-                    label: '按时间排序',
+                    key: "sortNewest",
+                    label: "按时间排序",
                   },
                   {
-                    key: 'sortCount',
-                    label: '按消息数排序',
+                    key: "sortCount",
+                    label: "按消息数排序",
                   },
                 ],
                 onClick: ({ key }) => {
                   const sorted = [...conversations];
-                  if (key === 'sortNewest') {
-                    sorted.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-                  } else if (key === 'sortCount') {
+                  if (key === "sortNewest") {
+                    sorted.sort(
+                      (a, b) =>
+                        new Date(b.updatedAt).getTime() -
+                        new Date(a.updatedAt).getTime(),
+                    );
+                  } else if (key === "sortCount") {
                     sorted.sort((a, b) => b.messageCount - a.messageCount);
                   }
                   setConversations(sorted);
@@ -655,11 +905,13 @@ const QaOps: React.FC = () => {
             ) : (
               conversations.slice(0, convPage * PAGE_SIZE).map((item) => (
                 <button
-                  className={`conv-item${item.threadId === threadId ? ' active' : ''}`}
+                  className={`conv-item${item.threadId === threadId ? " active" : ""}`}
                   key={item.threadId}
                   onClick={() => handleSelectConversation(item)}
                   type="button"
-                  onKeyDown={(e) => e.key === 'Enter' && handleSelectConversation(item)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && handleSelectConversation(item)
+                  }
                 >
                   <strong>{item.title}</strong>
                   <span>{formatTime(item.updatedAt)}</span>
@@ -668,8 +920,8 @@ const QaOps: React.FC = () => {
                     menu={{
                       items: [
                         {
-                          key: 'delete',
-                          label: '删除会话',
+                          key: "delete",
+                          label: "删除会话",
                           danger: true,
                           icon: <DeleteOutlined />,
                         },
@@ -678,11 +930,13 @@ const QaOps: React.FC = () => {
                         domEvent.stopPropagation();
                         try {
                           await deleteConversation(item.threadId);
-                          setConversations((prev) => prev.filter((c) => c.threadId !== item.threadId));
+                          setConversations((prev) =>
+                            prev.filter((c) => c.threadId !== item.threadId),
+                          );
                           if (threadId === item.threadId) {
                             setMessages([]);
                             setThreadId(undefined);
-                            setActiveTitle('');
+                            setActiveTitle("");
                           }
                         } catch {
                           // 删除失败
@@ -690,7 +944,7 @@ const QaOps: React.FC = () => {
                       },
                     }}
                     placement="bottomRight"
-                    trigger={['click']}
+                    trigger={["click"]}
                   >
                     <span
                       className="conv-more-btn"
@@ -715,24 +969,52 @@ const QaOps: React.FC = () => {
         </aside>
         <section className="rag-panel qa-chat">
           <div className="chat-head">
-            <h2>{activeTitle || 'AI 智能问答'}</h2>
-            <Button
-              icon={<DeleteOutlined />}
-              onClick={handleClearConversation}
-            >
-              清空对话
-            </Button>
+            <h2>{activeTitle || "AI 智能问答"}</h2>
+            <Space>
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={() => setArtifactDrawerOpen(true)}
+              >
+                文件
+              </Button>
+              <Button
+                icon={<DeleteOutlined />}
+                onClick={handleClearConversation}
+              >
+                清空对话
+              </Button>
+            </Space>
+          </div>
+          <div className="qa-role-toolbar">
+            <span>服务岗位</span>
+            <Select
+              aria-label="服务岗位"
+              loading={rolePresetsLoading}
+              onChange={handleRolePresetChange}
+              options={rolePresets.map((role) => ({
+                label: role.name,
+                value: role.id,
+              }))}
+              placeholder="选择岗位"
+              value={rolePresetId}
+            />
+            <p>{activeRolePreset?.summary ?? "正在加载岗位能力..."}</p>
           </div>
           <div className="chat-body" ref={chatBodyRef}>
             {messages.map((message) =>
-              message.role === 'user' ? (
+              message.role === "user" ? (
                 <div className="message user" key={message.id}>
                   <div>
                     <p>{message.content}</p>
                     <span>{message.createdAt}</span>
                   </div>
-                  <Avatar style={{ background: '#f0f2f5', color: '#8c8c8c' }}>
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <Avatar style={{ background: "#f0f2f5", color: "#8c8c8c" }}>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="currentColor"
+                    >
                       <title>用户</title>
                       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
                     </svg>
@@ -754,26 +1036,28 @@ const QaOps: React.FC = () => {
                           openLinksInNewTab
                           paragraphTag="div"
                         />
-                        {message.status === 'streaming' && (
+                        {message.status === "streaming" && (
                           <span className="answer-typing-caret" />
                         )}
                       </>
                     ) : (
-                      message.status === 'streaming' && (
+                      message.status === "streaming" && (
                         <p className="answer-loading">
                           正在通过 AG-UI 协议生成回答...
                         </p>
                       )
                     )}
-                    {message.status === 'done' && message.content && (
+                    {message.status === "done" && message.content && (
                       <Button
                         className="answer-voice-btn"
                         icon={<SoundOutlined />}
                         loading={
-                          ttsStatusByMessageId[message.id] === 'connecting' ||
-                          ttsStatusByMessageId[message.id] === 'synthesizing'
+                          ttsStatusByMessageId[message.id] === "connecting" ||
+                          ttsStatusByMessageId[message.id] === "synthesizing"
                         }
-                        onClick={() => handlePlayTts(message.id, message.content)}
+                        onClick={() =>
+                          handlePlayTts(message.id, message.content)
+                        }
                         size="small"
                         type="text"
                       >
@@ -785,7 +1069,7 @@ const QaOps: React.FC = () => {
                         {message.media.map((item) => (
                           <figure key={item.id}>
                             <img
-                              alt={item.alt ?? item.title ?? '回答图片'}
+                              alt={item.alt ?? item.title ?? "回答图片"}
                               loading="lazy"
                               src={item.url}
                             />
@@ -796,13 +1080,72 @@ const QaOps: React.FC = () => {
                         ))}
                       </div>
                     )}
+                    {message.artifacts && message.artifacts.length > 0 && (
+                      <div className="answer-artifacts">
+                        {message.artifacts.map((artifact) => (
+                          <article key={artifact.id}>
+                            <FileAddOutlined />
+                            <div>
+                              <strong>{artifact.title}</strong>
+                              <span>{artifact.filename}</span>
+                            </div>
+                            <Tag
+                              color={
+                                artifact.status === "ready"
+                                  ? "success"
+                                  : artifact.status === "failed"
+                                    ? "error"
+                                    : "processing"
+                              }
+                            >
+                              {
+                                {
+                                  queued: "排队中",
+                                  generating: "生成中",
+                                  ready: "可下载",
+                                  failed: "失败",
+                                }[artifact.status]
+                              }
+                            </Tag>
+                            <Button
+                              disabled={artifact.status !== "ready"}
+                              icon={<DownloadOutlined />}
+                              onClick={() =>
+                                void downloadArtifact(
+                                  artifact.id,
+                                  artifact.filename,
+                                ).catch((error) =>
+                                  antdMessage.error(error.message),
+                                )
+                              }
+                              size="small"
+                              title="下载"
+                            />
+                            <Button
+                              disabled={artifact.status !== "ready"}
+                              icon={<ShareAltOutlined />}
+                              onClick={() => {
+                                setSelectedArtifact(artifact);
+                                shareForm.setFieldsValue({
+                                  visibility: "external",
+                                  expiresInHours: 72,
+                                });
+                                setShareModalOpen(true);
+                              }}
+                              size="small"
+                              title="分享"
+                            />
+                          </article>
+                        ))}
+                      </div>
+                    )}
                     {message.route && (
                       <div className="answer-meta">
                         <span>路由：{message.route}</span>
                         {message.retrievalSufficient !== undefined && (
                           <span>
                             检索：
-                            {message.retrievalSufficient ? '充分' : '不足'}
+                            {message.retrievalSufficient ? "充分" : "不足"}
                           </span>
                         )}
                         {message.confidence !== undefined && (
@@ -814,7 +1157,7 @@ const QaOps: React.FC = () => {
                         {message.model && (
                           <span>
                             模型：
-                            {message.model === 'qwen' ? '通义千问' : 'DeepSeek'}
+                            {message.model === "qwen" ? "通义千问" : "DeepSeek"}
                           </span>
                         )}
                       </div>
@@ -839,7 +1182,7 @@ const QaOps: React.FC = () => {
                               <div>
                                 <b>{item.docId || item.id}</b>
                                 <span>
-                                  chunk #{item.chunkIndex} · score{' '}
+                                  chunk #{item.chunkIndex} · score{" "}
                                   {(item.totalScore ?? 0).toFixed(2)}
                                 </span>
                               </div>
@@ -854,19 +1197,45 @@ const QaOps: React.FC = () => {
             )}
           </div>
           {messages.length === 0 && (
-            <div className="suggestions">
-              <strong>你可能还想问</strong>
-              {[
-                '差旅报销需要哪些票据?',
-                '报销申请提交后多久能到账?',
-                '差旅报销的审批流程是怎样的?',
-                '特殊情况如何申请超标准报销?',
-              ].map((item) => (
-                <Button key={item} onClick={() => setInput(item)}>
-                  {item}
-                </Button>
-              ))}
-              <Button type="link">换一批</Button>
+            <div className="qa-role-workspace">
+              <div className="qa-role-intro">
+                <span className="qa-role-mark">
+                  {activeRolePreset?.shortName ?? "岗位"}
+                </span>
+                <div>
+                  <strong>{activeRolePreset?.name ?? "岗位能力加载中"}</strong>
+                  <p>{activeRolePreset?.summary}</p>
+                </div>
+              </div>
+              <div className="qa-role-responsibilities">
+                {activeRolePreset?.responsibilities.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="qa-role-actions">
+                <strong>常用任务</strong>
+                <div>
+                  {activeRolePreset?.starterTasks.map((item) => (
+                    <Button key={item} onClick={() => setInput(item)}>
+                      {item}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="qa-role-questions">
+                <strong>直接开始</strong>
+                <div>
+                  {activeRolePreset?.suggestedQuestions.map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => setInput(item)}
+                      type="button"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
           <div className="chat-input">
@@ -907,6 +1276,13 @@ const QaOps: React.FC = () => {
               <span>{input.length} / 2000</span>
               <Button disabled={loading} icon={<PaperClipOutlined />} />
               <Button
+                disabled={loading || (!input.trim() && !messages.length)}
+                icon={<FileAddOutlined />}
+                onClick={() => openArtifactModal()}
+              >
+                生成文件
+              </Button>
+              <Button
                 disabled={!input.trim() || loading}
                 icon={<SendOutlined />}
                 loading={loading}
@@ -919,6 +1295,159 @@ const QaOps: React.FC = () => {
           </div>
         </section>
       </div>
+      <Drawer
+        open={artifactDrawerOpen}
+        onClose={() => setArtifactDrawerOpen(false)}
+        size="large"
+        title="生成文件"
+        extra={
+          <Button
+            icon={<FileAddOutlined />}
+            type="primary"
+            onClick={() => openArtifactModal()}
+          >
+            新建
+          </Button>
+        }
+      >
+        <div className="artifact-list" aria-busy={artifactLoading}>
+          {!artifacts.length && !artifactLoading ? (
+            <p className="artifact-empty">暂无生成文件</p>
+          ) : (
+            artifacts.map((artifact) => (
+              <article className="artifact-item" key={artifact.id}>
+                <div className="artifact-item-main">
+                  <strong>{artifact.title}</strong>
+                  <span>{artifact.filename}</span>
+                  {artifact.errorMessage && <p>{artifact.errorMessage}</p>}
+                </div>
+                <div className="artifact-item-actions">
+                  <Tag>{artifactKindLabel[artifact.kind]}</Tag>
+                  <Tag
+                    color={
+                      artifact.status === "ready"
+                        ? "success"
+                        : artifact.status === "failed"
+                          ? "error"
+                          : "processing"
+                    }
+                  >
+                    {
+                      {
+                        queued: "排队中",
+                        generating: "生成中",
+                        ready: "可下载",
+                        failed: "失败",
+                      }[artifact.status]
+                    }
+                  </Tag>
+                  <Button
+                    disabled={artifact.status !== "ready"}
+                    icon={<DownloadOutlined />}
+                    onClick={() =>
+                      void downloadArtifact(
+                        artifact.id,
+                        artifact.filename,
+                      ).catch((error) => antdMessage.error(error.message))
+                    }
+                    title="下载"
+                  />
+                  <Button
+                    disabled={artifact.status !== "ready"}
+                    icon={<ShareAltOutlined />}
+                    onClick={() => {
+                      setSelectedArtifact(artifact);
+                      shareForm.setFieldsValue({
+                        visibility: "external",
+                        expiresInHours: 72,
+                      });
+                      setShareModalOpen(true);
+                    }}
+                    title="分享"
+                  />
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+      </Drawer>
+      <Modal
+        open={artifactModalOpen}
+        title="生成可传播文件"
+        okText="开始生成"
+        cancelText="取消"
+        confirmLoading={artifactSubmitting}
+        onCancel={() => setArtifactModalOpen(false)}
+        onOk={() => void handleCreateArtifact()}
+      >
+        <Form form={artifactForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="title"
+            label="文件标题"
+            rules={[{ required: true, message: "请输入文件标题" }]}
+          >
+            <Input maxLength={80} />
+          </Form.Item>
+          <Form.Item name="kind" label="文件类型" rules={[{ required: true }]}>
+            <Select
+              options={Object.entries(artifactKindLabel).map(
+                ([value, label]) => ({ value, label }),
+              )}
+            />
+          </Form.Item>
+          <Form.Item
+            name="sourceText"
+            label="文件内容"
+            rules={[{ required: true, message: "请输入或保留问答内容" }]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 8, maxRows: 16 }}
+              maxLength={200000}
+            />
+          </Form.Item>
+          <Form.Item name="prompt" label="图片补充描述">
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              maxLength={4000}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        open={shareModalOpen}
+        title={`分享：${selectedArtifact?.title ?? ""}`}
+        okText="创建并复制链接"
+        cancelText="取消"
+        confirmLoading={artifactSubmitting}
+        onCancel={() => setShareModalOpen(false)}
+        onOk={() => void handleCreateShare()}
+      >
+        <Form form={shareForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="visibility"
+            label="分享范围"
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { value: "external", label: "外部分享，无需登录" },
+                { value: "internal", label: "内部分享，需要登录" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="expiresInHours" label="有效时长（小时）">
+            <InputNumber min={1} max={8760} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="maxDownloads" label="最多下载次数">
+            <InputNumber
+              min={1}
+              max={100000}
+              placeholder="不填则不限次数"
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </ModulePage>
   );
 };

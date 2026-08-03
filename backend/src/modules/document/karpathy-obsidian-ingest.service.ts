@@ -5,6 +5,7 @@ import {
 } from '../obsidian/obsidian-knowledge.service';
 import { UrlExtractionResult } from './document-parser.util';
 import { DocumentService, UploadResult } from './document.service';
+import type { GameDocumentMetadata } from './document-profile.util';
 
 export interface KarpathyObsidianIngestResult {
   rag: UploadResult;
@@ -23,6 +24,7 @@ export class KarpathyObsidianIngestService {
     extracted: UrlExtractionResult;
     userId: string;
     filename: string;
+    businessMetadata?: Partial<GameDocumentMetadata>;
   }): Promise<KarpathyObsidianIngestResult> {
     const content = params.extracted.content.trim();
     const title = this.normalizeTitle(
@@ -30,10 +32,12 @@ export class KarpathyObsidianIngestService {
         this.extractTitleFromMarkdown(content) ||
         params.url,
     );
-    const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
-      content,
-    );
-    if (duplicate?.ragDocId) {
+    const duplicate =
+      await this.obsidianKnowledge.findSourceByContentHash(content);
+    if (
+      duplicate?.ragDocId &&
+      !this.hasBusinessMetadata(params.businessMetadata)
+    ) {
       const hasCurrentRagDoc = await this.documentService.hasDoc(
         duplicate.ragDocId,
         params.userId,
@@ -46,6 +50,7 @@ export class KarpathyObsidianIngestService {
           {
             originalBuffer: params.extracted.snapshot,
             contentType: params.extracted.contentType || 'text/plain',
+            businessMetadata: params.businessMetadata,
           },
         );
         return {
@@ -84,6 +89,7 @@ export class KarpathyObsidianIngestService {
       {
         originalBuffer: params.extracted.snapshot,
         contentType: params.extracted.contentType || 'text/plain',
+        businessMetadata: params.businessMetadata,
       },
     );
 
@@ -110,11 +116,15 @@ export class KarpathyObsidianIngestService {
     contentType?: string;
     originalBuffer?: Buffer;
     taskId?: string;
+    businessMetadata?: Partial<GameDocumentMetadata>;
   }): Promise<KarpathyObsidianIngestResult> {
     const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
       params.content,
     );
-    if (duplicate?.ragDocId) {
+    if (
+      duplicate?.ragDocId &&
+      !this.hasBusinessMetadata(params.businessMetadata)
+    ) {
       const hasCurrentRagDoc = await this.documentService.hasDoc(
         duplicate.ragDocId,
         params.userId,
@@ -129,6 +139,7 @@ export class KarpathyObsidianIngestService {
             originalBuffer:
               params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
             contentType: params.contentType ?? 'text/markdown',
+            businessMetadata: params.businessMetadata,
           },
         );
         return {
@@ -170,6 +181,7 @@ export class KarpathyObsidianIngestService {
         originalBuffer:
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',
+        businessMetadata: params.businessMetadata,
       },
     );
 
@@ -184,6 +196,17 @@ export class KarpathyObsidianIngestService {
     });
 
     return { rag, obsidian };
+  }
+
+  private hasBusinessMetadata(
+    metadata?: Partial<GameDocumentMetadata>,
+  ): boolean {
+    return Boolean(
+      metadata &&
+      Object.values(metadata).some((value) =>
+        Array.isArray(value) ? value.length > 0 : Boolean(value),
+      ),
+    );
   }
 
   private extractTitleFromMarkdown(content: string): string | null {

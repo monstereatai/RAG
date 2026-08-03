@@ -4,9 +4,18 @@ import { KarpathyRagModule } from '../karpathy/karpathy-rag.module';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { ToolsModule } from '../../tools/tools.module';
 import { PromptModule } from '../prompts/prompt.module';
+import { MetricsModule } from '../../modules/metrics/metrics.module';
+import { TracingModule } from '../../modules/tracing/tracing.module';
 
 @Module({
-  imports: [KarpathyRagModule, LlmModule, ToolsModule, PromptModule],
+  imports: [
+    KarpathyRagModule,
+    LlmModule,
+    ToolsModule,
+    PromptModule,
+    MetricsModule,
+    TracingModule,
+  ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],
 })

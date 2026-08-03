@@ -22,6 +22,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { ChatResumeDto } from './chat-resume.dto';
+import { ChatFeedbackDto } from './chat-feedback.dto';
+import { RagFeedbackService } from './rag-feedback.service';
+import { listRolePresets, resolveRoleContext } from './role-presets';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -31,7 +34,16 @@ export class ChatController {
     private readonly agenticRagService: AgenticRagService,
     private readonly conversationService: ConversationService,
     private readonly memoryService: MemoryService,
+    private readonly ragFeedbackService: RagFeedbackService,
   ) {}
+
+  @Get('role-presets')
+  rolePresets() {
+    return {
+      defaultRolePresetId: 'business-owner',
+      roles: listRolePresets(),
+    };
+  }
 
   /**
    * 非流式聊天（simple 模式；也可 agentic，无 SSE）
@@ -45,6 +57,14 @@ export class ChatController {
     return this.chatService.chat(body, user.userId);
   }
 
+  @Post('feedback')
+  submitFeedback(
+    @Body() body: ChatFeedbackDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.ragFeedbackService.create(body, user.userId);
+  }
+
   /**
    * SSE 流式聊天（agentic/auto 模式，推送完整 SSE 事件链）
    * GET /api/chat/stream?query=...&mode=agentic&threadId=...
@@ -55,6 +75,7 @@ export class ChatController {
     @CurrentUser() user: JwtPayload,
     @Query('mode') mode?: ChatMode,
     @Query('threadId') threadId?: string,
+    @Query('rolePresetId') rolePresetId?: string,
   ): Observable<SseEvent> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('query is required');
@@ -65,6 +86,7 @@ export class ChatController {
     return new Observable<SseEvent>((subscriber) => {
       void (async () => {
         try {
+          const startTime = Date.now();
           // 对话历史注入（SSE 流式模式）
           const activeThreadId =
             threadId ??
@@ -88,6 +110,11 @@ export class ChatController {
             activeThreadId,
           );
           const memoryMessages: Array<{ role: string; content: string }> = [];
+          const roleContext = resolveRoleContext(rolePresetId);
+          memoryMessages.push({
+            role: 'system',
+            content: roleContext.systemMessage,
+          });
           if (memoryResult.systemMessage) {
             memoryMessages.push({
               role: 'system',
@@ -104,6 +131,8 @@ export class ChatController {
               activeThreadId,
               userId,
               memoryMessages,
+              false,
+              { scope: { role: roleContext.role } },
             )
             .then(async (result) => {
               // 持久化本轮对话
@@ -127,6 +156,19 @@ export class ChatController {
                 query,
                 result.answer,
               );
+
+              await this.chatService.logQuery({
+                userId,
+                query,
+                mode: chatMode,
+                threadId: activeThreadId,
+                startTime,
+                refused: false,
+                citationCount: result.references?.length ?? 0,
+                hasAnswer: result.answer.length > 0,
+                answer: result.answer,
+                references: result.references ?? [],
+              });
 
               subscriber.complete();
             })

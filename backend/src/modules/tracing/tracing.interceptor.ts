@@ -5,7 +5,7 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { Observable, tap } from 'rxjs';
+import { finalize, Observable } from 'rxjs';
 import { TracingService } from './tracing.service';
 
 @Injectable()
@@ -24,12 +24,7 @@ export class TracingInterceptor implements NestInterceptor {
 
     res.setHeader('traceparent', this.tracingService.toTraceparent(trace));
 
-    return next.handle().pipe(
-      tap({
-        next: () => this.record(req, res, trace),
-        error: () => this.record(req, res, trace),
-      }),
-    );
+    return next.handle().pipe(finalize(() => this.record(req, res, trace)));
   }
 
   private record(

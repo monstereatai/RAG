@@ -1,115 +1,25 @@
-# 剩余 P2 增强项及红线项实施方案
+# 后端增强计划归档
 
-> 日期：2026-06-30 | 状态：待确认 | 类型：总览方案
+> 原始日期：2026-06-30｜校准日期：2026-08-03｜状态：本地开发项已完成，外部验收项迁移
 
-本文档汇总所有需要你确认后才能推进的事项，按依赖关系排序。
+本文档原来记录 BullMQ、短期记忆、Mem0 管理、部署模板和 Vision 接入方案。对应本地开发工作均已完成，不再作为待办事实源。
 
----
+## 已完成
 
-## 一、BullMQ 异步任务队列
+- [x] BullMQ 文档异步处理队列、Worker、状态 API 和 Redis 降级。
+- [x] Redis 短期记忆滑动窗口、结构化摘要和上下文注入。
+- [x] Mem0 cloud／local Provider、记忆 API 和管理后台页面。
+- [x] `DEPLOYMENT_CHECKLIST.md` 与 `scripts/deploy.sh` 部署模板。
+- [x] Vision mock／OpenAI-compatible Provider，图片／视频上传调用及失败降级。
+- [x] 27 个私密模拟文档、193 条业务问题、GraphRAG 种子、组织权限和多模态模拟包。
+- [x] 修复六岗位 Qwen 20 秒超时预算过短问题；连续三次完整 DAG 共 18／18 模型调用成功、0 降级。
 
-**问题**：文档处理（切片、Embedding、向量入库）当前在请求线程内同步执行，大文件阻塞 HTTP。
+## 仍未完成
 
-**方案**：详见 `docs/async-task-queue-plan.md`
+- [ ] 使用真实公司原件和 50～100 条真实毒题重新评测。
+- [ ] 接入真实组织系统、GraphRAG 数据源和视觉／视频模型。
+- [ ] 在三个以上时间窗口完成至少 30 次完整六岗位回放，验证 Qwen 长时间稳定性和正式配额。
+- [ ] 在目标规格机器完成性能、容量和长时间稳定性测试。
+- [ ] 完成登录后的 Agent Ops E2E 与生产部署验收。
 
-**需要你确认**：
-- [ ] 安装 `@nestjs/bullmq` + `bullmq` 依赖
-- [ ] 允许使用 Redis 做队列后端（已有 `RedisModule`）
-
----
-
-## 二、短期记忆产品化
-
-**现状**：Redis 已接入，`RedisModule` 已存在。但滑动窗口、摘要生成、上下文注入策略尚未产品化。
-
-**方案**：
-
-1. 在 `MemoryModule` 或 `ChatModule` 中新增短期记忆 Service
-2. Redis 中按 `sessionId` 存储最近 N 轮对话
-3. 当对话超过窗口大小时，调用 LLM 生成摘要并替换旧消息
-4. 每次新请求注入：最近消息 + 历史摘要
-5. 管理后台提供记忆查看和清理入口
-
-**依赖**：无外部依赖（只改代码），可立即实施。
-
-**需要你确认**：
-- [ ] 同意实施短期记忆产品化（不需要修改环境变量或 schema）
-
----
-
-## 三、长期记忆管理可视化（Mem0）
-
-**现状**：Mem0 Provider 已实现（cloud/local 双模式），`MemoryService` 已实现搜索/写入/分类器，`/api/v1/memories` 已有 GET/DELETE 接口。
-
-**可填的缺口**：
-- 管理后台 Mem0 记忆管理页面（查看/清理/开关用户级记忆）
-- Mem0 审计记录（谁在什么时候检索了什么记忆）
-
-**依赖**：admin 前端开发，不碰红线。
-
-**需要你确认**：
-- [ ] 同意实施管理后台 Mem0 记忆管理页面
-
----
-
-## 四、Deployment 部署准备
-
-**现状**：`docker/docker-compose.yml` 存在，`backend/Dockerfile` 存在，但缺少生产部署的完整流程和 checklist。
-
-**需要准备的文件**：
-
-1. **`DEPLOYMENT_CHECKLIST.md`**：生产部署前逐一确认的清单
-   - 域名、SSL 证书、反向代理
-   - `.env` 生产配置清单
-   - Milvus/PostgreSQL/Redis/ES/Neo4j 连接确认
-   - 外部 key 清单（Qwen、Bocha、Rerank、ASR/TTS 等）
-   - 备份策略
-   - 监控告警
-2. **`scripts/deploy.sh`**：一键部署脚本（服务器初始化 → 构建 → 启动）
-
-**红线**：不实际修改 `.env`、CI/CD 或执行部署。只出文档和脚本模板。
-
-**需要你确认**：
-- [ ] 同意我创建部署文档和脚本模板（不实际执行）
-
----
-
-## 五、视觉/视频模型接入（P2）
-
-**现状**：Vision Provider 脚手架已完成（interface + mock + openai-compatible + module）。
-`VISION_PROVIDER=mock` 时可在无 key 情况下开发运行。
-
-**遗留项**：
-1. Vision Provider 集成到文档上传流程（图片上传后自动调用 OCR/图像理解）
-2. 视频上传后调用 `describeVideo`
-3. 管理后台视觉处理状态展示
-
-**依赖**：
-- VISION_API_KEY 或 QWEN_VL_API_KEY 就位后才能真实联调
-- 无 key 时可继续用 mock provider 做开发和测试
-
-**可以现在做的**：
-- 集成 mock provider 到文档上传流程（已有 `document-parser.util.ts`）
-- 编写集成测试
-
----
-
-## 六、真实数据替换（P0/P1）
-
-所有 P0/P1 事项都依赖你提供真实数据：
-
-| 事项 | 你提供 | 我能做 |
-|------|--------|--------|
-| 真实公司私密原件 | 制度文档/音视频/截图文件 | 替换 `eval/private-*` 后运行评测 |
-| 真实 GraphRAG 业务数据 | 实体类型/关系/初始语料 | 导入 Neo4j 后校验 |
-| 真实组织架构数据 | 部门/岗位/继承规则 | 导入 admin-backend 后验证权限 |
-
----
-
-## 优先级建议
-
-1. ✅ **立即能做的**：短期记忆产品化、Mem0 管理页面、部署文档
-2. ⏳ **等你确认依赖后**：BullMQ 异步队列、Vision Provider 集成到上传流程
-3. 🔴 **依赖你提供输入**：真实数据替换、视觉 API key 联调
-
-你想先从哪个方向推进？
+当前真实进度以根目录 `ROADMAP.md` 为准，详细生产化差距见 `docs/plans/remaining-enhancement-plan.md`。本文件只保留历史决策上下文，避免旧勾选项继续误导后续开发。

@@ -8,12 +8,18 @@ import { VectorStoreProvider } from '../../providers/vector-store/vector-store.p
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
+import { canonicalizeRole } from '../../modules/chat/role-presets';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import {
   ObsidianKnowledgeService,
   ObsidianSearchHit,
 } from '../../modules/obsidian/obsidian-knowledge.service';
+import {
+  ContextBuilder,
+  detectRetrievalProfile,
+  RetrievalProfile,
+} from './context-builder';
 
 export interface RetrievedChunk {
   id: string;
@@ -35,6 +41,17 @@ export interface RetrievedChunk {
   effectiveAt?: string | null;
   expiredAt?: string | null;
   sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  supersedesDocId?: string | null;
+  retrievalSource?: 'bm25' | 'vector' | 'hybrid' | 'expansion' | 'obsidian';
+  contextRole?: 'hit' | 'neighbor' | 'section' | 'obsidian';
 }
 
 export interface KarpathyRagResult {
@@ -59,15 +76,50 @@ export interface KarpathyRagResult {
     effectiveAt?: string | null;
     expiredAt?: string | null;
     sourceAuthority?: string;
+    projectId?: string | null;
+    activityId?: string | null;
+    region?: string | null;
+    locale?: string | null;
+    channel?: string | null;
+    roleScope?: string[];
+    documentType?: string;
+    lifecycleStatus?: string;
+    supersedesDocId?: string | null;
+    retrievalSource?: RetrievedChunk['retrievalSource'];
+    contextRole?: RetrievedChunk['contextRole'];
   }>;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
   obsidianPaths?: string[];
   obsidianHits?: ObsidianSearchHit[];
+  retrievalDiagnostics?: RetrievalDiagnostics;
+}
+
+export interface RetrievalScope {
+  projectId?: string;
+  activityId?: string;
+  region?: string;
+  locale?: string;
+  channel?: string;
+  role?: string;
+  documentType?: string;
+  includeDeprecated?: boolean;
+}
+
+export interface RetrievalDiagnostics {
+  intent: RetrievalProfile['intent'];
+  candidateDepth: number;
+  expandedChunks: number;
+  duplicateChunksRemoved: number;
+  documentLimitRemoved: number;
+  budgetRemoved: number;
+  contextCharacters: number;
 }
 
 export interface RetrieveOptions {
   vectorSearch?: boolean;
+  scope?: RetrievalScope;
+  profile?: RetrievalProfile;
 }
 
 type RankedRetrievalHit = {
@@ -87,6 +139,15 @@ type RankedRetrievalHit = {
   effectiveAt?: string | null;
   expiredAt?: string | null;
   sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  supersedesDocId?: string | null;
 };
 
 /**
@@ -117,6 +178,15 @@ export class KarpathyRagService implements OnModuleInit {
       effectiveAt?: string | null;
       expiredAt?: string | null;
       sourceAuthority?: string;
+      projectId?: string | null;
+      activityId?: string | null;
+      region?: string | null;
+      locale?: string | null;
+      channel?: string | null;
+      roleScope?: string[];
+      documentType?: string;
+      lifecycleStatus?: string;
+      supersedesDocId?: string | null;
     }
   >();
 
@@ -128,7 +198,7 @@ export class KarpathyRagService implements OnModuleInit {
   private readonly bm25Weight = 0.3;
   private readonly cosineWeight = 0.7;
   private readonly rrfK = 60;
-  private readonly topK = 5;
+  private readonly contextBuilder = new ContextBuilder();
   private readonly unsupportedAnswer =
     '知识库片段不足以支撑可靠回答，暂不生成确定结论。';
 
@@ -196,6 +266,15 @@ export class KarpathyRagService implements OnModuleInit {
         effectiveAt: entry.effectiveAt,
         expiredAt: entry.expiredAt,
         sourceAuthority: entry.sourceAuthority,
+        projectId: entry.projectId,
+        activityId: entry.activityId,
+        region: entry.region,
+        locale: entry.locale,
+        channel: entry.channel,
+        roleScope: entry.roleScope,
+        documentType: entry.documentType,
+        lifecycleStatus: entry.lifecycleStatus,
+        supersedesDocId: entry.supersedesDocId,
       });
       this.persistedEntries.push(entry);
     }
@@ -221,6 +300,15 @@ export class KarpathyRagService implements OnModuleInit {
       effectiveAt?: Date | null;
       expiredAt?: Date | null;
       sourceAuthority?: string;
+      projectId?: string | null;
+      activityId?: string | null;
+      region?: string | null;
+      locale?: string | null;
+      channel?: string | null;
+      roleScope?: string[];
+      documentType?: string;
+      lifecycleStatus?: string;
+      supersedesDocId?: string | null;
     }>,
     userId?: string,
   ): void {
@@ -246,6 +334,15 @@ export class KarpathyRagService implements OnModuleInit {
         effectiveAt: c.effectiveAt?.toISOString() ?? null,
         expiredAt: c.expiredAt?.toISOString() ?? null,
         sourceAuthority: c.sourceAuthority,
+        projectId: c.projectId,
+        activityId: c.activityId,
+        region: c.region,
+        locale: c.locale,
+        channel: c.channel,
+        roleScope: c.roleScope,
+        documentType: c.documentType,
+        lifecycleStatus: c.lifecycleStatus,
+        supersedesDocId: c.supersedesDocId,
       });
       this.persistedEntries.push({
         id: c.id,
@@ -265,6 +362,15 @@ export class KarpathyRagService implements OnModuleInit {
         effectiveAt: c.effectiveAt?.toISOString() ?? null,
         expiredAt: c.expiredAt?.toISOString() ?? null,
         sourceAuthority: c.sourceAuthority,
+        projectId: c.projectId,
+        activityId: c.activityId,
+        region: c.region,
+        locale: c.locale,
+        channel: c.channel,
+        roleScope: c.roleScope,
+        documentType: c.documentType,
+        lifecycleStatus: c.lifecycleStatus,
+        supersedesDocId: c.supersedesDocId,
       });
     }
 
@@ -321,6 +427,25 @@ export class KarpathyRagService implements OnModuleInit {
     }
   }
 
+  updateDocumentLifecycle(
+    docId: string,
+    lifecycleStatus: string,
+    userId?: string,
+  ): void {
+    let changed = false;
+    this.persistedEntries = this.persistedEntries.map((entry) => {
+      if (entry.docId !== docId || entry.userId !== userId) return entry;
+      changed = true;
+      return { ...entry, lifecycleStatus };
+    });
+    for (const meta of this.chunkMeta.values()) {
+      if (meta.docId === docId && meta.userId === userId) {
+        meta.lifecycleStatus = lifecycleStatus;
+      }
+    }
+    if (changed) this.bm25Store.save(this.persistedEntries);
+  }
+
   /**
    * 混合检索：BM25 + Cosine 加权融合
    */
@@ -329,19 +454,41 @@ export class KarpathyRagService implements OnModuleInit {
     options: RetrieveOptions = {},
     userId?: string,
   ): Promise<RetrievedChunk[]> {
+    const result = await this.retrieveDetailed(query, options, userId);
+    return result.chunks;
+  }
+
+  async retrieveDetailed(
+    query: string,
+    options: RetrieveOptions = {},
+    userId?: string,
+  ): Promise<{
+    chunks: RetrievedChunk[];
+    diagnostics: RetrievalDiagnostics;
+    profile: RetrievalProfile;
+  }> {
     const vectorSearch = options.vectorSearch ?? true;
     const normalizedQuery = this.normalizeQuery(query);
+    const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
 
-    // 1. BM25 检索 topK*2（多召回一些用于融合）
-    const localBm25Hits = this.searchLocalBm25(normalizedQuery, userId);
+    const localBm25Hits = this.searchLocalBm25(
+      normalizedQuery,
+      userId,
+      profile.candidateDepth,
+    );
     let bm25Hits = localBm25Hits;
     if (this.elasticsearchProvider.isEnabled()) {
       const esHits = await this.elasticsearchProvider.search(
         normalizedQuery,
-        this.topK * 2,
+        profile.candidateDepth,
         userId,
+        options.scope,
       );
-      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits);
+      bm25Hits = this.mergeRankedHits(
+        esHits,
+        localBm25Hits,
+        profile.candidateDepth,
+      );
     }
     this.metricsService.observeRetrievalHits(
       this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
@@ -358,7 +505,7 @@ export class KarpathyRagService implements OnModuleInit {
         const queryVector = await this.embeddingProvider.embedQuery(query);
         cosineHits = await this.vectorStoreProvider.similaritySearch(
           queryVector,
-          this.topK * 2,
+          profile.candidateDepth,
           userId,
         );
         cosineHits = this.filterActiveVectorHits(cosineHits, userId);
@@ -376,14 +523,46 @@ export class KarpathyRagService implements OnModuleInit {
       cosineHits.length,
     );
 
-    // 3. RRF 排名融合：分数只用于展示和质量闸门，排序由 reciprocal rank 决定
     const fused = this.fuseByRrf(bm25Hits, cosineHits);
-
-    // 4. 按 RRF 总分排序，取 topK；可选叠加来源权威权重
-    const results = this.applySourceAuthority(fused).sort(
-      (a, b) => b.totalScore - a.totalScore,
+    const ranked = this.applySourceAuthority(fused)
+      .filter((chunk) => this.matchesScope(chunk, options.scope))
+      .sort((a, b) => b.totalScore - a.totalScore)
+      .slice(0, profile.candidateDepth)
+      .map((chunk) => ({
+        ...chunk,
+        retrievalSource:
+          chunk.bm25Score > 0 && chunk.cosineScore > 0
+            ? ('hybrid' as const)
+            : chunk.cosineScore > 0
+              ? ('vector' as const)
+              : ('bm25' as const),
+        contextRole: 'hit' as const,
+      }));
+    const expanded = this.expandContextChunks(
+      ranked,
+      profile,
+      userId,
+      options.scope,
     );
-    return results.slice(0, this.topK);
+    const built = this.contextBuilder.build(expanded, profile);
+    const diagnostics: RetrievalDiagnostics = {
+      intent: profile.intent,
+      candidateDepth: profile.candidateDepth,
+      expandedChunks: expanded.filter(
+        (chunk) => chunk.retrievalSource === 'expansion',
+      ).length,
+      duplicateChunksRemoved: built.stats.duplicateChunksRemoved,
+      documentLimitRemoved: built.stats.documentLimitRemoved,
+      budgetRemoved: built.stats.budgetRemoved,
+      contextCharacters: built.stats.contextCharacters,
+    };
+    this.metricsService.observeRetrievalContext(
+      profile.intent,
+      built.chunks.length,
+      diagnostics.expandedChunks,
+      diagnostics.contextCharacters,
+    );
+    return { chunks: built.chunks, diagnostics, profile };
   }
 
   /**
@@ -393,17 +572,28 @@ export class KarpathyRagService implements OnModuleInit {
   async retrieveBm25Only(
     query: string,
     userId?: string,
+    scope?: RetrievalScope,
   ): Promise<RetrievedChunk[]> {
     const normalizedQuery = this.normalizeQuery(query);
-    const localBm25Hits = this.searchLocalBm25(normalizedQuery, userId);
+    const profile = detectRetrievalProfile(normalizedQuery);
+    const localBm25Hits = this.searchLocalBm25(
+      normalizedQuery,
+      userId,
+      profile.candidateDepth,
+    );
     let bm25Hits = localBm25Hits;
     if (this.elasticsearchProvider.isEnabled()) {
       const esHits = await this.elasticsearchProvider.search(
         normalizedQuery,
-        this.topK * 2,
+        profile.candidateDepth,
         userId,
+        scope,
       );
-      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits);
+      bm25Hits = this.mergeRankedHits(
+        esHits,
+        localBm25Hits,
+        profile.candidateDepth,
+      );
     }
 
     this.metricsService.observeRetrievalHits(
@@ -429,7 +619,8 @@ export class KarpathyRagService implements OnModuleInit {
       })
       .map((chunk) => this.applySourceAuthorityToChunk(chunk))
       .sort((a, b) => b.totalScore - a.totalScore)
-      .slice(0, this.topK);
+      .filter((chunk) => this.matchesScope(chunk, scope))
+      .slice(0, profile.finalTopK);
   }
 
   /**
@@ -442,10 +633,11 @@ export class KarpathyRagService implements OnModuleInit {
     userId?: string,
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
+    retrieveOptions: RetrieveOptions = {},
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
-    const [chunks, obsidianHits] = await Promise.all([
-      this.retrieve(normalizedQuery, {}, userId),
+    const [retrieval, obsidianHits] = await Promise.all([
+      this.retrieveDetailed(normalizedQuery, retrieveOptions, userId),
       this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
         this.logger.warn(
           `Obsidian fast path failed: ${(error as Error).message}`,
@@ -453,12 +645,17 @@ export class KarpathyRagService implements OnModuleInit {
         return [] as ObsidianSearchHit[];
       }),
     ]);
+    const chunks = retrieval.chunks;
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
       obsidianHits,
     );
     const obsidianChunks = this.toObsidianChunks(obsidianHits);
-    const evidenceChunks = [...chunks, ...obsidianChunks];
+    const evidenceBuild = this.contextBuilder.build(
+      [...chunks, ...obsidianChunks],
+      retrieval.profile,
+    );
+    const evidenceChunks = evidenceBuild.chunks;
 
     if (chunks.length === 0) {
       if (obsidianGate.sufficient) {
@@ -476,6 +673,7 @@ export class KarpathyRagService implements OnModuleInit {
           retrievalReason: obsidianGate.reason,
           obsidianPaths: obsidianHits.map((hit) => hit.path),
           obsidianHits,
+          retrievalDiagnostics: retrieval.diagnostics,
         };
       }
       const answer = await this.generateModelFallbackAnswer(
@@ -492,6 +690,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalReason: `没有检索到候选片段；${obsidianGate.reason}；已使用模型兜底回答`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
+        retrievalDiagnostics: retrieval.diagnostics,
       };
     }
 
@@ -499,6 +698,7 @@ export class KarpathyRagService implements OnModuleInit {
       normalizedQuery,
       evidenceChunks,
       userId,
+      retrieveOptions.scope,
     );
     if (earlyDeterministicAnswer) {
       return {
@@ -508,6 +708,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalReason: '命中明确结构化事实，已使用片段抽取式回答',
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
+        retrievalDiagnostics: retrieval.diagnostics,
       };
     }
 
@@ -527,11 +728,15 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalReason: `${retrievalGate.reason}；${obsidianGate.reason}；已使用模型兜底回答`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
+        retrievalDiagnostics: retrieval.diagnostics,
       };
     }
 
     const context = evidenceChunks
-      .map((c, i) => `[片段 ${i + 1}]\n${sanitizeUntrustedContext(c.content)}`)
+      .map(
+        (c, i) =>
+          `[片段 ${i + 1}｜${c.contextRole ?? 'hit'}]\n${sanitizeUntrustedContext(c.content)}`,
+      )
       .join('\n\n---\n\n');
 
     this.logger.log(
@@ -541,6 +746,7 @@ export class KarpathyRagService implements OnModuleInit {
       normalizedQuery,
       evidenceChunks,
       userId,
+      retrieveOptions.scope,
     );
     if (deterministicAnswer) {
       return {
@@ -550,6 +756,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalReason: '命中明确结构化事实，已使用片段抽取式回答',
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
+        retrievalDiagnostics: retrieval.diagnostics,
       };
     }
 
@@ -590,6 +797,7 @@ export class KarpathyRagService implements OnModuleInit {
             retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
             obsidianPaths: obsidianHits.map((hit) => hit.path),
             obsidianHits,
+            retrievalDiagnostics: retrieval.diagnostics,
           };
         }
       }
@@ -601,6 +809,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrievalReason: citationGate.reason,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
+        retrievalDiagnostics: retrieval.diagnostics,
       };
     }
 
@@ -613,6 +822,7 @@ export class KarpathyRagService implements OnModuleInit {
         : '检索片段和答案引用通过本地质量闸门',
       obsidianPaths: obsidianHits.map((hit) => hit.path),
       obsidianHits,
+      retrievalDiagnostics: retrieval.diagnostics,
     };
   }
 
@@ -637,6 +847,7 @@ export class KarpathyRagService implements OnModuleInit {
   async assessFastPath(
     query: string,
     userId?: string,
+    options: RetrieveOptions = {},
   ): Promise<{
     sufficient: boolean;
     reason: string;
@@ -645,7 +856,7 @@ export class KarpathyRagService implements OnModuleInit {
   }> {
     const normalizedQuery = this.normalizeQuery(query);
     const [chunks, obsidianHits] = await Promise.all([
-      this.retrieve(normalizedQuery, {}, userId).catch((error) => {
+      this.retrieve(normalizedQuery, options, userId).catch((error) => {
         this.logger.warn(
           `Fast path RAG retrieval failed: ${(error as Error).message}`,
         );
@@ -679,7 +890,9 @@ export class KarpathyRagService implements OnModuleInit {
     hits: ObsidianSearchHit[];
     context: string;
   }> {
-    const hits = await this.obsidianKnowledge.search(this.normalizeQuery(query));
+    const hits = await this.obsidianKnowledge.search(
+      this.normalizeQuery(query),
+    );
     return {
       hits,
       context: this.obsidianKnowledge.formatHitsForPrompt(hits),
@@ -760,7 +973,7 @@ ${historyText || '无'}
         onToken?.(token);
       }
       return answer.trim();
-    } catch (err) {
+    } catch {
       const answer = await this.llmProvider.invoke(prompt);
       onToken?.(answer);
       return answer.trim();
@@ -881,10 +1094,11 @@ ${context}
     query: string,
     chunks: RetrievedChunk[],
     userId?: string,
+    scope?: RetrievalScope,
   ): string | null {
     const candidates = this.mergeEvidenceCandidates(
       chunks,
-      this.toPersistedChunks(userId),
+      this.toPersistedChunks(userId, scope),
     );
     const builders = [
       this.buildTravelPolicyVersionAnswer.bind(this),
@@ -916,10 +1130,16 @@ ${context}
 
     const current = chunks
       .map((chunk, index) => ({ chunk, index }))
-      .find(({ chunk }) => /2026/.test(chunk.content) && /650\s*元/.test(chunk.content));
+      .find(
+        ({ chunk }) =>
+          /2026/.test(chunk.content) && /650\s*元/.test(chunk.content),
+      );
     const historical = chunks
       .map((chunk, index) => ({ chunk, index }))
-      .find(({ chunk }) => /2025/.test(chunk.content) && /500\s*元/.test(chunk.content));
+      .find(
+        ({ chunk }) =>
+          /2025/.test(chunk.content) && /500\s*元/.test(chunk.content),
+      );
 
     if (!current || !historical) return null;
 
@@ -983,7 +1203,12 @@ ${context}
     chunks: RetrievedChunk[],
   ): string | null {
     if (!/客户行为日志|财务审计凭证|保留/.test(query)) return null;
-    const hit = this.findChunk(chunks, [/客户行为日志/, /180\s*天/, /财务审计凭证/, /10\s*年/]);
+    const hit = this.findChunk(chunks, [
+      /客户行为日志/,
+      /180\s*天/,
+      /财务审计凭证/,
+      /10\s*年/,
+    ]);
     if (!hit) return null;
     return `客户行为日志默认保留 180 天；财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。[片段${hit.index + 1}]`;
   }
@@ -1005,7 +1230,11 @@ ${context}
     if (!/nestjs/i.test(query) || !/provider|注入|模块/i.test(query)) {
       return null;
     }
-    const hit = this.findChunk(chunks, [/interface/, /providers/, /ConfigService/]);
+    const hit = this.findChunk(chunks, [
+      /interface/,
+      /providers/,
+      /ConfigService/,
+    ]);
     if (!hit) return null;
     return `NestJS 的 Provider 模式是在模块中通过 providers 注入切换实现：关键组件先用 interface 抽象，不同实现放到 Module 的 providers 中切换，环境变量由 ConfigService 统一管理。[片段${hit.index + 1}]`;
   }
@@ -1036,10 +1265,15 @@ ${context}
     return [...merged.values()];
   }
 
-  private toPersistedChunks(userId?: string): RetrievedChunk[] {
+  private toPersistedChunks(
+    userId?: string,
+    scope?: RetrievalScope,
+  ): RetrievedChunk[] {
     return this.persistedEntries
-      .filter((entry) => entry.userId === userId)
-      .map((entry, index) => ({
+      .filter(
+        (entry) => entry.userId === userId && this.matchesScope(entry, scope),
+      )
+      .map((entry) => ({
         id: entry.id,
         content: entry.content,
         docId: entry.docId,
@@ -1058,10 +1292,19 @@ ${context}
         effectiveAt: entry.effectiveAt,
         expiredAt: entry.expiredAt,
         sourceAuthority: entry.sourceAuthority,
+        projectId: entry.projectId,
+        activityId: entry.activityId,
+        region: entry.region,
+        locale: entry.locale,
+        channel: entry.channel,
+        roleScope: entry.roleScope,
+        documentType: entry.documentType,
+        lifecycleStatus: entry.lifecycleStatus,
+        supersedesDocId: entry.supersedesDocId,
+        retrievalSource: 'bm25' as const,
+        contextRole: 'hit' as const,
         sourceAuthorityWeight: 1,
-        chunkCandidateIndex: index,
-      }))
-      .map(({ chunkCandidateIndex: _chunkCandidateIndex, ...chunk }) => chunk);
+      }));
   }
 
   private extractEvidenceSentences(text: string): string[] {
@@ -1077,11 +1320,12 @@ ${context}
 
       const pathMatch = line.match(/^章节路径：(.+)$/);
       if (pathMatch) {
-        heading = pathMatch[1]
-          .split('>')
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .pop() ?? heading;
+        heading =
+          pathMatch[1]
+            .split('>')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .pop() ?? heading;
         continue;
       }
 
@@ -1111,10 +1355,11 @@ ${context}
   private searchLocalBm25(
     normalizedQuery: string,
     userId?: string,
+    limit = 10,
   ): RankedRetrievalHit[] {
     const userBm25 = this.getBm25Instance(userId);
     return userBm25
-      .search(normalizedQuery, this.topK * 2)
+      .search(normalizedQuery, limit)
       .map((hit) => {
         const meta = this.chunkMeta.get(hit.id);
         if (!meta || meta.userId !== userId) return null;
@@ -1133,6 +1378,7 @@ ${context}
   private mergeRankedHits(
     primaryHits: RankedRetrievalHit[],
     fallbackHits: RankedRetrievalHit[],
+    limit = 10,
   ): RankedRetrievalHit[] {
     const merged = new Map<string, RankedRetrievalHit>();
     for (const hit of [...primaryHits, ...fallbackHits]) {
@@ -1143,7 +1389,7 @@ ${context}
     }
     return [...merged.values()]
       .sort((a, b) => b.score - a.score)
-      .slice(0, this.topK * 2);
+      .slice(0, limit);
   }
 
   private toReferences(
@@ -1169,6 +1415,17 @@ ${context}
       effectiveAt: c.effectiveAt,
       expiredAt: c.expiredAt,
       sourceAuthority: c.sourceAuthority,
+      projectId: c.projectId,
+      activityId: c.activityId,
+      region: c.region,
+      locale: c.locale,
+      channel: c.channel,
+      roleScope: c.roleScope,
+      documentType: c.documentType,
+      lifecycleStatus: c.lifecycleStatus,
+      supersedesDocId: c.supersedesDocId,
+      retrievalSource: c.retrievalSource,
+      contextRole: c.contextRole,
     }));
   }
 
@@ -1190,6 +1447,8 @@ ${context}
       totalScore: hit.score,
       sourceAuthority: 'obsidian',
       headingPath: [hit.type, hit.title],
+      retrievalSource: 'obsidian',
+      contextRole: 'obsidian',
     }));
   }
 
@@ -1208,6 +1467,15 @@ ${context}
     | 'effectiveAt'
     | 'expiredAt'
     | 'sourceAuthority'
+    | 'projectId'
+    | 'activityId'
+    | 'region'
+    | 'locale'
+    | 'channel'
+    | 'roleScope'
+    | 'documentType'
+    | 'lifecycleStatus'
+    | 'supersedesDocId'
   > {
     return {
       parentChunkId: chunk.parentChunkId,
@@ -1221,6 +1489,15 @@ ${context}
       effectiveAt: chunk.effectiveAt,
       expiredAt: chunk.expiredAt,
       sourceAuthority: chunk.sourceAuthority,
+      projectId: chunk.projectId,
+      activityId: chunk.activityId,
+      region: chunk.region,
+      locale: chunk.locale,
+      channel: chunk.channel,
+      roleScope: chunk.roleScope,
+      documentType: chunk.documentType,
+      lifecycleStatus: chunk.lifecycleStatus,
+      supersedesDocId: chunk.supersedesDocId,
     };
   }
 
@@ -1332,6 +1609,116 @@ ${context}
     );
 
     return hits.filter((hit) => activeDocIds.has(hit.docId));
+  }
+
+  private matchesScope(
+    chunk: Partial<RetrievedChunk>,
+    scope: RetrievalScope = {},
+  ): boolean {
+    if (!scope.includeDeprecated && chunk.lifecycleStatus === 'deprecated') {
+      return false;
+    }
+    const exactFields: Array<
+      keyof Pick<
+        RetrievalScope,
+        | 'projectId'
+        | 'activityId'
+        | 'region'
+        | 'locale'
+        | 'channel'
+        | 'documentType'
+      >
+    > = [
+      'projectId',
+      'activityId',
+      'region',
+      'locale',
+      'channel',
+      'documentType',
+    ];
+    for (const field of exactFields) {
+      const expected = scope[field]?.trim().toLowerCase();
+      if (!expected) continue;
+      const actual = String(chunk[field] ?? '')
+        .trim()
+        .toLowerCase();
+      if (actual !== expected) return false;
+    }
+    if (scope.role) {
+      const expectedRole = canonicalizeRole(scope.role);
+      const roles = (chunk.roleScope ?? []).map(canonicalizeRole);
+      if (roles.length > 0 && !roles.includes(expectedRole)) return false;
+    }
+    return true;
+  }
+
+  private expandContextChunks(
+    hits: RetrievedChunk[],
+    profile: RetrievalProfile,
+    userId?: string,
+    scope?: RetrievalScope,
+  ): RetrievedChunk[] {
+    if (profile.neighborWindow === 0 && profile.sameSectionLimit === 0) {
+      return hits;
+    }
+
+    const entries = this.persistedEntries.filter(
+      (entry) => entry.userId === userId && this.matchesScope(entry, scope),
+    );
+    const expanded: RetrievedChunk[] = [];
+    const seen = new Set<string>();
+    const add = (chunk: RetrievedChunk) => {
+      if (!seen.has(chunk.id)) {
+        seen.add(chunk.id);
+        expanded.push(chunk);
+      }
+    };
+
+    for (const hit of hits) {
+      add(hit);
+      const sameDocument = entries.filter((entry) => entry.docId === hit.docId);
+      for (const entry of sameDocument) {
+        const distance = Math.abs(entry.chunkIndex - hit.chunkIndex);
+        if (distance > 0 && distance <= profile.neighborWindow) {
+          add(this.toExpandedChunk(entry, hit.totalScore * 0.85, 'neighbor'));
+        }
+      }
+      if (hit.sectionId && profile.sameSectionLimit > 0) {
+        sameDocument
+          .filter(
+            (entry) => entry.id !== hit.id && entry.sectionId === hit.sectionId,
+          )
+          .sort(
+            (a, b) =>
+              Math.abs(a.chunkIndex - hit.chunkIndex) -
+              Math.abs(b.chunkIndex - hit.chunkIndex),
+          )
+          .slice(0, profile.sameSectionLimit)
+          .forEach((entry) =>
+            add(this.toExpandedChunk(entry, hit.totalScore * 0.8, 'section')),
+          );
+      }
+    }
+    return expanded;
+  }
+
+  private toExpandedChunk(
+    entry: Bm25PersistedEntry,
+    score: number,
+    contextRole: 'neighbor' | 'section',
+  ): RetrievedChunk {
+    return {
+      id: entry.id,
+      content: entry.content,
+      docId: entry.docId,
+      chunkIndex: entry.chunkIndex,
+      ...this.pickChunkMetadata(entry),
+      bm25Score: 0,
+      cosineScore: 0,
+      totalScore: score,
+      retrievalSource: 'expansion',
+      contextRole,
+    };
   }
 
   private normalizeQuery(query: string): string {

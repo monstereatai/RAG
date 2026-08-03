@@ -15,7 +15,7 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
   - **数据硬隔离**：在 PostgreSQL 关系库、Redis 缓存、Milvus 向量存储及内存 BM25 分词索引四大组件中深度引入 `userId` 条件，彻底阻断跨租户的数据交互或隐私泄露。
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
-- **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在 3001 后端跑到 22/22 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
+- **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在真实后端跑到 28/28 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
 - **部署目标**：当前固定为 Docker Compose，见 `DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
 详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./rag-plan.md)。

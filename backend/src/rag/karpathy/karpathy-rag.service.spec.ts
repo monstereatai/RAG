@@ -5,6 +5,7 @@ import type { VectorStoreProvider } from '../../providers/vector-store/vector-st
 import type { LlmProvider } from '../../providers/llm/llm.provider';
 import type { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import type { MetricsService } from '../../modules/metrics/metrics.service';
+import type { ObsidianKnowledgeService } from '../../modules/obsidian/obsidian-knowledge.service';
 
 describe('KarpathyRagService exception scenarios', () => {
   function createService(overrides?: {
@@ -25,6 +26,11 @@ describe('KarpathyRagService exception scenarios', () => {
       .mockResolvedValue('answer');
     const llmProvider = {
       invoke: llmInvoke,
+      getModel: jest.fn().mockReturnValue({
+        stream: async function* (messages: unknown) {
+          yield { content: await llmInvoke(messages) };
+        },
+      }),
     } as unknown as LlmProvider;
     const configService = {
       get: jest
@@ -38,17 +44,32 @@ describe('KarpathyRagService exception scenarios', () => {
     const observeRetrievalHits = jest.fn();
     const metricsService = {
       observeRetrievalHits,
+      observeRetrievalContext: jest.fn(),
     } as unknown as MetricsService;
+    const obsidianKnowledge = {
+      search: jest.fn().mockResolvedValue([]),
+      assessHits: jest.fn().mockReturnValue({
+        sufficient: false,
+        reason: 'Obsidian 未命中',
+      }),
+      formatHitsForPrompt: jest.fn().mockReturnValue(''),
+    } as unknown as ObsidianKnowledgeService;
+
+    const service = new KarpathyRagService(
+      embeddingProvider,
+      vectorStoreProvider,
+      llmProvider,
+      configService,
+      elasticsearchProvider,
+      metricsService,
+      obsidianKnowledge,
+    );
+    (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
+      save: jest.fn(),
+    };
 
     return {
-      service: new KarpathyRagService(
-        embeddingProvider,
-        vectorStoreProvider,
-        llmProvider,
-        configService,
-        elasticsearchProvider,
-        metricsService,
-      ),
+      service,
       llmInvoke,
       vectorStoreProvider,
       metricsService,
@@ -60,11 +81,12 @@ describe('KarpathyRagService exception scenarios', () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('今天是星期三。');
 
-    await expect(service.answer('anything')).resolves.toEqual({
+    await expect(service.answer('anything')).resolves.toMatchObject({
       answer: '今天是星期三。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
+      retrievalReason:
+        '没有检索到候选片段；Obsidian 未命中；已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
@@ -86,11 +108,12 @@ describe('KarpathyRagService exception scenarios', () => {
 
     await expect(
       service.answer('quantum physics', [], 'user-1'),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: '量子物理研究微观粒子的行为。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '没有检索到候选片段；已使用模型兜底回答',
+      retrievalReason:
+        '没有检索到候选片段；Obsidian 未命中；已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
@@ -137,7 +160,7 @@ describe('KarpathyRagService exception scenarios', () => {
 
     await expect(
       service.answer('LangChain RAG', [], 'user-1'),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
       references: [],
       retrievalSufficient: false,
@@ -248,7 +271,7 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    expect(result.answer).toContain('片段中同时提到 2025、2026 版本');
+    expect(result.answer).toContain('应按 2026 版优先生效');
     expect(result.answer).toContain('[片段1]');
   });
 
@@ -281,12 +304,12 @@ describe('KarpathyRagService exception scenarios', () => {
 
     await expect(
       service.answer('quantum physics', [], 'user-1'),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       answer: '量子物理关注微观粒子和能量的行为。',
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '检索片段与问题关键词重合数 0 低于阈值 1；已使用模型兜底回答',
+        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
@@ -480,10 +503,8 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    const firstPrompt = llmInvoke.mock.calls.at(0)?.at(0);
-    expect(JSON.stringify(firstPrompt)).toContain(
-      '差旅制度 住宿标准 优先生效 历史版本',
-    );
+    expect(result.answer).toContain('应按 2026 版优先生效');
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
   it('applies configured source authority weights to retrieval ranking', async () => {
@@ -521,11 +542,7 @@ describe('KarpathyRagService exception scenarios', () => {
       docId: 'official-policy',
       sourceAuthorityWeight: 1.5,
     });
-    expect(results[1]).toMatchObject({
-      id: 'draft-chunk',
-      docId: 'draft-policy',
-      sourceAuthorityWeight: 0.5,
-    });
+    expect(results).toHaveLength(1);
   });
 
   it('filters stale vector hits whose docId is no longer active', async () => {
@@ -596,5 +613,80 @@ describe('KarpathyRagService exception scenarios', () => {
       effectiveAt: '2026-01-01T00:00:00.000Z',
       sourceAuthority: 'official',
     });
+  });
+
+  it('filters by game project and expands neighboring procedure chunks', async () => {
+    const { service } = createService();
+    service.indexChunks(
+      [
+        {
+          id: 'a-0',
+          content: '活动配置准备：创建夏日抽奖活动。',
+          docId: 'doc-a',
+          chunkIndex: 0,
+          sectionId: 'setup',
+          projectId: 'game-a',
+        },
+        {
+          id: 'a-1',
+          content: '抽奖流程配置：填写奖池并提交审核。',
+          docId: 'doc-a',
+          chunkIndex: 1,
+          sectionId: 'setup',
+          projectId: 'game-a',
+        },
+        {
+          id: 'b-0',
+          content: '抽奖流程配置：这是另一个游戏项目。',
+          docId: 'doc-b',
+          chunkIndex: 0,
+          projectId: 'game-b',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.retrieveDetailed(
+      '如何配置抽奖流程？',
+      { vectorSearch: false, scope: { projectId: 'game-a' } },
+      'user-1',
+    );
+
+    expect(result.chunks.every((chunk) => chunk.projectId === 'game-a')).toBe(
+      true,
+    );
+    expect(
+      result.chunks.some((chunk) => chunk.contextRole === 'neighbor'),
+    ).toBe(true);
+    expect(result.diagnostics.intent).toBe('procedure');
+    expect(result.diagnostics.expandedChunks).toBeGreaterThan(0);
+  });
+
+  it('removes a superseded document from default retrieval', async () => {
+    const { service } = createService();
+    service.indexChunks(
+      [
+        {
+          id: 'old-0',
+          content: '夏日活动奖励规则为旧版金币方案。',
+          docId: 'old-doc',
+          chunkIndex: 0,
+          lifecycleStatus: 'effective',
+        },
+      ],
+      'user-1',
+    );
+    service.updateDocumentLifecycle('old-doc', 'deprecated', 'user-1');
+
+    await expect(
+      service.retrieve('夏日活动奖励规则', { vectorSearch: false }, 'user-1'),
+    ).resolves.toHaveLength(0);
+    await expect(
+      service.retrieve(
+        '夏日活动奖励规则',
+        { vectorSearch: false, scope: { includeDeprecated: true } },
+        'user-1',
+      ),
+    ).resolves.toHaveLength(1);
   });
 });

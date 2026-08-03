@@ -84,7 +84,7 @@ services:
 
   # ---- Milvus 2.4 standalone（向量库）----
   milvus:
-    image: milvusdb/milvus:v2.4.4
+    image: milvusdb/milvus:v2.4.19
     container_name: rag-milvus
     restart: unless-stopped
     command: ['milvus', 'run', 'standalone']

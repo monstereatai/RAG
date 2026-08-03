@@ -17,7 +17,39 @@ type IndexedChunk = {
   effectiveAt?: string | null;
   expiredAt?: string | null;
   sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  supersedesDocId?: string | null;
 };
+
+export interface ElasticsearchSearchScope {
+  projectId?: string;
+  activityId?: string;
+  region?: string;
+  locale?: string;
+  channel?: string;
+  role?: string;
+  documentType?: string;
+  includeDeprecated?: boolean;
+}
+
+const BUSINESS_PROPERTIES = {
+  projectId: { type: 'keyword' },
+  activityId: { type: 'keyword' },
+  region: { type: 'keyword' },
+  locale: { type: 'keyword' },
+  channel: { type: 'keyword' },
+  roleScope: { type: 'keyword' },
+  documentType: { type: 'keyword' },
+  lifecycleStatus: { type: 'keyword' },
+  supersedesDocId: { type: 'keyword' },
+} satisfies Record<string, estypes.MappingProperty>;
 
 /**
  * Elasticsearch Provider
@@ -89,6 +121,13 @@ export class ElasticsearchProvider implements OnModuleInit {
           );
           await this.client.indices.delete({ index: this.indexName });
         } else {
+          if (!properties?.projectId) {
+            await this.client.indices.putMapping({
+              index: this.indexName,
+              properties: BUSINESS_PROPERTIES,
+            });
+            this.logger.log('ES business metadata mapping added');
+          }
           return;
         }
       } catch (err) {
@@ -133,6 +172,7 @@ export class ElasticsearchProvider implements OnModuleInit {
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
           sourceAuthority: { type: 'keyword' },
+          ...BUSINESS_PROPERTIES,
           createdAt: { type: 'date' },
         },
       },
@@ -161,6 +201,15 @@ export class ElasticsearchProvider implements OnModuleInit {
       effectiveAt?: Date | null;
       expiredAt?: Date | null;
       sourceAuthority?: string;
+      projectId?: string | null;
+      activityId?: string | null;
+      region?: string | null;
+      locale?: string | null;
+      channel?: string | null;
+      roleScope?: string[];
+      documentType?: string;
+      lifecycleStatus?: string;
+      supersedesDocId?: string | null;
     }>,
     userId?: string,
   ): Promise<void> {
@@ -185,6 +234,15 @@ export class ElasticsearchProvider implements OnModuleInit {
           effectiveAt: c.effectiveAt?.toISOString() ?? null,
           expiredAt: c.expiredAt?.toISOString() ?? null,
           sourceAuthority: c.sourceAuthority,
+          projectId: c.projectId,
+          activityId: c.activityId,
+          region: c.region,
+          locale: c.locale,
+          channel: c.channel,
+          roleScope: c.roleScope,
+          documentType: c.documentType,
+          lifecycleStatus: c.lifecycleStatus,
+          supersedesDocId: c.supersedesDocId,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -222,6 +280,31 @@ export class ElasticsearchProvider implements OnModuleInit {
     }
   }
 
+  async updateDocumentLifecycle(
+    docId: string,
+    lifecycleStatus: string,
+    userId?: string,
+  ): Promise<void> {
+    if (!this.enabled) return;
+    const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
+    if (userId) filter.push({ term: { userId } });
+    try {
+      await this.client.updateByQuery({
+        index: this.indexName,
+        query: { bool: { filter } },
+        script: {
+          source: 'ctx._source.lifecycleStatus = params.status',
+          params: { status: lifecycleStatus },
+        },
+        refresh: true,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `ES lifecycle update failed for docId=${docId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   /**
    * BM25 全文检索（ES 原生 BM25 算法）
    */
@@ -229,6 +312,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     query: string,
     topK = 5,
     userId?: string,
+    scope: ElasticsearchSearchScope = {},
   ): Promise<
     Array<{
       id: string;
@@ -247,6 +331,15 @@ export class ElasticsearchProvider implements OnModuleInit {
       effectiveAt?: string | null;
       expiredAt?: string | null;
       sourceAuthority?: string;
+      projectId?: string | null;
+      activityId?: string | null;
+      region?: string | null;
+      locale?: string | null;
+      channel?: string | null;
+      roleScope?: string[];
+      documentType?: string;
+      lifecycleStatus?: string;
+      supersedesDocId?: string | null;
     }>
   > {
     if (!this.enabled) return [];
@@ -255,6 +348,24 @@ export class ElasticsearchProvider implements OnModuleInit {
       const filter: estypes.QueryDslQueryContainer[] = userId
         ? [{ term: { userId } }]
         : [];
+      for (const [field, value] of Object.entries({
+        projectId: scope.projectId,
+        activityId: scope.activityId,
+        region: scope.region,
+        locale: scope.locale,
+        channel: scope.channel,
+        documentType: scope.documentType,
+      })) {
+        if (value) filter.push({ term: { [field]: value } });
+      }
+      if (scope.role) filter.push({ term: { roleScope: scope.role } });
+      if (!scope.includeDeprecated) {
+        filter.push({
+          bool: {
+            must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
+          },
+        });
+      }
       const queryObj: estypes.QueryDslQueryContainer = {
         bool: {
           must: [
@@ -295,6 +406,15 @@ export class ElasticsearchProvider implements OnModuleInit {
           effectiveAt: src?.effectiveAt,
           expiredAt: src?.expiredAt,
           sourceAuthority: src?.sourceAuthority,
+          projectId: src?.projectId,
+          activityId: src?.activityId,
+          region: src?.region,
+          locale: src?.locale,
+          channel: src?.channel,
+          roleScope: src?.roleScope,
+          documentType: src?.documentType,
+          lifecycleStatus: src?.lifecycleStatus,
+          supersedesDocId: src?.supersedesDocId,
         };
       });
     } catch (err) {

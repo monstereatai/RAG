@@ -102,7 +102,8 @@ sequenceDiagram
   B->>B: JWT auth + userId
   B->>P: Parse file
   P->>B: Text content
-  B->>B: Chunking
+  B->>B: Detect type + quality gate
+  B->>B: Strategy routing + structure-aware chunking
   B->>E: Generate embeddings
   E->>V: Insert chunks by userId/docId
   B->>S: Index text chunks
@@ -112,6 +113,17 @@ sequenceDiagram
 
 索引策略：
 
+- Chunking 先按 Markdown 标题建立父子 Section，每个叶子 Chunk 重复完整 `headingPath`，避免切分后丢失 PRD、接口、测试章节语境。
+- 游戏官网／活动业务文档采用结构保护切片：代码围栏保持完整；配置、概率和地区表格按完整行切分，并在每个表格 Chunk 重复表头；空单元格与转义竖线保持原列语义。
+- 接口契约、测试／验收、版本／地区规则写入轻量内容类型标识，供 BM25／ES、向量召回和 Rerank 联合识别；父子关系、source span、clause 和 table metadata 继续写入 `document_chunks`。
+- 入库先执行文档类型识别与质量报告，再选择 PRD／API／Design／Test／Config／Postmortem／General 切片策略。
+- 检索采用“自适应候选召回 → RRF／权威排序 → Section／相邻块扩展 → 去重与来源限额 → Token 预算与首尾交错排布”的上下文治理链路。
+- `documents_meta` 与 `document_chunks` 保存 project／activity／region／locale／channel／roleScope／documentType／lifecycle metadata；默认过滤 deprecated，历史对比显式放开。
+- `rag_feedback` 保存真实用户反馈、错误归因、召回快照和回归集状态，未经审核不进入 Prompt 或 Few-Shot。
+- `AddGameProductionRagGovernance` migration 为上述业务元数据、生命周期、query log 快照和反馈表提供 schema；本地开发库已执行，生产环境仍需独立审批。
+- `role-presets.ts` 是岗位目录的唯一事实源，静态提供业务负责人、产品、设计、前端、后端、测试、运营和项目管理八个预设；前端通过 `GET /chat/role-presets` 获取，不重复维护角色 Prompt。
+- 岗位预设在统一“业务负责人”基础身份上注入当前服务对象、职责和回答结构，并将角色别名归一为 `roleScope`；它不替代 RBAC，不新增数据库表。
+- 用户端和管理后台 QA 工作台共用该目录：用户端调用 `/chat/role-presets`，管理后台经 `admin-backend /admin/qa-ops/role-presets` 代理 `/rag/admin/role-presets`；两条 AG-UI 链路都透传同一个 `rolePresetId`。
 - Milvus 存储 dense vector，主 collection 默认 HNSW。
 - Elasticsearch 存储全文检索索引。
 - 内存 BM25 索引用于快速关键词召回和降级。
@@ -122,20 +134,24 @@ sequenceDiagram
 ```mermaid
 flowchart TD
   Q["User Query"] --> Mode{"mode"}
+  Role["Role preset + starter task"] --> Q
   Mode -->|simple| Simple["Karpathy RAG"]
   Mode -->|agentic| Agentic["Agentic RAG"]
   Mode -->|auto| Router["Routing"]
   Router --> Simple
   Router --> Agentic
 
-  Simple --> Retrieve["BM25 + Milvus + ES"]
+  Simple --> Intent["Intent profile + business／role scope"]
+  Intent --> Retrieve["BM25 + Milvus + ES"]
   Agentic --> Plan["Query augment / planning"]
   Plan --> Retrieve
   Retrieve --> Sufficiency["Sufficiency check"]
   Sufficiency -->|insufficient| Web["Bocha web search"]
   Sufficiency -->|sufficient| Rerank["DashScope rerank"]
   Web --> Rerank
-  Rerank --> Generate["LLM generation"]
+  Rerank --> Expand["Section + neighbor expansion"]
+  Expand --> Context["Dedup + diversity + budget"]
+  Context --> Generate["LLM generation"]
   Generate --> Reflect["Reflection"]
   Reflect -->|pass| Final["Answer + references"]
   Reflect -->|retry| Plan
@@ -240,7 +256,13 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - pino JSON 结构化日志
 - HTTP QPS / 延迟 / Node 默认指标
 - RAG 业务指标：检索命中、LLM 调用次数、LLM 调用耗时、输入/输出 token 估算
+- 上下文治理指标：`rag_retrieval_context_chunks`、`rag_retrieval_context_characters`、`rag_retrieval_expanded_chunks_total`
+- Bad Case 闭环：非流式问答同步记录 query log 与召回快照，用户反馈绑定服务端快照，Admin 支持审核、归因和回归集标记
+- 动态 Bad Case Few-Shot：只有人工审核且进入回归集的纠错样本写入独立 Milvus collection，生成前最多召回 2 条相似样本，当前知识证据优先
 - W3C `traceparent` 兼容的 in-memory tracing
+- Agent 节点 trace 与指标：记录 LangGraph 节点耗时、首 token、工具成功率、空召回、循环终止原因；单 trace 超过 15 个节点标记 `span_limit`
+- 产研运 FSM：产品、设计、前端、后端、测试、运营顺序执行，每个岗位结构化输出并人工审批，驳回回退一节点，Redis Checkpointer 支持恢复
+- 结构化短期记忆：压缩时提取角色、模块、变更前后、版本、生效期、证据、决策和开放问题，同时保留最近 6 轮原文
 - Debug chunks 分数面板
 - Agentic workflow Mermaid 导出
 - RAG eval / E2E / perf 脚本
@@ -248,8 +270,8 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - 结构化事实治理：`document_chunks` 保存父子 chunk、source span、section/clause/table metadata、doc version、生效期、来源权威；`fact_conflicts` 保存第一版事实冲突记录
 - 可选来源权威排序：`RAG_SOURCE_AUTHORITY_RULES` 按 docId / chunk 内容匹配来源权威权重
 - LLM-as-Judge 质量门禁：`npm run eval:rag:quality` 默认不消耗 Judge key，`EVAL_RAG_JUDGE_REQUIRED=true` 时强制 Qwen 判断 claim 为 supported / contradicted / not_mentioned
-- 企业级成熟度门禁：`npm run eval:rag:maturity` 按查得准、答得稳、引用能撑住、不会瞎编、可观测恢复、工程化门禁、真实落地准备打分；当前本地工程成熟度 96/100，Milvus search runtime 降级和生产目标机器/证书/备份策略未确认各扣 2 分，生产材料需显式确认后才可用 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 计入
-- 项目级仿真实业务评测：`npm run eval:rag:project` 覆盖多文档、多部门、版本冲突、跨文档、缩写别名、无答案拒答和强引用；`PROJECT_EVAL_REQUIRE_LIVE=true` 时必须真实后端上传/问答/打分，当前 3001 真实回放 22/22 通过
+- 企业级成熟度门禁：`npm run eval:rag:maturity` 按查得准、答得稳、引用能撑住、不会瞎编、可观测恢复、工程化门禁、真实落地准备打分；2026-08-03 当前本地工程成熟度 93/100，缺口是生产材料确认和 Milvus search runtime 降级，不把本地分数冒充生产就绪
+- 项目级仿真实业务评测：`npm run eval:rag:project` 覆盖多文档、多部门、版本冲突、跨文档、缩写别名、无答案拒答和强引用；`PROJECT_EVAL_REQUIRE_LIVE=true` 时必须真实后端上传/问答/打分，2026-08-03 真实后端回放 simple/auto 共 28/28 通过
 - 专项 smoke 脚本：MCP、GraphRAG、Speech、外部工具、Redis Checkpointer、Hybrid retrieval
 
 待确认：

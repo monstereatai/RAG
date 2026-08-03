@@ -13,19 +13,35 @@ import {
 import { RagAdminService } from './rag-admin.service';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
+import { RagFeedbackService } from '../chat/rag-feedback.service';
+import {
+  DEFAULT_ROLE_PRESET_ID,
+  listRolePresets,
+} from '../chat/role-presets';
 
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
 export class RagAdminController {
   private readonly logger = new Logger(RagAdminController.name);
 
-  constructor(private readonly ragAdminService: RagAdminService) {}
+  constructor(
+    private readonly ragAdminService: RagAdminService,
+    private readonly ragFeedbackService: RagFeedbackService,
+  ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
 
   @Get('capabilities')
   getCapabilities() {
     return this.ragAdminService.getCapabilities();
+  }
+
+  @Get('role-presets')
+  getRolePresets() {
+    return {
+      defaultRolePresetId: DEFAULT_ROLE_PRESET_ID,
+      roles: listRolePresets(),
+    };
   }
 
   // ─── Documents ──────────────────────────────────────────────
@@ -199,6 +215,34 @@ export class RagAdminController {
   @Get('qa/negative-feedback')
   async getQaNegativeFeedback() {
     return this.ragAdminService.getQaNegativeFeedback();
+  }
+
+  @Get('qa/feedback')
+  getQaFeedback(
+    @Query('status') status?: 'pending' | 'reviewed' | 'resolved' | 'ignored',
+    @Query('feedback') feedback?: 'positive' | 'negative',
+    @Query('limit') limit?: string,
+  ) {
+    return this.ragFeedbackService.list({
+      status,
+      feedback,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Patch('qa/feedback/:id')
+  reviewQaFeedback(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      status?: 'pending' | 'reviewed' | 'resolved' | 'ignored';
+      errorType?: string;
+      correctedAnswer?: string;
+      includeInRegression?: boolean;
+      reviewedBy?: string;
+    },
+  ) {
+    return this.ragFeedbackService.review(id, body);
   }
 
   @Get('qa/citation-failures')

@@ -1,13 +1,10 @@
 # 异步任务队列生产级增强方案
 
-> 日期：2026-06-30 | 状态：待确认 | 类型：基础设施增强
+> 日期：2026-06-30｜校准日期：2026-08-03｜状态：已实施并验证｜类型：基础设施增强
 
 ## 问题
 
-当前文档上传后的处理（切片、Embedding、向量入库、图谱抽取）在请求线程内同步执行。
-大规模文件或多媒体文件（图片 OCR、视频理解）会阻塞 HTTP 响应，不适合生产环境。
-
-现有 `document_tasks` 表记录任务状态，但缺少跨进程任务队列。
+原始问题是文档上传后的切片、Embedding 和索引处理在请求线程内同步执行。当前已经接入 BullMQ 和 Redis Worker，异步任务会写回状态，Redis 不可用时保守降级为同步处理。
 
 ## 目标
 
@@ -39,10 +36,10 @@ Upload → API → 创建 document_task (status: pending)
 Client → 轮询 GET /api/v1/documents/tasks/:taskId → 返回进度
 ```
 
-### 需要新增的依赖
+### 已使用的依赖
 
-- `@nestjs/bullmq` + `bullmq`（已规划在 RAG 能力内，非计划外依赖）
-- `ioredis`（可能已有，查一下）
+- `@nestjs/bullmq` + `bullmq`
+- `ioredis`
 
 ### 不涉及的红线
 
@@ -50,17 +47,13 @@ Client → 轮询 GET /api/v1/documents/tasks/:taskId → 返回进度
 - 不需要修改 `.env`（复用现有 `REDIS_*` 配置）
 - 不删除文件
 
-### 实施步骤
+### 实施状态
 
-1. 安装 `@nestjs/bullmq`、`bullmq`
-2. 创建 `DocumentProcessingQueue`（BullMQ 队列定义）
-3. 创建 `DocumentProcessingWorker`（消费任务）
-4. 修改 `DocumentService.upload`：同步上传改写入队列后返回 taskId
-5. 前端修改：上传后轮询 task 状态展示进度
-6. 验证：上传大文件 → 返回 taskId → 轮询到 completed
+- [x] 安装并固定 `@nestjs/bullmq`、`bullmq` 和 `ioredis`。
+- [x] 创建文档处理 Queue 与 Worker。
+- [x] 异步上传返回任务标识，Worker 调用真实解析、Embedding 和索引链路。
+- [x] 处理成功／失败写回 `document_tasks`，空内容失败也会落状态。
+- [x] 提供任务状态 API，修复 `queue/status` 路由顺序。
+- [x] Redis 未配置或不可用时降级为同步处理。
 
-## 实施前提
-
-需要你确认：
-- [ ] 同意安装 `@nestjs/bullmq` + `bullmq` 依赖
-- [ ] 同意使用 Redis（已有 `RedisModule`，需确认连接可用）
+目标机器上的队列容量、并发、积压告警和故障恢复仍属于根目录 `ROADMAP.md` 中的生产规格压测事项，不在本文档重复维护。

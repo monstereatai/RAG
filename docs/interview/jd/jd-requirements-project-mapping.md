@@ -100,7 +100,7 @@ BOSS/公开 JD 补充观察：
 | 权限过滤 | 已实现基础 | 文档 ACL 支持 user/role/department/public，缓存 allowed docIds；检索层带 userId | `backend/src/modules/document/document-permission.service.ts:8`、`backend/src/modules/document/document-permission.service.ts:49`、`backend/src/rag/karpathy/karpathy-rag.service.ts:329` | 有基础权限模型；真实组织继承/IAM 仍要对接 |
 | 多租户隔离 | 已实现基础 | PostgreSQL、Redis、Milvus、BM25 等按 userId 过滤；文档和检索带 userId | `README.md`、`backend/src/rag/karpathy/karpathy-rag.service.ts:329` | 可以讲基础隔离，不说金融级合规完成 |
 | 审计日志 | admin-backend 已实现 | 后台审计日志查询，数据库未启用时返回 disabled；关键写操作有 AuditLog 标记 | `admin-backend/src/modules/audit-logs/audit-logs.service.ts:21`、`admin-backend/src/common/decorators/audit-log.decorator.ts` | 能讲后台审计基础，不代表满足金融监管 |
-| 安全合规 | 部分实现 | 权限、审计、拒答、脱敏样本、红线文档；没有真实 DLP/IAM/审批/等保流程 | `docs/remaining-enhancement-plan.md`、`admin-backend/src/modules/security/security.service.ts` | 金融/证券面试必须说“架构预留，生产需接公司合规系统” |
+| 安全合规 | 部分实现 | 权限、审计、拒答、脱敏样本、红线文档；没有真实 DLP/IAM/审批/等保流程 | `docs/plans/remaining-enhancement-plan.md`、`admin-backend/src/modules/security/security.service.ts` | 金融/证券面试必须说“架构预留，生产需接公司合规系统” |
 | 多模态 | 部分实现 | Vision Provider 接口、Mock/OpenAI-compatible OCR/图片理解；视频 provider 明确不直接支持，需要抽帧/音频 | `backend/src/providers/vision/vision-provider.interface.ts:1`、`backend/src/providers/vision/openai-vision.provider.ts:81` | 可以说有链路和样本，不说完整视频理解/视觉向量/以图搜图 |
 | ASR / TTS | 已实现基础 | 腾讯云 ASR/TTS Provider，缺 key 明确降级 | `backend/src/providers/speech/tencent-speech.provider.ts`、`backend/scripts/smoke-speech.mjs` | 依赖腾讯云 key；不是端侧语音模型 |
 | Prompt 工程 | 已实现基础 | prompt 文件集中管理，few-shot、semantic example selector 存在；新增 Prompt Registry 记录 version/owner/evals/rollback | `backend/src/rag/prompts/agentic.prompts.ts`、`backend/src/rag/prompts/few-shot.examples.ts`、`backend/src/rag/prompts/prompt-registry.ts` | 可以说“有代码级 Prompt Registry”，不要说已有后台灰度/回滚平台 |
@@ -109,7 +109,7 @@ BOSS/公开 JD 补充观察：
 | 模型路由 | 部分实现 | AG-UI 支持选择 model；simple/auto/agentic 路由；LLM Provider 有模型选择入口 | `backend/src/modules/agui/agui.service.ts:51`、`backend/src/rag/agentic/agentic-rag.service.ts:171` | 不是完整多供应商动态路由和成本最优路由 |
 | SFT / RLHF / 模型训练 | 未实现 | 项目定位是 AI 应用工程和 RAG/Agent，不做模型训练和强化学习 | 无 | 金融/DeepSeek/算法岗问到时直接说不是本项目主线 |
 | 高并发 / 高可用 | 部分实现 | NestJS、Docker Compose、timeout、fallback、队列基础；没有真实压测环境 SLA | `docker/`、`backend/scripts/benchmark-rag.mjs`、`ROADMAP.md` | 大厂问生产时要承认真实资源压测未完成 |
-| 灰度发布 / 回滚 | 未完整实现 | 有文档和生产化差距清单，没有完整发布平台 | `docs/remaining-enhancement-plan.md` | 不能说已具备生产发布体系 |
+| 灰度发布 / 回滚 | 未完整实现 | 有文档和生产化差距清单，没有完整发布平台 | `docs/plans/remaining-enhancement-plan.md` | 不能说已具备生产发布体系 |
 | 业务系统 API 接入 | 未接真实系统 | 有工具框架和 MCP 接入能力，但没有接小米/大疆/高德/金融真实业务 API | `backend/src/providers/mcp/mcp.provider.ts`、`backend/src/tools/` | 说“架构可迁移，真实业务 API 要按公司系统接” |
 | CLI / 工程工具 | 已实现 | `rag search/context/ask --stream/admin search/graph query/eval` | `rag-cli/src/commands/` | 可以作为工程化亮点讲 |
 | 管理后台运营 | 已实现多个入口 | QA Ops、GraphOps、文档治理、审计、权限、指标 | `admin/src/pages/qa-ops/index.tsx`、`admin/src/pages/graph-ops/index.tsx`、`admin-backend/src/modules/` | 可以讲“AI 能力运营化”，不是只做聊天页 |
@@ -206,7 +206,7 @@ BOSS/公开 JD 补充观察：
 - `backend/src/modules/document/document-permission.service.ts`
 - `admin-backend/src/modules/audit-logs/audit-logs.service.ts`
 - `backend/scripts/eval-rag-project.mjs`
-- `docs/remaining-enhancement-plan.md`
+- `docs/plans/remaining-enhancement-plan.md`
 
 不要说：
 

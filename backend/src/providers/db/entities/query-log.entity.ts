@@ -41,6 +41,12 @@ export class QueryLogEntity {
   @Column({ type: 'boolean', default: false })
   hasAnswer!: boolean;
 
+  @Column({ type: 'text', nullable: true, default: null })
+  answer!: string | null;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  retrievalSnapshot!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

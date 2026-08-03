@@ -14,6 +14,10 @@ import { JobExecutionEntity } from './entities/job-execution.entity';
 import { DocumentTaskEntity } from './entities/document-task.entity';
 import { DocumentResourceEntity } from './entities/document-resource.entity';
 import { DocumentPermissionEntity } from './entities/document-permission.entity';
+import { RagFeedbackEntity } from './entities/rag-feedback.entity';
+import { GeneratedArtifactEntity } from './entities/generated-artifact.entity';
+import { ArtifactShareEntity } from './entities/artifact-share.entity';
+import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -63,6 +67,10 @@ import { DocumentPermissionEntity } from './entities/document-permission.entity'
             DocumentTaskEntity,
             DocumentResourceEntity,
             DocumentPermissionEntity,
+            RagFeedbackEntity,
+            GeneratedArtifactEntity,
+            ArtifactShareEntity,
+            ArtifactAccessLogEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -87,6 +95,10 @@ import { DocumentPermissionEntity } from './entities/document-permission.entity'
       DocumentTaskEntity,
       DocumentResourceEntity,
       DocumentPermissionEntity,
+      RagFeedbackEntity,
+      GeneratedArtifactEntity,
+      ArtifactShareEntity,
+      ArtifactAccessLogEntity,
     ]),
   ],
   exports: [TypeOrmModule],

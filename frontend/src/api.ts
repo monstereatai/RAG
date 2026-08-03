@@ -9,6 +9,7 @@ import type {
   DebugResponse,
   LoginResponse,
   UserInfo,
+  RolePresetCatalog,
 } from './types';
 
 const api = axios.create({
@@ -49,8 +50,21 @@ export async function deleteDocument(docId: string): Promise<void> {
 }
 
 // 聊天（非流式）
-export async function chat(query: string, mode: ChatMode): Promise<ChatResponse> {
-  const res = await api.post<ApiResponse<ChatResponse>>('/chat', { query, mode });
+export async function getRolePresets(): Promise<RolePresetCatalog> {
+  const res = await api.get<ApiResponse<RolePresetCatalog>>('/chat/role-presets');
+  return res.data.data;
+}
+
+export async function chat(
+  query: string,
+  mode: ChatMode,
+  rolePresetId: string,
+): Promise<ChatResponse> {
+  const res = await api.post<ApiResponse<ChatResponse>>('/chat', {
+    query,
+    mode,
+    rolePresetId,
+  });
   return res.data.data;
 }
 
@@ -66,13 +80,15 @@ export async function debugChunks(query: string): Promise<DebugResponse> {
 export function chatStream(
   query: string,
   mode: ChatMode,
+  rolePresetId: string,
   onEvent: (event: { type: string; data: unknown }) => void,
   onError: (err: Error) => void,
   onClose: () => void,
 ): void {
   const token = localStorage.getItem('token');
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  const url = `/api/v1/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
+  const roleParam = `&rolePresetId=${encodeURIComponent(rolePresetId)}`;
+  const url = `/api/v1/chat/stream?query=${encodeURIComponent(query)}&mode=${mode}${roleParam}${tokenParam}`;
   const eventSource = new EventSource(url);
 
   eventSource.onmessage = (e) => {
@@ -99,13 +115,15 @@ export function chatStream(
 export function aguiStream(
   query: string,
   mode: ChatMode,
+  rolePresetId: string,
   onEvent: (event: AguiEvent) => void,
   onError: (err: Error) => void,
   onClose: () => void,
 ): void {
   const token = localStorage.getItem('token');
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  const url = `/api/v1/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${tokenParam}`;
+  const roleParam = `&rolePresetId=${encodeURIComponent(rolePresetId)}`;
+  const url = `/api/v1/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${roleParam}${tokenParam}`;
   const eventSource = new EventSource(url);
   let finished = false;
 
