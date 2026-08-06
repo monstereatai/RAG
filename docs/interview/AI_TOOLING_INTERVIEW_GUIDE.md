@@ -1,6 +1,6 @@
 # Agent、多 Agent、Function Calling、Tools、MCP Server、Skill 面试手册
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 
 ## 一、六个概念先讲成人话
 
@@ -66,6 +66,7 @@ Function Calling 不是让模型直接执行函数，而是让模型生成结构
 ### 2.2 最小伪代码
 
 ```ts
+// 这里只把工具契约交给模型，execute 实现和凭证始终留在宿主侧。
 const functions = [
   {
     name: "search_knowledge",
@@ -85,22 +86,28 @@ const functions = [
   },
 ];
 
+// messages 同时保存模型决策和 Tool Observation，下一轮才能基于真实结果继续判断。
 let messages = [{ role: "user", content: userQuestion }];
 
+// MAX_STEPS 是 Harness 的硬停止条件，不能让模型自行决定是否无限继续。
 for (let step = 0; step < MAX_STEPS; step++) {
   const response = await model.chat({ messages, tools: functions });
+  // 没有 Tool Call 表示模型已经准备直接回答，循环在这里正常结束。
   if (!response.toolCalls?.length) return response.text;
 
   for (const call of response.toolCalls) {
+    // 模型输出不可信：先校验参数，再检查用户权限和任务预算。
     const args = validate(call.name, call.arguments);
     authorize(currentUser, call.name, args);
     checkBudget(taskId, call.name);
 
+    // 真实执行发生在宿主 Tool Runtime，并受统一超时保护。
     const result = await withTimeout(
       toolRegistry.execute(call.name, args),
       TOOL_TIMEOUT_MS,
     );
 
+    // Tool Call 和对应结果必须通过 call.id 成对回写，避免并行调用时串结果。
     messages.push({ role: "assistant", toolCall: call });
     messages.push({
       role: "tool",
@@ -110,6 +117,7 @@ for (let step = 0; step < MAX_STEPS; step++) {
   }
 }
 
+// 超过步数仍未完成属于受控失败，交给降级或人工接管，不能静默伪装成功。
 throw new MaxStepsExceededError();
 ```
 
@@ -122,14 +130,17 @@ throw new MaxStepsExceededError();
 5. **返回稳定结构**：统一 `ok／data／error／meta`，不要把完整网页、日志或数据库对象塞回上下文。
 
 ```ts
+// ToolResult 把业务成功与传输成功分开；HTTP 200 不代表业务动作完成。
 type ToolResult<T> = {
   ok: boolean;
   data?: T;
+  // error.code 供 Harness 决定修参、重试、降级还是终止。
   error?: {
     code: "INVALID_ARGUMENT" | "FORBIDDEN" | "TIMEOUT" | "UPSTREAM_ERROR";
     message: string;
     retryable: boolean;
   };
+  // meta 用于链路追踪、性能统计和证据来源定位，不直接参与业务判断。
   meta: { requestId: string; durationMs: number; source?: string };
 };
 ```
@@ -160,6 +171,7 @@ Tool 是 Agent 可以使用的原子能力，可以是本地函数、HTTP API、
 ### 3.2 Tool Registry 伪代码
 
 ```ts
+// Registry 保存模型可见契约和宿主执行策略，避免每个 Agent 各写一套治理逻辑。
 type ToolDefinition = {
   name: string;
   description: string;
@@ -178,11 +190,13 @@ class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
 
   register(tool: ToolDefinition) {
+    // 工具名是模型调用和审计的稳定主键，不允许重复覆盖。
     assertUnique(tool.name);
     this.tools.set(tool.name, tool);
   }
 
   listFor(user: User, agentRole: string) {
+    // 先按真实用户权限和 Agent 角色裁剪，再把最小 Tool Schema 暴露给模型。
     return [...this.tools.values()]
       .filter((tool) => hasPermissions(user, tool.requiredPermissions))
       .filter((tool) => rolePolicyAllows(agentRole, tool.name))
@@ -193,11 +207,13 @@ class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) throw new ToolNotFoundError(name);
 
+    // 模型参数必须按 Schema 重新解析，不能把 unknown 直接传给业务 Service。
     const input = validateSchema(tool.inputSchema, rawInput);
     authorize(context.user, tool.requiredPermissions);
     requireApprovalWhenNeeded(tool.risk, context.approval);
     enforceRateLimit(context.tenantId, name);
 
+    // 只有策略允许安全重试的动作才能进入 retryWhenSafe；写操作还必须有幂等键。
     return traceToolCall(name, () =>
       retryWhenSafe(
         () => withTimeout(tool.execute(input, context), tool.timeoutMs),
@@ -215,6 +231,7 @@ class ToolRegistry {
 - Tool 层只做 AI 适配与治理，核心业务仍调用现有 Service，避免 Web、后台和 Agent 各写一套规则。
 
 ```ts
+// Tool 只做 AI 协议适配，真正业务规则继续复用现有 Service。
 const createReviewTaskTool = defineTool({
   name: "create_review_task",
   inputSchema: CreateReviewTaskSchema,
@@ -225,15 +242,19 @@ const createReviewTaskTool = defineTool({
 ### 3.4 Tool 失败怎么处理
 
 ```ts
+// 错误码必须先归类，因为不同错误对应不同恢复策略，不能全部无脑重试。
 switch (error.code) {
   case "INVALID_ARGUMENT":
+    // 参数错误只允许模型修复有限次数，避免修参死循环。
     return askModelToRepairArgumentsOnce();
   case "UNAUTHORIZED":
   case "FORBIDDEN":
+    // 权限失败不可通过重试解决，应立即停止并解释。
     return stopAndExplain();
   case "RATE_LIMITED":
     return retryWithBackoffOrFallback();
   case "TIMEOUT":
+    // 超时不代表写操作没成功；仅只读或幂等操作才能直接降级／重试。
     return fallbackToCacheOrSecondaryTool();
   case "CONFLICT":
     return reloadStateAndAskForConfirmation();
@@ -287,8 +308,10 @@ MCP Server 不等于 Agent，也不负责决定何时调用工具，决策通常
 ### 4.2 最小伪代码
 
 ```ts
+// MCP Server 是协议适配层：声明能力、接收请求、调用后端，不负责 Agent 决策。
 const server = new McpServer({ name: "enterprise-rag", version: "1.0.0" });
 
+// Tool 适合“带参数的动作”；输入 Schema 会被 Host 发现并提供给模型。
 server.tool(
   "rag_search",
   {
@@ -299,20 +322,24 @@ server.tool(
     },
   },
   async (input, context) => {
+    // 根据当前用户取短期凭证，不能把 Server 的超级权限或明文密钥交给模型。
     const token = await credentialProvider.get(context.user);
     const result = await ragApi.search(input, { token });
     return {
+      // content 兼容模型阅读，structuredContent 供 Host 稳定解析和二次处理。
       content: [{ type: "text", text: JSON.stringify(result.items) }],
       structuredContent: result,
     };
   },
 );
 
+// Resource 是可寻址只读上下文；Prompt 是可复用任务模板，它们不等同于 Tool。
 server.resource("project://architecture", () => readArchitectureSummary());
 server.prompt("game_activity_plan", schema, (input) =>
   buildActivityPrompt(input),
 );
 
+// Transport 只决定通信方式；业务能力定义不应绑死 stdio 或 HTTP。
 await server.connect(new StdioTransport());
 ```
 
@@ -326,12 +353,13 @@ await server.connect(new StdioTransport());
 6. **凭证不进模型**：模型只拿凭证引用，明文密钥留在 Server 或 Credential Provider。
 
 ```ts
+// 这是 Host 认证后的运行上下文，不由模型生成，也不暴露真实凭证内容。
 type McpRequestContext = {
   userId: string;
   tenantId: string;
   roles: string[];
   traceId: string;
-  credentialRef: string;
+  credentialRef: string; // 只传凭证引用，真正密钥由 Credential Provider 保管。
 };
 ```
 
@@ -376,9 +404,11 @@ Skill：可版本化、可选择、可组合工具、可检查步骤、可评测
 ### 5.2 Skill 定义伪代码
 
 ```yaml
+# 元数据用于快速匹配 Skill；只有被选中后才加载完整步骤和参考资料。
 name: game-activity-launch
 description: 当用户需要设计、评审或上线游戏官网活动时使用
 inputs: [activity_type, region, launch_date]
+# 白名单限制 Skill 能提出哪些 Tool Call，但最终权限仍由宿主 Runtime 判断。
 allowed_tools:
   - rag_search
   - rag_graph_query
@@ -386,17 +416,20 @@ allowed_tools:
   - create_test_plan
   - create_release_checklist
 steps:
+  # 步骤描述业务 SOP，不把每一步都硬编码成不可变程序。
   - 读取项目规则、地区规则和历史复盘
   - 识别缺失信息与版本冲突
   - 生成产品、设计、前端、后端、测试、运营六岗位任务
   - 对高风险发布动作请求人工审批
   - 检查关键结论是否有引用证据
 success_criteria:
+  # 成功标准必须能被 Evaluator 或业务状态验证，不能只看模型说“完成了”。
   - 六岗位交付物齐全
   - 关键 Claim 有来源
   - 高风险项已审批或明确阻塞
   - 测试与发布检查清单已生成
 fallback:
+  # 降级策略明确系统做不到时怎样收口，避免证据不足仍然编造答案。
   - 证据不足时不承诺具体规则
   - 工具不可用时生成待人工补充清单
 ```
@@ -404,18 +437,21 @@ fallback:
 ### 5.3 Skill 选择和执行伪代码
 
 ```ts
-const catalog = loadSkillMetadataOnly(); // 常驻 name + description
+// 渐进式披露：常驻元数据用于低成本选择，不把所有 Skill 正文塞进上下文。
+const catalog = loadSkillMetadataOnly();
 const selected = await model.selectSkill({
   userGoal,
   availableSkills: catalog,
 });
 if (!selected) return runDefaultAgent(userGoal);
 
-const skill = loadFullSkill(selected.name); // 按需加载正文和 references
+// 选中后才加载步骤和 references，并校验它声明的 Tool 是否来自可信 Registry。
+const skill = loadFullSkill(selected.name);
 assertAllowedTools(skill.allowedTools);
 let state = createInitialState(userGoal, skill.inputs);
 
 for (const step of skill.steps) {
+  // Skill 给出“要完成什么”，模型在当前 State 下决定“这一步如何调用工具”。
   const action = await planStep(step, state, skill.allowedTools);
   const observation = await toolRuntime.execute(
     action.tool,
@@ -424,12 +460,14 @@ for (const step of skill.steps) {
   );
   state = updateState(state, step, observation);
 
+  // 审批前先做 Checkpoint，等待期间进程退出也可以从同一状态恢复。
   if (needsHumanApproval(step, state)) {
     state = await checkpointAndWaitForApproval(state);
   }
   if (shouldStop(state)) break;
 }
 
+// 最终按 Skill 的验收标准评分，而不是直接返回最后一次模型输出。
 return evaluateAgainstCriteria(state.output, skill.successCriteria);
 ```
 
@@ -490,6 +528,7 @@ Agent：目标 + 状态 + 动态决策 + 工具 + 反馈循环 + 停止条件。
 ### 6.2 Agent 最小循环伪代码
 
 ```ts
+// State 是 Harness 可持久化、可审计的事实，不等同于模型的自然语言思考过程。
 type AgentState = {
   goal: string;
   plan: PlanStep[];
@@ -503,12 +542,15 @@ type AgentState = {
 };
 
 async function runAgent(goal: string, context: AgentContext) {
+  // 预算在任务开始时一次性注入，后续每轮和每次 Tool Call 都会扣减。
   let state = createInitialState(goal, context.budget);
 
   while (state.status === "running") {
+    // 在调用模型前先执行硬门禁，避免已经超预算还继续产生费用。
     enforceBudget(state);
     detectNoProgressLoop(state);
 
+    // 模型只看到压缩后的必要 State，以及当前用户和角色允许的最小能力集。
     const decision = await policy.decide({
       goal: state.goal,
       state: summarizeForModel(state),
@@ -517,6 +559,7 @@ async function runAgent(goal: string, context: AgentContext) {
     });
 
     if (decision.type === "finish") {
+      // 模型声称完成不算完成；Evaluator 要检查证据、产物和业务状态。
       const evaluation = await evaluator.grade(state, decision.output);
       if (evaluation.passed)
         return complete(state, decision.output, evaluation);
@@ -525,15 +568,18 @@ async function runAgent(goal: string, context: AgentContext) {
     }
 
     if (decision.type === "ask_user") {
+      // 等待用户属于可恢复状态，先保存 Checkpoint 再退出本次运行。
       return checkpointAndWait(state, decision.question);
     }
 
+    // 模型的动作先过 Schema、权限、风险和预算校验，再交给 Tool Runtime。
     const action = validateDecision(decision, state, context);
     const observation = await toolRuntime.execute(
       action.tool,
       action.arguments,
       context,
     );
+    // Reducer 是唯一状态写入口，保证重放同一轨迹时得到一致状态。
     state = reduceState(state, action, observation);
   }
 
@@ -546,6 +592,7 @@ async function runAgent(goal: string, context: AgentContext) {
 ### 6.3 LangGraph 状态机伪代码
 
 ```ts
+// 显式节点承载可观测业务步骤，条件边只读取结构化 State 决定下一跳。
 const graph = new StateGraph<AgentState>()
   .addNode("route", routeByComplexity)
   .addNode("retrieve", retrieveEvidence)
@@ -556,12 +603,14 @@ const graph = new StateGraph<AgentState>()
   .addNode("humanReview", waitForHumanReview)
   .addEdge(START, "route")
   .addConditionalEdges("route", (state) => state.route, {
+    // 简单事实题走检索快路径；确需外部动作才进入受限 Tool 节点。
     simple: "retrieve",
     tool: "useTools",
     reject: END,
   })
   .addEdge("retrieve", "judgeEvidence")
   .addConditionalEdges("judgeEvidence", (state) => state.evidenceStatus, {
+    // 证据不足时扩展能力，无答案时直接收口，不能强行生成。
     sufficient: "generate",
     insufficient: "useTools",
     no_answer: END,
@@ -569,11 +618,13 @@ const graph = new StateGraph<AgentState>()
   .addEdge("useTools", "generate")
   .addEdge("generate", "verify")
   .addConditionalEdges("verify", (state) => state.verdict, {
+    // 可修复问题回到检索，高风险结果交人工；通过后才结束。
     pass: END,
     retry: "retrieve",
     high_risk: "humanReview",
   })
   .addEdge("humanReview", END)
+  // Checkpointer 让进程重启、人工等待和局部重跑都能恢复 State。
   .compile({ checkpointer: redisCheckpointer });
 ```
 
@@ -604,15 +655,18 @@ const graph = new StateGraph<AgentState>()
 
 ```ts
 function detectNoProgressLoop(state: AgentState) {
+  // 三类硬预算分别限制轨迹长度、墙钟时间和真实费用。
   if (state.remainingSteps <= 0) stop("MAX_STEPS");
   if (elapsed(state) > state.maxDurationMs) stop("TIME_BUDGET");
   if (state.remainingCost <= 0) stop("COST_BUDGET");
 
   const recent = state.observations.slice(-3);
+  // 不能只数轮次；相同动作且没有新证据，说明系统没有取得进展。
   if (sameActionAndArguments(recent) && noNewEvidence(recent)) {
     stop("REPEATED_ACTION_WITHOUT_PROGRESS");
   }
 
+  // 反复重规划仍不收敛时转人工，而不是让 Planner 无限推翻自己。
   if (state.replanCount > MAX_REPLANS) {
     handoff("PLAN_NOT_CONVERGING");
   }
@@ -674,6 +728,7 @@ function detectNoProgressLoop(state: AgentState) {
 ### 7.3 Agent Contract 伪代码
 
 ```ts
+// Contract 把角色的输入、输出、能力和成功标准变成可验证边界。
 type AgentContract<Input, Output> = {
   role: "product" | "design" | "frontend" | "backend" | "qa" | "operations";
   goal: string;
@@ -693,12 +748,16 @@ const backendAgent: AgentContract<BackendInput, BackendPlan> = {
   goal: "输出接口、数据、幂等、库存和风控方案",
   inputSchema: BackendInputSchema,
   outputSchema: BackendPlanSchema,
+  // 后端 Agent 只能看到本角色必要的 Tool，避免跨岗位越权或误调用。
   allowedTools: ["rag_search", "rag_graph_query", "create_architecture"],
+  // 依赖产品 Artifact，不依赖产品 Agent 的完整聊天历史。
   dependencies: ["product"],
   evidencePolicy: { minCoverage: 0.8, requireCitations: true },
+  // 普通方案自动执行，只有命中风险规则的动作才进入审批。
   approvalPolicy: "risk_based",
   timeoutMs: 75_000,
   retryPolicy: { maxAttempts: 2, backoffMs: 1_000 },
+  // 业务断言用于判断交付物是否真的合格，而不是只校验 JSON 格式。
   successCriteria: [hasApiContract, hasIdempotencyPlan, hasRiskList],
 };
 ```
@@ -708,6 +767,7 @@ Agent 之间传经过 Schema 校验的交付物、引用、决策和未解决问
 ### 7.4 六岗位 DAG 伪代码
 
 ```ts
+// DAG 用代码声明稳定依赖；没有依赖关系的设计和后端节点可以并行。
 const workflow = defineAgentDag({
   nodes: { product, design, frontend, backend, qa, operations },
   edges: [
@@ -723,6 +783,7 @@ const workflow = defineAgentDag({
 });
 
 async function runMultiAgentTask(input: ProjectBrief) {
+  // 初始任务立即持久化，后续每批完成后都更新 Checkpoint。
   let state = await checkpointStore.create({
     input,
     completed: {},
@@ -730,22 +791,26 @@ async function runMultiAgentTask(input: ProjectBrief) {
   });
 
   for (const batch of topologicalBatches(workflow)) {
+    // 只调度依赖已通过的角色，阻止上游垃圾产物继续传播。
     const runnable = batch.filter((role) => dependenciesPassed(role, state));
     const results = await mapWithConcurrency(
       runnable,
       MAX_PARALLEL_AGENTS,
       async (role) => {
         const contract = workflow.nodes[role];
+        // 每个角色只接收 Contract 声明的输入，并独立校验输出 Schema。
         const roleInput = buildContractInput(contract, state);
         const result = await runAgentWithContract(contract, roleInput);
         return validateOutput(contract.outputSchema, result);
       },
     );
 
+    // 合并版本化 Artifact 后执行跨角色质量门禁，再保存可恢复状态。
     state = mergeArtifactsByRole(state, results);
     state = await qualityGate.evaluate(state);
     await checkpointStore.save(state);
 
+    // 审批按风险触发，不要求每个岗位串行等待人工确认。
     if (state.requiresApproval) state = await waitForApproval(state);
     if (state.hasBlockingFailure) return handoffOrFail(state);
   }
@@ -761,6 +826,7 @@ async function supervisorLoop(task: Task, workers: WorkerAgent[]) {
   let state = createTeamState(task);
 
   while (!isTeamDone(state)) {
+    // Supervisor 根据当前产物摘要动态选择专家，适合子任务无法预先确定的场景。
     const decision = await supervisor.decide({
       goal: task.goal,
       summaries: summarizeWorkerArtifacts(state),
@@ -769,13 +835,16 @@ async function supervisorLoop(task: Task, workers: WorkerAgent[]) {
     });
 
     if (decision.type === "delegate") {
+      // Worker 名称和任务输入都必须校验，不能执行模型临时捏造的专家或参数。
       const worker = assertWorkerAllowed(decision.worker);
       const input = validateAssignment(decision.input, worker.inputSchema);
       const artifact = await worker.run(input);
       state = mergeValidatedArtifact(state, worker.role, artifact);
     } else if (decision.type === "finish") {
+      // Supervisor 的汇总仍需 Team Evaluator 验证，不能自己宣布团队成功。
       return teamEvaluator.grade(state, decision.output);
     } else {
+      // 无法安全决策时保存团队状态并向人澄清。
       return checkpointAndAskHuman(state, decision.question);
     }
   }
@@ -787,15 +856,16 @@ Supervisor 适合动态专家选择；稳定业务流程优先 DAG，否则主�
 ### 7.6 上下文和通信
 
 ```ts
+// Artifact 是 Agent 间的稳定通信协议，用版本化事实替代无限增长的群聊。
 type AgentArtifact = {
   artifactId: string;
   producerRole: string;
-  version: number;
+  version: number; // 下游记录消费版本，上游更新后才能计算影响范围。
   summary: string;
   structuredPayload: unknown;
   citations: Citation[];
   assumptions: string[];
-  unresolvedQuestions: string[];
+  unresolvedQuestions: string[]; // 未解决问题必须显式传递，不能在摘要中丢失。
   quality: { passed: boolean; coverage: number };
 };
 ```
@@ -810,7 +880,9 @@ type AgentArtifact = {
 
 ```ts
 async function rerunRole(batchId: string, role: AgentRole) {
+  // 从持久化状态恢复，避免重跑整个长任务。
   const state = await checkpointStore.load(batchId);
+  // 当前角色变化会使所有下游产物失效，但无关分支可以保留。
   const affected = descendantsOf(role, workflow);
 
   invalidateArtifacts(state, [role, ...affected]);
@@ -822,6 +894,7 @@ async function rerunRole(batchId: string, role: AgentRole) {
     buildContractInput(contract, state),
   );
 
+  // 保存新版本产物后，从下一个依赖已满足的批次继续执行。
   await checkpointStore.save(mergeRoleResult(state, role, result));
   return resumeFromNextReadyBatch(state);
 }
@@ -868,14 +941,17 @@ async function rerunRole(batchId: string, role: AgentRole) {
 2. Skill 要求先查询东南亚限制、历史复盘和奖励风险。
 3. 模型生成 Function Call：
 
-```json
+```jsonc
 {
+  // name 必须来自当前用户可见的 Tool Schema，不能由模型自由发明。
   "name": "rag_search",
   "arguments": {
+    // query 要能脱离聊天历史独立理解，减少检索器对隐含上下文的依赖。
     "query": "东南亚服周年庆抽奖活动的地区限制、奖励规则和历史风险",
     "topK": 8,
-    "filters": { "region": "Southeast Asia" }
-  }
+    // filters 进入后端权限和元数据过滤链路，不替代租户级强制隔离。
+    "filters": { "region": "Southeast Asia" },
+  },
 }
 ```
 
@@ -969,12 +1045,14 @@ Shutdown
 ### 11.2 初始化伪代码
 
 ```ts
+// initialize 必须是连接建立后的第一条协议请求，用于协商版本和双方能力。
 const initResult = await transport.request({
   jsonrpc: "2.0",
   id: 1,
   method: "initialize",
   params: {
     protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+    // Client 只声明自己真正实现的能力；空对象表示支持该能力族的基础功能。
     capabilities: {
       roots: { listChanged: true },
       sampling: {},
@@ -984,16 +1062,19 @@ const initResult = await transport.request({
   },
 });
 
+// 协议版本不兼容时立即关闭连接，不能带着错误假设继续调用 Tool。
 if (!supportedVersions.includes(initResult.protocolVersion)) {
   await transport.close();
   throw new ProtocolVersionMismatchError();
 }
 
+// 后续只能使用双方能力交集，不能仅凭 SDK 存在某个方法就直接调用。
 const negotiated = intersectCapabilities(
   clientCapabilities,
   initResult.capabilities,
 );
 
+// initialized 是 Notification，没有 id；发送后才进入普通 Operation 阶段。
 await transport.notify({
   jsonrpc: "2.0",
   method: "notifications/initialized",
@@ -1020,6 +1101,7 @@ Server 常见能力包括：
 ### 11.4 超时、取消、进度和恢复
 
 ```ts
+// 每个 Tool Request 同时绑定超时和 Progress 回调，UI 进度不等于业务完成。
 const request = client.callTool(input, {
   timeoutMs: 30_000,
   onProgress: (progress) => updateUi(progress),
@@ -1029,8 +1111,10 @@ try {
   return await request;
 } catch (error) {
   if (error instanceof TimeoutError) {
+    // 本地停止等待后显式通知 Server 取消，避免远端继续消耗资源。
     await client.notifyCancelled(request.id, "deadline exceeded");
   }
+  // 取消后仍向上抛出，让上层决定重试、降级还是转人工。
   throw error;
 }
 ```
@@ -1051,7 +1135,7 @@ try {
 
 MCP 使用 UTF-8 编码的 JSON-RPC 2.0 消息：
 
-```json
+```jsonc
 // Request：有 id，必须得到 result 或 error
 { "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {} }
 
@@ -1131,6 +1215,7 @@ POST Response：application/json 或 text/event-stream。
 ### 13.2 DAG 调度伪代码
 
 ```ts
+// PlannedCall 显式保存依赖和副作用，调度器不能只看调用列表就全部并行。
 type PlannedCall = {
   id: string;
   tool: string;
@@ -1139,12 +1224,15 @@ type PlannedCall = {
   sideEffect: "none" | "idempotent-write" | "non-idempotent-write";
 };
 
+// 拓扑批次保证同一批内部无依赖，前一批完成后才进入下一批。
 const batches = topologicalBatches(plannedCalls);
 
 for (const batch of batches) {
+  // 无副作用读取可以限流并行；所有写操作单独进入受控串行通道。
   const safeParallelCalls = batch.filter((call) => call.sideEffect === "none");
   const writes = batch.filter((call) => call.sideEffect !== "none");
 
+  // 使用并发上限保护模型供应商、连接池和业务下游，不直接 Promise.all。
   const readResults = await mapWithConcurrency(
     safeParallelCalls,
     MAX_PARALLEL_TOOLS,
@@ -1154,6 +1242,7 @@ for (const batch of batches) {
   mergeResultsIntoState(readResults);
 
   for (const write of writes) {
+    // 写操作先审批，再使用稳定幂等键抵御超时重试和消息重复投递。
     await requireApprovalWhenNeeded(write);
     const result = await executeTool({
       ...write,
@@ -1167,15 +1256,19 @@ for (const batch of batches) {
 ### 13.3 结果聚合和部分失败
 
 ```ts
+// allSettled 保留每个调用的独立结果，单个失败不会吞掉其他成功证据。
 const settled = await Promise.allSettled(calls.map(executeTool));
 
+// 聚合必须按 Call ID／原计划关联；这里的过滤只是伪代码简写。
 const success = settled.filter(isFulfilled).map((item) => item.value);
 const failed = settled.filter(isRejected).map(toToolFailure);
 
 if (failed.some((item) => item.required)) {
+  // 必需能力失败时阻塞或降级，不能用不完整证据伪装完整任务成功。
   return fallbackOrBlock(failed);
 }
 
+// 可选能力失败可以继续，但警告必须进入最终回答、Trace 和评测记录。
 return continueWithPartialEvidence({ success, warnings: failed });
 ```
 
@@ -1219,9 +1312,12 @@ Broker 层：Schema、权限、租户、速率、预算、审批、幂等。
 
 ```ts
 async function secureToolCall(call: ToolCall, context: ExecutionContext) {
+  // 只从可信 Registry 取已锁定版本，防止同名 Tool 被运行时替换或投毒。
   const tool = trustedRegistry.getPinnedVersion(call.name);
+  // 模型参数和检索证据都视为不可信输入，先做结构与注入检测。
   const input = validateSchema(tool.inputSchema, call.arguments);
 
+  // Skill 白名单、用户权限、租户范围是三道不同边界，缺一不可。
   assertToolAllowedBySkill(context.skill, tool.name);
   assertUserPermission(context.user, tool.permissions);
   assertTenantScope(context.tenantId, input);
@@ -1229,6 +1325,7 @@ async function secureToolCall(call: ToolCall, context: ExecutionContext) {
   enforceBudget(context.taskId, tool.costClass);
 
   if (tool.risk === "high-risk") {
+    // 审批展示规范化参数和预期副作用，不能让用户确认模糊自然语言。
     await requireExplicitApproval({
       tool,
       input,
@@ -1236,13 +1333,16 @@ async function secureToolCall(call: ToolCall, context: ExecutionContext) {
     });
   }
 
+  // Tool 在沙箱内运行，只拿最小网络、文件和短期凭证权限。
   const raw = await sandbox.run(tool, input, {
     networkAllowlist: tool.networkAllowlist,
     fileRoots: tool.allowedRoots,
     credentials: credentialBroker.referenceFor(tool.name),
   });
 
+  // Tool 输出进入模型前再次做 Schema 校验和脱敏，防止输出携带恶意指令或秘密。
   const output = validateAndRedact(raw, tool.outputSchema);
+  // 审计保存摘要 Hash 和 Trace 关联，不把完整敏感结果复制进日志。
   await auditLog.append({ call, context, outputDigest: hash(output) });
   return output;
 }
@@ -1284,6 +1384,7 @@ async function secureToolCall(call: ToolCall, context: ExecutionContext) {
 ### 15.2 评测用例 Schema
 
 ```ts
+// Eval Case 同时描述起始环境、允许能力、期望轨迹和最终业务状态。
 type ToolSkillEvalCase = {
   id: string;
   category:
@@ -1294,15 +1395,17 @@ type ToolSkillEvalCase = {
     | "failure-recovery";
   userGoal: string;
   initialState: Record<string, unknown>;
-  availableTools: string[];
+  availableTools: string[]; // 控制候选集，专门测试相似 Tool 下的选择能力。
   expectedSkill?: string;
   expectedCalls: Array<{
     tool: string;
+    // 参数断言可做精确匹配、范围匹配或业务语义匹配。
     argumentAssertions: Record<string, unknown>;
     dependsOn?: string[];
     optional?: boolean;
   }>;
-  forbiddenTools?: string[];
+  forbiddenTools?: string[]; // 越权或不必要调用即使最终答案正确也要扣分。
+  // Mock Outcome 用于稳定复现超时、限流和部分失败，不消耗真实外部 API。
   mockedOutcomes?: Record<string, ToolResult<unknown>>;
   expectedFinalState: Record<string, unknown>;
   maxSteps: number;
@@ -1314,13 +1417,16 @@ type ToolSkillEvalCase = {
 
 ```ts
 function grade(run: AgentRun, test: ToolSkillEvalCase) {
+  // 每一项独立计分，便于区分“选错工具”“参数错误”和“结果未落地”。
   return {
     skillSelection: run.skill === test.expectedSkill,
     toolSelection: compareToolSet(run.calls, test.expectedCalls),
     argumentAccuracy: gradeArguments(run.calls, test.expectedCalls),
     dependencyAccuracy: validateCallDAG(run.calls, test.expectedCalls),
+    // forbiddenCallCount 是硬安全指标，不能被流畅的最终文本抵消。
     forbiddenCallCount: countForbidden(run.calls, test.forbiddenTools),
     loopFree: run.steps <= test.maxSteps && !hasRepeatedNoProgressCall(run),
+    // 最终结果读取真实环境状态，不相信模型在回答中声称已经完成。
     finalStatePassed: assertState(run.environment, test.expectedFinalState),
     withinCost: run.cost <= test.maxCost,
   };
@@ -1384,7 +1490,9 @@ Skill 声明 Allowed Tools 和步骤。执行到某一步时，模型生成 Func
 - 明确完成、失败和人工接管条件。
 
 ```ts
+// Tool 名和规范化参数组成调用签名，用于检测完全相同的重复动作。
 const signature = hash(toolName, args);
+// 只有“重复调用且没有新证据”才停止，避免误杀必要的分页或轮询。
 if (state.recentCalls.includes(signature) && !state.hasNewEvidence) {
   return stop("REPEATED_TOOL_CALL_WITHOUT_PROGRESS");
 }

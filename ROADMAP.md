@@ -29,6 +29,7 @@
 | `docs/interview/resume/game-marketing-rag-evidence.md` | 游戏活动/官网营销 RAG 证据说明、评测维度、MCP/多 Agent 面试口径 |
 | `docs/interview/agentguide-rag-interview-mapping.md` | AgentGuide RAG/Agent 高频面试知识与当前项目能力、缺口、回答模板对照 |
 | `docs/interview/processon-ai-application-mindmap.md` | ProcessOn「AI 应用」思维导图逐节点整理、原图备份和当前 RAG 项目对照 |
+| `docs/interview/README.md` | 面试文档总入口、分时长阅读路线、主题定位和岗位复习顺序 |
 | `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md` | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 专题面试手册与代码映射 |
 | `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md` | Agent 平台架构图、十一类架构方案、优缺点、场景与选型手册 |
 | `docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md` | 主人历次 RAG／Agent／架构面试问题、覆盖状态和待补方向总清单 |
@@ -56,8 +57,9 @@
 
 ## 已完成能力
 
-- **Agent 工具体系面试专题**：新增并完善 `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md`，用统一游戏活动案例解释 Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系；补充单 Agent Goal／State／Policy／Action／Observation／Stop 闭环、LangGraph 状态机、防循环、模式选择和评测；补充多 Agent Supervisor／Pipeline／DAG／Handoff／Debate／Blackboard 对比、Agent Contract、六岗位 DAG、版本化 Artifact、上下文隔离、Checkpoint、局部重跑、协调开销和单 Agent Baseline；同时覆盖 Function Schema、Tool Registry、MCP 生命周期与传输、并行调用、安全治理、Skill 渐进式披露和五层评测门禁。TypeScript／YAML／JSON 伪代码、业务场景、高频追问、两分钟回答、项目代码入口和官方规范均已补齐。仅文档更新，未改运行时代码。
-- **Agent 架构设计与选型专题**：新增 `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md`，使用 Mermaid 绘制企业 Agent 平台总架构、架构决策树以及 Workflow、Router、ReAct、Plan-and-Execute、Workflow-first、Manager、Handoff、Multi-Agent DAG、Supervisor、Group Chat／Debate、Event-driven／Blackboard 十一类架构图；逐项记录特点、优缺点、业务场景、伪代码和治理边界，补充主流业务场景推荐、横向评分、七问选型法、项目架构与候选方案取舍、错误模式、面试回答和代码映射；主流模式判断已与 OpenAI Agents SDK、LangGraph.js 和 AutoGen 官方资料核对。仅文档更新，未改运行时代码。
+- **面试文档总入口**：新增 `docs/interview/README.md`，将 `docs/interview/` 下核心知识、架构、工具、七个难点、问题清单、JD 对照、简历和业务证据材料统一归类；补充 30 分钟、半天和一周三条阅读路线，按主题快速定位、四类目标岗位复习顺序、信息冲突优先级与维护规则；`interview-docs-usage.md` 保留为详细说明并回链总入口。仅文档更新，未改运行时代码。
+- **Agent 工具体系面试专题**：新增并完善 `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md`，用统一游戏活动案例解释 Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系；补充单 Agent Goal／State／Policy／Action／Observation／Stop 闭环、LangGraph 状态机、防循环、模式选择和评测；补充多 Agent Supervisor／Pipeline／DAG／Handoff／Debate／Blackboard 对比、Agent Contract、六岗位 DAG、版本化 Artifact、上下文隔离、Checkpoint、局部重跑、协调开销和单 Agent Baseline；同时覆盖 Function Schema、Tool Registry、MCP 生命周期与传输、并行调用、安全治理、Skill 渐进式披露和五层评测门禁。全部 TypeScript／YAML／JSONC 伪代码已补职责边界和关键决策中文注释，解释模型与宿主分工、Schema／权限／预算门禁、状态更新、停止条件、失败恢复、幂等、Checkpoint 和评测含义；业务场景、高频追问、两分钟回答、项目代码入口和官方规范均已补齐。仅文档更新，未改运行时代码。
+- **Agent 架构设计与选型专题**：新增并完善 `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md`，使用 Mermaid 绘制企业 Agent 平台总架构、架构决策树以及 Workflow、Router、ReAct、Plan-and-Execute、Workflow-first、Manager、Handoff、Multi-Agent DAG、Supervisor、Group Chat／Debate、Event-driven／Blackboard 十一类架构图；逐项记录特点、优缺点、业务场景、伪代码和治理边界；进一步把“主流方案”从资料索引扩写为 Workflow-first、单 Agent＋Tools／MCP／Skills、Manager、Router＋Handoff、多 Agent DAG 五张完整方案卡，补齐控制权、执行流、核心组件、适用边界、生产门禁和面试表达，并加入 Prompt Chaining、Routing、Parallelization、Orchestrator-Workers、Evaluator-Optimizer、Agent Loop 六个组合原语与多 Agent 升级硬门槛；主流模式结论已与 OpenAI Agents SDK、Anthropic、LangChain／LangGraph 和 Microsoft AutoGen 官方资料核对。仅文档更新，未改运行时代码。
 - **历次架构与面试问题总清单**：新增 `docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md`，汇总主人在项目讨论和两套真实面试中提出的 RAG、Agent、多 Agent、Function Calling／Tool／MCP／Skill、记忆、服务边界、生产评测、简历与岗位判断问题；每题标注已覆盖／需补数据／建议加深和主要答案入口，保留上海现场题与腾讯图片题原始清单，并新增 P0／P1 潜在追问缺口。仅文档更新，未改运行时代码。
 
 ### RAG 核心链路

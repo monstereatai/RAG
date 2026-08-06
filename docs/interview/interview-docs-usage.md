@@ -2,6 +2,8 @@
 
 更新时间：2026-08-03
 
+> 第一次进入面试材料请先看 [README.md](./README.md)。本文件保留更详细的阅读场景、问题定位和复习方法。
+
 ## 先看结论
 
 如果目标是 **高级 Agent 开发 / 高级 AI 应用开发**，不要把所有文档从头背到尾。按下面三层用：
@@ -22,24 +24,24 @@ INTERVIEW_PLAYBOOK.md 负责“怎么说”，AI_AGENT_CORE_KNOWLEDGE.md 负责�
 
 ## 这几份文件分别干什么
 
-| 文件 | 用途 | 什么时候看 |
-|---|---|---|
-| `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md` | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系、伪代码、业务场景、失败治理、评测和代码对照 | 面试官集中追问 Agent 架构、多 Agent 协作、外部能力、MCP 和 Skill 时 |
-| `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md` | Agent 平台总架构、方案图、Workflow／ReAct／Manager／Handoff／DAG／Supervisor 等模式对比、主流场景和选型 | 面试官追问“为什么这样设计、还有哪些架构、不同场景怎么选”时 |
-| `docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md` | 主人历次架构与面试问题按主题汇总，标注覆盖状态、答案入口、真实数据项和建议新增问题 | 面试复习前查漏补缺、决定下一步补什么时 |
-| `docs/interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md` | 七个 Agent／RAG 技术难点的业务背景、方案对比、项目选择、实现证据、口述稿和追问答案 | 面试前集中复习项目技术深度，或面试官追问“为什么这样设计”时 |
-| `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` | 高级／资深／Staff 岗位边界，真实业务、稳定性、性能、ADR、跨团队和事故证据的补数命令与验收线 | 判断项目能投什么级别、补简历数字、准备架构岗或 Staff 追问时 |
-| `AI_AGENT_CORE_KNOWLEDGE.md` | 高级 Agent / RAG 核心知识人话版：概念、方案、优缺点、项目取舍 | 系统复习、被深挖原理和方案选型时 |
-| `docs/interview/agentguide-rag-interview-mapping.md` | AgentGuide 高频知识与当前项目对照：覆盖度、项目证据、边界、回答模板 | 面试官按 AgentGuide 体系追问 RAG / Agent / MCP / Memory / Eval 时 |
-| `INTERVIEW_PLAYBOOK.md` | 面试回答稿：核心问题清晰回答版、项目介绍、高级 Agent 速背页、追问回答、反问清单 | 面试前背诵和临场组织语言 |
-| `docs/interview/resume/resume-rag-project.md` | 简历可复制版本：项目名称、项目描述、最终版 bullets、量化指标 | 写简历、改简历、投递前 |
-| `docs/interview/resume/resume-rag-project-game-marketing.md` | 更贴合主人游戏活动/营销/官网经历的简历版本 | 投 AI 应用、Agent、前端架构、业务中台相关岗位时 |
-| `docs/interview/resume/game-marketing-rag-evidence.md` | 游戏活动/官网营销专项证据：数据集、评测维度、MCP、多 Agent、边界 | 面试官追问“为什么这个项目贴合你的过往业务”时 |
-| `docs/interview/jd/jd-requirements-project-mapping.md` | 对照大厂 JD：岗位要求、项目实现、代码位置、面试边界 | 投递前、面试前判断岗位匹配度 |
-| `docs/interview/jd/jd-gap-implementation-status.md` | 看缺口状态：哪些已补、哪些只是基础版、哪些仍需外部条件 | 面试官追问“还有哪些没做完”时 |
-| `docs/interview/processon-ai-application-mindmap.md` | ProcessOn「AI 应用」思维导图逐节点整理和项目对照 | 面试前按知识地图查漏补缺时 |
-| `ROADMAP.md` | 项目真实进度源：已完成、阻塞、最近验证 | 回答“当前真实状态”和“验证证据”时 |
-| `docs/plans/remaining-enhancement-plan.md` | 一线大厂生产化差距：真实数据、权限、压测、安全、运维 | 讲生产化差距和下一步计划时 |
+| 文件                                                               | 用途                                                                                                              | 什么时候看                                                          |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md`                     | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系、伪代码、业务场景、失败治理、评测和代码对照 | 面试官集中追问 Agent 架构、多 Agent 协作、外部能力、MCP 和 Skill 时 |
+| `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md`             | Agent 平台总架构、方案图、Workflow／ReAct／Manager／Handoff／DAG／Supervisor 等模式对比、主流场景和选型           | 面试官追问“为什么这样设计、还有哪些架构、不同场景怎么选”时          |
+| `docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md` | 主人历次架构与面试问题按主题汇总，标注覆盖状态、答案入口、真实数据项和建议新增问题                                | 面试复习前查漏补缺、决定下一步补什么时                              |
+| `docs/interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md`             | 七个 Agent／RAG 技术难点的业务背景、方案对比、项目选择、实现证据、口述稿和追问答案                                | 面试前集中复习项目技术深度，或面试官追问“为什么这样设计”时          |
+| `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md`               | 高级／资深／Staff 岗位边界，真实业务、稳定性、性能、ADR、跨团队和事故证据的补数命令与验收线                       | 判断项目能投什么级别、补简历数字、准备架构岗或 Staff 追问时         |
+| `AI_AGENT_CORE_KNOWLEDGE.md`                                       | 高级 Agent / RAG 核心知识人话版：概念、方案、优缺点、项目取舍                                                     | 系统复习、被深挖原理和方案选型时                                    |
+| `docs/interview/agentguide-rag-interview-mapping.md`               | AgentGuide 高频知识与当前项目对照：覆盖度、项目证据、边界、回答模板                                               | 面试官按 AgentGuide 体系追问 RAG / Agent / MCP / Memory / Eval 时   |
+| `INTERVIEW_PLAYBOOK.md`                                            | 面试回答稿：核心问题清晰回答版、项目介绍、高级 Agent 速背页、追问回答、反问清单                                   | 面试前背诵和临场组织语言                                            |
+| `docs/interview/resume/resume-rag-project.md`                      | 简历可复制版本：项目名称、项目描述、最终版 bullets、量化指标                                                      | 写简历、改简历、投递前                                              |
+| `docs/interview/resume/resume-rag-project-game-marketing.md`       | 更贴合主人游戏活动/营销/官网经历的简历版本                                                                        | 投 AI 应用、Agent、前端架构、业务中台相关岗位时                     |
+| `docs/interview/resume/game-marketing-rag-evidence.md`             | 游戏活动/官网营销专项证据：数据集、评测维度、MCP、多 Agent、边界                                                  | 面试官追问“为什么这个项目贴合你的过往业务”时                        |
+| `docs/interview/jd/jd-requirements-project-mapping.md`             | 对照大厂 JD：岗位要求、项目实现、代码位置、面试边界                                                               | 投递前、面试前判断岗位匹配度                                        |
+| `docs/interview/jd/jd-gap-implementation-status.md`                | 看缺口状态：哪些已补、哪些只是基础版、哪些仍需外部条件                                                            | 面试官追问“还有哪些没做完”时                                        |
+| `docs/interview/processon-ai-application-mindmap.md`               | ProcessOn「AI 应用」思维导图逐节点整理和项目对照                                                                  | 面试前按知识地图查漏补缺时                                          |
+| `ROADMAP.md`                                                       | 项目真实进度源：已完成、阻塞、最近验证                                                                            | 回答“当前真实状态”和“验证证据”时                                    |
+| `docs/plans/remaining-enhancement-plan.md`                         | 一线大厂生产化差距：真实数据、权限、压测、安全、运维                                                              | 讲生产化差距和下一步计划时                                          |
 
 ## 推荐阅读顺序
 
@@ -82,11 +84,11 @@ docs/interview/agentguide-rag-interview-mapping.md
 
 阅读方法：
 
-| 步骤 | 文件 | 怎么看 |
-|---|---|---|
-| 1 | `AI_AGENT_CORE_KNOWLEDGE.md` | 看每个知识点的“人话理解 -> 面试怎么说 -> 项目对应” |
-| 2 | `INTERVIEW_PLAYBOOK.md` | 把长知识压缩成现场回答 |
-| 3 | `docs/interview/agentguide-rag-interview-mapping.md` | 检查 AgentGuide 高频点是否能和项目对上 |
+| 步骤 | 文件                                                 | 怎么看                                             |
+| ---- | ---------------------------------------------------- | -------------------------------------------------- |
+| 1    | `AI_AGENT_CORE_KNOWLEDGE.md`                         | 看每个知识点的“人话理解 -> 面试怎么说 -> 项目对应” |
+| 2    | `INTERVIEW_PLAYBOOK.md`                              | 把长知识压缩成现场回答                             |
+| 3    | `docs/interview/agentguide-rag-interview-mapping.md` | 检查 AgentGuide 高频点是否能和项目对上             |
 
 必须说顺的 12 条主线：
 
@@ -161,13 +163,13 @@ AI_AGENT_CORE_KNOWLEDGE.md
 
 使用方式：
 
-| 追问方向 | 优先看哪里 |
-|---|---|
-| RAG / Chunk / Embedding / Hybrid / Rerank | `AI_AGENT_CORE_KNOWLEDGE.md` 的 RAG 章节 |
-| Agentic RAG / Deep Research / Self-RAG / CRAG | `AI_AGENT_CORE_KNOWLEDGE.md` 的高级 Agent 章节 |
-| Agent Harness / Evaluation Harness | `AI_AGENT_CORE_KNOWLEDGE.md` 的 Harness 章节 |
-| AgentGuide 问题如何映射项目 | `docs/interview/agentguide-rag-interview-mapping.md` 的覆盖矩阵 |
-| 哪些不能硬说 | `docs/interview/agentguide-rag-interview-mapping.md` 的项目边界 |
+| 追问方向                                      | 优先看哪里                                                      |
+| --------------------------------------------- | --------------------------------------------------------------- |
+| RAG / Chunk / Embedding / Hybrid / Rerank     | `AI_AGENT_CORE_KNOWLEDGE.md` 的 RAG 章节                        |
+| Agentic RAG / Deep Research / Self-RAG / CRAG | `AI_AGENT_CORE_KNOWLEDGE.md` 的高级 Agent 章节                  |
+| Agent Harness / Evaluation Harness            | `AI_AGENT_CORE_KNOWLEDGE.md` 的 Harness 章节                    |
+| AgentGuide 问题如何映射项目                   | `docs/interview/agentguide-rag-interview-mapping.md` 的覆盖矩阵 |
+| 哪些不能硬说                                  | `docs/interview/agentguide-rag-interview-mapping.md` 的项目边界 |
 
 ### 3. 面试官问“项目现在到底完成到什么程度”
 
@@ -200,33 +202,33 @@ docs/plans/remaining-enhancement-plan.md
 
 ## 面试时怎么快速定位
 
-| 面试问题 | 查哪个文件 |
-|---|---|
-| 高级 Agent 开发通用知识怎么复习？ | `AI_AGENT_CORE_KNOWLEDGE.md` |
-| 面试现场怎么说得短？ | `INTERVIEW_PLAYBOOK.md` |
-| AgentGuide 问到的内容有没有覆盖？ | `docs/interview/agentguide-rag-interview-mapping.md` |
-| RAG 项目怎么写到简历上？ | `docs/interview/resume/resume-rag-project.md` |
-| 怎么把项目贴合游戏活动/营销/官网经历？ | `docs/interview/resume/resume-rag-project-game-marketing.md` + `docs/interview/resume/game-marketing-rag-evidence.md` |
-| 简历里 RAG 负责内容和重难点怎么短回答？ | `docs/interview/resume/resume-rag-project-game-marketing.md` 的“简历四条负责内容怎么说”和“重难点与结果短回答” |
-| 你这个项目和阿里/腾讯/百度/字节/美团 JD 对得上吗？ | `docs/interview/jd/jd-requirements-project-mapping.md` |
-| 你项目里哪些没实现？ | `docs/interview/jd/jd-gap-implementation-status.md` |
-| RAG 怎么做？ | `INTERVIEW_PLAYBOOK.md` 的“面试先看：核心问题清晰回答版” |
-| Agent Harness 怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent Harness 怎么设计？” + `INTERVIEW_PLAYBOOK.md` 的“高级 Agent 开发最后速背页” |
-| Evaluation Harness 怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent Evaluation Harness 怎么讲？” |
-| 框架选型怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent 框架怎么选？” |
-| 合规型 Agent 怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Parlant / 合规型 Agent 怎么讲？” |
-| 沙箱怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent 沙箱怎么讲？” |
-| 数据合成 / 评测集构建怎么讲？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“数据合成 / 评测集构建怎么讲？” |
-| 企业 Agent 落地为什么工作流优先？ | `AI_AGENT_CORE_KNOWLEDGE.md` 的“企业 Agent 落地：为什么工作流优先？” |
-| Agent 怎么协调？ | `INTERVIEW_PLAYBOOK.md` 的“多 Agent 怎么协调” + `docs/interview/jd/jd-requirements-project-mapping.md` |
-| 工具怎么调用？ | `INTERVIEW_PLAYBOOK.md` 的“工具怎么调用” + `docs/interview/jd/jd-gap-implementation-status.md` |
-| Prompt Injection 怎么防？ | `docs/interview/jd/jd-gap-implementation-status.md` |
-| Prompt 怎么管理版本？ | `docs/interview/jd/jd-gap-implementation-status.md` |
-| Agent 成功率怎么评估？ | `docs/interview/jd/jd-gap-implementation-status.md` |
-| ProcessOn「AI 应用」思维导图怎么用？ | `docs/interview/processon-ai-application-mindmap.md` + 本文档的“ProcessOn AI 应用思维导图用法” |
-| 金融/证券生产还差什么？ | `docs/plans/remaining-enhancement-plan.md` |
-| 当前最新进度和验证命令是什么？ | `ROADMAP.md` |
-| 资深架构岗／Staff 还差什么，真实数据怎么补？ | `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` |
+| 面试问题                                           | 查哪个文件                                                                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 高级 Agent 开发通用知识怎么复习？                  | `AI_AGENT_CORE_KNOWLEDGE.md`                                                                                          |
+| 面试现场怎么说得短？                               | `INTERVIEW_PLAYBOOK.md`                                                                                               |
+| AgentGuide 问到的内容有没有覆盖？                  | `docs/interview/agentguide-rag-interview-mapping.md`                                                                  |
+| RAG 项目怎么写到简历上？                           | `docs/interview/resume/resume-rag-project.md`                                                                         |
+| 怎么把项目贴合游戏活动/营销/官网经历？             | `docs/interview/resume/resume-rag-project-game-marketing.md` + `docs/interview/resume/game-marketing-rag-evidence.md` |
+| 简历里 RAG 负责内容和重难点怎么短回答？            | `docs/interview/resume/resume-rag-project-game-marketing.md` 的“简历四条负责内容怎么说”和“重难点与结果短回答”         |
+| 你这个项目和阿里/腾讯/百度/字节/美团 JD 对得上吗？ | `docs/interview/jd/jd-requirements-project-mapping.md`                                                                |
+| 你项目里哪些没实现？                               | `docs/interview/jd/jd-gap-implementation-status.md`                                                                   |
+| RAG 怎么做？                                       | `INTERVIEW_PLAYBOOK.md` 的“面试先看：核心问题清晰回答版”                                                              |
+| Agent Harness 怎么讲？                             | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent Harness 怎么设计？” + `INTERVIEW_PLAYBOOK.md` 的“高级 Agent 开发最后速背页”     |
+| Evaluation Harness 怎么讲？                        | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent Evaluation Harness 怎么讲？”                                                    |
+| 框架选型怎么讲？                                   | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent 框架怎么选？”                                                                   |
+| 合规型 Agent 怎么讲？                              | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Parlant / 合规型 Agent 怎么讲？”                                                      |
+| 沙箱怎么讲？                                       | `AI_AGENT_CORE_KNOWLEDGE.md` 的“Agent 沙箱怎么讲？”                                                                   |
+| 数据合成 / 评测集构建怎么讲？                      | `AI_AGENT_CORE_KNOWLEDGE.md` 的“数据合成 / 评测集构建怎么讲？”                                                        |
+| 企业 Agent 落地为什么工作流优先？                  | `AI_AGENT_CORE_KNOWLEDGE.md` 的“企业 Agent 落地：为什么工作流优先？”                                                  |
+| Agent 怎么协调？                                   | `INTERVIEW_PLAYBOOK.md` 的“多 Agent 怎么协调” + `docs/interview/jd/jd-requirements-project-mapping.md`                |
+| 工具怎么调用？                                     | `INTERVIEW_PLAYBOOK.md` 的“工具怎么调用” + `docs/interview/jd/jd-gap-implementation-status.md`                        |
+| Prompt Injection 怎么防？                          | `docs/interview/jd/jd-gap-implementation-status.md`                                                                   |
+| Prompt 怎么管理版本？                              | `docs/interview/jd/jd-gap-implementation-status.md`                                                                   |
+| Agent 成功率怎么评估？                             | `docs/interview/jd/jd-gap-implementation-status.md`                                                                   |
+| ProcessOn「AI 应用」思维导图怎么用？               | `docs/interview/processon-ai-application-mindmap.md` + 本文档的“ProcessOn AI 应用思维导图用法”                        |
+| 金融/证券生产还差什么？                            | `docs/plans/remaining-enhancement-plan.md`                                                                            |
+| 当前最新进度和验证命令是什么？                     | `ROADMAP.md`                                                                                                          |
+| 资深架构岗／Staff 还差什么，真实数据怎么补？       | `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md`                                                                  |
 
 ## 不能混用的地方
 
@@ -244,13 +246,13 @@ docs/plans/remaining-enhancement-plan.md
 
 ## 不同时间预算怎么用
 
-| 时间 | 只做什么 |
-|---|---|
-| 5 分钟 | 读 `INTERVIEW_PLAYBOOK.md` 的“一句话定位”和“高级 Agent 开发最后速背页” |
-| 10 分钟 | 加看“面试先看：核心问题清晰回答版” |
+| 时间    | 只做什么                                                                             |
+| ------- | ------------------------------------------------------------------------------------ |
+| 5 分钟  | 读 `INTERVIEW_PLAYBOOK.md` 的“一句话定位”和“高级 Agent 开发最后速背页”               |
+| 10 分钟 | 加看“面试先看：核心问题清晰回答版”                                                   |
 | 30 分钟 | 再看“面试时最好主动承认的边界”和 `docs/interview/jd/jd-gap-implementation-status.md` |
-| 2 小时 | 系统读 `AI_AGENT_CORE_KNOWLEDGE.md`，把每个方案的优缺点说顺 |
-| 半天 | 对照 `docs/interview/agentguide-rag-interview-mapping.md` 和目标 JD，做公司定制回答 |
+| 2 小时  | 系统读 `AI_AGENT_CORE_KNOWLEDGE.md`，把每个方案的优缺点说顺                          |
+| 半天    | 对照 `docs/interview/agentguide-rag-interview-mapping.md` 和目标 JD，做公司定制回答  |
 
 ## 面试回答组装公式
 
@@ -318,14 +320,14 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 ### 和你的 RAG 项目怎么对上
 
-| 图里的方向 | 你的项目怎么讲 | 面试重点 |
-|---|---|---|
-| Agent 记忆机制 | Redis 短期记忆摘要 + Mem0 长期记忆 + Admin 记忆管理 | 记忆分层、污染控制、摘要压缩、用户隔离 |
-| Agent 架构与工作流 | simple / auto / agentic 分层路由，复杂需求走 LangGraph | 简单问题 fast path，复杂问题 Agentic Workflow |
-| LangGraph 节点/边/状态 | routing、retrieval、sufficiency、rerank、generate、citation、reflection | 为什么用图编排，而不是单次 LLM 调用 |
-| Agent 工程落地 | RAG 后端、Admin、评测脚本、MCP 工具服务 | 能运营、能评测、能被 AI Coding 工具调用 |
-| Skill 和 MCP | Skill 更像本地能力/流程封装，MCP 是 Agent 调外部系统的标准工具接口 | CLI 给脚本和批量任务用，MCP 给 Agent 自动取上下文 |
-| Skill 命中率/维护 | Prompt Registry、Tool Registry、评测集回归、工具描述收敛 | 工具不是越多越好，要有路由、描述、评测和维护机制 |
+| 图里的方向             | 你的项目怎么讲                                                          | 面试重点                                          |
+| ---------------------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
+| Agent 记忆机制         | Redis 短期记忆摘要 + Mem0 长期记忆 + Admin 记忆管理                     | 记忆分层、污染控制、摘要压缩、用户隔离            |
+| Agent 架构与工作流     | simple / auto / agentic 分层路由，复杂需求走 LangGraph                  | 简单问题 fast path，复杂问题 Agentic Workflow     |
+| LangGraph 节点/边/状态 | routing、retrieval、sufficiency、rerank、generate、citation、reflection | 为什么用图编排，而不是单次 LLM 调用               |
+| Agent 工程落地         | RAG 后端、Admin、评测脚本、MCP 工具服务                                 | 能运营、能评测、能被 AI Coding 工具调用           |
+| Skill 和 MCP           | Skill 更像本地能力/流程封装，MCP 是 Agent 调外部系统的标准工具接口      | CLI 给脚本和批量任务用，MCP 给 Agent 自动取上下文 |
+| Skill 命中率/维护      | Prompt Registry、Tool Registry、评测集回归、工具描述收敛                | 工具不是越多越好，要有路由、描述、评测和维护机制  |
 
 ### AI 应用面试知识树补全版
 
@@ -535,19 +537,19 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 ### 高频追问速查
 
-| 面试追问 | 一句话回答 |
-|---|---|
-| 为什么不用纯向量？ | 纯向量能找相似，但业务术语、精确规则和关系依赖容易漏，所以用 Hybrid Search + GraphRAG。 |
-| simple 模式解决什么？ | 解决简单知识查询的延迟和成本问题，先走 Karpathy + Obsidian fast path。 |
-| 什么时候走 Agentic？ | 只有复杂需求、证据不足、需要拆方案和补风险时才走 Agentic。 |
-| GraphRAG 有什么用？ | 用来补齐活动玩法、页面、接口、埋点、地区版本、风险项之间的关系。 |
-| 记忆污染怎么办？ | 写入前分类，短期和长期分层，长期只沉淀稳定事实，错误和临时上下文不固化。 |
-| Token 怎么省？ | fast path、topK 控制、Rerank、摘要压缩、片段裁剪、低相关拒答一起做。 |
-| 工具怎么调用？ | MCP 暴露标准工具，Agent 根据工具描述和任务上下文选择调用。 |
-| MCP 和 CLI 区别？ | CLI 给人和脚本用，MCP 给 Agent 自动调用。 |
-| 幻觉怎么控？ | sufficiency gate、Rerank、citation gate、低相关拒答、Prompt Injection 检测、评测回归。 |
-| 怎么证明有效？ | 通用 RAG 指标 + 游戏活动专项指标 + 失败样本回流评测集。 |
-| 生产还差什么？ | 真实数据、真实权限系统、真实多模态模型、生产 SLA、灰度、成本和合规。 |
+| 面试追问                   | 一句话回答                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| 为什么不用纯向量？         | 纯向量能找相似，但业务术语、精确规则和关系依赖容易漏，所以用 Hybrid Search + GraphRAG。    |
+| simple 模式解决什么？      | 解决简单知识查询的延迟和成本问题，先走 Karpathy + Obsidian fast path。                     |
+| 什么时候走 Agentic？       | 只有复杂需求、证据不足、需要拆方案和补风险时才走 Agentic。                                 |
+| GraphRAG 有什么用？        | 用来补齐活动玩法、页面、接口、埋点、地区版本、风险项之间的关系。                           |
+| 记忆污染怎么办？           | 写入前分类，短期和长期分层，长期只沉淀稳定事实，错误和临时上下文不固化。                   |
+| Token 怎么省？             | fast path、topK 控制、Rerank、摘要压缩、片段裁剪、低相关拒答一起做。                       |
+| 工具怎么调用？             | MCP 暴露标准工具，Agent 根据工具描述和任务上下文选择调用。                                 |
+| MCP 和 CLI 区别？          | CLI 给人和脚本用，MCP 给 Agent 自动调用。                                                  |
+| 幻觉怎么控？               | sufficiency gate、Rerank、citation gate、低相关拒答、Prompt Injection 检测、评测回归。     |
+| 怎么证明有效？             | 通用 RAG 指标 + 游戏活动专项指标 + 失败样本回流评测集。                                    |
+| 生产还差什么？             | 真实数据、真实权限系统、真实多模态模型、生产 SLA、灰度、成本和合规。                       |
 | 这个项目和前端有什么关系？ | 它把活动需求转成页面结构、接口、埋点、风险和验收清单，并通过 MCP 给 AI Coding 提供上下文。 |
 
 ### 面试时不要展开成大而全

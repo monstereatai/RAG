@@ -683,11 +683,218 @@ flowchart TB
 | 实时语音 Agent   | 单 Agent＋低延迟 Tools                | 专家 Handoff                 | 多层 Supervisor          |
 | 批量文档／评测   | Event-driven Workers                  | Agent 做异常分类             | 同步长连接处理全部任务   |
 
-### 当前最主流的三种组合
+### 15.1 先分清：主流的是架构思想，不是某一个框架
 
-1. **Workflow-first＋局部 Agent**：企业应用默认答案，兼顾确定性和灵活性。
-2. **单 Agent＋Tools／MCP／Skills**：中等复杂度 Copilot、客服和 Coding 场景常用。
-3. **Manager 或 DAG 多 Agent**：只在专业角色和协作收益明确时使用。
+LangGraph、OpenAI Agents SDK、AutoGen、Semantic Kernel 等是实现载体，不是架构本身。面试时不要回答“我们的架构是 LangGraph”，这相当于别人问后端架构，你只回答“NestJS”。正确表达应该包含四层：
+
+1. **控制权放在哪里**：由代码、单个 LLM、Manager，还是多个 Agent 决定下一步。
+2. **能力如何提供**：Tool、MCP、Skill、RAG、Memory 如何进入执行上下文。
+3. **状态如何流转**：State、Artifact、Checkpoint、Handoff Payload 如何保存和传递。
+4. **可靠性如何闭环**：停止条件、预算、证据门禁、人工审批、评测和观测如何生效。
+
+当前企业应用中最常见的不是某一种纯架构，而是以下组合：
+
+```text
+确定性代码骨架
+  + 局部模型判断
+  + 受控工具执行
+  + 显式状态与恢复
+  + 风险门禁与评测
+```
+
+### 15.2 主流方案 A：Workflow-first＋局部 Agent
+
+**一句话定义**：代码掌握主流程和业务状态，LLM 只处理分类、检索规划、工具选择、生成和评审等不确定节点。
+
+**核心执行流**：
+
+```text
+请求校验
+  -> 规则／模型路由
+  -> 检索或业务节点
+  -> 证据充分性判断
+  -> 必要时进入受限 Agent 循环
+  -> 结构化生成
+  -> 规则／模型双重校验
+  -> 审批或输出
+```
+
+**核心组件**：
+
+- Typed State：保存目标、证据、预算、当前节点、错误和产物版本。
+- Deterministic Edges：固定依赖、权限判断、风险分支和最终状态由代码决定。
+- Agentic Nodes：仅在路径无法完全预知的位置允许模型动态决策。
+- Checkpoint：节点完成后持久化，失败从最近成功节点恢复。
+- Gate：对引用、Schema、权限、风险和业务成功状态做硬校验。
+
+**为什么主流**：企业任务通常不是完全确定，也不是完全开放。此方案把模型的语义能力留在真正需要它的位置，同时让速度、成本、权限、恢复和审计仍然可控。
+
+**适用信号**：主流程稳定、分支有限；任务跨多个步骤；有外部副作用；需要暂停恢复、局部重跑或人工审批。
+
+**不适用信号**：一次模型调用已经能稳定完成；步骤完全固定且不需要语义判断；或者任务开放到无法提前定义主要状态。
+
+**生产必备**：State Schema 版本、节点幂等键、超时与重试策略、Checkpoint、补偿动作、风险分级、逐节点 Trace 和离线 Evals。
+
+**面试表达**：
+
+> 企业 Agent 的默认解不是完全自治，而是 Workflow-first。代码控制状态、依赖和风险，模型只控制局部不确定性。这样既保留 Agent 根据 Observation 调整动作的能力，又能对每个节点做恢复、评测和审计。
+
+### 15.3 主流方案 B：单 Agent＋Tools／MCP／Skills
+
+**一句话定义**：一个 Agent 保持任务所有权，根据目标和 Observation 在受控循环中选择能力；Tool 负责执行，MCP 负责标准化接入，Skill 负责按需加载方法和知识。
+
+**核心执行流**：
+
+```text
+Goal + Context
+  -> Agent 选择 Skill／Tool
+  -> Function Call 生成结构化参数
+  -> Tool Runtime 做权限与参数校验
+  -> MCP／本地函数／业务 API 执行
+  -> Observation 回写 State
+  -> 完成、继续、降级或转人工
+```
+
+**核心组件**：
+
+- Agent Loop：`decide -> act -> observe -> update -> stop`。
+- Tool Registry：工具描述、Schema、权限、超时、幂等和风险级别统一注册。
+- MCP Client：发现和调用外部 MCP Server 暴露的 tools、resources、prompts。
+- Skill Loader：只把当前任务需要的 SOP、示例和工具说明加载进上下文。
+- Stop Controller：限制步骤、时间、Token、费用、重复调用和无进展次数。
+
+**为什么主流**：中等复杂度任务不需要多 Agent。一个 Owner 可以减少上下文转交、协调 Token 和故障面，又能组合企业内部工具完成动态任务。
+
+**适用信号**：任务路径要根据执行结果变化；一个上下文可以容纳任务；工具和权限不需要按角色强隔离；最终答案应保持统一口径。
+
+**不适用信号**：固定流程可以直接编码；工具过多导致选择准确率明显下降；上下文已经被多个专业领域挤满；存在可观的并行收益或独立交付物。
+
+**生产必备**：工具动态检索而非全量注入、最小权限、参数 Schema、执行前确认、副作用幂等、循环检测、结果裁剪、Sandbox 和逐 Tool 评测。
+
+**面试表达**：
+
+> Function Calling 是模型表达调用意图，Tool 是可执行能力，MCP 是能力接入协议，Skill 是可按需加载的方法包。单 Agent 负责决策，但真正执行必须经过 Tool Runtime 的权限、Schema、预算和审计门禁。
+
+### 15.4 主流方案 C：Manager／Subagents as Tools
+
+**一句话定义**：Manager 始终拥有用户会话和最终答案，专业 Agent 以 Tool 形式接受边界明确的子任务，完成后把结构化结果交回 Manager。
+
+**核心执行流**：
+
+```text
+用户目标
+  -> Manager 拆解和选择专家
+  -> Research／Data／Writer 等 Subagent
+  -> Subagent 返回 Evidence + Result + Limitations
+  -> Manager 去重、解决冲突并汇总
+  -> 最终校验和回答
+```
+
+**核心组件**：Manager Policy、Subagent Card、结构化 Task Contract、独立上下文和 Tool 白名单、结果聚合器、冲突处理规则。
+
+**为什么使用**：它用一次统一入口换取专业上下文隔离。专家不需要看到整段用户历史，Manager 可以统一风格、证据和 Guardrail。
+
+**适用信号**：一个入口要调用多个专家；专家只完成子任务，不应直接与用户长期对话；需要并行研究后统一汇总。
+
+**不适用信号**：专家需要持续追问用户；Manager 会成为明显的 Token、延迟或信息压缩瓶颈；专家之间依赖关系本来就是固定 DAG。
+
+**生产必备**：Subagent 输入最小化、结构化返回、并发上限、结果去重、证据回传、冲突仲裁、Manager 失败降级和总预算分配。
+
+**面试表达**：
+
+> Manager 模式的关键不是“多个 Prompt”，而是控制权不转移。专家是有独立上下文和工具边界的能力单元，Manager 负责拆解、汇总和最终责任。
+
+### 15.5 主流方案 D：Router＋Handoff
+
+**一句话定义**：Router／Triage 判断领域后，把当前会话所有权和经过裁剪的上下文交给专家；专家直接继续与用户交互。
+
+**核心执行流**：
+
+```text
+用户请求
+  -> 规则优先、模型补充的 Triage
+  -> 生成 Handoff Payload
+  -> 专家接管会话
+  -> 专家调用领域工具／继续追问
+  -> 完成、转其他专家或人工
+```
+
+**核心组件**：路由标签、专家能力描述、Handoff Schema、上下文过滤器、当前 Owner、最大转交次数和人工兜底。
+
+**为什么使用**：当专业 Agent 必须直接理解后续追问并持续服务用户时，Handoff 比 Manager 反复转述更自然，重复轮次的调用开销也更低。
+
+**适用信号**：客服、工单、企业服务台等领域边界清楚；专家需要直接追问；会话会在同一领域持续多轮。
+
+**不适用信号**：所有专家结果必须统一汇总；任务主要是后台并行计算；领域分类不稳定且错误转交代价很高。
+
+**生产必备**：置信度阈值、低置信度澄清、禁止来回转交、Payload Schema、敏感上下文过滤、Owner 记录、全局策略在每个专家重复执行。
+
+**面试表达**：
+
+> Manager 是“专家帮我做，结果回到我”；Handoff 是“这件事归专家，控制权也交给他”。选择依据不是 Agent 数量，而是用户会话的 Owner 是否需要变化。
+
+### 15.6 主流方案 E：多 Agent DAG／Pipeline
+
+**一句话定义**：代码显式声明角色依赖和并行关系，每个 Agent 围绕独立交付物工作，通过版本化 Artifact 而不是无限聊天协作。
+
+**核心执行流**：
+
+```text
+任务建模
+  -> 拓扑排序
+  -> 同批无依赖角色并行
+  -> Artifact Schema 校验
+  -> 下游消费指定版本
+  -> 质量门禁／局部重跑
+  -> 高风险节点审批
+  -> 汇总交付
+```
+
+**核心组件**：DAG、Agent Contract、Artifact Store、Dependency Gate、并行调度、Checkpoint、局部重跑、版本和血缘。
+
+**为什么使用**：已知流程中的角色分工、依赖和并行可以由代码精确表达，避免 Supervisor 每一步都花一次模型调用猜下一位执行者。
+
+**适用信号**：专业角色有独立 Tool、上下文、交付物和验收标准；依赖关系大体稳定；失败需要只重跑局部；并行能明显降低总时延。
+
+**不适用信号**：角色只是不同 Prompt，没有真正隔离；任务很短；依赖完全开放；协调成本高于专业化收益。
+
+**生产必备**：Artifact 版本、Schema 和血缘，上游失败传播规则，fan-out／fan-in 并发控制，局部重跑影响分析，角色级成功率和协调开销评测。
+
+**面试表达**：
+
+> 多 Agent DAG 不是让六个 Agent 自由聊天，而是把组织协作建模成可恢复的执行图。角色通过结构化 Artifact 交接，代码控制依赖和并行，模型负责各节点的专业判断。
+
+### 15.7 六个可组合的执行原语
+
+主流系统通常把下面原语组合起来，而不是强行选择一种大而全框架：
+
+| 执行原语             | 核心机制                                    | 适合场景                             | 主要代价                   |
+| -------------------- | ------------------------------------------- | ------------------------------------ | -------------------------- |
+| Prompt Chaining      | 前一步结构化输出作为后一步输入，中间加 Gate | 固定分解、逐步提高质量               | 串行延迟                   |
+| Routing              | 规则或模型分类后进入专业链路                | 输入类别清楚、模型或工具需要分层     | 错路由会放大下游错误       |
+| Parallelization      | 独立子任务并发或同题多次投票                | 降低总时延、获得多视角               | 聚合和冲突处理             |
+| Orchestrator-Workers | 中央模型动态拆解未知子任务并汇总            | Coding、Deep Research 等开放复杂任务 | Manager 成本和拆解稳定性   |
+| Evaluator-Optimizer  | 生成者和评审者按明确标准迭代                | 翻译、内容、代码、研究结论精修       | 可能循环，必须限制轮次     |
+| Agent Loop           | 模型根据环境反馈动态选择下一步              | 无法预先编码路径的开放任务           | 成本、累积错误和不确定轨迹 |
+
+组合示例：
+
+- 企业 RAG：`Routing -> Parallel Hybrid Retrieval -> Rerank -> Evaluator Gate -> Answer`。
+- Coding Agent：`Planner／Orchestrator -> Parallel Workers -> Tests as Ground Truth -> Evaluator`。
+- 客服：`Router -> Handoff -> Domain Agent Loop -> Risk Approval`。
+- 产研协作：`DAG -> Parallel Roles -> Artifact Gate -> QA Evaluator -> Human Approval`。
+
+### 15.8 从单 Agent 升级到多 Agent 的硬门槛
+
+至少满足以下一项，并用同一评测集证明收益，才值得升级：
+
+1. **上下文隔离收益**：单 Agent 因工具或知识过多而明显选错，多 Agent 后准确率提升。
+2. **专业化收益**：不同角色确实拥有独立 Prompt、数据、Tool、权限和验收标准。
+3. **并行收益**：独立子任务并发后，P95 明显下降且聚合错误可控。
+4. **组织边界收益**：不同团队需要独立开发、发布和评测能力单元。
+5. **控制权收益**：业务确实需要 Manager 统一负责，或需要专家 Handoff 后直接接管。
+
+不能证明以上收益时，优先保留单 Agent＋动态 Tools／Skills。多 Agent 不是能力倍增器，它首先会增加模型调用、上下文复制、协调成本和故障面。
 
 ## 十六、方案横向对比
 
@@ -864,14 +1071,39 @@ flowchart TD
 | Agent Evals                  | `backend/src/modules/agent-evals/agent-eval.service.ts`                                            |
 | Metrics／Trace               | `backend/src/modules/metrics/metrics.service.ts`、`backend/src/modules/tracing/tracing.service.ts` |
 
-## 二十二、官方资料
+## 二十二、主流框架共识与官方资料
 
-主流架构判断参考以下官方资料：
+### 22.1 不打开链接也必须掌握的核心结论
+
+| 官方体系             | 核心内容                                                                                                             | 对选型的直接影响                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| OpenAI Agents SDK    | 编排分为 LLM 决策和代码编排，两者可以混用；常见多 Agent 模式是 Agents as Tools 与 Handoffs                           | 要先决定会话控制权是否转移，再选 Manager 或 Handoff        |
+| Anthropic            | 区分固定代码路径的 Workflow 与模型动态控制过程的 Agent；先从简单可组合模式开始，只在有收益时加复杂度                 | 固定问题优先 Chain／Router，开放问题才使用 Agent Loop      |
+| LangChain／LangGraph | 多 Agent 的主要价值是上下文管理、分布式开发和并行；核心模式包括 Subagents、Handoffs、Skills、Router、Custom Workflow | 多 Agent 的本质是 Context Engineering，不是多写几个 Prompt |
+| Microsoft AutoGen    | Team 包含 RoundRobin、SelectorGroupChat、Swarm 等形态，同时明确简单任务应先优化单 Agent                              | Group Chat／Swarm 是特定协作模式，不应作为企业默认架构     |
+
+### 22.2 四家资料共同收敛出的工程原则
+
+1. **先简单后复杂**：Prompt＋RAG 或单 Agent 已经能解决时，不为了“高级”升级多 Agent。
+2. **代码和模型混合编排**：确定性依赖、权限和风险交给代码；语义判断和开放规划交给模型。
+3. **Manager 与 Handoff 不能混淆**：前者保留控制权并汇总，后者转移控制权让专家接管。
+4. **多 Agent 首先解决上下文问题**：工具过多、专业知识过深、权限不同或需要并行时才拆分。
+5. **环境反馈必须是真实信号**：Tool 结果、测试、检索证据和业务状态是 Agent 判断进度的 Ground Truth。
+6. **循环必须可停止**：完成条件、最大轮次、超时、预算、无进展检测和人工接管至少具备一套。
+7. **框架不能代替架构**：即使使用 SDK，也必须显式设计 State、Context、Tool Contract、Error Policy 和 Eval。
+8. **复杂度必须由数据偿还**：用任务成功率、P95、成本、协调开销和失败恢复能力与简单 Baseline 比较。
+
+### 22.3 面试时如何评价主流框架
+
+> 我不会按框架品牌选架构，而是先确定控制权、上下文边界和任务拓扑。LangGraph 更适合显式 State、条件边、Checkpoint 和确定性／Agent 混合工作流；OpenAI Agents SDK 的 Manager 与 Handoff 原语适合快速实现统一入口或专家接管；AutoGen 的 Team／Group Chat 适合研究动态协作，但生产上必须额外约束共享上下文、终止和状态。框架只是实现工具，最终仍用同一评测集比较成功率、延迟、成本和可恢复性。
+
+### 22.4 官方资料入口
 
 - [OpenAI Agents SDK：Agent orchestration](https://openai.github.io/openai-agents-python/multi_agent/)
 - [OpenAI Agents SDK：Agents](https://openai.github.io/openai-agents-python/agents/)
 - [OpenAI Agents SDK：Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
+- [Anthropic：Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
+- [LangChain：Multi-agent patterns](https://docs.langchain.com/oss/javascript/langchain/multi-agent)
 - [LangGraph.js Multi-Agent Supervisor](https://langchain-ai.github.io/langgraphjs/reference/modules/langgraph-supervisor.html)
-- [Microsoft AutoGen Teams](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html)
-
-官方资料共同体现的工程原则：LLM 编排和代码编排可以混合；Manager 与 Handoff 解决不同控制权问题；简单任务先优化单 Agent，只有协作和专业化收益明确时再使用多 Agent。
+- [Microsoft AutoGen：Teams](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html)
+- [Microsoft AutoGen：Selector Group Chat](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/selector-group-chat.html)
