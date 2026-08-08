@@ -42,6 +42,7 @@
 | `interview/resume/resume-rag-project.md`                      | RAG 项目简历写法                                                                                |
 | `interview/resume/resume-rag-project-game-marketing.md`       | 游戏官网营销 RAG 项目简历写法                                                                   |
 | `interview/resume/game-marketing-rag-evidence.md`             | 游戏活动 / 官网营销 RAG 证据说明                                                                |
+| `interview/resume/deepseek-高级资深Agent全栈简历定位与面试口径.md` | 高级资深 AI Agent 全栈 / AI 应用开发简历项目定位、三主线 STAR 口径与面试攻防清单                  |
 | `interview/jd/jd-requirements-project-mapping.md`             | 一线大厂 AI 应用 / Agent JD 与项目实现对照                                                      |
 | `interview/jd/jd-gap-implementation-status.md`                | JD 差距本地补齐状态                                                                             |
 
