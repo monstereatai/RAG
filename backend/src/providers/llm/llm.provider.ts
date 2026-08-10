@@ -5,6 +5,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider, LlmModelProvider } from './llm-provider.interface';
 import { DeepseekLlmProvider } from './deepseek-llm.provider';
 import { QwenLlmProvider } from './qwen-llm.provider';
+import { LlmGatewayPolicy, LlmTask, LlmRoutePolicy } from './llm-gateway.policy';
 
 /**
  * LLM Provider 工厂
@@ -14,12 +15,15 @@ import { QwenLlmProvider } from './qwen-llm.provider';
 export class LlmProvider implements ILLMProvider, OnModuleInit {
   private provider: ILLMProvider;
   private readonly requestModel = new AsyncLocalStorage<LlmModelProvider>();
+  private readonly gatewayPolicy: LlmGatewayPolicy;
 
   constructor(
     private readonly config: ConfigService,
     private readonly qwenProvider: QwenLlmProvider,
     private readonly deepseekProvider: DeepseekLlmProvider,
-  ) {}
+  ) {
+    this.gatewayPolicy = new LlmGatewayPolicy(this.config);
+  }
 
   onModuleInit() {
     const providerName = this.config.get<string>('llm.provider') ?? 'qwen';
@@ -48,6 +52,10 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
 
   getActiveProviderName(): LlmModelProvider {
     return this.requestModel.getStore() ?? this.getDefaultProviderName();
+  }
+
+  getRoutePolicy(task: LlmTask = 'fast', requested?: LlmModelProvider): LlmRoutePolicy {
+    return this.gatewayPolicy.resolve(task, requested);
   }
 
   runWithModel<T>(

@@ -183,6 +183,13 @@ export class RagOpsApiController {
     return this.ragOpsApiService.getQaCostSummary();
   }
 
+  @Get('qa/adoption-summary')
+  async getQaAdoptionSummary(@Query('windowDays') windowDays?: string) {
+    return this.ragOpsApiService.getQaAdoptionSummary(
+      windowDays ? Number(windowDays) : undefined,
+    );
+  }
+
   // ─── Graph Operations ───────────────────────────────────────
 
   @Get('graph/schema')

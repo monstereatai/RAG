@@ -90,6 +90,11 @@ export interface AgentBadCase {
   status: "pending" | "reviewed" | "resolved" | "ignored";
   includeInRegression: boolean;
   createdAt: string;
+  indexing?: {
+    indexed?: boolean;
+    removed?: boolean;
+    reason?: string;
+  };
 }
 
 export interface TraceSnapshot {

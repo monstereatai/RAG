@@ -7,6 +7,7 @@ import {
   CommentOutlined,
   ControlOutlined,
   DatabaseOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
   FolderOutlined,
   GlobalOutlined,
@@ -90,6 +91,24 @@ export const agentOpsNav: SideNavItem[] = [
     label: 'Agent 工作台',
     icon: <BranchesOutlined />,
     path: '/agent-ops',
+  },
+  {
+    key: 'bad-cases',
+    label: 'Bad Case 审核',
+    icon: <AuditOutlined />,
+    path: '/agent-ops/bad-cases',
+  },
+  {
+    key: 'evals',
+    label: 'Agent Evals',
+    icon: <ExperimentOutlined />,
+    path: '/agent-ops/evals',
+  },
+  {
+    key: 'traces',
+    label: '调用轨迹',
+    icon: <HistoryOutlined />,
+    path: '/agent-ops/traces',
   },
 ];
 

@@ -35,6 +35,9 @@ export class LangfuseProvider implements OnModuleDestroy {
   private readonly client: LangfuseClient | null;
   private readonly inputCostUsdPer1k: number;
   private readonly outputCostUsdPer1k: number;
+  private lastFlushAt: string | null = null;
+  private lastError: string | null = null;
+  private tracesSent = 0;
 
   constructor(private readonly config: ConfigService) {
     const enabled = this.config.get<boolean>('langfuse.enabled') ?? false;
@@ -65,6 +68,61 @@ export class LangfuseProvider implements OnModuleDestroy {
 
   isEnabled(): boolean {
     return !!this.client;
+  }
+
+  async smoke(): Promise<{
+    enabled: boolean;
+    sent: boolean;
+    reason?: string;
+  }> {
+    if (!this.client) {
+      return {
+        enabled: false,
+        sent: false,
+        reason: 'langfuse_disabled_or_missing_keys',
+      };
+    }
+
+    const trace = this.client.trace({
+      name: 'rag.observability.smoke',
+      input: { query: 'local observability smoke' },
+      output: { ok: true },
+      metadata: { source: 'backend smoke:langfuse' },
+    });
+    trace.generation({
+      name: 'rag.observability.smoke.generation',
+      input: 'local observability smoke',
+      output: 'ok',
+      model: 'smoke',
+      usageDetails: { input: 3, output: 1, total: 4 },
+      metadata: { source: 'backend smoke:langfuse' },
+    });
+    try {
+      await this.client.flushAsync();
+      this.lastFlushAt = new Date().toISOString();
+      this.lastError = null;
+      this.tracesSent += 1;
+      return { enabled: true, sent: true };
+    } catch (err) {
+      this.lastError = (err as Error).message;
+      return { enabled: true, sent: false, reason: 'langfuse_flush_failed' };
+    }
+  }
+
+  getHealth(): {
+    enabled: boolean;
+    healthy: boolean;
+    lastFlushAt: string | null;
+    tracesSent: number;
+    lastError: string | null;
+  } {
+    return {
+      enabled: this.isEnabled(),
+      healthy: this.isEnabled() && !this.lastError,
+      lastFlushAt: this.lastFlushAt,
+      tracesSent: this.tracesSent,
+      lastError: this.lastError,
+    };
   }
 
   getStatus(): {
@@ -129,7 +187,9 @@ export class LangfuseProvider implements OnModuleDestroy {
           route: payload.route,
         },
       });
+      this.tracesSent += 1;
     } catch (err) {
+      this.lastError = (err as Error).message;
       this.logger.warn(`LangFuse trace failed: ${(err as Error).message}`);
     }
   }

@@ -10,6 +10,7 @@ import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 import { ChatFeedbackDto } from './chat-feedback.dto';
 import { BadCaseFlywheelService } from '../../rag/prompts/bad-case-flywheel.service';
+import { ConversationService } from './conversation.service';
 
 export interface ReviewRagFeedback {
   status?: RagFeedbackEntity['status'];
@@ -27,16 +28,18 @@ export class RagFeedbackService {
     @InjectRepository(QueryLogEntity)
     private readonly queryLogRepo: Repository<QueryLogEntity>,
     private readonly badCaseFlywheel: BadCaseFlywheelService,
+    private readonly conversationService: ConversationService,
   ) {}
 
   async create(
     dto: ChatFeedbackDto,
     userId: string,
+    options: { allowCrossUserThread?: boolean } = {},
   ): Promise<RagFeedbackEntity> {
     if (!dto.queryLogId && !dto.threadId) {
       throw new BadRequestException('queryLogId or threadId is required');
     }
-    const queryLog = dto.queryLogId
+    let queryLog = dto.queryLogId
       ? await this.queryLogRepo.findOne({
           where: { id: dto.queryLogId, userId },
         })
@@ -44,6 +47,44 @@ export class RagFeedbackService {
           where: { threadId: dto.threadId, userId },
           order: { createdAt: 'DESC' },
         });
+    if (!queryLog && options.allowCrossUserThread && dto.threadId) {
+      queryLog = await this.queryLogRepo.findOne({
+        where: { threadId: dto.threadId },
+        order: { createdAt: 'DESC' },
+      });
+      if (!queryLog) {
+        const conversation = await this.conversationService.get(dto.threadId);
+        const lastAnswerIndex =
+          conversation?.messages
+            .map((message) => message.role)
+            .lastIndexOf('ai') ?? -1;
+        const answer =
+          lastAnswerIndex >= 0
+            ? conversation?.messages[lastAnswerIndex]?.content ?? ''
+            : '';
+        const query =
+          lastAnswerIndex > 0
+            ? conversation?.messages[lastAnswerIndex - 1]?.content ?? ''
+            : conversation?.title ?? '';
+        if (conversation && query && answer) {
+          queryLog = await this.queryLogRepo.save(
+            this.queryLogRepo.create({
+              id: randomUUID(),
+              userId,
+              query: query.slice(0, 2_000),
+              mode: 'simple',
+              threadId: dto.threadId,
+              refused: false,
+              citationCount: 0,
+              latencyMs: 0,
+              hasAnswer: true,
+              answer: answer.slice(0, 20_000),
+              retrievalSnapshot: '[]',
+            }),
+          );
+        }
+      }
+    }
     if (!queryLog) {
       throw new NotFoundException('query log not found');
     }
@@ -95,7 +136,7 @@ export class RagFeedbackService {
   async review(
     id: string,
     patch: ReviewRagFeedback,
-  ): Promise<RagFeedbackEntity> {
+  ): Promise<RagFeedbackEntity & { indexing?: Record<string, unknown> }> {
     const entity = await this.feedbackRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException(`feedback ${id} not found`);
     entity.status = patch.status ?? entity.status;
@@ -106,25 +147,50 @@ export class RagFeedbackService {
     entity.reviewedBy = patch.reviewedBy ?? entity.reviewedBy;
     entity.reviewedAt = new Date();
     const saved = await this.feedbackRepo.save(entity);
-    if (
+    const correctedAnswer = saved.correctedAnswer;
+    const shouldIndex =
       saved.feedback === 'negative' &&
-      saved.correctedAnswer &&
+      correctedAnswer &&
       saved.includeInRegression &&
-      (saved.status === 'reviewed' || saved.status === 'resolved')
-    ) {
+      (saved.status === 'reviewed' || saved.status === 'resolved');
+    if (shouldIndex) {
       const queryLog = saved.queryLogId
         ? await this.queryLogRepo.findOne({ where: { id: saved.queryLogId } })
         : null;
-      if (queryLog) {
-        await this.badCaseFlywheel.indexApproved({
+      if (!queryLog) {
+        return {
+          ...saved,
+          indexing: { indexed: false, reason: 'query_log_missing' },
+        };
+      }
+      let indexing: Record<string, unknown>;
+      try {
+        indexing = await this.badCaseFlywheel.indexApproved({
           id: saved.id,
           query: queryLog.query,
           wrongAnswer: queryLog.answer ?? '',
-          correctedAnswer: saved.correctedAnswer,
+          correctedAnswer,
           errorType: saved.errorType,
         });
+      } catch (error) {
+        indexing = {
+          indexed: false,
+          reason: 'index_failed',
+          error: error instanceof Error ? error.message : String(error),
+        };
       }
+      return { ...saved, indexing };
     }
-    return saved;
+    let indexing: Record<string, unknown>;
+    try {
+      indexing = await this.badCaseFlywheel.removeApproved(saved.id);
+    } catch (error) {
+      indexing = {
+        indexed: false,
+        reason: 'remove_failed',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return { ...saved, indexing };
   }
 }

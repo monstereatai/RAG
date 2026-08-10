@@ -6,6 +6,7 @@ import type { LlmProvider } from '../../providers/llm/llm.provider';
 import type { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import type { MetricsService } from '../../modules/metrics/metrics.service';
 import type { ObsidianKnowledgeService } from '../../modules/obsidian/obsidian-knowledge.service';
+import type { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
 
 describe('KarpathyRagService exception scenarios', () => {
   function createService(overrides?: {
@@ -54,6 +55,10 @@ describe('KarpathyRagService exception scenarios', () => {
       }),
       formatHitsForPrompt: jest.fn().mockReturnValue(''),
     } as unknown as ObsidianKnowledgeService;
+    const badCaseFlywheel = {
+      retrieveMatches: jest.fn().mockResolvedValue([]),
+      formatPrompt: jest.fn().mockReturnValue(''),
+    } as unknown as BadCaseFlywheelService;
 
     const service = new KarpathyRagService(
       embeddingProvider,
@@ -63,6 +68,7 @@ describe('KarpathyRagService exception scenarios', () => {
       elasticsearchProvider,
       metricsService,
       obsidianKnowledge,
+      badCaseFlywheel,
     );
     (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
       save: jest.fn(),

@@ -1,6 +1,6 @@
 # 七个 Agent／RAG 技术难点面试讲解稿
 
-更新时间：2026-08-03
+更新时间：2026-08-10
 
 ## 一、先记住整条主线
 
@@ -15,6 +15,8 @@
 | 5. Agent Evals        | 怎样证明系统真的有效                 | Recall、Faithfulness、任务成功、步骤准确、工具成功、回归门禁  |
 | 6. Bad Case 数据飞轮  | 系统怎样从错误中持续改进             | 负反馈、归因、人工审核、动态 Few-Shot、回归集                 |
 | 7. 节点级可观测性     | Agent 出错时怎样定位是哪一层         | Trace、Span、节点耗时、TTFT、工具调用、循环终止原因           |
+
+当前本地工程门禁已覆盖七项能力：30 次完整六岗位 DAG 回放全部完成，180 次岗位模型调用全部成功；Simple／Agentic 各 30 个本地性能样本通过 `local` profile；Redis Checkpointer 双进程共享 Redis 恢复、Milvus Bad Case 回灌／清理和已配置 LangFuse 真实 trace／flush／health 均通过。这里的“通过”只表示代码路径、依赖降级和门禁可执行，不替代真实业务数据、线上流量或生产 SLA。
 
 面试时统一使用下面的表达顺序：
 
@@ -359,17 +361,20 @@ Embedding 召回的目标是“尽量别漏”，所以候选集合通常较大�
 
 1. 用户负反馈进入待审池。
 2. 人工标注错误类型和 corrected answer。
-3. 只有 `reviewed／resolved`、存在纠正答案且允许进入回归集的负反馈才建立索引。
-4. 新问题生成前最多召回 2 条高相似坏例作为动态 Few-Shot。
-5. 当前知识证据始终优先，历史纠错案例不能覆盖新版本事实。
+3. 只有 `reviewed／resolved`、存在纠正答案且允许进入回归集的负反馈才建立索引；撤销审核、取消回归或忽略案例时同步删除索引。
+4. Simple 与 Agentic 共用结构化 Bad Case 检索协议，最多召回 2 条高相似案例。
+5. Simple 增加 Correction Gate：精确／强命中采用纠正证据，弱命中只作为提示；当前知识证据仍优先，历史纠错案例不能覆盖新版本事实。
 
 ### 4. 具体实现
 
 - Bad Case 使用独立 Milvus collection，避免污染正式知识向量。
 - 使用 HNSW＋Cosine 做相似案例检索。
-- 相似度门槛为 `0.85`，最多使用 2 条。
+- 相似度门槛为 `0.85`，最多使用 2 条；`0.88` 以上标记为 correction，`0.95` 以上、问题归一化相同或存在明确实体包含关系标记为 exact，避免“韦水春”与“韦水春是谁”这类短问题漏命中。
+- Simple 与 Agentic 都记录 Bad Case 命中级别；Simple 和 Agentic 对 exact／correction 都使用纠错事实重新生成自然答案，且 Agentic 在无知识库、检索不足和 Fast Fallback 前置检查 Bad Case，避免兜底分支绕过纠错证据；hint 仅注入生成上下文，避免把人工填写的纠正文本原样输出。
 - 审核操作同时决定是否加入回归集。
 - 管理后台支持查看、纠正和审核坏例。
+- `backend/scripts/eval-bad-case-regression.mjs` 会读取有效回归案例，逐条执行 `simple／auto／agentic`，检查旧答案不再出现、纠正事实覆盖率和最终路由；命令为 `npm run eval:bad-case`。
+- 当前正式知识先经过 Fast Path 充分性判断；已有新知识证据时，Bad Case 只能作为纠错提示，不能直接覆盖当前证据；只有当前知识不足时才启用强纠错答案。
 
 ### 5. 当前验证与边界
 
@@ -377,11 +382,11 @@ Embedding 召回的目标是“尽量别漏”，所以候选集合通常较大�
 - 真实 smoke 已完成临时坏例插入、flush、向量命中、标量读回和清理，不再把“写入成功”当成整个检索闭环成功。
 - 真实 smoke 会写入唯一临时审核样本，依次验证 flush、向量检索命中、标量回读和清理，当前全部通过。
 - 主知识集合 `rag_chunks` 的 425 条数据已完成 HNSW 索引，真实搜索耗时 24ms。
-- 这证明本地完整链路可运行，但不能把一次本地 smoke 说成生产长期稳定性；生产仍需要持续监控和业务流量回归。
+- 当前本地有效案例已完成 `2 条 × 3 条链路 = 6／6` 回归通过；这证明本地完整链路可运行，但不能把本地回归说成生产长期稳定性，生产仍需要持续监控和真实业务流量回归。
 
 ### 6. 面试口述版
 
-> 我没有让模型直接学习所有用户点踩，因为反馈本身可能是错的。我的 Bad Case 流程先捕获问题和召回快照，再由人工标错误类型、纠正答案和是否进入回归集。只有审核通过的负反馈才写入独立 Milvus collection。后续遇到相似问题时，最多召回两条高相似纠错样本做动态 Few-Shot，而且 Prompt 明确当前生效知识证据优先，避免旧坏例覆盖新版本事实。这样数据飞轮是受治理的，而不是把错误自动放大。
+> 我没有让模型直接学习所有用户点踩，因为反馈本身可能是错的。我的 Bad Case 流程先捕获问题和召回快照，再由人工标错误类型、纠正答案和是否进入回归集。只有审核通过的负反馈才写入独立 Milvus collection。Simple 和 Agentic 共用结构化 Bad Case 检索协议，Simple 通过 Correction Gate 区分精确、强语义和弱语义命中，精确／强命中使用纠错事实重新生成自然答案，弱命中只作提示；不会把人工纠正文本原样返回。Prompt 明确当前生效知识证据优先，避免旧坏例覆盖新版本事实。这样数据飞轮是受治理的，而不是把错误自动放大。
 
 ### 7. 常见追问
 
@@ -437,6 +442,7 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 - 真实 Agent 回放保留查询扩展、检索、充分性、Rerank、生成、审批节点和反思共 7 个节点。
 - 修复前一次 SSE 因多个事件累计 76 条 HTTP 记录，修复后严格计为 1 条。
 - 所有节点归属同一个 trace，可以区分检索慢、模型慢、工具失败和循环未终止。
+- LangFuse 增加状态契约和主动 smoke：当前配置完整密钥后已创建 trace／generation 并 flush；本地未配置密钥时也会明确返回禁用原因，不把“未发送”伪装成已观测。
 
 ### 6. 面试口述版
 
@@ -608,6 +614,10 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 - `backend/src/modules/tracing/tracing.service.ts`：thread 级 Trace、节点 Span 和 `span_limit` 告警。
 - `backend/src/modules/tracing/tracing.interceptor.ts`：HTTP Trace 拦截。
 - `backend/src/providers/observability/langfuse.provider.ts`：LangFuse trace、generation、token 和成本记录。
+- `backend/src/providers/observability/observability.controller.ts`：LangFuse 状态查询和受保护的主动 smoke 接口。
+- `backend/src/providers/llm/llm-gateway.policy.ts`：按任务统一模型主备、超时、输出上限和成本预算策略。
+- `backend/src/modules/rag-ops-api/query-log.service.ts`：查询、反馈、活跃用户和复访用户运营指标。
+- `backend/scripts/smoke-adoption-summary.mjs`：查询窗口内活跃用户、复访用户、回答率和反馈覆盖率。
 - `backend/src/rag/agentic/agentic-rag.service.ts`：`observedNode` 包装每个 LangGraph 节点，发出 `node_timing` 并记录循环决策。
 - `backend/src/rag/agentic/sse-event.ts`：节点耗时等 SSE 事件类型。
 
@@ -617,6 +627,9 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 - `backend/src/modules/tracing/tracing.interceptor.spec.ts`
 - `backend/src/modules/tracing/tracing.service.spec.ts`
 - `backend/src/rag/agentic/agentic-rag.service.spec.ts`
+- `backend/src/providers/observability/langfuse.provider.spec.ts`
+
+验证命令：`npm run smoke:langfuse`。已配置真实云端密钥时验收 trace、generation、flush 和 health；未配置时验收明确的禁用契约。
 
 ## 十二、文档和证据总入口
 

@@ -310,6 +310,13 @@ export class RagClientService {
     );
   }
 
+  submitQaFeedback(ownerUserId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/qa/feedback${this.toQueryString({ ownerUserId })}`,
+      body
+    );
+  }
+
   reviewQaFeedback(id: string, body: Record<string, unknown>) {
     return this.patchJson<Record<string, unknown>>(
       `/rag/admin/qa/feedback/${encodeURIComponent(id)}`,

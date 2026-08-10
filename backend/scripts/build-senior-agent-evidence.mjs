@@ -73,9 +73,16 @@ const seniorChecks = [
   ),
   check(
     'operational_recovery',
-    inputs.operations?.passed === true &&
+      inputs.operations?.passed === true &&
       (inputs.operations?.summary?.total ?? 0) >= 2,
     '至少两个依赖恢复／降级 smoke 通过',
+  ),
+  check(
+    'langfuse_observability',
+    inputs.operations?.results?.some(
+      (item) => item.scenario === 'langfuse' && item.passed === true,
+    ) === true,
+    'LangFuse 状态／smoke 契约通过；未配置生产密钥时允许本地降级契约',
   ),
 ];
 

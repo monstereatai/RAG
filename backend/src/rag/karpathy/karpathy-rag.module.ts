@@ -6,6 +6,7 @@ import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
 import { MetricsModule } from '../../modules/metrics/metrics.module';
 import { ObsidianKnowledgeModule } from '../../modules/obsidian/obsidian-knowledge.module';
+import { PromptModule } from '../prompts/prompt.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ObsidianKnowledgeModule } from '../../modules/obsidian/obsidian-knowled
     VectorStoreModule,
     MetricsModule,
     ObsidianKnowledgeModule,
+    PromptModule,
   ],
   providers: [KarpathyRagService],
   exports: [KarpathyRagService],

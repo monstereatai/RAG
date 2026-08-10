@@ -107,7 +107,7 @@ for (const role of state.selectedRoles) {
 
 await saveEvidence(buildEvidence(state, true));
 
-async function request(path, init) {
+async function request(path, init, attempt = 0) {
   const url = new URL(`${baseUrl}${path}`);
   const transport = url.protocol === 'https:' ? https : http;
   const payload = init.body ?? '';
@@ -129,6 +129,17 @@ async function request(path, init) {
         response.on('end', () => {
           try {
             const body = JSON.parse(raw);
+            if (response.statusCode === 429 && attempt < 8) {
+              const retryDelayMs = Math.min(
+                30_000,
+                Number(process.env.WORKFLOW_RETRY_DELAY_MS ?? 2_000) *
+                  2 ** attempt,
+              );
+              setTimeout(() => {
+                request(path, init, attempt + 1).then(resolve, reject);
+              }, retryDelayMs);
+              return;
+            }
             if ((response.statusCode ?? 500) >= 400) {
               reject(
                 new Error(`${response.statusCode} ${JSON.stringify(body)}`),

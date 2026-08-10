@@ -65,4 +65,18 @@ describe('BadCaseFlywheelService', () => {
       }),
     );
   });
+
+  it('removes a previously indexed bad case when the review is revoked', async () => {
+    const { service, client } = createService();
+
+    const result = await service.removeApproved('feedback-1');
+
+    expect(result.removed).toBe(true);
+    expect(client.deleteEntities).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expr: expect.stringContaining('badcase_feedback-1'),
+      }),
+    );
+    expect(client.flushSync).toHaveBeenCalled();
+  });
 });

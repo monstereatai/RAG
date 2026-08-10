@@ -226,6 +226,21 @@ export async function getConversation(threadId: string) {
   );
 }
 
+export async function submitConversationBadCase(
+  threadId: string,
+  body: {
+    errorType: string;
+    comment?: string;
+    correctedAnswer: string;
+    includeInRegression: boolean;
+  },
+) {
+  return authRequest(`/api/admin/qa-ops/conversations/${threadId}/bad-case`, {
+    method: 'POST',
+    data: body,
+  });
+}
+
 /** 删除会话 */
 export async function deleteConversation(threadId: string) {
   return authRequest<{ success: boolean }>(

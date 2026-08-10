@@ -115,6 +115,10 @@ export const configuration = () => ({
   // LLM（通义千问 + OpenAI 兼容）
   llm: {
     provider: process.env.LLM_PROVIDER ?? 'qwen',
+    gateway: {
+      fallbackEnabled: process.env.LLM_GATEWAY_FALLBACK_ENABLED !== 'false',
+      fallbackProvider: process.env.LLM_GATEWAY_FALLBACK_PROVIDER ?? '',
+    },
     qwen: {
       apiKey: process.env.QWEN_API_KEY ?? '',
       baseUrl:

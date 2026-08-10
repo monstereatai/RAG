@@ -20,6 +20,7 @@
     "audit:high": "pnpm audit --omit=dev --audit-level=high",
     "perf:smoke": "node scripts/perf-smoke.js",
     "perf:k6": "k6 run perf/load-test.js",
+    "simulate:operations": "node scripts/simulate-operations-lifecycle.mjs",
     "migration:check": "node scripts/check-migrations.js",
     "migration:generate": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:generate src/database/migrations/Migration",
     "migration:run": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:run",

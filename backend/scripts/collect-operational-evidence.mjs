@@ -13,6 +13,8 @@ const scenarioMap = {
   hybrid: 'smoke:hybrid',
   graph: 'smoke:graph',
   external: 'smoke:external:required',
+  langfuse: 'smoke:langfuse',
+  adoption: 'smoke:adoption',
 };
 
 if (process.argv.includes('--list')) {

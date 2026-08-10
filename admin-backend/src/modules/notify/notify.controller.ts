@@ -15,4 +15,20 @@ export class NotifyController {
   async sendEmailCode(@Body() sendCodeDto: SendCodeDto) {
     return this.notifyService.sendVerificationCode(sendCodeDto.email);
   }
+
+  @Post('operations-alert')
+  @RequireLogin()
+  @ApiOperation({ summary: '发送运营告警到企业微信或本地模拟通道' })
+  async sendOperationsAlert(
+    @Body()
+    body: {
+      title: string;
+      severity: 'info' | 'warning' | 'critical';
+      summary: string;
+      traceId?: string;
+      incidentId?: string;
+    },
+  ) {
+    return this.notifyService.sendOperationsAlert(body);
+  }
 }

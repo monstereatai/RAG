@@ -1,12 +1,16 @@
 # 面试文档导航
 
-更新时间：2026-08-03
+更新时间：2026-08-10
 
 ## 一、先看结论
 
 `docs/interview/` 里的材料不用全部从头读。默认从本文件进入，按目标选择路线：
 
 ```text
+面试前 10 小时冲刺（高级 AI 应用/Agent 岗）
+  -> deepseek-AI应用Agent岗-10小时冲刺指南.md
+  -> deepseek-AI应用Agent岗-模拟问答题库.md
+
 查自己问过什么
   -> USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md
 
@@ -18,6 +22,7 @@
 练习面试表达
   -> SEVEN_DIFFICULTIES_CHEATSHEET.md
   -> SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md
+  -> 功能步骤流程.md
   -> ../../INTERVIEW_PLAYBOOK.md
 
 准备投递和项目证据
@@ -70,6 +75,12 @@ Tool、MCP、Skill 分别是什么？
 |    6 | [高级岗位就绪度](./SENIOR_AGENT_INTERVIEW_READINESS.md)           | 区分高级、资深、Staff 所需证据          |
 |    7 | [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 最后查漏补缺                            |
 
+### 2.4 按实际操作理解项目
+
+| 文档 | 适用场景 |
+| --- | --- |
+| [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解 Simple、Auto、Agentic、RAG、Bad Case、观测和运营闭环 |
+
 ### 2.3 一周准备路线
 
 | 天数    | 任务                               | 使用文档                                                                                                           |
@@ -114,6 +125,8 @@ Tool、MCP、Skill 分别是什么？
 
 | 文件                                                                                                     | 内容                                                 | 优先级     |
 | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------- |
+| [deepseek-AI应用Agent岗-10小时冲刺指南.md](./deepseek-AI应用Agent岗-10小时冲刺指南.md)                     | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 | 面试前必读 |
+| [deepseek-AI应用Agent岗-模拟问答题库.md](./deepseek-AI应用Agent岗-模拟问答题库.md)                         | 33 道高频模拟题逐题可背答案、追问应对和边界红线（覆盖检索/Agentic/Prompt/安全/多租户/可观测等全知识面） | 面试前必读 |
 | [SEVEN_DIFFICULTIES_CHEATSHEET.md](./SEVEN_DIFFICULTIES_CHEATSHEET.md)                                   | 七个难点的一页式速查和回答框架                       | 面试前必读 |
 | [SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)                         | 七个难点的背景、方案比较、项目选择、代码、效果和追问 | 必读       |
 | [USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 历次提问、真实面试题、覆盖状态和建议补齐项           | 查漏必读   |
@@ -133,6 +146,7 @@ Tool、MCP、Skill 分别是什么？
 | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- | -------- |
 | [resume/resume-rag-project.md](./resume/resume-rag-project.md)                               | 通用企业级 Agentic RAG 项目简历写法                  | 通用投递 |
 | [resume/resume-rag-project-game-marketing.md](./resume/resume-rag-project-game-marketing.md) | 游戏官网、活动和营销业务版本                         | 优先使用 |
+| [resume/游戏营销RAG项目完整描述.md](./resume/游戏营销RAG项目完整描述.md) | 游戏营销 RAG 项目完整描述与七项技术难点展开版 | 面试深挖 |
 | [resume/game-marketing-rag-evidence.md](./resume/game-marketing-rag-evidence.md)             | 游戏活动专项数据、评测、MCP、多 Agent 和业务边界证据 | 深挖     |
 
 ## 五、四类岗位分别怎么看

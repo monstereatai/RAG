@@ -134,6 +134,23 @@ export class QaOpsController {
     return { data: this.unwrapObject(result.data) };
   }
 
+  @Post("conversations/:threadId/bad-case")
+  @ApiOperation({ summary: "提交会话 Bad Case" })
+  @RequirePermission("admin:qa-ops:write")
+  async submitBadCase(
+    @Param("threadId") threadId: string,
+    @Body() body: Record<string, unknown>,
+    @Req() req: Request
+  ) {
+    const result = await this.ragClient.submitQaFeedback(this.getUserId(req), {
+      ...body,
+      threadId,
+      feedback: "negative",
+    });
+    this.requireAvailable(result);
+    return { success: result.available, data: result.data };
+  }
+
   @Delete("conversations/:threadId")
   @ApiOperation({ summary: "删除会话" })
   @RequirePermission("admin:qa-ops:read")

@@ -5,6 +5,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { ModulePage, agentOpsNav } from "@/components/AdminShell";
+import { history } from "@umijs/max";
 import {
   Alert,
   Button,
@@ -75,8 +76,12 @@ export default function AgentOpsPage() {
   const [loading, setLoading] = React.useState(false);
 
   const loadBadCases = React.useCallback(async () => {
-    const result = await getAgentBadCases();
-    setBadCases(unwrapData<AgentBadCase[]>(result) ?? []);
+    try {
+      const result = await getAgentBadCases();
+      setBadCases(unwrapData<AgentBadCase[]>(result) ?? []);
+    } catch {
+      message.error("Bad Case 加载失败，请检查登录状态和 Agent Backend 服务");
+    }
   }, []);
   const loadTraces = React.useCallback(async () => {
     const result = await getAgentTraces();
@@ -172,8 +177,20 @@ export default function AgentOpsPage() {
     const values = await reviewForm.validateFields();
     setLoading(true);
     try {
-      await reviewAgentBadCase(selectedBadCase.id, values);
-      message.success("审核结果已保存；满足门禁时将自动进入动态 Few-Shot");
+      const result = unwrapData<AgentBadCase & { indexing?: AgentBadCase["indexing"] }>(
+        await reviewAgentBadCase(selectedBadCase.id, values),
+      );
+      if (
+        ["milvus_unavailable", "index_failed", "remove_failed"].includes(
+          result.indexing?.reason ?? "",
+        )
+      ) {
+        message.warning("审核已保存，但 Milvus 不可用，暂未完成回灌，请稍后重试");
+      } else if (result.indexing?.removed) {
+        message.success("审核结果已保存，历史 Bad Case 索引已撤销");
+      } else {
+        message.success("审核结果已保存；满足门禁时已进入动态 Few-Shot");
+      }
       setSelectedBadCase(null);
       await loadBadCases();
     } finally {
@@ -498,13 +515,43 @@ export default function AgentOpsPage() {
   );
 
   return (
-    <ModulePage activeKey="workspace" navItems={agentOpsNav} title="Agent 运营">
+    <ModulePage
+      activeKey={
+        history.location.pathname.endsWith("/bad-cases")
+          ? "bad-cases"
+          : history.location.pathname.endsWith("/evals")
+            ? "evals"
+            : history.location.pathname.endsWith("/traces")
+              ? "traces"
+              : "workspace"
+      }
+      navItems={agentOpsNav}
+      title="Agent 运营"
+    >
       <div className="agent-ops-page">
         <header>
           <h2>Agent 运行与质量控制</h2>
           <p>审批长流程、回灌已审核 Bad Case、执行单案例评测并查看调用轨迹。</p>
         </header>
         <Tabs
+          activeKey={
+            history.location.pathname.endsWith("/bad-cases")
+              ? "bad-cases"
+              : history.location.pathname.endsWith("/evals")
+                ? "eval"
+                : history.location.pathname.endsWith("/traces")
+                  ? "traces"
+                  : "workflow"
+          }
+          onChange={(key) => {
+            const routes: Record<string, string> = {
+              workflow: "/agent-ops",
+              eval: "/agent-ops/evals",
+              "bad-cases": "/agent-ops/bad-cases",
+              traces: "/agent-ops/traces",
+            };
+            history.push(routes[key] ?? "/agent-ops");
+          }}
           items={[
             { key: "workflow", label: "产研运工作流", children: workflowPanel },
             { key: "eval", label: "Agent Evals", children: evalPanel },
@@ -534,6 +581,15 @@ export default function AgentOpsPage() {
                         title: "状态",
                         dataIndex: "status",
                         render: (value) => <Tag>{value}</Tag>,
+                      },
+                      {
+                        title: "回归集",
+                        dataIndex: "includeInRegression",
+                        render: (value) => (
+                          <Tag color={value ? "green" : "default"}>
+                            {value ? "已加入" : "未加入"}
+                          </Tag>
+                        ),
                       },
                       {
                         title: "纠正答案",
@@ -633,7 +689,17 @@ export default function AgentOpsPage() {
           <Form.Item
             label="纠正答案"
             name="correctedAnswer"
-            rules={[{ required: true }]}
+            dependencies={["status"]}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (getFieldValue("status") === "ignored" || value?.trim()) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("审核通过或解决时必须填写纠正答案"));
+                },
+              }),
+            ]}
           >
             <Input.TextArea rows={6} />
           </Form.Item>

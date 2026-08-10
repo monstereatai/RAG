@@ -5,6 +5,7 @@ import {
   FileAddOutlined,
   FileWordOutlined,
   FolderOpenOutlined,
+  FlagOutlined,
   MenuOutlined,
   PaperClipOutlined,
   PlusOutlined,
@@ -26,6 +27,7 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
   Tag,
   message as antdMessage,
 } from "antd";
@@ -51,6 +53,7 @@ import {
   getArtifacts,
   getRolePresets,
   streamAguiAnswer,
+  submitConversationBadCase,
 } from "./service";
 
 const ROLE_PRESET_STORAGE_KEY = "qa_ops_role_preset";
@@ -262,6 +265,10 @@ const QaOps: React.FC = () => {
   const [artifactSubmitting, setArtifactSubmitting] = React.useState(false);
   const [selectedArtifact, setSelectedArtifact] =
     React.useState<GeneratedArtifact | null>(null);
+  const [badCaseMessage, setBadCaseMessage] =
+    React.useState<ChatMessage | null>(null);
+  const [badCaseForm] = Form.useForm();
+  const [badCaseSubmitting, setBadCaseSubmitting] = React.useState(false);
 
   const loadArtifacts = React.useCallback(async () => {
     setArtifactLoading(true);
@@ -1048,21 +1055,35 @@ const QaOps: React.FC = () => {
                       )
                     )}
                     {message.status === "done" && message.content && (
-                      <Button
-                        className="answer-voice-btn"
-                        icon={<SoundOutlined />}
-                        loading={
-                          ttsStatusByMessageId[message.id] === "connecting" ||
-                          ttsStatusByMessageId[message.id] === "synthesizing"
-                        }
-                        onClick={() =>
-                          handlePlayTts(message.id, message.content)
-                        }
-                        size="small"
-                        type="text"
-                      >
-                        {getTtsButtonText(ttsStatusByMessageId[message.id])}
-                      </Button>
+                      <Space>
+                        <Button
+                          className="answer-voice-btn"
+                          icon={<SoundOutlined />}
+                          loading={
+                            ttsStatusByMessageId[message.id] === "connecting" ||
+                            ttsStatusByMessageId[message.id] === "synthesizing"
+                          }
+                          onClick={() =>
+                            handlePlayTts(message.id, message.content)
+                          }
+                          size="small"
+                          type="text"
+                        >
+                          {getTtsButtonText(ttsStatusByMessageId[message.id])}
+                        </Button>
+                        <Button
+                          icon={<FlagOutlined />}
+                          onClick={() => {
+                            setBadCaseMessage(message);
+                            badCaseForm.resetFields();
+                            badCaseForm.setFieldValue("correctedAnswer", message.content);
+                          }}
+                          size="small"
+                          type="text"
+                        >
+                          提交 Bad Case
+                        </Button>
+                      </Space>
                     )}
                     {message.media && message.media.length > 0 && (
                       <div className="answer-media-grid">
@@ -1295,6 +1316,61 @@ const QaOps: React.FC = () => {
           </div>
         </section>
       </div>
+      <Modal
+        open={Boolean(badCaseMessage)}
+        title="提交 Bad Case"
+        okText="提交审核"
+        confirmLoading={badCaseSubmitting}
+        onCancel={() => setBadCaseMessage(null)}
+        onOk={async () => {
+          if (!threadId || !badCaseMessage) return;
+          const values = await badCaseForm.validateFields();
+          setBadCaseSubmitting(true);
+          try {
+            await submitConversationBadCase(threadId, values);
+            antdMessage.success("Bad Case 已提交，等待审核");
+            setBadCaseMessage(null);
+          } catch (error) {
+            antdMessage.error(error instanceof Error ? error.message : "提交失败");
+          } finally {
+            setBadCaseSubmitting(false);
+          }
+        }}
+      >
+        <Form form={badCaseForm} layout="vertical">
+          <Form.Item label="错误类型" name="errorType" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "retrieval_miss", label: "召回遗漏" },
+                { value: "ranking_error", label: "排序错误" },
+                { value: "citation_error", label: "引用错误" },
+                { value: "hallucination", label: "幻觉／编造" },
+                { value: "outdated_content", label: "内容过期" },
+                { value: "incomplete_answer", label: "回答不完整" },
+                { value: "other", label: "其他" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="问题描述" name="comment">
+            <Input.TextArea rows={3} placeholder="说明回答哪里不对" />
+          </Form.Item>
+          <Form.Item
+            label="纠正答案"
+            name="correctedAnswer"
+            rules={[{ required: true, whitespace: true }]}
+          >
+            <Input.TextArea rows={6} />
+          </Form.Item>
+          <Form.Item
+            label="允许进入回归集"
+            name="includeInRegression"
+            initialValue={false}
+            valuePropName="checked"
+          >
+            <Switch checkedChildren="是" unCheckedChildren="否" />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Drawer
         open={artifactDrawerOpen}
         onClose={() => setArtifactDrawerOpen(false)}

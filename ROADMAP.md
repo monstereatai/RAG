@@ -38,6 +38,8 @@
 | `docs/interview/interview-docs-usage.md` | 面试文档使用说明 |
 | `docs/plans/karpathy-obsidian-dual-ingest-plan.md` | Karpathy + Obsidian 统一知识链路方案 |
 | `tools/rag-mcp-server/README.md` | RAG MCP Server 接入说明，给 Codex/Trae/Claude Code/Cursor 自动取上下文 |
+| `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md` | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 |
+| `docs/interview/deepseek-AI应用Agent岗-模拟问答题库.md` | 高级 AI 应用/Agent 岗 33 道高频模拟题逐题可背答案、追问应对和边界红线，覆盖检索/Agentic/Prompt/安全/多租户/可观测全知识面 |
 
 ## 当前结论
 
@@ -57,6 +59,9 @@
 
 ## 已完成能力
 
+- **功能步骤流程补全简历全部链路**：更新 `docs/interview/功能步骤流程.md`，新增「简历核心职责流程速览」和「简历五项技术难点流程」；知识库与后台、三层问答／方案生成／MCP、Bad Case／质量运营／观测，以及受控多 Agent、路由预算、Hybrid／GraphRAG、可信纠错、Checkpoint／Trace／告警，均按用户操作和数据／状态流转串联。补充 Parent Chunk／Child Chunk 术语及「子块精确召回→父块／同章节按预算补全」规则。仅文档更新，未改运行时代码。
+- **功能步骤流程术语内联注释**：为上述简历职责与五项难点流程中的技术术语、状态字段和指标字段补充首次出现的「（注：……）」说明，保留原始英文名称以便与代码、日志和面试术语对应；重点补齐 Fast Path、retrievalHit、citationCoverage、confidence、taskComplexity、route、Agentic State、Parent／Child Chunk、Checkpoint、TTFT、Webhook 等。仅文档更新，未改运行时代码。
+- **游戏营销 RAG 完整项目描述**：新增 `docs/interview/resume/游戏营销RAG项目完整描述.md`，将诗悦网络游戏官网活动营销 Agentic RAG 项目的完整项目简介、五项负责内容、七项技术难点与本地验证边界独立沉淀；技术难点以多 Agent 受控协作、三层路由、Hybrid／GraphRAG、评测与 Bad Case、Checkpoint 和节点级可观测为主线，避免与简历精简版重复。同步更新 `docs/interview/README.md` 索引。仅文档更新，未改运行时代码。
 - **面试文档总入口**：新增 `docs/interview/README.md`，将 `docs/interview/` 下核心知识、架构、工具、七个难点、问题清单、JD 对照、简历和业务证据材料统一归类；补充 30 分钟、半天和一周三条阅读路线，按主题快速定位、四类目标岗位复习顺序、信息冲突优先级与维护规则；`interview-docs-usage.md` 保留为详细说明并回链总入口。仅文档更新，未改运行时代码。
 - **Agent 工具体系面试专题**：新增并完善 `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md`，用统一游戏活动案例解释 Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 六部分关系；补充单 Agent Goal／State／Policy／Action／Observation／Stop 闭环、LangGraph 状态机、防循环、模式选择和评测；补充多 Agent Supervisor／Pipeline／DAG／Handoff／Debate／Blackboard 对比、Agent Contract、六岗位 DAG、版本化 Artifact、上下文隔离、Checkpoint、局部重跑、协调开销和单 Agent Baseline；同时覆盖 Function Schema、Tool Registry、MCP 生命周期与传输、并行调用、安全治理、Skill 渐进式披露和五层评测门禁。全部 TypeScript／YAML／JSONC 伪代码已补职责边界和关键决策中文注释，解释模型与宿主分工、Schema／权限／预算门禁、状态更新、停止条件、失败恢复、幂等、Checkpoint 和评测含义；业务场景、高频追问、两分钟回答、项目代码入口和官方规范均已补齐。仅文档更新，未改运行时代码。
 - **Agent 架构设计与选型专题**：新增并完善 `docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md`，使用 Mermaid 绘制企业 Agent 平台总架构、架构决策树以及 Workflow、Router、ReAct、Plan-and-Execute、Workflow-first、Manager、Handoff、Multi-Agent DAG、Supervisor、Group Chat／Debate、Event-driven／Blackboard 十一类架构图；逐项记录特点、优缺点、业务场景、伪代码和治理边界；进一步把“主流方案”从资料索引扩写为 Workflow-first、单 Agent＋Tools／MCP／Skills、Manager、Router＋Handoff、多 Agent DAG 五张完整方案卡，补齐控制权、执行流、核心组件、适用边界、生产门禁和面试表达，并加入 Prompt Chaining、Routing、Parallelization、Orchestrator-Workers、Evaluator-Optimizer、Agent Loop 六个组合原语与多 Agent 升级硬门槛；主流模式结论已与 OpenAI Agents SDK、Anthropic、LangChain／LangGraph 和 Microsoft AutoGen 官方资料核对。仅文档更新，未改运行时代码。
@@ -128,19 +133,39 @@
 - [ ] **真实游戏官网／活动资料验收**：接入历史 PRD、设计规范、接口、埋点、测试问题单和活动复盘，验证当前 96 条模拟专项问题之外的真实效果
 - [ ] **真实业务结果补数**：按 `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` 的统一口径补齐 Recall@K、MRR、nDCG、引用正确率、拒答准确率；完成六岗位任务成功率、P95、降级率、Token／费用统计；采集用户采纳率、返工率、人工接管率和节省工时；至少沉淀 5 个典型失败案例及同数据集、同评分口径的优化前后对比。所有数字必须标注样本量、时间窗口、环境和证据来源
 
+> 生产化待补闭环总表已同步到 `docs/interview/SEVEN_DIFFICULTIES_CHEATSHEET.md` 和 `docs/interview/jd/jd-gap-implementation-status.md`，包括真实业务数据、生产 SLA、Redis 多实例、LangFuse 生产运营、长期回归、用户采纳、部署高可用以及 IAM／DLP／租户治理。当前不使用本地模拟结果冒充生产验收。
+
+> **性能监控口径已补充**：LangFuse 负责单次问答／Agent Trace、节点与模型耗时、首 Token、Token、成本、工具调用和降级定位；Prometheus 负责 QPS、成功率、错误率、P50／P95／P99、并发、基础设施和服务健康。两者已完成本地／云端基础验证，生产 Dashboard、告警、采样脱敏、长期留存和真实 SLA 仍待部署环境配置。
+
+> **Agent 运营入口补齐**：Agent Evals 和调用轨迹已新增独立路由与左侧菜单，复用既有接口和页面能力，避免只作为页内 Tab 隐藏在工作台中。
+
+> **功能步骤流程文档补齐**：新增并持续完善 `docs/interview/功能步骤流程.md`，按用户操作流程和状态／数据流转流程一次性覆盖 Simple、Auto、Agentic、多 Agent 协作、关键词／BM25、语义／向量、知识图谱／Graph Search、RRF／Rerank、权限与版本治理、会话记忆、答案门禁、Bad Case、Redis Checkpointer、LangFuse、Prometheus、Agent Ops、Tool／MCP、Prompt Registry、评测门禁、Adoption、模型网关、部署恢复和文档同步。
+
+> **核心流程实现状态核对**：步骤文档新增实现状态总览和专项流程，按用户操作与状态／数据流转展开 AG-UI／SSE、BullMQ 异步任务、OCR／ASR sidecar、GraphRAG、Bocha Web Search fallback、Redis 缓存、Nest Throttler、成本摘要、DLP、事故复盘等能力；断线续传、真实视觉向量、企业 DLP、租户账单、生产死信／告警／值班等外部能力明确保留为部分实现或环境事项。
+
+> **步骤流程术语注释补齐**：在 `docs/interview/功能步骤流程.md` 开头新增 Agent、RAG、BM25、Embedding、GraphRAG、RRF、Rerank、Checkpoint、AG-UI、SSE、Trace、Generation、Prometheus、BullMQ、MCP、DLP、IAM、SLA 等英文缩写和工程术语的中文解释，并在正文首次出现位置直接追加「（注：……）」说明，方便顺着流程阅读。
+
+> **企业微信告警入口补齐**：admin-backend `NotifyService` 新增 `sendEnterpriseWechatMarkdown()` 和 `sendOperationsAlert()`；配置 `WECHAT_WORK_WEBHOOK_URL` 后发送 Markdown 告警，未配置时返回 `simulated` 结果，步骤文档已补充告警到值班群的用户流程和状态流转。
+
+> **用户效果与生产运营模拟闭环补齐**：新增 `backend npm run simulate:user-outcomes`，模拟采纳率、返工率、人工接管率、节省工时和 SLA；新增 `admin-backend npm run simulate:operations`，模拟 Prometheus 告警、企业微信通知、值班确认、缓解、恢复和 Postmortem，并落盘 evidence 报告。报告明确标记 simulated，不污染真实业务数据。
+
+> **七类生产闭环总模拟补齐**：新增 `backend npm run simulate:production-closure`，一次模拟真实业务数据验收、多实例高可用、多模态、安全合规、成本治理、生产运营和用户效果，并为钉钉、飞书／PagerDuty、企业 IAM／DLP、真实模型价格、视觉模型和 Kubernetes／死信队列保留明确接入注释。
+
+> **项目架构图补齐**：在 `docs/interview/功能步骤流程.md` 新增 Mermaid 总体架构图、分层讲解和一次问答时序图，覆盖入口、API、Simple／Auto／Agentic、多 Agent、混合检索、状态记忆、知识存储、模型工具、LangFuse／Prometheus 和告警通知。
+
 ### P1：真实系统联调
 
 - [ ] **组织主数据联调**：接入真实部门、岗位、用户、角色和同步方式，覆盖转岗、兼任、离职和外包账号权限
 - [ ] **GraphRAG 业务数据联调**：导入真实实体、关系、别名和冲突合并规则，验证图谱召回及版本冲突
 - [ ] **视觉／视频真实联调**：配置真实模型和样本，评测 OCR、图片理解、ASR 和视频理解准确率
-- [ ] **LangFuse 真实环境联调**：验证 trace、token、成本、节点耗时和告警，不以本地可选 Provider 代替生产可观测闭环
+- [x] **LangFuse 可观测闭环（本地真实云端）**：已验证真实 trace、generation、flush、health、token／成本字段和节点事件上报；生产看板、告警规则和长期留存仍需部署环境补齐
 
 ### P2：性能与稳定性
 
-- [ ] **六岗位模型长期稳定性**：已修复 Qwen 默认 20 秒超时与岗位真实耗时不匹配的问题；独立 Node 22 实例连续三次完整 DAG 共 18／18 模型调用成功、0 降级，总耗时约 136.9～161.0 秒。重复回放和 SLA 门禁脚本已实现，仍需完成至少 30 次跨时间窗口正式回放及供应商 SLA 观测
+- [x] **六岗位模型长期稳定性（本地 30 次）**：已完成 30／30 个完整 DAG、180／180 个岗位模型调用成功、模型降级 0；跨供应商长期 SLA 仍需真实生产窗口
+- [x] **RAG 延迟／成本门禁（本地规格）**：`perf:rag` 已补并发、成功率、错误率、吞吐、p50／p95、Token 和成本预算字段；local 30＋30 样本门禁通过，strict 需要配置真实模型单价并在目标机器复验
+- [x] **Checkpointer 多实例恢复（进程级）**：两个独立进程共享 Redis 完成 writer→reader 恢复和清理；真实多副本编排、实例崩溃和长时间暂停仍需部署环境复验
 - [ ] **生产规格压测**：在目标机器验证 Milvus／ES／Redis／Neo4j／PostgreSQL 的冷启动、热缓存、批量导入、并发问答、队列积压和故障恢复
-- [ ] **RAG 延迟门槛复验**：`perf:rag` 已补并发、成功率、错误率、吞吐、p50／p95 和报告落盘；本轮 2＋2 次真实 smoke 请求均成功但严格延迟 SLA 未通过，仍需在目标规格环境完成至少 30 次／模式的正式复验
-- [ ] **Checkpointer 多实例恢复**：验证跨进程、多实例并发、服务崩溃和长时间暂停后的 Redis checkpoint 恢复
 
 ### P3：客户端与生产验收
 
@@ -160,6 +185,24 @@
 - 生产级部署/域名/证书/备份/监控接入本轮按要求不做
 
 ## 最近验证
+
+### 2026-08-08
+
+- **AI 问答会话提交 Bad Case（已完成）**：在每条已完成 AI 回答旁新增「提交 Bad Case」按钮和表单，支持错误类型、问题描述、纠正答案及回归集开关；新增管理代理和 RAG 管理接口，按 `threadId` 关联最近问答记录并复用服务端召回快照，提交后进入 Agent 运营审核池。backend build、admin-backend build、admin tsc 均通过。
+- **Bad Case 提交用户隔离修复（已完成）**：管理后台提交 Bad Case 时改为沿用当前登录用户的 `userId`，与 Simple／Agentic 问答写入 QueryLog 时的用户标识一致，修复错误返回 `query log not found` 的问题；admin-backend build ✅。
+- **管理后台旧会话 Bad Case 兼容修复（已完成）**：管理入口在当前用户范围查不到 QueryLog 时，允许受权限保护的管理员按 `threadId` 回查最近记录，兼容旧会话和身份切换场景；普通用户 `/chat/feedback` 仍保持用户隔离。backend、admin-backend build ✅。
+- **无 QueryLog 会话 Bad Case 兜底（已完成）**：针对会话消息已保存但 QueryLog 缺失的情况，管理员提交 Bad Case 时从最后一组 human／ai 消息生成最小 QueryLog，再保存反馈；RAG 反馈定向测试 4／4、backend build ✅。
+- **Simple／Agentic Bad Case 纠错链路（已完成）**：Bad Case 检索改为结构化返回命中分数和 `hint／correction／exact` 级别；Simple 并行检索审核案例并增加 Correction Gate，精确／强命中使用纠正答案，弱命中注入提示；Agentic 复用同一协议。Bad Case 定向测试 6／6、backend build ✅；正式知识补录和生产流量后的长期效果仍需真实业务数据验证。
+- **Bad Case 自然化回答修复（已完成）**：Simple 精确／强命中不再原样返回人工 `correctedAnswer`，而是将审核事实交给统一生成 Prompt 重新组织回答；Agentic 继续通过同一纠错证据协议生成。定向测试 9／9、backend build、admin-backend build ✅。
+- **Auto／Agentic 强命中纠错修复（已完成）**：Agentic 生成节点对 `exact／correction` 命中改为复用统一纠错生成器，不再只把 Bad Case 放进普通 memory，避免错误检索结果覆盖已审核事实；Agentic／Bad Case 定向测试 5／5、backend build、admin-backend build ✅。
+- **Bad Case 短实体查询命中修复（已完成）**：在向量门槛之外增加审核问题与当前问题的实体包含兜底，将“韦水春”命中“韦水春是谁”这类短查询标记为 `exact`，避免短实体向量相似度不足导致纠错证据未生效；定向测试 5／5、backend build ✅。
+- **Agentic 检索不足兜底绕过修复（已完成）**：Agentic 在无索引、检索不足和 Fast Fallback 前增加已审核 Bad Case 纠错预检，命中后先重新生成自然答案，不再直接走普通模型兜底；Agentic 定向测试 3／3、backend build ✅。
+- **Bad Case 生产闭环增强（已完成）**：审核回灌现在具备索引生命周期同步，审核撤销、取消回归或忽略案例会删除独立 Milvus 向量；审核接口返回索引结果，后台显示回归集状态并提示 Milvus 回灌失败。Simple／Agentic 先判断当前知识是否充分，正式证据充分时 Bad Case 只作为提示，避免旧纠正答案直接覆盖新知识。新增 `npm run eval:bad-case`，从有效审核案例逐条执行 simple／auto／agentic 并校验旧答案不再出现、纠正事实覆盖率和路由；当前本地 2 条案例、6 次执行全部通过。验证：backend build ✅、Bad Case／Agentic 定向测试 11／11 ✅、admin TypeScript ✅。
+- **七项难点本地验证增强（已完成）**：稳定性回放支持本地登录、30 次完整 DAG、串行／并发控制和 429 退避；本轮 30／30 个完整 DAG、180／180 个岗位模型调用成功、模型降级 0，`local` 稳定性门禁通过；RAG 性能基准新增 `local／strict` Profile，本地 30＋30 请求成功率 100%，local 门禁通过；Redis Checkpointer 跨进程 writer／reader／cleanup smoke 通过；LangFuse 新增状态契约、主动 trace smoke、flush 和 `npm run smoke:langfuse`，轮换后的配置已验证真实 trace 上报成功。自动审批场景不要求审批就绪，本地非真实业务证据覆盖率只作观察项；真实业务数据和生产 SLA 仍单独保留为外部验收项。
+- **生产闭环可测性增强（已完成）**：Redis smoke 明确验证两个独立进程共享 Redis 的 writer→reader 恢复；LangFuse 增加 health 状态、flush 时间、累计 trace 数和错误状态，真实云端 trace／generation／flush 已验证；Bad Case 回归新增长期 JSONL 历史，`eval:bad-case:long-term` 可持续比较通过率；RAG Ops API 新增 `qa/adoption-summary` 和 `smoke:adoption`，统计活跃用户、复访用户、回答率、反馈覆盖率和正向反馈率。生产成本单价、真实流量长期 SLA、真实业务数据和用户采纳结论仍不伪造。
+- **面试核心企业能力补齐（已完成）**：新增 `LlmGatewayPolicy`，统一任务类型、主备模型、超时、输出上限和成本预算；补充面试速查卡、JD 差距状态和 `.env.example` 配置说明。已有 ACL／Prompt Injection／Tool Registry／审计基础与新模型网关策略可以形成完整回答；真实 IAM、DLP、租户账单和生产灰度仍保留为后续环境事项。
+- **Bad Case 管理后台入口补齐（已完成）**：在 Agent 运营下新增独立「Bad Case 审核」菜单和 `/agent-ops/bad-cases` 路由，进入后直接展示待审核列表；保留工作台内原 Bad Case Tab，并补充加载失败提示。管理后台 `pnpm run lint` 通过（Node 20 引擎提示和既有 lint warning）；admin-backend `npm run verify` 通过（build、lint、71 单测、19 E2E、migration check）。
+- **AI 应用/Agent 岗面试冲刺材料（已完成）**：新增 `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md`（10 小时倒排计划、六条主线 30 秒背诵卡、必背数字表、红线自检、高频回答框架和面试复盘模板）和 `docs/interview/deepseek-AI应用Agent岗-模拟问答题库.md`（33 道高频模拟题逐题可背答案、追问应对和边界红线，覆盖检索/Agentic/Prompt/安全/多租户/可观测全知识面）；同步在 `docs/interview/README.md` 登记索引。仅文档更新，未改代码。
 
 ### 2026-08-03
 

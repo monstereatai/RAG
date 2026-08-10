@@ -15,12 +15,17 @@ describe('RagFeedbackService', () => {
     } as unknown as Repository<QueryLogEntity>;
     const badCaseFlywheel = {
       indexApproved: jest.fn().mockResolvedValue({ indexed: true }),
+      removeApproved: jest.fn().mockResolvedValue({ indexed: false, removed: true }),
+    };
+    const conversationService = {
+      get: jest.fn().mockResolvedValue(null),
     };
     return {
       service: new RagFeedbackService(
         feedbackRepo,
         queryLogRepo,
         badCaseFlywheel as never,
+        conversationService as never,
       ),
       feedbackRepo,
       badCaseFlywheel,
@@ -108,5 +113,34 @@ describe('RagFeedbackService', () => {
         correctedAnswer: '泰语按词组断行，并覆盖窄屏验收。',
       }),
     );
+  });
+
+  it('removes the vector example when regression inclusion is revoked', async () => {
+    const queryLog = {
+      id: '11111111-1111-4111-8111-111111111111',
+      query: '泰语活动页换行规则是什么？',
+      answer: '错误回答',
+    } as QueryLogEntity;
+    const { service, feedbackRepo, badCaseFlywheel } = createService(queryLog);
+    (feedbackRepo as unknown as { findOne: jest.Mock }).findOne = jest
+      .fn()
+      .mockResolvedValue({
+        id: 'feedback-1',
+        queryLogId: queryLog.id,
+        feedback: 'negative',
+        correctedAnswer: '旧纠正答案',
+        includeInRegression: true,
+        status: 'reviewed',
+        errorType: 'incomplete_answer',
+      });
+
+    await service.review('feedback-1', {
+      status: 'ignored',
+      includeInRegression: false,
+      reviewedBy: 'admin-1',
+    });
+
+    expect(badCaseFlywheel.removeApproved).toHaveBeenCalledWith('feedback-1');
+    expect(badCaseFlywheel.indexApproved).not.toHaveBeenCalled();
   });
 });

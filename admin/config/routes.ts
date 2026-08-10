@@ -77,7 +77,27 @@ export default [
     path: '/agent-ops',
     name: 'agent-ops',
     icon: 'branches',
-    component: './agent-ops',
+    routes: [
+      {
+        path: '/agent-ops',
+        component: './agent-ops',
+      },
+      {
+        path: '/agent-ops/bad-cases',
+        name: 'agent-ops-bad-cases',
+        component: './agent-ops',
+      },
+      {
+        path: '/agent-ops/evals',
+        name: 'agent-ops-evals',
+        component: './agent-ops',
+      },
+      {
+        path: '/agent-ops/traces',
+        name: 'agent-ops-traces',
+        component: './agent-ops',
+      },
+    ],
   },
   {
     path: '/graph-ops',

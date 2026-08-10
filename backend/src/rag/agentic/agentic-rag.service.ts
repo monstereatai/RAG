@@ -651,14 +651,38 @@ export class AgenticRagService {
       role: string;
       content: string;
     }>;
-    const badCasePrompt = await this.withTimeout(
-      this.badCaseFlywheel.selectPrompt(state.query, 2),
+    const badCaseMatches = await this.withTimeout(
+      this.badCaseFlywheel.retrieveMatches(state.query, 2),
       2_000,
       'Bad case selection',
-    ).catch(() => '');
+    ).catch(() => []);
+    const badCasePrompt = badCaseMatches.length
+      ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
+      : '';
     const generationMemory = badCasePrompt
       ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
       : memoryMessages;
+    const strongBadCase = badCaseMatches.find(
+      (match) => match.mode === 'exact' || match.mode === 'correction',
+    );
+    const correction = strongBadCase
+      ? this.karpathyRagService.extractCorrectedAnswer(strongBadCase.text)
+      : '';
+    if (strongBadCase && correction) {
+      const answer = await this.karpathyRagService.generateCorrectionAnswer(
+        state.query,
+        correction,
+        history,
+        memoryMessages,
+        (token) => onEvent?.({ type: 'token', data: token }),
+      );
+      onEvent?.({ type: 'citation', data: state.retrievedChunks });
+      return {
+        answer,
+        retrievalSufficient: true,
+        retrievalReason: `命中已审核 Bad Case 纠错证据（${strongBadCase.mode}，${strongBadCase.score.toFixed(3)}）`,
+      };
+    }
 
     if (state.retrievedChunks.length === 0 || !state.retrievalSufficient) {
       const reason =
@@ -1001,8 +1025,8 @@ export class AgenticRagService {
       }
       downstreamOnEvent?.(event);
     };
-    const fastPathGate =
-      mode === 'auto'
+    let fastPathGate =
+      mode !== 'simple'
         ? await this.karpathyRagService.assessFastPath(
             query,
             userId,
@@ -1071,6 +1095,24 @@ export class AgenticRagService {
           obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
         },
       });
+    }
+
+    if (!fastPathGate) {
+      fastPathGate = await this.karpathyRagService.assessFastPath(
+        query,
+        userId,
+        retrieveOptions,
+      );
+    }
+    const approvedCorrection = await this.tryApprovedBadCaseCorrection(
+      query,
+      onEvent,
+      history,
+      memoryMessages,
+      fastPathGate.sufficient,
+    );
+    if (approvedCorrection) {
+      return approvedCorrection;
     }
 
     if (!this.karpathyRagService.hasIndexedChunks(userId)) {
@@ -1326,6 +1368,59 @@ export class AgenticRagService {
       retrievalSufficient: false as const,
       retrievalReason: `${gate.reason}；已跳过查询扩展并使用模型兜底回答`,
     };
+    onEvent?.({ type: 'citation', data: [] });
+    onEvent?.({ type: 'final', data: result });
+    return result;
+  }
+
+  private async tryApprovedBadCaseCorrection(
+    query: string,
+    onEvent: SseCallback | undefined,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+    memoryMessages: Array<{ role: string; content: string }>,
+    currentEvidenceSufficient: boolean,
+  ): Promise<{
+    answer: string;
+    references: RetrievedChunk[];
+    route: 'agentic';
+    confidence: number;
+    retryCount: number;
+    retrievalSufficient: boolean;
+    retrievalReason: string;
+  } | null> {
+    if (currentEvidenceSufficient) return null;
+    const matches = await this.withTimeout(
+      this.badCaseFlywheel.retrieveMatches(query, 2),
+      2_000,
+      'Bad case preflight selection',
+    ).catch(() => []);
+    const match = matches.find(
+      (item) => item.mode === 'exact' || item.mode === 'correction',
+    );
+    if (!match) return null;
+    const correction = this.karpathyRagService.extractCorrectedAnswer(
+      match.text,
+    );
+    if (!correction) return null;
+    const answer = await this.karpathyRagService.generateCorrectionAnswer(
+      query,
+      correction,
+      history,
+      memoryMessages,
+      (token) => onEvent?.({ type: 'token', data: token }),
+    );
+    const retrievalReason = `命中已审核 Bad Case 纠错证据（${match.mode}，${match.score.toFixed(3)}）`;
+    const result = {
+      answer,
+      references: [],
+      route: 'agentic' as const,
+      confidence: 1,
+      retryCount: 0,
+      retrievalSufficient: true,
+      retrievalReason,
+    };
+    onEvent?.({ type: 'retrieval', data: [] });
+    onEvent?.({ type: 'sufficiency', data: { sufficient: true, reason: retrievalReason } });
     onEvent?.({ type: 'citation', data: [] });
     onEvent?.({ type: 'final', data: result });
     return result;

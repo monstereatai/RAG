@@ -40,6 +40,8 @@ if (mode === 'parent') {
     JSON.stringify(
       {
         ok,
+        topology: 'two-process-shared-redis',
+        recovery: 'writer-instance-to-reader-instance',
         threadId,
         checkpointId,
         writer: parseChildOutput(writer),

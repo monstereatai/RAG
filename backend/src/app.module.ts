@@ -44,6 +44,7 @@ import { RagGatewayModule } from './modules/rag-gateway/rag-gateway.module';
 import { ArtifactsModule } from './modules/artifacts/artifacts.module';
 import { AgentEvalModule } from './modules/agent-evals/agent-eval.module';
 import { AgentOpsAdminModule } from './modules/agent-ops-admin/agent-ops-admin.module';
+import { RagOpsApiModule } from './modules/rag-ops-api/rag-ops-api.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { AgentOpsAdminModule } from './modules/agent-ops-admin/agent-ops-admin.m
     ArtifactsModule,
     AgentEvalModule,
     AgentOpsAdminModule,
+    RagOpsApiModule,
   ],
   providers: [
     {

@@ -16,6 +16,16 @@ export interface ApprovedBadCase {
   errorType?: string | null;
 }
 
+export type BadCaseMatchMode = 'hint' | 'correction' | 'exact';
+
+export interface BadCaseMatch {
+  id: string;
+  query: string;
+  text: string;
+  score: number;
+  mode: BadCaseMatchMode;
+}
+
 @Injectable()
 export class BadCaseFlywheelService implements OnModuleInit {
   private readonly logger = new Logger(BadCaseFlywheelService.name);
@@ -83,8 +93,27 @@ export class BadCaseFlywheelService implements OnModuleInit {
     return { indexed: true, id };
   }
 
+  async removeApproved(feedbackId: string) {
+    if (!this.initialized || !this.client) {
+      return { indexed: false, reason: 'milvus_unavailable' };
+    }
+    const id = `badcase_${feedbackId}`.slice(0, 64);
+    await this.client.deleteEntities({
+      collection_name: this.collectionName,
+      expr: `id == "${this.escapeExpression(id)}"`,
+    });
+    await this.client.flushSync({ collection_names: [this.collectionName] });
+    return { indexed: false, removed: true, id };
+  }
+
   async selectPrompt(query: string, limit = 2): Promise<string> {
-    if (!this.initialized || !this.client) return '';
+    const matches = await this.retrieveMatches(query, limit);
+    if (matches.length === 0) return '';
+    return this.formatPrompt(matches);
+  }
+
+  async retrieveMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
+    if (!this.initialized || !this.client) return [];
     try {
       const vector = await this.embeddingProvider.embedQuery(query);
       const result = await this.client.search({
@@ -93,26 +122,59 @@ export class BadCaseFlywheelService implements OnModuleInit {
         limit: Math.min(Math.max(limit, 1), 2),
         metric_type: MetricType.COSINE,
         params: { ef: 64 },
-        output_fields: ['text'],
+        output_fields: ['id', 'query', 'text'],
         timeout: 1_500,
       });
-      const hits = (result.results as Array<Record<string, unknown>>).filter(
-        (item) =>
-          typeof item['text'] === 'string' &&
-          this.scoreOf(item) >= this.similarityThreshold,
-      );
-      if (hits.length === 0) return '';
-      return [
-        '【经人工审核的相似历史 Bad Case】',
-        '以下内容只用于避免重复犯错，不得覆盖当前知识库证据；若两者冲突，以当前有效证据为准。',
-        ...hits.slice(0, 2).map((item) => String(item['text'])),
-      ].join('\n\n');
+      return (result.results as Array<Record<string, unknown>>)
+        .map((item) => {
+          const storedQuery = String(item['query'] ?? '');
+          const score = this.scoreOf(item);
+          return {
+            id: String(item['id'] ?? item['ID'] ?? ''),
+            query: storedQuery,
+            text: String(item['text'] ?? ''),
+            score,
+            mode: this.modeOf(score, query, storedQuery),
+          } satisfies BadCaseMatch;
+        })
+        .filter(
+          (item) =>
+            item.text &&
+            (item.score >= this.similarityThreshold ||
+              this.hasLexicalEntityMatch(query, item.query)),
+        )
+        .slice(0, Math.min(Math.max(limit, 1), 2));
     } catch (error) {
       this.logger.warn(
         `Bad case selection skipped: ${(error as Error).message}`,
       );
-      return '';
+      return [];
     }
+  }
+
+  formatPrompt(matches: BadCaseMatch[]): string {
+    return [
+      '【经人工审核的相似历史 Bad Case】',
+      '以下内容只用于纠正历史错误，不得覆盖当前知识库证据；若两者冲突，以当前有效证据为准。',
+      ...matches.map((item) => `[命中级别：${item.mode}｜相似度：${item.score.toFixed(3)}]\n${item.text}`),
+    ].join('\n\n');
+  }
+
+  private modeOf(score: number, query: string, storedQuery: string): BadCaseMatchMode {
+    if (
+      query.trim().toLowerCase() === storedQuery.trim().toLowerCase() ||
+      score >= 0.95 ||
+      this.hasLexicalEntityMatch(query, storedQuery)
+    ) {
+      return 'exact';
+    }
+    return score >= 0.88 ? 'correction' : 'hint';
+  }
+
+  private hasLexicalEntityMatch(query: string, storedQuery: string): boolean {
+    const left = query.trim().toLowerCase();
+    const right = storedQuery.trim().toLowerCase();
+    return left.length >= 2 && right.length >= 2 && (left.includes(right) || right.includes(left));
   }
 
   private async ensureCollection(): Promise<void> {

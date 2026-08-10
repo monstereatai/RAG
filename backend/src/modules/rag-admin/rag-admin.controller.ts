@@ -230,6 +230,16 @@ export class RagAdminController {
     });
   }
 
+  @Post('qa/feedback')
+  submitQaFeedback(
+    @Body() body: import('../chat/chat-feedback.dto').ChatFeedbackDto,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.ragFeedbackService.create(body, ownerUserId, {
+      allowCrossUserThread: true,
+    });
+  }
+
   @Patch('qa/feedback/:id')
   reviewQaFeedback(
     @Param('id') id: string,

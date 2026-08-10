@@ -13,6 +13,7 @@ import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
+import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
       DocumentMetaEntity,
       FactConflictEntity,
       QueryLogEntity,
+      RagFeedbackEntity,
     ]),
     DocumentModule,
     GraphModule,

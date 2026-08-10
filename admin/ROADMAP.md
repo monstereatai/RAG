@@ -73,6 +73,7 @@
 - [x] AI 问答直接生成附件：对话请求明确文件类型时，解析 AG-UI `output.artifacts`，在回答卡片内轮询状态并提供下载、分享按钮
 - [x] 外部分享页：`/shared/artifacts/:token` 无需登录，展示文件信息、有效期、下载次数并预览 PNG／SVG；390px 移动端无横向溢出
 - [x] Agent 运营工作台：`/agent-ops` 支持产研运工作流启动与人工审批、Agent 单案例评测、Bad Case 审核回灌和调用轨迹查询
+- [x] Agent 运营菜单补齐：Agent Evals 和调用轨迹新增独立路由及左侧菜单入口，仍复用原有评测和 Trace 接口
 - [x] Agent 运营移动端：390px 下隐藏冗长品牌文字，表单、页签、按钮无横向溢出
 
 ### 工程验证

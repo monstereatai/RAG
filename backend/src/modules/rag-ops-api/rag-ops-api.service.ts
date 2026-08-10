@@ -506,6 +506,18 @@ export class RagOpsApiService {
     return { available: true, data: summary };
   }
 
+  async getQaAdoptionSummary(windowDays?: number) {
+    const summary = await this.queryLogService.getAdoptionSummary(windowDays);
+    return {
+      available: true,
+      data: summary,
+      note:
+        summary.status === 'measured'
+          ? 'Measured from query and feedback records in the selected window.'
+          : 'No real-user traffic is available for a meaningful adoption rate.',
+    };
+  }
+
   // ─── Graph Operations ─────────────────────────────────────────
 
   async getGraphEntities() {

@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { LangfuseProvider } from './langfuse.provider';
 
@@ -10,5 +10,15 @@ export class ObservabilityController {
   @Get('langfuse/status')
   getLangfuseStatus() {
     return this.langfuseProvider.getStatus();
+  }
+
+  @Get('langfuse/health')
+  getLangfuseHealth() {
+    return this.langfuseProvider.getHealth();
+  }
+
+  @Post('langfuse/smoke')
+  smokeLangfuse() {
+    return this.langfuseProvider.smoke();
   }
 }
