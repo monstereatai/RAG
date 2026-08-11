@@ -27,6 +27,7 @@ import {
 import React from "react";
 import {
   type AgentBadCase,
+  type AgenticRunOption,
   type AgenticRunSnapshot,
   type AgentEvalResult,
   type ProductionRole,
@@ -34,6 +35,7 @@ import {
   type TraceSnapshot,
   evaluateAgent,
   getAgentBadCases,
+  getAgentRuns,
   getAgentRunArtifacts,
   getAgentTraces,
   getProductionWorkflow,
@@ -76,8 +78,10 @@ export default function AgentOpsPage() {
   const [traces, setTraces] = React.useState<TraceSnapshot[]>([]);
   const [runSnapshot, setRunSnapshot] =
     React.useState<AgenticRunSnapshot | null>(null);
+  const [runOptions, setRunOptions] = React.useState<AgenticRunOption[]>([]);
   const [artifactThreadId, setArtifactThreadId] = React.useState("");
   const [artifactLoading, setArtifactLoading] = React.useState(false);
+  const [runOptionsLoading, setRunOptionsLoading] = React.useState(false);
   const [selectedBadCase, setSelectedBadCase] =
     React.useState<AgentBadCase | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -93,6 +97,17 @@ export default function AgentOpsPage() {
   const loadTraces = React.useCallback(async () => {
     const result = await getAgentTraces();
     setTraces(unwrapData<TraceSnapshot[]>(result) ?? []);
+  }, []);
+  const loadRunOptions = React.useCallback(async () => {
+    setRunOptionsLoading(true);
+    try {
+      const result = await getAgentRuns();
+      setRunOptions(unwrapData<AgenticRunOption[]>(result) ?? []);
+    } catch {
+      message.error("最近 Agentic 会话加载失败");
+    } finally {
+      setRunOptionsLoading(false);
+    }
   }, []);
   const loadRunArtifacts = async () => {
     const threadId = artifactThreadId.trim();
@@ -125,8 +140,10 @@ export default function AgentOpsPage() {
   };
 
   React.useEffect(() => {
-    void Promise.all([loadBadCases(), loadTraces()]).catch(() => undefined);
-  }, [loadBadCases, loadTraces]);
+    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions()]).catch(
+      () => undefined,
+    );
+  }, [loadBadCases, loadRunOptions, loadTraces]);
 
   React.useEffect(() => {
     if (workflow?.status !== "running") return;
@@ -713,9 +730,39 @@ export default function AgentOpsPage() {
                     showIcon
                     type="info"
                     title="查看一次 Agentic 运行在 Redis Checkpointer 中保存的结构化交接物"
-                    description="输入问答会话的 Thread ID，可展开子问题计划、证据包和答案契约；该页面只读，不直接修改运行状态。"
+                    description="优先选择最近 Agentic 会话；高级排障时也可以手动输入 Thread ID。"
                   />
                   <div className="agent-ops-form-grid">
+                    <Select
+                      allowClear
+                      showSearch
+                      loading={runOptionsLoading}
+                      value={
+                        runOptions.some(
+                          (item) => item.threadId === artifactThreadId,
+                        )
+                          ? artifactThreadId
+                          : undefined
+                      }
+                      onChange={(value) => {
+                        setArtifactThreadId(value ?? "");
+                        if (value) {
+                          void getAgentRunArtifacts(value).then((result) =>
+                            setRunSnapshot(
+                              unwrapData<AgenticRunSnapshot>(result),
+                            ),
+                          );
+                        } else {
+                          setRunSnapshot(null);
+                        }
+                      }}
+                      optionFilterProp="label"
+                      options={runOptions.map((item) => ({
+                        value: item.threadId,
+                        label: `${item.title} · ${item.mode} · ${new Date(item.updatedAt).toLocaleString("zh-CN")}`,
+                      }))}
+                      placeholder="选择最近 Agentic 会话"
+                    />
                     <Input
                       value={artifactThreadId}
                       onChange={(event) => setArtifactThreadId(event.target.value)}

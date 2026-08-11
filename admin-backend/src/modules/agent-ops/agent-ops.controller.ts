@@ -84,6 +84,12 @@ export class AgentOpsController {
     return this.ragClient.getAgentRunArtifacts(threadId);
   }
 
+  @Get('runs')
+  @RequirePermission('admin:qa-ops:read')
+  runs(@Query('limit') limit?: string) {
+    return this.ragClient.getAgentRuns(Number(limit ?? 30));
+  }
+
   @Post('runs/:threadId/retry')
   @RequirePermission('admin:qa-ops:write')
   retryRun(@Param('threadId') threadId: string) {

@@ -19,6 +19,7 @@ import {
 } from '../workflow/production-workflow.dto';
 import { ProductionWorkflowService } from '../workflow/production-workflow.service';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
+import { ConversationService } from '../chat/conversation.service';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -29,6 +30,7 @@ export class AgentOpsAdminController {
     private readonly feedback: RagFeedbackService,
     private readonly tracing: TracingService,
     private readonly agenticRag: AgenticRagService,
+    private readonly conversations: ConversationService,
   ) {}
 
   @Post('workflows')
@@ -94,6 +96,30 @@ export class AgentOpsAdminController {
   @Get('runs/:threadId/artifacts')
   getRunArtifacts(@Param('threadId') threadId: string) {
     return this.agenticRag.getRunSnapshot(threadId);
+  }
+
+  @Get('runs')
+  async recentRuns(@Query('limit') limit?: string) {
+    const parsed = Number(limit ?? 30);
+    const max = Number.isInteger(parsed)
+      ? Math.min(Math.max(parsed, 1), 100)
+      : 30;
+    const conversations = await this.conversations.listConversations();
+    const candidates = conversations
+      .filter((item) => item.mode !== 'simple')
+      .slice(0, max);
+    const runs = await Promise.all(
+      candidates.map(async (item) => {
+        const snapshot = await this.agenticRag.getRunSnapshot(item.threadId);
+        return {
+          ...item,
+          checkpointAvailable: snapshot.available,
+          route: snapshot.route,
+          retrievalSufficient: snapshot.retrievalSufficient,
+        };
+      }),
+    );
+    return runs;
   }
 
   @Post('runs/:threadId/retry')

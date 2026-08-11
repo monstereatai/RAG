@@ -132,6 +132,12 @@ export class RagClientService {
     );
   }
 
+  getAgentRuns(limit = 30) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/runs${this.toQueryString({ limit })}`
+    );
+  }
+
   retryAgentRun(threadId: string) {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/runs/${encodeURIComponent(threadId)}/retry`,

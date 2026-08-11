@@ -130,6 +130,18 @@ export interface AgenticRunSnapshot {
   passed: boolean | null;
 }
 
+export interface AgenticRunOption {
+  threadId: string;
+  title: string;
+  mode: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  checkpointAvailable: boolean;
+  route: "simple" | "agentic" | null;
+  retrievalSufficient: boolean | null;
+}
+
 export const startProductionWorkflow = (body: {
   projectId: string;
   brief: string;
@@ -188,6 +200,11 @@ export const getAgentRunArtifacts = (threadId: string) =>
   authRequest<unknown>(
     `/api/admin/agent-ops/runs/${encodeURIComponent(threadId)}/artifacts`,
   );
+
+export const getAgentRuns = () =>
+  authRequest<unknown>("/api/admin/agent-ops/runs", {
+    params: { limit: 30 },
+  });
 
 export const retryAgentRun = (threadId: string) =>
   authRequest<unknown>(

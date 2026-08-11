@@ -170,6 +170,7 @@ export class ConversationService {
     Array<{
       threadId: string;
       title: string;
+      mode: string;
       messageCount: number;
       createdAt: string;
       updatedAt: string;
@@ -199,6 +200,7 @@ export class ConversationService {
       results.push({
         threadId: conv.id,
         title: conv.title,
+        mode: conv.mode,
         messageCount,
         createdAt: conv.createdAt.toISOString(),
         updatedAt: (lastMsg?.createdAt ?? conv.createdAt).toISOString(),
@@ -207,7 +209,8 @@ export class ConversationService {
 
     // 按最后更新时间降序排列（最新对话排最前）
     results.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
 
     return results;

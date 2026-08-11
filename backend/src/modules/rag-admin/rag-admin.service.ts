@@ -489,7 +489,7 @@ export class RagAdminService {
     return list.map((item) => ({
       threadId: item.threadId,
       title: item.title,
-      mode: 'unknown',
+      mode: item.mode,
       messageCount: item.messageCount,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
