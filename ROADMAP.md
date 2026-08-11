@@ -66,6 +66,7 @@
 - **Artifact 审计免手输 Thread**：会话摘要补齐实际 `mode`，Agent 运营服务新增最近 Agentic／Auto 会话候选接口；Artifact 审计页面自动加载会话下拉列表，选择问题后直接查看 Checkpoint，Thread ID 仅保留为高级排障入口。全量 backend／admin-backend 测试和三端构建通过。
 - **Artifact 审计空列表交互修复**：不再提前过滤没有 Checkpoint 的 Auto 会话，页面会自动选中最近会话并加载状态；没有 Agentic Checkpoint 时明确提示原因，不再要求用户先手输 Thread ID。
 - **Artifact 审计会话列表可用性补强**：下拉选项补充模式、Checkpoint 状态和更新时间，新增独立「刷新会话列表」入口；无会话或接口未返回数据时显示明确操作提示，避免页面只呈现空选择框。
+- **Artifact 审计实际操作流程文档同步**：在 `docs/interview/功能步骤流程.md` 补充管理员从进入审计页、刷新／选择最近会话、查看 Artifact、识别无 Checkpoint 到重新执行的用户操作和服务端状态流转，并明确会话事实来自会话服务、运行交接物来自 Redis Checkpointer。
 - **功能步骤流程补全简历全部链路**：更新 `docs/interview/功能步骤流程.md`，新增「简历核心职责流程速览」和「简历五项技术难点流程」；知识库与后台、三层问答／方案生成／MCP、Bad Case／质量运营／观测，以及受控多 Agent、路由预算、Hybrid／GraphRAG、可信纠错、Checkpoint／Trace／告警，均按用户操作和数据／状态流转串联。补充 Parent Chunk／Child Chunk 术语及「子块精确召回→父块／同章节按预算补全」规则。仅文档更新，未改运行时代码。
 - **功能步骤流程术语内联注释**：为上述简历职责与五项难点流程中的技术术语、状态字段和指标字段补充首次出现的「（注：……）」说明，保留原始英文名称以便与代码、日志和面试术语对应；重点补齐 Fast Path、retrievalHit、citationCoverage、confidence、taskComplexity、route、Agentic State、Parent／Child Chunk、Checkpoint、TTFT、Webhook 等。仅文档更新，未改运行时代码。
 - **游戏营销 RAG 完整项目描述**：新增 `docs/interview/resume/游戏营销RAG项目完整描述.md`，将诗悦网络游戏官网活动营销 Agentic RAG 项目的完整项目简介、五项负责内容、七项技术难点与本地验证边界独立沉淀；技术难点以多 Agent 受控协作、三层路由、Hybrid／GraphRAG、评测与 Bad Case、Checkpoint 和节点级可观测为主线，避免与简历精简版重复。同步更新 `docs/interview/README.md` 索引。仅文档更新，未改运行时代码。
