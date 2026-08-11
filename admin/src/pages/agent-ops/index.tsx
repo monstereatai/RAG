@@ -27,14 +27,17 @@ import {
 import React from "react";
 import {
   type AgentBadCase,
+  type AgenticRunSnapshot,
   type AgentEvalResult,
   type ProductionRole,
   type ProductionWorkflow,
   type TraceSnapshot,
   evaluateAgent,
   getAgentBadCases,
+  getAgentRunArtifacts,
   getAgentTraces,
   getProductionWorkflow,
+  retryAgentRun,
   resumeProductionWorkflow,
   reviewAgentBadCase,
   startProductionWorkflow,
@@ -71,6 +74,10 @@ export default function AgentOpsPage() {
   );
   const [badCases, setBadCases] = React.useState<AgentBadCase[]>([]);
   const [traces, setTraces] = React.useState<TraceSnapshot[]>([]);
+  const [runSnapshot, setRunSnapshot] =
+    React.useState<AgenticRunSnapshot | null>(null);
+  const [artifactThreadId, setArtifactThreadId] = React.useState("");
+  const [artifactLoading, setArtifactLoading] = React.useState(false);
   const [selectedBadCase, setSelectedBadCase] =
     React.useState<AgentBadCase | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -87,6 +94,35 @@ export default function AgentOpsPage() {
     const result = await getAgentTraces();
     setTraces(unwrapData<TraceSnapshot[]>(result) ?? []);
   }, []);
+  const loadRunArtifacts = async () => {
+    const threadId = artifactThreadId.trim();
+    if (!threadId) {
+      message.warning("请输入 Thread ID");
+      return;
+    }
+    setArtifactLoading(true);
+    try {
+      const result = await getAgentRunArtifacts(threadId);
+      setRunSnapshot(unwrapData<AgenticRunSnapshot>(result));
+    } catch {
+      message.error("Artifact 状态加载失败，请检查服务和 Thread ID");
+    } finally {
+      setArtifactLoading(false);
+    }
+  };
+  const handleRetryRun = async () => {
+    if (!runSnapshot?.available) return;
+    setArtifactLoading(true);
+    try {
+      await retryAgentRun(runSnapshot.threadId);
+      message.success("已重新执行 Agentic 链路，请稍后刷新查看新 Artifact");
+      await loadRunArtifacts();
+    } catch {
+      message.error("重新执行失败，请检查模型、索引和 Redis 状态");
+    } finally {
+      setArtifactLoading(false);
+    }
+  };
 
   React.useEffect(() => {
     void Promise.all([loadBadCases(), loadTraces()]).catch(() => undefined);
@@ -333,7 +369,8 @@ export default function AgentOpsPage() {
               items={workflow.selectedRoles
                 .filter((role) => workflow.results[role])
                 .map((role) => {
-                  const result = workflow.results[role]!;
+                  const result = workflow.results[role];
+                  if (!result) return null;
                   const pendingClaims = result.claims.filter(
                     (claim) => claim.status === "pending_confirmation",
                   );
@@ -406,7 +443,8 @@ export default function AgentOpsPage() {
                       </div>
                     ),
                   };
-                })}
+                })
+                .filter((item): item is NonNullable<typeof item> => item !== null)}
             />
             {workflow.requiresApproval && (
               <div className="agent-approval-row">
@@ -521,8 +559,10 @@ export default function AgentOpsPage() {
           ? "bad-cases"
           : history.location.pathname.endsWith("/evals")
             ? "evals"
-            : history.location.pathname.endsWith("/traces")
-              ? "traces"
+          : history.location.pathname.endsWith("/traces")
+            ? "traces"
+            : history.location.pathname.endsWith("/artifacts")
+              ? "artifacts"
               : "workspace"
       }
       navItems={agentOpsNav}
@@ -539,8 +579,10 @@ export default function AgentOpsPage() {
               ? "bad-cases"
               : history.location.pathname.endsWith("/evals")
                 ? "eval"
-                : history.location.pathname.endsWith("/traces")
+              : history.location.pathname.endsWith("/traces")
                   ? "traces"
+                  : history.location.pathname.endsWith("/artifacts")
+                    ? "artifacts"
                   : "workflow"
           }
           onChange={(key) => {
@@ -549,6 +591,7 @@ export default function AgentOpsPage() {
               eval: "/agent-ops/evals",
               "bad-cases": "/agent-ops/bad-cases",
               traces: "/agent-ops/traces",
+              artifacts: "/agent-ops/artifacts",
             };
             history.push(routes[key] ?? "/agent-ops");
           }}
@@ -658,6 +701,98 @@ export default function AgentOpsPage() {
                       },
                     ]}
                   />
+                </section>
+              ),
+            },
+            {
+              key: "artifacts",
+              label: "Artifact 审计",
+              children: (
+                <section className="agent-ops-panel">
+                  <Alert
+                    showIcon
+                    type="info"
+                    title="查看一次 Agentic 运行在 Redis Checkpointer 中保存的结构化交接物"
+                    description="输入问答会话的 Thread ID，可展开子问题计划、证据包和答案契约；该页面只读，不直接修改运行状态。"
+                  />
+                  <div className="agent-ops-form-grid">
+                    <Input
+                      value={artifactThreadId}
+                      onChange={(event) => setArtifactThreadId(event.target.value)}
+                      onPressEnter={() => void loadRunArtifacts()}
+                      placeholder="例如：ad8543e1-14ef-420c-a184-57595d6d01bc"
+                    />
+                    <Button
+                      icon={<ReloadOutlined />}
+                      loading={artifactLoading}
+                      onClick={() => void loadRunArtifacts()}
+                      type="primary"
+                    >
+                      查询运行状态
+                    </Button>
+                  </div>
+                  {runSnapshot && (
+                    <div className="agent-artifact-audit">
+                      {!runSnapshot.available ? (
+                        <Alert
+                          showIcon
+                          type="warning"
+                          title="未找到该 Thread 的 Checkpoint"
+                          description="可能已过 Redis TTL，或该会话尚未进入 Agentic LangGraph 流程。"
+                        />
+                      ) : (
+                        <>
+                          <Descriptions
+                            column={2}
+                            items={[
+                              { key: "thread", label: "Thread", children: runSnapshot.threadId },
+                              { key: "checkpoint", label: "Checkpoint", children: runSnapshot.checkpointId },
+                              { key: "route", label: "路由", children: runSnapshot.route ?? "-" },
+                              {
+                                key: "sufficient",
+                                label: "检索充分",
+                                children: runSnapshot.retrievalSufficient === null
+                                  ? "-"
+                                  : runSnapshot.retrievalSufficient ? "是" : "否",
+                              },
+                              { key: "retry", label: "重试次数", children: runSnapshot.retryCount ?? "-" },
+                              { key: "passed", label: "契约通过", children: runSnapshot.passed === null ? "-" : runSnapshot.passed ? "是" : "否" },
+                            ]}
+                          />
+                          <Button
+                            loading={artifactLoading}
+                            onClick={() => void handleRetryRun()}
+                            style={{ marginBottom: 16 }}
+                          >
+                            重新执行 Agentic 链路
+                          </Button>
+                          {runSnapshot.retrievalReason && (
+                            <Alert type="warning" showIcon title="检索结论" description={runSnapshot.retrievalReason} />
+                          )}
+                          <h3>子问题计划与证据状态</h3>
+                          <Table
+                            rowKey={(record, index) => String(record.id ?? index)}
+                            pagination={false}
+                            dataSource={runSnapshot.subQuestions}
+                            columns={[
+                              { title: "子问题", dataIndex: "question", ellipsis: true },
+                              { title: "状态", dataIndex: "status", render: (value) => <Tag>{String(value ?? "-")}</Tag> },
+                              { title: "证据数", dataIndex: "evidenceIds", render: (value) => Array.isArray(value) ? value.length : 0 },
+                              { title: "检索次数", dataIndex: "retrievalAttempts" },
+                            ]}
+                          />
+                          <h3>Artifact 交接物</h3>
+                          <Collapse
+                            items={runSnapshot.artifacts.map((artifact) => ({
+                              key: artifact.id,
+                              label: `${artifact.type} · ${artifact.producer} · ${new Date(artifact.createdAt).toLocaleString("zh-CN")}`,
+                              children: <pre>{JSON.stringify(artifact.payload, null, 2)}</pre>,
+                            }))}
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
                 </section>
               ),
             },

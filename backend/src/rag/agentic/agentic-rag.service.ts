@@ -51,6 +51,7 @@ export class AgenticRagService {
     { invoke: (input: unknown) => Promise<unknown> }
   >();
   private app: any;
+  private readonly checkpointer: RedisCheckpointer;
 
   private readonly confidenceThreshold: number;
   private readonly maxRetries: number;
@@ -124,6 +125,7 @@ export class AgenticRagService {
       this.configService.get<boolean>('agentic.rerankEnabled') ?? true;
     this.graphSearchEnabled =
       this.configService.get<boolean>('agentic.graphSearchEnabled') ?? true;
+    this.checkpointer = new RedisCheckpointer(this.redisProvider);
     this.initGraph();
   }
 
@@ -219,7 +221,7 @@ export class AgenticRagService {
     );
 
     this.app = workflow.compile({
-      checkpointer: new RedisCheckpointer(this.redisProvider),
+      checkpointer: this.checkpointer,
     });
   }
 
@@ -1241,6 +1243,81 @@ export class AgenticRagService {
   }
 
   /**
+   * 读取一次 Agentic 运行的最新检查点，供 Agent 运营后台审计。
+   * 只返回已定义的状态字段，避免把 Redis 内部 checkpoint 结构直接暴露给后台。
+   */
+  async getRunSnapshot(threadId: string): Promise<{
+    available: boolean;
+    threadId: string;
+    checkpointId: string | null;
+    updatedAt: string | null;
+    query: string | null;
+    route: 'simple' | 'agentic' | null;
+    subQuestions: AgenticSubQuestion[];
+    artifacts: AgenticArtifact[];
+    retrievalSufficient: boolean | null;
+    retrievalReason: string | null;
+    retryCount: number | null;
+    passed: boolean | null;
+  }> {
+    const tuple = await this.checkpointer.getTuple({
+      configurable: { thread_id: threadId },
+    });
+    if (!tuple) {
+      return {
+        available: false,
+        threadId,
+        checkpointId: null,
+        updatedAt: null,
+        query: null,
+        route: null,
+        subQuestions: [],
+        artifacts: [],
+        retrievalSufficient: null,
+        retrievalReason: null,
+        retryCount: null,
+        passed: null,
+      };
+    }
+
+    const values = tuple.checkpoint.channel_values as Record<string, unknown>;
+    return {
+      available: true,
+      threadId,
+      checkpointId:
+        (tuple.config.configurable?.checkpoint_id as string | undefined) ??
+        null,
+      updatedAt: tuple.checkpoint.ts ?? null,
+      query: typeof values.query === 'string' ? values.query : null,
+      route: this.isAgenticRoute(values.route) ? values.route : null,
+      subQuestions: this.isSubQuestions(values.subQuestions)
+        ? values.subQuestions
+        : [],
+      artifacts: this.isArtifacts(values.artifacts) ? values.artifacts : [],
+      retrievalSufficient:
+        typeof values.retrievalSufficient === 'boolean'
+          ? values.retrievalSufficient
+          : null,
+      retrievalReason:
+        typeof values.retrievalReason === 'string'
+          ? values.retrievalReason
+          : null,
+      retryCount:
+        typeof values.retryCount === 'number' ? values.retryCount : null,
+      passed: typeof values.passed === 'boolean' ? values.passed : null,
+    };
+  }
+
+  /** 重新执行当前 Thread 的 Agentic 全链路，保留同一会话用于对比前后 Artifact。 */
+  async retryRun(threadId: string, onEvent?: SseCallback) {
+    const snapshot = await this.getRunSnapshot(threadId);
+    if (!snapshot.available || !snapshot.query) {
+      throw new Error('未找到可重新执行的 Agentic Thread');
+    }
+    return this.run(snapshot.query, 'agentic', onEvent, [], threadId);
+  }
+
+  /**
    * 条件路由：reflection 后决定重试还是结束
    */
   reflectionRouter(state: AgenticRagStateType): 'retry' | 'end' {
@@ -1600,6 +1677,18 @@ export class AgenticRagService {
     if (!state.subQuestions?.length) return 1;
     const covered = state.subQuestions.filter((item) => item.sufficient).length;
     return covered / state.subQuestions.length;
+  }
+
+  private isAgenticRoute(value: unknown): value is 'simple' | 'agentic' {
+    return value === 'simple' || value === 'agentic';
+  }
+
+  private isSubQuestions(value: unknown): value is AgenticSubQuestion[] {
+    return Array.isArray(value);
+  }
+
+  private isArtifacts(value: unknown): value is AgenticArtifact[] {
+    return Array.isArray(value);
   }
 
   private recordOf(value: unknown): Record<string, unknown> {

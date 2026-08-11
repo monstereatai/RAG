@@ -107,6 +107,29 @@ export interface TraceSnapshot {
   startedAt: string;
 }
 
+export interface AgenticArtifact {
+  id: string;
+  type: "subquestion_plan" | "evidence_bundle" | "answer_contract";
+  version: number;
+  producer: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+}
+
+export interface AgenticRunSnapshot {
+  available: boolean;
+  threadId: string;
+  checkpointId: string | null;
+  updatedAt: string | null;
+  route: "simple" | "agentic" | null;
+  subQuestions: Array<Record<string, unknown>>;
+  artifacts: AgenticArtifact[];
+  retrievalSufficient: boolean | null;
+  retrievalReason: string | null;
+  retryCount: number | null;
+  passed: boolean | null;
+}
+
 export const startProductionWorkflow = (body: {
   projectId: string;
   brief: string;
@@ -160,6 +183,17 @@ export const getAgentTraces = () =>
   authRequest<unknown>("/api/admin/agent-ops/traces", {
     params: { limit: 50 },
   });
+
+export const getAgentRunArtifacts = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/runs/${encodeURIComponent(threadId)}/artifacts`,
+  );
+
+export const retryAgentRun = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/runs/${encodeURIComponent(threadId)}/retry`,
+    { method: "POST", data: {} },
+  );
 
 export function unwrapData<T>(value: unknown): T {
   let current = value;

@@ -126,6 +126,19 @@ export class RagClientService {
     );
   }
 
+  getAgentRunArtifacts(threadId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/runs/${encodeURIComponent(threadId)}/artifacts`
+    );
+  }
+
+  retryAgentRun(threadId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/runs/${encodeURIComponent(threadId)}/retry`,
+      {}
+    );
+  }
+
   createArtifact(body: RagArtifactCreateInput) {
     return this.postJson<Record<string, unknown>>("/rag/admin/artifacts", body);
   }

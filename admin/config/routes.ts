@@ -97,6 +97,11 @@ export default [
         name: 'agent-ops-traces',
         component: './agent-ops',
       },
+      {
+        path: '/agent-ops/artifacts',
+        name: 'agent-ops-artifacts',
+        component: './agent-ops',
+      },
     ],
   },
   {

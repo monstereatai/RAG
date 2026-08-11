@@ -110,6 +110,12 @@ export const agentOpsNav: SideNavItem[] = [
     icon: <HistoryOutlined />,
     path: '/agent-ops/traces',
   },
+  {
+    key: 'artifacts',
+    label: 'Artifact 审计',
+    icon: <FileTextOutlined />,
+    path: '/agent-ops/artifacts',
+  },
 ];
 
 export const graphNav: SideNavItem[] = [

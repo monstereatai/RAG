@@ -18,6 +18,7 @@ import {
   StartProductionWorkflowDto,
 } from '../workflow/production-workflow.dto';
 import { ProductionWorkflowService } from '../workflow/production-workflow.service';
+import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -27,6 +28,7 @@ export class AgentOpsAdminController {
     private readonly evals: AgentEvalService,
     private readonly feedback: RagFeedbackService,
     private readonly tracing: TracingService,
+    private readonly agenticRag: AgenticRagService,
   ) {}
 
   @Post('workflows')
@@ -87,5 +89,15 @@ export class AgentOpsAdminController {
     return this.tracing.recent(
       Number.isInteger(parsed) ? Math.min(Math.max(parsed, 1), 100) : 50,
     );
+  }
+
+  @Get('runs/:threadId/artifacts')
+  getRunArtifacts(@Param('threadId') threadId: string) {
+    return this.agenticRag.getRunSnapshot(threadId);
+  }
+
+  @Post('runs/:threadId/retry')
+  retryRun(@Param('threadId') threadId: string) {
+    return this.agenticRag.retryRun(threadId);
   }
 }

@@ -78,6 +78,18 @@ export class AgentOpsController {
     return this.ragClient.getAgentTraces(Number(limit ?? 50));
   }
 
+  @Get('runs/:threadId/artifacts')
+  @RequirePermission('admin:qa-ops:read')
+  runArtifacts(@Param('threadId') threadId: string) {
+    return this.ragClient.getAgentRunArtifacts(threadId);
+  }
+
+  @Post('runs/:threadId/retry')
+  @RequirePermission('admin:qa-ops:write')
+  retryRun(@Param('threadId') threadId: string) {
+    return this.ragClient.retryAgentRun(threadId);
+  }
+
   private userId(req: Request): string {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;
