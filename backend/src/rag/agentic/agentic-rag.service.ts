@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import {
@@ -7,7 +7,11 @@ import {
   RetrievedChunk,
 } from '../karpathy/karpathy-rag.service';
 import { SseCallback } from './sse-event';
-import { AgenticRagState, type AgenticRagStateType } from './agentic-rag.state';
+import {
+  AgenticRagState,
+  type AgenticRagStateType,
+  type AgenticSubQuestion,
+} from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
 import {
@@ -29,6 +33,7 @@ import { RedisProvider } from '../../providers/redis/redis.provider';
 import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { TracingService } from '../../modules/tracing/tracing.service';
+import { GraphService } from '../../modules/graph/graph.service';
 
 /**
  * Agentic RAG 服务
@@ -48,12 +53,14 @@ export class AgenticRagService {
   private readonly maxRetries: number;
   private readonly maxAugmentedQueries: number;
   private readonly maxRetrievalQueries: number;
+  private readonly maxSubQuestions: number;
   private readonly maxRetrievedChunks: number;
   private readonly maxWebSearchResults: number;
   private readonly maxRerankTopN: number;
   private readonly maxAutoQueryLength: number;
   private readonly webSearchFallbackEnabled: boolean;
   private readonly rerankEnabled: boolean;
+  private readonly graphSearchEnabled: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -66,6 +73,7 @@ export class AgenticRagService {
     private readonly metricsService: MetricsService,
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
+    @Optional() private readonly graphService?: GraphService,
   ) {
     this.confidenceThreshold = this.numberConfig(
       'agentic.confidenceThreshold',
@@ -86,6 +94,7 @@ export class AgenticRagService {
       1,
       8,
     );
+    this.maxSubQuestions = this.intConfig('agentic.maxSubQuestions', 3, 1, 5);
     this.maxRetrievedChunks = this.intConfig(
       'agentic.maxRetrievedChunks',
       5,
@@ -110,6 +119,8 @@ export class AgenticRagService {
       true;
     this.rerankEnabled =
       this.configService.get<boolean>('agentic.rerankEnabled') ?? true;
+    this.graphSearchEnabled =
+      this.configService.get<boolean>('agentic.graphSearchEnabled') ?? true;
     this.initGraph();
   }
 
@@ -164,7 +175,10 @@ export class AgenticRagService {
     workflow.addConditionalEdges(
       'sufficiency',
       (state) => {
-        return state.retrievalSufficient ? 'rerank' : 'webSearchFallback';
+        if (state.retrievalSufficient || state.webSearchAttempted) {
+          return 'rerank';
+        }
+        return 'webSearchFallback';
       },
       {
         rerank: 'rerank',
@@ -172,7 +186,7 @@ export class AgenticRagService {
       },
     );
 
-    workflow.addEdge('webSearchFallback', 'rerank');
+    workflow.addEdge('webSearchFallback', 'sufficiency');
     workflow.addEdge('rerank', 'generate');
     workflow.addEdge('generate', 'humanApprovalNode');
 
@@ -300,12 +314,21 @@ export class AgenticRagService {
       }
     }
 
-    onEvent?.({ type: 'query_augment', data: queries });
-    return { augmentedQueries: queries };
+    const subQuestions = this.buildSubQuestions(
+      state.query,
+      queries,
+      this.getSubQuestionLimit(config),
+    );
+    onEvent?.({
+      type: 'query_augment',
+      data: { queries, subQuestions },
+    });
+    return { augmentedQueries: queries, subQuestions };
   }
 
   /**
-   * 检索节点：原始问题做一次混合检索，扩展问题走 BM25 检索，合并去重。
+   * 检索节点：每个子问题独立执行完整 Hybrid Search（向量＋关键词／ES），
+   * 低命中时再补一次 BM25，最后合并去重。这样扩展问句不会只依赖关键词检索。
    */
   async retrievalNode(
     state: AgenticRagStateType,
@@ -315,35 +338,85 @@ export class AgenticRagService {
     const userId = config?.configurable?.userId as string | undefined;
     const retrieveOptions = (config?.configurable?.retrieveOptions ??
       {}) as RetrieveOptions;
-    const queries =
-      state.augmentedQueries.length > 0
-        ? [state.query, ...state.augmentedQueries]
-        : [state.query];
-    const boundedQueries = queries.slice(0, this.maxRetrievalQueries);
-
-    this.logger.log(
-      `Retrieving with ${boundedQueries.length}/${queries.length} queries (1 hybrid + BM25 fallback) for userId=${userId ?? 'none'}`,
+    const fastPathChunks = (config?.configurable?.fastPathChunks ??
+      []) as RetrievedChunk[];
+    const subQuestionLimit = this.getSubQuestionLimit(config);
+    const plannedSubQuestions =
+      state.subQuestions?.length > 0
+        ? state.subQuestions
+        : this.buildSubQuestions(
+            state.query,
+            state.augmentedQueries,
+            subQuestionLimit,
+          );
+    const boundedSubQuestions = plannedSubQuestions.slice(
+      0,
+      Math.min(subQuestionLimit, this.maxRetrievalQueries),
     );
 
-    const allResults: RetrievedChunk[][] = [];
-    for (const [index, q] of boundedQueries.entries()) {
-      try {
-        const results =
-          index === 0
-            ? await this.karpathyRagService.retrieve(q, retrieveOptions, userId)
-            : await this.karpathyRagService.retrieveBm25Only(
-                q,
-                userId,
-                retrieveOptions.scope,
-              );
-        allResults.push(results);
-      } catch (err) {
-        this.logger.warn(
-          `Retrieve failed for query "${q.slice(0, 30)}": ${(err as Error).message}`,
-        );
-        allResults.push([]);
-      }
-    }
+    this.logger.log(
+      `Retrieving ${boundedSubQuestions.length}/${plannedSubQuestions.length} sub-questions with hybrid search for userId=${userId ?? 'none'}`,
+    );
+
+    const retrievedSubQuestions = await Promise.all(
+      boundedSubQuestions.map(async (subQuestion, index) => {
+        const q = subQuestion.question;
+        try {
+          // Auto 升级时复用 Fast Path 原问题结果，避免再次访问 Milvus／ES。
+          let results =
+            index === 0 && q === state.query && fastPathChunks.length > 0
+              ? fastPathChunks
+              : await this.karpathyRagService.retrieve(
+                  q,
+                  retrieveOptions,
+                  userId,
+                );
+          // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
+          if (results.length === 0) {
+            results = await this.karpathyRagService.retrieveBm25Only(
+              q,
+              userId,
+              retrieveOptions.scope,
+            );
+          }
+          const graphChunks = await this.retrieveGraphEvidence(q, userId);
+          results = [...results, ...graphChunks];
+          return {
+            ...subQuestion,
+            status:
+              results.length > 0
+                ? ('retrieved' as const)
+                : ('needs_more' as const),
+            evidenceIds: results.map((chunk) => chunk.id),
+            retrievalAttempts: subQuestion.retrievalAttempts + 1,
+            results,
+          };
+        } catch (err) {
+          this.logger.warn(
+            `Retrieve failed for query "${q.slice(0, 30)}": ${(err as Error).message}`,
+          );
+          return {
+            ...subQuestion,
+            status: 'needs_more' as const,
+            retrievalAttempts: subQuestion.retrievalAttempts + 1,
+            reason: (err as Error).message,
+            results: [] as RetrievedChunk[],
+          };
+        }
+      }),
+    );
+    const allResults = retrievedSubQuestions.map((item) => item.results);
+    const updatedSubQuestions: AgenticSubQuestion[] = retrievedSubQuestions.map(
+      ({ results, ...subQuestion }) => {
+        void results;
+        return subQuestion;
+      },
+    );
+
+    const resultIds = new Set(allResults.flat().map((chunk) => chunk.id));
+    const remainingSubQuestions = plannedSubQuestions
+      .slice(boundedSubQuestions.length)
+      .map((item) => ({ ...item, status: 'needs_more' as const }));
 
     const fusedMap = new Map<string, RetrievedChunk>();
     for (const results of allResults) {
@@ -355,19 +428,46 @@ export class AgenticRagService {
       }
     }
 
-    const chunks = Array.from(fusedMap.values())
-      .sort((a, b) => b.totalScore - a.totalScore)
-      .slice(0, this.maxRetrievedChunks);
+    const rankedChunks = Array.from(fusedMap.values()).sort(
+      (a, b) => b.totalScore - a.totalScore,
+    );
+    const requiredIds = updatedSubQuestions
+      .map((item) => item.evidenceIds[0])
+      .filter((id): id is string => Boolean(id));
+    const requiredChunks = requiredIds
+      .map((id) => fusedMap.get(id))
+      .filter((chunk): chunk is RetrievedChunk => Boolean(chunk));
+    const chunks = Array.from(
+      new Map(
+        [...requiredChunks, ...rankedChunks].map((chunk) => [chunk.id, chunk]),
+      ).values(),
+    ).slice(0, this.maxRetrievedChunks);
 
     this.logger.log(
-      `Retrieved ${chunks.length} unique chunks from ${boundedQueries.length} queries`,
+      `Retrieved ${chunks.length} unique chunks from ${boundedSubQuestions.length} sub-questions`,
     );
 
-    onEvent?.({ type: 'retrieval', data: chunks });
+    onEvent?.({
+      type: 'retrieval',
+      data: {
+        chunks,
+        subQuestions: [...updatedSubQuestions, ...remainingSubQuestions].map(
+          (item) => ({ ...item, evidenceCount: item.evidenceIds.length }),
+        ),
+        evidenceCount: resultIds.size,
+      },
+    });
     if (chunks.length === 0) {
       this.metricsService.observeAgentEmptyRetrieval(state.route || 'agentic');
     }
-    return { retrievedChunks: chunks, answer: '', passed: false };
+    return {
+      retrievedChunks: chunks,
+      subQuestions: [...updatedSubQuestions, ...remainingSubQuestions],
+      webSearchAttempted: false,
+      webSearchCount: 0,
+      answer: '',
+      passed: false,
+    };
   }
 
   /**
@@ -378,10 +478,43 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
-    if (state.retrievedChunks.length === 0) {
+    const subQuestions = state.subQuestions?.length
+      ? state.subQuestions
+      : this.buildSubQuestions(
+          state.query,
+          state.augmentedQueries,
+          this.getSubQuestionLimit(config),
+        );
+    const chunksById = new Map(
+      state.retrievedChunks.map((chunk) => [chunk.id, chunk]),
+    );
+    const evaluatedSubQuestions = subQuestions.map((subQuestion) => {
+      const evidence = subQuestion.evidenceIds
+        .map((id) => chunksById.get(id))
+        .filter((chunk): chunk is RetrievedChunk => Boolean(chunk));
+      const gate = this.karpathyRagService.assessRetrievedChunks(
+        subQuestion.question,
+        evidence,
+      );
+      return {
+        ...subQuestion,
+        sufficient: gate.sufficient,
+        status: gate.sufficient
+          ? ('sufficient' as const)
+          : ('needs_more' as const),
+        reason: gate.reason,
+      };
+    });
+    const unresolved = evaluatedSubQuestions.filter((item) => !item.sufficient);
+
+    if (state.retrievedChunks.length === 0 || unresolved.length > 0) {
       const res = {
         retrievalSufficient: false,
-        retrievalReason: '没有检索到任何可用片段',
+        retrievalReason:
+          state.retrievedChunks.length === 0
+            ? '没有检索到任何可用片段'
+            : `仍有 ${unresolved.length} 个子问题缺少直接证据：${unresolved.map((item) => item.question).join('；')}`,
+        subQuestions: evaluatedSubQuestions,
       };
       onEvent?.({
         type: 'sufficiency',
@@ -408,6 +541,7 @@ export class AgenticRagService {
       return {
         retrievalSufficient: false,
         retrievalReason: localGate.reason,
+        subQuestions: evaluatedSubQuestions,
       };
     }
 
@@ -443,6 +577,12 @@ export class AgenticRagService {
       return {
         retrievalSufficient: result.sufficient,
         retrievalReason: result.reason,
+        subQuestions: evaluatedSubQuestions.map((item) => ({
+          ...item,
+          sufficient: result.sufficient && item.sufficient,
+          status:
+            result.sufficient && item.sufficient ? 'sufficient' : 'needs_more',
+        })),
       };
     } catch (err) {
       const topScore = Math.max(
@@ -464,6 +604,7 @@ export class AgenticRagService {
       return {
         retrievalSufficient: sufficient,
         retrievalReason: reason,
+        subQuestions: evaluatedSubQuestions,
       };
     }
   }
@@ -501,37 +642,63 @@ export class AgenticRagService {
       return {
         retrievalReason: reason,
         webSearchCount: 0,
+        webSearchAttempted: true,
       };
     }
 
     try {
-      const results =
-        this.maxWebSearchResults > 0
-          ? await this.bochaSearchService.search(
-              state.query,
-              this.maxWebSearchResults,
-            )
-          : [];
-      const webChunks = results.map((result, index) => {
-        const parts = [
-          `标题：${result.title}`,
-          `来源：${result.siteName ?? result.url}`,
-          result.datePublished ? `发布时间：${result.datePublished}` : '',
-          result.summary ? `摘要：${result.summary}` : '',
-          result.snippet ? `片段：${result.snippet}` : '',
-          `URL：${result.url}`,
-        ].filter(Boolean);
+      const subQuestions = state.subQuestions?.length
+        ? state.subQuestions
+        : this.buildSubQuestions(
+            state.query,
+            state.augmentedQueries,
+            this.getSubQuestionLimit(config),
+          );
+      const unresolved = subQuestions.filter((item) => !item.sufficient);
+      const searchQuestions = unresolved.length
+        ? unresolved.slice(0, this.getSubQuestionLimit(config))
+        : [{ question: state.query }];
+      const searchResults = await Promise.all(
+        searchQuestions.map(async (item) => ({
+          question: item.question,
+          results:
+            this.maxWebSearchResults > 0
+              ? await this.bochaSearchService.search(
+                  item.question,
+                  this.maxWebSearchResults,
+                )
+              : [],
+        })),
+      );
+      const webIdsByQuestion = new Map<string, string[]>();
+      const webChunks = searchResults.flatMap(({ results }) =>
+        results.map((result, index) => {
+          const parts = [
+            `标题：${result.title}`,
+            `来源：${result.siteName ?? result.url}`,
+            result.datePublished ? `发布时间：${result.datePublished}` : '',
+            result.summary ? `摘要：${result.summary}` : '',
+            result.snippet ? `片段：${result.snippet}` : '',
+            `URL：${result.url}`,
+          ].filter(Boolean);
 
-        return {
-          id: `web:${result.url}`,
-          content: parts.join('\n'),
-          docId: result.url,
-          chunkIndex: index,
-          bm25Score: 0,
-          cosineScore: 0,
-          totalScore: 0.15,
-        } satisfies RetrievedChunk;
-      });
+          return {
+            id: `web:${result.url}`,
+            content: parts.join('\n'),
+            docId: result.url,
+            chunkIndex: index,
+            bm25Score: 0,
+            cosineScore: 0,
+            totalScore: 0.15,
+          } satisfies RetrievedChunk;
+        }),
+      );
+      for (const { question, results } of searchResults) {
+        webIdsByQuestion.set(
+          question,
+          results.map((result) => `web:${result.url}`),
+        );
+      }
 
       this.logger.log(`Bocha web_search returned ${webChunks.length} results`);
       const reason = `${state.retrievalReason || '检索不足'}；已通过 Bocha web_search 补充 ${webChunks.length} 条结果`;
@@ -548,8 +715,19 @@ export class AgenticRagService {
           0,
           this.maxRetrievedChunks,
         ),
+        subQuestions: subQuestions.map((item) => ({
+          ...item,
+          evidenceIds: [
+            ...item.evidenceIds,
+            ...(webIdsByQuestion.get(item.question) ?? []),
+          ],
+          status: webIdsByQuestion.has(item.question)
+            ? ('retrieved' as const)
+            : item.status,
+        })),
         retrievalReason: reason,
         webSearchCount: webChunks.length,
+        webSearchAttempted: true,
       };
     } catch (err) {
       const reason = `Bocha web_search 调用失败：${(err as Error).message}`;
@@ -568,6 +746,7 @@ export class AgenticRagService {
       return {
         retrievalReason: fallbackReason,
         webSearchCount: 0,
+        webSearchAttempted: true,
       };
     }
   }
@@ -1147,18 +1326,6 @@ export class AgenticRagService {
       return result;
     }
 
-    const fastFallback = await this.tryFastInsufficientFallback(
-      query,
-      onEvent,
-      history,
-      userId,
-      memoryMessages,
-      retrieveOptions,
-    );
-    if (fastFallback) {
-      return fastFallback;
-    }
-
     // 通过 LangGraph StateGraph 执行 agentic 流程
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
@@ -1166,9 +1333,12 @@ export class AgenticRagService {
         query,
         route: 'agentic',
         augmentedQueries: [],
+        subQuestions: [],
         retrievedChunks: [],
         retrievalSufficient: false,
         retrievalReason: '',
+        webSearchAttempted: false,
+        webSearchCount: 0,
         answer: '',
         confidence: 0,
         retryCount: 0,
@@ -1185,6 +1355,11 @@ export class AgenticRagService {
           memoryMessages,
           enableInterrupt,
           retrieveOptions,
+          fastPathChunks: fastPathGate.chunks,
+          subQuestionLimit:
+            mode === 'auto'
+              ? Math.min(this.maxSubQuestions, 2)
+              : this.maxSubQuestions,
         },
       },
     )) as AgenticRagStateType;
@@ -1280,7 +1455,7 @@ export class AgenticRagService {
     durationMs: number,
     startedAt: Date,
   ): void {
-    const threadId = config?.configurable?.thread_id;
+    const threadId = config?.configurable?.thread_id as unknown;
     if (typeof threadId !== 'string' || !threadId) return;
 
     const trace = this.tracingService.recordAgentNode({
@@ -1299,78 +1474,6 @@ export class AgenticRagService {
     return value && typeof value === 'object'
       ? (value as Record<string, unknown>)
       : {};
-  }
-
-  private async tryFastInsufficientFallback(
-    query: string,
-    onEvent: SseCallback | undefined,
-    history: Array<{ role: 'human' | 'ai'; content: string }>,
-    userId: string | undefined,
-    memoryMessages: Array<{ role: string; content: string }>,
-    retrieveOptions: RetrieveOptions,
-  ): Promise<{
-    answer: string;
-    references: RetrievedChunk[];
-    route: 'agentic';
-    confidence: number;
-    retryCount: number;
-    retrievalSufficient: false;
-    retrievalReason: string;
-  } | null> {
-    let chunks: RetrievedChunk[] = [];
-    try {
-      chunks = await this.karpathyRagService.retrieve(
-        query,
-        retrieveOptions,
-        userId,
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Fast insufficient retrieval failed, continue full agentic graph: ${(err as Error).message}`,
-      );
-      return null;
-    }
-
-    const gate =
-      chunks.length === 0
-        ? {
-            sufficient: false,
-            reason: '原始问题没有检索到候选片段',
-          }
-        : this.karpathyRagService.assessRetrievedChunks(query, chunks);
-
-    if (gate.sufficient) {
-      return null;
-    }
-
-    onEvent?.({ type: 'retrieval', data: chunks });
-    onEvent?.({
-      type: 'sufficiency',
-      data: {
-        sufficient: false,
-        reason: gate.reason,
-      },
-    });
-
-    const answer = await this.karpathyRagService.generateModelFallbackAnswer(
-      query,
-      gate.reason,
-      history,
-      memoryMessages,
-      (token) => onEvent?.({ type: 'token', data: token }),
-    );
-    const result = {
-      answer,
-      references: [],
-      route: 'agentic' as const,
-      confidence: 1,
-      retryCount: 0,
-      retrievalSufficient: false as const,
-      retrievalReason: `${gate.reason}；已跳过查询扩展并使用模型兜底回答`,
-    };
-    onEvent?.({ type: 'citation', data: [] });
-    onEvent?.({ type: 'final', data: result });
-    return result;
   }
 
   private async tryApprovedBadCaseCorrection(
@@ -1420,7 +1523,10 @@ export class AgenticRagService {
       retrievalReason,
     };
     onEvent?.({ type: 'retrieval', data: [] });
-    onEvent?.({ type: 'sufficiency', data: { sufficient: true, reason: retrievalReason } });
+    onEvent?.({
+      type: 'sufficiency',
+      data: { sufficient: true, reason: retrievalReason },
+    });
     onEvent?.({ type: 'citation', data: [] });
     onEvent?.({ type: 'final', data: result });
     return result;
@@ -1462,6 +1568,81 @@ export class AgenticRagService {
       .filter(Boolean);
     while (out.length < this.maxAugmentedQueries) out.push(original);
     return out.slice(0, this.maxAugmentedQueries);
+  }
+
+  private buildSubQuestions(
+    original: string,
+    queries: string[],
+    limit = this.maxSubQuestions,
+  ): AgenticSubQuestion[] {
+    const normalized = [
+      original,
+      ...this.normalizeQueries(original, queries).filter(
+        (query) => query !== original,
+      ),
+    ];
+    return normalized.slice(0, limit).map((question, index) => ({
+      id: `subq-${index + 1}`,
+      question,
+      // 当前规划器生成互补问题；保留依赖字段，支持后续有向多跳计划。
+      dependsOn: index === 0 ? [] : ['subq-1'],
+      status: 'planned',
+      evidenceIds: [],
+      retrievalAttempts: 0,
+      sufficient: false,
+      reason: '',
+    }));
+  }
+
+  private getSubQuestionLimit(config?: RunnableConfig): number {
+    const configurable = config?.configurable as unknown as
+      | Record<string, unknown>
+      | undefined;
+    const configured = configurable?.subQuestionLimit;
+    if (typeof configured === 'number' && Number.isFinite(configured)) {
+      return Math.min(
+        this.maxSubQuestions,
+        Math.max(1, Math.trunc(configured)),
+      );
+    }
+    return this.maxSubQuestions;
+  }
+
+  private async retrieveGraphEvidence(
+    query: string,
+    userId?: string,
+  ): Promise<RetrievedChunk[]> {
+    if (
+      !this.graphSearchEnabled ||
+      !this.graphService?.isEnabled() ||
+      !userId ||
+      !/[关系关联上下游依赖多跳分别]/.test(query)
+    ) {
+      return [];
+    }
+    try {
+      const result = await this.withTimeout(
+        this.graphService.queryGraph(query, userId),
+        4_000,
+        'GraphRAG sub-question search',
+      );
+      return result.facts.map((fact, index) => ({
+        id: `graph:${fact.sourceId}:${fact.source}:${fact.target}:${index}`,
+        content: `${fact.sourceLabel}（${fact.source}）—${fact.relationship}→${fact.targetLabel}（${fact.target}）\n来源：${fact.sourceId}`,
+        docId: fact.sourceId,
+        chunkIndex: index,
+        bm25Score: 0,
+        cosineScore: 0,
+        totalScore: Math.max(0.1, fact.confidence * 0.2),
+        retrievalSource: 'expansion',
+        contextRole: 'hit',
+      }));
+    } catch (err) {
+      this.logger.warn(
+        `GraphRAG sub-question search skipped: ${(err as Error).message}`,
+      );
+      return [];
+    }
   }
 
   private intConfig(

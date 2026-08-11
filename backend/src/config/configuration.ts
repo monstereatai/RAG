@@ -208,6 +208,7 @@ export const configuration = () => ({
       process.env.AGENTIC_MAX_RETRIEVAL_QUERIES ?? '4',
       10,
     ),
+    maxSubQuestions: parseInt(process.env.AGENTIC_MAX_SUB_QUESTIONS ?? '3', 10),
     maxRetrievedChunks: parseInt(
       process.env.AGENTIC_MAX_RETRIEVED_CHUNKS ?? '5',
       10,
@@ -224,6 +225,7 @@ export const configuration = () => ({
     webSearchFallbackEnabled:
       process.env.AGENTIC_WEB_SEARCH_FALLBACK_ENABLED !== 'false',
     rerankEnabled: process.env.AGENTIC_RERANK_ENABLED !== 'false',
+    graphSearchEnabled: process.env.AGENTIC_GRAPH_SEARCH_ENABLED !== 'false',
   },
 
   // LangSmith 评测与追踪（可选）

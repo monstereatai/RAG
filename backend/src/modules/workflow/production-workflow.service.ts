@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -26,6 +26,7 @@ import {
   normalizeProductionRoles,
 } from './production-workflow.plan';
 import { ProductionWorkflowTools } from './production-workflow.tools';
+import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -89,6 +90,7 @@ export class ProductionWorkflowService {
     redisProvider: RedisProvider,
     private readonly roleTools: ProductionWorkflowTools,
     private readonly artifacts: ArtifactsService,
+    @Optional() private readonly langfuseProvider?: LangfuseProvider,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
@@ -99,6 +101,7 @@ export class ProductionWorkflowService {
     const initialState = this.createInitialState(dto, userId, threadId);
     const state = await this.app.invoke(initialState, this.config(threadId));
     const settled = await this.runUntilSettled(threadId, state);
+    await this.traceLangfuse(settled);
     return this.view(threadId, settled, userId);
   }
 
@@ -130,6 +133,7 @@ export class ProductionWorkflowService {
       this.config(threadId),
     );
     const settled = await this.runUntilSettled(threadId, state);
+    await this.traceLangfuse(settled);
     return this.view(threadId, settled, userId);
   }
 
@@ -659,6 +663,38 @@ export class ProductionWorkflowService {
 
   private config(threadId: string) {
     return { configurable: { thread_id: `production:${threadId}` } };
+  }
+
+  private async traceLangfuse(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.langfuseProvider) return;
+    await this.langfuseProvider.traceProductionWorkflow({
+      userId: state.userId,
+      threadId: state.threadId,
+      projectId: state.projectId,
+      brief: state.brief,
+      status: state.status,
+      stepCount: state.stepCount,
+      maxSteps: state.maxSteps,
+      approvalMode: state.approvalMode,
+      selectedRoles: state.selectedRoles,
+      completedRoles: state.completedRoles,
+      pendingApprovalRoles: state.pendingApprovalRoles,
+      stages: Object.values(state.results).map((result) => ({
+        role: result.role,
+        summary: result.summary,
+        riskLevel: result.riskLevel,
+        evidenceCoverage: result.evidenceCoverage,
+        readyForApproval: result.readyForApproval,
+        claims: result.claims.length,
+        supportedClaims: result.claims.filter(
+          (claim) => claim.status === 'supported',
+        ).length,
+        issues: result.issues,
+        downstreamRisks: result.downstreamRisks,
+        toolExecutions: result.toolExecutions,
+        completedAt: result.completedAt,
+      })),
+    });
   }
 
   private view(

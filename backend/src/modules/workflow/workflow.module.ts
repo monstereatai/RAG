@@ -5,9 +5,15 @@ import { ProductionWorkflowService } from './production-workflow.service';
 import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ProductionWorkflowTools } from './production-workflow.tools';
+import { ObservabilityModule } from '../../providers/observability/observability.module';
 
 @Module({
-  imports: [LlmModule, KarpathyRagModule, ArtifactsModule],
+  imports: [
+    LlmModule,
+    KarpathyRagModule,
+    ArtifactsModule,
+    ObservabilityModule,
+  ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],
   exports: [ProductionWorkflowService],

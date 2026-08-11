@@ -59,6 +59,8 @@
 
 ## 已完成能力
 
+- **六岗位生产工作流接入 LangFuse**：`ProductionWorkflowService` 现在为每次生产协作工作流创建 `agent.production.workflow` Trace，并为产品、设计、前端、后端、测试、运营阶段写入 Span／Generation／工具事件；记录项目、线程、工作流状态、审批、风险等级、证据覆盖、重试、降级和完成岗位。`LangfuseProvider` 增加工作流 Trace、显式 flush 和健康状态更新，普通问答 Trace 也会及时 flush；未启用 LangFuse 或单测未注入 Provider 时安全跳过。backend build、LangFuse Provider 与生产工作流定向测试通过。
+- **Agentic 子问题多路检索闭环**：Agentic 查询规划新增显式 `subQuestions` 状态，最多拆分 3 个子问题；每个子问题独立执行 Milvus 向量＋BM25／Elasticsearch Hybrid Search，空结果再走 BM25 降级；关系／多跳子问题按需调用 Neo4j GraphRAG，逐题执行证据充分性门禁，不足项分别触发 Web Search，最后按 chunk 去重、保留每题最低证据覆盖并统一 Rerank。新增 Agentic 检索定向回归，backend build 和 Agentic／Graph 定向测试通过；真实 GraphRAG／Bocha 效果仍依赖对应服务和 key。
 - **功能步骤流程补全简历全部链路**：更新 `docs/interview/功能步骤流程.md`，新增「简历核心职责流程速览」和「简历五项技术难点流程」；知识库与后台、三层问答／方案生成／MCP、Bad Case／质量运营／观测，以及受控多 Agent、路由预算、Hybrid／GraphRAG、可信纠错、Checkpoint／Trace／告警，均按用户操作和数据／状态流转串联。补充 Parent Chunk／Child Chunk 术语及「子块精确召回→父块／同章节按预算补全」规则。仅文档更新，未改运行时代码。
 - **功能步骤流程术语内联注释**：为上述简历职责与五项难点流程中的技术术语、状态字段和指标字段补充首次出现的「（注：……）」说明，保留原始英文名称以便与代码、日志和面试术语对应；重点补齐 Fast Path、retrievalHit、citationCoverage、confidence、taskComplexity、route、Agentic State、Parent／Child Chunk、Checkpoint、TTFT、Webhook 等。仅文档更新，未改运行时代码。
 - **游戏营销 RAG 完整项目描述**：新增 `docs/interview/resume/游戏营销RAG项目完整描述.md`，将诗悦网络游戏官网活动营销 Agentic RAG 项目的完整项目简介、五项负责内容、七项技术难点与本地验证边界独立沉淀；技术难点以多 Agent 受控协作、三层路由、Hybrid／GraphRAG、评测与 Bad Case、Checkpoint 和节点级可观测为主线，避免与简历精简版重复。同步更新 `docs/interview/README.md` 索引。仅文档更新，未改运行时代码。
@@ -185,6 +187,11 @@
 - 生产级部署/域名/证书/备份/监控接入本轮按要求不做
 
 ## 最近验证
+
+### 2026-08-11
+
+- **Agentic 子问题多路检索闭环（已完成）**：将原来的“首问混合检索＋扩展问句 BM25”升级为显式子问题计划；每个子问题独立执行向量、BM25／Elasticsearch、父子上下文扩展，关系／多跳问题按需接入 GraphRAG，逐题执行充分性门禁，不足项进行一次有界 Web Search 补检索并再次评估，最终合并去重、保留每题最低证据覆盖并统一 Rerank。新增 `AGENTIC_MAX_SUB_QUESTIONS`、`AGENTIC_GRAPH_SEARCH_ENABLED` 配置，更新 `docs/interview/功能步骤流程.md` 的用户流程和状态流程。验证：backend build ✅；backend 全量 42 Suites／183 Tests ✅；本次相关 ESLint 和 4 Suites／16 Tests ✅。真实 GraphRAG／Bocha 结果仍依赖对应服务和 key。
+- **Auto 链路延迟优化（已完成）**：移除 Fast Path 不足时的重复检索／模型兜底分支；Auto 升级 Agentic 时复用 Fast Path 原问题召回结果，补充子问题并行检索，Auto 子问题上限收敛为 2 个，Agentic 保持最多 3 个。新增 Fast Path 复用回归测试，更新步骤文档。验证：backend build、定向 ESLint、Agentic 定向测试通过；全量测试 42 Suites／184 Tests 通过。
 
 ### 2026-08-08
 

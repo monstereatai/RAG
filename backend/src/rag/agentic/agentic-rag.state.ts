@@ -1,6 +1,18 @@
 import { Annotation } from '@langchain/langgraph';
 import type { RetrievedChunk } from '../karpathy/karpathy-rag.service';
 
+export interface AgenticSubQuestion {
+  id: string;
+  question: string;
+  /** 依赖的前置子问题，当前用于记录规划关系和后续局部重试。 */
+  dependsOn: string[];
+  status: 'planned' | 'retrieved' | 'sufficient' | 'needs_more' | 'completed';
+  evidenceIds: string[];
+  retrievalAttempts: number;
+  sufficient: boolean;
+  reason: string;
+}
+
 /**
  * Agentic RAG 工作流状态
  *
@@ -27,6 +39,12 @@ export const AgenticRagState = Annotation.Root({
     default: () => [],
   }),
 
+  /** 显式子问题计划：每个子问题独立检索、评估和补检索。 */
+  subQuestions: Annotation<AgenticSubQuestion[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
+
   /** 检索到的 chunks（去重后） */
   retrievedChunks: Annotation<RetrievedChunk[]>({
     reducer: (_prev, next) => next,
@@ -43,6 +61,18 @@ export const AgenticRagState = Annotation.Root({
   retrievalReason: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
+  }),
+
+  /** 本轮是否已经执行过联网补检索，防止 Web Search 无限循环。 */
+  webSearchAttempted: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
+
+  /** 本轮联网补检索返回的结果数。 */
+  webSearchCount: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => 0,
   }),
 
   /** LLM 生成的答案 */

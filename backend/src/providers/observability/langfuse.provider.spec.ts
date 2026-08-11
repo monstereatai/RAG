@@ -29,4 +29,30 @@ describe('LangfuseProvider', () => {
       lastError: null,
     });
   });
+
+  it('does not fail when production workflow tracing is disabled', async () => {
+    const provider = new LangfuseProvider({
+      get: (key: string) => {
+        if (key === 'langfuse.baseUrl') return 'http://localhost:3000';
+        if (key === 'langfuse.enabled') return false;
+        return undefined;
+      },
+    } as never);
+
+    await expect(
+      provider.traceProductionWorkflow({
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        brief: 'test brief',
+        status: 'completed',
+        stepCount: 2,
+        maxSteps: 18,
+        approvalMode: 'auto',
+        selectedRoles: ['product'],
+        completedRoles: ['product'],
+        pendingApprovalRoles: [],
+        stages: [],
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

@@ -29,6 +29,40 @@ export interface RagTraceEvent {
   timestamp?: string;
 }
 
+export interface ProductionWorkflowTracePayload {
+  userId?: string;
+  threadId: string;
+  projectId: string;
+  brief: string;
+  status: string;
+  stepCount: number;
+  maxSteps: number;
+  approvalMode: string;
+  selectedRoles: string[];
+  completedRoles: string[];
+  pendingApprovalRoles: string[];
+  stages: Array<{
+    role: string;
+    summary: string;
+    riskLevel: string;
+    evidenceCoverage: number;
+    readyForApproval: boolean;
+    claims: number;
+    supportedClaims: number;
+    issues: string[];
+    downstreamRisks: string[];
+    toolExecutions: Array<{
+      tool: string;
+      status: string;
+      durationMs: number;
+      evidenceCount: number;
+      fallback?: string;
+      error?: string;
+    }>;
+    completedAt: string;
+  }>;
+}
+
 @Injectable()
 export class LangfuseProvider implements OnModuleDestroy {
   private readonly logger = new Logger(LangfuseProvider.name);
@@ -98,10 +132,7 @@ export class LangfuseProvider implements OnModuleDestroy {
       metadata: { source: 'backend smoke:langfuse' },
     });
     try {
-      await this.client.flushAsync();
-      this.lastFlushAt = new Date().toISOString();
-      this.lastError = null;
-      this.tracesSent += 1;
+      await this.flush();
       return { enabled: true, sent: true };
     } catch (err) {
       this.lastError = (err as Error).message;
@@ -188,9 +219,129 @@ export class LangfuseProvider implements OnModuleDestroy {
         },
       });
       this.tracesSent += 1;
+      void this.flush();
     } catch (err) {
       this.lastError = (err as Error).message;
       this.logger.warn(`LangFuse trace failed: ${(err as Error).message}`);
+    }
+  }
+
+  async traceProductionWorkflow(
+    payload: ProductionWorkflowTracePayload,
+  ): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      const trace = this.client.trace({
+        name: 'agent.production.workflow',
+        userId: payload.userId,
+        sessionId: payload.threadId,
+        input: {
+          projectId: payload.projectId,
+          brief: payload.brief,
+          selectedRoles: payload.selectedRoles,
+        },
+        output: {
+          status: payload.status,
+          completedRoles: payload.completedRoles,
+          pendingApprovalRoles: payload.pendingApprovalRoles,
+        },
+        metadata: {
+          workflowType: 'production-multi-agent',
+          stepCount: payload.stepCount,
+          maxSteps: payload.maxSteps,
+          approvalMode: payload.approvalMode,
+          selectedRoles: payload.selectedRoles,
+          completedRoles: payload.completedRoles,
+          pendingApprovalRoles: payload.pendingApprovalRoles,
+          stageCount: payload.stages.length,
+        },
+      });
+
+      for (const stage of payload.stages) {
+        const stageInput = {
+          role: stage.role,
+          evidenceCount: stage.toolExecutions.reduce(
+            (total, execution) => total + execution.evidenceCount,
+            0,
+          ),
+        };
+        const stageOutput = {
+          summary: this.compactData(stage.summary),
+          riskLevel: stage.riskLevel,
+          evidenceCoverage: stage.evidenceCoverage,
+          readyForApproval: stage.readyForApproval,
+          claims: stage.claims,
+          supportedClaims: stage.supportedClaims,
+          issues: stage.issues,
+          downstreamRisks: stage.downstreamRisks,
+        };
+        const stageSpan = trace.span({
+          name: `agent.production.stage.${stage.role}`,
+          input: stageInput,
+          output: stageOutput,
+          metadata: {
+            role: stage.role,
+            riskLevel: stage.riskLevel,
+            evidenceCoverage: stage.evidenceCoverage,
+            completedAt: stage.completedAt,
+          },
+        });
+        for (const execution of stage.toolExecutions) {
+          stageSpan.event({
+            name: `agent.production.tool.${execution.tool}`,
+            input: { tool: execution.tool },
+            output: {
+              status: execution.status,
+              durationMs: execution.durationMs,
+              evidenceCount: execution.evidenceCount,
+              fallback: execution.fallback,
+              error: execution.error,
+            },
+          });
+        }
+        trace.generation({
+          name: `agent.production.generation.${stage.role}`,
+          input: stageInput,
+          output: stageOutput,
+          model: 'production-workflow-role',
+          metadata: {
+            role: stage.role,
+            toolExecutions: stage.toolExecutions.length,
+          },
+        });
+      }
+
+      trace.event({
+        name: 'agent.production.workflow.finished',
+        input: {
+          status: payload.status,
+          stepCount: payload.stepCount,
+        },
+        output: {
+          completedRoles: payload.completedRoles,
+          pendingApprovalRoles: payload.pendingApprovalRoles,
+        },
+      });
+      this.tracesSent += 1;
+      await this.flush();
+    } catch (err) {
+      this.lastError = (err as Error).message;
+      this.logger.warn(
+        `LangFuse production workflow trace failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.flushAsync();
+      this.lastFlushAt = new Date().toISOString();
+      this.lastError = null;
+    } catch (err) {
+      this.lastError = (err as Error).message;
+      this.logger.warn(`LangFuse flush failed: ${(err as Error).message}`);
     }
   }
 
@@ -300,6 +451,6 @@ export class LangfuseProvider implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.client?.flushAsync();
+    await this.flush();
   }
 }

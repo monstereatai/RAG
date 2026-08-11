@@ -17,6 +17,7 @@ describe('AgenticRagService budget boundaries', () => {
           'agentic.maxRetries': 1,
           'agentic.maxAugmentedQueries': 2,
           'agentic.maxRetrievalQueries': 2,
+          'agentic.maxSubQuestions': 2,
           'agentic.maxRetrievedChunks': 2,
           'agentic.maxWebSearchResults': 1,
           'agentic.maxRerankTopN': 2,
@@ -121,8 +122,55 @@ describe('AgenticRagService budget boundaries', () => {
       configurable: { userId: 'user-1' },
     });
 
+    expect(karpathyRagService.retrieve.mock.calls).toHaveLength(2);
+    expect(karpathyRagService.retrieveBm25Only.mock.calls).toHaveLength(0);
+    expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
+      'c1',
+      'c2',
+    ]);
+  });
+
+  it('reuses fast-path evidence when agentic retrieval starts', async () => {
+    const { service, karpathyRagService } = createService();
+    karpathyRagService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
+
+    const result = await service.retrievalNode(
+      {
+        query: '原始问题',
+        augmentedQueries: ['扩展问题'],
+        subQuestions: [
+          {
+            id: 'subq-1',
+            question: '原始问题',
+            dependsOn: [],
+            status: 'planned',
+            evidenceIds: [],
+            retrievalAttempts: 0,
+            sufficient: false,
+            reason: '',
+          },
+          {
+            id: 'subq-2',
+            question: '扩展问题',
+            dependsOn: ['subq-1'],
+            status: 'planned',
+            evidenceIds: [],
+            retrievalAttempts: 0,
+            sufficient: false,
+            reason: '',
+          },
+        ],
+      } as AgenticRagStateType,
+      {
+        configurable: {
+          userId: 'user-1',
+          fastPathChunks: [chunk('c1', 0.9)],
+          subQuestionLimit: 2,
+        },
+      },
+    );
+
     expect(karpathyRagService.retrieve.mock.calls).toHaveLength(1);
-    expect(karpathyRagService.retrieveBm25Only.mock.calls).toHaveLength(1);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
       'c1',
       'c2',

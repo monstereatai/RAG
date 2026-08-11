@@ -22,7 +22,7 @@ export const classifyComplexityPrompt = ChatPromptTemplate.fromMessages([
 ]);
 
 /**
- * 查询扩展 Prompt：生成 3 条多角度检索问句
+ * 子问题规划 Prompt：生成 3 条可独立检索的子问题
  *
  * 输出：{ queries: string[3] }
  * 注入 few_shot_block（来自 few-shot.examples.ts）以提升改写质量。
@@ -32,7 +32,7 @@ export const queryAugmentPrompt = ChatPromptTemplate.fromMessages([
     'system',
     `{few_shot_block}
 
-用户会给出一句中文问题。请另外写出恰好 3 条检索用的问句（与原意一致、角度尽量不同），便于搜索引擎或向量库分别召回。
+用户会给出一句中文问题。请将它拆成恰好 3 条可独立检索的子问题（与原意一致、角度尽量不同），便于每个子问题分别执行向量、关键词和关联上下文检索。
 可改写说法、换提问角度、或略加限定词；专有名词、型号、订单号等必须保留原样。
 只输出结构化字段 queries（长度为 3 的字符串数组）。`,
   ],
@@ -90,8 +90,8 @@ export const sufficiencyPrompt = ChatPromptTemplate.fromMessages([
 /**
  * DeepAgent 检索规划 System Prompt
  */
-export const deepAgentQueryPlanSystemPrompt = `你是 RAG 检索规划 Agent。
-你的任务是把用户问题拆成 3 条互补的中文检索问句。
+export const deepAgentQueryPlanSystemPrompt = `你是 RAG 子问题规划 Agent。
+你的任务是把用户问题拆成 3 条可独立检索、互补的中文子问题。
 不要回答用户问题，不要调用不必要的工具。
 必须只输出 JSON：{"queries":["...","...","..."]}`;
 

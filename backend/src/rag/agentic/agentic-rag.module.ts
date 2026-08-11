@@ -6,6 +6,7 @@ import { ToolsModule } from '../../tools/tools.module';
 import { PromptModule } from '../prompts/prompt.module';
 import { MetricsModule } from '../../modules/metrics/metrics.module';
 import { TracingModule } from '../../modules/tracing/tracing.module';
+import { GraphModule } from '../../modules/graph/graph.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { TracingModule } from '../../modules/tracing/tracing.module';
     PromptModule,
     MetricsModule,
     TracingModule,
+    GraphModule,
   ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],
