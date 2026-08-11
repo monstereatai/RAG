@@ -765,10 +765,17 @@ export default function AgentOpsPage() {
                       optionFilterProp="label"
                       options={runOptions.map((item) => ({
                         value: item.threadId,
-                        label: `${item.title} · ${item.mode} · ${new Date(item.updatedAt).toLocaleString("zh-CN")}`,
+                        label: `${item.title} · ${item.mode} · ${new Date(item.updatedAt).toLocaleString("zh-CN")}${item.checkpointAvailable ? " · 已保存 Checkpoint" : " · 无 Checkpoint"}`,
                       }))}
                       placeholder="选择最近 Agentic 会话"
                     />
+                    <Button
+                      icon={<ReloadOutlined />}
+                      loading={runOptionsLoading}
+                      onClick={() => void loadRunOptions()}
+                    >
+                      刷新会话列表
+                    </Button>
                     <Input
                       value={artifactThreadId}
                       onChange={(event) => setArtifactThreadId(event.target.value)}
@@ -784,6 +791,14 @@ export default function AgentOpsPage() {
                       查询运行状态
                     </Button>
                   </div>
+                  {!runOptionsLoading && runOptions.length === 0 && (
+                    <Alert
+                      showIcon
+                      type="warning"
+                      title="暂时没有可审计的 Agentic 会话"
+                      description="请先在 AI 智能问答中选择 Agentic 模式完成一次提问，再点击“刷新会话列表”。如果仍为空，请检查当前登录状态和 Agent Backend 服务。"
+                    />
+                  )}
                   {runSnapshot && (
                     <div className="agent-artifact-audit">
                       {!runSnapshot.available ? (
