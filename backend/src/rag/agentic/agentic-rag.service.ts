@@ -11,6 +11,9 @@ import {
   AgenticRagState,
   type AgenticRagStateType,
   type AgenticSubQuestion,
+  createAgenticArtifact,
+  type AgenticArtifact,
+  type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
@@ -323,7 +326,12 @@ export class AgenticRagService {
       type: 'query_augment',
       data: { queries, subQuestions },
     });
-    return { augmentedQueries: queries, subQuestions };
+    const artifact = createAgenticArtifact('subquestion_plan', 'queryAugment', {
+      query: state.query,
+      subQuestions,
+    });
+    onEvent?.({ type: 'artifact', data: artifact });
+    return { augmentedQueries: queries, subQuestions, artifacts: [artifact] };
   }
 
   /**
@@ -457,12 +465,34 @@ export class AgenticRagService {
         evidenceCount: resultIds.size,
       },
     });
+    const previousArtifacts = (state.artifacts ?? []).filter(
+      (artifact) => artifact.type !== 'evidence_bundle',
+    );
+    const evidenceArtifact = createAgenticArtifact(
+      'evidence_bundle',
+      'retrieval',
+      {
+        query: state.query,
+        chunkIds: chunks.map((chunk) => chunk.id),
+        subQuestions: [...updatedSubQuestions, ...remainingSubQuestions].map(
+          ({ id, question, evidenceIds, status }) => ({
+            id,
+            question,
+            evidenceIds,
+            status,
+          }),
+        ),
+        webSearchCount: 0,
+      },
+    );
+    onEvent?.({ type: 'artifact', data: evidenceArtifact });
     if (chunks.length === 0) {
       this.metricsService.observeAgentEmptyRetrieval(state.route || 'agentic');
     }
     return {
       retrievedChunks: chunks,
       subQuestions: [...updatedSubQuestions, ...remainingSubQuestions],
+      artifacts: [...previousArtifacts, evidenceArtifact],
       webSearchAttempted: false,
       webSearchCount: 0,
       answer: '',
@@ -856,10 +886,19 @@ export class AgenticRagService {
         (token) => onEvent?.({ type: 'token', data: token }),
       );
       onEvent?.({ type: 'citation', data: state.retrievedChunks });
+      const artifacts = this.withAnswerArtifact(
+        state,
+        answer,
+        true,
+        1,
+        '命中已审核 Bad Case 纠错答案',
+      );
+      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
       return {
         answer,
         retrievalSufficient: true,
         retrievalReason: `命中已审核 Bad Case 纠错证据（${strongBadCase.mode}，${strongBadCase.score.toFixed(3)}）`,
+        artifacts,
       };
     }
 
@@ -876,11 +915,20 @@ export class AgenticRagService {
         (token) => onEvent?.({ type: 'token', data: token }),
       );
       onEvent?.({ type: 'citation', data: [] });
+      const artifacts = this.withAnswerArtifact(
+        state,
+        ans,
+        true,
+        1,
+        '检索不足，使用模型兜底回答',
+      );
+      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
       return {
         answer: ans,
         retrievedChunks: [],
         retrievalSufficient: false,
         retrievalReason: `${reason}；已使用模型兜底回答`,
+        artifacts,
       };
     }
 
@@ -930,10 +978,22 @@ export class AgenticRagService {
           if (fallbackGate.sufficient) {
             onEvent?.({ type: 'token', data: fallbackAnswer });
             onEvent?.({ type: 'citation', data: state.retrievedChunks });
+            const artifacts = this.withAnswerArtifact(
+              state,
+              fallbackAnswer,
+              true,
+              this.getSubQuestionCoverage(state),
+              '抽取式答案通过引用校验',
+            );
+            onEvent?.({
+              type: 'artifact',
+              data: artifacts[artifacts.length - 1],
+            });
             return {
               answer: fallbackAnswer,
               retrievalSufficient: true,
               retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+              artifacts,
             };
           }
         }
@@ -942,17 +1002,34 @@ export class AgenticRagService {
       const safeAnswer = this.karpathyRagService.unsupportedReliableAnswer();
       onEvent?.({ type: 'token', data: safeAnswer });
       onEvent?.({ type: 'citation', data: [] });
+      const artifacts = this.withAnswerArtifact(
+        state,
+        safeAnswer,
+        false,
+        0,
+        citationGate.reason,
+      );
+      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
       return {
         answer: safeAnswer,
         retrievedChunks: [],
         retrievalSufficient: false,
         retrievalReason: citationGate.reason,
         passed: true,
+        artifacts,
       };
     }
 
     onEvent?.({ type: 'citation', data: state.retrievedChunks });
-    return { answer };
+    const artifacts = this.withAnswerArtifact(
+      state,
+      answer,
+      true,
+      this.getSubQuestionCoverage(state),
+      '答案通过引用和子问题覆盖校验',
+    );
+    onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
+    return { answer, artifacts };
   }
 
   /**
@@ -974,6 +1051,27 @@ export class AgenticRagService {
         },
       });
       return { confidence: 1, passed: true, retryCount: state.retryCount };
+    }
+
+    const answerContract = [...(state.artifacts ?? [])]
+      .reverse()
+      .find((artifact) => artifact.type === 'answer_contract');
+    const contractPayload = answerContract?.payload as
+      | AnswerContractArtifactPayload
+      | undefined;
+    if (contractPayload && !contractPayload.valid) {
+      const retryCount = state.retryCount + 1;
+      const reason = `答案契约校验未通过：${contractPayload.reason}`;
+      onEvent?.({
+        type: 'reflection',
+        data: {
+          confidence: 0,
+          passed: false,
+          retryCount,
+          reason,
+        },
+      });
+      return { confidence: 0, passed: false, retryCount };
     }
 
     const model = this.llmProvider.getModel();
@@ -1345,6 +1443,7 @@ export class AgenticRagService {
         passed: false,
         humanApproval: null,
         interruptReason: '',
+        artifacts: [],
       },
       {
         configurable: {
@@ -1468,6 +1567,39 @@ export class AgenticRagService {
     if (trace.alert === 'span_limit') {
       this.metricsService.observeAgentLoopDecision('span_limit_warning');
     }
+  }
+
+  private withAnswerArtifact(
+    state: AgenticRagStateType,
+    answer: string,
+    citationSupported: boolean,
+    subQuestionCoverage: number,
+    reason: string,
+  ): AgenticArtifact[] {
+    const payload: AnswerContractArtifactPayload = {
+      answer,
+      citationSupported,
+      subQuestionCoverage,
+      valid: citationSupported && subQuestionCoverage >= 1,
+      reason,
+    };
+    const artifact = createAgenticArtifact(
+      'answer_contract',
+      'generate',
+      payload,
+    );
+    return [
+      ...(state.artifacts ?? []).filter(
+        (item) => item.type !== 'answer_contract',
+      ),
+      artifact,
+    ];
+  }
+
+  private getSubQuestionCoverage(state: AgenticRagStateType): number {
+    if (!state.subQuestions?.length) return 1;
+    const covered = state.subQuestions.filter((item) => item.sufficient).length;
+    return covered / state.subQuestions.length;
   }
 
   private recordOf(value: unknown): Record<string, unknown> {

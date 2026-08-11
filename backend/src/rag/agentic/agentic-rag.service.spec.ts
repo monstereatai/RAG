@@ -29,8 +29,9 @@ describe('AgenticRagService budget boundaries', () => {
       }),
     } as unknown as ConfigService;
 
+    const getModelMock = jest.fn();
     const llmProvider = {
-      getModel: jest.fn(),
+      getModel: getModelMock,
     } as unknown as LlmProvider;
     const karpathyRagService = {
       retrieve: jest.fn(),
@@ -72,7 +73,7 @@ describe('AgenticRagService budget boundaries', () => {
       redisProvider,
     );
 
-    return { service, karpathyRagService };
+    return { service, karpathyRagService, llmProvider, getModelMock };
   }
 
   it('caps normalized augmented queries', () => {
@@ -128,6 +129,14 @@ describe('AgenticRagService budget boundaries', () => {
       'c1',
       'c2',
     ]);
+    expect(result.artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'evidence_bundle',
+          producer: 'retrieval',
+        }),
+      ]),
+    );
   });
 
   it('reuses fast-path evidence when agentic retrieval starts', async () => {
@@ -175,6 +184,40 @@ describe('AgenticRagService budget boundaries', () => {
       'c1',
       'c2',
     ]);
+  });
+
+  it('blocks reflection when the answer contract is invalid', async () => {
+    const { service, getModelMock } = createService();
+    const result = await service.reflectionNode({
+      query: '原始问题',
+      answer: '没有可验证引用的答案',
+      retrievedChunks: [chunk('c1', 0.9)],
+      retrievalSufficient: true,
+      retryCount: 0,
+      artifacts: [
+        {
+          id: 'answer_contract:test',
+          type: 'answer_contract',
+          version: 1,
+          producer: 'generate',
+          createdAt: new Date().toISOString(),
+          payload: {
+            answer: '没有可验证引用的答案',
+            citationSupported: false,
+            subQuestionCoverage: 0,
+            valid: false,
+            reason: '答案缺少显式片段引用',
+          },
+        },
+      ],
+    } as AgenticRagStateType);
+
+    expect(result).toMatchObject({
+      confidence: 0,
+      passed: false,
+      retryCount: 1,
+    });
+    expect(getModelMock).not.toHaveBeenCalled();
   });
 
   function chunk(id: string, totalScore: number) {

@@ -13,6 +13,44 @@ export interface AgenticSubQuestion {
   reason: string;
 }
 
+export type AgenticArtifactType =
+  | 'subquestion_plan'
+  | 'evidence_bundle'
+  | 'answer_contract';
+
+/** 节点间的结构化交接物，会随 LangGraph 状态进入 Redis Checkpointer。 */
+export interface AgenticArtifact<TPayload = unknown> {
+  id: string;
+  type: AgenticArtifactType;
+  version: 1;
+  producer: string;
+  createdAt: string;
+  payload: TPayload;
+}
+
+export interface AnswerContractArtifactPayload {
+  answer: string;
+  citationSupported: boolean;
+  subQuestionCoverage: number;
+  valid: boolean;
+  reason: string;
+}
+
+export function createAgenticArtifact<TPayload>(
+  type: AgenticArtifactType,
+  producer: string,
+  payload: TPayload,
+): AgenticArtifact<TPayload> {
+  return {
+    id: `${type}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    version: 1,
+    producer,
+    createdAt: new Date().toISOString(),
+    payload,
+  };
+}
+
 /**
  * Agentic RAG 工作流状态
  *
@@ -41,6 +79,12 @@ export const AgenticRagState = Annotation.Root({
 
   /** 显式子问题计划：每个子问题独立检索、评估和补检索。 */
   subQuestions: Annotation<AgenticSubQuestion[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
+
+  /** 节点间结构化交接物，随 Checkpointer 持久化。 */
+  artifacts: Annotation<AgenticArtifact[]>({
     reducer: (_prev, next) => next,
     default: () => [],
   }),
