@@ -16,36 +16,49 @@ const companies = [
   '迷你玩', '凉屋游戏',
 ];
 
-// 只放公开且可验证的代表性入口；其余公司生成脱敏模拟模板，不冒充真实内部资料。
-const publicSources = [
-  {
-    id: 'tencent-games-official',
-    company: '腾讯游戏',
-    url: 'https://www.tencent.com/zh-cn/products/tencent-games/',
-    documentType: 'official-site',
-  },
-  {
-    id: 'netease-games-community',
-    company: '网易游戏',
-    url: 'https://app.netease.com/',
-    documentType: 'community',
-  },
-  {
-    id: 'mihoyo-community',
-    company: '米哈游',
-    url: 'https://bbs.mihoyo.com/index.html',
-    documentType: 'community',
-  },
-  {
-    id: 'mihoyo-honkai-official',
-    company: '米哈游',
-    url: 'https://bh3.mihoyo.com/main',
-    documentType: 'official-site',
-  },
-];
+// 公开入口目录。只抓取官网、官方游戏站、活动页和官方社区，不抓登录后内容、不绕过验证码或 robots 限制。
+const sourceCatalog = [
+  ['诗悦网络', [['https://www.shiyue.com/', 'official-site'], ['https://www.shiyue.com/news', 'campaign']]],
+  ['百田游戏', [['https://baitianyouxiguanwang.asia/', 'official-site']]],
+  ['腾讯游戏', [['https://www.tencent.com/zh-cn/products/tencent-games/', 'official-site'], ['https://cloud.tencent.com/customer/txyx', 'campaign']]],
+  ['网易游戏', [['https://app.netease.com/', 'community'], ['https://xm.gameyw.netease.com/', 'official-site']]],
+  ['米哈游', [['https://bbs.mihoyo.com/index.html', 'community'], ['https://bh3.mihoyo.com/main', 'official-site']]],
+  ['三七互娱', [['https://www.37wan.net/', 'official-site'], ['https://www.37wan.net/media.html', 'campaign'], ['https://sqyx.37.com/', 'official-site']]],
+  ['库洛游戏', [['https://kurogames.com/', 'official-site']]],
+  ['灵犀互娱', [['https://sgz.lingxigames.com/', 'official-site'], ['https://shop.lingxigames.com/', 'campaign']]],
+  ['4399', [['https://www.4399.com/index.htm', 'official-site'], ['https://a.4399.cn/huodong/', 'campaign'], ['https://news.4399.com/', 'community']]],
+  ['深蓝互动', [['https://www.bluepoch.com/', 'official-site']]],
+  ['益世界', [['https://www.yiworld.com/index.html', 'official-site']]],
+  ['多益网络', [['https://www.duoyi.com/', 'official-site']]],
+  ['贪玩游戏', [['https://www.tanwan.cn/', 'official-site'], ['https://www.tanwan.cn/about/', 'campaign']]],
+  ['星辉游戏', [['https://www.3737.com/', 'official-site'], ['https://www.rastar.com/', 'official-site']]],
+  ['中手游', [['https://zhongshouyou.com.cn/', 'official-site']]],
+  ['完美世界', [['https://games.wanmei.com/m/', 'official-site'], ['https://games.wanmei.com/m/hotgame/index.html', 'campaign'], ['https://www.pwrd.net.cn/', 'official-site']]],
+  ['莉莉丝游戏', [['https://lilisi.com.cn/', 'official-site'], ['https://llsiyouxi.com.cn/', 'official-site']]],
+  ['叠纸游戏', [['https://www.papegames.com/home', 'official-site'], ['https://www.papegames.com/contactUs', 'official-site']]],
+  ['FunPlus', [['https://funplus.com/', 'official-site'], ['https://funplus.com/category/games/', 'campaign']]],
+  ['盛趣游戏', [['https://www.shengqugames.com/', 'official-site'], ['https://www.shengqugames.com/cn/game', 'campaign'], ['https://www.sdo.com/?page=1', 'community']]],
+  ['巨人网络', [['https://www.ztgame.com.cn/about.html', 'official-site'], ['https://www.hngiant.com/product/', 'campaign']]],
+  ['吉比特', [['https://www.g-bits.com/zh/', 'official-site'], ['https://www.leiting.com/mobile/index.html', 'campaign']]],
+  ['心动网络', [['https://www.xd.com/about', 'official-site'], ['https://sxd.xd.com/', 'campaign']]],
+  ['鹰角网络', [['https://customer-service.hypergryph.com/', 'community'], ['https://ak.hypergryph.com/special/recruitment/', 'official-site']]],
+  ['沐瞳科技', [['https://cn.moonton.com/', 'official-site'], ['https://cn.moonton.com/news/69.html', 'campaign'], ['https://cn.moonton.com/about/index.html', 'official-site']]],
+  ['友塔游戏', [['https://www.yottagames.com.cn/zh/about', 'official-site']]],
+  ['途游游戏', [['https://www.tuyoo.com/', 'official-site'], ['https://www.tuyoo.com/games', 'campaign']]],
+  ['波克城市', [['https://www.boke.com/', 'official-site'], ['https://www.boke.com/game/game_index.html', 'campaign'], ['https://www.pook.com/introduce/index.html', 'official-site']]],
+  ['冰川网络', [['https://q1.com.hk/', 'official-site'], ['https://www.q1.com/about.html', 'official-site'], ['https://lw2.q1.com/produce.html', 'campaign']]],
+  ['创梦天地', [['https://www.idreamsky.com/aboutus', 'official-site'], ['https://ir.idreamsky.com/sc/', 'campaign']]],
+  ['迷你玩', [['https://www.mini1.cn/', 'official-site']]],
+  ['凉屋游戏', [['https://www.chilly.tech/', 'official-site'], ['https://chillyroom.com/zh/about-us', 'official-site'], ['https://chillyroom.com/zh/support', 'community']]],
+].flatMap(([company, urls]) => urls.map(([url, documentType]) => ({
+  id: `${slug(company)}-${slug(url)}`,
+  company,
+  url,
+  documentType,
+})));
 
 const fetched = [];
-for (const source of publicSources) {
+for (const source of sourceCatalog) {
   fetched.push(await fetchPublicSource(source));
 }
 
@@ -84,7 +97,7 @@ const payload = {
       .filter((item) => item.status === 'fetched' && item.content)
       .map((item) => ({
         id: item.id,
-        title: `${item.company} 公开官网／社区页面快照`,
+        title: `${item.company} 公开${item.documentType}页面快照`,
         metadata: {
           company: item.company,
           sourceUrl: item.url,
@@ -107,6 +120,7 @@ console.log(
       ok: true,
       outputPath,
       companyCount: companies.length,
+      sourceAttemptCount: fetched.length,
       publicSourceCount: fetched.filter((item) => item.status === 'fetched').length,
       simulatedDocumentCount: simulatedDocuments.length,
       failedSources: fetched.filter((item) => item.status !== 'fetched').map((item) => item.url),

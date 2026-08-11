@@ -5,12 +5,21 @@ const datasetPath = process.env.GAME_MARKETING_PUBLIC_DATASET ?? 'eval/game-mark
 const maxDocuments = Number(process.env.GAME_MARKETING_IMPORT_MAX ?? '0');
 const dryRun = process.argv.includes('--dry-run');
 const onlyPublic = process.argv.includes('--only-public');
+const requestedIds = new Set(
+  (process.env.GAME_MARKETING_IMPORT_IDS ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
 const dataset = JSON.parse(await readFile(datasetPath, 'utf8'));
 const documents = Array.isArray(dataset.documents) ? dataset.documents : [];
 const scopedDocuments = onlyPublic
   ? documents.filter((document) => document.metadata?.evidenceLevel === 'public_web_snapshot')
   : documents;
-const selected = maxDocuments > 0 ? scopedDocuments.slice(0, maxDocuments) : scopedDocuments;
+const idScopedDocuments = requestedIds.size > 0
+  ? scopedDocuments.filter((document) => requestedIds.has(document.id))
+  : scopedDocuments;
+const selected = maxDocuments > 0 ? idScopedDocuments.slice(0, maxDocuments) : idScopedDocuments;
 
 if (dryRun) {
   console.log(JSON.stringify({ ok: true, mode: 'dry-run', datasetPath, documents: selected.length }, null, 2));

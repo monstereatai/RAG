@@ -53,18 +53,24 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
   }
 
   async embedDocuments(texts: string[]): Promise<number[][]> {
+    const batchSize = 10;
+    const vectors: number[][] = [];
     try {
-      const promise = this.embeddings.embedDocuments(texts);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Timeout calling embedding API')),
-          5000,
-        ),
-      );
-      return await Promise.race([promise, timeoutPromise]);
+      for (let start = 0; start < texts.length; start += batchSize) {
+        const batch = texts.slice(start, start + batchSize);
+        const promise = this.embeddings.embedDocuments(batch);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Timeout calling embedding API')),
+            5000,
+          ),
+        );
+        vectors.push(...(await Promise.race([promise, timeoutPromise])));
+      }
+      return vectors;
     } catch (err) {
       this.logger.warn(
-        `[QwenEmbeddingProvider] embedDocuments failed: ${(err as Error).message}`,
+        `[QwenEmbeddingProvider] embedDocuments failed after ${vectors.length} vectors: ${(err as Error).message}`,
       );
       throw err;
     }
