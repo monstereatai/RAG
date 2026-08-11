@@ -16,6 +16,7 @@ import { DocumentResourceEntity } from '../../providers/db/entities/document-res
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { DocumentPermissionService } from './document-permission.service';
 import { PermissionSubject } from './document-permission.service';
+import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
@@ -44,6 +45,7 @@ export interface UploadResult {
   lifecycleStatus?: DocumentLifecycleStatus;
   supersedesDocId?: string | null;
   ingestionQuality?: IngestionQualityReport;
+  chunkStrategy?: { chunkSize: number; chunkOverlap: number };
   metadata?: {
     title: string;
     author: string;
@@ -92,6 +94,8 @@ export class DocumentService {
     private readonly metadataExtractor: DocumentMetadataExtractor,
     private readonly objectStorageProvider: ObjectStorageProvider,
     private readonly permissionService: DocumentPermissionService,
+    @InjectRepository(KnowledgeBaseProfileEntity)
+    private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
   ) {}
 
   async upload(
@@ -130,7 +134,7 @@ export class DocumentService {
         detectedBusiness,
         options.businessMetadata,
       );
-      const strategy = getChunkStrategy(business.documentType);
+      const strategy = await this.resolveChunkStrategy(business);
       const structuredChunks = await new MarkdownChunker(
         strategy.chunkSize,
         strategy.chunkOverlap,
@@ -225,6 +229,7 @@ export class DocumentService {
         lifecycleStatus: governance.lifecycleStatus,
         supersedesDocId: governance.supersedesDocId,
         ingestionQuality: JSON.stringify(ingestionQuality),
+        chunkStrategy: JSON.stringify(strategy),
       });
       await this.docMetaRepo.save(docMeta);
       if (governance.supersedesDocId) {
@@ -295,6 +300,7 @@ export class DocumentService {
         lifecycleStatus: governance.lifecycleStatus,
         supersedesDocId: governance.supersedesDocId,
         ingestionQuality,
+        chunkStrategy: strategy,
         metadata: metadata || undefined,
       };
     } catch (err) {
@@ -426,6 +432,19 @@ export class DocumentService {
     );
   }
 
+  private async resolveChunkStrategy(
+    business: GameDocumentMetadata,
+  ): Promise<{ chunkSize: number; chunkOverlap: number }> {
+    const keys = [business.projectId, business.documentType].filter(Boolean) as string[];
+    for (const key of keys) {
+      const profile = await this.knowledgeBaseProfileRepo.findOne({
+        where: { key, status: 'enabled', workspaceId: 'default' },
+      });
+      if (profile) return { chunkSize: profile.chunkSize, chunkOverlap: profile.chunkOverlap };
+    }
+    return getChunkStrategy(business.documentType);
+  }
+
   private async upsertTask(
     taskId: string,
     patch: Partial<DocumentTaskEntity>,
@@ -517,6 +536,9 @@ export class DocumentService {
       ingestionQuality: meta.ingestionQuality
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
         : undefined,
+      chunkStrategy: meta.chunkStrategy
+        ? (JSON.parse(meta.chunkStrategy) as { chunkSize: number; chunkOverlap: number })
+        : undefined,
     };
   }
 
@@ -545,6 +567,9 @@ export class DocumentService {
       supersedesDocId: meta.supersedesDocId,
       ingestionQuality: meta.ingestionQuality
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
+        : undefined,
+      chunkStrategy: meta.chunkStrategy
+        ? (JSON.parse(meta.chunkStrategy) as { chunkSize: number; chunkOverlap: number })
         : undefined,
       metadata: meta.title
         ? {

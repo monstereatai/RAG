@@ -9,6 +9,7 @@ import { TracingModule } from '../../modules/tracing/tracing.module';
 import { GraphModule } from '../../modules/graph/graph.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
+import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/age
     MetricsModule,
     TracingModule,
     GraphModule,
-    TypeOrmModule.forFeature([AgenticStructuredArtifactEntity]),
+    TypeOrmModule.forFeature([AgenticStructuredArtifactEntity, ArtifactDependencyEntity]),
   ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],

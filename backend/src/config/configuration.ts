@@ -228,6 +228,14 @@ export const configuration = () => ({
     graphSearchEnabled: process.env.AGENTIC_GRAPH_SEARCH_ENABLED !== 'false',
   },
 
+  // Agent Run Center 预算门禁（估算成本超过阈值时标记为需审批）
+  agentRun: {
+    budgetUsd: parseFloat(process.env.AGENT_RUN_BUDGET_USD ?? '0.2'),
+    maxSteps: parseInt(process.env.AGENT_RUN_MAX_STEPS ?? '18', 10),
+    maxToolCalls: parseInt(process.env.AGENT_RUN_MAX_TOOL_CALLS ?? '24', 10),
+    maxDelegations: parseInt(process.env.AGENT_RUN_MAX_DELEGATIONS ?? '6', 10),
+  },
+
   // LangSmith 评测与追踪（可选）
   langsmith: {
     tracing: process.env.LANGSMITH_TRACING === 'true',

@@ -83,6 +83,16 @@ export default [
         component: './agent-ops',
       },
       {
+        path: '/agent-ops/run-center',
+        name: 'agent-ops-run-center',
+        component: './agent-ops',
+      },
+      {
+        path: '/agent-ops/collaboration',
+        name: 'agent-ops-collaboration',
+        component: './agent-ops',
+      },
+      {
         path: '/agent-ops/bad-cases',
         name: 'agent-ops-bad-cases',
         component: './agent-ops',
@@ -100,6 +110,11 @@ export default [
       {
         path: '/agent-ops/artifacts',
         name: 'agent-ops-artifacts',
+        component: './agent-ops',
+      },
+      {
+        path: '/agent-ops/governance',
+        name: 'agent-ops-governance',
         component: './agent-ops',
       },
     ],

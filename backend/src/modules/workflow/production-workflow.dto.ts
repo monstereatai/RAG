@@ -58,6 +58,10 @@ export class StartProductionWorkflowDto {
   @IsOptional()
   @IsIn(['medium', 'high'])
   riskApprovalThreshold?: 'medium' | 'high';
+
+  @IsOptional()
+  @IsIn(['sequential', 'hierarchical', 'conditional'])
+  processType?: 'sequential' | 'hierarchical' | 'conditional';
 }
 
 export class ResumeProductionWorkflowDto {

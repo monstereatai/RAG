@@ -16,6 +16,7 @@ import {
 import { XMarkdown } from "@ant-design/x-markdown";
 import "@ant-design/x-markdown/es/XMarkdown/index.css";
 import { ModulePage, qaNav } from "@/components/AdminShell";
+import { history } from "@umijs/max";
 import {
   Avatar,
   Button,
@@ -1201,7 +1202,13 @@ const QaOps: React.FC = () => {
                             <article key={item.id}>
                               <FileWordOutlined className="file-icon word" />
                               <div>
-                                <b>{item.docId || item.id}</b>
+                                <a
+                                  onClick={() =>
+                                    history.push(`/documents/${encodeURIComponent(item.docId)}`)
+                                  }
+                                >
+                                  {item.docId || item.id}
+                                </a>
                                 <span>
                                   chunk #{item.chunkIndex} · score{" "}
                                   {(item.totalScore ?? 0).toFixed(2)}

@@ -13,6 +13,9 @@ import { ConversationEntity } from '../../providers/db/entities/conversation.ent
 import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
+import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
+import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
+import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { RagFeedbackService } from './rag-feedback.service';
 import { PromptModule } from '../../rag/prompts/prompt.module';
 
@@ -23,6 +26,8 @@ import { PromptModule } from '../../rag/prompts/prompt.module';
       MessageEntity,
       QueryLogEntity,
       RagFeedbackEntity,
+      EvaluationCaseEntity,
+      KnowledgeBaseProfileEntity,
     ]),
     ConfigModule,
     KarpathyRagModule,
@@ -30,6 +35,7 @@ import { PromptModule } from '../../rag/prompts/prompt.module';
     MemoryModule,
     EmbeddingModule,
     PromptModule,
+    AgentRunsModule,
   ],
   controllers: [ChatController],
   providers: [

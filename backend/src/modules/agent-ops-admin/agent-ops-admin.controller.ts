@@ -20,6 +20,10 @@ import {
 import { ProductionWorkflowService } from '../workflow/production-workflow.service';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from '../chat/conversation.service';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
+import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
+import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
+import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -31,6 +35,10 @@ export class AgentOpsAdminController {
     private readonly tracing: TracingService,
     private readonly agenticRag: AgenticRagService,
     private readonly conversations: ConversationService,
+    private readonly runs: AgentRunsService,
+    private readonly collaboration: AgentCollaborationService,
+    private readonly tasks: AgentTasksService,
+    private readonly runtimeEvents: AgentRuntimeEventsService,
   ) {}
 
   @Post('workflows')
@@ -125,5 +133,69 @@ export class AgentOpsAdminController {
   @Post('runs/:threadId/retry')
   retryRun(@Param('threadId') threadId: string) {
     return this.agenticRag.retryRun(threadId);
+  }
+
+  @Get('run-center')
+  runCenter(@Query('limit') limit?: string) {
+    return this.runs.list(Number(limit ?? 50));
+  }
+
+  @Get('run-center/:id')
+  runDetail(@Param('id') id: string) {
+    return this.runs.get(id);
+  }
+
+  @Post('run-center/:id/retry')
+  retryRunRecord(@Param('id') id: string) {
+    return this.runs.retry(id);
+  }
+
+  @Get('collaboration/sops')
+  collaborationSops() { return this.collaboration.listSops(); }
+
+  @Post('collaboration/sops')
+  saveCollaborationSop(@Body() body: any) { return this.collaboration.upsertSop(body); }
+
+  @Get('collaboration/messages')
+  collaborationMessages(@Query('threadId') threadId?: string) { return this.collaboration.listMessages(threadId); }
+
+  @Post('collaboration/messages')
+  publishCollaborationMessage(@Body() body: any) { return this.collaboration.publishMessage(body); }
+
+  @Get('collaboration/dependencies')
+  collaborationDependencies(@Query('threadId') threadId?: string) { return this.collaboration.listDependencies(threadId); }
+
+  @Post('collaboration/decisions')
+  createCollaborationDecision(@Body() body: any) { return this.collaboration.createDecision({ ...body, createdBy: body.createdBy ?? 'admin-backend' }); }
+
+  @Get('collaboration/decisions')
+  collaborationDecisions(@Query('threadId') threadId?: string) { return this.collaboration.listDecisions(threadId); }
+
+  @Get('collaboration/conflicts/:threadId')
+  collaborationConflicts(@Param('threadId') threadId: string) { return this.collaboration.detectConflicts(threadId); }
+
+  @Get('collaboration/replay/:threadId')
+  collaborationReplay(@Param('threadId') threadId: string) { return this.collaboration.collaborationSnapshot(threadId); }
+
+  @Get('tasks')
+  listAgentTasks(@Query('threadId') threadId?: string) { return this.tasks.list(threadId); }
+
+  @Post('tasks/:id/retry')
+  retryAgentTask(@Param('id') id: string) { return this.tasks.retry(id); }
+
+  @Post('tasks/delegate')
+  async delegateAgentTask(@Body() body: any) {
+    if (body.runId) await this.runs.reserveDelegation(body.runId);
+    return this.tasks.delegate(body);
+  }
+
+  @Get('runtime-events')
+  runtimeEventsList(@Query('threadId') threadId?: string, @Query('runId') runId?: string) {
+    return this.runtimeEvents.list(threadId, runId);
+  }
+
+  @Get('runtime-events/metrics')
+  runtimeEventMetrics(@Query('threadId') threadId?: string) {
+    return this.runtimeEvents.metrics(threadId);
   }
 }

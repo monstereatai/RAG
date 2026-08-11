@@ -210,6 +210,15 @@ export const getAgentTraces = () =>
     params: { limit: 50 },
   });
 
+export const getRuntimeEvents = (threadId?: string, runId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/runtime-events", { params: { threadId, runId } });
+
+export const getRuntimeEventMetrics = (threadId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/runtime-events/metrics", { params: { threadId } });
+
+export const delegateAgentTask = (body: Record<string, unknown>) =>
+  authRequest<unknown>("/api/admin/agent-ops/tasks/delegate", { method: "POST", data: body });
+
 export const getAgentRunArtifacts = (threadId: string) =>
   authRequest<unknown>(
     `/api/admin/agent-ops/runs/${encodeURIComponent(threadId)}/artifacts`,
@@ -225,6 +234,60 @@ export const retryAgentRun = (threadId: string) =>
     `/api/admin/agent-ops/runs/${encodeURIComponent(threadId)}/retry`,
     { method: "POST", data: {} },
   );
+
+export const getAgentRunCenter = () =>
+  authRequest<unknown>("/api/admin/agent-ops/run-center", { params: { limit: 50 } });
+
+export const getAgentRunDetail = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}`);
+
+export const retryAgentRunRecord = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`, { method: "POST", data: {} });
+
+export const cloneGovernanceWorkflow = (id: string, body: { key: string; name?: string }) =>
+  authRequest<unknown>(`/api/admin/agent-ops/governance/workflows/${encodeURIComponent(id)}/clone`, { method: "POST", data: body });
+
+export const getCollaborationSops = () => authRequest<unknown>("/api/admin/agent-ops/collaboration/sops");
+export const getCollaborationMessages = (threadId?: string) => authRequest<unknown>("/api/admin/agent-ops/collaboration/messages", { params: threadId ? { threadId } : undefined });
+export const getArtifactDependencies = (threadId?: string) => authRequest<unknown>("/api/admin/agent-ops/collaboration/dependencies", { params: threadId ? { threadId } : undefined });
+export const getDecisionRecords = (threadId?: string) => authRequest<unknown>("/api/admin/agent-ops/collaboration/decisions", { params: threadId ? { threadId } : undefined });
+export const getCollaborationConflicts = (threadId: string) => authRequest<unknown>(`/api/admin/agent-ops/collaboration/conflicts/${encodeURIComponent(threadId)}`);
+export const createDecisionRecord = (body: unknown) => authRequest<unknown>("/api/admin/agent-ops/collaboration/decisions", { method: "POST", data: body });
+export const getCollaborationReplay = (threadId: string) => authRequest<unknown>(`/api/admin/agent-ops/collaboration/replay/${encodeURIComponent(threadId)}`);
+export const getAgentTasks = (threadId?: string) => authRequest<unknown>("/api/admin/agent-ops/tasks", { params: threadId ? { threadId } : undefined });
+export const retryAgentTask = (id: string) => authRequest<unknown>(`/api/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry`, { method: "POST", data: {} });
+
+export const getGovernanceWorkflows = (workspaceId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/workflows", {
+    params: workspaceId ? { workspaceId } : undefined,
+  });
+
+export const getGovernancePlugins = () =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/plugins");
+
+export const getGovernanceModels = () =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/models");
+
+export const getGovernanceEvaluationCases = (workspaceId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/evaluation-cases", {
+    params: workspaceId ? { workspaceId } : undefined,
+  });
+
+export const getKnowledgeBaseProfiles = (workspaceId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/knowledge-base-profiles", {
+    params: workspaceId ? { workspaceId } : undefined,
+  });
+
+export const registerKnowledgeBaseProfile = (body: Record<string, unknown>) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/knowledge-base-profiles", {
+    method: "POST",
+    data: body,
+  });
+
+export const debugGovernanceRetrieval = (query: string, scope?: string, knowledgeBaseKey?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/retrieval-debug", {
+    params: { query, ...(scope ? { scope } : {}), ...(knowledgeBaseKey ? { knowledgeBaseKey } : {}) },
+  });
 
 export function unwrapData<T>(value: unknown): T {
   let current = value;

@@ -17,6 +17,7 @@ import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.en
 import { DocumentTaskEntity } from '../../providers/db/entities/document-task.entity';
 import { DocumentResourceEntity } from '../../providers/db/entities/document-resource.entity';
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
+import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
       DocumentTaskEntity,
       DocumentResourceEntity,
       DocumentPermissionEntity,
+      KnowledgeBaseProfileEntity,
     ]),
     EmbeddingModule,
     VectorStoreModule,

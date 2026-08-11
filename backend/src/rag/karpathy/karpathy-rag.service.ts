@@ -115,6 +115,15 @@ export interface RetrievalDiagnostics {
   documentLimitRemoved: number;
   budgetRemoved: number;
   contextCharacters: number;
+  stages?: {
+    keywordCandidates: number;
+    vectorCandidates: number;
+    fusedCandidates: number;
+    scopedCandidates: number;
+    finalCandidates: number;
+    filteredByScope: number;
+    filteredByBudget: number;
+  };
 }
 
 export interface RetrieveOptions {
@@ -526,9 +535,11 @@ export class KarpathyRagService implements OnModuleInit {
     );
 
     const fused = this.fuseByRrf(bm25Hits, cosineHits);
-    const ranked = this.applySourceAuthority(fused)
+    const fusedCandidateCount = fused.length;
+    const scoped = this.applySourceAuthority(fused)
       .filter((chunk) => this.matchesScope(chunk, options.scope))
-      .sort((a, b) => b.totalScore - a.totalScore)
+      .sort((a, b) => b.totalScore - a.totalScore);
+    const ranked = scoped
       .slice(0, profile.candidateDepth)
       .map((chunk) => ({
         ...chunk,
@@ -557,6 +568,15 @@ export class KarpathyRagService implements OnModuleInit {
       documentLimitRemoved: built.stats.documentLimitRemoved,
       budgetRemoved: built.stats.budgetRemoved,
       contextCharacters: built.stats.contextCharacters,
+      stages: {
+        keywordCandidates: bm25Hits.length,
+        vectorCandidates: cosineHits.length,
+        fusedCandidates: fusedCandidateCount,
+        scopedCandidates: scoped.length,
+        finalCandidates: built.chunks.length,
+        filteredByScope: Math.max(0, fusedCandidateCount - scoped.length),
+        filteredByBudget: built.stats.budgetRemoved,
+      },
     };
     this.metricsService.observeRetrievalContext(
       profile.intent,

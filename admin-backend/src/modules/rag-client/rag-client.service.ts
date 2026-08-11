@@ -145,6 +145,76 @@ export class RagClientService {
     );
   }
 
+  getAgentRunCenter(limit = 50) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center${this.toQueryString({ limit })}`);
+  }
+
+  getAgentRunDetail(id: string) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center/${encodeURIComponent(id)}`);
+  }
+
+  retryAgentRunRecord(id: string) {
+    return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`, {});
+  }
+
+  listGovernanceWorkflows(workspaceId?: string) {
+    return this.getJson<Record<string, unknown>>(`/platform-governance/workflows${this.toQueryString({ workspaceId })}`);
+  }
+
+  createGovernanceWorkflow(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/platform-governance/workflows', body);
+  }
+
+  publishGovernanceWorkflow(id: string, version: number) {
+    return this.postJson<Record<string, unknown>>(`/platform-governance/workflows/${encodeURIComponent(id)}/publish`, { version });
+  }
+
+  cloneGovernanceWorkflow(id: string, body: { key: string; name?: string }) {
+    return this.postJson<Record<string, unknown>>(`/platform-governance/workflows/${encodeURIComponent(id)}/clone`, body);
+  }
+
+  listCollaborationSops() { return this.getJson<Record<string, unknown>>('/rag/admin/agent-ops/collaboration/sops'); }
+  listCollaborationMessages(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/messages${this.toQueryString({ threadId })}`); }
+  createCollaborationMessage(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/collaboration/messages', body); }
+  listArtifactDependencies(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/dependencies${this.toQueryString({ threadId })}`); }
+  listDecisionRecords(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/decisions${this.toQueryString({ threadId })}`); }
+  detectCollaborationConflicts(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/conflicts/${encodeURIComponent(threadId)}`); }
+  createDecisionRecord(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/collaboration/decisions', body); }
+  getCollaborationReplay(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/replay/${encodeURIComponent(threadId)}`); }
+  listAgentTasks(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks${this.toQueryString({ threadId })}`); }
+  retryAgentTask(id: string) { return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry`, {}); }
+  delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', body); }
+  listRuntimeEvents(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events${this.toQueryString({ threadId, runId })}`); }
+  getRuntimeEventMetrics(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events/metrics${this.toQueryString({ threadId })}`); }
+
+  listPlatformPlugins() {
+    return this.getJson<Record<string, unknown>>('/platform-governance/plugins');
+  }
+
+  listPlatformModels() {
+    return this.getJson<Record<string, unknown>>('/platform-governance/models');
+  }
+
+  listEvaluationCases(workspaceId?: string) {
+    return this.getJson<Record<string, unknown>>(`/platform-governance/evaluation-cases${this.toQueryString({ workspaceId })}`);
+  }
+
+  createEvaluationCase(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/platform-governance/evaluation-cases', body);
+  }
+
+  listKnowledgeBaseProfiles(workspaceId?: string) {
+    return this.getJson<Record<string, unknown>>(`/platform-governance/knowledge-base-profiles${this.toQueryString({ workspaceId })}`);
+  }
+
+  registerKnowledgeBaseProfile(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/platform-governance/knowledge-base-profiles', body);
+  }
+
+  debugRetrieval(query: string, scope?: string, knowledgeBaseKey?: string) {
+    return this.getJson<Record<string, unknown>>(`/platform-governance/retrieval-debug${this.toQueryString({ query, scope, knowledgeBaseKey })}`);
+  }
+
   createArtifact(body: RagArtifactCreateInput) {
     return this.postJson<Record<string, unknown>>("/rag/admin/artifacts", body);
   }

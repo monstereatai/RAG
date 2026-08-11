@@ -45,6 +45,11 @@ import { ArtifactsModule } from './modules/artifacts/artifacts.module';
 import { AgentEvalModule } from './modules/agent-evals/agent-eval.module';
 import { AgentOpsAdminModule } from './modules/agent-ops-admin/agent-ops-admin.module';
 import { RagOpsApiModule } from './modules/rag-ops-api/rag-ops-api.module';
+import { PlatformGovernanceModule } from './modules/platform-governance/platform-governance.module';
+import { AgentRunsModule } from './modules/agent-runs/agent-runs.module';
+import { AgentCollaborationModule } from './modules/agent-collaboration/agent-collaboration.module';
+import { AgentTasksModule } from './modules/agent-tasks/agent-tasks.module';
+import { AgentRuntimeEventsModule } from './modules/agent-runtime-events/agent-runtime-events.module';
 
 @Module({
   imports: [
@@ -101,6 +106,11 @@ import { RagOpsApiModule } from './modules/rag-ops-api/rag-ops-api.module';
     AgentEvalModule,
     AgentOpsAdminModule,
     RagOpsApiModule,
+    PlatformGovernanceModule,
+    AgentRunsModule,
+    AgentCollaborationModule,
+    AgentTasksModule,
+    AgentRuntimeEventsModule,
   ],
   providers: [
     {

@@ -100,6 +100,9 @@ export class DocumentMetaEntity {
   @Column({ type: 'text', nullable: true, default: null })
   ingestionQuality!: string | null;
 
+  @Column({ type: 'text', nullable: true, default: null })
+  chunkStrategy!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

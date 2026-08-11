@@ -1,6 +1,6 @@
 # 面试文档使用说明
 
-更新时间：2026-08-03
+更新时间：2026-08-11
 
 > 第一次进入面试材料请先看 [README.md](./README.md)。本文件保留更详细的阅读场景、问题定位和复习方法。
 
@@ -40,6 +40,8 @@ INTERVIEW_PLAYBOOK.md 负责“怎么说”，AI_AGENT_CORE_KNOWLEDGE.md 负责�
 | `docs/interview/jd/jd-requirements-project-mapping.md`             | 对照大厂 JD：岗位要求、项目实现、代码位置、面试边界                                                               | 投递前、面试前判断岗位匹配度                                        |
 | `docs/interview/jd/jd-gap-implementation-status.md`                | 看缺口状态：哪些已补、哪些只是基础版、哪些仍需外部条件                                                            | 面试官追问“还有哪些没做完”时                                        |
 | `docs/interview/processon-ai-application-mindmap.md`               | ProcessOn「AI 应用」思维导图逐节点整理和项目对照                                                                  | 面试前按知识地图查漏补缺时                                          |
+| `docs/interview/开源项目参考能力归档.md`                            | Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的参考能力、当前项目融合方式、未照搬部分和生产边界                  | 面试官问“为什么参考这些项目”“为什么不直接引入框架”时，或统一复习平台治理、检索和多 Agent 设计时 |
+| `docs/interview/功能步骤流程.md`                                   | 按用户操作→状态／数据流转说明 Simple、Auto、Agentic、RAG、Bad Case、多 Agent、观测和运营链路                         | 面试官要求具体讲一次请求如何经过页面、服务端、数据库和后台时     |
 | `ROADMAP.md`                                                       | 项目真实进度源：已完成、阻塞、最近验证                                                                            | 回答“当前真实状态”和“验证证据”时                                    |
 | `docs/plans/remaining-enhancement-plan.md`                         | 一线大厂生产化差距：真实数据、权限、压测、安全、运维                                                              | 讲生产化差距和下一步计划时                                          |
 
@@ -181,6 +183,27 @@ ROADMAP.md
 
 回答时只说 ROADMAP 里已经实现并验证过的内容。
 
+### 3.5 面试官问“你参考过哪些开源项目，具体吸收了什么”
+
+先读：
+
+```text
+docs/interview/开源项目参考能力归档.md
+docs/interview/功能步骤流程.md 的“Dify／RAGFlow／AutoGPT／MetaGPT／CrewAI／AutoGen”章节
+ROADMAP.md
+```
+
+回答顺序：
+
+```text
+1. 先说没有把多个框架直接堆进项目，执行引擎仍是 LangGraph。
+2. 再按问题域回答：Dify 管治理，RAGFlow 管知识检索，AutoGPT 管运行中心，MetaGPT 管角色协作，CrewAI 管 Task／Process，AutoGen 管事件和工具协作。
+3. 最后落到当前项目的真实入口、数据表和验证结果。
+4. 主动区分“本地已实现”和“生产仍需接入”，不要把开源项目的宣传能力当成自己的生产数据。
+```
+
+如果继续追问“为什么不直接使用这些框架”，重点说明：当前项目已有 NestJS、LangGraph、Redis Checkpointer、MCP、Milvus、ES／BM25、Neo4j 和 Agent Ops；直接叠加多个 Runtime 会造成状态、权限、工具和观测重复，因此只吸收可迁移的设计思想，统一落到现有技术边界内。
+
 不要把 `INTERVIEW_PLAYBOOK.md` 里的面试表达当作真实进度源。
 
 ### 4. 面试官问“一线大厂还差什么”
@@ -241,6 +264,8 @@ docs/plans/remaining-enhancement-plan.md
 - `INTERVIEW_PLAYBOOK.md` 是表达话术，不是进度源。
 - `docs/interview/jd/jd-requirements-project-mapping.md` 是 JD 对照，不是承诺所有 JD 能力都已完成。
 - `docs/interview/jd/jd-gap-implementation-status.md` 是缺口状态，不要把“基础版已实现”说成“生产平台已完成”。
+- `docs/interview/开源项目参考能力归档.md` 是开源项目对照和融合记录，不是这些开源项目的所有能力都已在当前项目生产化。
+- `docs/interview/功能步骤流程.md` 是用户操作和服务端状态流转说明；需要讲“怎么用、数据怎么走”时优先看它，不要只背参考项目名称。
 - `docs/plans/remaining-enhancement-plan.md` 里的真实生产/真实数据/真实合规项，不能靠本地模拟冒充完成。
 - `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` 是岗位证据和操作手册；其中自动生成的本地报告也不能冒充真实生产经历。
 

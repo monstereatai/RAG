@@ -36,12 +36,79 @@
 | `docs/interview/jd/jd-requirements-project-mapping.md` | 一线大厂 AI 应用 / Agent JD 与项目实现对照 |
 | `docs/interview/jd/jd-gap-implementation-status.md` | JD 差距本地补齐状态 |
 | `docs/interview/interview-docs-usage.md` | 面试文档使用说明 |
+| `docs/interview/开源项目参考能力归档.md` | Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 参考能力、融合实现和生产边界归档 |
 | `docs/plans/karpathy-obsidian-dual-ingest-plan.md` | Karpathy + Obsidian 统一知识链路方案 |
 | `tools/rag-mcp-server/README.md` | RAG MCP Server 接入说明，给 Codex/Trae/Claude Code/Cursor 自动取上下文 |
 | `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md` | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 |
 | `docs/interview/deepseek-AI应用Agent岗-模拟问答题库.md` | 高级 AI 应用/Agent 岗 33 道高频模拟题逐题可背答案、追问应对和边界红线，覆盖检索/Agentic/Prompt/安全/多租户/可观测全知识面 |
 
 ## 当前结论
+
+### 最近完成：开源项目参考能力统一归档（2026-08-11）
+
+- 新增 `docs/interview/开源项目参考能力归档.md`，统一记录 Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的可参考能力、当前项目融合方式、未照搬内容、统一状态流转和生产待接入项。
+- 归档内容与当前代码、Agent Ops、LangGraph、MCP、LangFuse、Prometheus、Redis Checkpointer 和数据库表保持对应，不将外部项目能力描述为未实现的生产能力。
+- 同步更新 `docs/interview/interview-docs-usage.md` 和 `docs/interview/功能步骤流程.md`，补充归档文档入口、面试使用方式以及六个参考项目融合后的用户操作和数据流转总览。
+
+### 最近完成：AutoGen 事件驱动与受控 Agent 能力本地闭环（2026-08-11）
+
+- **统一运行事件流**：新增 `agent_runtime_events`，记录 Run、Task、Tool、Message、委派、审批、预算超限和完成／失败事件，支持按 Thread／Run 查询和事件指标聚合。
+- **运行预算门禁**：`agent_runs` 增加最大工具调用数、工具调用计数、最大委派数和委派计数；工具调用超过上限时记录 `budget.exceeded` 并拒绝继续调用。
+- **Agent as Tool**：Agent Ops→协作编排新增受控委派入口，复用 `agent_tasks.parentTaskId` 保存 Manager 与子 Agent 的父子关系，保留任务权限、依赖、审计和重试能力。
+- **运营闭环**：后台展示运行事件流、工具调用、委派次数、审批次数和预算超限次数，并与已有 Artifact、Decision Record、LangFuse、Prometheus 和项目回放关联。
+- **实现边界**：未引入 AutoGen Runtime，继续使用 LangGraph、Redis Checkpointer、MCP Tool Registry 和现有 Agent Ops；多副本原子事件序号、真实 Worker 租约、企业 IAM 和生产评测数据仍是生产环境事项。
+- **文档同步**：`docs/interview/功能步骤流程.md` 新增 AutoGen 参考能力的用户流程、数据／状态流转、实现映射和边界说明。
+- **验证结果**：`migration:run` 已执行 `178680`、`178690`；backend build、admin-backend build、Admin TypeScript 检查、Admin 生产构建和 backend Jest 全量测试（43 个测试套件、187 个测试）均通过。
+
+### 最近完成：AutoGPT 参考能力本地闭环（2026-08-11）
+
+- **Agent Run Center**：新增 `agent_runs`、`agent_actions` 和 Agent 运营→运行中心，统一记录 Simple／Auto／Agentic 的模式、实际路由、状态、最大步数、动作数量、重试次数、结果摘要和估算成本。
+- **动作审计与预算标记**：ChatService 将工具调用／节点事件写入动作审计，按写入、删除、发送、发布、部署等动作标记高风险；复用 LangFuse Token 估算和价格配置，超过 `AGENT_RUN_BUDGET_USD` 标记需审批。
+- **局部重跑**：运行中心支持保留原记录的局部重跑，不覆盖历史审计；Artifact 审计仍按 Thread 查看 Redis Checkpoint 和结构化交接物。
+- **模板复用**：平台治理新增工作流模板复制接口，复制已发布版本或最新草稿为独立草稿，避免通过复制粘贴 JSON 破坏版本治理。
+- **定时／触发边界**：复用现有 `JobsService` 的 cron／every／at、启动恢复和执行历史；真实生产多副本抢占、Webhook、企业审批和部署环境仍列为外部生产项。
+- **后台入口**：admin-backend 增加运行中心和模板复制代理，Admin Shell、路由、菜单国际化和 Agent Ops 页面已接入。
+- **文档同步**：`docs/interview/功能步骤流程.md` 新增 AutoGPT 参考能力的用户操作流程、数据／状态流转、实现映射和生产边界。
+- **验证结果**：`migration:run`、`migration:show`、backend build、admin-backend build、Admin TypeScript 检查、Admin 生产构建和 backend Jest 全量测试均通过。
+
+### 最近完成：MetaGPT 角色协作能力本地闭环（2026-08-11）
+
+- **Agent SOP**：新增 `agent_sops`，提供产品、设计、前端、后端、测试、运营六个角色的输入契约、允许动作、输出契约、角色依赖和最大步数；后台提供默认配置展示和可扩展写入口。
+- **结构化交接**：新增 `agent_collaboration_messages`；产研运工作流角色完成后，按依赖关系向下游角色发布结构化交接消息，消息只传摘要、风险、证据覆盖和产物 ID。
+- **Artifact 依赖**：新增 `artifact_dependencies`；Agentic 结构化产物自动建立需求→方案→接口／埋点→测试→验收／上线／代码上下文的依赖关系。
+- **冲突与决策**：新增冲突检测接口和 `decision_records`，支持按 Thread／主题比较不同交接消息并保存候选方案、最终决策、理由和来源产物。
+- **项目回放**：协作编排后台汇总 Agent Run、动作审计、结构化产物、依赖、消息和 Decision Record，支持按 Thread 回放一次完整协作过程。
+- **边界**：没有引入 MetaGPT Python Runtime，也没有替换现有 LangGraph；自然语言语义冲突、企业 IAM 审批和生产发布平台仍需真实生产环境接入。
+- **文档同步**：`docs/interview/功能步骤流程.md` 新增 MetaGPT 参考能力的用户流程、状态流转、实现映射和边界说明。
+
+### 最近完成：CrewAI Task／Process 能力本地闭环（2026-08-11）
+
+- **Task 工作单**：新增 `agent_tasks`，每个产研运角色任务记录 Process 类型、角色、父任务、依赖任务、状态、审批、结果产物和重试次数。
+- **Process 策略**：工作流支持 `sequential`、`hierarchical`、`conditional` 三类策略字段；顺序执行复用现有角色依赖批次，层级执行支持 Manager 受控委派，条件执行复用 Auto／Agentic 质量闸门。
+- **运行闭环**：工作流启动创建 Task，角色执行时更新 running，产物生成后回填 completed／waiting_approval，失败保留错误，后台支持单 Task 重跑。
+- **后台入口**：Agent Ops→协作编排新增 Task 看板，展示角色、Process、状态、产物和重试操作；接口支持任务查询、委派和重跑。
+- **边界**：未引入 CrewAI Python Runtime，继续使用 LangGraph、Redis Checkpointer、现有 SOP、Artifact、Decision Record 和 Tool Registry。
+- **文档同步**：`docs/interview/功能步骤流程.md` 新增 CrewAI 参考能力的用户流程、状态流转、实现映射和生产边界。
+- **验证结果**：新增 `agent_tasks` 迁移已执行并在 `migration:show` 中显示；backend／admin-backend 构建、Admin TypeScript 检查、Admin 生产构建和 backend Jest 全量测试通过。
+
+### 最近完成：Dify 参考治理能力落地（2026-08-11）
+
+- **平台治理控制面**：新增 `workflow_templates`、`workflow_template_versions`、`platform_plugins`、`model_registry`、`evaluation_cases` 五张 PostgreSQL 表及迁移；支持工作流草稿／发布／回滚、模型能力与价格来源登记、Tool／MCP 权限和超时登记、评测样本管理。
+- **Bad Case→评测集闭环**：管理员审核通过且勾选回归后，既回灌动态 Few-Shot，又自动写入 `evaluation_cases`；撤销回归时同步停用评测样本，避免回归集和线上示例状态不一致。
+- **Agent Ops 平台治理入口**：新增「平台治理」菜单和页面，展示模型、工具、工作流版本、评测集，并调用现有 `KarpathyRagService.retrieveDetailed` 提供关键词／语义／图谱／融合／重排检索调试。
+- **Prometheus／Grafana 看板**：新增 `admin-backend/docker/grafana/dashboards/rag-agent-ops.json`，使用当前项目 `rag_*` 指标观察 HTTP QPS、P95、检索来源、LLM 失败、Agent 节点耗时和空召回；LangFuse 继续负责单次 Trace／Generation。
+- **Dify 参考范围**：参考 Dify 的 Workflow、Model Plugin、Tool Plugin、Plugin Types 和 Grafana 运营思路，保留当前项目 LangGraph、Simple／Auto／Agentic、MCP、Hybrid／GraphRAG、Bad Case 和 LangFuse 实现，不引入可视化 Workflow 画布、插件市场或重复运行时。详细用户流程、状态流转和参考清单见 `docs/interview/功能步骤流程.md` 的「Dify 参考能力在本项目中的落地」。
+- **验证结果**：backend build ✅；admin-backend build ✅；admin TypeScript 检查与生产构建 ✅；RagFeedbackService 定向测试 5/5 ✅；`migration:show` 显示平台治理迁移已执行 ✅。
+
+### 最近完成：RAGFlow 文档与检索能力增量落地（2026-08-11）
+
+- **知识库配置治理**：新增 `knowledge_base_profiles` 表和 Agent Ops 平台治理入口，支持按项目／文档类型保存 Chunk 大小、重叠、检索配置和同步配置；文档入库时按项目→文档类型匹配，未命中时回退现有业务默认策略。
+- **切块策略可追溯**：`documents_meta.chunkStrategy` 保存每个文档实际使用的策略；现有 `document_chunks` 继续保存 Parent／Child、标题路径、表格引用和原文偏移，文档详情可查看切块。
+- **入库状态与检索阶段可解释**：保留现有 queued→parsing→embedding→vector_index→metadata→completed／failed 状态；`retrieveDetailed` 新增关键词、向量、融合、权限过滤、最终候选和预算裁剪统计，Agent Ops 检索调试支持选择知识库配置。
+- **增量同步边界复用现有实现**：URL／Obsidian 入库继续使用内容 Hash 去重、`supersedesDocId` 和生命周期版本治理，不重复引入第二套同步系统。
+- **验证结果**：backend build ✅；admin-backend build ✅；admin TypeScript 检查 ✅；Karpathy RAG、文档策略和 Bad Case 定向测试 29/29 ✅；知识库治理迁移已执行 ✅。
+- **真实问答配置生效**：`ChatDto` 支持 `knowledgeBaseKey`；未传时按 `scope.projectId`→`scope.documentType` 自动匹配，Simple、Auto、Agentic 统一使用知识库的 RetrievalProfile，避免平台治理配置只停留在后台展示层。
+- **运营入口补全**：平台治理页支持新增／更新知识库配置，问答引用可点击回到文档详情页；前端 TypeScript 和生产构建继续通过。
 
 **本地工程成熟度：93/100 | 项目级 RAG 评测：100%（28/28）| TS 错误：0**
 

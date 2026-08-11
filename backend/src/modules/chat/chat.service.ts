@@ -1,4 +1,5 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
@@ -17,6 +18,9 @@ import {
 } from '../../providers/observability/langfuse.provider';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { resolveRoleContext } from './role-presets';
+import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
+import { detectRetrievalProfile, type RetrievalProfile } from '../../rag/karpathy/context-builder';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
 
 @Injectable()
 export class ChatService {
@@ -32,6 +36,11 @@ export class ChatService {
     private readonly langfuseProvider: LangfuseProvider,
     @InjectRepository(QueryLogEntity)
     private readonly queryLogRepo: Repository<QueryLogEntity>,
+    @Optional()
+    @InjectRepository(KnowledgeBaseProfileEntity)
+    private readonly knowledgeBaseProfileRepo?: Repository<KnowledgeBaseProfileEntity>,
+    @Optional() private readonly agentRuns?: AgentRunsService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
@@ -66,6 +75,22 @@ export class ChatService {
       ...req.scope,
       role: roleContext.role,
     };
+    const retrievalProfile = await this.resolveRetrievalProfile(
+      req.query,
+      req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
+    );
+    const retrievalOptions = {
+      scope: retrievalScope,
+      ...(retrievalProfile ? { profile: retrievalProfile } : {}),
+    };
+    const run = await this.agentRuns?.start({
+      threadId,
+      userId,
+      mode,
+      maxSteps: this.config?.get<number>('agentRun.maxSteps') ?? 18,
+      maxToolCalls: this.config?.get<number>('agentRun.maxToolCalls') ?? 24,
+      maxDelegations: this.config?.get<number>('agentRun.maxDelegations') ?? 6,
+    });
     if (memoryResult.systemMessage) {
       memoryMessages.push({
         role: 'system',
@@ -119,7 +144,7 @@ export class ChatService {
         userId,
         memoryMessages,
         undefined,
-        { scope: retrievalScope },
+        retrievalOptions,
       );
 
       // 持久化本轮对话
@@ -169,6 +194,18 @@ export class ChatService {
         answer: result.answer,
         references: result.references,
       });
+      const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
+        this.langfuseProvider.estimateTextTokens(req.query),
+        this.langfuseProvider.estimateTextTokens(result.answer),
+      );
+      if (run) await this.agentRuns?.finish(run.id, {
+        queryLogId,
+        route: 'simple',
+        status: 'completed',
+        costUsd: estimatedCostUsd,
+        requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
+        resultSummary: result.answer.slice(0, 2000),
+      });
       this.traceAnswer({
         userId,
         query: req.query,
@@ -200,6 +237,7 @@ export class ChatService {
         route: 'simple',
         threadId,
         queryLogId,
+        runId: run?.id,
       };
     }
 
@@ -214,7 +252,7 @@ export class ChatService {
       userId,
       memoryMessages,
       false,
-      { scope: retrievalScope },
+      retrievalOptions,
     );
 
     // 持久化本轮对话
@@ -264,6 +302,35 @@ export class ChatService {
       answer: result.answer,
       references: result.references ?? [],
     });
+    for (const event of traceEvents) {
+      if (event.type === 'tool_call' || event.type === 'node_start' || event.type === 'node_end') {
+        const data = event.data as Record<string, unknown> | undefined;
+        const actionName = typeof data?.name === 'string' ? data.name : event.type;
+        const riskLevel = /write|delete|send|publish|deploy/i.test(actionName) ? 'high' : 'low';
+        if (run) await this.agentRuns?.recordAction(run.id, {
+          name: actionName,
+          actionType: event.type,
+          status: data?.error ? 'failed' : 'success',
+          riskLevel,
+          requiresApproval: riskLevel === 'high',
+          input: data,
+          output: data,
+        });
+      }
+    }
+    const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
+      this.langfuseProvider.estimateTextTokens(req.query),
+      this.langfuseProvider.estimateTextTokens(result.answer),
+    );
+    if (run) await this.agentRuns?.finish(run.id, {
+      queryLogId,
+      route: result.route,
+      status: 'completed',
+      retryCount: result.retryCount,
+      costUsd: estimatedCostUsd,
+      requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
+      resultSummary: result.answer.slice(0, 2000),
+    });
     this.traceAnswer({
       userId,
       query: req.query,
@@ -289,6 +356,7 @@ export class ChatService {
       retrievalReason: result.retrievalReason,
       threadId,
       queryLogId,
+      runId: run?.id,
     };
   }
 
@@ -328,6 +396,25 @@ export class ChatService {
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
       return undefined;
+    }
+  }
+
+  private async resolveRetrievalProfile(
+    query: string,
+    key?: string,
+  ): Promise<RetrievalProfile | undefined> {
+    const detected = detectRetrievalProfile(query);
+    if (!key?.trim()) return undefined;
+    const config = await this.knowledgeBaseProfileRepo?.findOne({
+      where: { key: key.trim(), workspaceId: 'default', status: 'enabled' },
+    });
+    if (!config?.retrievalConfig) return detected;
+    try {
+      const overrides = JSON.parse(config.retrievalConfig) as Partial<RetrievalProfile>;
+      return { ...detected, ...overrides, intent: detected.intent };
+    } catch {
+      this.logger.warn(`Invalid retrievalConfig for knowledge base ${key}`);
+      return detected;
     }
   }
 

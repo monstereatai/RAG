@@ -66,6 +66,11 @@ export class ChatDto {
   @IsString()
   rolePresetId?: string;
 
+  /** 可选知识库配置 Key；未传时按 scope.projectId／documentType 自动匹配 */
+  @IsOptional()
+  @IsString()
+  knowledgeBaseKey?: string;
+
   /**
    * 对话 threadId（可选）
    * - 不传：新建对话（返回新 threadId）
@@ -119,4 +124,5 @@ export interface ChatResponse {
   /** 返回当前对话的 threadId（新建对话时为新生成的 ID） */
   threadId?: string;
   queryLogId?: string;
+  runId?: string;
 }

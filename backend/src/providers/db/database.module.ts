@@ -19,6 +19,20 @@ import { GeneratedArtifactEntity } from './entities/generated-artifact.entity';
 import { ArtifactShareEntity } from './entities/artifact-share.entity';
 import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
 import { AgenticStructuredArtifactEntity } from './entities/agentic-structured-artifact.entity';
+import { WorkflowTemplateEntity } from './entities/workflow-template.entity';
+import { WorkflowTemplateVersionEntity } from './entities/workflow-template-version.entity';
+import { PlatformPluginEntity } from './entities/platform-plugin.entity';
+import { ModelRegistryEntity } from './entities/model-registry.entity';
+import { EvaluationCaseEntity } from './entities/evaluation-case.entity';
+import { KnowledgeBaseProfileEntity } from './entities/knowledge-base-profile.entity';
+import { AgentRunEntity } from './entities/agent-run.entity';
+import { AgentActionEntity } from './entities/agent-action.entity';
+import { AgentSopEntity } from './entities/agent-sop.entity';
+import { AgentCollaborationMessageEntity } from './entities/agent-collaboration-message.entity';
+import { ArtifactDependencyEntity } from './entities/artifact-dependency.entity';
+import { DecisionRecordEntity } from './entities/decision-record.entity';
+import { AgentTaskEntity } from './entities/agent-task.entity';
+import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -73,6 +87,20 @@ import { AgenticStructuredArtifactEntity } from './entities/agentic-structured-a
             ArtifactShareEntity,
             ArtifactAccessLogEntity,
             AgenticStructuredArtifactEntity,
+            WorkflowTemplateEntity,
+            WorkflowTemplateVersionEntity,
+            PlatformPluginEntity,
+            ModelRegistryEntity,
+            EvaluationCaseEntity,
+            KnowledgeBaseProfileEntity,
+            AgentRunEntity,
+            AgentActionEntity,
+            AgentSopEntity,
+            AgentCollaborationMessageEntity,
+            ArtifactDependencyEntity,
+            DecisionRecordEntity,
+            AgentTaskEntity,
+            AgentRuntimeEventEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -102,6 +130,20 @@ import { AgenticStructuredArtifactEntity } from './entities/agentic-structured-a
       ArtifactShareEntity,
       ArtifactAccessLogEntity,
       AgenticStructuredArtifactEntity,
+      WorkflowTemplateEntity,
+      WorkflowTemplateVersionEntity,
+      PlatformPluginEntity,
+      ModelRegistryEntity,
+      EvaluationCaseEntity,
+      KnowledgeBaseProfileEntity,
+      AgentRunEntity,
+      AgentActionEntity,
+      AgentSopEntity,
+      AgentCollaborationMessageEntity,
+      ArtifactDependencyEntity,
+      DecisionRecordEntity,
+      AgentTaskEntity,
+      AgentRuntimeEventEntity,
     ]),
   ],
   exports: [TypeOrmModule],

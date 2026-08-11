@@ -9,6 +9,7 @@ import { history } from "@umijs/max";
 import {
   Alert,
   Button,
+  Card,
   Collapse,
   Descriptions,
   Form,
@@ -37,7 +38,29 @@ import {
   getAgentBadCases,
   getAgentRuns,
   getAgentRunArtifacts,
+  getAgentRunCenter,
+  retryAgentRunRecord,
   getAgentTraces,
+  debugGovernanceRetrieval,
+  getGovernanceEvaluationCases,
+  getGovernanceModels,
+  getGovernancePlugins,
+  getGovernanceWorkflows,
+  cloneGovernanceWorkflow,
+  getCollaborationSops,
+  getCollaborationMessages,
+  getArtifactDependencies,
+  getDecisionRecords,
+  getCollaborationConflicts,
+  createDecisionRecord,
+  getCollaborationReplay,
+  getAgentTasks,
+  retryAgentTask,
+  getRuntimeEvents,
+  getRuntimeEventMetrics,
+  delegateAgentTask,
+  getKnowledgeBaseProfiles,
+  registerKnowledgeBaseProfile,
   getProductionWorkflow,
   retryAgentRun,
   resumeProductionWorkflow,
@@ -85,6 +108,9 @@ export default function AgentOpsPage() {
   const [workflowForm] = Form.useForm();
   const [evalForm] = Form.useForm();
   const [reviewForm] = Form.useForm();
+  const [knowledgeBaseForm] = Form.useForm();
+  const [decisionForm] = Form.useForm();
+  const [delegateForm] = Form.useForm();
   const [workflow, setWorkflow] = React.useState<ProductionWorkflow | null>(
     null,
   );
@@ -96,12 +122,32 @@ export default function AgentOpsPage() {
   const [runSnapshot, setRunSnapshot] =
     React.useState<AgenticRunSnapshot | null>(null);
   const [runOptions, setRunOptions] = React.useState<AgenticRunOption[]>([]);
+  const [runCenter, setRunCenter] = React.useState<any[]>([]);
   const [artifactThreadId, setArtifactThreadId] = React.useState("");
   const [artifactLoading, setArtifactLoading] = React.useState(false);
   const [runOptionsLoading, setRunOptionsLoading] = React.useState(false);
   const [selectedBadCase, setSelectedBadCase] =
     React.useState<AgentBadCase | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [governanceModels, setGovernanceModels] = React.useState<any[]>([]);
+  const [governancePlugins, setGovernancePlugins] = React.useState<any[]>([]);
+  const [governanceWorkflows, setGovernanceWorkflows] = React.useState<any[]>([]);
+  const [evaluationCases, setEvaluationCases] = React.useState<any[]>([]);
+  const [knowledgeBaseProfiles, setKnowledgeBaseProfiles] = React.useState<any[]>([]);
+  const [retrievalQuery, setRetrievalQuery] = React.useState("");
+  const [retrievalProfileKey, setRetrievalProfileKey] = React.useState("general");
+  const [retrievalDebug, setRetrievalDebug] = React.useState<any>(null);
+  const [governanceLoading, setGovernanceLoading] = React.useState(false);
+  const [collaborationSops, setCollaborationSops] = React.useState<any[]>([]);
+  const [collaborationMessages, setCollaborationMessages] = React.useState<any[]>([]);
+  const [artifactDependencies, setArtifactDependencies] = React.useState<any[]>([]);
+  const [decisionRecords, setDecisionRecords] = React.useState<any[]>([]);
+  const [collaborationReplay, setCollaborationReplay] = React.useState<any>(null);
+  const [collaborationConflicts, setCollaborationConflicts] = React.useState<any[]>([]);
+  const [agentTasks, setAgentTasks] = React.useState<any[]>([]);
+  const [collaborationLoading, setCollaborationLoading] = React.useState(false);
+  const [runtimeEvents, setRuntimeEvents] = React.useState<any[]>([]);
+  const [runtimeMetrics, setRuntimeMetrics] = React.useState<Record<string, number>>({});
 
   const loadBadCases = React.useCallback(async () => {
     try {
@@ -148,6 +194,14 @@ export default function AgentOpsPage() {
       setArtifactLoading(false);
     }
   };
+  const loadRunCenter = React.useCallback(async () => {
+    try {
+      const result = await getAgentRunCenter();
+      setRunCenter(unwrapData<any[]>(result) ?? []);
+    } catch {
+      message.error("运行中心加载失败，请检查 Agent Backend 服务");
+    }
+  }, []);
   const handleRetryRun = async () => {
     if (!runSnapshot?.available) return;
     setArtifactLoading(true);
@@ -163,10 +217,10 @@ export default function AgentOpsPage() {
   };
 
   React.useEffect(() => {
-    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions()]).catch(
+    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunCenter()]).catch(
       () => undefined,
     );
-  }, [loadBadCases, loadRunOptions, loadTraces]);
+  }, [loadBadCases, loadRunCenter, loadRunOptions, loadTraces]);
 
   React.useEffect(() => {
     if (workflow?.status !== "running") return;
@@ -184,6 +238,100 @@ export default function AgentOpsPage() {
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [workflow, workflowForm]);
+
+  const loadGovernance = React.useCallback(async () => {
+    setGovernanceLoading(true);
+    try {
+      const [models, plugins, workflows, cases, profiles] = await Promise.all([
+        getGovernanceModels(),
+        getGovernancePlugins(),
+        getGovernanceWorkflows(),
+        getGovernanceEvaluationCases(),
+        getKnowledgeBaseProfiles(),
+      ]);
+      setGovernanceModels(unwrapData<any[]>(models) ?? []);
+      setGovernancePlugins(unwrapData<any[]>(plugins) ?? []);
+      setGovernanceWorkflows(unwrapData<any[]>(workflows) ?? []);
+      setEvaluationCases(unwrapData<any[]>(cases) ?? []);
+      setKnowledgeBaseProfiles(unwrapData<any[]>(profiles) ?? []);
+    } catch {
+      message.error("平台治理数据加载失败，请检查 Agent Backend 服务");
+    } finally {
+      setGovernanceLoading(false);
+    }
+  }, []);
+
+  const handleCloneWorkflow = async (record: any) => {
+    const key = window.prompt("请输入副本 Key", `${record.key}-copy`);
+    if (!key?.trim()) return;
+    try {
+      await cloneGovernanceWorkflow(record.id, { key: key.trim(), name: `${record.name}（副本）` });
+      message.success("工作流副本已创建");
+      await loadGovernance();
+    } catch {
+      message.error("工作流复制失败，请检查 Key 是否重复");
+    }
+  };
+
+  const handleRegisterKnowledgeBase = async () => {
+    const values = await knowledgeBaseForm.validateFields();
+    setGovernanceLoading(true);
+    try {
+      await registerKnowledgeBaseProfile(values);
+      message.success("知识库配置已保存，后续入库和问答会按配置生效");
+      knowledgeBaseForm.resetFields();
+      await loadGovernance();
+    } finally {
+      setGovernanceLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (history.location.pathname.endsWith("/governance")) {
+      void loadGovernance();
+    }
+  }, [loadGovernance]);
+
+  const loadCollaboration = React.useCallback(async () => {
+    setCollaborationLoading(true);
+    try {
+      const [sops, messages, dependencies, decisions, tasks, events, metrics] = await Promise.all([
+        getCollaborationSops(), getCollaborationMessages(), getArtifactDependencies(), getDecisionRecords(), getAgentTasks(), getRuntimeEvents(), getRuntimeEventMetrics(),
+      ]);
+      setCollaborationSops(unwrapData<any[]>(sops) ?? []);
+      setCollaborationMessages(unwrapData<any[]>(messages) ?? []);
+      setArtifactDependencies(unwrapData<any[]>(dependencies) ?? []);
+      setDecisionRecords(unwrapData<any[]>(decisions) ?? []);
+      setAgentTasks(unwrapData<any[]>(tasks) ?? []);
+      setRuntimeEvents(unwrapData<any[]>(events) ?? []);
+      setRuntimeMetrics(unwrapData<Record<string, number>>(metrics) ?? {});
+    } catch { message.error("协作编排数据加载失败，请检查 Agent Backend 服务"); }
+    finally { setCollaborationLoading(false); }
+  }, []);
+
+  React.useEffect(() => {
+    if (history.location.pathname.endsWith("/collaboration")) void loadCollaboration();
+  }, [loadCollaboration]);
+
+  const handleCreateDecision = async () => {
+    const values = await decisionForm.validateFields();
+    try {
+      await createDecisionRecord({ ...values, conflicts: values.conflicts ? values.conflicts.split("\n").filter(Boolean) : [], options: values.options ? values.options.split("\n").filter(Boolean) : [] });
+      decisionForm.resetFields();
+      message.success("Decision Record 已保存");
+      await loadCollaboration();
+    } catch { message.error("Decision Record 保存失败"); }
+  };
+
+  const handleDelegateTask = async () => {
+    const values = await delegateForm.validateFields();
+    try {
+      await delegateAgentTask(values);
+      delegateForm.resetFields();
+      message.success("Agent 子任务已受控委派");
+      await loadCollaboration();
+    } catch { message.error("Agent 子任务委派失败"); }
+  };
 
   const handleStartWorkflow = async () => {
     const values = await workflowForm.validateFields();
@@ -294,6 +442,15 @@ export default function AgentOpsPage() {
                 { value: "auto", label: "普通任务：自动流转" },
                 { value: "risk_based", label: "按风险审批" },
                 { value: "required", label: "全部岗位人工审批" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="协作策略" name="processType" initialValue="sequential">
+            <Select
+              options={[
+                { value: "sequential", label: "Sequential：按依赖顺序" },
+                { value: "hierarchical", label: "Hierarchical：Manager 委派" },
+                { value: "conditional", label: "Conditional：按质量分支" },
               ]}
             />
           </Form.Item>
@@ -592,17 +749,324 @@ export default function AgentOpsPage() {
     </section>
   );
 
+  const governancePanel = (
+    <section className="agent-ops-panel">
+      <Alert
+        showIcon
+        type="info"
+        title="平台治理"
+        description="管理当前项目的工作流版本、模型与工具能力，并用同一套检索链路定位召回、重排和引用问题。"
+      />
+      <Button
+        icon={<ReloadOutlined />}
+        loading={governanceLoading}
+        onClick={() => void loadGovernance()}
+        style={{ margin: "16px 0" }}
+      >
+        刷新治理数据
+      </Button>
+      <div className="agent-ops-form-grid">
+        <Card title={`模型注册（${governanceModels.length}）`} size="small">
+          <Table
+            size="small"
+            rowKey={(row) => row.id ?? `${row.provider}-${row.model}`}
+            pagination={false}
+            dataSource={governanceModels}
+            columns={[
+              { title: "提供方", dataIndex: "provider" },
+              { title: "模型", dataIndex: "model" },
+              { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+              { title: "降级模型", dataIndex: "fallbackModel", render: (value) => value || "-" },
+            ]}
+          />
+        </Card>
+        <Card title={`工具／插件注册（${governancePlugins.length}）`} size="small">
+          <Table
+            size="small"
+            rowKey={(row) => row.id ?? row.key}
+            pagination={false}
+            dataSource={governancePlugins}
+            columns={[
+              { title: "标识", dataIndex: "key" },
+              { title: "类型", dataIndex: "type" },
+              { title: "版本", dataIndex: "version" },
+              { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+            ]}
+          />
+        </Card>
+      </div>
+      <Card title="工作流版本与回滚" size="small" style={{ marginTop: 16 }}>
+        <Table
+          size="small"
+          rowKey="id"
+          pagination={false}
+          dataSource={governanceWorkflows}
+          columns={[
+            { title: "工作流", dataIndex: "name" },
+            { title: "Key", dataIndex: "key" },
+            { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+              { title: "当前版本", dataIndex: "activeVersion", render: (value) => value || "-" },
+              {
+                title: "操作",
+                render: (_, record) => <Button size="small" onClick={() => void handleCloneWorkflow(record)}>复制模板</Button>,
+              },
+          ]}
+        />
+      </Card>
+      <Card title={`知识库配置（${knowledgeBaseProfiles.length}）`} size="small" style={{ marginTop: 16 }}>
+        <Form form={knowledgeBaseForm} layout="inline" style={{ marginBottom: 16 }}>
+          <Form.Item name="key" rules={[{ required: true, message: "请输入 Key" }]}>
+            <Input placeholder="项目 Key 或文档类型" />
+          </Form.Item>
+          <Form.Item name="name" rules={[{ required: true, message: "请输入名称" }]}>
+            <Input placeholder="知识库名称" />
+          </Form.Item>
+          <Form.Item name="documentType" initialValue="general">
+            <Select style={{ width: 130 }} options={["prd", "api", "design", "test", "config", "general"].map((value) => ({ value, label: value }))} />
+          </Form.Item>
+          <Form.Item name="chunkSize" initialValue={500}>
+            <InputNumber min={200} max={4000} addonBefore="Chunk" />
+          </Form.Item>
+          <Form.Item name="chunkOverlap" initialValue={50}>
+            <InputNumber min={0} max={1000} addonBefore="Overlap" />
+          </Form.Item>
+          <Button type="primary" loading={governanceLoading} onClick={() => void handleRegisterKnowledgeBase()}>
+            保存配置
+          </Button>
+        </Form>
+        <Table
+          size="small"
+          rowKey="id"
+          pagination={false}
+          dataSource={knowledgeBaseProfiles}
+          columns={[
+            { title: "配置", dataIndex: "name" },
+            { title: "Key", dataIndex: "key" },
+            { title: "文档类型", dataIndex: "documentType" },
+            { title: "Chunk", render: (_, row) => `${row.chunkSize}／${row.chunkOverlap}` },
+            { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+          ]}
+        />
+      </Card>
+      <Card title="评测集（Bad Case 审核通过后沉淀）" size="small" style={{ marginTop: 16 }}>
+        <Table
+          size="small"
+          rowKey="id"
+          pagination={{ pageSize: 5 }}
+          dataSource={evaluationCases}
+          columns={[
+            { title: "问题", dataIndex: "query", ellipsis: true },
+            { title: "期望答案", dataIndex: "expectedAnswer", ellipsis: true },
+            { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+          ]}
+        />
+      </Card>
+      <Card title="检索调试" size="small" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Select
+            value={retrievalProfileKey}
+            onChange={setRetrievalProfileKey}
+            style={{ width: 180 }}
+            options={knowledgeBaseProfiles.map((profile) => ({ value: profile.key, label: profile.name }))}
+          />
+          <Input
+            value={retrievalQuery}
+            onChange={(event) => setRetrievalQuery(event.target.value)}
+            onPressEnter={() => {
+              if (retrievalQuery.trim()) {
+                void debugGovernanceRetrieval(retrievalQuery.trim(), undefined, retrievalProfileKey).then((result) =>
+                  setRetrievalDebug(unwrapData<any>(result)),
+                );
+              }
+            }}
+            placeholder="输入问题，查看关键词、语义、图谱、融合和重排结果"
+          />
+          <Button
+            type="primary"
+            disabled={!retrievalQuery.trim()}
+            onClick={() => {
+              void debugGovernanceRetrieval(retrievalQuery.trim(), undefined, retrievalProfileKey).then((result) =>
+                setRetrievalDebug(unwrapData<any>(result)),
+              );
+            }}
+          >
+            调试检索
+          </Button>
+        </div>
+        {retrievalDebug && (
+          <>
+            <Descriptions
+              column={3}
+              style={{ marginTop: 16 }}
+              items={[
+                { key: "profile", label: "检索配置", children: retrievalDebug.profile?.name ?? "-" },
+                { key: "count", label: "最终片段", children: retrievalDebug.count ?? 0 },
+                { key: "time", label: "生成时间", children: retrievalDebug.generatedAt ?? "-" },
+              ]}
+            />
+            <Collapse
+              items={[
+                { key: "diagnostics", label: "诊断信息（召回／融合／重排）", children: <pre>{JSON.stringify(retrievalDebug.diagnostics, null, 2)}</pre> },
+                { key: "chunks", label: "最终证据片段", children: <pre>{JSON.stringify(retrievalDebug.chunks, null, 2)}</pre> },
+              ]}
+            />
+          </>
+        )}
+      </Card>
+    </section>
+  );
+
+  const runCenterPanel = (
+    <section className="agent-ops-panel">
+      <Alert
+        showIcon
+        type="info"
+        title="Agent 运行中心"
+        description="集中查看每次问答的路由、状态、动作、重试和估算成本；局部重跑会复用原 Thread，详细交接物仍在 Artifact 审计中查看。"
+      />
+      <Button
+        icon={<ReloadOutlined />}
+        onClick={() => void loadRunCenter()}
+        style={{ margin: "16px 0" }}
+      >
+        刷新运行记录
+      </Button>
+      <Table
+        rowKey="id"
+        dataSource={runCenter}
+        pagination={{ pageSize: 10 }}
+        expandable={{
+          expandedRowRender: (record) => (
+            <Descriptions
+              size="small"
+              column={3}
+              items={[
+                { key: "thread", label: "Thread", children: record.threadId || "-" },
+                { key: "node", label: "当前节点", children: record.currentNode || "-" },
+                { key: "max", label: "最大步数", children: record.maxSteps ?? "-" },
+                { key: "approval", label: "审批标记", children: record.requiresApproval ? "需要审批" : "无需审批" },
+                { key: "created", label: "开始时间", children: record.createdAt || "-" },
+                { key: "finished", label: "结束时间", children: record.finishedAt || "-" },
+                { key: "summary", label: "结果摘要", span: 3, children: record.resultSummary || record.errorMessage || "-" },
+              ]}
+            />
+          ),
+        }}
+        columns={[
+          { title: "运行 ID", dataIndex: "id", ellipsis: true },
+          { title: "模式", dataIndex: "mode" },
+          { title: "路由", dataIndex: "route", render: (value) => value || "-" },
+          {
+            title: "状态",
+            dataIndex: "status",
+            render: (value) => <Tag color={value === "completed" ? "success" : value === "failed" ? "error" : "processing"}>{value}</Tag>,
+          },
+          { title: "动作", dataIndex: "actionCount" },
+          { title: "重试", dataIndex: "retryCount" },
+          { title: "估算成本", dataIndex: "costUsd", render: (value) => `$${Number(value ?? 0).toFixed(4)}` },
+          {
+            title: "操作",
+            render: (_, record) => (
+              <Button
+                size="small"
+                disabled={record.status === "running"}
+                onClick={() =>
+                  void retryAgentRunRecord(record.id)
+                    .then(() => {
+                      message.success("已创建重跑任务");
+                      return loadRunCenter();
+                    })
+                    .catch(() => message.error("重跑失败，请检查 Redis 和模型服务"))
+                }
+              >
+                局部重跑
+              </Button>
+            ),
+          },
+        ]}
+      />
+    </section>
+  );
+
+  const collaborationPanel = (
+    <section className="agent-ops-panel">
+      <Alert showIcon type="info" title="多 Agent 协作编排" description="把角色 Prompt 固化为 SOP，把上下游交接固化为结构化消息，把 Artifact 依赖和冲突决策纳入同一条可回放链路。" />
+      <Button icon={<ReloadOutlined />} loading={collaborationLoading} onClick={() => void loadCollaboration()} style={{ margin: "16px 0" }}>刷新协作数据</Button>
+      <Card title={`Agent SOP（${collaborationSops.length}）`} size="small">
+        <Table size="small" rowKey="key" pagination={false} dataSource={collaborationSops} columns={[
+          { title: "角色", dataIndex: "role" }, { title: "SOP", dataIndex: "name" }, { title: "版本", dataIndex: "version" }, { title: "最大步数", dataIndex: "maxSteps" },
+          { title: "输入契约", dataIndex: "inputContract", render: (value) => JSON.stringify(value) }, { title: "输出契约", dataIndex: "outputContract", render: (value) => JSON.stringify(value) },
+        ]} />
+      </Card>
+      <Card title={`Task 看板（${agentTasks.length}）`} size="small" style={{ marginTop: 16 }}>
+        <Table size="small" rowKey="id" pagination={{ pageSize: 8 }} dataSource={agentTasks} columns={[
+          { title: "任务", dataIndex: "title" }, { title: "角色", dataIndex: "role" }, { title: "Process", dataIndex: "processType" },
+          { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "completed" ? "success" : value === "waiting_approval" ? "warning" : value === "failed" ? "error" : "processing"}>{value}</Tag> },
+          { title: "重试", dataIndex: "retryCount" }, { title: "产物", dataIndex: "outputArtifactId", render: (value) => value || "-" },
+          { title: "操作", render: (_, record) => <Button size="small" disabled={!['failed', 'waiting_approval'].includes(record.status)} onClick={() => void retryAgentTask(record.id).then(() => { message.success("Task 已重新排队"); return loadCollaboration(); }).catch(() => message.error("Task 重跑失败"))}>单任务重跑</Button> },
+        ]} />
+      </Card>
+      <Card title="受控委派（Agent as Tool）" size="small" style={{ marginTop: 16 }}>
+        <Form form={delegateForm} layout="inline">
+          <Form.Item name="threadId" rules={[{ required: true, message: "请输入 Thread ID" }]}><Input placeholder="Thread ID" /></Form.Item>
+          <Form.Item name="runId"><Input placeholder="Run ID（绑定委派预算，可选）" /></Form.Item>
+          <Form.Item name="parentTaskId"><Input placeholder="父任务 ID（可选）" /></Form.Item>
+          <Form.Item name="role" rules={[{ required: true, message: "请输入角色" }]}><Input placeholder="目标 Agent 角色" /></Form.Item>
+          <Form.Item name="title" rules={[{ required: true, message: "请输入任务标题" }]}><Input placeholder="子任务标题" /></Form.Item>
+          <Form.Item name="description" rules={[{ required: true, message: "请输入任务描述" }]}><Input placeholder="任务描述" /></Form.Item>
+          <Button type="primary" onClick={() => void handleDelegateTask()}>委派子任务</Button>
+        </Form>
+      </Card>
+      <Card title={`运行事件流（${runtimeEvents.length}）`} size="small" style={{ marginTop: 16 }}>
+        <Descriptions size="small" bordered column={4} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="事件总数">{runtimeMetrics.total ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="工具调用">{runtimeMetrics.toolCalls ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="委派次数">{runtimeMetrics.delegations ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="预算超限">{runtimeEvents.filter((item) => item.eventType === "budget.exceeded").length}</Descriptions.Item>
+        </Descriptions>
+        <Table size="small" rowKey="id" pagination={{ pageSize: 8 }} dataSource={runtimeEvents.slice().reverse()} columns={[
+          { title: "序号", dataIndex: "sequence" }, { title: "事件", dataIndex: "eventType" }, { title: "执行者", dataIndex: "actor" }, { title: "目标", dataIndex: "target", render: (value) => value || "-" }, { title: "时间", dataIndex: "createdAt" },
+        ]} />
+      </Card>
+      <div className="agent-ops-form-grid" style={{ marginTop: 16 }}>
+        <Card title={`结构化交接消息（${collaborationMessages.length}）`} size="small"><Table size="small" rowKey="id" pagination={{ pageSize: 5 }} dataSource={collaborationMessages} columns={[{ title: "来源", dataIndex: "fromRole" }, { title: "目标", dataIndex: "toRole" }, { title: "主题", dataIndex: "subject" }, { title: "类型", dataIndex: "messageType" }]} /></Card>
+        <Card title={`Artifact 依赖（${artifactDependencies.length}）`} size="small"><Table size="small" rowKey="id" pagination={{ pageSize: 5 }} dataSource={artifactDependencies} columns={[{ title: "产物", dataIndex: "artifactId" }, { title: "依赖", dataIndex: "dependsOnArtifactId" }, { title: "关系", dataIndex: "relation" }]} /></Card>
+      </div>
+      <Card title="Decision Record（冲突与最终决策）" size="small" style={{ marginTop: 16 }}>
+        <Form form={decisionForm} layout="inline" style={{ marginBottom: 16 }}>
+          <Form.Item name="threadId" rules={[{ required: true, message: "请输入 Thread ID" }]}><Input placeholder="Thread ID" /></Form.Item>
+          <Form.Item name="title" rules={[{ required: true, message: "请输入决策标题" }]}><Input placeholder="决策标题" /></Form.Item>
+          <Form.Item name="conflicts"><Input.TextArea placeholder="冲突项，每行一条" autoSize={{ minRows: 1, maxRows: 3 }} /></Form.Item>
+          <Form.Item name="options"><Input.TextArea placeholder="候选方案，每行一条" autoSize={{ minRows: 1, maxRows: 3 }} /></Form.Item>
+          <Button type="primary" onClick={() => void handleCreateDecision()}>保存决策</Button>
+        </Form>
+        <Table size="small" rowKey="id" pagination={{ pageSize: 5 }} dataSource={decisionRecords} columns={[{ title: "标题", dataIndex: "title" }, { title: "Thread", dataIndex: "threadId" }, { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> }, { title: "冲突", dataIndex: "conflicts", render: (value) => Array.isArray(value) ? value.join("；") || "-" : "-" }]} />
+      </Card>
+      <Card title="项目回放" size="small" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 8 }}><Select showSearch style={{ width: 360 }} placeholder="选择 Agentic 会话" options={runOptions.map((item) => ({ value: item.threadId, label: `${item.threadId} · ${item.mode}` }))} onChange={(value) => void Promise.all([getCollaborationReplay(value), getCollaborationConflicts(value)]).then(([replay, conflicts]) => { setCollaborationReplay(unwrapData<any>(replay)); setCollaborationConflicts(unwrapData<any[]>(conflicts) ?? []); }).catch(() => message.error("回放加载失败"))} /><Button icon={<ReloadOutlined />} onClick={() => void loadRunOptions()}>刷新会话</Button></div>
+        {collaborationConflicts.length > 0 && <Alert style={{ marginTop: 16 }} showIcon type="warning" title={`检测到 ${collaborationConflicts.length} 个协作冲突`} description={<pre>{JSON.stringify(collaborationConflicts, null, 2)}</pre>} />}
+        {collaborationReplay && <Collapse style={{ marginTop: 16 }} items={[{ key: "run", label: "运行与动作", children: <pre>{JSON.stringify({ run: collaborationReplay.run, actions: collaborationReplay.actions }, null, 2)}</pre> }, { key: "artifacts", label: "产物与依赖", children: <pre>{JSON.stringify({ artifacts: collaborationReplay.artifacts, dependencies: collaborationReplay.dependencies }, null, 2)}</pre> }, { key: "messages", label: "交接消息与决策", children: <pre>{JSON.stringify({ messages: collaborationReplay.messages, decisions: collaborationReplay.decisions }, null, 2)}</pre> }]} />}
+      </Card>
+    </section>
+  );
+
   return (
     <ModulePage
       activeKey={
         history.location.pathname.endsWith("/bad-cases")
           ? "bad-cases"
+          : history.location.pathname.endsWith("/run-center")
+            ? "run-center"
+          : history.location.pathname.endsWith("/collaboration")
+            ? "collaboration"
           : history.location.pathname.endsWith("/evals")
             ? "evals"
           : history.location.pathname.endsWith("/traces")
             ? "traces"
             : history.location.pathname.endsWith("/artifacts")
               ? "artifacts"
+              : history.location.pathname.endsWith("/governance")
+                ? "governance"
               : "workspace"
       }
       navItems={agentOpsNav}
@@ -617,12 +1081,18 @@ export default function AgentOpsPage() {
           activeKey={
             history.location.pathname.endsWith("/bad-cases")
               ? "bad-cases"
+              : history.location.pathname.endsWith("/run-center")
+                ? "run-center"
+              : history.location.pathname.endsWith("/collaboration")
+                ? "collaboration"
               : history.location.pathname.endsWith("/evals")
                 ? "eval"
               : history.location.pathname.endsWith("/traces")
                   ? "traces"
                   : history.location.pathname.endsWith("/artifacts")
                     ? "artifacts"
+                    : history.location.pathname.endsWith("/governance")
+                      ? "governance"
                   : "workflow"
           }
           onChange={(key) => {
@@ -630,14 +1100,20 @@ export default function AgentOpsPage() {
               workflow: "/agent-ops",
               eval: "/agent-ops/evals",
               "bad-cases": "/agent-ops/bad-cases",
+              "run-center": "/agent-ops/run-center",
+              collaboration: "/agent-ops/collaboration",
               traces: "/agent-ops/traces",
               artifacts: "/agent-ops/artifacts",
+              governance: "/agent-ops/governance",
             };
             history.push(routes[key] ?? "/agent-ops");
           }}
           items={[
             { key: "workflow", label: "产研运工作流", children: workflowPanel },
+            { key: "run-center", label: "运行中心", children: runCenterPanel },
+            { key: "collaboration", label: "协作编排", children: collaborationPanel },
             { key: "eval", label: "Agent Evals", children: evalPanel },
+            { key: "governance", label: "平台治理", children: governancePanel },
             {
               key: "bad-cases",
               label: `Bad Case（${badCases.length}）`,

@@ -27,6 +27,8 @@ import {
 } from './production-workflow.plan';
 import { ProductionWorkflowTools } from './production-workflow.tools';
 import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
+import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
+import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -91,6 +93,8 @@ export class ProductionWorkflowService {
     private readonly roleTools: ProductionWorkflowTools,
     private readonly artifacts: ArtifactsService,
     @Optional() private readonly langfuseProvider?: LangfuseProvider,
+    @Optional() private readonly collaboration?: AgentCollaborationService,
+    @Optional() private readonly tasks?: AgentTasksService,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
@@ -99,6 +103,7 @@ export class ProductionWorkflowService {
   async start(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
     const initialState = this.createInitialState(dto, userId, threadId);
+    await this.initializeTasks(initialState);
     const state = await this.app.invoke(initialState, this.config(threadId));
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
@@ -108,6 +113,7 @@ export class ProductionWorkflowService {
   startAsync(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
     const initialState = this.createInitialState(dto, userId, threadId);
+    void this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
     this.schedule(threadId, userId, () =>
       this.start({ ...dto, threadId }, userId),
@@ -186,6 +192,7 @@ export class ProductionWorkflowService {
       projectId: dto.projectId.trim(),
       userId,
       brief: dto.brief.trim(),
+      processType: dto.processType ?? 'sequential',
       currentRole: selectedRoles[0],
       selectedRoles,
       executionBatches: buildProductionExecutionBatches(selectedRoles),
@@ -208,6 +215,13 @@ export class ProductionWorkflowService {
       results: {},
       error: '',
     };
+  }
+
+  private async initializeTasks(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.tasks) return;
+    const existing = await this.tasks.list(state.threadId);
+    if (existing.length > 0) return;
+    await this.tasks.createPlan({ threadId: state.threadId, roles: state.selectedRoles, processType: state.processType });
   }
 
   private schedule(
@@ -372,6 +386,7 @@ export class ProductionWorkflowService {
     role: ProductionRole,
     state: ProductionWorkflowStateType,
   ): Promise<ProductionStageResult> {
+    await this.tasks?.updateForRole(state.threadId, role, { status: 'running' });
     const dependencies = dependenciesForProductionRole(
       role,
       state.selectedRoles,
@@ -442,6 +457,13 @@ export class ProductionWorkflowService {
           state,
           result,
         );
+        await this.recordRoleHandoff(state, result);
+        await this.tasks?.updateForRole(state.threadId, role, {
+          status: result.readyForApproval ? 'completed' : 'waiting_approval',
+          summary: result.summary,
+          outputArtifactId: result.generatedArtifact?.id,
+          approvalRequired: !result.readyForApproval,
+        });
         return result;
       } catch (error) {
         lastError = error as Error;
@@ -470,7 +492,34 @@ export class ProductionWorkflowService {
       state,
       degraded,
     );
+    await this.recordRoleHandoff(state, degraded);
+    await this.tasks?.updateForRole(state.threadId, role, {
+      status: 'waiting_approval',
+      summary: degraded.summary,
+      outputArtifactId: degraded.generatedArtifact?.id,
+      approvalRequired: true,
+      errorMessage: lastError?.message,
+    });
     return degraded;
+  }
+
+  private async recordRoleHandoff(
+    state: ProductionWorkflowStateType,
+    result: ProductionStageResult,
+  ): Promise<void> {
+    if (!this.collaboration) return;
+    const downstreamRoles = PRODUCTION_ROLES.filter((candidate) =>
+      dependenciesForProductionRole(candidate, state.selectedRoles).includes(result.role),
+    );
+    await Promise.all(downstreamRoles.map((toRole) => this.collaboration!.publishMessage({
+      threadId: state.threadId,
+      fromRole: result.role,
+      toRole,
+      messageType: 'artifact_handoff',
+      subject: `${result.role} → ${toRole} 交接`,
+      payload: { summary: result.summary, riskLevel: result.riskLevel, evidenceCoverage: result.evidenceCoverage, readyForApproval: result.readyForApproval },
+      artifactIds: result.generatedArtifact?.id ? [result.generatedArtifact.id] : [],
+    })));
   }
 
   private degradedRoleResult(

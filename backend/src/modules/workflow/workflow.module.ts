@@ -6,6 +6,8 @@ import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ProductionWorkflowTools } from './production-workflow.tools';
 import { ObservabilityModule } from '../../providers/observability/observability.module';
+import { AgentCollaborationModule } from '../agent-collaboration/agent-collaboration.module';
+import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
 
 @Module({
   imports: [
@@ -13,6 +15,8 @@ import { ObservabilityModule } from '../../providers/observability/observability
     KarpathyRagModule,
     ArtifactsModule,
     ObservabilityModule,
+    AgentCollaborationModule,
+    AgentTasksModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

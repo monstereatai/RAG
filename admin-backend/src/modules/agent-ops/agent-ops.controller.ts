@@ -96,6 +96,110 @@ export class AgentOpsController {
     return this.ragClient.retryAgentRun(threadId);
   }
 
+  @Get('run-center')
+  @RequirePermission('admin:qa-ops:read')
+  runCenter(@Query('limit') limit?: string) { return this.ragClient.getAgentRunCenter(Number(limit ?? 50)); }
+
+  @Get('run-center/:id')
+  @RequirePermission('admin:qa-ops:read')
+  runCenterDetail(@Param('id') id: string) { return this.ragClient.getAgentRunDetail(id); }
+
+  @Post('run-center/:id/retry')
+  @RequirePermission('admin:qa-ops:write')
+  retryRunRecord(@Param('id') id: string) { return this.ragClient.retryAgentRunRecord(id); }
+
+  @Get('governance/workflows')
+  @RequirePermission('admin:qa-ops:read')
+  governanceWorkflows(@Query('workspaceId') workspaceId?: string) { return this.ragClient.listGovernanceWorkflows(workspaceId); }
+
+  @Post('governance/workflows')
+  @RequirePermission('admin:qa-ops:write')
+  createGovernanceWorkflow(@Body() body: unknown) { return this.ragClient.createGovernanceWorkflow(body); }
+
+  @Post('governance/workflows/:id/publish')
+  @RequirePermission('admin:qa-ops:write')
+  publishGovernanceWorkflow(@Param('id') id: string, @Body('version') version: number) { return this.ragClient.publishGovernanceWorkflow(id, Number(version)); }
+
+  @Post('governance/workflows/:id/clone')
+  @RequirePermission('admin:qa-ops:write')
+  cloneGovernanceWorkflow(@Param('id') id: string, @Body() body: { key: string; name?: string }) { return this.ragClient.cloneGovernanceWorkflow(id, body); }
+
+  @Get('collaboration/sops')
+  @RequirePermission('admin:qa-ops:read')
+  collaborationSops() { return this.ragClient.listCollaborationSops(); }
+
+  @Get('collaboration/messages')
+  @RequirePermission('admin:qa-ops:read')
+  collaborationMessages(@Query('threadId') threadId?: string) { return this.ragClient.listCollaborationMessages(threadId); }
+
+  @Get('collaboration/dependencies')
+  @RequirePermission('admin:qa-ops:read')
+  artifactDependencies(@Query('threadId') threadId?: string) { return this.ragClient.listArtifactDependencies(threadId); }
+
+  @Get('collaboration/decisions')
+  @RequirePermission('admin:qa-ops:read')
+  decisionRecords(@Query('threadId') threadId?: string) { return this.ragClient.listDecisionRecords(threadId); }
+
+  @Get('collaboration/conflicts/:threadId')
+  @RequirePermission('admin:qa-ops:read')
+  collaborationConflicts(@Param('threadId') threadId: string) { return this.ragClient.detectCollaborationConflicts(threadId); }
+
+  @Post('collaboration/decisions')
+  @RequirePermission('admin:qa-ops:write')
+  createDecisionRecord(@Body() body: unknown) { return this.ragClient.createDecisionRecord(body); }
+
+  @Get('collaboration/replay/:threadId')
+  @RequirePermission('admin:qa-ops:read')
+  collaborationReplay(@Param('threadId') threadId: string) { return this.ragClient.getCollaborationReplay(threadId); }
+
+  @Get('tasks')
+  @RequirePermission('admin:qa-ops:read')
+  agentTasks(@Query('threadId') threadId?: string) { return this.ragClient.listAgentTasks(threadId); }
+
+  @Post('tasks/:id/retry')
+  @RequirePermission('admin:qa-ops:write')
+  retryAgentTask(@Param('id') id: string) { return this.ragClient.retryAgentTask(id); }
+
+  @Post('tasks/delegate')
+  @RequirePermission('admin:qa-ops:write')
+  delegateAgentTask(@Body() body: unknown) { return this.ragClient.delegateAgentTask(body); }
+
+  @Get('runtime-events')
+  @RequirePermission('admin:qa-ops:read')
+  runtimeEvents(@Query('threadId') threadId?: string, @Query('runId') runId?: string) { return this.ragClient.listRuntimeEvents(threadId, runId); }
+
+  @Get('runtime-events/metrics')
+  @RequirePermission('admin:qa-ops:read')
+  runtimeEventMetrics(@Query('threadId') threadId?: string) { return this.ragClient.getRuntimeEventMetrics(threadId); }
+
+  @Get('governance/plugins')
+  @RequirePermission('admin:qa-ops:read')
+  governancePlugins() { return this.ragClient.listPlatformPlugins(); }
+
+  @Get('governance/models')
+  @RequirePermission('admin:qa-ops:read')
+  governanceModels() { return this.ragClient.listPlatformModels(); }
+
+  @Get('governance/evaluation-cases')
+  @RequirePermission('admin:qa-ops:read')
+  governanceEvaluationCases(@Query('workspaceId') workspaceId?: string) { return this.ragClient.listEvaluationCases(workspaceId); }
+
+  @Post('governance/evaluation-cases')
+  @RequirePermission('admin:qa-ops:write')
+  createGovernanceEvaluationCase(@Body() body: unknown) { return this.ragClient.createEvaluationCase(body); }
+
+  @Get('governance/knowledge-base-profiles')
+  @RequirePermission('admin:qa-ops:read')
+  knowledgeBaseProfiles(@Query('workspaceId') workspaceId?: string) { return this.ragClient.listKnowledgeBaseProfiles(workspaceId); }
+
+  @Post('governance/knowledge-base-profiles')
+  @RequirePermission('admin:qa-ops:write')
+  registerKnowledgeBaseProfile(@Body() body: unknown) { return this.ragClient.registerKnowledgeBaseProfile(body); }
+
+  @Get('governance/retrieval-debug')
+  @RequirePermission('admin:qa-ops:read')
+  governanceRetrievalDebug(@Query('query') query: string, @Query('scope') scope?: string, @Query('knowledgeBaseKey') knowledgeBaseKey?: string) { return this.ragClient.debugRetrieval(query, scope, knowledgeBaseKey); }
+
   private userId(req: Request): string {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;

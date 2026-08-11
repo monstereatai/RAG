@@ -2,12 +2,14 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
+import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
 import { ChatFeedbackDto } from './chat-feedback.dto';
 import { BadCaseFlywheelService } from '../../rag/prompts/bad-case-flywheel.service';
 import { ConversationService } from './conversation.service';
@@ -29,6 +31,9 @@ export class RagFeedbackService {
     private readonly queryLogRepo: Repository<QueryLogEntity>,
     private readonly badCaseFlywheel: BadCaseFlywheelService,
     private readonly conversationService: ConversationService,
+    @Optional()
+    @InjectRepository(EvaluationCaseEntity)
+    private readonly evaluationCaseRepo?: Repository<EvaluationCaseEntity>,
   ) {}
 
   async create(
@@ -136,7 +141,7 @@ export class RagFeedbackService {
   async review(
     id: string,
     patch: ReviewRagFeedback,
-  ): Promise<RagFeedbackEntity & { indexing?: Record<string, unknown> }> {
+  ): Promise<RagFeedbackEntity & { indexing?: Record<string, unknown>; evaluationCaseId?: string }> {
     const entity = await this.feedbackRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException(`feedback ${id} not found`);
     entity.status = patch.status ?? entity.status;
@@ -163,6 +168,29 @@ export class RagFeedbackService {
           indexing: { indexed: false, reason: 'query_log_missing' },
         };
       }
+      let evaluationCaseId: string | undefined;
+      if (this.evaluationCaseRepo) {
+        const existing = await this.evaluationCaseRepo.findOne({
+          where: { sourceFeedbackId: saved.id, status: 'active' },
+        });
+        const evaluationCase = existing ?? this.evaluationCaseRepo.create({
+          id: randomUUID(),
+          sourceFeedbackId: saved.id,
+          workspaceId: 'default',
+          query: queryLog.query,
+          expectedAnswer: correctedAnswer,
+          expectedReferences: queryLog.retrievalSnapshot || '[]',
+          status: 'active',
+          createdBy: saved.reviewedBy ?? null,
+        });
+        if (existing) {
+          evaluationCase.expectedAnswer = correctedAnswer;
+          evaluationCase.expectedReferences = queryLog.retrievalSnapshot || '[]';
+          evaluationCase.createdBy = saved.reviewedBy ?? existing.createdBy;
+        }
+        const savedCase = await this.evaluationCaseRepo.save(evaluationCase);
+        evaluationCaseId = savedCase.id;
+      }
       let indexing: Record<string, unknown>;
       try {
         indexing = await this.badCaseFlywheel.indexApproved({
@@ -179,7 +207,7 @@ export class RagFeedbackService {
           error: error instanceof Error ? error.message : String(error),
         };
       }
-      return { ...saved, indexing };
+      return { ...saved, indexing, ...(evaluationCaseId ? { evaluationCaseId } : {}) };
     }
     let indexing: Record<string, unknown>;
     try {
@@ -190,6 +218,12 @@ export class RagFeedbackService {
         reason: 'remove_failed',
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+    if (this.evaluationCaseRepo) {
+      await this.evaluationCaseRepo.update(
+        { sourceFeedbackId: saved.id, status: 'active' },
+        { status: 'disabled' },
+      );
     }
     return { ...saved, indexing };
   }

@@ -41,6 +41,8 @@ import { TracingService } from '../../modules/tracing/tracing.service';
 import { GraphService } from '../../modules/graph/graph.service';
 import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
+import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Agentic RAG 服务
@@ -85,6 +87,9 @@ export class AgenticRagService {
     @Optional()
     @InjectRepository(AgenticStructuredArtifactEntity)
     private readonly structuredArtifactRepository?: Repository<AgenticStructuredArtifactEntity>,
+    @Optional()
+    @InjectRepository(ArtifactDependencyEntity)
+    private readonly artifactDependencyRepository?: Repository<ArtifactDependencyEntity>,
   ) {
     this.confidenceThreshold = this.numberConfig(
       'agentic.confidenceThreshold',
@@ -1642,7 +1647,29 @@ export class AgenticRagService {
           sourceDocIds: sourceDocIds.length > 0 ? JSON.stringify(sourceDocIds) : null,
         });
       });
-    if (rows.length > 0) await this.structuredArtifactRepository.save(rows);
+    if (rows.length > 0) {
+      await this.structuredArtifactRepository.save(rows);
+      if (this.artifactDependencyRepository) {
+        const byType = new Map(rows.map((row) => [row.type, row.artifactId]));
+        const dependencyTypes: Record<string, string[]> = {
+          assumption_register: ['requirement_brief'],
+          claim_evidence_matrix: ['requirement_brief'],
+          solution_brief: ['requirement_brief', 'assumption_register', 'claim_evidence_matrix'],
+          api_contract: ['solution_brief'],
+          event_tracking_plan: ['solution_brief'],
+          test_plan: ['api_contract', 'event_tracking_plan', 'solution_brief'],
+          acceptance_checklist: ['test_plan', 'risk_register'],
+          risk_register: ['solution_brief'],
+          rollout_plan: ['acceptance_checklist', 'risk_register'],
+          code_context_pack: ['solution_brief', 'api_contract', 'event_tracking_plan', 'test_plan'],
+        };
+        const links = rows.flatMap((row) => (dependencyTypes[row.type] ?? []).flatMap((type) => {
+          const dependsOnArtifactId = byType.get(type);
+          return dependsOnArtifactId ? [{ id: randomUUID(), threadId, artifactId: row.artifactId, dependsOnArtifactId, relation: 'input' }] : [];
+        }));
+        if (links.length > 0) await this.artifactDependencyRepository.save(links);
+      }
+    }
   }
 
   private observedNode(
