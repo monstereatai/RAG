@@ -1,4 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import {
@@ -37,6 +39,8 @@ import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { TracingService } from '../../modules/tracing/tracing.service';
 import { GraphService } from '../../modules/graph/graph.service';
+import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
+import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 
 /**
  * Agentic RAG 服务
@@ -78,6 +82,9 @@ export class AgenticRagService {
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
     @Optional() private readonly graphService?: GraphService,
+    @Optional()
+    @InjectRepository(AgenticStructuredArtifactEntity)
+    private readonly structuredArtifactRepository?: Repository<AgenticStructuredArtifactEntity>,
   ) {
     this.confidenceThreshold = this.numberConfig(
       'agentic.confidenceThreshold',
@@ -920,8 +927,8 @@ export class AgenticRagService {
       const artifacts = this.withAnswerArtifact(
         state,
         ans,
-        true,
-        1,
+        false,
+        0,
         '检索不足，使用模型兜底回答',
       );
       onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
@@ -1264,6 +1271,7 @@ export class AgenticRagService {
       configurable: { thread_id: threadId },
     });
     if (!tuple) {
+      const persistedArtifacts = await this.loadPersistedArtifacts(threadId);
       return {
         available: false,
         threadId,
@@ -1272,7 +1280,7 @@ export class AgenticRagService {
         query: null,
         route: null,
         subQuestions: [],
-        artifacts: [],
+        artifacts: persistedArtifacts,
         retrievalSufficient: null,
         retrievalReason: null,
         retryCount: null,
@@ -1281,6 +1289,14 @@ export class AgenticRagService {
     }
 
     const values = tuple.checkpoint.channel_values as Record<string, unknown>;
+    const checkpointArtifacts = this.isArtifacts(values.artifacts)
+      ? values.artifacts
+      : [];
+    const persistedArtifacts = await this.loadPersistedArtifacts(threadId);
+    const artifacts = [...checkpointArtifacts];
+    for (const artifact of persistedArtifacts) {
+      if (!artifacts.some((item) => item.id === artifact.id)) artifacts.push(artifact);
+    }
     return {
       available: true,
       threadId,
@@ -1293,7 +1309,7 @@ export class AgenticRagService {
       subQuestions: this.isSubQuestions(values.subQuestions)
         ? values.subQuestions
         : [],
-      artifacts: this.isArtifacts(values.artifacts) ? values.artifacts : [],
+      artifacts,
       retrievalSufficient:
         typeof values.retrievalSufficient === 'boolean'
           ? values.retrievalSufficient
@@ -1306,6 +1322,28 @@ export class AgenticRagService {
         typeof values.retryCount === 'number' ? values.retryCount : null,
       passed: typeof values.passed === 'boolean' ? values.passed : null,
     };
+  }
+
+  private async loadPersistedArtifacts(threadId: string): Promise<AgenticArtifact[]> {
+    if (!this.structuredArtifactRepository) return [];
+    const rows = await this.structuredArtifactRepository.find({
+      where: { threadId },
+      order: { createdAt: 'ASC' },
+    });
+    return rows.flatMap((row) => {
+      try {
+        return [{
+          id: row.artifactId,
+          type: row.type as AgenticArtifact['type'],
+          version: row.version as 1,
+          producer: row.producer,
+          createdAt: row.createdAt.toISOString(),
+          payload: JSON.parse(row.payload) as unknown,
+        }];
+      } catch {
+        return [];
+      }
+    });
   }
 
   /** 重新执行当前 Thread 的 Agentic 全链路，保留同一会话用于对比前后 Artifact。 */
@@ -1488,6 +1526,11 @@ export class AgenticRagService {
         retrievalReason: `${reason}；已使用模型兜底回答`,
         obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
       };
+      await this.persistStructuredArtifacts(
+        threadId,
+        userId,
+        buildStructuredDeliveryArtifacts(query, [], answer, false),
+      );
       onEvent?.({ type: 'retrieval', data: [] });
       onEvent?.({
         type: 'sufficiency',
@@ -1565,8 +1608,41 @@ export class AgenticRagService {
       retrievalReason: finalState.retrievalReason,
       obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
     };
+    await this.persistStructuredArtifacts(threadId, userId, finalState.artifacts);
     onEvent?.({ type: 'final', data: result });
     return result;
+  }
+
+  private async persistStructuredArtifacts(
+    threadId: string,
+    userId: string | undefined,
+    artifacts: AgenticArtifact[],
+  ): Promise<void> {
+    if (!this.structuredArtifactRepository || artifacts.length === 0) return;
+    const rows = artifacts
+      .filter((artifact) => artifact.type !== 'subquestion_plan' || artifact.payload)
+      .map((artifact) => {
+        const payload = this.recordOf(artifact.payload);
+        const sourceDocIds = Array.isArray(payload.sourceDocIds)
+          ? payload.sourceDocIds.filter((item): item is string => typeof item === 'string')
+          : [];
+        return this.structuredArtifactRepository!.create({
+          id: `${threadId}:${artifact.type}:${artifact.id}`.slice(0, 128),
+          threadId,
+          userId: userId ?? null,
+          artifactId: artifact.id,
+          type: artifact.type,
+          producer: artifact.producer,
+          version: artifact.version,
+          status:
+            typeof payload.status === 'string'
+              ? payload.status
+              : 'ready_for_review',
+          payload: JSON.stringify(artifact.payload),
+          sourceDocIds: sourceDocIds.length > 0 ? JSON.stringify(sourceDocIds) : null,
+        });
+      });
+    if (rows.length > 0) await this.structuredArtifactRepository.save(rows);
   }
 
   private observedNode(
@@ -1665,11 +1741,34 @@ export class AgenticRagService {
       'generate',
       payload,
     );
-    return [
+    const artifacts = [
       ...(state.artifacts ?? []).filter(
-        (item) => item.type !== 'answer_contract',
+        (item) =>
+          item.type !== 'answer_contract' &&
+          ![
+            'requirement_brief',
+            'assumption_register',
+            'claim_evidence_matrix',
+            'solution_brief',
+            'api_contract',
+            'event_tracking_plan',
+            'test_plan',
+            'acceptance_checklist',
+            'risk_register',
+            'rollout_plan',
+            'code_context_pack',
+          ].includes(item.type),
       ),
       artifact,
+    ];
+    return [
+      ...artifacts,
+      ...buildStructuredDeliveryArtifacts(
+        state.query,
+        state.retrievedChunks,
+        answer,
+        state.retrievalSufficient,
+      ),
     ];
   }
 

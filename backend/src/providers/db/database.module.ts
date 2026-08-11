@@ -18,6 +18,7 @@ import { RagFeedbackEntity } from './entities/rag-feedback.entity';
 import { GeneratedArtifactEntity } from './entities/generated-artifact.entity';
 import { ArtifactShareEntity } from './entities/artifact-share.entity';
 import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
+import { AgenticStructuredArtifactEntity } from './entities/agentic-structured-artifact.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -71,6 +72,7 @@ import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
             GeneratedArtifactEntity,
             ArtifactShareEntity,
             ArtifactAccessLogEntity,
+            AgenticStructuredArtifactEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -99,6 +101,7 @@ import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
       GeneratedArtifactEntity,
       ArtifactShareEntity,
       ArtifactAccessLogEntity,
+      AgenticStructuredArtifactEntity,
     ]),
   ],
   exports: [TypeOrmModule],

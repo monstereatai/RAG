@@ -7,6 +7,8 @@ import { PromptModule } from '../prompts/prompt.module';
 import { MetricsModule } from '../../modules/metrics/metrics.module';
 import { TracingModule } from '../../modules/tracing/tracing.module';
 import { GraphModule } from '../../modules/graph/graph.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 
 @Module({
   imports: [
@@ -17,6 +19,7 @@ import { GraphModule } from '../../modules/graph/graph.module';
     MetricsModule,
     TracingModule,
     GraphModule,
+    TypeOrmModule.forFeature([AgenticStructuredArtifactEntity]),
   ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],

@@ -109,7 +109,21 @@ export interface TraceSnapshot {
 
 export interface AgenticArtifact {
   id: string;
-  type: "subquestion_plan" | "evidence_bundle" | "answer_contract";
+  type:
+    | "subquestion_plan"
+    | "evidence_bundle"
+    | "answer_contract"
+    | "requirement_brief"
+    | "assumption_register"
+    | "claim_evidence_matrix"
+    | "solution_brief"
+    | "api_contract"
+    | "event_tracking_plan"
+    | "test_plan"
+    | "acceptance_checklist"
+    | "risk_register"
+    | "rollout_plan"
+    | "code_context_pack";
   version: number;
   producer: string;
   createdAt: string;

@@ -62,6 +62,7 @@
 - **六岗位生产工作流接入 LangFuse**：`ProductionWorkflowService` 现在为每次生产协作工作流创建 `agent.production.workflow` Trace，并为产品、设计、前端、后端、测试、运营阶段写入 Span／Generation／工具事件；记录项目、线程、工作流状态、审批、风险等级、证据覆盖、重试、降级和完成岗位。`LangfuseProvider` 增加工作流 Trace、显式 flush 和健康状态更新，普通问答 Trace 也会及时 flush；未启用 LangFuse 或单测未注入 Provider 时安全跳过。backend build、LangFuse Provider 与生产工作流定向测试通过。
 - **Agentic 子问题多路检索闭环**：Agentic 查询规划新增显式 `subQuestions` 状态，最多拆分 3 个子问题；每个子问题独立执行 Milvus 向量＋BM25／Elasticsearch Hybrid Search，空结果再走 BM25 降级；关系／多跳子问题按需调用 Neo4j GraphRAG，逐题执行证据充分性门禁，不足项分别触发 Web Search，最后按 chunk 去重、保留每题最低证据覆盖并统一 Rerank。新增 Agentic 检索定向回归，backend build 和 Agentic／Graph 定向测试通过；真实 GraphRAG／Bocha 效果仍依赖对应服务和 key。
 - **Autix 结构化交接模式落地**：Agentic 状态新增 `subquestion_plan`、`evidence_bundle`、`answer_contract` 三类 Artifact（结构化节点交接物），随 Redis Checkpointer 保存并通过 AG-UI `CUSTOM` 事件透出；生成后执行引用支持、子问题覆盖率和答案契约校验，契约不通过时进入已有受限 Reflection 重试门禁，不额外增加 LLM 调用。新增 Artifact／Critic 回归验证；backend build、Agentic 定向测试和 SSE 事件测试通过。
+- **Autix 风格结构化交付物补齐**：Agentic 生成后新增需求简报、假设登记、结论—证据矩阵、方案简报、接口契约、埋点方案、测试计划、验收清单、风险登记、发布计划和编码上下文包 11 类 Artifact；统一记录 Schema、状态、版本、证据和待确认事实，写入 `agentic_structured_artifacts` PostgreSQL 表，并在 Redis Checkpoint 过期后由 Agent Ops 恢复展示。新增结构化交付物单测；backend／admin 构建通过，数据库迁移已执行。
 - **Agent 运营 Artifact 闭环**：rag-backend 新增按 Thread 读取最新 Agentic Checkpoint 和重新执行接口；admin-backend 增加权限代理；Agent 运营后台新增「Artifact 审计」菜单，可查看子问题、证据包、答案契约、检索状态和重试次数，并支持重新执行同一 Agentic Thread。未新增数据库表，直接复用 Redis Checkpointer；backend／admin-backend／admin 构建及现有测试通过。
 - **Artifact 审计免手输 Thread**：会话摘要补齐实际 `mode`，Agent 运营服务新增最近 Agentic／Auto 会话候选接口；Artifact 审计页面自动加载会话下拉列表，选择问题后直接查看 Checkpoint，Thread ID 仅保留为高级排障入口。全量 backend／admin-backend 测试和三端构建通过。
 - **Artifact 审计空列表交互修复**：不再提前过滤没有 Checkpoint 的 Auto 会话，页面会自动选中最近会话并加载状态；没有 Agentic Checkpoint 时明确提示原因，不再要求用户先手输 Thread ID。
@@ -160,6 +161,10 @@
 > **七类生产闭环总模拟补齐**：新增 `backend npm run simulate:production-closure`，一次模拟真实业务数据验收、多实例高可用、多模态、安全合规、成本治理、生产运营和用户效果，并为钉钉、飞书／PagerDuty、企业 IAM／DLP、真实模型价格、视觉模型和 Kubernetes／死信队列保留明确接入注释。
 
 > **项目架构图补齐**：在 `docs/interview/功能步骤流程.md` 新增 Mermaid 总体架构图、分层讲解和一次问答时序图，覆盖入口、API、Simple／Auto／Agentic、多 Agent、混合检索、状态记忆、知识存储、模型工具、LangFuse／Prometheus 和告警通知。
+
+> **公开资料与模拟数据验证包补齐**：新增游戏营销公开资料采集与异步导入脚本，保留 4 个公开页面快照，并为 32 家用户指定游戏公司生成显式 `simulated` 脱敏模板；已验证采集、文档类型归一化、队列导入和检索索引链路。真实业务原件仍需后续替换。
+
+> **结构化交付物文档同步**：在 `docs/interview/功能步骤流程.md` 增加 11 类交付物的用户操作、状态流转、PostgreSQL 持久化、Redis 过期恢复、Agent Ops 审计和公开／模拟资料入库流程。
 
 ### P1：真实系统联调
 

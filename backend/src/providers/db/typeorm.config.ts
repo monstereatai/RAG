@@ -31,6 +31,7 @@ import { RagFeedbackEntity } from './entities/rag-feedback.entity';
 import { GeneratedArtifactEntity } from './entities/generated-artifact.entity';
 import { ArtifactShareEntity } from './entities/artifact-share.entity';
 import { ArtifactAccessLogEntity } from './entities/artifact-access-log.entity';
+import { AgenticStructuredArtifactEntity } from './entities/agentic-structured-artifact.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -59,6 +60,7 @@ export default new DataSource({
     GeneratedArtifactEntity,
     ArtifactShareEntity,
     ArtifactAccessLogEntity,
+    AgenticStructuredArtifactEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

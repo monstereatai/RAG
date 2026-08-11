@@ -64,6 +64,23 @@ const METRIC_LABELS: Record<string, string> = {
   human_handoff_rate: "人工接管",
 };
 
+const ARTIFACT_LABELS: Record<string, string> = {
+  subquestion_plan: "子问题计划",
+  evidence_bundle: "证据包",
+  answer_contract: "答案契约",
+  requirement_brief: "需求简报",
+  assumption_register: "假设登记",
+  claim_evidence_matrix: "声明证据矩阵",
+  solution_brief: "方案简报",
+  api_contract: "接口契约",
+  event_tracking_plan: "埋点方案",
+  test_plan: "测试计划",
+  acceptance_checklist: "验收清单",
+  risk_register: "风险登记",
+  rollout_plan: "上线计划",
+  code_context_pack: "AI Coding 上下文包",
+};
+
 export default function AgentOpsPage() {
   const [workflowForm] = Form.useForm();
   const [evalForm] = Form.useForm();
@@ -804,9 +821,9 @@ export default function AgentOpsPage() {
                       {!runSnapshot.available ? (
                         <Alert
                           showIcon
-                          type="warning"
-                          title="未找到该 Thread 的 Checkpoint"
-                          description="可能已过 Redis TTL，或该会话尚未进入 Agentic LangGraph 流程。"
+                          type={runSnapshot.artifacts.length > 0 ? "info" : "warning"}
+                          title={runSnapshot.artifacts.length > 0 ? "Checkpoint 已过期，已加载持久化交接物" : "未找到该 Thread 的 Checkpoint"}
+                          description={runSnapshot.artifacts.length > 0 ? "Redis Checkpoint 可能已过 TTL，以下内容来自 PostgreSQL 持久化记录，仍可用于审计和交接。" : "可能已过 Redis TTL，或该会话尚未进入 Agentic LangGraph 流程。"}
                         />
                       ) : (
                         <>
@@ -849,11 +866,15 @@ export default function AgentOpsPage() {
                               { title: "检索次数", dataIndex: "retrievalAttempts" },
                             ]}
                           />
+                        </>
+                      )}
+                      {runSnapshot.artifacts.length > 0 && (
+                        <>
                           <h3>Artifact 交接物</h3>
                           <Collapse
                             items={runSnapshot.artifacts.map((artifact) => ({
                               key: artifact.id,
-                              label: `${artifact.type} · ${artifact.producer} · ${new Date(artifact.createdAt).toLocaleString("zh-CN")}`,
+                              label: `${ARTIFACT_LABELS[artifact.type] ?? artifact.type} · ${artifact.producer} · ${new Date(artifact.createdAt).toLocaleString("zh-CN")}`,
                               children: <pre>{JSON.stringify(artifact.payload, null, 2)}</pre>,
                             }))}
                           />

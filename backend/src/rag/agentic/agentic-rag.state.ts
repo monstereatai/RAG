@@ -16,7 +16,18 @@ export interface AgenticSubQuestion {
 export type AgenticArtifactType =
   | 'subquestion_plan'
   | 'evidence_bundle'
-  | 'answer_contract';
+  | 'answer_contract'
+  | 'requirement_brief'
+  | 'assumption_register'
+  | 'claim_evidence_matrix'
+  | 'solution_brief'
+  | 'api_contract'
+  | 'event_tracking_plan'
+  | 'test_plan'
+  | 'acceptance_checklist'
+  | 'risk_register'
+  | 'rollout_plan'
+  | 'code_context_pack';
 
 /** 节点间的结构化交接物，会随 LangGraph 状态进入 Redis Checkpointer。 */
 export interface AgenticArtifact<TPayload = unknown> {

@@ -37,6 +37,8 @@
     "demo:production-workflow": "node scripts/demo-production-workflow.mjs",
     "eval:game-marketing": "node scripts/build-game-marketing-regression-dataset.mjs --check",
     "game:dataset": "node scripts/build-game-marketing-regression-dataset.mjs",
+    "game:public-sources": "node scripts/collect-game-marketing-public-sources.mjs",
+    "game:import-public-sources": "node scripts/import-game-marketing-public-sources.mjs",
     "eval:business-dataset": "node scripts/build-business-regression-dataset.mjs --check",
     "eval:business-private": "node scripts/import-business-regression-dataset.mjs --input eval/private-business-regression.dataset.json --min-cases 50",
     "eval:business-import": "node scripts/import-business-regression-dataset.mjs",
