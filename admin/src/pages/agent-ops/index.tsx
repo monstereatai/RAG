@@ -102,13 +102,19 @@ export default function AgentOpsPage() {
     setRunOptionsLoading(true);
     try {
       const result = await getAgentRuns();
-      setRunOptions(unwrapData<AgenticRunOption[]>(result) ?? []);
+      const options = unwrapData<AgenticRunOption[]>(result) ?? [];
+      setRunOptions(options);
+      if (!artifactThreadId && options[0]) {
+        setArtifactThreadId(options[0].threadId);
+        const snapshot = await getAgentRunArtifacts(options[0].threadId);
+        setRunSnapshot(unwrapData<AgenticRunSnapshot>(snapshot));
+      }
     } catch {
       message.error("最近 Agentic 会话加载失败");
     } finally {
       setRunOptionsLoading(false);
     }
-  }, []);
+  }, [artifactThreadId]);
   const loadRunArtifacts = async () => {
     const threadId = artifactThreadId.trim();
     if (!threadId) {
@@ -730,7 +736,7 @@ export default function AgentOpsPage() {
                     showIcon
                     type="info"
                     title="查看一次 Agentic 运行在 Redis Checkpointer 中保存的结构化交接物"
-                    description="优先选择最近 Agentic 会话；高级排障时也可以手动输入 Thread ID。"
+                    description="页面会自动选择最近会话；优先使用下拉选择，手动输入 Thread ID 仅用于高级排障。"
                   />
                   <div className="agent-ops-form-grid">
                     <Select

@@ -119,7 +119,7 @@ export class AgentOpsAdminController {
         };
       }),
     );
-    return runs.filter((run) => run.checkpointAvailable);
+    return runs;
   }
 
   @Post('runs/:threadId/retry')
