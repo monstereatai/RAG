@@ -12,8 +12,23 @@ export class RagGatewayService {
 
   async search(input: RagSearchDto, userId: string) {
     const limit = input.limit ?? 5;
-    const chunks = await this.karpathyRagService.retrieve(input.query, {}, userId);
-    const results = chunks.slice(0, limit).map((chunk) => ({
+    const [retrievedChunks, reviewedEvidence] = await Promise.all([
+      this.karpathyRagService.retrieve(input.query, {}, userId),
+      this.karpathyRagService.retrieveReviewedEvidence(input.query, 2),
+    ]);
+    const chunks = [...reviewedEvidence, ...retrievedChunks];
+    const selectedChunks = chunks.slice(0, limit);
+    const assessment =
+      selectedChunks.length > 0
+        ? this.karpathyRagService.assessRetrievedChunks(
+            input.query,
+            selectedChunks,
+          )
+        : {
+            sufficient: false,
+            reason: 'RAG 没有检索到候选片段',
+          };
+    const results = selectedChunks.map((chunk) => ({
       id: chunk.id,
       chunkId: chunk.id,
       docId: chunk.docId,
@@ -25,12 +40,16 @@ export class RagGatewayService {
       cosineScore: chunk.cosineScore,
       totalScore: chunk.totalScore,
       score: chunk.totalScore,
+      retrievalSource: chunk.retrievalSource,
+      contextRole: chunk.contextRole,
     }));
 
     return {
       query: input.query,
       topK: limit,
-      status: results.length > 0 ? 'ok' : 'insufficient_context',
+      status: assessment.sufficient ? 'ok' : 'insufficient_context',
+      retrievalSufficient: assessment.sufficient,
+      retrievalReason: assessment.reason,
       results,
       chunks: results,
     };
@@ -47,7 +66,9 @@ export class RagGatewayService {
 
     return {
       task: input.task,
-      status: search.results.length > 0 ? 'ok' : 'insufficient_context',
+      status: search.status,
+      retrievalSufficient: search.retrievalSufficient,
+      retrievalReason: search.retrievalReason,
       knowledge: search.results,
       matchedSkills,
       citations: search.results.map((chunk, index) => ({

@@ -26,6 +26,8 @@ import {
   message,
 } from "antd";
 import React from "react";
+import { XMarkdown } from "@ant-design/x-markdown";
+import "@ant-design/x-markdown/es/XMarkdown/index.css";
 import {
   type AgentBadCase,
   type AgenticRunOption,
@@ -62,6 +64,7 @@ import {
   getKnowledgeBaseProfiles,
   registerKnowledgeBaseProfile,
   getProductionWorkflow,
+  getProductionWorkflows,
   retryAgentRun,
   resumeProductionWorkflow,
   reviewAgentBadCase,
@@ -104,6 +107,19 @@ const ARTIFACT_LABELS: Record<string, string> = {
   code_context_pack: "AI Coding 上下文包",
 };
 
+const CURRENT_PRODUCTION_WORKFLOW_KEY = "agent-ops.current-production-workflow";
+const WORKFLOW_STATUS_LABELS: Record<ProductionWorkflow["status"], string> = {
+  running: "运行中",
+  pending_approval: "待审批",
+  completed: "已完成",
+  failed: "失败",
+};
+
+const normalizeArtifactMarkdown = (content: string) =>
+  content
+    .replace(/\r\n/g, "\n")
+    .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, "```$1\n");
+
 export default function AgentOpsPage() {
   const [workflowForm] = Form.useForm();
   const [evalForm] = Form.useForm();
@@ -114,6 +130,8 @@ export default function AgentOpsPage() {
   const [workflow, setWorkflow] = React.useState<ProductionWorkflow | null>(
     null,
   );
+  const [productionWorkflows, setProductionWorkflows] = React.useState<ProductionWorkflow[]>([]);
+  const [workflowListLoading, setWorkflowListLoading] = React.useState(false);
   const [evalResult, setEvalResult] = React.useState<AgentEvalResult | null>(
     null,
   );
@@ -202,6 +220,17 @@ export default function AgentOpsPage() {
       message.error("运行中心加载失败，请检查 Agent Backend 服务");
     }
   }, []);
+  const loadProductionWorkflows = React.useCallback(async () => {
+    setWorkflowListLoading(true);
+    try {
+      const result = await getProductionWorkflows();
+      setProductionWorkflows(unwrapData<ProductionWorkflow[]>(result) ?? []);
+    } catch {
+      message.error("产研运工作流列表加载失败");
+    } finally {
+      setWorkflowListLoading(false);
+    }
+  }, []);
   const handleRetryRun = async () => {
     if (!runSnapshot?.available) return;
     setArtifactLoading(true);
@@ -217,10 +246,34 @@ export default function AgentOpsPage() {
   };
 
   React.useEffect(() => {
-    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunCenter()]).catch(
+    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunCenter(), loadProductionWorkflows()]).catch(
       () => undefined,
     );
-  }, [loadBadCases, loadRunCenter, loadRunOptions, loadTraces]);
+  }, [loadBadCases, loadRunCenter, loadRunOptions, loadTraces, loadProductionWorkflows]);
+
+  React.useEffect(() => {
+    const threadId = window.localStorage.getItem(
+      CURRENT_PRODUCTION_WORKFLOW_KEY,
+    );
+    if (!threadId) return;
+    void getProductionWorkflow(threadId)
+      .then((result) => {
+        const nextWorkflow = unwrapData<ProductionWorkflow>(result);
+        if (!nextWorkflow?.threadId) return;
+        if (nextWorkflow.status === "completed" || nextWorkflow.status === "failed") {
+          window.localStorage.removeItem(CURRENT_PRODUCTION_WORKFLOW_KEY);
+          return;
+        }
+        setWorkflow(nextWorkflow);
+        workflowForm.setFieldsValue({
+          projectId: nextWorkflow.projectId,
+          rerunRoles: nextWorkflow.pendingApprovalRoles,
+        });
+      })
+      .catch(() => {
+        window.localStorage.removeItem(CURRENT_PRODUCTION_WORKFLOW_KEY);
+      });
+  }, [workflowForm]);
 
   React.useEffect(() => {
     if (workflow?.status !== "running") return;
@@ -228,6 +281,18 @@ export default function AgentOpsPage() {
       void getProductionWorkflow(workflow.threadId)
         .then((result) => {
           const nextWorkflow = unwrapData<ProductionWorkflow>(result);
+          void loadProductionWorkflows();
+          if (nextWorkflow.status === "completed" || nextWorkflow.status === "failed") {
+            setWorkflow(null);
+            workflowForm.resetFields();
+            window.localStorage.removeItem(CURRENT_PRODUCTION_WORKFLOW_KEY);
+            message.success(
+              nextWorkflow.status === "completed"
+                ? "工作流已完成，详情已收起，可从列表重新查看"
+                : "工作流已结束，详情已收起，可从列表重新查看",
+            );
+            return;
+          }
           setWorkflow(nextWorkflow);
           workflowForm.setFieldValue(
             "rerunRoles",
@@ -237,7 +302,7 @@ export default function AgentOpsPage() {
         .catch(() => undefined);
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [workflow, workflowForm]);
+  }, [loadProductionWorkflows, workflow, workflowForm]);
 
   const loadGovernance = React.useCallback(async () => {
     setGovernanceLoading(true);
@@ -340,6 +405,12 @@ export default function AgentOpsPage() {
       const result = await startProductionWorkflow(values);
       const nextWorkflow = unwrapData<ProductionWorkflow>(result);
       setWorkflow(nextWorkflow);
+      void loadProductionWorkflows();
+      window.localStorage.setItem(
+        CURRENT_PRODUCTION_WORKFLOW_KEY,
+        nextWorkflow.threadId,
+      );
+      history.push(`/agent-ops/workflows/${encodeURIComponent(nextWorkflow.threadId)}`);
       workflowForm.setFieldValue(
         "rerunRoles",
         nextWorkflow.pendingApprovalRoles,
@@ -365,6 +436,11 @@ export default function AgentOpsPage() {
       });
       const nextWorkflow = unwrapData<ProductionWorkflow>(result);
       setWorkflow(nextWorkflow);
+      void loadProductionWorkflows();
+      window.localStorage.setItem(
+        CURRENT_PRODUCTION_WORKFLOW_KEY,
+        nextWorkflow.threadId,
+      );
       workflowForm.setFieldValue("feedback", "");
       workflowForm.setFieldValue(
         "rerunRoles",
@@ -424,6 +500,34 @@ export default function AgentOpsPage() {
 
   const workflowPanel = (
     <section className="agent-ops-panel">
+      <Card
+        title="产研运工作流列表"
+        size="small"
+        extra={<Button icon={<ReloadOutlined />} loading={workflowListLoading} onClick={() => void loadProductionWorkflows()}>刷新</Button>}
+        style={{ marginBottom: 16 }}
+      >
+        <Table
+          size="small"
+          rowKey="threadId"
+          loading={workflowListLoading}
+          dataSource={productionWorkflows}
+          pagination={{ pageSize: 5 }}
+          onRow={(record) => ({
+            onClick: () => {
+              history.push(`/agent-ops/workflows/${encodeURIComponent(record.threadId)}`);
+            },
+            style: { cursor: "pointer" },
+          })}
+          columns={[
+            { title: "项目／活动", dataIndex: "projectId" },
+            { title: "状态", dataIndex: "status", render: (value: ProductionWorkflow["status"]) => <Tag color={value === "completed" ? "green" : value === "failed" ? "red" : value === "pending_approval" ? "orange" : "blue"}>{WORKFLOW_STATUS_LABELS[value] ?? value}</Tag> },
+            { title: "完成岗位", render: (_, record) => `${record.completedRoles?.length ?? 0}/${record.selectedRoles?.length ?? 0}` },
+            { title: "当前批次", render: (_, record) => record.currentBatch?.map((role: ProductionRole) => ROLE_LABELS[role]).join("＋") || "已完成" },
+            { title: "Thread", dataIndex: "threadId", ellipsis: true },
+          ]}
+        />
+        <div style={{ color: "#667085", marginTop: 8 }}>点击任意工作流查看详情、阶段产物和审批操作。</div>
+      </Card>
       <Form form={workflowForm} layout="vertical">
         <div className="agent-ops-form-grid">
           <Form.Item
@@ -516,7 +620,7 @@ export default function AgentOpsPage() {
         >
           启动工作流
         </Button>
-        {workflow && (
+        {history.location.pathname.includes("/workflows/") && workflow && (
           <div className="agent-workflow-result">
             <Steps
               current={workflow.stageIndex}
@@ -535,7 +639,7 @@ export default function AgentOpsPage() {
             <Descriptions
               column={2}
               items={[
-                { key: "status", label: "状态", children: workflow.status },
+                { key: "status", label: "状态", children: WORKFLOW_STATUS_LABELS[workflow.status] },
                 {
                   key: "steps",
                   label: "步数",
@@ -614,7 +718,15 @@ export default function AgentOpsPage() {
                             key={`${deliverable.type}-${deliverable.title}`}
                           >
                             <strong>{deliverable.title}</strong>
-                            <pre>{deliverable.markdown}</pre>
+                            <XMarkdown
+                              className="agent-deliverable-markdown"
+                              content={normalizeArtifactMarkdown(
+                                deliverable.markdown,
+                              )}
+                              escapeRawHtml
+                              openLinksInNewTab
+                              paragraphTag="div"
+                            />
                           </section>
                         ))}
                         <p>问题：{result.issues.join("；") || "无"}</p>
@@ -1086,7 +1198,7 @@ export default function AgentOpsPage() {
               : history.location.pathname.endsWith("/collaboration")
                 ? "collaboration"
               : history.location.pathname.endsWith("/evals")
-                ? "eval"
+                ? "evals"
               : history.location.pathname.endsWith("/traces")
                   ? "traces"
                   : history.location.pathname.endsWith("/artifacts")
@@ -1098,7 +1210,7 @@ export default function AgentOpsPage() {
           onChange={(key) => {
             const routes: Record<string, string> = {
               workflow: "/agent-ops",
-              eval: "/agent-ops/evals",
+              evals: "/agent-ops/evals",
               "bad-cases": "/agent-ops/bad-cases",
               "run-center": "/agent-ops/run-center",
               collaboration: "/agent-ops/collaboration",
@@ -1112,7 +1224,7 @@ export default function AgentOpsPage() {
             { key: "workflow", label: "产研运工作流", children: workflowPanel },
             { key: "run-center", label: "运行中心", children: runCenterPanel },
             { key: "collaboration", label: "协作编排", children: collaborationPanel },
-            { key: "eval", label: "Agent Evals", children: evalPanel },
+            { key: "evals", label: "Agent Evals", children: evalPanel },
             { key: "governance", label: "平台治理", children: governancePanel },
             {
               key: "bad-cases",

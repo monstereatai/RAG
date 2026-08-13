@@ -27,6 +27,18 @@ export interface GameDocumentMetadata {
   supersedesDocId: string | null;
 }
 
+export type DocumentBusinessMetadata = Partial<GameDocumentMetadata> & {
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+};
+
+export type ResolvedDocumentBusinessMetadata = GameDocumentMetadata & {
+  docVersion: string | null;
+  effectiveAt: string | null;
+  expiredAt: string | null;
+};
+
 export interface ChunkStrategy {
   chunkSize: number;
   chunkOverlap: number;

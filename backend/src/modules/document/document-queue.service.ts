@@ -11,7 +11,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueEvents, Worker } from 'bullmq';
-import type { GameDocumentMetadata } from './document-profile.util';
+import type { DocumentBusinessMetadata } from './document-profile.util';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 
@@ -21,7 +21,7 @@ export interface DocumentProcessingJob {
   filename: string;
   originalBufferBase64: string;
   contentType?: string;
-  businessMetadata?: Partial<GameDocumentMetadata>;
+  businessMetadata?: DocumentBusinessMetadata;
 }
 
 export interface DocumentProcessingResult {
@@ -93,7 +93,10 @@ export class DocumentQueueService implements OnModuleDestroy {
       },
       {
         connection,
-        concurrency: 2,
+        concurrency: Math.max(
+          1,
+          Number(process.env.DOCUMENT_QUEUE_CONCURRENCY ?? 2),
+        ),
       },
     );
 

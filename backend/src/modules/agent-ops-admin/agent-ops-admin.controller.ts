@@ -6,8 +6,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { AgentEvalDto } from '../agent-evals/agent-eval.dto';
 import { AgentEvalService } from '../agent-evals/agent-eval.service';
@@ -49,6 +51,11 @@ export class AgentOpsAdminController {
     return this.workflows.startAsync(body, ownerUserId);
   }
 
+  @Get('workflows')
+  listWorkflows(@Query('ownerUserId') ownerUserId: string) {
+    return this.workflows.list(ownerUserId);
+  }
+
   @Post('workflows/:threadId/resume')
   resumeWorkflow(
     @Param('threadId') threadId: string,
@@ -56,6 +63,36 @@ export class AgentOpsAdminController {
     @Body() body: ResumeProductionWorkflowDto,
   ) {
     return this.workflows.resumeAsync(threadId, body, ownerUserId);
+  }
+
+  @Get('workflows/:threadId/coding-context')
+  codingContext(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.workflows.codingContext(threadId, ownerUserId);
+  }
+
+  @Post('workflows/:threadId/generate-project')
+  generateProject(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.workflows.generateProject(threadId, ownerUserId);
+  }
+
+  @Post('workflows/:threadId/generate-project-zip')
+  async generateProjectZip(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Res() response: Response,
+  ) {
+    const zip = await this.workflows.generateProjectZip(threadId, ownerUserId);
+    response
+      .status(200)
+      .type('application/zip')
+      .setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(threadId)}-project.zip"`)
+      .send(zip);
   }
 
   @Get('workflows/:threadId')

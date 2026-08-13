@@ -1,5 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import {
   DataType,
   IndexType,
@@ -7,6 +14,8 @@ import {
   MilvusClient,
 } from '@zilliz/milvus2-sdk-node';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
+import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
+import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 
 export interface ApprovedBadCase {
   id: string;
@@ -38,6 +47,12 @@ export class BadCaseFlywheelService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly embeddingProvider: EmbeddingProvider,
+    @Optional()
+    @InjectRepository(RagFeedbackEntity)
+    private readonly feedbackRepo?: Repository<RagFeedbackEntity>,
+    @Optional()
+    @InjectRepository(QueryLogEntity)
+    private readonly queryLogRepo?: Repository<QueryLogEntity>,
   ) {
     this.collectionName =
       this.config.get<string>('vectorStore.milvus.badCaseCollection') ??
@@ -113,6 +128,8 @@ export class BadCaseFlywheelService implements OnModuleInit {
   }
 
   async retrieveMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
+    const exactMatches = await this.findExactReviewedMatches(query, limit);
+    if (exactMatches.length > 0) return exactMatches;
     if (!this.initialized || !this.client) return [];
     try {
       const vector = await this.embeddingProvider.embedQuery(query);
@@ -147,6 +164,54 @@ export class BadCaseFlywheelService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(
         `Bad case selection skipped: ${(error as Error).message}`,
+      );
+      return [];
+    }
+  }
+
+  private async findExactReviewedMatches(
+    query: string,
+    limit: number,
+  ): Promise<BadCaseMatch[]> {
+    if (!this.feedbackRepo || !this.queryLogRepo) return [];
+    try {
+      const rows = await this.feedbackRepo
+        .createQueryBuilder('feedback')
+        .innerJoin(
+          QueryLogEntity,
+          'queryLog',
+          'queryLog.id = feedback."queryLogId"',
+        )
+        .where('feedback.feedback = :feedback', { feedback: 'negative' })
+        .andWhere('feedback.status IN (:...statuses)', {
+          statuses: ['reviewed', 'resolved'],
+        })
+        .andWhere('feedback."correctedAnswer" IS NOT NULL')
+        .andWhere('LOWER(queryLog.query) = LOWER(:query)', {
+          query: query.trim(),
+        })
+        .select([
+          'feedback.id AS "feedbackId"',
+          'queryLog.query AS query',
+          'feedback."correctedAnswer" AS "correctedAnswer"',
+        ])
+        .limit(Math.min(Math.max(limit, 1), 2))
+        .getRawMany<{
+          feedbackId: string;
+          query: string;
+          correctedAnswer: string;
+        }>();
+
+      return rows.map((row) => ({
+        id: `db:${row.feedbackId}`,
+        query: row.query,
+        text: `正确处理标准：${row.correctedAnswer}`,
+        score: 1,
+        mode: 'exact',
+      }));
+    } catch (error) {
+      this.logger.warn(
+        `Reviewed exact bad case lookup skipped: ${(error as Error).message}`,
       );
       return [];
     }

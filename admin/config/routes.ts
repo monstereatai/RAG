@@ -117,6 +117,11 @@ export default [
         name: 'agent-ops-governance',
         component: './agent-ops',
       },
+      {
+        path: '/agent-ops/workflows/:threadId',
+        name: 'agent-ops-workflow-detail',
+        component: './agent-ops/workflow-detail',
+      },
     ],
   },
   {

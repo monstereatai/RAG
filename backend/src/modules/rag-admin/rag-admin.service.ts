@@ -14,6 +14,11 @@ import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.en
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
+import { KarpathyObsidianIngestService } from '../document/karpathy-obsidian-ingest.service';
+import {
+  DocumentLifecycleStatus,
+  GameDocumentType,
+} from '../document/document-profile.util';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -88,6 +93,7 @@ export class RagAdminService {
   constructor(
     private readonly configService: ConfigService,
     private readonly documentService: DocumentService,
+    private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
     private readonly graphService: GraphService,
     private readonly conversationService: ConversationService,
     private readonly karpathyRagService: KarpathyRagService,
@@ -227,6 +233,8 @@ export class RagAdminService {
           category: doc.category ?? '其他',
           sourceAuthority: doc.sourceAuthority ?? 'normal',
           docVersion: doc.docVersion ?? 'unknown',
+          lifecycleStatus: doc.lifecycleStatus,
+          supersedesDocId: doc.supersedesDocId,
           effectiveAt: doc.effectiveAt?.toISOString() ?? null,
           expiredAt: doc.expiredAt?.toISOString() ?? null,
           title: doc.title ?? null,
@@ -242,7 +250,7 @@ export class RagAdminService {
 
   async getDocument(docId: string) {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
-    if (!doc) return null;
+    if (!doc || !doc.userId) return null;
 
     const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(docId);
     return {
@@ -260,9 +268,125 @@ export class RagAdminService {
       obsidianPath,
       obsidianStatus: obsidianPath ? 'linked' : 'missing',
       docVersion: doc.docVersion ?? 'unknown',
+      lifecycleStatus: doc.lifecycleStatus,
+      supersedesDocId: doc.supersedesDocId,
       effectiveAt: doc.effectiveAt?.toISOString() ?? null,
       expiredAt: doc.expiredAt?.toISOString() ?? null,
       createdAt: doc.createdAt.toISOString(),
+    };
+  }
+
+  async listDocumentVersions(docId: string) {
+    const root = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!root) return null;
+    if (!root.userId) return [];
+    const all = await this.docMetaRepo.find({
+      where: { userId: root.userId },
+      order: { createdAt: 'ASC' },
+    });
+    const ids = new Set([docId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const doc of all) {
+        if (doc.supersedesDocId && ids.has(doc.supersedesDocId) && !ids.has(doc.docId)) {
+          ids.add(doc.docId);
+          changed = true;
+        }
+        if (ids.has(doc.docId) && doc.supersedesDocId && !ids.has(doc.supersedesDocId)) {
+          ids.add(doc.supersedesDocId);
+          changed = true;
+        }
+      }
+    }
+    return all
+      .filter((doc) => ids.has(doc.docId))
+      .map((doc) => this.toDocumentVersionItem(doc));
+  }
+
+  async createDocumentVersion(
+    docId: string,
+    body: {
+      content?: string;
+      filename?: string;
+      docVersion?: string;
+      effectiveAt?: string;
+      expiredAt?: string;
+      lifecycleStatus?: DocumentLifecycleStatus;
+      documentType?: GameDocumentType;
+    },
+  ) {
+    const previous = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!previous) return null;
+    if (!previous.userId) throw new Error('document owner is missing');
+    const content = body.content?.trim();
+    if (!content) throw new Error('content is required');
+    const roleScope = previous.roleScope
+      ? (JSON.parse(previous.roleScope) as string[])
+      : [];
+    const result = await this.karpathyObsidianIngest.ingestText({
+      title: body.filename?.trim() || previous.filename,
+      content,
+      userId: previous.userId,
+      filename: body.filename?.trim() || previous.filename,
+      sourceType: 'document',
+      contentType: 'text/markdown',
+      originalBuffer: Buffer.from(content, 'utf8'),
+      businessMetadata: {
+          projectId: previous.projectId,
+          activityId: previous.activityId,
+          region: previous.region,
+          locale: previous.locale,
+          channel: previous.channel,
+          roleScope,
+          documentType: body.documentType ?? (previous.documentType as GameDocumentType),
+          lifecycleStatus: body.lifecycleStatus ?? 'effective',
+          supersedesDocId: docId,
+          docVersion: body.docVersion ?? null,
+          effectiveAt: body.effectiveAt ?? null,
+          expiredAt: body.expiredAt ?? null,
+      },
+    });
+    return { ...result.rag, obsidian: result.obsidian, previousDocId: docId };
+  }
+
+  async updateDocumentLifecycle(
+    docId: string,
+    lifecycleStatus: DocumentLifecycleStatus,
+  ) {
+    const doc = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!doc || !doc.userId) return null;
+    const updated = await this.documentService.updateLifecycle(
+      docId,
+      doc.userId,
+      lifecycleStatus,
+    );
+    return updated ? { docId, lifecycleStatus } : null;
+  }
+
+  async rollbackDocumentVersion(docId: string) {
+    const versions = await this.listDocumentVersions(docId);
+    if (!versions) return null;
+    for (const version of versions) {
+      await this.updateDocumentLifecycle(
+        version.docId,
+        version.docId === docId ? 'effective' : 'deprecated',
+      );
+    }
+    return { activeDocId: docId, versions };
+  }
+
+  private toDocumentVersionItem(doc: DocumentMetaEntity) {
+    return {
+      docId: doc.docId,
+      filename: doc.filename,
+      docVersion: doc.docVersion ?? 'unknown',
+      lifecycleStatus: doc.lifecycleStatus,
+      supersedesDocId: doc.supersedesDocId,
+      effectiveAt: doc.effectiveAt?.toISOString() ?? null,
+      expiredAt: doc.expiredAt?.toISOString() ?? null,
+      createdAt: doc.createdAt.toISOString(),
+      chunkCount: doc.chunkCount,
     };
   }
 

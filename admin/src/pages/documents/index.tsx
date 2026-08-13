@@ -7,6 +7,7 @@ import {
   FileWordOutlined,
   FileExcelOutlined,
   LockOutlined,
+  HistoryOutlined,
   MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -23,11 +24,27 @@ import {
   getRoles,
   getUsers,
   updateDocumentPermissions,
+  getDocumentVersions,
+  createDocumentVersion,
+  rollbackDocumentVersion,
   type DocumentItem,
+  type DocumentVersionItem,
   type DocumentPermissionInput,
 } from './service';
 
 type PageState = 'loading' | 'data' | 'error' | 'empty';
+
+/** 修复历史数据中 UTF-8 被按 Latin-1 解码后形成的常见中文乱码。 */
+const repairMojibake = (value?: string | null): string => {
+  if (!value) return '';
+  if (!/[ÃÂâðåæçèéêëìíîïñòóôõö÷øùúûüýþÿ]/.test(value)) return value;
+  try {
+    const bytes = Uint8Array.from(value, (character) => character.charCodeAt(0) & 0xff);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return value;
+  }
+};
 
 const iconMap: Record<string, React.ReactNode> = {
   pdf: <FilePdfOutlined className="file-icon pdf" />,
@@ -49,17 +66,28 @@ const Documents: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [permissionDoc, setPermissionDoc] = useState<DocumentItem | null>(null);
   const [permissionSaving, setPermissionSaving] = useState(false);
+  const [versionDoc, setVersionDoc] = useState<DocumentItem | null>(null);
+  const [versionItems, setVersionItems] = useState<DocumentVersionItem[]>([]);
+  const [versionLoading, setVersionLoading] = useState(false);
+  const [versionSaving, setVersionSaving] = useState(false);
   const [userOptions, setUserOptions] = useState<{ label: string; value: string }[]>([]);
   const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<
     { label: string; value: string }[]
   >([]);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [permissionForm] = Form.useForm<{ permissions: DocumentPermissionInput[] }>();
+  const [versionForm] = Form.useForm<{
+    content: string;
+    filename?: string;
+    docVersion?: string;
+    effectiveAt?: string;
+  }>();
 
-  const fetchDocs = () => {
+  const fetchDocs = (nextPagination = pagination) => {
     setPageState('loading');
     Promise.all([
-      getDocuments({ current: 1, pageSize: 20 }),
+      getDocuments(nextPagination),
       getUsers(),
       getRoles(),
       getOrganizations(),
@@ -112,15 +140,20 @@ const Documents: React.FC = () => {
           setDocs(
             items.map((item: any) => ({
               id: item.docId,
-              filename: item.filename,
-              fileType: (item.filename ?? '').split('.').pop() ?? '',
+              filename: repairMojibake(item.filename),
+              fileType: (repairMojibake(item.filename) ?? '').split('.').pop() ?? '',
               fileSize: 0,
               chunkCount: item.chunkCount ?? 0,
               uploadedBy: userMap.get(String(item.userId)) ?? item.userId ?? '',
               createdAt: item.createdAt,
               updatedAt: item.createdAt,
-              metadata: { category: item.category, title: item.title },
-              obsidianPath: item.obsidianPath,
+              metadata: { category: repairMojibake(item.category), title: repairMojibake(item.title) },
+              docVersion: item.docVersion,
+              lifecycleStatus: item.lifecycleStatus,
+              supersedesDocId: item.supersedesDocId,
+              effectiveAt: item.effectiveAt,
+              expiredAt: item.expiredAt,
+              obsidianPath: repairMojibake(item.obsidianPath),
               obsidianStatus: item.obsidianStatus,
             })),
           );
@@ -174,6 +207,52 @@ const Documents: React.FC = () => {
     }
   };
 
+  const openVersionModal = async (record: DocumentItem) => {
+    setVersionDoc(record);
+    setVersionLoading(true);
+    versionForm.resetFields();
+    versionForm.setFieldsValue({ filename: record.filename });
+    try {
+      const response = await getDocumentVersions(record.id);
+      const raw = (response as any)?.data ?? response;
+      setVersionItems(Array.isArray(raw) ? raw : raw?.data ?? []);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '版本链加载失败');
+    } finally {
+      setVersionLoading(false);
+    }
+  };
+
+  const handleCreateVersion = async () => {
+    if (!versionDoc) return;
+    const values = await versionForm.validateFields();
+    setVersionSaving(true);
+    try {
+      await createDocumentVersion(versionDoc.id, {
+        ...values,
+        lifecycleStatus: 'effective',
+      });
+      message.success('新版本已创建，旧版本已自动废弃');
+      setVersionDoc(null);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '新版本创建失败');
+    } finally {
+      setVersionSaving(false);
+    }
+  };
+
+  const handleRollback = async (item: DocumentVersionItem) => {
+    try {
+      await rollbackDocumentVersion(item.docId);
+      message.success(`已回滚到 ${item.docVersion}`);
+      if (versionDoc) openVersionModal(versionDoc);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '版本回滚失败');
+    }
+  };
+
   const columns: ColumnsType<DocumentItem> = [
     {
       title: <Checkbox />,
@@ -186,7 +265,7 @@ const Documents: React.FC = () => {
       render: (_, record) => (
         <Space size={12}>
           {iconMap[record.fileType] ?? iconMap.pdf}
-          <span>{record.filename}</span>
+          <span>{record.metadata?.title || record.filename}</span>
         </Space>
       ),
     },
@@ -202,6 +281,18 @@ const Documents: React.FC = () => {
         const item = statusMap[status] ?? statusMap.pending;
         return <Tag color={item.color}>{item.text}</Tag>;
       },
+    },
+    {
+      title: '版本状态',
+      width: 180,
+      render: (_, record) => (
+        <Space size={4}>
+          <Tag color={record.lifecycleStatus === 'effective' ? 'green' : 'default'}>
+            {record.docVersion || '未标注版本'}
+          </Tag>
+          <Tag>{record.lifecycleStatus || 'confirmed'}</Tag>
+        </Space>
+      ),
     },
     {
       title: '权限范围',
@@ -233,6 +324,13 @@ const Documents: React.FC = () => {
             size="small"
             type="text"
           />
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => openVersionModal(record)}
+            size="small"
+            title="版本治理"
+            type="text"
+          />
           <MoreOutlined />
         </Space>
       ),
@@ -249,7 +347,7 @@ const Documents: React.FC = () => {
         <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
         <Select defaultValue="权限范围" options={[{ value: '权限范围' }]} />
         <Button>更多筛选</Button>
-        <Button icon={<ReloadOutlined />} onClick={fetchDocs} type="text" />
+        <Button icon={<ReloadOutlined />} onClick={() => fetchDocs()} type="text" />
       </div>
       <div className="view-switch">
         <Button icon={<TableOutlined />} type="primary" />
@@ -265,7 +363,7 @@ const Documents: React.FC = () => {
             <p style={{ color: '#999', margin: '12px 0 24px' }}>
               无法获取文档列表，请确认服务正常运行。
             </p>
-            <Button icon={<ReloadOutlined />} onClick={fetchDocs} type="primary">
+            <Button icon={<ReloadOutlined />} onClick={() => fetchDocs()} type="primary">
               重新加载
             </Button>
           </div>
@@ -283,7 +381,18 @@ const Documents: React.FC = () => {
           <Table
             columns={columns}
             dataSource={docs}
-            pagination={{ pageSize: 10, total }}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total,
+              showSizeChanger: true,
+              pageSizeOptions: [10, 20, 50],
+              onChange: (current, pageSize) => {
+                const nextPagination = { current, pageSize };
+                setPagination(nextPagination);
+                fetchDocs(nextPagination);
+              },
+            }}
             rowKey="id"
           />
         )}
@@ -390,6 +499,56 @@ const Documents: React.FC = () => {
               </div>
             )}
           </Form.List>
+        </Form>
+      </Modal>
+      <Modal
+        destroyOnClose
+        onCancel={() => setVersionDoc(null)}
+        onOk={handleCreateVersion}
+        confirmLoading={versionSaving}
+        open={!!versionDoc}
+        title="版本治理"
+        width={820}
+      >
+        <p>当前文档：{versionDoc?.filename}</p>
+        <Table
+          loading={versionLoading}
+          size="small"
+          pagination={false}
+          rowKey="docId"
+          dataSource={versionItems}
+          columns={[
+            { title: '版本', dataIndex: 'docVersion' },
+            { title: '状态', dataIndex: 'lifecycleStatus' },
+            { title: '生效时间', dataIndex: 'effectiveAt' },
+            { title: '创建时间', dataIndex: 'createdAt' },
+            {
+              title: '操作',
+              render: (_: unknown, item: DocumentVersionItem) => (
+                <Button
+                  disabled={item.lifecycleStatus === 'effective'}
+                  onClick={() => handleRollback(item)}
+                  size="small"
+                >
+                  回滚到此版本
+                </Button>
+              ),
+            },
+          ] as ColumnsType<DocumentVersionItem>}
+        />
+        <Form form={versionForm} layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item label="新版本号" name="docVersion" rules={[{ required: true, message: '请输入版本号' }]}>
+            <Input placeholder="例如 v2.0" />
+          </Form.Item>
+          <Form.Item label="新文件名" name="filename">
+            <Input />
+          </Form.Item>
+          <Form.Item label="生效时间" name="effectiveAt">
+            <Input placeholder="例如 2026-08-12" />
+          </Form.Item>
+          <Form.Item label="新规范正文" name="content" rules={[{ required: true, message: '请输入新规范正文' }]}>
+            <Input.TextArea rows={8} placeholder="粘贴最新规范内容。提交后会重新切块、向量化并建立新版本索引。" />
+          </Form.Item>
         </Form>
       </Modal>
     </ModulePage>

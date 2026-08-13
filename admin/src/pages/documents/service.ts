@@ -20,6 +20,23 @@ export interface DocumentItem {
   };
   obsidianPath?: string | null;
   obsidianStatus?: 'linked' | 'missing';
+  docVersion?: string | null;
+  lifecycleStatus?: string | null;
+  supersedesDocId?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+}
+
+export interface DocumentVersionItem {
+  docId: string;
+  filename: string;
+  docVersion: string;
+  lifecycleStatus: string;
+  supersedesDocId?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+  createdAt: string;
+  chunkCount: number;
 }
 
 export interface DocumentPermissionInput {
@@ -95,4 +112,30 @@ export async function updateDocumentPermissions(
     method: 'POST',
     data: { permissions },
   });
+}
+
+export async function getDocumentVersions(id: string) {
+  return authRequest<DocumentVersionItem[]>(`/api/admin/documents/${id}/versions`);
+}
+
+export async function createDocumentVersion(id: string, body: {
+  content: string;
+  filename?: string;
+  docVersion?: string;
+  effectiveAt?: string;
+  expiredAt?: string;
+  lifecycleStatus?: string;
+}) {
+  return authRequest(`/api/admin/documents/${id}/versions`, { method: 'POST', data: body });
+}
+
+export async function updateDocumentLifecycle(id: string, lifecycleStatus: string) {
+  return authRequest(`/api/admin/documents/${id}/lifecycle`, {
+    method: 'POST',
+    data: { lifecycleStatus },
+  });
+}
+
+export async function rollbackDocumentVersion(id: string) {
+  return authRequest(`/api/admin/documents/${id}/rollback`, { method: 'POST' });
 }

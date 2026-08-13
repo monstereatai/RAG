@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import {
@@ -10,6 +10,7 @@ import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
 import { MemoryService } from '../memory/memory.service';
+import { ShortTermMemoryService } from '../memory/short-term-memory.service';
 import type { AguiEvent, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
@@ -24,6 +25,7 @@ export class AguiService {
     private readonly llmProvider: LlmProvider,
     private readonly langfuseProvider: LangfuseProvider,
     private readonly artifactsService: ArtifactsService,
+    @Optional() private readonly shortTermMemory?: ShortTermMemoryService,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -81,12 +83,17 @@ export class AguiService {
             role: 'assistant',
           });
 
-          const [history, memoryResult] = await Promise.all([
+          const [history, shortTermContext, memoryResult] = await Promise.all([
             this.conversationService.getRecentHistory(
               activeThreadId,
               5,
               options.userId,
             ),
+            this.shortTermMemory?.getContext(activeThreadId) ?? Promise.resolve({
+              systemMessage: null,
+              recentTurns: [],
+              truncatedHistory: false,
+            }),
             this.withTimeout(
               this.memoryService.searchMemory(
                 query,
@@ -114,6 +121,19 @@ export class AguiService {
               content: memoryResult.systemMessage.content as string,
             });
           }
+          if (shortTermContext.systemMessage) {
+            memoryMessages.push({
+              role: 'system',
+              content: shortTermContext.systemMessage.content as string,
+            });
+          }
+
+          const boundedHistory = shortTermContext.recentTurns.length > 0
+            ? shortTermContext.recentTurns.map((turn) => ({
+                role: turn.role === 'assistant' ? ('ai' as const) : ('human' as const),
+                content: turn.content,
+              }))
+            : history;
 
           const result = await this.llmProvider.runWithModel(
             selectedModel,
@@ -125,7 +145,7 @@ export class AguiService {
                   traceEvents.push(this.toTraceEvent(event));
                   this.emitAguiEvent(event, emit, messageId);
                 },
-                history,
+                boundedHistory,
                 activeThreadId,
                 options.userId,
                 memoryMessages,
@@ -146,6 +166,8 @@ export class AguiService {
             result.answer,
             options.userId,
           );
+          void this.shortTermMemory?.addTurn(activeThreadId, 'user', query);
+          void this.shortTermMemory?.addTurn(activeThreadId, 'assistant', result.answer);
           void this.memoryService.classifyAndPersist(
             options.userId,
             activeThreadId,

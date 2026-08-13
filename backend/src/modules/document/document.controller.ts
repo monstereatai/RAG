@@ -30,6 +30,7 @@ import { VisionProvider } from '../../providers/vision/vision.provider';
 import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 import {
   DocumentLifecycleStatus,
+  DocumentBusinessMetadata,
   GameDocumentMetadata,
   GameDocumentType,
 } from './document-profile.util';
@@ -44,7 +45,10 @@ type DocumentUploadBody = Partial<
     | 'roleScope'
     | 'documentType'
     | 'lifecycleStatus'
-    | 'supersedesDocId',
+    | 'supersedesDocId'
+    | 'docVersion'
+    | 'effectiveAt'
+    | 'expiredAt',
     string | string[]
   >
 >;
@@ -229,7 +233,7 @@ export class DocumentController {
     file: Express.Multer.File,
     userId: string,
     taskId: string,
-    businessMetadata?: Partial<GameDocumentMetadata>,
+    businessMetadata?: DocumentBusinessMetadata,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
     const content = (await this.extractUploadContent(file, kind)).trim();
@@ -377,7 +381,7 @@ export class DocumentController {
 
   private parseBusinessMetadata(
     body: DocumentUploadBody,
-  ): Partial<GameDocumentMetadata> | undefined {
+  ): DocumentBusinessMetadata | undefined {
     const text = (key: keyof DocumentUploadBody): string | undefined => {
       const value = body?.[key];
       const normalized = Array.isArray(value) ? value[0] : value;
@@ -389,7 +393,7 @@ export class DocumentController {
     )
       ?.map((item) => item.trim())
       .filter(Boolean);
-    const metadata: Partial<GameDocumentMetadata> = {
+    const metadata: DocumentBusinessMetadata = {
       projectId: text('projectId') ?? null,
       activityId: text('activityId') ?? null,
       region: text('region') ?? null,
@@ -401,6 +405,9 @@ export class DocumentController {
         | DocumentLifecycleStatus
         | undefined,
       supersedesDocId: text('supersedesDocId') ?? null,
+      docVersion: text('docVersion') ?? null,
+      effectiveAt: text('effectiveAt') ?? null,
+      expiredAt: text('expiredAt') ?? null,
     };
     return Object.values(metadata).some((value) =>
       Array.isArray(value) ? value.length > 0 : value != null,

@@ -31,6 +31,8 @@ export interface SearchResult {
   chunks?: SearchChunk[];
   results?: SearchChunk[];
   status?: string;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
 }
 
 export interface ContextResult {
@@ -74,6 +76,15 @@ export interface SupervisorResult {
     confidence: number;
   }>;
   totalDurationMs: number;
+}
+
+interface ProductionWorkflowSummary {
+  threadId: string;
+  projectId: string;
+  status: string;
+  updatedAt?: string;
+  completedRoles?: string[];
+  selectedRoles?: string[];
 }
 
 interface LoginResult {
@@ -151,6 +162,31 @@ export class RagApiClient {
       method: 'POST',
       body: { query },
     });
+  }
+
+  async productionWorkflowCodingContext(activityName: string): Promise<Record<string, unknown>> {
+    const workflows = await this.productionWorkflowActivities();
+    const normalized = activityName.trim().toLowerCase();
+    const matches = workflows
+      .filter((workflow) => workflow.projectId?.toLowerCase() === normalized || workflow.projectId?.toLowerCase().includes(normalized))
+      .sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')));
+    const completed = matches.find((workflow) => workflow.status === 'completed');
+    if (!completed) {
+      throw new RagMcpError(
+        'not_found',
+        matches.length > 0
+          ? `activity "${activityName}" has no completed production workflow`
+          : `no production workflow matched activity "${activityName}"`,
+        { recoverable: true },
+      );
+    }
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(completed.threadId)}/coding-context`,
+    );
+  }
+
+  async productionWorkflowActivities(): Promise<ProductionWorkflowSummary[]> {
+    return this.request<ProductionWorkflowSummary[]>('/workflows/production');
   }
 
   private async request<T>(

@@ -83,6 +83,12 @@ export class RagClientService {
     );
   }
 
+  listProductionWorkflows(ownerUserId: string) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId })}`
+    );
+  }
+
   resumeProductionWorkflow(
     threadId: string,
     ownerUserId: string,
@@ -97,6 +103,36 @@ export class RagClientService {
   getProductionWorkflow(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}${this.toQueryString({ ownerUserId })}`
+    );
+  }
+
+  getProductionWorkflowCodingContext(threadId: string, ownerUserId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context${this.toQueryString({ ownerUserId })}`
+    );
+  }
+
+  generateProductionWorkflowProject(threadId: string, ownerUserId: string) {
+    return this.request<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project${this.toQueryString({ ownerUserId })}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      true,
+      180_000,
+    );
+  }
+
+  generateProductionWorkflowProjectZip(threadId: string, ownerUserId: string) {
+    return this.requestRaw(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project-zip${this.toQueryString({ ownerUserId })}`,
+      true,
+      { 'content-type': 'application/json' },
+      'POST',
+      '{}',
+      180_000,
     );
   }
 
@@ -310,6 +346,33 @@ export class RagClientService {
   getDocumentChunks(docId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/documents/${encodeURIComponent(docId)}/chunks`
+    );
+  }
+
+  getDocumentVersions(docId: string) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/versions`
+    );
+  }
+
+  createDocumentVersion(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/versions`,
+      body
+    );
+  }
+
+  updateDocumentLifecycle(docId: string, lifecycleStatus: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/lifecycle`,
+      { lifecycleStatus }
+    );
+  }
+
+  rollbackDocumentVersion(docId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/rollback`,
+      {}
     );
   }
 
@@ -564,10 +627,11 @@ export class RagClientService {
   private async request<T>(
     path: string,
     init: RequestInit,
-    authenticated = true
+    authenticated = true,
+    timeoutMs = this.timeoutMs,
   ): Promise<RagClientResult<T>> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     const headers: Record<string, string> = {
       ...(init.headers as Record<string, string> | undefined),
@@ -609,13 +673,22 @@ export class RagClientService {
   private async requestRaw(
     path: string,
     authenticated: boolean,
-    extraHeaders: Record<string, string> = {}
+    extraHeaders: Record<string, string> = {},
+    method = 'GET',
+    body?: string,
+    timeoutMs = this.timeoutMs,
   ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const headers = { ...extraHeaders };
     if (authenticated && this.serviceToken) {
       headers["Authorization"] = `Bearer ${this.serviceToken}`;
     }
-    return fetch(`${this.baseUrl}${path}`, { method: "GET", headers });
+    try {
+      return await fetch(`${this.baseUrl}${path}`, { method, headers, body, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private toQueryString(query: object): string {

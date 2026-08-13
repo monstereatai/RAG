@@ -1023,6 +1023,32 @@ ${memoryText || '无'}
     return this.assessRetrievalQuality(this.normalizeQuery(query), chunks);
   }
 
+  async retrieveReviewedEvidence(
+    query: string,
+    limit = 2,
+  ): Promise<RetrievedChunk[]> {
+    const matches = await this.badCaseFlywheel.retrieveMatches(query, limit);
+    return matches
+      .filter((match) => match.mode === 'exact' || match.mode === 'correction')
+      .flatMap((match, index): RetrievedChunk[] => {
+        const correctedAnswer = this.extractCorrectedAnswer(match.text);
+        if (!correctedAnswer) return [];
+
+        return [{
+          id: `reviewed-bad-case:${match.id}`,
+          docId: `reviewed-bad-case:${match.id}`,
+          content: `已审核问题：${match.query}\n正确处理标准：${correctedAnswer}`,
+          chunkIndex: index,
+          bm25Score: match.score,
+          cosineScore: match.score,
+          totalScore: match.score,
+          sourceAuthority: 'reviewed_bad_case',
+          retrievalSource: 'expansion',
+          contextRole: 'hit',
+        } satisfies RetrievedChunk];
+      });
+  }
+
   validateAnswerCitationSupport(
     answer: string,
     chunks: RetrievedChunk[],

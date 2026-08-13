@@ -7,9 +7,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
 
@@ -26,6 +27,12 @@ export class AgentOpsController {
     return this.ragClient.startProductionWorkflow(this.userId(req), body);
   }
 
+  @Get('workflows')
+  @RequirePermission('admin:qa-ops:read')
+  listWorkflows(@Req() req: Request) {
+    return this.ragClient.listProductionWorkflows(this.userId(req));
+  }
+
   @Post('workflows/:threadId/resume')
   @ApiOperation({ summary: '审批并恢复产研运工作流' })
   @RequirePermission('admin:qa-ops:write')
@@ -39,6 +46,28 @@ export class AgentOpsController {
       this.userId(req),
       body
     );
+  }
+
+  @Get('workflows/:threadId/coding-context')
+  @RequirePermission('admin:qa-ops:read')
+  getWorkflowCodingContext(@Param('threadId') threadId: string, @Req() req: Request) {
+    return this.ragClient.getProductionWorkflowCodingContext(threadId, this.userId(req));
+  }
+
+  @Post('workflows/:threadId/generate-project')
+  @RequirePermission('admin:qa-ops:write')
+  generateWorkflowProject(@Param('threadId') threadId: string, @Req() req: Request) {
+    return this.ragClient.generateProductionWorkflowProject(threadId, this.userId(req));
+  }
+
+  @Post('workflows/:threadId/generate-project-zip')
+  @RequirePermission('admin:qa-ops:write')
+  async generateWorkflowProjectZip(@Param('threadId') threadId: string, @Req() req: Request, @Res() res: Response) {
+    const response = await this.ragClient.generateProductionWorkflowProjectZip(threadId, this.userId(req));
+    res.status(response.status ?? 500);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return res.send(buffer);
   }
 
   @Get('workflows/:threadId')

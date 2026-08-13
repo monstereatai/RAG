@@ -12,13 +12,14 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
     const path = request.route?.path || 'unknown';
     const method = request.method;
     const key = `${method}:${path}`;
+    const timeoutMs = path.includes('/generate-project') ? 180_000 : 5_000;
 
     if (this.isSseRequest(request)) {
       return next.handle();
     }
 
     return next.handle().pipe(
-      timeout(5000), // 5秒超时
+      timeout(timeoutMs),
       catchError(error => {
         throw error;
       }),

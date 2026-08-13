@@ -5,7 +5,7 @@ import {
 } from '../obsidian/obsidian-knowledge.service';
 import { UrlExtractionResult } from './document-parser.util';
 import { DocumentService, UploadResult } from './document.service';
-import type { GameDocumentMetadata } from './document-profile.util';
+import type { DocumentBusinessMetadata } from './document-profile.util';
 
 export interface KarpathyObsidianIngestResult {
   rag: UploadResult;
@@ -24,7 +24,7 @@ export class KarpathyObsidianIngestService {
     extracted: UrlExtractionResult;
     userId: string;
     filename: string;
-    businessMetadata?: Partial<GameDocumentMetadata>;
+    businessMetadata?: DocumentBusinessMetadata;
   }): Promise<KarpathyObsidianIngestResult> {
     const content = params.extracted.content.trim();
     const title = this.normalizeTitle(
@@ -116,7 +116,7 @@ export class KarpathyObsidianIngestService {
     contentType?: string;
     originalBuffer?: Buffer;
     taskId?: string;
-    businessMetadata?: Partial<GameDocumentMetadata>;
+    businessMetadata?: DocumentBusinessMetadata;
   }): Promise<KarpathyObsidianIngestResult> {
     const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
       params.content,
@@ -199,7 +199,7 @@ export class KarpathyObsidianIngestService {
   }
 
   private hasBusinessMetadata(
-    metadata?: Partial<GameDocumentMetadata>,
+    metadata?: DocumentBusinessMetadata,
   ): boolean {
     return Boolean(
       metadata &&

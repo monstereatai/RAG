@@ -69,6 +69,59 @@ export class RagAdminController {
     return this.ragAdminService.getDocumentChunks(docId);
   }
 
+  @Get('documents/:docId/versions')
+  async listDocumentVersions(@Param('docId') docId: string) {
+    const versions = await this.ragAdminService.listDocumentVersions(docId);
+    if (!versions) throw new NotFoundException(`doc ${docId} not found`);
+    return versions;
+  }
+
+  @Post('documents/:docId/versions')
+  async createDocumentVersion(
+    @Param('docId') docId: string,
+    @Body()
+    body: {
+      content?: string;
+      filename?: string;
+      docVersion?: string;
+      effectiveAt?: string;
+      expiredAt?: string;
+      lifecycleStatus?: 'draft' | 'confirmed' | 'effective' | 'deprecated';
+      documentType?: string;
+    },
+  ) {
+    const result = await this.ragAdminService.createDocumentVersion(docId, {
+      ...body,
+      documentType: body.documentType as never,
+    });
+    if (!result) throw new NotFoundException(`doc ${docId} not found`);
+    return result;
+  }
+
+  @Post('documents/:docId/lifecycle')
+  async updateDocumentLifecycle(
+    @Param('docId') docId: string,
+    @Body('lifecycleStatus') lifecycleStatus:
+      | 'draft'
+      | 'confirmed'
+      | 'effective'
+      | 'deprecated',
+  ) {
+    const result = await this.ragAdminService.updateDocumentLifecycle(
+      docId,
+      lifecycleStatus,
+    );
+    if (!result) throw new NotFoundException(`doc ${docId} not found`);
+    return result;
+  }
+
+  @Post('documents/:docId/rollback')
+  async rollbackDocumentVersion(@Param('docId') docId: string) {
+    const result = await this.ragAdminService.rollbackDocumentVersion(docId);
+    if (!result) throw new NotFoundException(`doc ${docId} not found`);
+    return result;
+  }
+
   @Get('documents/:docId/status')
   async getDocumentStatus(@Param('docId') docId: string) {
     const doc = await this.ragAdminService.getDocument(docId);

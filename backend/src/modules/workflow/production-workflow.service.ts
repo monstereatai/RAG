@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
+import JSZip from 'jszip';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { RedisProvider } from '../../providers/redis/redis.provider';
@@ -57,6 +58,20 @@ const roleSchema = z.object({
   readyForApproval: z.boolean(),
 });
 
+const projectFileSchema = z.object({
+  path: z.string().regex(/^[A-Za-z0-9_.\-/]+$/).max(180),
+  content: z.string().max(80_000),
+  purpose: z.string().max(500),
+});
+
+const projectSchema = z.object({
+  projectName: z.string().min(1).max(120),
+  framework: z.string().min(1).max(120),
+  files: z.array(projectFileSchema).min(3).max(30),
+  runCommand: z.string().min(1).max(300),
+  notes: z.array(z.string().max(500)).max(12),
+});
+
 const ROLE_GUIDANCE: Record<ProductionRole, string> = {
   product:
     '校验目标、范围、规则、边界条件、地区版本和验收口径，输出 PRD 审查结论。',
@@ -86,10 +101,11 @@ export class ProductionWorkflowService {
     string,
     ProductionWorkflowStateType
   >();
+  private readonly workflowIndexMemory = new Map<string, Record<string, unknown>>();
 
   constructor(
     private readonly llmProvider: LlmProvider,
-    redisProvider: RedisProvider,
+    private readonly redisProvider: RedisProvider,
     private readonly roleTools: ProductionWorkflowTools,
     private readonly artifacts: ArtifactsService,
     @Optional() private readonly langfuseProvider?: LangfuseProvider,
@@ -107,7 +123,9 @@ export class ProductionWorkflowService {
     const state = await this.app.invoke(initialState, this.config(threadId));
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
-    return this.view(threadId, settled, userId);
+    const result = this.view(threadId, settled, userId);
+    await this.saveWorkflowIndex(result);
+    return result;
   }
 
   startAsync(dto: StartProductionWorkflowDto, userId: string) {
@@ -115,6 +133,7 @@ export class ProductionWorkflowService {
     const initialState = this.createInitialState(dto, userId, threadId);
     void this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
+    void this.saveWorkflowIndex(this.view(threadId, initialState, userId));
     this.schedule(threadId, userId, () =>
       this.start({ ...dto, threadId }, userId),
     );
@@ -140,7 +159,9 @@ export class ProductionWorkflowService {
     );
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
-    return this.view(threadId, settled, userId);
+    const result = this.view(threadId, settled, userId);
+    await this.saveWorkflowIndex(result);
+    return result;
   }
 
   async resumeAsync(
@@ -160,6 +181,7 @@ export class ProductionWorkflowService {
       rerunRoles: dto.rerunRoles ?? [],
     };
     this.pendingStates.set(threadId, pending);
+    void this.saveWorkflowIndex(this.view(threadId, pending, userId));
     this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
     return this.view(threadId, pending, userId);
   }
@@ -178,7 +200,120 @@ export class ProductionWorkflowService {
         this.runUntilSettled(threadId, state),
       );
     }
-    return this.view(threadId, state, userId);
+    const result = this.view(threadId, state, userId);
+    void this.saveWorkflowIndex(result);
+    return result;
+  }
+
+  async list(userId: string) {
+    const ids = await this.redisProvider.zrange(
+      `production:workflows:${userId}`,
+      0,
+      -1,
+      'REV',
+    );
+    const items = await Promise.all(
+      ids.map((threadId) => this.redisProvider.get(this.workflowIndexKey(userId, threadId))),
+    );
+    const redisItems = items
+      .filter((item): item is string => Boolean(item))
+      .map((item) => JSON.parse(item) as Record<string, unknown>);
+    const memoryItems = [...this.workflowIndexMemory.values()].filter(
+      (item) => item.userId === userId,
+    );
+    const merged = new Map<string, Record<string, unknown>>();
+    [...redisItems, ...memoryItems].forEach((item) => {
+      const threadId = String(item.threadId ?? '');
+      if (threadId) merged.set(threadId, item);
+    });
+    return [...merged.values()]
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
+  async codingContext(threadId: string, userId: string) {
+    const state = await this.getOwnedState(threadId, userId);
+    if (state.status !== 'completed') {
+      throw new Error(`workflow is not completed: ${state.status}`);
+    }
+    return {
+      threadId: state.threadId,
+      projectId: state.projectId,
+      status: state.status,
+      selectedRoles: state.selectedRoles,
+      completedRoles: state.completedRoles,
+      brief: state.brief,
+      stages: state.selectedRoles
+        .map((role) => state.results[role])
+        .filter((result): result is ProductionStageResult => Boolean(result))
+        .map((result) => ({
+          role: result.role,
+          summary: result.summary,
+          riskLevel: result.riskLevel,
+          evidenceCoverage: result.evidenceCoverage,
+          claims: result.claims,
+          issues: result.issues,
+          downstreamRisks: result.downstreamRisks,
+          deliverables: result.deliverables,
+          generatedArtifact: result.generatedArtifact,
+        })),
+    };
+  }
+
+  async generateProject(threadId: string, userId: string) {
+    const context = await this.codingContext(threadId, userId);
+    const handoff = context.stages
+      .map((stage) => `${stage.role}\n${stage.summary}\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`)
+      .join('\n\n');
+    const messages = [
+        {
+          role: 'system',
+          content:
+            '你是资深前端工程师。只返回一个 JSON 对象，不要返回解释文字、Markdown 围栏或只返回 notes。JSON 必须严格包含且只能包含这些字段：projectName（字符串）、framework（字符串）、files（数组）、runCommand（字符串）、notes（字符串数组）。files 至少 4 项，每项必须包含 path、content、purpose 三个字段；content 必须是完整可运行源码，不能用省略号代替。优先生成 React + Vite + TypeScript；不确定的后端接口使用 mock 数据并在 notes 数组说明。文件路径必须是相对路径，禁止绝对路径、..、node_modules 和二进制文件。',
+        },
+        {
+          role: 'user',
+          content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
+        },
+      ];
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const output = await this.llmProvider
+          .getModel()
+          .withStructuredOutput(projectSchema, { method: 'jsonMode' })
+          .invoke(messages);
+        const normalized = {
+          ...output,
+          notes: Array.isArray(output.notes) ? output.notes : [String(output.notes ?? '')].filter(Boolean),
+        };
+        return { ...normalized, activityName: context.projectId, sourceThreadId: context.threadId };
+      } catch (error) {
+        lastError = error;
+        if (attempt === 1) {
+          messages.push({
+            role: 'user',
+            content: '上一次输出不符合 JSON schema。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组。',
+          });
+        }
+      }
+    }
+    throw new Error(`项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  }
+
+  async generateProjectZip(threadId: string, userId: string): Promise<Buffer> {
+    const context = await this.codingContext(threadId, userId);
+    const generated = await this.generateProject(threadId, userId);
+    const zip = new JSZip();
+    generated.files.forEach((file) => zip.file(file.path, file.content));
+    zip.file('RAG_WORKFLOW_CONTEXT.json', JSON.stringify({ ...context, generatedProject: generated }, null, 2));
+    zip.file('README.md', `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`);
+    context.stages.forEach((stage) => {
+      stage.deliverables.forEach((deliverable, index) => {
+        const safeTitle = deliverable.title.replace(/[\\/:*?"<>|]/g, '-');
+        zip.file(`handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`, deliverable.markdown);
+      });
+    });
+    return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   }
 
   private createInitialState(
@@ -712,6 +847,40 @@ export class ProductionWorkflowService {
 
   private config(threadId: string) {
     return { configurable: { thread_id: `production:${threadId}` } };
+  }
+
+  private workflowIndexKey(userId: string, threadId: string) {
+    return `production:workflow:${userId}:${threadId}`;
+  }
+
+  private async saveWorkflowIndex(view: ReturnType<ProductionWorkflowService['view']>) {
+    const index = {
+      ...view,
+      brief: undefined,
+      updatedAt: new Date().toISOString(),
+      results: Object.fromEntries(
+        Object.entries(view.results).map(([role, result]) => [role, result ? {
+          role: result.role,
+          summary: result.summary,
+          riskLevel: result.riskLevel,
+          evidenceCoverage: result.evidenceCoverage,
+          readyForApproval: result.readyForApproval,
+          completedAt: result.completedAt,
+          deliverables: result.deliverables.map((item) => ({ type: item.type, title: item.title })),
+        } : result]),
+      ),
+    };
+    this.workflowIndexMemory.set(`${view.userId}:${view.threadId}`, index);
+    await this.redisProvider.set(
+      this.workflowIndexKey(view.userId, view.threadId),
+      JSON.stringify(index),
+      86400 * 30,
+    );
+    await this.redisProvider.zadd(
+      `production:workflows:${view.userId}`,
+      Date.now(),
+      view.threadId,
+    );
   }
 
   private async traceLangfuse(state: ProductionWorkflowStateType): Promise<void> {

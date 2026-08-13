@@ -22,6 +22,8 @@ import {
   detectGameDocumentMetadata,
   DocumentLifecycleStatus,
   GameDocumentMetadata,
+  DocumentBusinessMetadata,
+  ResolvedDocumentBusinessMetadata,
   GameDocumentType,
   getChunkStrategy,
   IngestionQualityReport,
@@ -60,7 +62,7 @@ export interface UploadOptions {
   taskId?: string;
   originalBuffer?: Buffer;
   contentType?: string;
-  businessMetadata?: Partial<GameDocumentMetadata>;
+  businessMetadata?: DocumentBusinessMetadata;
 }
 
 export interface DocMeta extends UploadResult {
@@ -144,9 +146,20 @@ export class DocumentService {
         content,
         structuredChunks,
       );
-      const governance = {
-        ...this.extractGovernanceMetadata(filename, content),
+      const extractedGovernance = this.extractGovernanceMetadata(
+        filename,
+        content,
+      );
+      const governance: DocumentGovernanceMetadata = {
+        ...extractedGovernance,
         ...business,
+        docVersion: business.docVersion ?? extractedGovernance.docVersion,
+        effectiveAt:
+          this.parseDateOverride(business.effectiveAt) ??
+          extractedGovernance.effectiveAt,
+        expiredAt:
+          this.parseDateOverride(business.expiredAt) ??
+          extractedGovernance.expiredAt,
       };
       if (!ingestionQuality.accepted) {
         throw new Error('document failed ingestion quality gate');
@@ -762,6 +775,12 @@ export class DocumentService {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
+  private parseDateOverride(value?: string | null): Date | null {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
   private extractSourceAuthority(filename: string, content: string): string {
     const haystack = `${filename}\n${content}`.toLowerCase();
     if (/废止|失效|deprecated/.test(haystack)) return 'deprecated';
@@ -772,8 +791,8 @@ export class DocumentService {
 
   private mergeBusinessMetadata(
     detected: GameDocumentMetadata,
-    explicit?: Partial<GameDocumentMetadata>,
-  ): GameDocumentMetadata {
+    explicit?: DocumentBusinessMetadata,
+  ): ResolvedDocumentBusinessMetadata {
     return {
       projectId: explicit?.projectId?.trim() || detected.projectId,
       activityId: explicit?.activityId?.trim() || detected.activityId,
@@ -792,7 +811,34 @@ export class DocumentService {
       lifecycleStatus: explicit?.lifecycleStatus ?? detected.lifecycleStatus,
       supersedesDocId:
         explicit?.supersedesDocId?.trim() || detected.supersedesDocId,
+      docVersion: explicit?.docVersion?.trim() || null,
+      effectiveAt: explicit?.effectiveAt?.trim() || null,
+      expiredAt: explicit?.expiredAt?.trim() || null,
     };
+  }
+
+  async updateLifecycle(
+    docId: string,
+    userId: string,
+    lifecycleStatus: DocumentLifecycleStatus,
+  ): Promise<boolean> {
+    const exists = await this.docMetaRepo.exist({ where: { docId, userId } });
+    if (!exists) return false;
+    await Promise.all([
+      this.docMetaRepo.update({ docId, userId }, { lifecycleStatus }),
+      this.docChunkRepo.update({ docId, userId }, { lifecycleStatus }),
+      this.elasticsearchProvider.updateDocumentLifecycle(
+        docId,
+        lifecycleStatus,
+        userId,
+      ),
+    ]);
+    this.karpathyRagService.updateDocumentLifecycle(
+      docId,
+      lifecycleStatus,
+      userId,
+    );
+    return true;
   }
 }
 

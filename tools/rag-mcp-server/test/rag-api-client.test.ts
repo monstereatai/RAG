@@ -16,6 +16,9 @@ test('RagApiClient unwraps standard response envelope', async () => {
           data: {
             query: '组件',
             chunks: [{ id: 'c1', content: '内部组件用法' }],
+            status: 'insufficient_context',
+            retrievalSufficient: false,
+            retrievalReason: '候选片段未通过检索质量门禁',
           },
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -26,6 +29,9 @@ test('RagApiClient unwraps standard response envelope', async () => {
   const result = await client.search('组件', 3);
   assert.equal(result.query, '组件');
   assert.equal(result.chunks?.[0]?.content, '内部组件用法');
+  assert.equal(result.status, 'insufficient_context');
+  assert.equal(result.retrievalSufficient, false);
+  assert.equal(result.retrievalReason, '候选片段未通过检索质量门禁');
 });
 
 test('RagApiClient falls back to debug chunks when formal search is missing', async () => {

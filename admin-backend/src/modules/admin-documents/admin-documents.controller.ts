@@ -38,6 +38,38 @@ export class AdminDocumentsController {
     return this.ragClient.getDocumentChunks(docId);
   }
 
+  @Get(':docId/versions')
+  @ApiOperation({ summary: '查看文档版本链' })
+  @RequirePermission('admin:documents:read')
+  versions(@Param('docId') docId: string) {
+    return this.ragClient.getDocumentVersions(docId);
+  }
+
+  @Post(':docId/versions')
+  @AuditLog('documents', 'create-version')
+  @ApiOperation({ summary: '创建文档新版本并替代旧版本' })
+  @RequirePermission('admin:documents:write')
+  createVersion(@Param('docId') docId: string, @Body() body: unknown) {
+    return this.ragClient.createDocumentVersion(docId, body);
+  }
+
+  @Post(':docId/lifecycle')
+  @AuditLog('documents', 'lifecycle')
+  @ApiOperation({ summary: '修改文档生命周期状态' })
+  @RequirePermission('admin:documents:write')
+  lifecycle(@Param('docId') docId: string, @Body() body: unknown) {
+    const lifecycleStatus = (body as { lifecycleStatus?: string })?.lifecycleStatus;
+    return this.ragClient.updateDocumentLifecycle(docId, lifecycleStatus ?? 'deprecated');
+  }
+
+  @Post(':docId/rollback')
+  @AuditLog('documents', 'rollback')
+  @ApiOperation({ summary: '回滚到指定文档版本' })
+  @RequirePermission('admin:documents:write')
+  rollback(@Param('docId') docId: string) {
+    return this.ragClient.rollbackDocumentVersion(docId);
+  }
+
   @Get(':docId/status')
   @ApiOperation({ summary: '后台查看文档解析状态' })
   @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })

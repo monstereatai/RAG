@@ -1,6 +1,6 @@
 # 面试文档导航
 
-更新时间：2026-08-10
+更新时间：2026-08-12
 
 ## 一、先看结论
 
@@ -18,6 +18,11 @@
   -> ../../AI_AGENT_CORE_KNOWLEDGE.md
   -> AI_TOOLING_INTERVIEW_GUIDE.md
   -> AGENT_ARCHITECTURE_SELECTION_GUIDE.md
+
+按项目模块和真实链路理解
+  -> 功能步骤流程.md
+  -> 开源项目参考能力归档.md
+  -> ../../ARCHITECTURE.md
 
 练习面试表达
   -> SEVEN_DIFFICULTIES_CHEATSHEET.md
@@ -39,6 +44,215 @@
 | 面试表达   | 现场怎样在 30 秒或 2 分钟内说清楚 | 能脱离文档复述                 |
 | 项目证据   | 项目真的实现了什么                | 有代码、接口、评测或运行证据   |
 | 岗位与简历 | 怎么投、怎么写、哪些不能夸大      | 与 JD 对齐且不超过项目真实边界 |
+
+## 一、项目架构简图
+
+面试时先讲这张简图，具体模块职责和数据流再展开看[功能步骤流程](./功能步骤流程.md)。
+
+```mermaid
+flowchart TB
+  subgraph ENTRY[用户与运营入口]
+    User[用户提问／查看答案]
+    AdminUser[管理员上传规范／审核／回滚]
+    OpsUser[运营人员提交 Bad Case／评测／审计]
+    Web[React 问答与管理后台]
+  end
+
+  subgraph ACCESS[服务入口]
+    Admin[admin-backend\n认证／权限／审计／代理]
+    RAG[rag-backend\nChat／Document／Agent Ops API]
+  end
+
+  subgraph INGEST[知识入库链路]
+    Sources[文件／URL／公开资料／手工笔记]
+    Ingest[解析／质量门禁／父子切块／版本治理]
+    Queue[BullMQ Worker\n异步处理／重试]
+  end
+
+  subgraph QUERY[问答链路]
+    Router[Simple／Auto／Agentic\n路由与工作流]
+    Retrieve[Karpathy／Obsidian\nBM25／向量／图谱召回]
+    Gate[RRF／Rerank／权限版本过滤\n引用门禁／充分性判断]
+    Answer[LLM Gateway\n生成答案／降级／工具调用]
+  end
+
+  subgraph DATA[知识与运行状态]
+    Index[(Milvus／Elasticsearch／Neo4j\n语义／关键词／关系索引)]
+    Knowledge[(PostgreSQL\n文档／版本／会话／Query Log／Bad Case／Artifact)]
+    Memory[(Redis\n缓存／队列／Checkpoint／短期记忆)]
+    Obsidian[(Karpathy／Obsidian\ncompiled／index／notes)]
+  end
+
+  subgraph FLYWHEEL[质量闭环]
+    Feedback[用户反馈／提交 Bad Case]
+    Review[Agent Ops 审核\n修正答案／是否回归]
+    Reinject[审核通过后回灌\n纠错索引／评测集]
+    Regression[重新召回／回归验证\n通过后持续生效]
+  end
+
+  Tools[Tool Registry／MCP\nWeb Search／业务工具]
+  Observe[LangFuse／Prometheus\nTrace／指标／告警／审计]
+
+  User --> Web
+  AdminUser --> Web
+  OpsUser --> Web
+  Web --> Admin
+  Web --> RAG
+  Admin --> RAG
+
+  Admin --> Sources
+  Sources --> Ingest --> Queue
+  Queue --> Index
+  Queue --> Knowledge
+  Queue --> Obsidian
+
+  RAG --> Router
+  Router --> Retrieve --> Gate --> Answer
+  Retrieve --> Index
+  Retrieve --> Obsidian
+  Gate --> Knowledge
+  Router --> Memory
+  Router --> Tools --> Answer
+  Answer --> Web
+
+  Web --> Feedback --> Knowledge
+  Knowledge --> Review --> Reinject --> Regression
+  Regression --> Retrieve
+
+  RAG --> Observe
+  Queue --> Observe
+  Router --> Observe
+  Answer --> Observe
+  Observe --> Admin
+
+  %% 箭头按声明顺序着色：公共连接、知识入库、用户问答、Bad Case、观测告警
+  linkStyle 3,5 stroke:#64748b,stroke-width:2px
+  linkStyle 1,6,7,8,9,10,11 stroke:#16a34a,stroke-width:2px
+  linkStyle 0,4,12,13,14,15,16,17,18,19,20,21,22 stroke:#9333ea,stroke-width:2px
+  linkStyle 2,23,24,25,26,27,28 stroke:#ea580c,stroke-width:2px
+  linkStyle 29,30,31,32,33 stroke:#dc2626,stroke-width:2px
+
+  classDef entry fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef access fill:#e0e7ff,stroke:#4f46e5,color:#312e81
+  classDef ingest fill:#dcfce7,stroke:#16a34a,color:#14532d
+  classDef query fill:#f3e8ff,stroke:#9333ea,color:#581c87
+  classDef data fill:#f1f5f9,stroke:#64748b,color:#334155
+  classDef flywheel fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+  classDef tool fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef observe fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+  class User,AdminUser,OpsUser,Web entry
+  class Admin,RAG access
+  class Sources,Ingest,Queue ingest
+  class Router,Retrieve,Gate,Answer query
+  class Index,Knowledge,Memory,Obsidian data
+  class Feedback,Review,Reinject,Regression flywheel
+  class Tools tool
+  class Observe observe
+```
+
+图例：
+
+```text
+绿色：知识入库完整链路    紫色：用户问答完整链路（含 Agentic 工具调用）
+橙色：Bad Case 质量闭环    红色：观测、告警和审计链路
+灰色：公共入口、服务分发和共享存储连接
+```
+
+### 这张图怎么讲
+
+```text
+知识从文件、URL、公开资料进入解析和质量门禁
+  → 父子切块后写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、Karpathy 和 Obsidian
+  → 用户问题经过 Simple／Auto／Agentic 路由
+  → 关键词、向量、图谱和纠错证据统一召回、融合、重排和版本权限过滤
+  → LLM Gateway 基于证据生成答案，Agentic 必要时调用 Tool／MCP
+  → 用户反馈进入 Bad Case 审核、回灌和回归验证
+  → Redis 保存运行状态和 Checkpoint，LangFuse／Prometheus 记录全链路
+```
+
+### 箭头线颜色对应的流程
+
+架构图中的箭头不是装饰，颜色表示一条完整的业务流。阅读时可以先选择一种颜色，再沿着同色箭头看完这条链路。
+
+| 箭头颜色 | 代表流程 | 起点 | 经过的主要模块 | 终点／结果 |
+| --- | --- | --- | --- | --- |
+| 灰色 | 公共入口与服务分发 | React 页面和管理操作 | admin-backend、rag-backend | 完成认证、权限、审计和 API 分发；不属于某一条业务闭环 |
+| 绿色 | 知识入库流 | 文件、URL、公开资料、手工笔记 | 解析、质量门禁、父子切块、BullMQ Worker | 写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、Karpathy、Obsidian |
+| 紫色 | 用户问答流 | 用户问题 | Simple／Auto／Agentic、混合检索、RRF、Rerank、引用门禁、Tool／MCP、LLM Gateway | 返回带引用的答案；必要时降级或拒答 |
+| 橙色 | Bad Case 质量回流 | 用户反馈和 Bad Case | Agent Ops 审核、纠正答案、纠错索引、回归评测 | 重新召回验证，合格证据进入后续问答 |
+| 红色 | 观测与告警流 | 问答、队列、Agent、模型调用 | LangFuse、Prometheus、告警适配层 | Trace、指标、告警、审计和运营处理 |
+
+补充说明：灰色节点和灰色箭头表示公共连接，不代表独立业务流程；同一个存储节点可能被多种颜色的流程读写。例如 PostgreSQL 同时保存文档版本、Query Log、Bad Case 和 Artifact，Redis 同时保存队列、缓存和 Checkpoint。
+
+### 这张图怎么看
+
+#### 先看图的方向
+
+这张图不是单纯的模块堆砌，箭头表示“谁调用谁、数据往哪里流转”。建议从上往下看：
+
+1. **入口区**：用户、管理员和运营人员都从 React 页面进入；普通用户提问，管理员管理规范和版本，运营人员处理 Bad Case、评测和审计。
+2. **服务入口区**：React 请求先进入 `admin-backend` 或 `rag-backend`。`admin-backend` 主要负责管理端认证、权限、审计和代理；真正的问答、入库和 Agent 执行由 `rag-backend` 完成。
+3. **知识入库区**：文件、URL、公开资料和手工笔记经过解析、质量门禁、父子切块和版本治理，再由 BullMQ Worker 异步写入索引。
+4. **问答区**：问题进入 Simple／Auto／Agentic 路由，随后检索证据、执行质量门禁，再交给 LLM Gateway 生成答案。
+5. **数据区**：PostgreSQL 保存业务状态和审计；Milvus、Elasticsearch、Neo4j 负责不同类型的检索；Redis 保存运行时状态；Karpathy／Obsidian 保存编译知识和快速检索内容。
+6. **质量闭环区**：错误答案不是直接覆盖，而是经过 Bad Case 审核、回灌、重新召回和回归验证后才再次参与回答。
+
+#### 再看四条主要链路
+
+**第一条：知识入库链路，左侧进入中间。**
+
+```text
+文件／URL／公开资料
+  → 解析和编码修复
+  → 质量门禁
+  → 父子切块和版本治理
+  → BullMQ Worker 异步处理
+  → PostgreSQL 保存元数据
+  → Milvus／Elasticsearch／Neo4j 建立索引
+  → Karpathy／Obsidian 双写知识层
+```
+
+这条链路解决“知识怎么进入系统，以及最新规范如何替换旧规范”。新版本索引成功后，旧版本变成 `deprecated`（注：已废弃），默认检索不再使用旧版本。
+
+**第二条：用户问答链路，中间向下。**
+
+```text
+用户问题
+  → Chat API
+  → Simple／Auto／Agentic 路由
+  → Karpathy／Obsidian、关键词、向量、图谱召回
+  → RRF 融合和 Rerank 重排
+  → 权限／版本过滤和引用门禁
+  → LLM Gateway
+  → AG-UI／SSE 返回答案和引用
+```
+
+- `Simple`（注：简单链路）优先低延迟回答。
+- `Auto`（注：自动链路）先走 Simple，证据不足才升级。
+- `Agentic`（注：代理链路）可以拆分子问题、循环检索、调用工具和协调多 Agent。
+
+**第三条：Agent 工具链路，从 Router 横向到右侧。**
+
+Agentic 不是直接让模型随便执行动作，而是先通过 `Tool Registry`（注：工具注册表）检查工具权限、风险、超时和版本，再通过 MCP 或 Function Calling 调用 Web Search、图谱、RAG 或业务工具。工具结果回到 Agent Workflow，经过证据和状态检查后才进入最终生成。
+
+**第四条：Bad Case 质量飞轮，从右下方回到检索。**
+
+```text
+用户反馈
+  → Bad Case 提交
+  → Agent Ops 人工审核
+  → 修正答案和是否进入回归集
+  → 审核通过后回灌纠错索引
+  → 重新召回和回归验证
+  → 下一次问答优先使用有效纠错证据
+```
+
+这里的关键是：Bad Case 不能未经审核直接覆盖知识库；历史纠错证据也不能覆盖当前生效规范，必须经过版本和引用门禁。
+
+#### 面试时可以这样复述
+
+> 这个项目分成入口、服务、知识入库、问答编排、检索存储和质量运营几部分。知识从文件、URL 或公开资料进入后，经过解析、质量门禁、父子切块和版本治理，分别写入 PostgreSQL、Milvus、Elasticsearch、Neo4j 以及 Karpathy 和 Obsidian。用户提问后，由 Simple、Auto、Agentic 三档链路路由，经过关键词、向量、图谱和纠错证据的混合检索、融合重排、权限版本过滤和引用门禁，最后通过 LLM Gateway 生成答案。Agentic 复杂任务可以调用受控工具并产出结构化 Artifact；错误答案通过 Bad Case 审核、回灌和回归验证形成质量飞轮，LangFuse 和 Prometheus 负责单次调用与整体运行监控。
 
 ## 二、最短阅读路线
 
@@ -79,7 +293,8 @@ Tool、MCP、Skill 分别是什么？
 
 | 文档 | 适用场景 |
 | --- | --- |
-| [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解 Simple、Auto、Agentic、RAG、Bad Case、观测和运营闭环 |
+| [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解模块职责、模块交互、Simple、Auto、Agentic、RAG、版本治理、Bad Case、Artifact、观测和运营闭环 |
+| [开源项目参考能力归档](./开源项目参考能力归档.md) | 了解 Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的参考点，以及哪些能力已结合当前项目落地 |
 
 ### 2.3 一周准备路线
 
@@ -106,9 +321,13 @@ Tool、MCP、Skill 分别是什么？
 | 项目还有什么没实现                        | [JD 缺口状态](./jd/jd-gap-implementation-status.md)               | [项目真实进度](../../ROADMAP.md)                                |
 | 一线大厂岗位要求                          | [JD 要求与项目对照](./jd/jd-requirements-project-mapping.md)      | [高级岗位就绪度](./SENIOR_AGENT_INTERVIEW_READINESS.md)         |
 | 游戏官网／活动业务背景                    | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md)   | [游戏营销证据](./resume/game-marketing-rag-evidence.md)         |
+| 公开资料入库与 Simple Karpathy 验收        | [公开资料与 Karpathy 方案](../plans/游戏运营营销公开资料与Karpathy方案.md) | [功能步骤流程](./功能步骤流程.md) |
 | 简历怎么写                                | [通用 RAG 简历版](./resume/resume-rag-project.md)                 | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md) |
 | 历次真实面试题和主人问过的问题            | [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 表中标注的具体答案入口                                          |
 | AI 应用完整知识地图                       | [ProcessOn 知识图谱](./processon-ai-application-mindmap.md)       | [AgentGuide 对照](./agentguide-rag-interview-mapping.md)        |
+| 项目模块如何协作                          | [功能步骤流程](./功能步骤流程.md)                                | [项目架构](../../ARCHITECTURE.md)                               |
+| 文档规范增量、发布、废弃和回滚            | [功能步骤流程](./功能步骤流程.md)                                | [项目真实进度](../../ROADMAP.md)                                |
+| Dify 到 AutoGen 的能力借鉴                | [开源项目参考能力归档](./开源项目参考能力归档.md)                 | [功能步骤流程](./功能步骤流程.md)                               |
 
 ## 四、目录内全部文件
 
@@ -132,6 +351,15 @@ Tool、MCP、Skill 分别是什么？
 | [USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 历次提问、真实面试题、覆盖状态和建议补齐项           | 查漏必读   |
 | [SENIOR_AGENT_INTERVIEW_READINESS.md](./SENIOR_AGENT_INTERVIEW_READINESS.md)                             | 高级／资深／Staff 岗位差距、真实数据采集和证据验收   | 投递前必读 |
 | [interview-docs-usage.md](./interview-docs-usage.md)                                                     | 更详细的文档使用场景、问题定位和复习说明             | 需要时查   |
+| [功能步骤流程.md](./功能步骤流程.md)                                                                       | 项目模块清单、模块交互、用户操作和服务端状态／数据流 | 项目深挖   |
+| [开源项目参考能力归档.md](./开源项目参考能力归档.md)                                                       | Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的参考能力与当前项目融合边界 | 项目深挖 |
+
+### 4.5 参考项目与项目融合
+
+| 文件 | 内容 | 优先级 |
+| --- | --- | --- |
+| [开源项目参考能力归档.md](./开源项目参考能力归档.md) | 记录各开源项目参考了什么、当前项目实际实现了什么、没有照搬什么，以及生产环境仍需补齐的部分 | 面试追问必读 |
+| [功能步骤流程.md](./功能步骤流程.md) | 把参考能力落到当前项目的真实用户操作、模块交互、状态变化和验证路径 | 面试演示必读 |
 
 ### 4.3 JD 对照
 
@@ -148,6 +376,7 @@ Tool、MCP、Skill 分别是什么？
 | [resume/resume-rag-project-game-marketing.md](./resume/resume-rag-project-game-marketing.md) | 游戏官网、活动和营销业务版本                         | 优先使用 |
 | [resume/游戏营销RAG项目完整描述.md](./resume/游戏营销RAG项目完整描述.md) | 游戏营销 RAG 项目完整描述与七项技术难点展开版 | 面试深挖 |
 | [resume/game-marketing-rag-evidence.md](./resume/game-marketing-rag-evidence.md)             | 游戏活动专项数据、评测、MCP、多 Agent 和业务边界证据 | 深挖     |
+| [resume/deepseek-高级资深Agent全栈简历定位与面试口径.md](./resume/deepseek-高级资深Agent全栈简历定位与面试口径.md) | 高级／资深 Agent 全栈岗位的简历定位、项目口径和追问边界 | 定制投递 |
 
 ## 五、四类岗位分别怎么看
 
@@ -192,6 +421,8 @@ Tool、MCP、Skill 分别是什么？
 | 面试时怎么说           | [INTERVIEW_PLAYBOOK.md](../../INTERVIEW_PLAYBOOK.md)                                                |
 | Agent／RAG 原理        | [AI_AGENT_CORE_KNOWLEDGE.md](../../AI_AGENT_CORE_KNOWLEDGE.md)                                      |
 | 架构方案与选型         | [AGENT_ARCHITECTURE_SELECTION_GUIDE.md](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md)                    |
+| 项目模块与实际交互流程 | [功能步骤流程.md](./功能步骤流程.md)                                                            |
+| 开源项目参考与融合边界 | [开源项目参考能力归档.md](./开源项目参考能力归档.md)                                              |
 | Tool／MCP／Skill       | [AI_TOOLING_INTERVIEW_GUIDE.md](./AI_TOOLING_INTERVIEW_GUIDE.md)                                    |
 | 项目七个难点           | [SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)                    |
 | 真实生产数据           | [SENIOR_AGENT_INTERVIEW_READINESS.md](./SENIOR_AGENT_INTERVIEW_READINESS.md) 中实际采集并验收的数据 |

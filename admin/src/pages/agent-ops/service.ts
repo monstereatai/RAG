@@ -188,6 +188,26 @@ export const getProductionWorkflow = (threadId: string) =>
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}`,
   );
 
+export const getProductionWorkflowCodingContext = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context`,
+  );
+
+export const generateProductionWorkflowProject = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project`,
+    { method: "POST", data: {} },
+  );
+
+export const downloadProductionWorkflowProjectZip = (threadId: string) =>
+  fetch(`/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project-zip`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${localStorage.getItem("access_token") ?? ""}` },
+  });
+
+export const getProductionWorkflows = () =>
+  authRequest<unknown[]>('/api/admin/agent-ops/workflows');
+
 export const evaluateAgent = (body: Record<string, unknown>) =>
   authRequest<unknown>("/api/admin/agent-ops/evals", {
     method: "POST",

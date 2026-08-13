@@ -87,6 +87,12 @@ export const qaNav: SideNavItem[] = [
 
 export const agentOpsNav: SideNavItem[] = [
   {
+    key: 'workspace',
+    label: '产研运工作流',
+    icon: <BranchesOutlined />,
+    path: '/agent-ops',
+  },
+  {
     key: 'run-center',
     label: '运行中心',
     icon: <HistoryOutlined />,
@@ -99,22 +105,22 @@ export const agentOpsNav: SideNavItem[] = [
     path: '/agent-ops/collaboration',
   },
   {
-    key: 'workspace',
-    label: 'Agent 工作台',
-    icon: <BranchesOutlined />,
-    path: '/agent-ops',
+    key: 'evals',
+    label: 'Agent Evals',
+    icon: <ExperimentOutlined />,
+    path: '/agent-ops/evals',
+  },
+  {
+    key: 'governance',
+    label: '平台治理',
+    icon: <DatabaseOutlined />,
+    path: '/agent-ops/governance',
   },
   {
     key: 'bad-cases',
     label: 'Bad Case 审核',
     icon: <AuditOutlined />,
     path: '/agent-ops/bad-cases',
-  },
-  {
-    key: 'evals',
-    label: 'Agent Evals',
-    icon: <ExperimentOutlined />,
-    path: '/agent-ops/evals',
   },
   {
     key: 'traces',
@@ -127,12 +133,6 @@ export const agentOpsNav: SideNavItem[] = [
     label: 'Artifact 审计',
     icon: <FileTextOutlined />,
     path: '/agent-ops/artifacts',
-  },
-  {
-    key: 'governance',
-    label: '平台治理',
-    icon: <DatabaseOutlined />,
-    path: '/agent-ops/governance',
   },
 ];
 

@@ -38,6 +38,11 @@ export class WorkflowController {
     return this.productionWorkflow.startAsync(body, user.userId);
   }
 
+  @Get('production')
+  listProduction(@CurrentUser() user: JwtPayload) {
+    return this.productionWorkflow.list(user.userId);
+  }
+
   @Post('production/:threadId/resume')
   resumeProduction(
     @Param('threadId') threadId: string,
@@ -45,6 +50,14 @@ export class WorkflowController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.productionWorkflow.resumeAsync(threadId, body, user.userId);
+  }
+
+  @Get('production/:threadId/coding-context')
+  productionCodingContext(
+    @Param('threadId') threadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.productionWorkflow.codingContext(threadId, user.userId);
   }
 
   @Get('production/:threadId')

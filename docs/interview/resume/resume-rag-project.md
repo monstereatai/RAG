@@ -1,6 +1,6 @@
 # RAG 项目简历写法
 
-更新时间：2026-07-07
+更新时间：2026-08-12
 
 ## 依据材料
 
@@ -14,6 +14,8 @@
 ## 项目描述
 
 基于 NestJS + React + LangGraph.js + Milvus + Elasticsearch + PostgreSQL + Redis + Neo4j 构建企业级 Agentic RAG 知识治理与问答平台，覆盖文档解析、混合检索、GraphRAG、Agentic Workflow、MCP 工具治理、AG-UI/SSE 流式输出、权限过滤、引用校验、拒答策略、评测门禁和后台运营。项目重点解决企业知识库“搜得到、答得准、有引用、可评测、可运营、可控成本”的工程落地问题。
+
+最新公开资料验收：建立中国 PC 端候选 Top50、页游候选 Top50 目录，实际抓取 127 个公开页面，108 份唯一目标文档全部完成索引；资料进入 PostgreSQL、Milvus、BM25／Elasticsearch、Karpathy 和 Obsidian。该数据用于验证公开资料入库和检索链路，不代表真实企业线上效果。
 
 ## 简历最终版
 

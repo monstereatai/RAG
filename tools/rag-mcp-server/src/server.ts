@@ -42,7 +42,8 @@ export async function createServer(): Promise<McpServer> {
     'rag_search',
     {
       title: 'Search RAG knowledge',
-      description: 'Search internal RAG knowledge and return compact evidence chunks for coding agents.',
+      description:
+        'Return retrieval evidence chunks for inspection and coding context, including approved reviewed-correction evidence when it matches. This tool does not generate a final answer; use rag_ask for direct factual questions or QA Ops-equivalent answers.',
       inputSchema: {
         query: z.string().min(1).describe('Search query.'),
         limit: z.number().int().positive().max(20).optional().describe('Maximum chunks to return.'),
@@ -82,7 +83,8 @@ export async function createServer(): Promise<McpServer> {
     'rag_ask',
     {
       title: 'Ask RAG',
-      description: 'Ask the RAG backend in simple/auto/agentic mode and return answer, references and Obsidian paths.',
+      description:
+        'Ask a direct factual or business question through the full RAG answer pipeline used by QA Ops, including retrieval quality gates, reviewed Bad Case corrections and Obsidian evidence when available.',
       inputSchema: {
         query: z.string().min(1),
         mode: chatModeSchema.default('auto'),
@@ -128,6 +130,40 @@ export async function createServer(): Promise<McpServer> {
     },
     async ({ task }) =>
       runTool(async () => compactSupervisorResult(await client.supervisorQuery(task))),
+  );
+
+  server.registerTool(
+    'rag_production_workflow_context',
+    {
+      title: 'Get approved production workflow coding context',
+      description:
+        'Return the approved, completed production workflow stages and Markdown deliverables for Codex or another coding agent. Only completed workflows are accepted.',
+      inputSchema: {
+        activityName: z.string().min(1).describe('Activity or project name, for example act10.'),
+      },
+    },
+    async ({ activityName }) => runTool(async () => client.productionWorkflowCodingContext(activityName)),
+  );
+
+  server.registerTool(
+    'rag_production_workflow_activities',
+    {
+      title: 'List production workflow activities',
+      description:
+        'List production and operations activities visible to the current MCP user, including status, completed roles and updated time. Use this before getting a coding context by activity name.',
+      inputSchema: {},
+    },
+    async () =>
+      runTool(async () => {
+        const workflows = await client.productionWorkflowActivities();
+        return workflows.map((workflow) => ({
+          activityName: workflow.projectId,
+          status: workflow.status,
+          completedRoles: workflow.completedRoles ?? [],
+          selectedRoles: workflow.selectedRoles ?? [],
+          updatedAt: workflow.updatedAt ?? null,
+        }));
+      }),
   );
 
   registerGameTool(server, client, 'rag_game_plan', 'plan');
@@ -215,6 +251,8 @@ function normalizeSearchResult(result: SearchResult): Record<string, unknown> {
     count: chunks.length,
     chunks: chunks.map(compactChunk),
     status: result.status,
+    retrievalSufficient: result.retrievalSufficient,
+    retrievalReason: result.retrievalReason,
   };
 }
 
@@ -295,6 +333,8 @@ function helpText(): string {
     '  rag_graph_query',
     '  rag_agent_domains',
     '  rag_agent_pipeline',
+    '  rag_production_workflow_context',
+    '  rag_production_workflow_activities',
     '  rag_game_plan',
     '  rag_game_checklist',
     '  rag_game_tracking',

@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises';
 const baseUrl = (process.env.RAG_BUSINESS_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 const datasetPath = process.env.GAME_MARKETING_PUBLIC_DATASET ?? 'eval/game-marketing-public-sources.dataset.json';
 const maxDocuments = Number(process.env.GAME_MARKETING_IMPORT_MAX ?? '0');
+const delayMs = Math.max(0, Number(process.env.GAME_MARKETING_IMPORT_DELAY_MS ?? '0'));
+const retryCount = Math.max(0, Number(process.env.GAME_MARKETING_IMPORT_RETRIES ?? '2'));
+const skipExisting = process.env.GAME_MARKETING_IMPORT_SKIP_EXISTING === 'true';
 const dryRun = process.argv.includes('--dry-run');
 const onlyPublic = process.argv.includes('--only-public');
 const requestedIds = new Set(
@@ -19,19 +22,24 @@ const scopedDocuments = onlyPublic
 const idScopedDocuments = requestedIds.size > 0
   ? scopedDocuments.filter((document) => requestedIds.has(document.id))
   : scopedDocuments;
-const selected = maxDocuments > 0 ? idScopedDocuments.slice(0, maxDocuments) : idScopedDocuments;
+const selected = idScopedDocuments;
 
 if (dryRun) {
   console.log(JSON.stringify({ ok: true, mode: 'dry-run', datasetPath, documents: selected.length }, null, 2));
 } else {
   const token = await login();
+  const existingFilenames = skipExisting ? await listExistingFilenames(token) : new Set();
+  const pendingCandidates = selected.filter((document) => !existingFilenames.has(`${document.id}.md`));
+  const pending = maxDocuments > 0 ? pendingCandidates.slice(0, maxDocuments) : pendingCandidates;
   const results = [];
-  for (const document of selected) {
-    results.push(await upload(token, document));
+  for (const document of pending) {
+    results.push(await uploadWithRetry(token, document));
+    if (delayMs > 0) await delay(delayMs);
   }
   console.log(JSON.stringify({
     ok: results.every((item) => item.ok),
     datasetPath,
+    skippedExisting: selected.length - pending.length - (pendingCandidates.length - pending.length),
     imported: results.filter((item) => item.ok).length,
     failed: results.filter((item) => !item.ok),
     evidenceLevels: [...new Set(selected.map((item) => item.metadata?.evidenceLevel ?? 'unknown'))],
@@ -71,6 +79,31 @@ async function upload(token, document) {
   } catch (error) {
     return { ok: false, id: document.id, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function listExistingFilenames(token) {
+  const response = await fetch(`${baseUrl}/api/v1/documents`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) throw new Error(`list documents failed: ${response.status}`);
+  const body = await response.json();
+  const documents = unwrap(body);
+  return new Set(Array.isArray(documents) ? documents.map((item) => item.filename).filter(Boolean) : []);
+}
+
+async function uploadWithRetry(token, document) {
+  let result;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    result = await upload(token, document);
+    if (result.ok || ![429, 502, 503, 504].includes(result.status) || attempt === retryCount) return result;
+    await delay(Math.max(delayMs, 1000) * (attempt + 1));
+  }
+  return result;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function unwrap(body) {

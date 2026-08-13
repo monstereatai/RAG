@@ -54,6 +54,7 @@
 | `plans/game-production-rag-functional-plan.md`      | 游戏官网／活动场景的入库、检索、上下文、业务元数据、生命周期、Bad Case 和专项评测增强方案 |
 | `plans/expert-agent-difficulties-implementation.md` | 七项专家级 Agent／RAG 难点的实现入口、方案取舍、指标和真实验证                            |
 | `plans/karpathy-obsidian-dual-ingest-plan.md`       | Karpathy + Obsidian 统一知识链路方案                                                      |
+| `plans/游戏运营营销公开资料与Karpathy方案.md`       | PC／页游 Top100 公开资料抓取、入库、Simple Karpathy Fast Path 和最终验收口径                  |
 | `plans/official-docs-sync.md`                       | 官方文档夜间同步策略                                                                      |
 | `architecture-decisions/README.md`                  | Workflow First、混合检索、证据门禁、分层记忆和降级恢复五项 ADR 索引                       |
 | `evidence/EVIDENCE_COLLECTION_TEMPLATES.md`         | 跨团队交付、事故复盘和架构决策口述模板                                                    |
