@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
+import { AgentGoalService } from './agent-goal.service';
 
 @Injectable()
 export class AgentRunsService {
@@ -12,6 +13,7 @@ export class AgentRunsService {
     @InjectRepository(AgentRunEntity) private readonly runRepo: Repository<AgentRunEntity>,
     @InjectRepository(AgentActionEntity) private readonly actionRepo: Repository<AgentActionEntity>,
     private readonly events: AgentRuntimeEventsService,
+    private readonly goals: AgentGoalService,
   ) {}
 
   async start(input: { threadId: string; userId?: string; mode: AgentRunEntity['mode']; maxSteps?: number; maxToolCalls?: number; maxDelegations?: number }) {
@@ -28,6 +30,35 @@ export class AgentRunsService {
     const saved = await this.runRepo.save(run);
     await this.events.emit({ threadId: saved.threadId, runId: saved.id, eventType: `run.${saved.status === 'completed' ? 'completed' : saved.status === 'failed' ? 'failed' : 'updated'}`, actor: saved.mode, payload: { status: saved.status, route: saved.route, costUsd: saved.costUsd } });
     return saved;
+  }
+
+  async recordRuntimeEvent(runId: string, input: { eventType: string; actor?: string; target?: string; payload?: unknown; taskId?: string }) {
+    const run = await this.runRepo.findOne({ where: { id: runId } });
+    if (!run) throw new NotFoundException(`agent run ${runId} not found`);
+    return this.events.emit({
+      threadId: run.threadId,
+      runId,
+      taskId: input.taskId,
+      eventType: input.eventType,
+      actor: input.actor ?? run.mode,
+      target: input.target,
+      payload: input.payload,
+    });
+  }
+
+  async updateCurrentNode(runId: string, currentNode: string, payload?: unknown) {
+    const run = await this.runRepo.findOne({ where: { id: runId } });
+    if (!run) throw new NotFoundException(`agent run ${runId} not found`);
+    run.currentNode = currentNode;
+    await this.runRepo.save(run);
+    return this.events.emit({
+      threadId: run.threadId,
+      runId,
+      eventType: 'node.started',
+      actor: run.mode,
+      target: currentNode,
+      payload,
+    });
   }
 
   async recordAction(runId: string, input: { name: string; actionType?: string; status?: AgentActionEntity['status']; riskLevel?: AgentActionEntity['riskLevel']; requiresApproval?: boolean; durationMs?: number; input?: unknown; output?: unknown }) {
@@ -56,13 +87,16 @@ export class AgentRunsService {
     return { allowed: true, remaining: run.maxDelegations - run.delegationCount - 1 };
   }
 
-  list(limit = 50) { return this.runRepo.find({ order: { createdAt: 'DESC' }, take: Math.min(Math.max(limit, 1), 200) }); }
+  async list(limit = 50) {
+    const runs = await this.runRepo.find({ order: { createdAt: 'DESC' }, take: Math.min(Math.max(limit, 1), 200) });
+    return Promise.all(runs.map(async (run) => ({ ...run, goal: await this.goals.get(run.id) })));
+  }
 
   async get(id: string) {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
     const actions = await this.actionRepo.find({ where: { runId: id }, order: { createdAt: 'ASC' } });
-    return { ...run, actions };
+    return { ...run, actions, goal: await this.goals.get(id) };
   }
 
   async retry(id: string) {

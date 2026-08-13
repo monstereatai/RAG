@@ -44,6 +44,7 @@ describe('AgenticRagService budget boundaries', () => {
     const dashScopeRerankService = {
       isEnabled: jest.fn().mockReturnValue(false),
     } as unknown as DashScopeRerankService;
+    const toolPolicy = { decide: jest.fn().mockReturnValue({ allowed: true }) };
     const semanticExampleSelector = {} as SemanticExampleSelector;
     const badCaseFlywheel = {
       selectPrompt: jest.fn().mockResolvedValue(''),
@@ -66,6 +67,7 @@ describe('AgenticRagService budget boundaries', () => {
       karpathyRagService,
       bochaSearchService,
       dashScopeRerankService,
+      toolPolicy as never,
       semanticExampleSelector,
       badCaseFlywheel as never,
       metricsService as never,
@@ -169,7 +171,7 @@ describe('AgenticRagService budget boundaries', () => {
             reason: '',
           },
         ],
-      } as AgenticRagStateType,
+      } as unknown as AgenticRagStateType,
       {
         configurable: {
           userId: 'user-1',

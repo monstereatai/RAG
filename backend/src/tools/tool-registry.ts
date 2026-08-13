@@ -7,6 +7,9 @@ export interface ToolRegistryEntry {
   audit: boolean;
   fallback: string;
   owner: string;
+  modes: Array<'simple' | 'auto' | 'agentic' | 'production'>;
+  roles?: string[];
+  requiresApproval?: boolean;
 }
 
 export const toolRegistry: ToolRegistryEntry[] = [
@@ -19,6 +22,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '跳过联网搜索，继续使用本地 RAG / BM25 / ES 证据。',
     owner: 'rag-backend',
+    modes: ['agentic'],
   },
   {
     name: 'dashscope_rerank',
@@ -29,6 +33,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '使用融合排序结果，不阻断主问答链路。',
     owner: 'rag-backend',
+    modes: ['simple', 'auto', 'agentic'],
   },
   {
     name: 'graph_search_tool',
@@ -39,6 +44,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '图谱不可用时回退到 RAG 文档证据。',
     owner: 'rag-backend',
+    modes: ['auto', 'agentic'],
   },
   {
     name: 'mcp_tools',
@@ -49,6 +55,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: 'MCP server 未启用或失败时禁用对应工具，不影响核心 RAG。',
     owner: 'rag-backend',
+    modes: ['agentic', 'production'],
   },
   {
     name: 'product_knowledge_search',
@@ -59,6 +66,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['product'],
   },
   {
     name: 'design_guideline_search',
@@ -69,6 +78,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['design'],
   },
   {
     name: 'frontend_engineering_search',
@@ -79,6 +90,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['frontend'],
   },
   {
     name: 'backend_contract_search',
@@ -89,6 +102,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['backend'],
   },
   {
     name: 'qa_regression_search',
@@ -99,6 +114,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['qa'],
   },
   {
     name: 'operations_playbook_search',
@@ -109,6 +126,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '检索失败时继续生成方案草稿，并将事实性声明标记为待确认。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['operations'],
   },
   {
     name: 'artifact_generate',
@@ -119,5 +138,8 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '交付内容保留在工作流 checkpoint，稍后可重新生成文件。',
     owner: 'production-workflow',
+    modes: ['production'],
+    roles: ['product', 'design', 'frontend', 'backend', 'qa', 'operations'],
+    requiresApproval: true,
   },
 ];

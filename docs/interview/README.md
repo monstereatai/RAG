@@ -294,7 +294,7 @@ Tool、MCP、Skill 分别是什么？
 | 文档 | 适用场景 |
 | --- | --- |
 | [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解模块职责、模块交互、Simple、Auto、Agentic、RAG、版本治理、Bad Case、Artifact、观测和运营闭环 |
-| [开源项目参考能力归档](./开源项目参考能力归档.md) | 了解 Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的参考点，以及哪些能力已结合当前项目落地 |
+| [开源项目参考能力归档](./开源项目参考能力归档.md) | 了解 Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen、DeepSeek Harness 的参考点，以及哪些能力已结合当前项目落地 |
 
 ### 2.3 一周准备路线
 

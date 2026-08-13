@@ -21,6 +21,7 @@ import { resolveRoleContext } from './role-presets';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { detectRetrievalProfile, type RetrievalProfile } from '../../rag/karpathy/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
+import { AgentGoalService } from '../agent-runs/agent-goal.service';
 
 @Injectable()
 export class ChatService {
@@ -40,6 +41,7 @@ export class ChatService {
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo?: Repository<KnowledgeBaseProfileEntity>,
     @Optional() private readonly agentRuns?: AgentRunsService,
+    @Optional() private readonly agentGoals?: AgentGoalService,
     @Optional() private readonly config?: ConfigService,
   ) {}
 
@@ -91,6 +93,15 @@ export class ChatService {
       maxToolCalls: this.config?.get<number>('agentRun.maxToolCalls') ?? 24,
       maxDelegations: this.config?.get<number>('agentRun.maxDelegations') ?? 6,
     });
+    if (run) {
+      await this.agentGoals?.activate({
+        threadId,
+        runId: run.id,
+        actor: mode,
+        objective: req.query,
+        maxRounds: run.maxSteps,
+      });
+    }
     if (memoryResult.systemMessage) {
       memoryMessages.push({
         role: 'system',
@@ -112,6 +123,17 @@ export class ChatService {
         this.logger.debug(
           `Short-term memory injected: ${stmContext.recentTurns.length} recent turns, truncated=${stmContext.truncatedHistory}`,
         );
+      }
+      if (run) {
+        await this.agentRuns?.recordRuntimeEvent(run.id, {
+          eventType: 'memory.context.loaded',
+          target: 'short_term_memory',
+          payload: {
+            recentTurns: stmContext.recentTurns.length,
+            truncatedHistory: stmContext.truncatedHistory,
+            summaryLoaded: Boolean(stmContext.systemMessage),
+          },
+        });
       }
     }
 
@@ -138,14 +160,37 @@ export class ChatService {
     }
 
     if (mode === 'simple') {
-      const result = await this.karpathyRagService.answer(
-        req.query,
-        history,
-        userId,
-        memoryMessages,
-        undefined,
-        retrievalOptions,
-      );
+      let result;
+      try {
+        result = await this.karpathyRagService.answer(
+          req.query,
+          history,
+          userId,
+          memoryMessages,
+          undefined,
+          retrievalOptions,
+        );
+      } catch (error) {
+        await this.finishFailedRun(run, req.query, mode, error);
+        throw error;
+      }
+
+      if (run) {
+        await this.agentRuns?.recordRuntimeEvent(run.id, {
+          eventType: 'route.selected',
+          target: 'simple',
+          payload: { requestedMode: mode, route: 'simple' },
+        });
+        await this.agentRuns?.recordRuntimeEvent(run.id, {
+          eventType: 'retrieval.completed',
+          target: 'karpathy_rag',
+          payload: {
+            references: result.references.length,
+            sufficient: result.retrievalSufficient,
+            reason: result.retrievalReason,
+          },
+        });
+      }
 
       // 持久化本轮对话
       await this.conversationService.addMessage(
@@ -206,6 +251,17 @@ export class ChatService {
         requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
         resultSummary: result.answer.slice(0, 2000),
       });
+      if (run) {
+        await this.agentGoals?.update({
+          threadId,
+          runId: run.id,
+          actor: mode,
+          objective: req.query,
+          maxRounds: run.maxSteps,
+          status: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? 'blocked' : 'completed',
+          reason: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? result.retrievalReason : undefined,
+        });
+      }
       this.traceAnswer({
         userId,
         query: req.query,
@@ -243,17 +299,23 @@ export class ChatService {
 
     // agentic / auto 模式走 AgenticRagService
     const traceEvents: RagTraceEvent[] = [];
-    const result = await this.agenticRagService.run(
-      req.query,
-      mode,
-      (event) => traceEvents.push(this.toTraceEvent(event)),
-      history,
-      threadId,
-      userId,
-      memoryMessages,
-      false,
-      retrievalOptions,
-    );
+    let result;
+    try {
+      result = await this.agenticRagService.run(
+        req.query,
+        mode,
+        (event) => traceEvents.push(this.toTraceEvent(event)),
+        history,
+        threadId,
+        userId,
+        memoryMessages,
+        false,
+        retrievalOptions,
+      );
+    } catch (error) {
+      await this.finishFailedRun(run, req.query, mode, error);
+      throw error;
+    }
 
     // 持久化本轮对话
     await this.conversationService.addMessage(
@@ -318,6 +380,19 @@ export class ChatService {
         });
       }
     }
+    if (run) {
+      await this.recordTraceTimeline(run.id, traceEvents, result.route);
+      await this.agentRuns?.recordRuntimeEvent(run.id, {
+        eventType: 'retrieval.completed',
+        target: 'agentic_rag',
+        payload: {
+          references: result.references?.length ?? 0,
+          sufficient: result.retrievalSufficient,
+          reason: result.retrievalReason,
+          retryCount: result.retryCount,
+        },
+      });
+    }
     const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
       this.langfuseProvider.estimateTextTokens(req.query),
       this.langfuseProvider.estimateTextTokens(result.answer),
@@ -331,6 +406,17 @@ export class ChatService {
       requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
       resultSummary: result.answer.slice(0, 2000),
     });
+    if (run) {
+      await this.agentGoals?.update({
+        threadId,
+        runId: run.id,
+        actor: mode,
+        objective: req.query,
+        maxRounds: run.maxSteps,
+        status: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? 'blocked' : 'completed',
+        reason: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? result.retrievalReason : undefined,
+      });
+    }
     this.traceAnswer({
       userId,
       query: req.query,
@@ -469,5 +555,70 @@ export class ChatService {
       data: event.type === 'token' ? undefined : event.data,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private async recordTraceTimeline(
+    runId: string,
+    events: RagTraceEvent[],
+    route: string,
+  ): Promise<void> {
+    for (const event of events) {
+      const data = this.asRecord(event.data);
+      if (event.type === 'routing') {
+        await this.agentRuns?.recordRuntimeEvent(runId, {
+          eventType: 'route.selected',
+          target: typeof data?.route === 'string' ? data.route : route,
+          payload: data,
+        });
+        continue;
+      }
+      if (event.type === 'node_timing') {
+        const node = typeof data?.node === 'string' ? data.node : 'unknown';
+        await this.agentRuns?.updateCurrentNode(runId, node, data);
+        await this.agentRuns?.recordRuntimeEvent(runId, {
+          eventType: data?.success === false ? 'node.failed' : 'node.completed',
+          target: node,
+          payload: data,
+        });
+        continue;
+      }
+      if (['retrieval', 'sufficiency', 'web_search', 'rerank', 'reflection'].includes(event.type)) {
+        await this.agentRuns?.recordRuntimeEvent(runId, {
+          eventType: `${event.type}.completed`,
+          target: event.type,
+          payload: data ?? event.data,
+        });
+      }
+    }
+  }
+
+  private async finishFailedRun(
+    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined,
+    objective: string,
+    mode: ChatMode,
+    error: unknown,
+  ): Promise<void> {
+    if (!run) return;
+    const reason = error instanceof Error ? error.message : String(error);
+    await this.agentRuns?.finish(run.id, {
+      status: 'failed',
+      errorMessage: reason.slice(0, 2_000),
+      resultSummary: '运行失败，未生成可用回答。',
+    });
+    await this.agentGoals?.update({
+      threadId: run.threadId,
+      runId: run.id,
+      actor: mode,
+      objective,
+      maxRounds: run.maxSteps,
+      status: 'blocked',
+      reason,
+    });
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
   }
 }

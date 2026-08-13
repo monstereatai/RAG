@@ -117,6 +117,15 @@
 - **文档同步**：`docs/interview/功能步骤流程.md` 新增 AutoGen 参考能力的用户流程、数据／状态流转、实现映射和边界说明。
 - **验证结果**：`migration:run` 已执行 `178680`、`178690`；backend build、admin-backend build、Admin TypeScript 检查、Admin 生产构建和 backend Jest 全量测试（43 个测试套件、187 个测试）均通过。
 
+### 最近完成：DeepSeek Harness 可审计运行能力本地闭环（2026-08-14）
+
+- **事件与目标**：统一运行事件扩展到路由、节点、检索、目标、上下文压缩、岗位产物和工具授权；Simple／Auto／Agentic 异常会结束对应 Run 并写入 `goal.blocked`，成功则写入 `goal.completed`。
+- **上下文工程**：Redis 短期记忆在裁剪时保存压缩审计快照，记录触发原因、来源／保留轮次、Token 估算、LLM／降级摘要模式和失败原因，同时写入运行事件流。
+- **工具最小权限**：Tool Registry 增加链路模式、岗位与写入审批属性；产研运岗位检索和 Artifact 生成在执行前默认拒绝未授权工具，并在后台显示 `policy.denied`。
+- **运营回放**：运行中心显示事件投影的目标状态；协作编排支持按 Run 过滤、展开查看事件 Payload，并统计节点、压缩、目标、授权拦截、委派与预算事件。
+- **实现边界**：未引入 Cordis 或第二套 Agent Runtime，未新增数据库迁移；跨实例原子事件序号、真实 Worker 租约、代码沙箱／网络隔离和企业 IAM 保持生产待接入。
+- **验证结果**：backend、admin-backend、admin TypeScript 检查通过；相关短期记忆、Agentic、产研运工具单元测试已同步更新。
+
 ### 最近完成：AutoGPT 参考能力本地闭环（2026-08-11）
 
 - **Agent Run Center**：新增 `agent_runs`、`agent_actions` 和 Agent 运营→运行中心，统一记录 Simple／Auto／Agentic 的模式、实际路由、状态、最大步数、动作数量、重试次数、结果摘要和估算成本。

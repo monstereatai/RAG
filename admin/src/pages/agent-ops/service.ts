@@ -233,8 +233,8 @@ export const getAgentTraces = () =>
 export const getRuntimeEvents = (threadId?: string, runId?: string) =>
   authRequest<unknown>("/api/admin/agent-ops/runtime-events", { params: { threadId, runId } });
 
-export const getRuntimeEventMetrics = (threadId?: string) =>
-  authRequest<unknown>("/api/admin/agent-ops/runtime-events/metrics", { params: { threadId } });
+export const getRuntimeEventMetrics = (threadId?: string, runId?: string) =>
+  authRequest<unknown>("/api/admin/agent-ops/runtime-events/metrics", { params: { threadId, runId } });
 
 export const delegateAgentTask = (body: Record<string, unknown>) =>
   authRequest<unknown>("/api/admin/agent-ops/tasks/delegate", { method: "POST", data: body });

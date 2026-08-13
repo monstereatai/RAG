@@ -221,7 +221,7 @@ describe('ChatModes Integration', () => {
     const call = karpathyRagService.answer.mock.calls[0];
     expect(call?.[0]).toBe('检查需求缺口');
     expect(
-      call?.[3].some((message) =>
+      call?.[3]?.some((message) =>
         message.content.includes('当前服务对象岗位：产品经理'),
       ),
     ).toBe(true);

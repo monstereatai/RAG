@@ -62,7 +62,7 @@ export interface ProductionEvidence {
 
 export interface ProductionToolExecution {
   tool: string;
-  status: 'success' | 'degraded' | 'failed';
+  status: 'success' | 'degraded' | 'failed' | 'blocked';
   durationMs: number;
   evidenceCount: number;
   fallback?: string;

@@ -28,9 +28,13 @@ import {
 } from '../prompts/agentic.prompts';
 import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
 import { SemanticExampleSelector } from '../prompts/semantic-example.selector';
-import { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
+import {
+  BadCaseFlywheelService,
+  type BadCaseMatch,
+} from '../prompts/bad-case-flywheel.service';
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
+import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
 import { ConfigService } from '@nestjs/config';
@@ -78,6 +82,7 @@ export class AgenticRagService {
     private readonly karpathyRagService: KarpathyRagService,
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
+    private readonly toolPolicy: ToolExecutionPolicyService,
     private readonly semanticExampleSelector: SemanticExampleSelector,
     private readonly badCaseFlywheel: BadCaseFlywheelService,
     private readonly metricsService: MetricsService,
@@ -667,7 +672,8 @@ export class AgenticRagService {
 
     if (
       !this.webSearchFallbackEnabled ||
-      !this.bochaSearchService.isEnabled()
+      !this.bochaSearchService.isEnabled() ||
+      !this.toolPolicy.decide('bocha_web_search', { mode: 'agentic' }).allowed
     ) {
       this.logger.warn(
         'Retrieval insufficient but Bocha web_search is disabled or budgeted off',
@@ -816,7 +822,11 @@ export class AgenticRagService {
       return { reranked: false };
     }
 
-    if (!this.rerankEnabled || !this.dashScopeRerankService.isEnabled()) {
+    if (
+      !this.rerankEnabled ||
+      !this.dashScopeRerankService.isEnabled() ||
+      !this.toolPolicy.decide('dashscope_rerank', { mode: 'agentic' }).allowed
+    ) {
       onEvent?.({
         type: 'rerank',
         data: {
@@ -878,7 +888,7 @@ export class AgenticRagService {
       this.badCaseFlywheel.retrieveMatches(state.query, 2),
       2_000,
       'Bad case selection',
-    ).catch(() => []);
+    ).catch(() => [] as BadCaseMatch[]);
     const badCasePrompt = badCaseMatches.length
       ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
       : '';
@@ -1843,7 +1853,7 @@ export class AgenticRagService {
       this.badCaseFlywheel.retrieveMatches(query, 2),
       2_000,
       'Bad case preflight selection',
-    ).catch(() => []);
+    ).catch(() => [] as BadCaseMatch[]);
     const match = matches.find(
       (item) => item.mode === 'exact' || item.mode === 'correction',
     );
@@ -1962,6 +1972,7 @@ export class AgenticRagService {
     if (
       !this.graphSearchEnabled ||
       !this.graphService?.isEnabled() ||
+      !this.toolPolicy.decide('graph_search_tool', { mode: 'agentic' }).allowed ||
       !userId ||
       !/[关系关联上下游依赖多跳分别]/.test(query)
     ) {

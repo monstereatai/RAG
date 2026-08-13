@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import {
   type ProductionEvidence,
   type ProductionRole,
@@ -79,7 +80,10 @@ export interface ProductionRoleToolResult {
 export class ProductionWorkflowTools {
   private readonly evidenceLimit = 6;
 
-  constructor(private readonly rag: KarpathyRagService) {}
+  constructor(
+    private readonly rag: KarpathyRagService,
+    private readonly toolPolicy: ToolExecutionPolicyService,
+  ) {}
 
   async gather(
     role: ProductionRole,
@@ -88,6 +92,23 @@ export class ProductionWorkflowTools {
     const startedAt = Date.now();
     const policy = PRODUCTION_ROLE_TOOL_POLICIES[role];
     const tool = policy.allowedTools[0];
+    const authorization = this.toolPolicy.decide(tool, {
+      mode: 'production',
+      role,
+    });
+    if (!authorization.allowed) {
+      return {
+        evidence: [],
+        executions: [{
+          tool,
+          status: 'blocked',
+          durationMs: Date.now() - startedAt,
+          evidenceCount: 0,
+          fallback: policy.fallback,
+          error: authorization.reason,
+        }],
+      };
+    }
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
     try {
       const result = await this.withTimeout(

@@ -149,10 +149,10 @@ describe('ProductionWorkflowService', () => {
     );
 
     expect(state.status).toBe('completed');
-    expect(state.results.backend.readyForApproval).toBe(false);
-    expect(state.results.backend.evidenceCoverage).toBe(0);
-    expect(state.results.backend.deliverables[0].type).toBe('degraded-review');
-    expect(state.results.backend.claims[0].status).toBe('pending_confirmation');
+    expect(state.results.backend?.readyForApproval).toBe(false);
+    expect(state.results.backend?.evidenceCoverage).toBe(0);
+    expect(state.results.backend?.deliverables[0]?.type).toBe('degraded-review');
+    expect(state.results.backend?.claims[0]?.status).toBe('pending_confirmation');
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(createArtifact).toHaveBeenCalledTimes(1);
   });

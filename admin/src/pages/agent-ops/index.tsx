@@ -166,6 +166,7 @@ export default function AgentOpsPage() {
   const [collaborationLoading, setCollaborationLoading] = React.useState(false);
   const [runtimeEvents, setRuntimeEvents] = React.useState<any[]>([]);
   const [runtimeMetrics, setRuntimeMetrics] = React.useState<Record<string, number>>({});
+  const [runtimeRunId, setRuntimeRunId] = React.useState<string>();
 
   const loadBadCases = React.useCallback(async () => {
     try {
@@ -361,7 +362,7 @@ export default function AgentOpsPage() {
     setCollaborationLoading(true);
     try {
       const [sops, messages, dependencies, decisions, tasks, events, metrics] = await Promise.all([
-        getCollaborationSops(), getCollaborationMessages(), getArtifactDependencies(), getDecisionRecords(), getAgentTasks(), getRuntimeEvents(), getRuntimeEventMetrics(),
+        getCollaborationSops(), getCollaborationMessages(), getArtifactDependencies(), getDecisionRecords(), getAgentTasks(), getRuntimeEvents(undefined, runtimeRunId), getRuntimeEventMetrics(undefined, runtimeRunId),
       ]);
       setCollaborationSops(unwrapData<any[]>(sops) ?? []);
       setCollaborationMessages(unwrapData<any[]>(messages) ?? []);
@@ -372,7 +373,7 @@ export default function AgentOpsPage() {
       setRuntimeMetrics(unwrapData<Record<string, number>>(metrics) ?? {});
     } catch { message.error("协作编排数据加载失败，请检查 Agent Backend 服务"); }
     finally { setCollaborationLoading(false); }
-  }, []);
+  }, [runtimeRunId]);
 
   React.useEffect(() => {
     if (history.location.pathname.endsWith("/collaboration")) void loadCollaboration();
@@ -1060,6 +1061,7 @@ export default function AgentOpsPage() {
                 { key: "created", label: "开始时间", children: record.createdAt || "-" },
                 { key: "finished", label: "结束时间", children: record.finishedAt || "-" },
                 { key: "summary", label: "结果摘要", span: 3, children: record.resultSummary || record.errorMessage || "-" },
+                { key: "goal", label: "目标状态", span: 3, children: record.goal ? `${record.goal.status}：${record.goal.objective}${record.goal.reason ? `；${record.goal.reason}` : ""}` : "-" },
               ]}
             />
           ),
@@ -1130,14 +1132,22 @@ export default function AgentOpsPage() {
         </Form>
       </Card>
       <Card title={`运行事件流（${runtimeEvents.length}）`} size="small" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <Select allowClear showSearch value={runtimeRunId} style={{ width: 420 }} placeholder="选择一次问答运行，仅回放该 Run 的事件" options={runCenter.map((run) => ({ value: run.id, label: `${run.mode}／${run.route || "未路由"}／${run.status} · ${run.id}` }))} onChange={(value) => setRuntimeRunId(value)} />
+          <Button onClick={() => setRuntimeRunId(undefined)}>查看全部事件</Button>
+        </div>
         <Descriptions size="small" bordered column={4} style={{ marginBottom: 16 }}>
           <Descriptions.Item label="事件总数">{runtimeMetrics.total ?? 0}</Descriptions.Item>
           <Descriptions.Item label="工具调用">{runtimeMetrics.toolCalls ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="节点执行">{runtimeMetrics.nodeStarts ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="目标完成／阻塞">{`${runtimeMetrics.goalsCompleted ?? 0}／${runtimeMetrics.goalsBlocked ?? 0}`}</Descriptions.Item>
+          <Descriptions.Item label="上下文压缩">{runtimeMetrics.compactions ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="授权拦截">{runtimeMetrics.policyDenied ?? 0}</Descriptions.Item>
           <Descriptions.Item label="委派次数">{runtimeMetrics.delegations ?? 0}</Descriptions.Item>
           <Descriptions.Item label="预算超限">{runtimeEvents.filter((item) => item.eventType === "budget.exceeded").length}</Descriptions.Item>
         </Descriptions>
-        <Table size="small" rowKey="id" pagination={{ pageSize: 8 }} dataSource={runtimeEvents.slice().reverse()} columns={[
-          { title: "序号", dataIndex: "sequence" }, { title: "事件", dataIndex: "eventType" }, { title: "执行者", dataIndex: "actor" }, { title: "目标", dataIndex: "target", render: (value) => value || "-" }, { title: "时间", dataIndex: "createdAt" },
+        <Table size="small" rowKey="id" pagination={{ pageSize: 8 }} dataSource={runtimeEvents.slice().reverse()} expandable={{ expandedRowRender: (record) => <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(record.payload, null, 2)}</pre> }} columns={[
+          { title: "序号", dataIndex: "sequence" }, { title: "事件", dataIndex: "eventType", render: (value) => <Tag color={String(value).includes("failed") || String(value).includes("blocked") || String(value).includes("denied") ? "error" : String(value).includes("completed") ? "success" : "processing"}>{value}</Tag> }, { title: "执行者", dataIndex: "actor" }, { title: "目标", dataIndex: "target", render: (value) => value || "-" }, { title: "时间", dataIndex: "createdAt" },
         ]} />
       </Card>
       <div className="agent-ops-form-grid" style={{ marginTop: 16 }}>

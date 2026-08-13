@@ -232,7 +232,7 @@ export class AgentOpsAdminController {
   }
 
   @Get('runtime-events/metrics')
-  runtimeEventMetrics(@Query('threadId') threadId?: string) {
-    return this.runtimeEvents.metrics(threadId);
+  runtimeEventMetrics(@Query('threadId') threadId?: string, @Query('runId') runId?: string) {
+    return this.runtimeEvents.metrics(threadId, runId);
   }
 }

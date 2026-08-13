@@ -19,6 +19,8 @@ describe('ShortTermMemoryService structured compression', () => {
         return Promise.resolve('OK');
       }),
       zremrangebyrank: jest.fn().mockResolvedValue(4),
+      zadd: jest.fn().mockResolvedValue(undefined),
+      expire: jest.fn().mockResolvedValue(undefined),
     };
     const llm = {
       invoke: jest.fn().mockResolvedValue(
@@ -82,6 +84,8 @@ describe('ShortTermMemoryService structured compression', () => {
         return Promise.resolve('OK');
       }),
       zremrangebyrank: jest.fn().mockResolvedValue(2),
+      zadd: jest.fn().mockResolvedValue(undefined),
+      expire: jest.fn().mockResolvedValue(undefined),
     };
     const service = new ShortTermMemoryService(
       redis as never,

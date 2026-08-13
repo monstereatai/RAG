@@ -199,7 +199,7 @@ export class AgentOpsController {
 
   @Get('runtime-events/metrics')
   @RequirePermission('admin:qa-ops:read')
-  runtimeEventMetrics(@Query('threadId') threadId?: string) { return this.ragClient.getRuntimeEventMetrics(threadId); }
+  runtimeEventMetrics(@Query('threadId') threadId?: string, @Query('runId') runId?: string) { return this.ragClient.getRuntimeEventMetrics(threadId, runId); }
 
   @Get('governance/plugins')
   @RequirePermission('admin:qa-ops:read')

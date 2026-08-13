@@ -8,6 +8,8 @@ import { ProductionWorkflowTools } from './production-workflow.tools';
 import { ObservabilityModule } from '../../providers/observability/observability.module';
 import { AgentCollaborationModule } from '../agent-collaboration/agent-collaboration.module';
 import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
+import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
+import { ToolsModule } from '../../tools/tools.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
     ObservabilityModule,
     AgentCollaborationModule,
     AgentTasksModule,
+    AgentRuntimeEventsModule,
+    ToolsModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

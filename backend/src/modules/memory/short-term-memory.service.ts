@@ -11,11 +11,13 @@
  * 未配置 Redis 时自动静默降级，不阻断对话。
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 
 interface StoredTurn {
   role: 'user' | 'assistant' | 'system';
@@ -48,6 +50,19 @@ const structuredMemorySummarySchema = z.object({
 
 type StructuredMemorySummary = z.infer<typeof structuredMemorySummarySchema>;
 
+export interface ContextCompactionAudit {
+  id: string;
+  status: 'started' | 'completed' | 'failed';
+  reason: 'turn_window' | 'token_budget' | 'manual';
+  sourceTurnCount: number;
+  retainedTurnCount: number;
+  sourceTokenEstimate: number;
+  summaryMode?: 'llm' | 'fallback';
+  error?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
 @Injectable()
 export class ShortTermMemoryService {
   private readonly logger = new Logger(ShortTermMemoryService.name);
@@ -55,6 +70,7 @@ export class ShortTermMemoryService {
   constructor(
     private readonly redis: RedisProvider,
     private readonly llmProvider: LlmProvider,
+    @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
   ) {}
 
   isEnabled(): boolean {
@@ -111,8 +127,8 @@ export class ShortTermMemoryService {
     conversationId: string,
     role: 'user' | 'assistant',
     content: string,
-  ): Promise<void> {
-    if (!this.redis.isEnabled()) return;
+  ): Promise<ContextCompactionAudit | null> {
+    if (!this.redis.isEnabled()) return null;
 
     const key = this.turnsKey(conversationId);
     const turn: StoredTurn = { role, content, ts: Date.now() };
@@ -126,8 +142,13 @@ export class ShortTermMemoryService {
       all.length > DEFAULT_MAX_TURNS * 1.5 ||
       estimatedTokens > COMPRESSION_TRIGGER_TOKENS
     ) {
-      await this.trimAndSummarize(conversationId);
+      return this.trimAndSummarize(
+        conversationId,
+        DEFAULT_MAX_TURNS,
+        all.length > DEFAULT_MAX_TURNS * 1.5 ? 'turn_window' : 'token_budget',
+      );
     }
+    return null;
   }
 
   /**
@@ -136,14 +157,15 @@ export class ShortTermMemoryService {
   async trimAndSummarize(
     conversationId: string,
     maxTurns = DEFAULT_MAX_TURNS,
-  ): Promise<void> {
-    if (!this.redis.isEnabled()) return;
+    reason: ContextCompactionAudit['reason'] = 'manual',
+  ): Promise<ContextCompactionAudit | null> {
+    if (!this.redis.isEnabled()) return null;
 
     const key = this.turnsKey(conversationId);
     const all = await this.redis.zrange(key, 0, -1);
 
     const keepStart = this.findKeepStart(all, maxTurns);
-    if (keepStart <= 0) return;
+    if (keepStart <= 0) return null;
 
     const toTrim = all.slice(0, keepStart);
 
@@ -154,10 +176,23 @@ export class ShortTermMemoryService {
       })
       .join('\n');
 
+    const audit: ContextCompactionAudit = {
+      id: randomUUID(),
+      status: 'started',
+      reason,
+      sourceTurnCount: keepStart,
+      retainedTurnCount: all.length - keepStart,
+      sourceTokenEstimate: this.estimateTokens(trimmedContent),
+      createdAt: new Date().toISOString(),
+    };
+    await this.saveAudit(conversationId, audit);
+    await this.emitAuditEvent(conversationId, 'memory.compaction.started', audit);
+
     const existingSummary = await this.redis.get(
       this.summaryKey(conversationId),
     );
     let summary: StructuredMemorySummary;
+    let summaryMode: ContextCompactionAudit['summaryMode'] = 'llm';
     try {
       const raw = await this.llmProvider.invoke([
         new SystemMessage(
@@ -176,19 +211,42 @@ export class ShortTermMemoryService {
         `Short-term memory summarization failed: ${(err as Error).message}`,
       );
       summary = this.fallbackSummary(existingSummary, trimmedContent);
+      summaryMode = 'fallback';
     }
 
-    // 保留最近 maxTurns 轮：删除较早的记录
-    await this.redis.zremrangebyrank(key, 0, keepStart - 1);
-    await this.redis.set(
-      this.summaryKey(conversationId),
-      JSON.stringify(summary),
-      TTL_SECONDS,
-    );
+    try {
+      // 保留最近 maxTurns 轮：删除较早的记录
+      await this.redis.zremrangebyrank(key, 0, keepStart - 1);
+      await this.redis.set(
+        this.summaryKey(conversationId),
+        JSON.stringify(summary),
+        TTL_SECONDS,
+      );
+    } catch (error) {
+      const failed = {
+        ...audit,
+        status: 'failed' as const,
+        error: error instanceof Error ? error.message : String(error),
+        completedAt: new Date().toISOString(),
+      };
+      await this.saveAudit(conversationId, failed);
+      await this.emitAuditEvent(conversationId, 'memory.compaction.failed', failed);
+      throw error;
+    }
+
+    const completed = {
+      ...audit,
+      status: 'completed' as const,
+      summaryMode,
+      completedAt: new Date().toISOString(),
+    };
+    await this.saveAudit(conversationId, completed);
+    await this.emitAuditEvent(conversationId, 'memory.compaction.completed', completed);
 
     this.logger.debug(
       `Short-term memory compressed: removed ${keepStart} turns, kept ${all.length - keepStart}`,
     );
+    return completed;
   }
 
   /**
@@ -198,6 +256,18 @@ export class ShortTermMemoryService {
     if (!this.redis.isEnabled()) return;
     await this.redis.del(this.turnsKey(conversationId));
     await this.redis.del(this.summaryKey(conversationId));
+    await this.redis.del(this.auditKey(conversationId));
+  }
+
+  async getCompactionAudit(
+    conversationId: string,
+    limit = 20,
+  ): Promise<ContextCompactionAudit[]> {
+    if (!this.redis.isEnabled()) return [];
+    const raw = await this.redis.zrange(this.auditKey(conversationId), -Math.max(limit, 1), -1);
+    return raw
+      .map((item) => this.tryParseAudit(item))
+      .filter((item): item is ContextCompactionAudit => Boolean(item));
   }
 
   // --- helpers ---
@@ -208,6 +278,47 @@ export class ShortTermMemoryService {
 
   private summaryKey(conversationId: string): string {
     return `stm:${conversationId}:summary`;
+  }
+
+  private auditKey(conversationId: string): string {
+    return `stm:${conversationId}:compactions`;
+  }
+
+  private async saveAudit(
+    conversationId: string,
+    audit: ContextCompactionAudit,
+  ): Promise<void> {
+    const key = this.auditKey(conversationId);
+    await this.redis.zadd(key, Date.now(), JSON.stringify(audit));
+    await this.redis.zremrangebyrank(key, 0, -51);
+    await this.redis.expire(key, TTL_SECONDS);
+  }
+
+  private async emitAuditEvent(
+    conversationId: string,
+    eventType: string,
+    audit: ContextCompactionAudit,
+  ): Promise<void> {
+    try {
+      await this.runtimeEvents?.emit({
+        threadId: conversationId,
+        eventType,
+        actor: 'short_term_memory',
+        payload: audit,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Short-term memory audit event failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private tryParseAudit(raw: string): ContextCompactionAudit | null {
+    try {
+      return JSON.parse(raw) as ContextCompactionAudit;
+    } catch {
+      return null;
+    }
   }
 
   private findKeepStart(all: string[], maxTurns: number): number {

@@ -16,7 +16,10 @@ describe('ProductionWorkflowTools', () => {
         },
       ],
     });
-    const service = new ProductionWorkflowTools({ retrieveDetailed } as never);
+    const service = new ProductionWorkflowTools(
+      { retrieveDetailed } as never,
+      { decide: jest.fn().mockReturnValue({ allowed: true }) } as never,
+    );
 
     const result = await service.gather('frontend', {
       projectId: 'project-1',
@@ -31,9 +34,10 @@ describe('ProductionWorkflowTools', () => {
   });
 
   it('degrades without inventing evidence when retrieval fails', async () => {
-    const service = new ProductionWorkflowTools({
-      retrieveDetailed: () => Promise.reject(new Error('milvus timeout')),
-    } as never);
+    const service = new ProductionWorkflowTools(
+      { retrieveDetailed: () => Promise.reject(new Error('milvus timeout')) } as never,
+      { decide: jest.fn().mockReturnValue({ allowed: true }) } as never,
+    );
 
     const result = await service.gather('backend', {
       projectId: 'project-1',

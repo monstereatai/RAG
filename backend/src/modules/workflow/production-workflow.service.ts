@@ -30,6 +30,8 @@ import { ProductionWorkflowTools } from './production-workflow.tools';
 import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
 import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
+import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
+import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -111,6 +113,8 @@ export class ProductionWorkflowService {
     @Optional() private readonly langfuseProvider?: LangfuseProvider,
     @Optional() private readonly collaboration?: AgentCollaborationService,
     @Optional() private readonly tasks?: AgentTasksService,
+    @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
+    @Optional() private readonly toolPolicy?: ToolExecutionPolicyService,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
@@ -119,11 +123,23 @@ export class ProductionWorkflowService {
   async start(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
     const initialState = this.createInitialState(dto, userId, threadId);
+    await this.emitRuntimeEvent(initialState, 'workflow.started', 'production_workflow', {
+      projectId: initialState.projectId,
+      selectedRoles: initialState.selectedRoles,
+      processType: initialState.processType,
+    });
+    await this.emitRuntimeEvent(initialState, 'goal.active', 'production_workflow', {
+      objective: initialState.brief,
+      status: 'active',
+      round: 1,
+      maxRounds: initialState.maxSteps,
+    });
     await this.initializeTasks(initialState);
     const state = await this.app.invoke(initialState, this.config(threadId));
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
     const result = this.view(threadId, settled, userId);
+    await this.emitWorkflowState(settled);
     await this.saveWorkflowIndex(result);
     return result;
   }
@@ -160,6 +176,11 @@ export class ProductionWorkflowService {
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
     const result = this.view(threadId, settled, userId);
+    await this.emitRuntimeEvent(settled, `approval.${dto.approval}`, 'human_reviewer', {
+      feedback: dto.feedback?.trim() ?? '',
+      rerunRoles: dto.rerunRoles ?? [],
+    });
+    await this.emitWorkflowState(settled);
     await this.saveWorkflowIndex(result);
     return result;
   }
@@ -521,6 +542,10 @@ export class ProductionWorkflowService {
     role: ProductionRole,
     state: ProductionWorkflowStateType,
   ): Promise<ProductionStageResult> {
+    await this.emitRuntimeEvent(state, 'role.started', role, {
+      role,
+      dependencies: dependenciesForProductionRole(role, state.selectedRoles),
+    });
     await this.tasks?.updateForRole(state.threadId, role, { status: 'running' });
     const dependencies = dependenciesForProductionRole(
       role,
@@ -547,11 +572,16 @@ export class ProductionWorkflowService {
       brief: state.brief,
       userId: state.userId,
     });
+    await this.emitRuntimeEvent(state, 'retrieval.completed', role, {
+      evidenceCount: toolResult.evidence.length,
+      executions: toolResult.executions,
+    });
     const model = this.llmProvider.getModel();
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const modelStartedAt = Date.now();
       try {
+        await this.emitRuntimeEvent(state, 'model.started', role, { attempt });
         const output = await model
           .withStructuredOutput(roleSchema, { method: 'jsonMode' })
           .invoke(
@@ -592,12 +622,22 @@ export class ProductionWorkflowService {
           state,
           result,
         );
+        await this.emitRuntimeEvent(state, 'artifact.published', role, {
+          artifact: result.generatedArtifact,
+          evidenceCoverage: result.evidenceCoverage,
+          riskLevel: result.riskLevel,
+        });
         await this.recordRoleHandoff(state, result);
         await this.tasks?.updateForRole(state.threadId, role, {
           status: result.readyForApproval ? 'completed' : 'waiting_approval',
           summary: result.summary,
           outputArtifactId: result.generatedArtifact?.id,
           approvalRequired: !result.readyForApproval,
+        });
+        await this.emitRuntimeEvent(state, 'role.completed', role, {
+          readyForApproval: result.readyForApproval,
+          riskLevel: result.riskLevel,
+          evidenceCoverage: result.evidenceCoverage,
         });
         return result;
       } catch (error) {
@@ -612,6 +652,10 @@ export class ProductionWorkflowService {
         this.logger.warn(
           `${role} structured output attempt ${attempt} failed: ${lastError.message}`,
         );
+        await this.emitRuntimeEvent(state, 'model.failed', role, {
+          attempt,
+          error: lastError.message,
+        });
         if (attempt < 2) {
           await this.sleep(ROLE_LLM_RETRY_BACKOFF_MS * 2 ** (attempt - 1));
         }
@@ -634,6 +678,10 @@ export class ProductionWorkflowService {
       outputArtifactId: degraded.generatedArtifact?.id,
       approvalRequired: true,
       errorMessage: lastError?.message,
+    });
+    await this.emitRuntimeEvent(state, 'role.degraded', role, {
+      error: lastError?.message,
+      artifact: degraded.generatedArtifact,
     });
     return degraded;
   }
@@ -750,6 +798,25 @@ export class ProductionWorkflowService {
     result: ProductionStageResult,
   ) {
     const startedAt = Date.now();
+    const authorization = this.toolPolicy?.decide('artifact_generate', {
+      mode: 'production',
+      role: result.role,
+    });
+    if (authorization && !authorization.allowed) {
+      result.toolExecutions.push({
+        tool: 'artifact_generate',
+        status: 'blocked',
+        durationMs: Date.now() - startedAt,
+        evidenceCount: 0,
+        fallback: '交付内容保留在工作流状态中，等待管理员修正工具授权。',
+        error: authorization.reason,
+      });
+      await this.emitRuntimeEvent(state, 'policy.denied', result.role, {
+        tool: 'artifact_generate',
+        reason: authorization.reason,
+      });
+      return undefined;
+    }
     const sourceText = this.renderDeliverables(
       result.deliverables,
       result.claims,
@@ -913,6 +980,68 @@ export class ProductionWorkflowService {
         completedAt: result.completedAt,
       })),
     });
+  }
+
+  private async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
+    if (state.status === 'pending_approval') {
+      await this.emitRuntimeEvent(state, 'approval.required', 'production_workflow', {
+        roles: state.pendingApprovalRoles,
+      });
+      await this.emitRuntimeEvent(state, 'goal.paused', 'production_workflow', {
+        objective: state.brief,
+        status: 'paused',
+        round: state.stepCount,
+        maxRounds: state.maxSteps,
+        reason: '等待人工审批。',
+      });
+      return;
+    }
+    if (state.status === 'completed') {
+      await this.emitRuntimeEvent(state, 'workflow.completed', 'production_workflow', {
+        completedRoles: state.completedRoles,
+      });
+      await this.emitRuntimeEvent(state, 'goal.completed', 'production_workflow', {
+        objective: state.brief,
+        status: 'completed',
+        round: state.stepCount,
+        maxRounds: state.maxSteps,
+      });
+      return;
+    }
+    if (state.status === 'failed') {
+      await this.emitRuntimeEvent(state, 'workflow.failed', 'production_workflow', {
+        error: state.error,
+      });
+      await this.emitRuntimeEvent(state, 'goal.blocked', 'production_workflow', {
+        objective: state.brief,
+        status: 'blocked',
+        round: state.stepCount,
+        maxRounds: state.maxSteps,
+        reason: state.error || '工作流失败。',
+      });
+    }
+  }
+
+  private async emitRuntimeEvent(
+    state: ProductionWorkflowStateType,
+    eventType: string,
+    actor: string,
+    payload: unknown,
+  ): Promise<void> {
+    if (!this.runtimeEvents) return;
+    try {
+      await this.runtimeEvents.emit({
+        threadId: state.threadId,
+        eventType,
+        actor,
+        target: state.projectId,
+        payload,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Runtime event skipped: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private view(
