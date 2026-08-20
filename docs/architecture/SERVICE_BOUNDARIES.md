@@ -177,7 +177,7 @@ admin-backend/src/
 第一步：文档确认。
 
 - 更新 `SERVICE_BOUNDARIES.md`。
-- 更新 `ADMIN_FEATURES.md`。
+- 更新 `../product/ADMIN_FEATURES.md`。
 - 更新 `ROADMAP.md`。
 
 第二步：冻结单后端后台扩展。

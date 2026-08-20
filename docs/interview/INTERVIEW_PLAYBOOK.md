@@ -2034,7 +2034,7 @@ Memory 要分 working、episodic、semantic、procedural。当前任务状态是
 面试前按这个顺序准备：
 
 1. 先读 `README.md`，掌握项目一句话和当前状态。
-2. 再读 `ARCHITECTURE.md`，掌握模块边界和技术取舍。
+2. 再读 `../architecture/ARCHITECTURE.md`，掌握模块边界和技术取舍。
 3. 再读 `ROADMAP.md`，掌握完成项、缺口和验证证据。
 4. 再看 `backend/src/rag/karpathy/karpathy-rag.service.ts`，弄懂稳定主链路。
 5. 再看 `backend/src/rag/agentic/agentic-rag.service.ts`，弄懂 Agentic 编排。

@@ -10,6 +10,11 @@
 | `interview/resume/`       | 简历写法、业务证据、游戏营销项目表达     |
 | `interview/jd/`           | JD 要求、项目能力映射和缺口状态          |
 | `plans/`                  | 工程方案、增强计划、同步策略             |
+| `architecture/`          | 技术架构、服务边界、部署和基础设施       |
+| `product/`                | PRD、管理后台功能和产品集成说明         |
+| `cli/`                    | RAG CLI 产品和技术设计                  |
+| `reference/`              | 参考项目能力总结和学习资料               |
+| `archive/`                | 历史 Roadmap 和过期方案归档              |
 | `assets/`                 | 文档引用的图片等静态资源                 |
 | `architecture-decisions/` | 关键架构选择、代价、指标和回滚条件       |
 | `evidence/`               | 真实规模、跨团队和事故证据的本地填写模板 |
@@ -61,8 +66,11 @@
 
 ## 维护规则
 
+- 根目录只保留 `README.md`、`CLAUDE.md`、`ROADMAP.md`、版本和工程配置；新增项目文档不要继续堆在根目录。
+- 源码服务目录保持现有边界：`backend/`、`admin/`、`admin-backend/`、`frontend/` 不因文档整理而改名或搬迁。
 - 新增面试相关材料优先放入 `interview/`。
 - 新增简历或业务证据材料放入 `interview/resume/`。
 - 新增 JD 对照、岗位缺口材料放入 `interview/jd/`。
 - 新增工程方案、规划、策略说明放入 `plans/`。
 - 新增图片等附件放入 `assets/`，并使用相对路径引用。
+- 运行时文件放入 `workspace/`、`uploads/` 或服务自己的临时目录，不放入 `docs/`，也不提交索引、缓存和用户上传内容。

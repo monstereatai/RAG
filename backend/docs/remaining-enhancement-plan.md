@@ -9,7 +9,7 @@
 - [x] BullMQ 文档异步处理队列、Worker、状态 API 和 Redis 降级。
 - [x] Redis 短期记忆滑动窗口、结构化摘要和上下文注入。
 - [x] Mem0 cloud／local Provider、记忆 API 和管理后台页面。
-- [x] `DEPLOYMENT_CHECKLIST.md` 与 `scripts/deploy.sh` 部署模板。
+- [x] `../../docs/architecture/DEPLOYMENT_CHECKLIST.md` 与 `scripts/deploy.sh` 部署模板。
 - [x] Vision mock／OpenAI-compatible Provider，图片／视频上传调用及失败降级。
 - [x] 27 个私密模拟文档、193 条业务问题、GraphRAG 种子、组织权限和多模态模拟包。
 - [x] 修复六岗位 Qwen 20 秒超时预算过短问题；连续三次完整 DAG 共 18／18 模型调用成功、0 降级。

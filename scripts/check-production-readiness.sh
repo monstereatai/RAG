@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 missing=()
 
-for file in docker/docker-compose.prod.yml DEPLOYMENT.md ROADMAP.md; do
+for file in docker/docker-compose.prod.yml docs/architecture/DEPLOYMENT.md ROADMAP.md; do
   if [[ ! -f "$file" ]]; then
     missing+=("$file")
   fi

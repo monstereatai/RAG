@@ -4,15 +4,16 @@
 
 ## 项目定位
 
-企业级 Agentic RAG + Karpathy-Style RAG Web 应用。详细规划见 `rag-plan.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `SUMMARY.md`。
+企业级 Agentic RAG + Karpathy-Style RAG Web 应用。详细规划见 `docs/plans/rag-plan.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `docs/reference/SUMMARY.md`。
 
 ## 文档关系
 
-- `ARCHITECTURE.md`：技术架构与设计约束。
-- `PRD.md`：产品需求与验收标准。
+- `docs/architecture/ARCHITECTURE.md`：技术架构与设计约束。
+- `docs/product/PRD.md`：产品需求与验收标准。
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
-- `rag-plan.md`：早期计划和技术路线。
+- `docs/plans/rag-plan.md`：早期计划和技术路线。
+- `docs/README.md`：文档分类和阅读入口。
 
 ## 技术栈（锁死，未经主人确认不得更换）
 
@@ -59,16 +60,26 @@ RAG/
 │   └── package.json
 ├── frontend/            # 用户端前端（M4+）
 ├── admin/               # 管理后台前端（M4+）
+├── admin-backend/       # 管理后台服务
+├── rag-cli/              # RAG 命令行工具
+├── tools/                # MCP 和外部工具服务
+├── scripts/              # 项目级脚本
 ├── docker/              # Docker 编排
 │   └── docker-compose.yml
 ├── skills/              # Skills 技能系统（M8+）
-├── workspace/           # 运行时工作区（上传文件等，.gitkeep，运行时内容不进 git）
+├── workspace/           # 运行时工作区（上传文件等，运行时内容不进 git）
+├── docs/                # 项目文档、面试资料、方案、素材和验证证据
+│   ├── architecture/   # 架构、服务边界和部署
+│   ├── product/        # PRD、后台功能和集成说明
+│   ├── plans/          # 技术方案和实施计划
+│   ├── interview/      # 面试、简历和岗位材料
+│   ├── cli/            # CLI 设计文档
+│   ├── reference/      # 参考项目和能力总结
+│   ├── archive/        # 历史文档
+│   └── assets/         # 截图、面试素材和文档附件
 ├── CLAUDE.md            # 本文件
-├── ARCHITECTURE.md      # 技术架构与设计约束
-├── PRD.md               # 产品需求与验收标准
 ├── ROADMAP.md           # 进度源
-├── SUMMARY.md           # 参考代码总结
-└── rag-plan.md          # 规划文档
+└── docs/README.md        # 文档总索引
 ```
 
 ## 命名约定
@@ -135,7 +146,7 @@ cd backend && npm run smoke:redis-checkpointer
 ## 开发环境要求
 
 - **Node.js ≥ 22**（管理后台要求 Node ≥ 22；项目根目录有 `.nvmrc` / `.node-version`，`nvm use` 自动切换）
-- **包管理器**：`backend/` 用 npm，`admin/` 用 pnpm，`frontend/` 见各子项目文档
+- **包管理器**：根目录统一使用 pnpm 10.17.1，通过 `pnpm-workspace.yaml` 纳管所有应用和工具包；各子项目原有锁文件与 workspace 配置暂时保留，用于兼容独立启动
 
 已完成能力：
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。

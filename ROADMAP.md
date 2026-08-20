@@ -1,11 +1,11 @@
 # ROADMAP
 
-> 项目真实进度源。只保留当前状态、开放事项、阻塞和最近验证结论。完整历史已备份到 `ROADMAP.full-2026-06-25.md`。
+> 项目真实进度源。只保留当前状态、开放事项、阻塞和最近验证结论。完整历史已备份到 `docs/archive/ROADMAP.full-2026-06-25.md`。
 
 ## 读取规则
 
 - 日常开发：优先读本文件。
-- 历史细节：读 `ROADMAP.full-2026-06-25.md`，用 `rg` 精准搜索。
+- 历史细节：读 `docs/archive/ROADMAP.full-2026-06-25.md`，用 `rg` 精准搜索。
 - 只有已实现并验证的写入"已完成"。做完未验证不得标完成。
 - 外部依赖/红线/缺用户输入的事项显式写入"阻塞/待确认"。
 
@@ -14,10 +14,10 @@
 | 文档 | 说明 |
 |------|------|
 | `CLAUDE.md` | 项目规则、红线、验证命令 |
-| `ARCHITECTURE.md` | 系统架构与模块边界 |
-| `PRD.md` | 产品需求和验收标准 |
-| `SERVICE_BOUNDARIES.md` | rag-backend 与 admin-backend 服务边界 |
-| `DEPLOYMENT_CHECKLIST.md` | 生产部署 Checklist |
+| `docs/architecture/ARCHITECTURE.md` | 系统架构与模块边界 |
+| `docs/product/PRD.md` | 产品需求和验收标准 |
+| `docs/architecture/SERVICE_BOUNDARIES.md` | rag-backend 与 admin-backend 服务边界 |
+| `docs/architecture/DEPLOYMENT_CHECKLIST.md` | 生产部署 Checklist |
 | `docs/README.md` | 文档总索引和目录维护规则 |
 | `docs/PROJECT_BACKGROUND.md` | 游戏官网／活动产研一体化 RAG 与 Agent 工作台的项目背景、目标用户、业务流程和边界 |
 | `backend/docs/async-task-queue-plan.md` | BullMQ 异步队列方案 |
@@ -44,6 +44,8 @@
 
 ## 当前结论
 
+- 根目录已完成 pnpm Workspace 第一步改造：统一纳管 `backend`、`admin-backend`、`admin`、`frontend`、`rag-cli` 和 `tools/*`，新增根 `package.json`、`pnpm-workspace.yaml` 与 `pnpm-lock.yaml`，提供按服务开发、统一构建、测试、类型检查和 MCP 启动命令。已通过 `pnpm install --lockfile-only --ignore-scripts`、`pnpm workspace:list` 和后端／管理后台／MCP workspace smoke 校验；本阶段暂不引入 Turborepo、不移动源码目录、不删除子项目配置。
+- 项目目录已完成低风险分类整理：根目录只保留项目入口、规则和进度文件；架构／部署、产品、CLI、参考资料、面试材料、历史文档和素材分别归档到 `docs/` 对应目录；未移动 `backend`、`admin`、`admin-backend`、`frontend` 等源码目录，也未移动 `workspace`、上传和临时运行目录。已同步 README、CLAUDE、Docs Index、ROADMAP 和相关文档引用，并完成 Markdown 相对链接检查。
 - 运行中心的最终结果已复用 AI 问答页的统一 Markdown 预览组件，支持标题、列表、表格、代码块、引用和链接渲染；问答页与运行详情页共用同一套 Markdown 规范化逻辑，避免运行中心将回答显示为挤压在表格单元格里的纯文本。已通过 Admin TypeScript 检查和生产构建。
 - 新增 `docs/interview/林芮瑭简历大模型面试问题.md`，根据附件简历整理 Agent Runtime、Context Engineering、SFT／RL 轨迹评测、多模态应用、工具安全和指标可信度等面试问题，并同步加入面试文档索引。
 - 新增 `docs/interview/平台型Agent开源框架参考.md`，记录 DeepSeek Harness、OpenHands、SWE-agent、Letta、Microsoft Agent Framework、Pydantic AI、Dify、RAGFlow 等平台型 Agent 框架的学习顺序、设计重点和当前项目映射。
@@ -290,7 +292,7 @@
 - 多模态样本 **19 个**（text/table/structured/checklist/speech/image/ocr/video/permission/workflow）
 
 ### 部署 & 文档
-- `DEPLOYMENT_CHECKLIST.md`：基础设施/外部依赖/步骤/Nginx/备份/监控
+- `docs/architecture/DEPLOYMENT_CHECKLIST.md`：基础设施/外部依赖/步骤/Nginx/备份/监控
 - `scripts/deploy.sh`：一键部署模板
 - `rag-cli`：CLI README/中文说明/CLI roadmap 与正式 API、高级命令保持同步
 
@@ -431,26 +433,26 @@
 - **管理后台岗位预设闭环（已完成）**：RAG 服务新增服务令牌保护的 `GET /api/v1/rag/admin/role-presets`，admin-backend 新增 `GET /api/admin/qa-ops/role-presets` 代理并在 AG-UI 链路透传 `rolePresetId`；管理后台 QA 页新增八岗位选择、职责、常用任务、示例问题和 localStorage 记忆。岗位目录仍以 `role-presets.ts` 为唯一事实源，与系统 RBAC 角色完全分离，未新增 schema、依赖或 `.env` 修改。验证：backend Node 22 全量 28 Suites／135 Tests、build ✅；admin-backend 8 Suites／71 Tests、build／lint ✅（仅既有 warning）；admin 定向 Biome、TypeScript、build ✅；Ant Design CLI 本次新增页面 0 issue；真实目录 8 岗位 ✅；产品经理 AG-UI 透传 200／RUN_STARTED／RUN_FINISHED ✅；浏览器视觉与无横向溢出检查 ✅。
 - **岗位预设与首次使用工作台（已完成）**：系统统一保持“懂产品、设计、前端、后端、测试、运营和项目管理全流程的业务负责人”基础身份，新增业务负责人、产品经理、UI／UX 设计师、前端开发、后端开发、测试、游戏活动运营和项目经理 8 个岗位预设；每个预设包含职责、常用任务、3 个示例问题和岗位回答结构。`GET /api/v1/chat/role-presets` 提供唯一角色目录，`rolePresetId` 已接入 simple、agentic、auto、Chat SSE 和 AG-UI SSE；中英文岗位别名统一映射到 `roleScope`，业务负责人不缩窄检索，公共文档保持可见。frontend 新增岗位选择、职责说明、任务入口和问题自动填入，选择结果使用 localStorage 记忆。未新增 schema、未修改 `.env`、未添加依赖。验证：后端全量测试 28 Suites／135 Tests ✅；角色相关 3 Suites／11 Tests ✅；backend 定向 ESLint ✅；backend build ✅；frontend lint／build ✅；真实角色目录 HTTP smoke 8 个岗位 ✅；产品岗位真实问答 201、answer／queryLogId ✅；浏览器验证角色切换和示例问题填入 ✅。
 - **游戏官网／活动 RAG 功能增强闭环（已完成）**：实现入库质量门禁与 PRD／API／Design／Test／Config／Postmortem 策略路由；文档与 Chunk 支持 project／activity／region／locale／channel／roleScope／documentType／lifecycle metadata，替代文档会自动废弃旧版本；检索支持 query intent 自适应候选深度、scope 过滤、同 Section／相邻块扩展、语义去重、单文档限额、上下文预算和 Lost-in-the-Middle 排布；新增真实用户反馈、服务端召回快照和 Admin Bad Case 审核，不再返回假成功。`AddGameProductionRagGovernance` migration 已获明确授权并在本地开发 PostgreSQL 执行，`migration:show` 3／3 已应用。验证：后端全量测试 28 Suites／135 Tests ✅；backend build ✅；admin-backend build ✅；`eval:game-marketing` 8 文档／96 问题 ✅；`enterprise:readiness` 12／12 ✅；真实本地登录、scope 问答、queryLogId、反馈写入和 metrics HTTP smoke ✅。本地工程闭环已完成，真实企业私有数据效果和生产部署不在本次完成口径内。
-- **游戏官网／活动业务结构保护切片优化**：基于 `docs/PROJECT_BACKGROUND.md` 优化 `MarkdownChunker`：每个叶子 Chunk 重复完整章节路径；代码围栏保持原子性且不参与 Markdown 表格转换；配置、概率和地区表格按完整行切分并在每块重复表头，保留空单元格和转义竖线的原列语义；接口契约、测试／验收、版本／地区规则增加轻量内容类型标识，继续复用已有父子 Chunk、headingPath、tableRef 和 source span，不新增 schema 或依赖。同步 `ARCHITECTURE.md` 与 `PRD.md`。验证：Chunker／Parser 单测 13／13 ✅；`backend npm run build` ✅；Chunker 定向 ESLint ✅；`backend npm run eval:game-marketing` ✅（8 文档／96 问题）。
+- **游戏官网／活动业务结构保护切片优化**：基于 `docs/PROJECT_BACKGROUND.md` 优化 `MarkdownChunker`：每个叶子 Chunk 重复完整章节路径；代码围栏保持原子性且不参与 Markdown 表格转换；配置、概率和地区表格按完整行切分并在每块重复表头，保留空单元格和转义竖线的原列语义；接口契约、测试／验收、版本／地区规则增加轻量内容类型标识，继续复用已有父子 Chunk、headingPath、tableRef 和 source span，不新增 schema 或依赖。同步 `docs/architecture/ARCHITECTURE.md` 与 `docs/product/PRD.md`。验证：Chunker／Parser 单测 13／13 ✅；`backend npm run build` ✅；Chunker 定向 ESLint ✅；`backend npm run eval:game-marketing` ✅（8 文档／96 问题）。
 - **游戏官网／活动产研一体化项目背景文档**：新增 `docs/PROJECT_BACKGROUND.md`，统一说明项目定位、产品／UI／前端／后端／测试五类用户、从需求到复盘的业务闭环、知识沉淀边界、RAG 与 Agent 分工、七类技术难点的业务来源、产品形态、成功指标和简历表达边界；明确附带材料中的高完成率、高召回率和成本收益数字在缺少对应实验时只能作为目标，不能冒充真实结果。同步更新 `docs/README.md` 与本文件索引。仅文档更新，未改代码。
 
 ### 2026-07-30
 
-- **docs 目录分类整理**：将根目录 `docs/` 下文档按用途整理到 `docs/interview/`、`docs/interview/resume/`、`docs/interview/jd/`、`docs/plans/`，新增 `docs/README.md` 作为文档总索引；同步更新 `ROADMAP.md`、`INTERVIEW_PLAYBOOK.md` 和相关文档中的路径引用，并修正 `ROADMAP.md` 中 BullMQ 异步队列方案的实际路径为 `backend/docs/async-task-queue-plan.md`，同步修正 `backend/docs/remaining-enhancement-plan.md` 的同目录引用。仅文档路径整理，未改代码。
+- **docs 目录分类整理**：将根目录 `docs/` 下文档按用途整理到 `docs/interview/`、`docs/interview/resume/`、`docs/interview/jd/`、`docs/plans/`，新增 `docs/README.md` 作为文档总索引；同步更新 `ROADMAP.md`、`docs/interview/INTERVIEW_PLAYBOOK.md` 和相关文档中的路径引用，并修正 `ROADMAP.md` 中 BullMQ 异步队列方案的实际路径为 `backend/docs/async-task-queue-plan.md`，同步修正 `backend/docs/remaining-enhancement-plan.md` 的同目录引用。仅文档路径整理，未改代码。
 - **面试文档目录整理**：将原先散放在 `docs/` 根层的面试使用说明移动到 `docs/interview/interview-docs-usage.md`，统一面试导航文档到 `docs/interview/` 目录；同步更新 `ROADMAP.md` 和 `docs/interview/resume/resume-rag-project-game-marketing.md` 中旧路径引用。仅文档路径整理，未改代码。
 
 ### 2026-07-29
 
-- **面试文档使用说明升级**：更新 `docs/interview/interview-docs-usage.md`，把 2026-07-29 补齐的高级 Agent 开发主干纳入使用导航，明确 `INTERVIEW_PLAYBOOK.md` 负责“怎么说”、`AI_AGENT_CORE_KNOWLEDGE.md` 负责“为什么”、`docs/interview/agentguide-rag-interview-mapping.md` 负责“AgentGuide 怎么对上项目和哪些不能吹”；新增面试前 10 分钟、30 分钟、2 小时、半天的阅读策略，以及 Agent Harness、Evaluation Harness、框架选型、合规型 Agent、沙箱、数据合成、工作流优先等问题的定位表。仅文档更新，未改代码。
-- **高级 Agent 开发通用主干闭环**：继续更新 `AI_AGENT_CORE_KNOWLEDGE.md`、`INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，补齐最后两块通用缺口：数据合成 / 评测集构建工程口径（Self-Instruct、Evol-Instruct、AgenticRAGTracer、Dependency Irreducibility、格式/语义/约束/多样性/去污染五道质量防线、合成数据只能冷启动不能冒充真实业务效果）和企业 Agent 工作流落地口径（workflow first、Agent 不总是最佳答案、Agent onboarding、每一步可追踪验证、可复用组件、人类负责判断/合规/最终签署）。同时在文档中明确高级 Agent 开发通用面试主干已覆盖，后续只按具体公司 JD 做定制化补强。仅文档更新，未改代码。
-- **高级 Agent 开发边角知识补齐**：继续更新 `AI_AGENT_CORE_KNOWLEDGE.md`、`INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，补齐 AgentGuide 中剩余的开发岗高频边角：Agent 框架选型（LangGraph、LangChain、AutoGen、CrewAI、Swarm、Parlant、AgentScope）、Parlant / 合规型 Agent（failure severity、Guidelines、Journeys、Strict Mode、ARQs）、Agent 沙箱隔离（Docker、microVM/E2B、gVisor/Kata、OpenSandbox、Browser sandbox、文件/网络/secret/资源/审计约束）、多模态 RAG 证据定位（page、bbox、figure、table、caption、timestamp、ColPali/ColQwen/ViDoRe 了解项）。仅文档更新，未改代码。
-- **高级 Agent 开发面试知识补齐**：继续结合 AgentGuide 的 12-Factor Agent、Agent Harness、Evaluation Harness、Agentic RAG / Deep Research、Skills / 程序性记忆、Memory 高级设计和生产 Agent 挑战，更新 `AI_AGENT_CORE_KNOWLEDGE.md`、`INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`。新增生产级 Agent 控制流、统一状态、暂停恢复、无状态 reducer、多入口触发、Agent Harness 七层、可靠性六件套、Task/Trial/Transcript/Outcome/Grader/Report、pass@k/pass^k、上线门禁、RAG 四代演进、Self-RAG/CRAG 工程近似、Deep Research 搜索规划、Skill 渐进式披露、Skill 安全、working/episodic/semantic/procedural memory、记忆冲突/过期/遗忘、错误复合和长上下文成本等高级 Agent 开发面试口径。仅文档更新，未改代码。
-- **AI 应用 / 大模型应用面试方案地图补强**：结合 `/Users/monster/Documents/GitHub/code/AgentGuide` 中 RAG、Agent、上下文工程、MCP、Memory、模型评测、文档解析和向量库选型高频问题，更新 `AI_AGENT_CORE_KNOWLEDGE.md`、`INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，新增“有哪些方案、优缺点、怎么选择、项目怎么落地、边界是什么”的横向知识地图，覆盖文档解析、切片、Embedding、向量库、BM25/Hybrid、Query 改写、Rerank、上下文组装、Lost in the Middle、幻觉治理、RAG 评测、数据更新、权限、Memory、Agent 架构、Tool/MCP、多 Agent、模型路由、Prompt/Context Engineering、微调取舍、推理性能、可观测、安全、多模态、成本延迟等面试必会点。仅文档更新，未改代码。
-- **RAG 分块策略面试口径补强**：更新 `INTERVIEW_PLAYBOOK.md` 和 `AI_AGENT_CORE_KNOWLEDGE.md`，把文档分块从“结构切分 + 500/50 参数”扩展为面试可讲版本，覆盖固定长度、递归字符、结构化切分、Parent-child、语义切分、多模态专用切分等方案对比，以及 chunk size / overlap 取舍、项目当前 MarkdownChunker 落地、差旅制度示例、评估指标和不能这么说的边界。仅文档更新，未改代码。
+- **面试文档使用说明升级**：更新 `docs/interview/interview-docs-usage.md`，把 2026-07-29 补齐的高级 Agent 开发主干纳入使用导航，明确 `docs/interview/INTERVIEW_PLAYBOOK.md` 负责“怎么说”、`docs/interview/AI_AGENT_CORE_KNOWLEDGE.md` 负责“为什么”、`docs/interview/agentguide-rag-interview-mapping.md` 负责“AgentGuide 怎么对上项目和哪些不能吹”；新增面试前 10 分钟、30 分钟、2 小时、半天的阅读策略，以及 Agent Harness、Evaluation Harness、框架选型、合规型 Agent、沙箱、数据合成、工作流优先等问题的定位表。仅文档更新，未改代码。
+- **高级 Agent 开发通用主干闭环**：继续更新 `docs/interview/AI_AGENT_CORE_KNOWLEDGE.md`、`docs/interview/INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，补齐最后两块通用缺口：数据合成 / 评测集构建工程口径（Self-Instruct、Evol-Instruct、AgenticRAGTracer、Dependency Irreducibility、格式/语义/约束/多样性/去污染五道质量防线、合成数据只能冷启动不能冒充真实业务效果）和企业 Agent 工作流落地口径（workflow first、Agent 不总是最佳答案、Agent onboarding、每一步可追踪验证、可复用组件、人类负责判断/合规/最终签署）。同时在文档中明确高级 Agent 开发通用面试主干已覆盖，后续只按具体公司 JD 做定制化补强。仅文档更新，未改代码。
+- **高级 Agent 开发边角知识补齐**：继续更新 `docs/interview/AI_AGENT_CORE_KNOWLEDGE.md`、`docs/interview/INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，补齐 AgentGuide 中剩余的开发岗高频边角：Agent 框架选型（LangGraph、LangChain、AutoGen、CrewAI、Swarm、Parlant、AgentScope）、Parlant / 合规型 Agent（failure severity、Guidelines、Journeys、Strict Mode、ARQs）、Agent 沙箱隔离（Docker、microVM/E2B、gVisor/Kata、OpenSandbox、Browser sandbox、文件/网络/secret/资源/审计约束）、多模态 RAG 证据定位（page、bbox、figure、table、caption、timestamp、ColPali/ColQwen/ViDoRe 了解项）。仅文档更新，未改代码。
+- **高级 Agent 开发面试知识补齐**：继续结合 AgentGuide 的 12-Factor Agent、Agent Harness、Evaluation Harness、Agentic RAG / Deep Research、Skills / 程序性记忆、Memory 高级设计和生产 Agent 挑战，更新 `docs/interview/AI_AGENT_CORE_KNOWLEDGE.md`、`docs/interview/INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`。新增生产级 Agent 控制流、统一状态、暂停恢复、无状态 reducer、多入口触发、Agent Harness 七层、可靠性六件套、Task/Trial/Transcript/Outcome/Grader/Report、pass@k/pass^k、上线门禁、RAG 四代演进、Self-RAG/CRAG 工程近似、Deep Research 搜索规划、Skill 渐进式披露、Skill 安全、working/episodic/semantic/procedural memory、记忆冲突/过期/遗忘、错误复合和长上下文成本等高级 Agent 开发面试口径。仅文档更新，未改代码。
+- **AI 应用 / 大模型应用面试方案地图补强**：结合 `/Users/monster/Documents/GitHub/code/AgentGuide` 中 RAG、Agent、上下文工程、MCP、Memory、模型评测、文档解析和向量库选型高频问题，更新 `docs/interview/AI_AGENT_CORE_KNOWLEDGE.md`、`docs/interview/INTERVIEW_PLAYBOOK.md`、`docs/interview/agentguide-rag-interview-mapping.md`，新增“有哪些方案、优缺点、怎么选择、项目怎么落地、边界是什么”的横向知识地图，覆盖文档解析、切片、Embedding、向量库、BM25/Hybrid、Query 改写、Rerank、上下文组装、Lost in the Middle、幻觉治理、RAG 评测、数据更新、权限、Memory、Agent 架构、Tool/MCP、多 Agent、模型路由、Prompt/Context Engineering、微调取舍、推理性能、可观测、安全、多模态、成本延迟等面试必会点。仅文档更新，未改代码。
+- **RAG 分块策略面试口径补强**：更新 `docs/interview/INTERVIEW_PLAYBOOK.md` 和 `docs/interview/AI_AGENT_CORE_KNOWLEDGE.md`，把文档分块从“结构切分 + 500/50 参数”扩展为面试可讲版本，覆盖固定长度、递归字符、结构化切分、Parent-child、语义切分、多模态专用切分等方案对比，以及 chunk size / overlap 取舍、项目当前 MarkdownChunker 落地、差旅制度示例、评估指标和不能这么说的边界。仅文档更新，未改代码。
 
 ### 2026-07-28
 
-- **INTERVIEW_PLAYBOOK 高频问题清晰化**：更新 `INTERVIEW_PLAYBOOK.md`，新增“这份文件怎么用”和“面试先看：核心问题清晰回答版”，把 RAG 项目定位、RAG 主链路、simple/auto/agentic、向量/ES/图谱、召回优化、Rerank、Memory/缓存/Token、幻觉控制、多 Agent、工具调用、MCP/CLI、评测、权限、项目问题、情感分析、AI Coding、前端业务关联和一线大厂生产差距整理成“一句话结论 -> 项目做法 -> 追问边界”的面试回答；同步 `docs/interview/interview-docs-usage.md` 的定位入口。仅文档更新，未改代码。
+- **INTERVIEW_PLAYBOOK 高频问题清晰化**：更新 `docs/interview/INTERVIEW_PLAYBOOK.md`，新增“这份文件怎么用”和“面试先看：核心问题清晰回答版”，把 RAG 项目定位、RAG 主链路、simple/auto/agentic、向量/ES/图谱、召回优化、Rerank、Memory/缓存/Token、幻觉控制、多 Agent、工具调用、MCP/CLI、评测、权限、项目问题、情感分析、AI Coding、前端业务关联和一线大厂生产差距整理成“一句话结论 -> 项目做法 -> 追问边界”的面试回答；同步 `docs/interview/interview-docs-usage.md` 的定位入口。仅文档更新，未改代码。
 
 ### 2026-07-27
 
@@ -481,12 +483,12 @@
 - **游戏官网营销场景简历版本**：新增并继续补强 `docs/interview/resume/resume-rag-project-game-marketing.md`，将 RAG 项目从泛企业知识库收敛到更贴合主人经历的“游戏活动与官网营销 RAG 知识协同平台”；覆盖节假日、周年庆、版本更新、新角色、改版、充值、抽奖、小程序/H5、PC/H5 官网，以及台湾服、东南亚服、国内和海外多地区交付；明确不沉淀每次变化的活动规则，而是沉淀通用活动类型、营销玩法、官网落地页模块、前端工程规范、埋点规范、地区适配、风险检查和验收 checklist。用户定义从岗位列表升级为业务线视角，并补充业务负责人角色：业务负责人统筹活动目标、玩法方案、资源协同、技术风险、上线节奏和复盘沉淀；需求策划侧、体验设计侧、交付验证侧协同落地；业务流串联活动想法、玩法方案、页面方案、素材需求、技术拆解、埋点验收、上线检查和复盘沉淀。补充 AI 编程工具集成路线：优先做通用 `rag-mcp-server`，服务 Codex、Trae、Claude Code、Cursor 等支持 MCP 的客户端；CLI 定位为命令行网关，面向人、脚本、CI、批量导入和批量评测；MCP 定位为 Agent 工具接口，面向 AI 编程工具自动查知识；Codex 插件仅作为后续平台封装方式。当前 `rag ask/context/search/graph/eval` 可用于方案上下文、编码计划和评测；后续可扩展 `rag game plan/checklist/tracking/region-check/graph/retro` 等业务命令。仅文档更新，未改代码。
 - **jl-pic 简历素材全量总结与 RAG 简历强化**：逐张阅读 `jl-pic` 下 57 张图片，重写 `jl-pic/jl-pic-summary.md`，记录逐图摘要、项目类型聚类、面试反推问题、可迁移到当前 RAG 项目的简历表达和不能照搬的指标边界；同步更新 `docs/interview/resume/resume-rag-project.md`，将项目定位收敛为“企业级 Agentic RAG 知识治理与问答平台”，补强 Hybrid Search、GraphRAG、LangGraph、MCP/Tool Registry、AG-UI/SSE、Karpathy + Obsidian、评测闭环和后台运营等面试口径。仅文档更新，未改代码。
 - **JD 差距可本地补齐项实现**：新增 `docs/interview/jd/jd-gap-implementation-status.md` 记录“已实现/部分实现/外部阻塞”；补齐 Prompt Injection 基础防护（`prompt-injection.guard.ts` + 检索片段高风险行脱敏 + prompt 不可信证据边界 + `eval/prompt-injection.dataset.json`）、Prompt Registry 基础版（`prompt-registry.ts` + `prompt:registry:check`）、Tool Registry 基础版（`tool-registry.ts` + `tools:registry:check`）、Agent 任务级评测脚手架（`eval-agent-task-metrics.mjs` + `eval:agent-tasks`）。同步更新 `docs/interview/jd/jd-requirements-project-mapping.md` 和 `docs/plans/remaining-enhancement-plan.md`，把这些项从“缺口”调整为“本地基础版已实现，生产化仍待真实数据/平台接入”。验证：`backend npm run eval:prompt-injection` ✅（7/7）；`backend npm run prompt:registry:check` ✅；`backend npm run tools:registry:check` ✅；`backend npm run eval:agent-tasks` ✅；`backend npm run build` ✅。
-- **面试文档使用说明**：新增 `docs/interview/interview-docs-usage.md`，说明 `jd-requirements-project-mapping.md`、`jd-gap-implementation-status.md`、`INTERVIEW_PLAYBOOK.md`、`ROADMAP.md`、`remaining-enhancement-plan.md` 的用途、阅读顺序、问题定位方式和不能混用的边界。仅文档更新，未改代码。
-- **RAG 项目简历写法沉淀**：新增 `docs/interview/resume/resume-rag-project.md`，整理项目名称、项目描述、简历最终版 bullets、可展开亮点、量化指标、面试补充边界和不建议写法；同步 `INTERVIEW_PLAYBOOK.md` 与 `docs/interview/interview-docs-usage.md` 的入口说明。仅文档更新，未改代码。
+- **面试文档使用说明**：新增 `docs/interview/interview-docs-usage.md`，说明 `jd-requirements-project-mapping.md`、`jd-gap-implementation-status.md`、`docs/interview/INTERVIEW_PLAYBOOK.md`、`ROADMAP.md`、`remaining-enhancement-plan.md` 的用途、阅读顺序、问题定位方式和不能混用的边界。仅文档更新，未改代码。
+- **RAG 项目简历写法沉淀**：新增 `docs/interview/resume/resume-rag-project.md`，整理项目名称、项目描述、简历最终版 bullets、可展开亮点、量化指标、面试补充边界和不建议写法；同步 `docs/interview/INTERVIEW_PLAYBOOK.md` 与 `docs/interview/interview-docs-usage.md` 的入口说明。仅文档更新，未改代码。
 
 ### 2026-07-06
 
-- **面试文档核心口径补强**：更新 `INTERVIEW_PLAYBOOK.md`，将本地工程成熟度和项目级评测口径同步为 `96/100`、`28/28`；新增“面试先记这一页”、30 秒总回答、2 分钟展开版、7 问压缩背诵卡片，并围绕 RAG 主链路、向量/ES/图谱、多 Agent、工具调用、RAG 难点、情感分析边界、AI Coding 使用方式补充追问回答。继续补充二层追问：NestJS/FastAPI 选型、Dify/Coze/LangFlow 取舍、权限过滤、索引一致性、性能优化、幻觉控制、一线大厂生产化差距、前端负责人视角、后台指标、评测集建设、AG-UI/SSE 排障 STAR 和反问清单。按公开 JD 抽样继续补充大厂 AI 应用/Agent 岗位对照：RAG+Agent、Planning/Acting/Reflection、Tool Calling/MCP、Memory、Eval、Observability、多模态、生产工程、成本延迟、金融合规，并加入阿里/腾讯/百度/字节/美团、小米/大疆/高德、微信/DeepSeek、中信/平安/证券公司的差异化讲法。仅文档更新，未改代码。
+- **面试文档核心口径补强**：更新 `docs/interview/INTERVIEW_PLAYBOOK.md`，将本地工程成熟度和项目级评测口径同步为 `96/100`、`28/28`；新增“面试先记这一页”、30 秒总回答、2 分钟展开版、7 问压缩背诵卡片，并围绕 RAG 主链路、向量/ES/图谱、多 Agent、工具调用、RAG 难点、情感分析边界、AI Coding 使用方式补充追问回答。继续补充二层追问：NestJS/FastAPI 选型、Dify/Coze/LangFlow 取舍、权限过滤、索引一致性、性能优化、幻觉控制、一线大厂生产化差距、前端负责人视角、后台指标、评测集建设、AG-UI/SSE 排障 STAR 和反问清单。按公开 JD 抽样继续补充大厂 AI 应用/Agent 岗位对照：RAG+Agent、Planning/Acting/Reflection、Tool Calling/MCP、Memory、Eval、Observability、多模态、生产工程、成本延迟、金融合规，并加入阿里/腾讯/百度/字节/美团、小米/大疆/高德、微信/DeepSeek、中信/平安/证券公司的差异化讲法。仅文档更新，未改代码。
 - **大厂 JD 与项目实现对照文档**：新增 `docs/interview/jd/jd-requirements-project-mapping.md`，把公开 AI 应用/Agent 岗位要求与本项目实现逐项映射，覆盖 RAG、Hybrid Search、Agentic Workflow、Planning/Acting/Reflection、Tool Calling/MCP、Memory、GraphRAG、Eval、Observability、权限、审计、多模态、金融合规、Prompt 安全、模型路由、生产化等；每项标注“已实现/部分实现/未实现”、核心代码位置和面试回答边界，便于面试时准确说明项目能力与一线大厂差距。仅文档更新，未改代码。
 - **BOSS/公开 JD 对照表补强**：继续完善 `docs/interview/jd/jd-requirements-project-mapping.md`，新增 BOSS/公开 JD 高频要求观察和公司/行业对照表，覆盖阿里、腾讯/微信、百度、字节、美团、小米、高德、大疆、DeepSeek、中信/平安/证券；补充工具注册/工具目录、灰度/A-B/效果回归、上下文工程、SFT/RLHF/模型训练等招聘要求与项目实现边界。仅文档更新，未改代码。
 
@@ -500,7 +502,7 @@
 
 ### 2026-07-03
 
-- **未完成项复核与成熟度门禁校准**：`backend npm run enterprise:readiness` ✅（本地 11/11，通过；当前未 ready 外部输入：视觉/视频理解 key、LangFuse key、真实业务原件和毒题集、真实组织系统、真实 GraphRAG 数据源、真实资源压测窗口、生产环境、安全合规口径）；修正 `eval-rag-maturity.mjs` 的生产材料判断，不再依赖 ROADMAP 文案字符串，改为显式 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 后才计入；同步 `PRD.md` / `ARCHITECTURE.md` 企业级成熟度口径为 96/100。
+- **未完成项复核与成熟度门禁校准**：`backend npm run enterprise:readiness` ✅（本地 11/11，通过；当前未 ready 外部输入：视觉/视频理解 key、LangFuse key、真实业务原件和毒题集、真实组织系统、真实 GraphRAG 数据源、真实资源压测窗口、生产环境、安全合规口径）；修正 `eval-rag-maturity.mjs` 的生产材料判断，不再依赖 ROADMAP 文案字符串，改为显式 `RAG_PRODUCTION_MATERIALS_CONFIRMED=true` 后才计入；同步 `docs/product/PRD.md` / `docs/architecture/ARCHITECTURE.md` 企业级成熟度口径为 96/100。
 - **RAG 脚本服务边界修正**：将真实 rag-backend 检查脚本默认地址统一为 `http://localhost:3000`，避免 `perf/eval/smoke` 误打 admin-backend `3001` 后出现 `/api/v1/auth/login` 404；同步 `backend/scripts/README.md`。`backend npm run build` ✅
 - **Karpathy + Obsidian 双写去重修复**：Obsidian `content_hash` 命中旧 note 时，不再直接复用旧 `rag_doc_id` 阻断当前用户 RAG 入库；若当前用户没有该 RAG 文档，会重新走 `DocumentService.upload()` 写入 DB、Milvus/ES、Karpathy BM25，再返回 duplicate note 关联的新 `ragDocId`。这样 Obsidian 负责知识沉淀去重，RAG 负责当前用户可检索数据，两条链路互补不互相吞数据。`backend npm run build` ✅
 - **项目级 RAG 评测修复到 100%**：Karpathy 检索改为 ES + 本地 BM25 结果合并，答案证据优先 RAG chunks 再补 Obsidian chunks；明确事实题新增结构化抽取兜底，覆盖差旅审批、采购付款、法务审查、数据留存、React 状态管理、NestJS Provider 等场景；抽取式 fallback 跳过 `path:`/Obsidian source link 噪声。`backend npm run eval:rag:project` ✅（score=1，simple 14/14，auto 14/14）

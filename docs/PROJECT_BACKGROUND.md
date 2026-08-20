@@ -220,5 +220,5 @@ Agent 负责理解目标、选择工具、拆分步骤、维护状态、检查�
 
 - `docs/interview/resume/resume-rag-project-game-marketing.md`：简历写法和业务案例。
 - `docs/interview/resume/game-marketing-rag-evidence.md`：专项评测、代码证据和不能硬说的边界。
-- `INTERVIEW_PLAYBOOK.md`：面试回答结构与追问口径。
+- `interview/INTERVIEW_PLAYBOOK.md`：面试回答结构与追问口径。
 - `ROADMAP.md`：当前真实进度、验证结果和外部阻塞。

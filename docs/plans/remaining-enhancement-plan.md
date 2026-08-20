@@ -20,7 +20,7 @@
 | 外部工具 smoke | Bocha、Rerank、Judge 的 key 缺失降级和 required 模式 | `npm run smoke:external` / `npm run smoke:external:required` |
 | Milvus 基础治理 | index smoke、timeout/warmup/circuit breaker 相关脚手架 | `npm run smoke:milvus` |
 | 性能基准脚手架 | simple/agentic p50/p95 基准脚本 | `npm run perf:rag` |
-| 部署清单 | 基础设施、Nginx、备份、监控、回滚 checklist 模板 | `DEPLOYMENT_CHECKLIST.md` |
+| 部署清单 | 基础设施、Nginx、备份、监控、回滚 checklist 模板 | `../architecture/DEPLOYMENT_CHECKLIST.md` |
 | 企业级 readiness 汇总 | 统一检查数据、脚本、文档、外部阻塞 | `npm run enterprise:readiness` |
 | Prompt Injection 基础防护 | 检索片段本地检测/高风险行脱敏、prompt 边界、专项评测集 | `npm run eval:prompt-injection` |
 | Prompt Registry 基础版 | prompt name/version/owner/evals/rollback 代码级登记 | `npm run prompt:registry:check` |

@@ -15,20 +15,20 @@
   -> USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md
 
 理解核心知识
-  -> ../../AI_AGENT_CORE_KNOWLEDGE.md
+  -> ./AI_AGENT_CORE_KNOWLEDGE.md
   -> AI_TOOLING_INTERVIEW_GUIDE.md
   -> AGENT_ARCHITECTURE_SELECTION_GUIDE.md
 
 按项目模块和真实链路理解
   -> 功能步骤流程.md
   -> 开源项目参考能力归档.md
-  -> ../../ARCHITECTURE.md
+  -> ../architecture/ARCHITECTURE.md
 
 练习面试表达
   -> SEVEN_DIFFICULTIES_CHEATSHEET.md
   -> SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md
   -> 功能步骤流程.md
-  -> ../../INTERVIEW_PLAYBOOK.md
+  -> ./INTERVIEW_PLAYBOOK.md
 
 准备投递和项目证据
   -> resume/
@@ -261,7 +261,7 @@ Agentic 不是直接让模型随便执行动作，而是先通过 `Tool Registry
 按顺序看：
 
 1. [七个难点速查卡](./SEVEN_DIFFICULTIES_CHEATSHEET.md)：先记回答结构和七条主线。
-2. [面试回答手册](../../INTERVIEW_PLAYBOOK.md)：复习高频问题的短回答。
+2. [面试回答手册](./INTERVIEW_PLAYBOOK.md)：复习高频问题的短回答。
 3. [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md)：检查是否还有没准备的问题。
 4. [项目真实进度](../../ROADMAP.md)：确认数字、完成度和不能夸大的边界。
 
@@ -281,7 +281,7 @@ Tool、MCP、Skill 分别是什么？
 
 | 顺序 | 文档                                                              | 复习目标                                |
 | ---: | ----------------------------------------------------------------- | --------------------------------------- |
-|    1 | [核心知识手册](../../AI_AGENT_CORE_KNOWLEDGE.md)                  | 建立 RAG／Agent 全局知识骨架            |
+|    1 | [核心知识手册](./AI_AGENT_CORE_KNOWLEDGE.md)                  | 建立 RAG／Agent 全局知识骨架            |
 |    2 | [工具体系手册](./AI_TOOLING_INTERVIEW_GUIDE.md)                   | 讲清 Agent、Tool、MCP、Skill 和多 Agent |
 |    3 | [架构选型手册](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md)           | 讲清主流架构、优缺点、场景和项目选择    |
 |    4 | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)         | 用背景、对比、选择、落地、效果讲项目    |
@@ -300,20 +300,20 @@ Tool、MCP、Skill 分别是什么？
 
 | 天数    | 任务                               | 使用文档                                                                                                           |
 | ------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 第 1 天 | RAG 主链路、切片、检索、重排       | [核心知识手册](../../AI_AGENT_CORE_KNOWLEDGE.md)                                                                   |
-| 第 2 天 | Agent、状态机、记忆、防循环        | [核心知识手册](../../AI_AGENT_CORE_KNOWLEDGE.md)、[七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)        |
+| 第 1 天 | RAG 主链路、切片、检索、重排       | [核心知识手册](./AI_AGENT_CORE_KNOWLEDGE.md)                                                                   |
+| 第 2 天 | Agent、状态机、记忆、防循环        | [核心知识手册](./AI_AGENT_CORE_KNOWLEDGE.md)、[七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)        |
 | 第 3 天 | Function Calling、Tool、MCP、Skill | [工具体系手册](./AI_TOOLING_INTERVIEW_GUIDE.md)                                                                    |
 | 第 4 天 | 单／多 Agent 架构和选型            | [架构选型手册](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md)                                                            |
 | 第 5 天 | 项目难点、效果、失败案例           | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)、[高级岗位就绪度](./SENIOR_AGENT_INTERVIEW_READINESS.md) |
 | 第 6 天 | JD 对照、简历和岗位定制            | [JD 对照](./jd/jd-requirements-project-mapping.md)、[简历目录](./resume/)                                          |
-| 第 7 天 | 模拟问答和查漏                     | [面试回答手册](../../INTERVIEW_PLAYBOOK.md)、[问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md)     |
+| 第 7 天 | 模拟问答和查漏                     | [面试回答手册](./INTERVIEW_PLAYBOOK.md)、[问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md)     |
 
 ## 三、按主题找文档
 
 | 面试主题                                  | 第一阅读入口                                                      | 深挖／证据入口                                                  |
 | ----------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------- |
-| RAG、Chunk、Embedding、Hybrid、Rerank     | [核心知识手册](../../AI_AGENT_CORE_KNOWLEDGE.md)                  | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)       |
-| Agent 定义、状态机、防死循环、Memory      | [核心知识手册](../../AI_AGENT_CORE_KNOWLEDGE.md)                  | [工具体系手册](./AI_TOOLING_INTERVIEW_GUIDE.md)                 |
+| RAG、Chunk、Embedding、Hybrid、Rerank     | [核心知识手册](./AI_AGENT_CORE_KNOWLEDGE.md)                  | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)       |
+| Agent 定义、状态机、防死循环、Memory      | [核心知识手册](./AI_AGENT_CORE_KNOWLEDGE.md)                  | [工具体系手册](./AI_TOOLING_INTERVIEW_GUIDE.md)                 |
 | Function Calling、Tool、MCP、Skill        | [工具体系手册](./AI_TOOLING_INTERVIEW_GUIDE.md)                   | [AgentGuide 对照](./agentguide-rag-interview-mapping.md)        |
 | 单 Agent、多 Agent、Manager、Handoff、DAG | [架构选型手册](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md)           | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)       |
 | 项目七个核心技术难点                      | [七个难点速查卡](./SEVEN_DIFFICULTIES_CHEATSHEET.md)              | [七个难点讲解稿](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)       |
@@ -325,7 +325,7 @@ Tool、MCP、Skill 分别是什么？
 | 简历怎么写                                | [通用 RAG 简历版](./resume/resume-rag-project.md)                 | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md) |
 | 历次真实面试题和主人问过的问题            | [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 表中标注的具体答案入口                                          |
 | AI 应用完整知识地图                       | [ProcessOn 知识图谱](./processon-ai-application-mindmap.md)       | [AgentGuide 对照](./agentguide-rag-interview-mapping.md)        |
-| 项目模块如何协作                          | [功能步骤流程](./功能步骤流程.md)                                | [项目架构](../../ARCHITECTURE.md)                               |
+| 项目模块如何协作                          | [功能步骤流程](./功能步骤流程.md)                                | [项目架构](../architecture/ARCHITECTURE.md)                               |
 | 文档规范增量、发布、废弃和回滚            | [功能步骤流程](./功能步骤流程.md)                                | [项目真实进度](../../ROADMAP.md)                                |
 | Dify 到 AutoGen 的能力借鉴                | [开源项目参考能力归档](./开源项目参考能力归档.md)                 | [功能步骤流程](./功能步骤流程.md)                               |
 
@@ -419,9 +419,9 @@ Tool、MCP、Skill 分别是什么？
 | 信息类型               | 唯一优先来源                                                                                        |
 | ---------------------- | --------------------------------------------------------------------------------------------------- |
 | 当前完成度、验证和阻塞 | [ROADMAP.md](../../ROADMAP.md)                                                                      |
-| 运行架构和模块边界     | [ARCHITECTURE.md](../../ARCHITECTURE.md)                                                            |
-| 面试时怎么说           | [INTERVIEW_PLAYBOOK.md](../../INTERVIEW_PLAYBOOK.md)                                                |
-| Agent／RAG 原理        | [AI_AGENT_CORE_KNOWLEDGE.md](../../AI_AGENT_CORE_KNOWLEDGE.md)                                      |
+| 运行架构和模块边界     | [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)                                                            |
+| 面试时怎么说           | [INTERVIEW_PLAYBOOK.md](./INTERVIEW_PLAYBOOK.md)                                                |
+| Agent／RAG 原理        | [AI_AGENT_CORE_KNOWLEDGE.md](./AI_AGENT_CORE_KNOWLEDGE.md)                                      |
 | 架构方案与选型         | [AGENT_ARCHITECTURE_SELECTION_GUIDE.md](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md)                    |
 | 项目模块与实际交互流程 | [功能步骤流程.md](./功能步骤流程.md)                                                            |
 | 开源项目参考与融合边界 | [开源项目参考能力归档.md](./开源项目参考能力归档.md)                                              |

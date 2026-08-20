@@ -32,10 +32,10 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
 
 ## 文档关系
 
-- `ARCHITECTURE.md`：技术架构与设计约束。
-- `PRD.md`：产品需求与验收标准。
-- `ROADMAP.md`：真实进度源。
-- `CLAUDE.md`：项目规则。
+- `../architecture/ARCHITECTURE.md`：技术架构与设计约束。
+- `../product/PRD.md`：产品需求与验收标准。
+- `../../ROADMAP.md`：真实进度源。
+- `../../CLAUDE.md`：项目规则。
 - `rag-plan.md`：早期计划和技术路线。
 
 ---

@@ -182,7 +182,7 @@
   - 后台 AG-UI SSE 链路已由 admin-backend 真实代理验证通过
 - 2026-06-24：AG-UI 文档与工程规则同步
   - `CLAUDE.md` 已从模板默认 npm/package-lock 规则同步为当前实际 `pnpm + pnpm-lock.yaml`
-  - 根目录 `AGUI_INTEGRATION.md` 已补齐管理后台流式问答启动和验证说明
+  - `docs/product/AGUI_INTEGRATION.md` 已补齐管理后台流式问答启动和验证说明
   - `pnpm run lint` 通过
 - 2026-06-24：admin-picture 效果图对齐复验
   - `pnpm run build` 通过，产物输出到 `dist`

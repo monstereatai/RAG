@@ -1,0 +1,22 @@
+{
+  "name": "rag-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise Agentic RAG platform workspace",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "dev": "sh -c 'pnpm --filter backend start:dev & pnpm --filter admin-backend start & pnpm --filter ant-design-pro start:no-mock & pnpm --filter rag-frontend dev & wait'",
+    "dev:backend": "pnpm --filter backend start:dev",
+    "dev:admin-backend": "pnpm --filter admin-backend start",
+    "dev:admin": "pnpm --filter ant-design-pro start:no-mock",
+    "dev:frontend": "pnpm --filter rag-frontend dev",
+    "dev:mcp": "pnpm --filter rag-mcp-server start",
+    "build": "pnpm -r --if-present run build",
+    "test": "pnpm -r --if-present run test",
+    "lint": "pnpm -r --if-present run lint",
+    "typecheck": "pnpm --filter backend exec tsc --noEmit && pnpm --filter admin-backend exec tsc --noEmit && pnpm --filter ant-design-pro tsc && pnpm --filter rag-frontend exec tsc --noEmit",
+    "format": "pnpm --filter backend format",
+    "workspace:list": "pnpm -r list --depth -1",
+    "workspace:check": "pnpm -r --if-present run build"
+  }
+}

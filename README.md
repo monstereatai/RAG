@@ -17,9 +17,9 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
 - **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在真实后端跑到 28/28 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
 - **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch、Karpathy 和 Obsidian 索引；公开快照用于验证链路，不代表真实企业线上效果。
-- **部署目标**：当前固定为 Docker Compose，见 `DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
+- **部署目标**：当前固定为 Docker Compose，见 `docs/architecture/DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
-详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./rag-plan.md)。
+详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./docs/plans/rag-plan.md)。
 
 ---
 
@@ -28,8 +28,33 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
 ### 前置要求
 
 - **Node.js ≥ 22**（管理后台要求 Node ≥ 22，项目根目录包含 `.nvmrc` / `.node-version` 约束，`nvm use` 自动切换）
-- **包管理器**：各子项目使用不同包管理器，详见下方分项目说明
+- **包管理器**：根目录统一使用 pnpm 10.17.1；子项目保留独立配置以兼容单独启动
 - **Docker**（用于基础设施：PostgreSQL、Redis、Milvus 等）
+
+### Workspace（推荐入口）
+
+根目录已统一纳管 `backend`、`admin-backend`、`admin`、`frontend`、`rag-cli` 和 `tools/*`。首次安装和日常开发优先在根目录执行：
+
+```bash
+pnpm install
+pnpm workspace:list
+pnpm dev
+```
+
+按服务启动或执行检查：
+
+```bash
+pnpm dev:backend       # RAG API
+pnpm dev:admin-backend # Agent 运营后台 API
+pnpm dev:admin         # 管理后台
+pnpm dev:frontend      # 用户前台
+pnpm dev:mcp           # RAG MCP Server（stdio）
+pnpm build
+pnpm test
+pnpm typecheck
+```
+
+`pnpm dev` 会同时启动后端、管理后台 API、管理后台前端和用户前台；基础设施仍需先按下方 Docker 步骤启动。
 
 ### 1. 启动基础设施
 ```bash
@@ -101,7 +126,7 @@ npm run dev
 * **调试与可观测**
   * `GET /api/debug/chunks?query=...`：查看当前查询在检索召回时的 BM25 分、余弦分及融合加权总分
 
-AG-UI 用户端与管理后台接入说明见 [AGUI_INTEGRATION.md](./AGUI_INTEGRATION.md)。
+AG-UI 用户端与管理后台接入说明见 [AGUI_INTEGRATION.md](./docs/product/AGUI_INTEGRATION.md)。
 
 ---
 
