@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
+import { ToolExecutionService } from '../../tools/tool-execution.service';
 import {
   type ProductionEvidence,
   type ProductionRole,
@@ -69,6 +70,10 @@ export interface ProductionRoleToolContext {
   projectId: string;
   brief: string;
   userId: string;
+  threadId?: string;
+  runId?: string;
+  pluginKeys?: string[];
+  pluginTools?: string[];
 }
 
 export interface ProductionRoleToolResult {
@@ -83,6 +88,7 @@ export class ProductionWorkflowTools {
   constructor(
     private readonly rag: KarpathyRagService,
     private readonly toolPolicy: ToolExecutionPolicyService,
+    private readonly toolExecution: ToolExecutionService,
   ) {}
 
   async gather(
@@ -95,6 +101,8 @@ export class ProductionWorkflowTools {
     const authorization = this.toolPolicy.decide(tool, {
       mode: 'production',
       role,
+      pluginKeys: context.pluginKeys,
+      allowedToolNames: context.pluginTools,
     });
     if (!authorization.allowed) {
       return {
@@ -111,10 +119,36 @@ export class ProductionWorkflowTools {
     }
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
     try {
-      const result = await this.withTimeout(
-        this.rag.retrieveDetailed(query, { scope: { role } }, context.userId),
-        policy.timeoutMs,
-      );
+      const execution = await this.toolExecution.execute({
+        toolName: tool,
+        threadId: context.threadId ?? `production:${context.projectId}`,
+        runId: context.runId,
+        ownerUserId: context.userId,
+        mode: 'production',
+        role,
+        actor: role,
+        pluginKeys: context.pluginKeys,
+        allowedToolNames: context.pluginTools,
+        input: { query, focus: ROLE_SEARCH_FOCUS[role] },
+        execute: () => this.withTimeout(
+          this.rag.retrieveDetailed(query, { scope: { role } }, context.userId),
+          policy.timeoutMs,
+        ),
+      });
+      if (!execution.output) {
+        return {
+          evidence: [],
+          executions: [{
+            tool,
+            status: execution.status === 'blocked' ? 'blocked' : 'failed',
+            durationMs: execution.durationMs,
+            evidenceCount: 0,
+            fallback: policy.fallback,
+            error: execution.error,
+          }],
+        };
+      }
+      const result = execution.output;
       const evidence = result.chunks
         .slice(0, this.evidenceLimit)
         .map((chunk) => ({
@@ -134,7 +168,7 @@ export class ProductionWorkflowTools {
           {
             tool,
             status: evidence.length > 0 ? 'success' : 'degraded',
-            durationMs: Date.now() - startedAt,
+            durationMs: execution.durationMs,
             evidenceCount: evidence.length,
             fallback: evidence.length > 0 ? undefined : policy.fallback,
           },

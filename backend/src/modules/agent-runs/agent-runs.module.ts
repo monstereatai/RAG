@@ -5,9 +5,10 @@ import { AgentActionEntity } from '../../providers/db/entities/agent-action.enti
 import { AgentRunsService } from './agent-runs.service';
 import { AgentGoalService } from './agent-goal.service';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
+import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AgentRunEntity, AgentActionEntity]), AgentRuntimeEventsModule],
+  imports: [TypeOrmModule.forFeature([AgentRunEntity, AgentActionEntity]), AgentRuntimeEventsModule, AgentRuntimeModule],
   providers: [AgentRunsService, AgentGoalService],
   exports: [AgentRunsService, AgentGoalService],
 })

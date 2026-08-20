@@ -44,6 +44,45 @@
 
 ## 当前结论
 
+- 运行中心的最终结果已复用 AI 问答页的统一 Markdown 预览组件，支持标题、列表、表格、代码块、引用和链接渲染；问答页与运行详情页共用同一套 Markdown 规范化逻辑，避免运行中心将回答显示为挤压在表格单元格里的纯文本。已通过 Admin TypeScript 检查和生产构建。
+- 新增 `docs/interview/林芮瑭简历大模型面试问题.md`，根据附件简历整理 Agent Runtime、Context Engineering、SFT／RL 轨迹评测、多模态应用、工具安全和指标可信度等面试问题，并同步加入面试文档索引。
+- 新增 `docs/interview/平台型Agent开源框架参考.md`，记录 DeepSeek Harness、OpenHands、SWE-agent、Letta、Microsoft Agent Framework、Pydantic AI、Dify、RAGFlow 等平台型 Agent 框架的学习顺序、设计重点和当前项目映射。
+- 根据第一项目简历能力新增 Agent Runtime 控制层：按模式生成受限 Runtime Plan，加载 `skills/*/SKILL.md` 并记录技能选择、上下文策略和阶段依赖；运行详情新增 Failure Onset（失败起点）分析，定位第一个工具失败、权限拒绝或预算阻塞事件。未新增数据库表、迁移或任意代码执行入口。
+- Agent Ops 运行详情已展示 Runtime 计划、阶段依赖、Skill、上下文策略和 Failure Onset；Admin Backend 新增 Runtime capabilities／plans 代理入口，形成从计划预览到 Run 审计的可操作闭环。
+
+### 已完成（代码闭环）：DeepSeek Harness 声明式插件组合（2026-08-18）
+
+- 新增 Plugin Runtime：内置「产研运基础、只读审查、混合检索证据、联网研究、MCP 编码上下文」能力包，并允许管理后台登记只引用现有 Tool Registry 工具的自定义插件；复用 `platform_plugins`，未新增表、迁移、依赖或环境变量。
+- 产研运工作流可选择多个插件，后端校验启用状态、链路适配、依赖和冲突，将 `pluginKeys`、有效工具白名单写入 Checkpoint、工作流索引和 Run 事件。岗位检索与 Artifact 写入会受该白名单实际拦截／放行。
+- Agent Ops→平台治理增加插件登记、启停和工作流组合预览入口；功能流程与开源参考归档同步更新。
+- AI 智能问答的 Chat／AG-UI 已支持按 Simple、Auto、Agentic 选择插件能力包；服务端会把插件解析结果带入检索配置、请求快照和 Agentic 工具执行策略，工具白名单违规会记录 `policy.denied`。后续仅需在 PostgreSQL、Redis 和模型服务可用时做真实页面回归。
+- 验证：rag-backend TypeScript 无输出校验、Plugin Runtime／Tool Policy／生产工作流／AG-UI 4 个定向测试共 19 个用例、admin-backend TypeScript 无输出校验、admin TypeScript 无输出校验通过。真实 HTTP 联调待 PostgreSQL 与 Redis 恢复后执行；当前本机 `5432`、`6379` 均拒绝连接，RAG 后端无法完成启动。
+
+### 最近完成：DeepSeek Harness 运行审计后台可视化闭环（2026-08-14）
+
+- Agent 运营→运行中心新增「运行详情」入口。每次 Run 在独立页面展示运行总览、目标状态、请求快照、节点／检索／工具／审批／重试事件时间线、工具输入输出和运行指标。
+- 产研运工作流启动时复用同一 `threadId` 创建 `agent_runs` 记录，路由标记为 `production_workflow`；岗位检索、交付物、审批与终态写入同一 Run，因此工作流列表与运行中心可相互追溯。读取历史工作流列表时会补建缺失 Run，不迁移、不复制工作流数据。
+- 运行详情聚合两类 Artifact：`generated_artifacts` 的文件交付物与 Agentic 的结构化交接物；直接展开可审计内容。没有产物的历史 Run 会禁用查看入口并明确说明“本次未生成”，不再跳转到空审计页。
+- 详情页仍可跳转到原始问答会话；协作编排继续只负责多 Agent Task、交接、依赖和决策。
+- 后端 `AgentRunsService.get` 复用既有 `agent_runs`、`agent_actions`、`agent_runtime_events`，聚合事件与指标返回；未新增数据库表、迁移或依赖。
+- 验证：rag-backend TypeScript 无输出校验、生产工作流／工具执行定向测试、admin-backend 编译、admin TypeScript 无输出校验通过。`nest build` 受既有 `backend/dist` 非空目录阻断，未执行删除操作。
+
+### 最近完成：管理后台会话／文档列表超时不再伪装为空数据（2026-08-14）
+
+- 管理后台访问 RAG 的会话、文档列表使用 10 秒独立读取超时，避免 2 秒通用超时在本地冷启动或查询波动时中止真实列表请求。
+- QA 会话和文档代理在 RAG 请求失败时返回 502／上游状态，不再把失败结果解包成空数组；前端保留原有数据并提示「加载失败，请重试」。
+- 验证：admin-backend 定向测试与构建、admin 前端构建；本地接口验证确认 RAG 端仍有 752 个会话、261 篇文档。
+
+### 最近完成：DeepSeek Harness 剩余适配能力一次闭环（2026-08-14）
+
+- **请求可复现**：Simple／Auto／Agentic 创建 Run 后写入 `request.snapshot`，保存查询 Hash、模式、角色预设、检索 Profile、历史／记忆计数、Prompt 版本和工具策略；产研运岗位调用保存依赖岗位、证据 ID、审批模式和工具清单。原始敏感 Prompt 不进入运行事件。
+- **统一工具执行**：新增 `ToolExecutionService`，覆盖 Agentic 的 Bocha Web Search、DashScope Rerank、GraphRAG，以及产研运岗位检索、岗位 Artifact 写入和可运行项目代码生成：统一记录 `tool.call` → 权限校验 → 写入审批对 `approval.asked`／`approval.decided` → `tool.result`／`tool.failed`；未注册工具默认拒绝，审批不可用按拒绝优先处理。
+- **可恢复与大结果治理**：写入型工具使用 Redis 幂等键，完成结果可恢复、中断结果标为 `unknown` 避免盲目重写；超过 6,000 字符的工具输出外置为内部 Artifact，运行事件只保留预览和 Artifact ID。
+- **代码交付验收**：工作流生成项目代码增加必要文件、路径安全、`package.json` 脚本与 React 入口静态校验；下载 ZIP 包含 `DELIVERY_VERIFICATION.json`，明确服务端不执行不可信模型代码，用户需在隔离目录安装与构建。
+- **多实例推进保护**：产研运异步工作流复用 Redis `SET NX` 租约，同一 Thread 不会被两个实例同时推进；Redis 不可用时退回已有进程内保护与 Checkpointer 恢复。运行事件跨实例连续序号与生产多副本压测仍是部署环境验证项。
+- **验证结果**：backend 定向 Jest 3 Suites／15 Tests、backend build、`git diff --check` 通过；未新增数据库表、迁移、依赖或环境变量修改。
+- **生产增强归档**：`功能步骤流程.md` 已按用户操作与数据／状态流转记录三项暂不实现的 Harness 生产增强：单次工具实时审批、进程崩溃后的 `outcome_unknown` 恢复扫描、LangFuse／外部告警统一出站脱敏；均明确保留企业微信 API、Worker 启动扫描和观测规则后台的接入点，不作为当前已实现能力。
+
 ### 最近完成：面试文档 README 导航与简版架构图更新（2026-08-12）
 
 - 更新 `docs/interview/README.md` 的更新时间、项目模块交互入口、版本治理入口、开源项目归档入口和新增简历文档索引。

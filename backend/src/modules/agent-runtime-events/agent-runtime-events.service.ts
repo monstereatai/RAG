@@ -48,6 +48,8 @@ export class AgentRuntimeEventsService {
       routes: count('route.selected'), retrievals: count('retrieval.completed'), nodeStarts: count('node.started'),
       compactions: count('memory.compaction.completed'), policyDenied: count('policy.denied'),
       goalsCompleted: count('goal.completed'), goalsBlocked: count('goal.blocked'),
+      requestSnapshots: count('request.snapshot'), toolResults: count('tool.result'), toolBlocked: count('tool.blocked'),
+      approvalAsked: count('approval.asked'), approvalDecided: count('approval.decided'), recoveredToolCalls: events.filter((event) => event.eventType === 'tool.result' && Boolean((event.payload as { recovered?: boolean }).recovered)).length,
     };
   }
 

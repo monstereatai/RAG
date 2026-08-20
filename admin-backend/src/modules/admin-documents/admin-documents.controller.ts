@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
@@ -14,12 +14,14 @@ export class AdminDocumentsController {
   @Get()
   @ApiOperation({ summary: '后台文档治理列表' })
   @RequirePermission('admin:documents:read')
-  list(@Query() query: RagDocumentQueryDto) {
+  async list(@Query() query: RagDocumentQueryDto) {
     // 前端 ProTable 传 current，转换为 rag-backend 的 page
     if (query.current && !query.page) {
       query.page = query.current;
     }
-    return this.ragClient.getDocuments(query);
+    const result = await this.ragClient.getDocuments(query);
+    this.requireAvailable(result);
+    return result.data;
   }
 
   @Get(':docId')
@@ -145,5 +147,18 @@ export class AdminDocumentsController {
   @RequirePermission('admin:documents:write')
   batch(@Body() body: unknown) {
     return this.ragClient.batchDocumentOperation(body);
+  }
+
+  private requireAvailable(result: {
+    available: boolean;
+    status: number | null;
+    error?: string;
+  }) {
+    if (!result.available) {
+      throw new HttpException(
+        result.error || 'RAG service request failed',
+        result.status && result.status >= 400 ? result.status : 502,
+      );
+    }
   }
 }

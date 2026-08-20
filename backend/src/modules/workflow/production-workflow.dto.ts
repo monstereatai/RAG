@@ -62,6 +62,13 @@ export class StartProductionWorkflowDto {
   @IsOptional()
   @IsIn(['sequential', 'hierarchical', 'conditional'])
   processType?: 'sequential' | 'hierarchical' | 'conditional';
+
+  /** 声明式插件组合；未传时使用产研运基础能力包。 */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  pluginKeys?: string[];
 }
 
 export class ResumeProductionWorkflowDto {

@@ -5,6 +5,8 @@ import {
   ValidateNested,
   IsUUID,
   IsBoolean,
+  IsArray,
+  ArrayUnique,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -90,6 +92,13 @@ export class ChatDto {
   @ValidateNested()
   @Type(() => RetrievalScopeDto)
   scope?: RetrievalScopeDto;
+
+  /** 可选插件组合；服务端会校验链路、依赖、冲突和工具权限。 */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  pluginKeys?: string[];
 }
 
 export interface ChatReference {

@@ -6,6 +6,7 @@ import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { AgentGoalService } from './agent-goal.service';
+import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 
 @Injectable()
 export class AgentRunsService {
@@ -14,6 +15,7 @@ export class AgentRunsService {
     @InjectRepository(AgentActionEntity) private readonly actionRepo: Repository<AgentActionEntity>,
     private readonly events: AgentRuntimeEventsService,
     private readonly goals: AgentGoalService,
+    private readonly runtime: AgentRuntimeService,
   ) {}
 
   async start(input: { threadId: string; userId?: string; mode: AgentRunEntity['mode']; maxSteps?: number; maxToolCalls?: number; maxDelegations?: number }) {
@@ -92,11 +94,32 @@ export class AgentRunsService {
     return Promise.all(runs.map(async (run) => ({ ...run, goal: await this.goals.get(run.id) })));
   }
 
+  async findLatestByThread(threadId: string) {
+    return this.runRepo.findOne({
+      where: { threadId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async get(id: string) {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
     const actions = await this.actionRepo.find({ where: { runId: id }, order: { createdAt: 'ASC' } });
-    return { ...run, actions, goal: await this.goals.get(id) };
+    const events = await this.events.list(run.threadId, id);
+    return {
+      ...run,
+      actions,
+      events,
+      metrics: await this.events.metrics(run.threadId, id),
+      goal: await this.goals.get(id),
+      failureOnset: this.runtime.analyzeFailureOnset(events.map((event) => ({
+        sequence: event.sequence,
+        eventType: event.eventType,
+        actor: event.actor ?? undefined,
+        target: event.target ?? undefined,
+        payload: event.payload,
+      }))),
+    };
   }
 
   async retry(id: string) {

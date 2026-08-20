@@ -63,6 +63,9 @@ import {
   delegateAgentTask,
   getKnowledgeBaseProfiles,
   registerKnowledgeBaseProfile,
+  registerGovernancePlugin,
+  resolveGovernancePluginComposition,
+  setGovernancePluginStatus,
   getProductionWorkflow,
   getProductionWorkflows,
   retryAgentRun,
@@ -125,6 +128,7 @@ export default function AgentOpsPage() {
   const [evalForm] = Form.useForm();
   const [reviewForm] = Form.useForm();
   const [knowledgeBaseForm] = Form.useForm();
+  const [pluginForm] = Form.useForm();
   const [decisionForm] = Form.useForm();
   const [delegateForm] = Form.useForm();
   const [workflow, setWorkflow] = React.useState<ProductionWorkflow | null>(
@@ -156,6 +160,7 @@ export default function AgentOpsPage() {
   const [retrievalProfileKey, setRetrievalProfileKey] = React.useState("general");
   const [retrievalDebug, setRetrievalDebug] = React.useState<any>(null);
   const [governanceLoading, setGovernanceLoading] = React.useState(false);
+  const [pluginPreview, setPluginPreview] = React.useState<any>(null);
   const [collaborationSops, setCollaborationSops] = React.useState<any[]>([]);
   const [collaborationMessages, setCollaborationMessages] = React.useState<any[]>([]);
   const [artifactDependencies, setArtifactDependencies] = React.useState<any[]>([]);
@@ -352,8 +357,49 @@ export default function AgentOpsPage() {
     }
   };
 
+  const handleRegisterPlugin = async () => {
+    const values = await pluginForm.validateFields();
+    try {
+      await registerGovernancePlugin({
+        ...values,
+        tools: String(values.tools ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+        modes: values.modes ?? ["production"],
+      });
+      pluginForm.resetFields();
+      message.success("插件已登记，可在产研运工作流中组合使用");
+      await loadGovernance();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "插件登记失败，请确认工具已在 Tool Registry 注册");
+    }
+  };
+
+  const handleTogglePlugin = async (plugin: any) => {
+    if (plugin.builtin) {
+      message.info("内置插件随代码发布，不支持在后台停用；可在工作流中不选择它");
+      return;
+    }
+    try {
+      await setGovernancePluginStatus(plugin.key, plugin.version, plugin.status === "enabled" ? "disabled" : "enabled");
+      await loadGovernance();
+      message.success(plugin.status === "enabled" ? "插件已停用" : "插件已启用");
+    } catch {
+      message.error("插件状态更新失败");
+    }
+  };
+
+  const handlePreviewPluginComposition = async () => {
+    const pluginKeys = workflowForm.getFieldValue("pluginKeys") ?? ["workflow.production-base"];
+    try {
+      const result = await resolveGovernancePluginComposition(pluginKeys, "production");
+      setPluginPreview(unwrapData<any>(result));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "插件组合校验失败");
+    }
+  };
+
   React.useEffect(() => {
-    if (history.location.pathname.endsWith("/governance")) {
+    const currentPath = history.location.pathname.replace(/\/$/, "");
+    if (currentPath.endsWith("/governance") || currentPath === "/agent-ops") {
       void loadGovernance();
     }
   }, [loadGovernance]);
@@ -559,7 +605,28 @@ export default function AgentOpsPage() {
               ]}
             />
           </Form.Item>
+          <Form.Item label="插件能力包" name="pluginKeys" initialValue={["workflow.production-base"]}>
+            <Select
+              mode="multiple"
+              placeholder="选择并组合能力包"
+              options={governancePlugins
+                .filter((plugin) => plugin.status === "enabled" && (plugin.modes ?? []).includes("production"))
+                .map((plugin) => ({ value: plugin.key, label: `${plugin.displayName ?? plugin.key}（${plugin.key}）` }))}
+            />
+          </Form.Item>
+          <Form.Item label="组合校验">
+            <Button onClick={() => void handlePreviewPluginComposition()}>预览有效工具</Button>
+          </Form.Item>
         </div>
+        {pluginPreview && (
+          <Alert
+            showIcon
+            type="info"
+            style={{ marginBottom: 16 }}
+            title={`已组合：${(pluginPreview.pluginKeys ?? []).join("、") || "无"}`}
+            description={`有效工具：${(pluginPreview.toolNames ?? []).join("、") || "无（将只保留模型生成，不调用工具）"}`}
+          />
+        )}
         <Form.Item
           label="参与岗位"
           name="roles"
@@ -894,6 +961,12 @@ export default function AgentOpsPage() {
           />
         </Card>
         <Card title={`工具／插件注册（${governancePlugins.length}）`} size="small">
+          <Alert
+            showIcon
+            type="info"
+            style={{ marginBottom: 12 }}
+            description="插件是声明式能力包：只能组合已在 Tool Registry 注册的工具，不支持上传并执行任意代码。工作流启动时会把选中的插件和有效工具写入运行审计。"
+          />
           <Table
             size="small"
             rowKey={(row) => row.id ?? row.key}
@@ -904,8 +977,41 @@ export default function AgentOpsPage() {
               { title: "类型", dataIndex: "type" },
               { title: "版本", dataIndex: "version" },
               { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+              { title: "工具", dataIndex: "tools", render: (value) => (value ?? []).join("、") || "-" },
+              {
+                title: "操作",
+                render: (_, row) => <Button size="small" disabled={row.builtin} onClick={() => void handleTogglePlugin(row)}>{row.status === "enabled" ? "停用" : "启用"}</Button>,
+              },
             ]}
           />
+          <Form form={pluginForm} layout="vertical" style={{ marginTop: 16 }}>
+            <div className="agent-ops-form-grid">
+              <Form.Item label="插件 Key" name="key" rules={[{ required: true, message: "例如 workflow.partner-review" }]}>
+                <Input placeholder="workflow.partner-review" />
+              </Form.Item>
+              <Form.Item label="显示名称" name="displayName" rules={[{ required: true }]}>
+                <Input placeholder="合作方审查能力包" />
+              </Form.Item>
+              <Form.Item label="类型" name="type" initialValue="tool">
+                <Select options={["tool", "mcp", "datasource", "agent_strategy", "trigger"].map((value) => ({ value, label: value }))} />
+              </Form.Item>
+              <Form.Item label="版本" name="version" initialValue="1.0.0">
+                <Input />
+              </Form.Item>
+            </div>
+            <Form.Item label="已注册工具（英文逗号分隔）" name="tools">
+              <Input placeholder="product_knowledge_search, artifact_generate" />
+            </Form.Item>
+            <div className="agent-ops-form-grid">
+              <Form.Item label="适用链路" name="modes" initialValue={["production"]}>
+                <Select mode="multiple" options={["simple", "auto", "agentic", "production"].map((value) => ({ value, label: value }))} />
+              </Form.Item>
+              <Form.Item label="说明" name="description">
+                <Input placeholder="该能力包解决什么问题" />
+              </Form.Item>
+            </div>
+            <Button type="primary" onClick={() => void handleRegisterPlugin()}>登记插件</Button>
+          </Form>
         </Card>
       </div>
       <Card title="工作流版本与回滚" size="small" style={{ marginTop: 16 }}>
@@ -1035,7 +1141,7 @@ export default function AgentOpsPage() {
         showIcon
         type="info"
         title="Agent 运行中心"
-        description="集中查看每次问答的路由、状态、动作、重试和估算成本；局部重跑会复用原 Thread，详细交接物仍在 Artifact 审计中查看。"
+        description="集中查看问答与产研运工作流的路由、状态、动作、重试和估算成本；产研运工作流以 production_workflow 路由显示，点击“运行详情”可回放岗位检索、交付物、审批与最终结果。"
       />
       <Button
         icon={<ReloadOutlined />}
@@ -1069,7 +1175,7 @@ export default function AgentOpsPage() {
         columns={[
           { title: "运行 ID", dataIndex: "id", ellipsis: true },
           { title: "模式", dataIndex: "mode" },
-          { title: "路由", dataIndex: "route", render: (value) => value || "-" },
+          { title: "路由／来源", dataIndex: "route", render: (value) => value === "production_workflow" ? <Tag color="purple">产研运工作流</Tag> : value || "问答" },
           {
             title: "状态",
             dataIndex: "status",
@@ -1081,20 +1187,23 @@ export default function AgentOpsPage() {
           {
             title: "操作",
             render: (_, record) => (
-              <Button
-                size="small"
-                disabled={record.status === "running"}
-                onClick={() =>
-                  void retryAgentRunRecord(record.id)
-                    .then(() => {
-                      message.success("已创建重跑任务");
-                      return loadRunCenter();
-                    })
-                    .catch(() => message.error("重跑失败，请检查 Redis 和模型服务"))
-                }
-              >
-                局部重跑
-              </Button>
+              <span style={{ display: "inline-flex", gap: 8 }}>
+                <Button size="small" onClick={() => history.push(`/agent-ops/run-center/${encodeURIComponent(record.id)}`)}>运行详情</Button>
+                <Button
+                  size="small"
+                  disabled={record.status === "running"}
+                  onClick={() =>
+                    void retryAgentRunRecord(record.id)
+                      .then(() => {
+                        message.success("已创建重跑任务");
+                        return loadRunCenter();
+                      })
+                      .catch(() => message.error("重跑失败，请检查 Redis 和模型服务"))
+                  }
+                >
+                  局部重跑
+                </Button>
+              </span>
             ),
           },
         ]}

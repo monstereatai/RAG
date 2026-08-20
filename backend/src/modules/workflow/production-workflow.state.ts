@@ -89,6 +89,18 @@ export const ProductionWorkflowState = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => '',
   }),
+  runId: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
+  }),
+  pluginKeys: Annotation<string[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  pluginTools: Annotation<string[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
   brief: Annotation<string>({
     reducer: (_previous, next) => next,
     default: () => '',

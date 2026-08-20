@@ -49,6 +49,8 @@ export interface ProductionStageResult {
 export interface ProductionWorkflow {
   threadId: string;
   projectId: string;
+  pluginKeys?: string[];
+  pluginTools?: string[];
   currentRole: ProductionRole;
   selectedRoles: ProductionRole[];
   executionBatches: ProductionRole[][];
@@ -261,6 +263,15 @@ export const getAgentRunCenter = () =>
 export const getAgentRunDetail = (id: string) =>
   authRequest<unknown>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}`);
 
+export const getAgentRunDetailArtifacts = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/artifacts`);
+
+export const getAgentRuntimeCapabilities = () =>
+  authRequest<unknown>('/api/admin/agent-ops/runtime/capabilities');
+
+export const createAgentRuntimePlan = (body: Record<string, unknown>) =>
+  authRequest<unknown>('/api/admin/agent-ops/runtime/plans', { method: 'POST', data: body });
+
 export const retryAgentRunRecord = (id: string) =>
   authRequest<unknown>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`, { method: "POST", data: {} });
 
@@ -284,6 +295,15 @@ export const getGovernanceWorkflows = (workspaceId?: string) =>
 
 export const getGovernancePlugins = () =>
   authRequest<unknown>("/api/admin/agent-ops/governance/plugins");
+
+export const registerGovernancePlugin = (body: Record<string, unknown>) =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/plugins", { method: "POST", data: body });
+
+export const setGovernancePluginStatus = (key: string, version: string, status: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/governance/plugins/${encodeURIComponent(key)}/${encodeURIComponent(version)}/status`, { method: "POST", data: { status } });
+
+export const resolveGovernancePluginComposition = (pluginKeys: string[], mode = "production") =>
+  authRequest<unknown>("/api/admin/agent-ops/governance/plugin-compositions/resolve", { method: "POST", data: { pluginKeys, mode } });
 
 export const getGovernanceModels = () =>
   authRequest<unknown>("/api/admin/agent-ops/governance/models");

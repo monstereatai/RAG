@@ -101,6 +101,27 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * 仅在 key 不存在时写入，用于工具调用的幂等执行锁。
+   * Redis 不可用时返回 false，由调用方按保守的本进程策略继续处理。
+   */
+  async setIfAbsent(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (err) {
+      this.logger.warn(
+        `Redis SET NX failed for key=${key}: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
    * 删除缓存
    */
   async del(key: string): Promise<void> {
@@ -111,6 +132,21 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Redis DEL failed for key=${key}: ${(err as Error).message}`,
       );
+    }
+  }
+
+  /** 仅删除自己持有的锁，避免租约过期后误删其他实例的新锁。 */
+  async releaseLock(key: string, value: string): Promise<void> {
+    if (!this.enabled) return;
+    try {
+      await this.client.eval(
+        'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end',
+        1,
+        key,
+        value,
+      );
+    } catch (err) {
+      this.logger.warn(`Redis release lock failed for key=${key}: ${(err as Error).message}`);
     }
   }
 

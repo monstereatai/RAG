@@ -9,9 +9,10 @@ import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-cas
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { PlatformGovernanceController } from './platform-governance.controller';
 import { PlatformGovernanceService } from './platform-governance.service';
+import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WorkflowTemplateEntity, WorkflowTemplateVersionEntity, PlatformPluginEntity, ModelRegistryEntity, EvaluationCaseEntity, KnowledgeBaseProfileEntity]), KarpathyRagModule],
+  imports: [TypeOrmModule.forFeature([WorkflowTemplateEntity, WorkflowTemplateVersionEntity, PlatformPluginEntity, ModelRegistryEntity, EvaluationCaseEntity, KnowledgeBaseProfileEntity]), KarpathyRagModule, PluginRuntimeModule],
   controllers: [PlatformGovernanceController],
   providers: [PlatformGovernanceService],
   exports: [PlatformGovernanceService],

@@ -54,7 +54,7 @@ describe('ProductionWorkflowService', () => {
           withStructuredOutput: () => ({ invoke }),
         }),
       } as never,
-      { isEnabled: () => false } as never,
+      { isEnabled: () => false, set: jest.fn(), get: jest.fn(), zadd: jest.fn(), zrange: jest.fn().mockResolvedValue([]), expire: jest.fn(), setIfAbsent: jest.fn(), releaseLock: jest.fn() } as never,
       { gather } as never,
       { create: createArtifact } as never,
     );
@@ -95,7 +95,7 @@ describe('ProductionWorkflowService', () => {
   it('returns immediately and exposes background progress through status', async () => {
     const { service } = createService();
 
-    const accepted = service.startAsync(
+    const accepted = await service.startAsync(
       {
         projectId: 'async-workflow',
         brief: '验证管理后台启动工作流后立即返回，并通过状态查询取得最终结果。',
@@ -133,6 +133,18 @@ describe('ProductionWorkflowService', () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(state.results.frontend?.generatedArtifact?.id).toBe('artifact-1');
     expect(state.results.frontend?.evidenceCoverage).toBe(1);
+  });
+
+  it('rejects generated project code without runnable entry requirements', async () => {
+    const { service, invoke } = createService();
+    jest.spyOn(service, 'codingContext').mockResolvedValue({
+      threadId: 'thread-1', projectId: 'demo', brief: '生成活动页', stages: [],
+    } as never);
+    invoke.mockResolvedValue({
+      projectName: 'demo', framework: 'React + Vite', runCommand: 'npm run dev', notes: [],
+      files: [{ path: 'package.json', content: '{"scripts":{"dev":"vite","build":"vite build"}}', purpose: '配置' }],
+    });
+    await expect(service.generateProject('thread-1', 'user-1')).rejects.toThrow('缺少 package.json、index.html');
   });
 
   it('finishes with an evidence-preserving deliverable when the model fails', async () => {

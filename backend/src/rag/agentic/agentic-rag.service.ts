@@ -35,6 +35,7 @@ import {
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
+import { ToolExecutionService } from '../../tools/tool-execution.service';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
 import { ConfigService } from '@nestjs/config';
@@ -88,6 +89,7 @@ export class AgenticRagService {
     private readonly metricsService: MetricsService,
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
+    @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly graphService?: GraphService,
     @Optional()
     @InjectRepository(AgenticStructuredArtifactEntity)
@@ -406,7 +408,7 @@ export class AgenticRagService {
               retrieveOptions.scope,
             );
           }
-          const graphChunks = await this.retrieveGraphEvidence(q, userId);
+          const graphChunks = await this.retrieveGraphEvidence(q, userId, config);
           results = [...results, ...graphChunks];
           return {
             ...subQuestion,
@@ -673,7 +675,7 @@ export class AgenticRagService {
     if (
       !this.webSearchFallbackEnabled ||
       !this.bochaSearchService.isEnabled() ||
-      !this.toolPolicy.decide('bocha_web_search', { mode: 'agentic' }).allowed
+      !this.toolPolicy.decide('bocha_web_search', this.pluginPolicy(config, 'agentic')).allowed
     ) {
       this.logger.warn(
         'Retrieval insufficient but Bocha web_search is disabled or budgeted off',
@@ -708,14 +710,19 @@ export class AgenticRagService {
       const searchQuestions = unresolved.length
         ? unresolved.slice(0, this.getSubQuestionLimit(config))
         : [{ question: state.query }];
+      const threadId = this.threadIdFromConfig(config);
       const searchResults = await Promise.all(
         searchQuestions.map(async (item) => ({
           question: item.question,
           results:
             this.maxWebSearchResults > 0
-              ? await this.bochaSearchService.search(
-                  item.question,
-                  this.maxWebSearchResults,
+              ? await this.executeAgenticTool(
+                  'bocha_web_search',
+                  threadId,
+                  this.userIdFromConfig(config),
+                  { question: item.question, count: this.maxWebSearchResults },
+                  () => this.bochaSearchService.search(item.question, this.maxWebSearchResults),
+                  config,
                 )
               : [],
         })),
@@ -825,7 +832,7 @@ export class AgenticRagService {
     if (
       !this.rerankEnabled ||
       !this.dashScopeRerankService.isEnabled() ||
-      !this.toolPolicy.decide('dashscope_rerank', { mode: 'agentic' }).allowed
+      !this.toolPolicy.decide('dashscope_rerank', this.pluginPolicy(config, 'agentic')).allowed
     ) {
       onEvent?.({
         type: 'rerank',
@@ -839,10 +846,13 @@ export class AgenticRagService {
     }
 
     try {
-      const chunks = await this.dashScopeRerankService.rerank(
-        state.query,
-        state.retrievedChunks,
-        this.maxRerankTopN,
+      const chunks = await this.executeAgenticTool(
+        'dashscope_rerank',
+        this.threadIdFromConfig(config),
+        this.userIdFromConfig(config),
+        { query: state.query, candidateCount: state.retrievedChunks.length, topN: this.maxRerankTopN },
+        () => this.dashScopeRerankService.rerank(state.query, state.retrievedChunks, this.maxRerankTopN),
+        config,
       );
       onEvent?.({
         type: 'rerank',
@@ -1968,21 +1978,25 @@ export class AgenticRagService {
   private async retrieveGraphEvidence(
     query: string,
     userId?: string,
+    config?: RunnableConfig,
   ): Promise<RetrievedChunk[]> {
     if (
       !this.graphSearchEnabled ||
       !this.graphService?.isEnabled() ||
-      !this.toolPolicy.decide('graph_search_tool', { mode: 'agentic' }).allowed ||
+      !this.toolPolicy.decide('graph_search_tool', this.pluginPolicy(config, 'agentic')).allowed ||
       !userId ||
       !/[关系关联上下游依赖多跳分别]/.test(query)
     ) {
       return [];
     }
     try {
-      const result = await this.withTimeout(
-        this.graphService.queryGraph(query, userId),
-        4_000,
-        'GraphRAG sub-question search',
+      const result = await this.executeAgenticTool(
+        'graph_search_tool',
+        this.threadIdFromConfig(config),
+        userId,
+        { query },
+        () => this.withTimeout(this.graphService!.queryGraph(query, userId), 4_000, 'GraphRAG sub-question search'),
+        config,
       );
       return result.facts.map((fact, index) => ({
         id: `graph:${fact.sourceId}:${fact.source}:${fact.target}:${index}`,
@@ -2012,6 +2026,47 @@ export class AgenticRagService {
     const value = this.configService.get<number>(key) ?? fallback;
     if (!Number.isFinite(value)) return fallback;
     return Math.min(max, Math.max(min, Math.trunc(value)));
+  }
+
+  private async executeAgenticTool<T>(
+    toolName: string,
+    threadId: string,
+    ownerUserId: string | undefined,
+    input: unknown,
+    execute: () => Promise<T>,
+    config?: RunnableConfig,
+  ): Promise<T> {
+    if (!this.toolExecution || !threadId) return execute();
+    const result = await this.toolExecution.execute({
+      toolName,
+      threadId,
+      ownerUserId,
+      actor: 'agentic_rag',
+      ...this.pluginPolicy(config, 'agentic'),
+      input,
+      execute,
+    });
+    if (!result.output) throw new Error(result.error ?? `${toolName} 被阻断或未返回结果`);
+    return result.output;
+  }
+
+  private pluginPolicy(config: RunnableConfig | undefined, mode: 'simple' | 'auto' | 'agentic' | 'production') {
+    const retrieveOptions = config?.configurable?.retrieveOptions as RetrieveOptions | undefined;
+    return {
+      mode,
+      pluginKeys: retrieveOptions?.pluginKeys,
+      allowedToolNames: retrieveOptions?.pluginTools,
+    };
+  }
+
+  private threadIdFromConfig(config?: RunnableConfig): string {
+    const value = config?.configurable?.thread_id;
+    return typeof value === 'string' ? value : '';
+  }
+
+  private userIdFromConfig(config?: RunnableConfig): string | undefined {
+    const value = config?.configurable?.userId;
+    return typeof value === 'string' && value ? value : undefined;
   }
 
   private numberConfig(

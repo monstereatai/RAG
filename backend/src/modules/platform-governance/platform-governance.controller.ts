@@ -14,6 +14,8 @@ export class PlatformGovernanceController {
   @Post('workflows/:id/clone') cloneWorkflow(@Param('id') id: string, @Body() body: { key: string; name?: string }) { return this.service.cloneWorkflow(id, { ...body, ownerId: 'admin-backend' }); }
   @Get('plugins') listPlugins() { return this.service.listPlugins(); }
   @Post('plugins') registerPlugin(@Body() body: any) { return this.service.registerPlugin(body); }
+  @Post('plugins/:key/:version/status') setPluginStatus(@Param('key') key: string, @Param('version') version: string, @Body('status') status: 'enabled' | 'disabled' | 'degraded') { return this.service.setPluginStatus(key, version, status); }
+  @Post('plugin-compositions/resolve') resolvePluginComposition(@Body() body: { pluginKeys?: string[]; mode?: 'simple' | 'auto' | 'agentic' | 'production' }) { return this.service.resolvePluginComposition(body.pluginKeys, body.mode ?? 'production'); }
   @Get('models') listModels() { return this.service.listModels(); }
   @Post('models') registerModel(@Body() body: any) { return this.service.registerModel(body); }
   @Get('evaluation-cases') listEvaluationCases(@Query('workspaceId') workspaceId?: string) { return this.service.listEvaluationCases(workspaceId); }

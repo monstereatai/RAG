@@ -335,6 +335,12 @@ export async function updateQaFeedback(id: string, feedback: string) {
   });
 }
 
+export async function getQaPlugins() {
+  return authRequest<{ data: Array<{ key: string; displayName?: string; status: string; modes?: string[] }> }>(
+    '/api/admin/qa-ops/plugins',
+  );
+}
+
 export async function streamAguiAnswer(
   query: string,
   mode: ChatMode,
@@ -344,6 +350,7 @@ export async function streamAguiAnswer(
   onClose: () => void,
   threadId?: string,
   rolePresetId?: string,
+  pluginKeys?: string[],
 ): Promise<AbortController> {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
@@ -353,6 +360,9 @@ export async function streamAguiAnswer(
   }
   if (rolePresetId) {
     url += `&rolePresetId=${encodeURIComponent(rolePresetId)}`;
+  }
+  if (pluginKeys?.length) {
+    url += `&pluginKeys=${encodeURIComponent(pluginKeys.join(','))}`;
   }
 
   (async () => {

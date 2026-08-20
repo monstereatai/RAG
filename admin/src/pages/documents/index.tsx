@@ -163,8 +163,9 @@ const Documents: React.FC = () => {
           setPageState('empty');
         }
       })
-      .catch(() => {
+      .catch((error) => {
         setPageState('error');
+        message.error(error instanceof Error ? error.message : '文档列表加载失败，请重试');
       });
   };
 

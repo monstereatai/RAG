@@ -14,6 +14,7 @@ export interface RagAguiStreamQuery {
   userId?: string;
   threadId?: string;
   rolePresetId?: string;
+  pluginKeys?: string[];
 }
 
 export interface RagArtifactCreateInput {
@@ -24,6 +25,8 @@ export interface RagArtifactCreateInput {
   sourceText: string;
   prompt?: string;
 }
+
+const LIST_READ_TIMEOUT_MS = 10_000;
 
 @Injectable()
 export class RagClientService {
@@ -189,6 +192,18 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center/${encodeURIComponent(id)}`);
   }
 
+  getAgentRunDetailArtifacts(id: string) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center/${encodeURIComponent(id)}/artifacts`);
+  }
+
+  getAgentRuntimeCapabilities() {
+    return this.getJson<Record<string, unknown>>('/agent-runtime/capabilities');
+  }
+
+  createAgentRuntimePlan(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/agent-runtime/plans', body);
+  }
+
   retryAgentRunRecord(id: string) {
     return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`, {});
   }
@@ -225,6 +240,18 @@ export class RagClientService {
 
   listPlatformPlugins() {
     return this.getJson<Record<string, unknown>>('/platform-governance/plugins');
+  }
+
+  registerPlatformPlugin(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/platform-governance/plugins', body);
+  }
+
+  setPlatformPluginStatus(key: string, version: string, status: string) {
+    return this.postJson<Record<string, unknown>>(`/platform-governance/plugins/${encodeURIComponent(key)}/${encodeURIComponent(version)}/status`, { status });
+  }
+
+  resolvePluginComposition(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/platform-governance/plugin-compositions/resolve', body);
   }
 
   listPlatformModels() {
@@ -333,7 +360,8 @@ export class RagClientService {
 
   getDocuments(query: RagDocumentQueryDto) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/documents${this.toQueryString(query)}`
+      `/rag/admin/documents${this.toQueryString(query)}`,
+      LIST_READ_TIMEOUT_MS,
     );
   }
 
@@ -387,7 +415,8 @@ export class RagClientService {
   getConversations(userId?: string) {
     const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/conversations${params}`
+      `/rag/admin/conversations${params}`,
+      LIST_READ_TIMEOUT_MS,
     );
   }
 
@@ -499,6 +528,9 @@ export class RagClientService {
     if (query.rolePresetId) {
       params.set("rolePresetId", query.rolePresetId);
     }
+    if (query.pluginKeys?.length) {
+      params.set("pluginKeys", query.pluginKeys.join(","));
+    }
     const headers: Record<string, string> = {};
     if (this.serviceToken) {
       headers.Authorization = `Bearer ${this.serviceToken}`;
@@ -594,8 +626,11 @@ export class RagClientService {
     );
   }
 
-  async getJson<T>(path: string): Promise<RagClientResult<T>> {
-    return this.request<T>(path, { method: "GET" });
+  async getJson<T>(
+    path: string,
+    timeoutMs = this.timeoutMs,
+  ): Promise<RagClientResult<T>> {
+    return this.request<T>(path, { method: "GET" }, true, timeoutMs);
   }
 
   private async postJson<T>(

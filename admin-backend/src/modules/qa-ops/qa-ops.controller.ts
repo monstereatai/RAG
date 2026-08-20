@@ -114,6 +114,7 @@ export class QaOpsController {
   async listConversations() {
     // admin QA Ops 展示所有会话，不按 userId 过滤
     const result = await this.ragClient.getConversations();
+    this.requireAvailable(result);
     return { data: this.unwrapList(result.data) };
   }
 
@@ -131,6 +132,7 @@ export class QaOpsController {
   async getConversation(@Param("threadId") threadId: string) {
     // admin QA Ops 可查看任意会话，不按 userId 过滤
     const result = await this.ragClient.getConversation(threadId);
+    this.requireAvailable(result);
     return { data: this.unwrapObject(result.data) };
   }
 
@@ -259,7 +261,8 @@ export class QaOpsController {
     @Query("threadId") threadId: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
-    @Query("rolePresetId") rolePresetId?: string
+    @Query("rolePresetId") rolePresetId?: string,
+    @Query("pluginKeys") pluginKeys?: string,
   ) {
     if (!query?.trim()) {
       res.status(400).json({ message: "query is required" });
@@ -282,6 +285,7 @@ export class QaOpsController {
           model: this.parseModel(model),
           threadId,
           rolePresetId,
+          pluginKeys: pluginKeys?.split(",").map((item) => item.trim()).filter(Boolean),
           userId: this.getUserId(req),
         },
         controller.signal
@@ -319,6 +323,12 @@ export class QaOpsController {
         res.end();
       }
     }
+  }
+
+  @Get("plugins")
+  @RequirePermission("admin:qa-ops:read")
+  qaPlugins() {
+    return this.ragClient.listPlatformPlugins();
   }
 
   @Patch("records/:id/feedback")

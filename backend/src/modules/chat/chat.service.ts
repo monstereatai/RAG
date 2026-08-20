@@ -22,6 +22,9 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { detectRetrievalProfile, type RetrievalProfile } from '../../rag/karpathy/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
+import { createHash } from 'node:crypto';
+import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 
 @Injectable()
 export class ChatService {
@@ -43,6 +46,8 @@ export class ChatService {
     @Optional() private readonly agentRuns?: AgentRunsService,
     @Optional() private readonly agentGoals?: AgentGoalService,
     @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly plugins?: PluginRuntimeService,
+    @Optional() private readonly runtime?: AgentRuntimeService,
   ) {}
 
   async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
@@ -52,6 +57,9 @@ export class ChatService {
 
     const mode: ChatMode = req.mode ?? 'simple';
     const startTime = Date.now();
+    const pluginComposition = req.pluginKeys?.length && this.plugins
+      ? await this.plugins.resolve(req.pluginKeys, mode)
+      : undefined;
 
     // 对话历史管理：threadId 不传则新建
     const threadId =
@@ -60,6 +68,9 @@ export class ChatService {
     const history =
       req.history ??
       (await this.conversationService.getRecentHistory(threadId, 5, userId));
+    const runtimePlan = this.runtime
+      ? await this.runtime.createPlan({ objective: req.query, mode })
+      : undefined;
 
     // Mem0 长期记忆搜索：chat 前注入记忆上下文
     const memoryResult = await this.memoryService.searchMemory(
@@ -84,6 +95,7 @@ export class ChatService {
     const retrievalOptions = {
       scope: retrievalScope,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
+      ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
     };
     const run = await this.agentRuns?.start({
       threadId,
@@ -100,6 +112,40 @@ export class ChatService {
         actor: mode,
         objective: req.query,
         maxRounds: run.maxSteps,
+      });
+      await this.agentRuns?.recordRuntimeEvent(run.id, {
+        eventType: 'agent.plan.created',
+        target: runtimePlan?.planId,
+        payload: runtimePlan,
+      });
+      await this.agentRuns?.recordRuntimeEvent(run.id, {
+        eventType: 'context.policy.selected',
+        target: 'context-engineering',
+        payload: runtimePlan?.contextPolicy,
+      });
+      if (runtimePlan?.selectedSkills.length) {
+        await this.agentRuns?.recordRuntimeEvent(run.id, {
+          eventType: 'skill.selected',
+          target: 'skill-system',
+          payload: { skills: runtimePlan.selectedSkills },
+        });
+      }
+      await this.agentRuns?.recordRuntimeEvent(run.id, {
+        eventType: 'request.snapshot',
+        target: 'model_request',
+        payload: this.requestSnapshot({
+          query: req.query,
+          mode,
+          rolePresetId: req.rolePresetId,
+          role: roleContext.role ?? 'business-owner',
+          retrievalProfile,
+          historyCount: history.length,
+          memoryEnabled: Boolean(memoryResult.systemMessage),
+          threadId,
+          pluginKeys: pluginComposition?.pluginKeys ?? [],
+          pluginTools: pluginComposition?.toolNames ?? [],
+          runtimePlan,
+        }),
       });
     }
     if (memoryResult.systemMessage) {
@@ -547,6 +593,45 @@ export class ChatService {
         outputTokens,
       ),
     });
+  }
+
+  private requestSnapshot(input: {
+    query: string;
+    mode: ChatMode;
+    rolePresetId?: string;
+    role: string;
+    retrievalProfile?: RetrievalProfile;
+    historyCount: number;
+    memoryEnabled: boolean;
+    threadId: string;
+    pluginKeys?: string[];
+    pluginTools?: string[];
+    runtimePlan?: unknown;
+  }) {
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
+    return {
+      schemaVersion: 1,
+      mode: input.mode,
+      threadId: input.threadId,
+      queryHash: hash(input.query),
+      queryLength: input.query.length,
+      role: input.role,
+      rolePresetId: input.rolePresetId ?? null,
+      retrievalProfile: input.retrievalProfile ? {
+        intent: input.retrievalProfile.intent,
+        candidateDepth: input.retrievalProfile.candidateDepth,
+        finalTopK: input.retrievalProfile.finalTopK,
+        neighborWindow: input.retrievalProfile.neighborWindow,
+        contextCharacterBudget: input.retrievalProfile.contextCharacterBudget,
+      } : null,
+      promptVersions: { roleContext: 'role-presets/v1', memory: 'short-term-memory/v1', answer: input.mode === 'simple' ? 'karpathy/v1' : 'agentic/v1' },
+      historyCount: input.historyCount,
+      memoryEnabled: input.memoryEnabled,
+      pluginKeys: input.pluginKeys ?? [],
+      pluginTools: input.pluginTools ?? [],
+      runtimePlan: input.runtimePlan ?? null,
+      toolPolicy: input.mode === 'agentic' || input.mode === 'auto' ? 'tool-registry/v1' : null,
+    };
   }
 
   private toTraceEvent(event: SseEvent): RagTraceEvent {

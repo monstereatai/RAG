@@ -18,6 +18,8 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { RagFeedbackService } from './rag-feedback.service';
 import { PromptModule } from '../../rag/prompts/prompt.module';
+import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
+import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { PromptModule } from '../../rag/prompts/prompt.module';
     EmbeddingModule,
     PromptModule,
     AgentRunsModule,
+    PluginRuntimeModule,
+    AgentRuntimeModule,
   ],
   controllers: [ChatController],
   providers: [

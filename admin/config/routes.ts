@@ -88,6 +88,11 @@ export default [
         component: './agent-ops',
       },
       {
+        path: '/agent-ops/run-center/:id',
+        name: 'agent-ops-run-detail',
+        component: './agent-ops/run-detail',
+      },
+      {
         path: '/agent-ops/collaboration',
         name: 'agent-ops-collaboration',
         component: './agent-ops',

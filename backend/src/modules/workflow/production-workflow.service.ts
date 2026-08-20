@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
@@ -32,6 +32,10 @@ import { AgentCollaborationService } from '../agent-collaboration/agent-collabor
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
+import { ToolExecutionService } from '../../tools/tool-execution.service';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
+import { AgentGoalService } from '../agent-runs/agent-goal.service';
+import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -115,6 +119,10 @@ export class ProductionWorkflowService {
     @Optional() private readonly tasks?: AgentTasksService,
     @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
     @Optional() private readonly toolPolicy?: ToolExecutionPolicyService,
+    @Optional() private readonly toolExecution?: ToolExecutionService,
+    @Optional() private readonly agentRuns?: AgentRunsService,
+    @Optional() private readonly agentGoals?: AgentGoalService,
+    @Optional() private readonly plugins?: PluginRuntimeService,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
@@ -122,11 +130,14 @@ export class ProductionWorkflowService {
 
   async start(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
-    const initialState = this.createInitialState(dto, userId, threadId);
+    const initialState = await this.createInitialState(dto, userId, threadId);
+    await this.ensureRun(initialState);
     await this.emitRuntimeEvent(initialState, 'workflow.started', 'production_workflow', {
       projectId: initialState.projectId,
       selectedRoles: initialState.selectedRoles,
       processType: initialState.processType,
+      pluginKeys: initialState.pluginKeys,
+      pluginTools: initialState.pluginTools,
     });
     await this.emitRuntimeEvent(initialState, 'goal.active', 'production_workflow', {
       objective: initialState.brief,
@@ -144,9 +155,10 @@ export class ProductionWorkflowService {
     return result;
   }
 
-  startAsync(dto: StartProductionWorkflowDto, userId: string) {
+  async startAsync(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
-    const initialState = this.createInitialState(dto, userId, threadId);
+    const initialState = await this.createInitialState(dto, userId, threadId);
+    await this.ensureRun(initialState);
     void this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
     void this.saveWorkflowIndex(this.view(threadId, initialState, userId));
@@ -162,6 +174,7 @@ export class ProductionWorkflowService {
     userId: string,
   ) {
     const current = await this.getOwnedState(threadId, userId);
+    await this.ensureRun(current);
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
@@ -191,6 +204,7 @@ export class ProductionWorkflowService {
     userId: string,
   ) {
     const current = await this.getOwnedState(threadId, userId);
+    await this.ensureRun(current);
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
@@ -247,8 +261,10 @@ export class ProductionWorkflowService {
       const threadId = String(item.threadId ?? '');
       if (threadId) merged.set(threadId, item);
     });
-    return [...merged.values()]
+    const workflows = [...merged.values()]
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    await Promise.all(workflows.map((item) => this.ensureIndexedRun(item, userId)));
+    return workflows;
   }
 
   async codingContext(threadId: string, userId: string) {
@@ -282,6 +298,7 @@ export class ProductionWorkflowService {
 
   async generateProject(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
+    const run = await this.agentRuns?.findLatestByThread(threadId);
     const handoff = context.stages
       .map((stage) => `${stage.role}\n${stage.summary}\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`)
       .join('\n\n');
@@ -296,29 +313,36 @@ export class ProductionWorkflowService {
           content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
         },
       ];
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        const output = await this.llmProvider
-          .getModel()
-          .withStructuredOutput(projectSchema, { method: 'jsonMode' })
-          .invoke(messages);
-        const normalized = {
-          ...output,
-          notes: Array.isArray(output.notes) ? output.notes : [String(output.notes ?? '')].filter(Boolean),
-        };
-        return { ...normalized, activityName: context.projectId, sourceThreadId: context.threadId };
-      } catch (error) {
-        lastError = error;
-        if (attempt === 1) {
-          messages.push({
+    const generate = async () => {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          const output = await this.llmProvider.getModel().withStructuredOutput(projectSchema, { method: 'jsonMode' }).invoke(messages);
+          const normalized = {
+            ...output,
+            notes: Array.isArray(output.notes) ? output.notes : [String(output.notes ?? '')].filter(Boolean),
+          };
+          return this.validateGeneratedProject({ ...normalized, activityName: context.projectId, sourceThreadId: context.threadId });
+        } catch (error) {
+          lastError = error;
+          if (attempt === 1) messages.push({
             role: 'user',
-            content: '上一次输出不符合 JSON schema。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组。',
+            content: '上一次输出不符合 JSON schema 或无法运行。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组，package.json 要有 dev 与 build 脚本，入口文件要实际挂载页面。',
           });
         }
       }
-    }
-    throw new Error(`项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
+      throw new Error(`项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    };
+    const execution = this.toolExecution
+      ? await this.toolExecution.execute({
+          toolName: 'artifact_generate', threadId, runId: run?.id, ownerUserId: userId, mode: 'production', actor: 'code_delivery',
+          input: { projectId: context.projectId, stageCount: context.stages.length, type: 'runnable_project' },
+          approvalPolicy: 'auto', approvalGranted: true,
+          execute: generate,
+        })
+      : { status: 'success' as const, output: await generate(), durationMs: 0 };
+    if (!execution.output) throw new Error(('error' in execution ? execution.error : undefined) ?? '项目代码生成未完成，请在运行中心查看工具执行记录。');
+    return execution.output;
   }
 
   async generateProjectZip(threadId: string, userId: string): Promise<Buffer> {
@@ -328,6 +352,7 @@ export class ProductionWorkflowService {
     generated.files.forEach((file) => zip.file(file.path, file.content));
     zip.file('RAG_WORKFLOW_CONTEXT.json', JSON.stringify({ ...context, generatedProject: generated }, null, 2));
     zip.file('README.md', `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`);
+    zip.file('DELIVERY_VERIFICATION.json', JSON.stringify(this.deliveryVerification(generated), null, 2));
     context.stages.forEach((stage) => {
       stage.deliverables.forEach((deliverable, index) => {
         const safeTitle = deliverable.title.replace(/[\\/:*?"<>|]/g, '-');
@@ -337,16 +362,22 @@ export class ProductionWorkflowService {
     return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   }
 
-  private createInitialState(
+  private async createInitialState(
     dto: StartProductionWorkflowDto,
     userId: string,
     threadId: string,
-  ): ProductionWorkflowStateType {
+  ): Promise<ProductionWorkflowStateType> {
     const selectedRoles = normalizeProductionRoles(dto.roles);
+    const composition = this.plugins
+      ? await this.plugins.resolve(dto.pluginKeys, 'production', ['workflow.production-base'])
+      : { pluginKeys: dto.pluginKeys?.length ? dto.pluginKeys : ['workflow.production-base'], toolNames: [], manifests: [] };
     return {
       threadId,
       projectId: dto.projectId.trim(),
       userId,
+      runId: '',
+      pluginKeys: composition.pluginKeys,
+      pluginTools: composition.toolNames,
       brief: dto.brief.trim(),
       processType: dto.processType ?? 'sequential',
       currentRole: selectedRoles[0],
@@ -380,14 +411,100 @@ export class ProductionWorkflowService {
     await this.tasks.createPlan({ threadId: state.threadId, roles: state.selectedRoles, processType: state.processType });
   }
 
+  private async ensureRun(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.agentRuns || state.runId) return;
+    const threadId = state.threadId;
+    const existing = await this.agentRuns.findLatestByThread(threadId);
+    const run = existing ?? await this.agentRuns.start({
+      threadId,
+      userId: state.userId,
+      mode: 'agentic',
+      maxSteps: state.maxSteps,
+    });
+    state.runId = run.id;
+    if (run.route !== 'production_workflow') {
+      await this.agentRuns.finish(run.id, {
+        route: 'production_workflow',
+        status: run.status,
+        resultSummary: run.resultSummary ?? `${state.projectId}：产研运工作流已创建。`,
+      });
+    }
+    if (!existing) {
+      await this.agentGoals?.activate({
+        threadId,
+        runId: run.id,
+        actor: 'production_workflow',
+        objective: state.brief,
+        maxRounds: state.maxSteps,
+      });
+    }
+  }
+
+  private async ensureIndexedRun(
+    item: Record<string, unknown>,
+    userId: string,
+  ): Promise<void> {
+    if (!this.agentRuns) return;
+    const threadId = String(item.threadId ?? '');
+    if (!threadId || await this.agentRuns.findLatestByThread(threadId)) return;
+    const selectedRoles = Array.isArray(item.selectedRoles)
+      ? item.selectedRoles
+      : [];
+    const completedRoles = Array.isArray(item.completedRoles)
+      ? item.completedRoles
+      : [];
+    const status = String(item.status ?? 'running');
+    const projectId = String(item.projectId ?? '未命名活动');
+    const maxSteps = Number(item.maxSteps ?? 18);
+    const run = await this.agentRuns.start({
+      threadId,
+      userId,
+      mode: 'agentic',
+      maxSteps,
+    });
+    await this.agentRuns.finish(run.id, {
+      route: 'production_workflow',
+      status: run.status,
+      resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
+    });
+    await this.agentGoals?.activate({
+      threadId,
+      runId: run.id,
+      actor: 'production_workflow',
+      objective: String(item.brief ?? projectId),
+      maxRounds: maxSteps,
+    });
+    if (status === 'completed' || status === 'failed' || status === 'pending_approval') {
+      await this.agentRuns.finish(run.id, {
+        route: 'production_workflow',
+        status: status === 'pending_approval' ? 'waiting_approval' : status,
+        requiresApproval: status === 'pending_approval',
+        errorMessage: status === 'failed' ? String(item.error ?? '历史工作流失败') : undefined,
+        resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
+      });
+    }
+  }
+
   private schedule(
     threadId: string,
     userId: string,
     task: () => Promise<unknown>,
   ): void {
     if (this.activeRuns.has(threadId)) return;
+    const leaseToken = randomUUID();
+    const leaseKey = `production:workflow:lease:${threadId}`;
     const run = Promise.resolve()
-      .then(task)
+      .then(async () => {
+        if (!this.redisProvider.isEnabled()) return true;
+        return this.redisProvider.setIfAbsent(leaseKey, leaseToken, 5 * 60);
+      })
+      .then((acquired) => {
+        if (!acquired) {
+          this.logger.warn(`production workflow ${threadId} is being advanced by another instance`);
+          return undefined;
+        }
+        return task();
+      })
       .then(() => undefined)
       .catch(async (error) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -410,6 +527,7 @@ export class ProductionWorkflowService {
       })
       .finally(() => {
         this.activeRuns.delete(threadId);
+        void this.redisProvider.releaseLock(leaseKey, leaseToken);
         if (this.pendingStates.get(threadId)?.status !== 'failed') {
           this.pendingStates.delete(threadId);
         }
@@ -571,10 +689,28 @@ export class ProductionWorkflowService {
       projectId: state.projectId,
       brief: state.brief,
       userId: state.userId,
+      threadId: state.threadId,
+      runId: state.runId || undefined,
+      pluginKeys: state.pluginKeys,
+      pluginTools: state.pluginTools,
     });
     await this.emitRuntimeEvent(state, 'retrieval.completed', role, {
       evidenceCount: toolResult.evidence.length,
       executions: toolResult.executions,
+    });
+    await this.emitRuntimeEvent(state, 'request.snapshot', role, {
+      schemaVersion: 1,
+      route: 'production_workflow',
+      role,
+      promptVersion: 'production-role/v1',
+      projectId: state.projectId,
+      briefLength: state.brief.length,
+      dependencyRoles: dependencies,
+      evidenceIds: toolResult.evidence.map((item) => item.id),
+      evidenceCount: toolResult.evidence.length,
+      toolNames: toolResult.executions.map((item) => item.tool),
+      pluginKeys: state.pluginKeys,
+      approvalMode: state.approvalMode,
     });
     const model = this.llmProvider.getModel();
     let lastError: Error | null = null;
@@ -801,6 +937,8 @@ export class ProductionWorkflowService {
     const authorization = this.toolPolicy?.decide('artifact_generate', {
       mode: 'production',
       role: result.role,
+      pluginKeys: state.pluginKeys,
+      allowedToolNames: state.pluginTools,
     });
     if (authorization && !authorization.allowed) {
       result.toolExecutions.push({
@@ -822,17 +960,25 @@ export class ProductionWorkflowService {
       result.claims,
     );
     try {
-      const artifact = await this.artifacts.create({
-        ownerUserId: state.userId,
-        threadId: state.threadId,
-        title: `${state.projectId}-${result.role}-交付物`,
-        kind: 'markdown',
-        sourceText,
-      });
+      const execution = this.toolExecution
+        ? await this.toolExecution.execute({
+            toolName: 'artifact_generate', threadId: state.threadId, runId: state.runId || undefined, ownerUserId: state.userId,
+            mode: 'production', role: result.role, actor: result.role,
+            pluginKeys: state.pluginKeys, allowedToolNames: state.pluginTools,
+            input: { title: `${state.projectId}-${result.role}-交付物`, size: sourceText.length },
+            // 岗位交付物只写入受权限保护的内部 Artifact；它是否继续流转由后续岗位审批门禁决定。
+            approvalPolicy: 'auto', approvalGranted: true,
+            sideEffect: true,
+            idempotencyKey: `workflow-artifact:${state.threadId}:${result.role}:${this.contentHash(sourceText)}`,
+            execute: () => this.artifacts.create({ ownerUserId: state.userId, threadId: state.threadId, title: `${state.projectId}-${result.role}-交付物`, kind: 'markdown', sourceText }),
+          })
+        : { status: 'success' as const, output: await this.artifacts.create({ ownerUserId: state.userId, threadId: state.threadId, title: `${state.projectId}-${result.role}-交付物`, kind: 'markdown', sourceText }), durationMs: Date.now() - startedAt };
+      if (!execution.output) throw new Error(('error' in execution ? execution.error : undefined) ?? '交付物等待审批或执行结果未知。');
+      const artifact = execution.output;
       result.toolExecutions.push({
         tool: 'artifact_generate',
         status: 'success',
-        durationMs: Date.now() - startedAt,
+        durationMs: execution.durationMs,
         evidenceCount: 0,
       });
       return {
@@ -870,6 +1016,43 @@ export class ProductionWorkflowService {
         }`,
     );
     return [...sections, '# 事实声明与证据', ...claimLines].join('\n\n');
+  }
+
+  private contentHash(content: string): string {
+    return createHash('sha256').update(content).digest('hex').slice(0, 32);
+  }
+
+  private validateGeneratedProject<T extends { files: Array<{ path: string; content: string }>; runCommand: string }>(project: T): T {
+    const paths = new Set(project.files.map((file) => file.path));
+    const packageFile = project.files.find((file) => file.path === 'package.json');
+    const entryFile = project.files.find((file) => /^src\/main\.(tsx|jsx)$/.test(file.path));
+    if (!packageFile || !entryFile || !paths.has('index.html')) throw new Error('生成代码缺少 package.json、index.html 或 src/main.tsx／src/main.jsx。');
+    let packageJson: { scripts?: Record<string, string> };
+    try { packageJson = JSON.parse(packageFile.content) as { scripts?: Record<string, string> }; } catch { throw new Error('生成的 package.json 不是合法 JSON。'); }
+    if (!packageJson.scripts?.dev || !packageJson.scripts?.build) throw new Error('生成的 package.json 缺少 dev 或 build 脚本。');
+    if (!/createRoot|ReactDOM\.render/.test(entryFile.content)) throw new Error('项目入口没有挂载 React 页面。');
+    if (project.files.some((file) => file.path.includes('..') || file.path.startsWith('/'))) throw new Error('项目文件路径不安全。');
+    return project;
+  }
+
+  private deliveryVerification(project: { projectName: string; framework: string; files: Array<{ path: string; content: string }>; runCommand: string; sourceThreadId: string }) {
+    const paths = project.files.map((file) => file.path);
+    return {
+      schemaVersion: 1,
+      status: 'static_verified',
+      projectName: project.projectName,
+      framework: project.framework,
+      sourceThreadId: project.sourceThreadId,
+      checkedAt: new Date().toISOString(),
+      checks: [
+        { name: 'required_files', passed: paths.includes('package.json') && paths.includes('index.html') && paths.some((path) => /^src\/main\.(tsx|jsx)$/.test(path)) },
+        { name: 'safe_relative_paths', passed: paths.every((path) => !path.includes('..') && !path.startsWith('/')) },
+        { name: 'package_scripts', passed: true },
+        { name: 'react_mount', passed: true },
+      ],
+      runCommand: project.runCommand,
+      note: '本系统不在服务端执行模型生成代码；已完成结构、路径、入口和启动脚本静态验收。下载后请在隔离目录执行依赖安装与构建。',
+    };
   }
 
   private requiresRoleApproval(
@@ -983,6 +1166,7 @@ export class ProductionWorkflowService {
   }
 
   private async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
+    const runId = state.runId;
     if (state.status === 'pending_approval') {
       await this.emitRuntimeEvent(state, 'approval.required', 'production_workflow', {
         roles: state.pendingApprovalRoles,
@@ -994,6 +1178,14 @@ export class ProductionWorkflowService {
         maxRounds: state.maxSteps,
         reason: '等待人工审批。',
       });
+      if (runId) {
+        await this.agentRuns?.finish(runId, {
+          route: 'production_workflow',
+          status: 'waiting_approval',
+          requiresApproval: true,
+          resultSummary: `${state.projectId}：等待 ${state.pendingApprovalRoles.join('、')} 审批。`,
+        });
+      }
       return;
     }
     if (state.status === 'completed') {
@@ -1006,6 +1198,13 @@ export class ProductionWorkflowService {
         round: state.stepCount,
         maxRounds: state.maxSteps,
       });
+      if (runId) {
+        await this.agentRuns?.finish(runId, {
+          route: 'production_workflow',
+          status: 'completed',
+          resultSummary: `${state.projectId}：已完成 ${state.completedRoles.length}/${state.selectedRoles.length} 个岗位交付。`,
+        });
+      }
       return;
     }
     if (state.status === 'failed') {
@@ -1019,6 +1218,14 @@ export class ProductionWorkflowService {
         maxRounds: state.maxSteps,
         reason: state.error || '工作流失败。',
       });
+      if (runId) {
+        await this.agentRuns?.finish(runId, {
+          route: 'production_workflow',
+          status: 'failed',
+          errorMessage: state.error,
+          resultSummary: `${state.projectId}：工作流失败。`,
+        });
+      }
     }
   }
 
@@ -1032,6 +1239,7 @@ export class ProductionWorkflowService {
     try {
       await this.runtimeEvents.emit({
         threadId: state.threadId,
+        runId: state.runId || undefined,
         eventType,
         actor,
         target: state.projectId,
@@ -1051,6 +1259,9 @@ export class ProductionWorkflowService {
   ) {
     return {
       threadId,
+      runId: state.runId,
+      pluginKeys: state.pluginKeys,
+      pluginTools: state.pluginTools,
       projectId: state.projectId,
       userId,
       currentRole: state.currentRole,

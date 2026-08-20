@@ -29,4 +29,13 @@ describe('ToolExecutionPolicyService', () => {
       allowed: false,
     });
   });
+
+  it('enforces the resolved plugin tool allowlist when one is supplied', () => {
+    expect(service.decide('artifact_generate', {
+      mode: 'production',
+      role: 'product',
+      pluginKeys: ['workflow.readonly-review'],
+      allowedToolNames: ['product_knowledge_search'],
+    })).toMatchObject({ allowed: false });
+  });
 });

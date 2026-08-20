@@ -4,18 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { WorkflowTemplateEntity } from '../../providers/db/entities/workflow-template.entity';
 import { WorkflowTemplateVersionEntity } from '../../providers/db/entities/workflow-template-version.entity';
-import { PlatformPluginEntity } from '../../providers/db/entities/platform-plugin.entity';
 import { ModelRegistryEntity } from '../../providers/db/entities/model-registry.entity';
 import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { detectRetrievalProfile } from '../../rag/karpathy/context-builder';
-
-const DEFAULT_PLUGINS = [
-  { key: 'rag.search', type: 'tool', version: '1.0.0', capabilities: ['hybrid-search', 'graph-search'], permissions: ['knowledge.read'] },
-  { key: 'rag.mcp', type: 'mcp', version: '1.0.0', capabilities: ['rag_context', 'rag_game_plan', 'rag_graph_search'], permissions: ['knowledge.read'] },
-  { key: 'web.search', type: 'tool', version: '1.0.0', capabilities: ['web-search'], permissions: ['network.outbound'] },
-];
+import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
 const DEFAULT_MODELS = [
   { provider: 'qwen', model: 'qwen-plus', capabilities: ['chat', 'tool-call', 'stream'], pricing: { input: 0, output: 0, currency: 'CNY', source: 'env' } },
@@ -36,11 +30,11 @@ export class PlatformGovernanceService {
   constructor(
     @InjectRepository(WorkflowTemplateEntity) private readonly workflowRepo: Repository<WorkflowTemplateEntity>,
     @InjectRepository(WorkflowTemplateVersionEntity) private readonly versionRepo: Repository<WorkflowTemplateVersionEntity>,
-    @InjectRepository(PlatformPluginEntity) private readonly pluginRepo: Repository<PlatformPluginEntity>,
     @InjectRepository(ModelRegistryEntity) private readonly modelRepo: Repository<ModelRegistryEntity>,
     @InjectRepository(EvaluationCaseEntity) private readonly evalRepo: Repository<EvaluationCaseEntity>,
     @InjectRepository(KnowledgeBaseProfileEntity) private readonly profileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly rag: KarpathyRagService,
+    private readonly pluginRuntime: PluginRuntimeService,
   ) {}
 
   async listWorkflows(workspaceId = 'default') {
@@ -97,8 +91,7 @@ export class PlatformGovernanceService {
   }
 
   async listPlugins() {
-    const stored = await this.pluginRepo.find({ order: { key: 'ASC', version: 'DESC' } });
-    return stored.length > 0 ? stored : DEFAULT_PLUGINS.map((item) => ({ ...item, status: 'enabled', timeoutMs: 5000 }));
+    return this.pluginRuntime.list();
   }
 
   async listModels() {
@@ -106,8 +99,16 @@ export class PlatformGovernanceService {
     return stored.length > 0 ? stored : DEFAULT_MODELS.map((item) => ({ ...item, status: 'enabled', fallbackModel: null }));
   }
 
-  async registerPlugin(input: { key: string; type: PlatformPluginEntity['type']; version: string; capabilities?: string[]; permissions?: string[]; timeoutMs?: number }) {
-    return this.pluginRepo.save(this.pluginRepo.create({ id: randomUUID(), key: input.key, type: input.type, version: input.version, capabilities: JSON.stringify(input.capabilities ?? []), permissions: JSON.stringify(input.permissions ?? []), timeoutMs: input.timeoutMs ?? 5000, status: 'enabled' }));
+  async registerPlugin(input: Record<string, unknown>) {
+    return this.pluginRuntime.register(input);
+  }
+
+  async setPluginStatus(key: string, version: string, status: 'enabled' | 'disabled' | 'degraded') {
+    return this.pluginRuntime.setStatus(key, version, status);
+  }
+
+  async resolvePluginComposition(keys: string[] | undefined, mode: 'simple' | 'auto' | 'agentic' | 'production') {
+    return this.pluginRuntime.resolve(keys, mode);
   }
 
   async registerModel(input: { provider: string; model: string; capabilities?: string[]; pricing?: Record<string, unknown>; fallbackModel?: string }) {

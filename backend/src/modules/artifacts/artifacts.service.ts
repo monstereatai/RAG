@@ -78,6 +78,23 @@ export class ArtifactsService implements OnModuleInit {
     return items.map((item) => this.toView(item));
   }
 
+  /**
+   * Agent 运营的管理员审计视图：按运行 Thread 查看生成型 Artifact。
+   * 该方法仅由受 ServiceTokenGuard 保护的内部运营接口调用，不复用
+   * 面向普通用户的 owner 范围查询，避免运营人员误以为运行没有生成文件。
+   */
+  async listForRunAudit(threadId: string) {
+    const items = await this.artifacts.find({
+      where: { threadId },
+      order: { createdAt: 'ASC' },
+      take: 100,
+    });
+    return items.map((item) => ({
+      ...this.toView(item),
+      sourceText: item.sourceText,
+    }));
+  }
+
   async getOwned(id: string, ownerUserId: string) {
     const artifact = await this.artifacts.findOne({
       where: { id, ownerUserId },

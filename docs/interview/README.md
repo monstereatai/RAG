@@ -293,7 +293,7 @@ Tool、MCP、Skill 分别是什么？
 
 | 文档 | 适用场景 |
 | --- | --- |
-| [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解模块职责、模块交互、Simple、Auto、Agentic、RAG、版本治理、Bad Case、Artifact、观测和运营闭环 |
+| [功能步骤流程](./功能步骤流程.md) | 按「用户操作→状态／数据流转」理解模块职责、模块交互、Simple、Auto、Agentic、RAG、版本治理、Bad Case、请求快照、工具审批、Artifact、代码交付验收、观测和运营闭环 |
 | [开源项目参考能力归档](./开源项目参考能力归档.md) | 了解 Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen、DeepSeek Harness 的参考点，以及哪些能力已结合当前项目落地 |
 
 ### 2.3 一周准备路线
@@ -346,6 +346,8 @@ Tool、MCP、Skill 分别是什么？
 | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------- |
 | [deepseek-AI应用Agent岗-10小时冲刺指南.md](./deepseek-AI应用Agent岗-10小时冲刺指南.md)                     | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 | 面试前必读 |
 | [deepseek-AI应用Agent岗-模拟问答题库.md](./deepseek-AI应用Agent岗-模拟问答题库.md)                         | 33 道高频模拟题逐题可背答案、追问应对和边界红线（覆盖检索/Agentic/Prompt/安全/多租户/可观测等全知识面） | 面试前必读 |
+| [林芮瑭简历大模型面试问题.md](./林芮瑭简历大模型面试问题.md) | 针对多模态算法/Agent 简历的高频追问、回答要点、项目可信度核验和岗位定位 | 简历定向复习 |
+| [平台型Agent开源框架参考.md](./平台型Agent开源框架参考.md) | DeepSeek Harness、OpenHands、SWE-agent、Letta、Microsoft Agent Framework、Dify、RAGFlow 等平台型 Agent 框架的学习重点和当前项目映射 | 框架调研 |
 | [SEVEN_DIFFICULTIES_CHEATSHEET.md](./SEVEN_DIFFICULTIES_CHEATSHEET.md)                                   | 七个难点的一页式速查和回答框架                       | 面试前必读 |
 | [SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)                         | 七个难点的背景、方案比较、项目选择、代码、效果和追问 | 必读       |
 | [USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 历次提问、真实面试题、覆盖状态和建议补齐项           | 查漏必读   |

@@ -15,6 +15,7 @@ import type { AguiEvent, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
+import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
 @Injectable()
 export class AguiService {
@@ -26,6 +27,7 @@ export class AguiService {
     private readonly langfuseProvider: LangfuseProvider,
     private readonly artifactsService: ArtifactsService,
     @Optional() private readonly shortTermMemory?: ShortTermMemoryService,
+    @Optional() private readonly plugins?: PluginRuntimeService,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -56,6 +58,9 @@ export class AguiService {
         try {
           const selectedModel = options.model ?? 'qwen';
           const roleContext = resolveRoleContext(options.rolePresetId);
+          const pluginComposition = options.pluginKeys?.length && this.plugins
+            ? await this.plugins.resolve(options.pluginKeys, options.mode)
+            : undefined;
           const artifactIntent = parseArtifactIntent(query);
           const activeThreadId =
             options.threadId ??
@@ -71,6 +76,8 @@ export class AguiService {
               mode: options.mode,
               model: selectedModel,
               rolePresetId: roleContext.preset.id,
+              pluginKeys: pluginComposition?.pluginKeys ?? [],
+              pluginTools: pluginComposition?.toolNames ?? [],
             },
           });
           traceEvents.push({
@@ -150,7 +157,10 @@ export class AguiService {
                 options.userId,
                 memoryMessages,
                 false,
-                { scope: { role: roleContext.role } },
+                {
+                  scope: { role: roleContext.role },
+                  ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
+                },
               ),
           );
 

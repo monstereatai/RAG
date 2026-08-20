@@ -133,6 +133,18 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:read')
   runCenterDetail(@Param('id') id: string) { return this.ragClient.getAgentRunDetail(id); }
 
+  @Get('run-center/:id/artifacts')
+  @RequirePermission('admin:qa-ops:read')
+  runCenterDetailArtifacts(@Param('id') id: string) { return this.ragClient.getAgentRunDetailArtifacts(id); }
+
+  @Get('runtime/capabilities')
+  @RequirePermission('admin:qa-ops:read')
+  runtimeCapabilities() { return this.ragClient.getAgentRuntimeCapabilities(); }
+
+  @Post('runtime/plans')
+  @RequirePermission('admin:qa-ops:write')
+  createRuntimePlan(@Body() body: unknown) { return this.ragClient.createAgentRuntimePlan(body); }
+
   @Post('run-center/:id/retry')
   @RequirePermission('admin:qa-ops:write')
   retryRunRecord(@Param('id') id: string) { return this.ragClient.retryAgentRunRecord(id); }
@@ -204,6 +216,18 @@ export class AgentOpsController {
   @Get('governance/plugins')
   @RequirePermission('admin:qa-ops:read')
   governancePlugins() { return this.ragClient.listPlatformPlugins(); }
+
+  @Post('governance/plugins')
+  @RequirePermission('admin:qa-ops:write')
+  registerGovernancePlugin(@Body() body: unknown) { return this.ragClient.registerPlatformPlugin(body); }
+
+  @Post('governance/plugins/:key/:version/status')
+  @RequirePermission('admin:qa-ops:write')
+  setGovernancePluginStatus(@Param('key') key: string, @Param('version') version: string, @Body('status') status: string) { return this.ragClient.setPlatformPluginStatus(key, version, status); }
+
+  @Post('governance/plugin-compositions/resolve')
+  @RequirePermission('admin:qa-ops:read')
+  resolveGovernancePluginComposition(@Body() body: unknown) { return this.ragClient.resolvePluginComposition(body); }
 
   @Get('governance/models')
   @RequirePermission('admin:qa-ops:read')

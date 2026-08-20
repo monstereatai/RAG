@@ -130,6 +130,9 @@ export interface RetrieveOptions {
   vectorSearch?: boolean;
   scope?: RetrievalScope;
   profile?: RetrievalProfile;
+  /** 可选插件组合传入的运行时工具白名单。 */
+  pluginKeys?: string[];
+  pluginTools?: string[];
 }
 
 type RankedRetrievalHit = {

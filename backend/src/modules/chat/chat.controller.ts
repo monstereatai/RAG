@@ -8,6 +8,7 @@ import {
   Query,
   Param,
   BadRequestException,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -25,6 +26,7 @@ import { ChatResumeDto } from './chat-resume.dto';
 import { ChatFeedbackDto } from './chat-feedback.dto';
 import { RagFeedbackService } from './rag-feedback.service';
 import { listRolePresets, resolveRoleContext } from './role-presets';
+import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -35,6 +37,7 @@ export class ChatController {
     private readonly conversationService: ConversationService,
     private readonly memoryService: MemoryService,
     private readonly ragFeedbackService: RagFeedbackService,
+    @Optional() private readonly plugins?: PluginRuntimeService,
   ) {}
 
   @Get('role-presets')
@@ -76,16 +79,19 @@ export class ChatController {
     @Query('mode') mode?: ChatMode,
     @Query('threadId') threadId?: string,
     @Query('rolePresetId') rolePresetId?: string,
+    @Query('pluginKeys') pluginKeys?: string,
   ): Observable<SseEvent> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('query is required');
     }
     const chatMode: ChatMode = mode ?? 'agentic';
     const userId = user.userId;
-
     return new Observable<SseEvent>((subscriber) => {
       void (async () => {
         try {
+          const pluginComposition = pluginKeys?.trim() && this.plugins
+            ? await this.plugins.resolve(pluginKeys.split(',').map((item) => item.trim()), chatMode)
+            : undefined;
           const startTime = Date.now();
           // 对话历史注入（SSE 流式模式）
           const activeThreadId =
@@ -132,7 +138,10 @@ export class ChatController {
               userId,
               memoryMessages,
               false,
-              { scope: { role: roleContext.role } },
+              {
+                scope: { role: roleContext.role },
+                ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
+              },
             )
             .then(async (result) => {
               // 持久化本轮对话

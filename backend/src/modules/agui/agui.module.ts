@@ -5,6 +5,7 @@ import { AgenticRagModule } from '../../rag/agentic/agentic-rag.module';
 import { ChatModule } from '../chat/chat.module';
 import { MemoryModule } from '../memory/memory.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
+import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { AguiController } from './agui.controller';
 import { AguiService } from './agui.service';
 
@@ -16,6 +17,7 @@ import { AguiService } from './agui.service';
     LlmModule,
     ObservabilityModule,
     ArtifactsModule,
+    PluginRuntimeModule,
   ],
   controllers: [AguiController],
   providers: [AguiService],

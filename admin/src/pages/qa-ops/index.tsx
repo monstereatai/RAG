@@ -13,8 +13,7 @@ import {
   ShareAltOutlined,
   SoundOutlined,
 } from "@ant-design/icons";
-import { XMarkdown } from "@ant-design/x-markdown";
-import "@ant-design/x-markdown/es/XMarkdown/index.css";
+import { AssistantMarkdown } from "@/components/AssistantMarkdown";
 import { ModulePage, qaNav } from "@/components/AdminShell";
 import { history } from "@umijs/max";
 import {
@@ -53,6 +52,7 @@ import {
   getConversations,
   getArtifacts,
   getRolePresets,
+  getQaPlugins,
   streamAguiAnswer,
   submitConversationBadCase,
 } from "./service";
@@ -104,20 +104,6 @@ interface EventTraceItem {
 }
 
 type TtsStatus = "connecting" | "synthesizing" | "playing" | "error";
-
-const normalizeAssistantMarkdown = (
-  content: string,
-  status?: ChatMessage["status"],
-) => {
-  const normalized = content
-    .replace(/\r\n/g, "\n")
-    .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, "```$1\n");
-  const fenceCount = normalized.match(/```/g)?.length ?? 0;
-  if (status === "done" && fenceCount % 2 === 1) {
-    return `${normalized}\n\`\`\``;
-  }
-  return normalized;
-};
 
 const toAnswerMedia = (value: unknown): AnswerMedia[] => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
@@ -224,6 +210,8 @@ const formatEventTrace = (events: EventTraceItem[]) =>
 const QaOps: React.FC = () => {
   const [input, setInput] = React.useState("");
   const [mode, setMode] = React.useState<ChatMode>("auto");
+  const [qaPlugins, setQaPlugins] = React.useState<Array<{ key: string; displayName?: string; status: string; modes?: string[] }>>([]);
+  const [pluginKeys, setPluginKeys] = React.useState<string[]>([]);
   const modelConfig = React.useMemo(() => getQaModelConfig(), []);
   const modelOptions = React.useMemo(
     () => getEnabledQaModelOptions(modelConfig),
@@ -400,8 +388,8 @@ const QaOps: React.FC = () => {
       const res = await getConversations();
       setConversations(res.data ?? []);
       setConvPage(1);
-    } catch {
-      // 静默失败，保留上次列表
+    } catch (error) {
+      antdMessage.error(error instanceof Error ? error.message : '会话列表加载失败，请重试');
     } finally {
       setSidebarLoading(false);
     }
@@ -410,6 +398,10 @@ const QaOps: React.FC = () => {
   React.useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  React.useEffect(() => {
+    void getQaPlugins().then((result) => setQaPlugins(result.data ?? [])).catch(() => undefined);
+  }, []);
 
   React.useEffect(() => {
     let active = true;
@@ -662,6 +654,7 @@ const QaOps: React.FC = () => {
       },
       threadId,
       rolePresetId,
+      pluginKeys,
     ).then((controller) => {
       abortRef.current = controller;
     });
@@ -1034,15 +1027,10 @@ const QaOps: React.FC = () => {
                   <div className="answer-card">
                     {message.content ? (
                       <>
-                        <XMarkdown
+                        <AssistantMarkdown
                           className="answer-markdown"
-                          content={normalizeAssistantMarkdown(
-                            message.content,
-                            message.status,
-                          )}
-                          escapeRawHtml
-                          openLinksInNewTab
-                          paragraphTag="div"
+                          content={message.content}
+                          status={message.status === "streaming" ? "streaming" : "done"}
                         />
                         {message.status === "streaming" && (
                           <span className="answer-typing-caret" />
@@ -1300,6 +1288,17 @@ const QaOps: React.FC = () => {
                     {item.label}
                   </option>
                 ))}
+              </select>
+              <select
+                aria-label="插件能力包"
+                multiple
+                value={pluginKeys}
+                onChange={(event) => setPluginKeys(Array.from(event.target.selectedOptions, (option) => option.value))}
+                title="按住 Command 可多选插件能力包"
+              >
+                {qaPlugins
+                  .filter((plugin) => plugin.status === "enabled" && (plugin.modes ?? []).includes(mode))
+                  .map((plugin) => <option key={plugin.key} value={plugin.key}>{plugin.displayName ?? plugin.key}</option>)}
               </select>
               <span>{input.length} / 2000</span>
               <Button disabled={loading} icon={<PaperClipOutlined />} />

@@ -10,6 +10,8 @@ import { AgentCollaborationModule } from '../agent-collaboration/agent-collabora
 import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
 import { ToolsModule } from '../../tools/tools.module';
+import { AgentRunsModule } from '../agent-runs/agent-runs.module';
+import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { ToolsModule } from '../../tools/tools.module';
     AgentTasksModule,
     AgentRuntimeEventsModule,
     ToolsModule,
+    AgentRunsModule,
+    PluginRuntimeModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

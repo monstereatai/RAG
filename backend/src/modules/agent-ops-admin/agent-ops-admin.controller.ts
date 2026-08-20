@@ -26,6 +26,7 @@ import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
+import { ArtifactsService } from '../artifacts/artifacts.service';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -41,6 +42,7 @@ export class AgentOpsAdminController {
     private readonly collaboration: AgentCollaborationService,
     private readonly tasks: AgentTasksService,
     private readonly runtimeEvents: AgentRuntimeEventsService,
+    private readonly artifacts: ArtifactsService,
   ) {}
 
   @Post('workflows')
@@ -180,6 +182,21 @@ export class AgentOpsAdminController {
   @Get('run-center/:id')
   runDetail(@Param('id') id: string) {
     return this.runs.get(id);
+  }
+
+  @Get('run-center/:id/artifacts')
+  async runDetailArtifacts(@Param('id') id: string) {
+    const run = await this.runs.get(id);
+    const [files, snapshot] = await Promise.all([
+      this.artifacts.listForRunAudit(run.threadId),
+      this.agenticRag.getRunSnapshot(run.threadId),
+    ]);
+    return {
+      threadId: run.threadId,
+      files,
+      structuredArtifacts: snapshot.artifacts,
+      checkpointAvailable: snapshot.available,
+    };
   }
 
   @Post('run-center/:id/retry')
