@@ -4,6 +4,7 @@ import {
   ExperimentOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
+import { AssistantMarkdown } from "@/components/AssistantMarkdown";
 import { ModulePage, agentOpsNav } from "@/components/AdminShell";
 import { history } from "@umijs/max";
 import {
@@ -945,7 +946,7 @@ export default function AgentOpsPage() {
       >
         刷新治理数据
       </Button>
-      <div className="agent-ops-form-grid">
+      <div className="agent-governance-grid">
         <Card title={`模型注册（${governanceModels.length}）`} size="small">
           <Table
             size="small"
@@ -960,30 +961,34 @@ export default function AgentOpsPage() {
             ]}
           />
         </Card>
-        <Card title={`工具／插件注册（${governancePlugins.length}）`} size="small">
+        <Card className="agent-governance-plugin-card" title={`工具／插件注册（${governancePlugins.length}）`} size="small">
           <Alert
             showIcon
             type="info"
             style={{ marginBottom: 12 }}
             description="插件是声明式能力包：只能组合已在 Tool Registry 注册的工具，不支持上传并执行任意代码。工作流启动时会把选中的插件和有效工具写入运行审计。"
           />
-          <Table
-            size="small"
-            rowKey={(row) => row.id ?? row.key}
-            pagination={false}
-            dataSource={governancePlugins}
-            columns={[
-              { title: "标识", dataIndex: "key" },
-              { title: "类型", dataIndex: "type" },
-              { title: "版本", dataIndex: "version" },
-              { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
-              { title: "工具", dataIndex: "tools", render: (value) => (value ?? []).join("、") || "-" },
-              {
-                title: "操作",
-                render: (_, row) => <Button size="small" disabled={row.builtin} onClick={() => void handleTogglePlugin(row)}>{row.status === "enabled" ? "停用" : "启用"}</Button>,
-              },
-            ]}
-          />
+          <div className="agent-governance-table-wrap">
+            <Table
+              size="small"
+              rowKey={(row) => row.id ?? row.key}
+              pagination={false}
+              scroll={{ x: 820 }}
+              dataSource={governancePlugins}
+              columns={[
+                { title: "标识", dataIndex: "key", width: 190 },
+                { title: "类型", dataIndex: "type", width: 100 },
+                { title: "版本", dataIndex: "version", width: 90 },
+                { title: "状态", dataIndex: "status", width: 90, render: (value) => <Tag>{value}</Tag> },
+                { title: "工具", dataIndex: "tools", width: 360, render: (value) => <span className="agent-governance-tools">{(value ?? []).join("、") || "-"}</span> },
+                {
+                  title: "操作",
+                  width: 90,
+                  render: (_, row) => <Button size="small" disabled={row.builtin} onClick={() => void handleTogglePlugin(row)}>{row.status === "enabled" ? "停用" : "启用"}</Button>,
+                },
+              ]}
+            />
+          </div>
           <Form form={pluginForm} layout="vertical" style={{ marginTop: 16 }}>
             <div className="agent-ops-form-grid">
               <Form.Item label="插件 Key" name="key" rules={[{ required: true, message: "例如 workflow.partner-review" }]}>
@@ -1166,8 +1171,27 @@ export default function AgentOpsPage() {
                 { key: "approval", label: "审批标记", children: record.requiresApproval ? "需要审批" : "无需审批" },
                 { key: "created", label: "开始时间", children: record.createdAt || "-" },
                 { key: "finished", label: "结束时间", children: record.finishedAt || "-" },
-                { key: "summary", label: "结果摘要", span: 3, children: record.resultSummary || record.errorMessage || "-" },
-                { key: "goal", label: "目标状态", span: 3, children: record.goal ? `${record.goal.status}：${record.goal.objective}${record.goal.reason ? `；${record.goal.reason}` : ""}` : "-" },
+                {
+                  key: "summary",
+                  label: "结果摘要",
+                  span: 3,
+                  children: record.resultSummary ? (
+                    <div className="answer-card run-result-preview agent-run-center-summary">
+                      <AssistantMarkdown content={String(record.resultSummary)} status="done" />
+                    </div>
+                  ) : record.errorMessage || "-",
+                },
+                {
+                  key: "goal",
+                  label: "目标状态",
+                  span: 3,
+                  children: record.goal ? (
+                    <span className="agent-run-center-goal">
+                      {record.goal.status}：{record.goal.objective}
+                      {record.goal.reason ? `；${record.goal.reason}` : ""}
+                    </span>
+                  ) : "-",
+                },
               ]}
             />
           ),

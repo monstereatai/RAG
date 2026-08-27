@@ -639,6 +639,17 @@ canvas {
   background: #fff;
 }
 
+.agent-run-center-summary {
+  max-width: none;
+  margin: 4px 0;
+}
+
+.agent-run-center-goal {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .answer-markdown {
   color: #1f2937;
   font-size: 15px;
@@ -941,6 +952,23 @@ canvas {
   border-radius: 6px;
   background: #fff;
   color: #1f2937;
+}
+
+.chat-plugin-label {
+  flex: none;
+  color: #667085;
+  font-size: 12px;
+}
+
+.chat-plugin-control {
+  min-width: 240px;
+  max-width: min(360px, 32vw);
+}
+
+.chat-plugin-control .ant-select-selector {
+  min-height: 30px !important;
+  border-color: #d9e1ec !important;
+  border-radius: 6px !important;
 }
 
 .model-config-layout {
@@ -1344,6 +1372,29 @@ ol {
   gap: 16px;
 }
 
+.agent-governance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.agent-governance-grid > .ant-card,
+.agent-governance-plugin-card {
+  min-width: 0;
+}
+
+.agent-governance-table-wrap {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agent-governance-tools {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .agent-workflow-result,
 .agent-eval-result {
   display: grid;
@@ -1428,8 +1479,12 @@ ol {
 @media (max-width: 800px) {
   .agent-ops-page { padding: 16px; }
   .agent-ops-form-grid,
+  .agent-governance-grid,
   .agent-approval-row,
   .agent-metric-grid { grid-template-columns: 1fr; }
+
+  .chat-input > div { flex-wrap: wrap; }
+  .chat-plugin-control { min-width: 180px; max-width: 100%; flex: 1; }
 }
 
 .artifact-list {

@@ -327,8 +327,14 @@ export class QaOpsController {
 
   @Get("plugins")
   @RequirePermission("admin:qa-ops:read")
-  qaPlugins() {
-    return this.ragClient.listPlatformPlugins();
+  async qaPlugins() {
+    const result = await this.ragClient.listPlatformPlugins();
+    this.requireAvailable(result);
+    return {
+      data: this.unwrapList(result.data),
+      available: result.available,
+      error: result.error,
+    };
   }
 
   @Patch("records/:id/feedback")

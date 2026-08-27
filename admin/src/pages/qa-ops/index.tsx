@@ -212,6 +212,10 @@ const QaOps: React.FC = () => {
   const [mode, setMode] = React.useState<ChatMode>("auto");
   const [qaPlugins, setQaPlugins] = React.useState<Array<{ key: string; displayName?: string; status: string; modes?: string[] }>>([]);
   const [pluginKeys, setPluginKeys] = React.useState<string[]>([]);
+  const availableQaPlugins = React.useMemo(
+    () => qaPlugins.filter((plugin) => plugin.status === "enabled" && (plugin.modes ?? []).includes(mode)),
+    [mode, qaPlugins],
+  );
   const modelConfig = React.useMemo(() => getQaModelConfig(), []);
   const modelOptions = React.useMemo(
     () => getEnabledQaModelOptions(modelConfig),
@@ -400,8 +404,23 @@ const QaOps: React.FC = () => {
   }, [loadConversations]);
 
   React.useEffect(() => {
-    void getQaPlugins().then((result) => setQaPlugins(result.data ?? [])).catch(() => undefined);
+    void getQaPlugins()
+      .then((result) => {
+        const payload: unknown = result?.data;
+        const plugins = Array.isArray(payload)
+          ? payload
+          : payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
+            ? payload.data
+            : [];
+        setQaPlugins(plugins);
+      })
+      .catch(() => setQaPlugins([]));
   }, []);
+
+  React.useEffect(() => {
+    const availableKeys = new Set(availableQaPlugins.map((plugin) => plugin.key));
+    setPluginKeys((current) => current.filter((key) => availableKeys.has(key)));
+  }, [availableQaPlugins]);
 
   React.useEffect(() => {
     let active = true;
@@ -1289,17 +1308,23 @@ const QaOps: React.FC = () => {
                   </option>
                 ))}
               </select>
-              <select
+              <span className="chat-plugin-label">插件</span>
+              <Select
                 aria-label="插件能力包"
-                multiple
+                className="chat-plugin-control"
+                mode="multiple"
+                allowClear
+                maxTagCount="responsive"
+                placeholder={availableQaPlugins.length ? "选择插件能力包（可多选）" : "当前链路暂无可用插件"}
                 value={pluginKeys}
-                onChange={(event) => setPluginKeys(Array.from(event.target.selectedOptions, (option) => option.value))}
-                title="按住 Command 可多选插件能力包"
-              >
-                {qaPlugins
-                  .filter((plugin) => plugin.status === "enabled" && (plugin.modes ?? []).includes(mode))
-                  .map((plugin) => <option key={plugin.key} value={plugin.key}>{plugin.displayName ?? plugin.key}</option>)}
-              </select>
+                disabled={!availableQaPlugins.length}
+                options={availableQaPlugins.map((plugin) => ({
+                  label: plugin.displayName ?? plugin.key,
+                  value: plugin.key,
+                  title: plugin.key,
+                }))}
+                onChange={(values) => setPluginKeys(values)}
+              />
               <span>{input.length} / 2000</span>
               <Button disabled={loading} icon={<PaperClipOutlined />} />
               <Button

@@ -44,6 +44,11 @@
 
 ## 当前结论
 
+- 优化运行中心展开行的结果展示：结果摘要复用 AI 问答列表的 `AssistantMarkdown`（注：统一 Markdown 预览）组件，目标状态支持长文本换行，避免 `ant-descriptions-item-content` 中原始长字符串挤压页面。
+- 已在功能步骤文档补充插件选型说明：明确每个内置插件的适用场景、不适用场景、三条问答链路限制、插件叠加成本和产研运／只读审查选择原则。
+- 优化 AI 智能问答插件选择：改为带标签的 Ant Design 多选控件，按当前 Simple／Auto／Agentic 模式过滤可用插件，支持响应式标签、清空和空状态提示；已通过 Admin TypeScript 检查和生产构建。
+- 已在功能步骤文档补充插件使用指南：分别说明平台治理登记、产研运工作流组合、AI 智能问答选择、Simple／Auto／Agentic 差异、工具白名单、运行审计和常见排查路径。
+- 修复 QA Ops 插件列表响应被二次包装导致 `qaPlugins.filter is not a function` 的问题：管理后台 API 统一解包插件数组，问答页增加异常响应兜底；已完成 TypeScript／前端构建验证。
 - 根目录已完成 pnpm Workspace 第一步改造：统一纳管 `backend`、`admin-backend`、`admin`、`frontend`、`rag-cli` 和 `tools/*`，新增根 `package.json`、`pnpm-workspace.yaml` 与 `pnpm-lock.yaml`，提供按服务开发、统一构建、测试、类型检查和 MCP 启动命令。已通过 `pnpm install --lockfile-only --ignore-scripts`、`pnpm workspace:list` 和后端／管理后台／MCP workspace smoke 校验；本阶段暂不引入 Turborepo、不移动源码目录、不删除子项目配置。
 - 项目目录已完成低风险分类整理：根目录只保留项目入口、规则和进度文件；架构／部署、产品、CLI、参考资料、面试材料、历史文档和素材分别归档到 `docs/` 对应目录；未移动 `backend`、`admin`、`admin-backend`、`frontend` 等源码目录，也未移动 `workspace`、上传和临时运行目录。已同步 README、CLAUDE、Docs Index、ROADMAP 和相关文档引用，并完成 Markdown 相对链接检查。
 - 运行中心的最终结果已复用 AI 问答页的统一 Markdown 预览组件，支持标题、列表、表格、代码块、引用和链接渲染；问答页与运行详情页共用同一套 Markdown 规范化逻辑，避免运行中心将回答显示为挤压在表格单元格里的纯文本。已通过 Admin TypeScript 检查和生产构建。
@@ -562,6 +567,8 @@
 - Deployment 文档：CHECKLIST.md + deploy.sh
 - Vision 集成到文档上传：图片 OCR/视频理解 + 自动降级
 ### 2026-08-11
+
+- **问答上下文机制文档补齐**：在《功能步骤流程.md》明确记录 Thread 会话隔离、PostgreSQL 完整历史、Redis 短期窗口与结构化摘要、Mem0 长期记忆、历史会话向量召回、约 2,000 tokens／约 30 条消息的自动压缩阈值，以及 Simple／Auto／Agentic 的上下文差异和压缩审计事件。
 
 - **产研运工作流切页恢复修复**：修正 Agent 工作台只把当前工作流保存在 React 内存、切换页面后无法恢复的问题；启动、审批和驳回后持久化当前 `threadId`，重新进入工作台时自动调用后端状态接口恢复项目、岗位、Artifact、审批和运行状态；Thread 已失效时自动清理本地记录。`admin npm run lint` 通过（保留既有 warning）；TypeScript 检查通过。
 
