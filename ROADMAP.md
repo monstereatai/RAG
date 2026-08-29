@@ -44,7 +44,7 @@
 
 ## 当前结论
 
-- 已重构 `docs/interview/功能步骤流程.md` 为 12 章的实现核对版：删去与参考项目归档重复的流程叙述，统一 Simple、Auto、Chat Agentic 与 Task Agentic 的定义；按用户操作、数据／状态流、代码入口和生产边界重写核心链路。已修复目录锚点，并对 16 张 Mermaid 图逐一校验箭头样式索引；参考项目内容统一链接至 `docs/interview/开源项目参考能力归档.md`，不再作为实现状态的重复来源。
+- 已重构 `docs/interview/功能步骤流程.md` 为 12 章的实现核对版：删去与参考项目归档重复的流程叙述，统一 Simple、Auto、Chat Agentic 与 Task Agentic 的定义；按用户操作、数据／状态流、代码入口和生产边界重写核心链路。已修复目录锚点，并对 16 张 Mermaid 图逐一校验箭头样式索引；每张图例均改为「起点节点 → 中间节点 → 终点节点」的箭头说明；参考项目内容统一链接至 `docs/interview/开源项目参考能力归档.md`，不再作为实现状态的重复来源。
 
 - 三条问答链路已按分层策略收紧：Simple 首先执行 Bad Case 预检查，再尝试受治理 Karpathy 直答；只有 `docVersion` 完整、`effective`、有来源、权限范围匹配、处于生效时间、无待确认项且问题关键词覆盖度达到默认 70％的编译知识才能抽取式返回并附引用，不查询 Milvus、不调用 LLM。缺少任一治理字段的知识不会绕过常规检索与生成门禁。其余 Simple 问题使用联网兜底与自适应检索，Query 标准化只做 Unicode NFKC、空白清理、已登记错别字修正和少数领域规则补充；精确查询优先走本地 BM25，关键词证据不足才补一次 Embedding＋Milvus 向量检索，流程／对比／方案类问题则直接走混合检索。Auto 始终先执行一次完整 Hybrid Fast Path，并结合证据充分性与任务复杂度决定直接生成或升级 Agentic；直接生成时复用首轮证据，避免重复检索。Agentic 保持子问题并行 Hybrid 检索，按需补图谱、联网和受控工具，再执行反思、审批与 Checkpoint 恢复。Simple 本地证据不足时通过 Tool Registry 调用 Bocha Web Search，网页内容按不可信上下文清洗后交给 LLM 归纳并作为可点击来源返回；联网未配置、超时或无结果时才进入受限模型兜底。
 - 本轮实现已验证：Karpathy 直答正例能在治理字段齐全时只走本地 BM25 抽取答案，缺少版本字段时会回到常规向量／生成门禁；Karpathy、Agentic 和 Chat 相关测试共 34 项通过，Backend TypeScript 检查通过，健康接口返回 200。
