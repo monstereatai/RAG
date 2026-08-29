@@ -166,6 +166,7 @@ export interface ReferenceChunk {
   totalScore?: number;
   bm25Score?: number;
   cosineScore?: number;
+  retrievalSource?: string;
 }
 
 export type AguiEventType =

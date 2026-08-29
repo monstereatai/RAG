@@ -191,6 +191,9 @@ export const configuration = () => ({
     minCitationCoverage: parseFloat(
       process.env.RAG_MIN_CITATION_COVERAGE ?? '0.15',
     ),
+    karpathyDirectCoverage: parseFloat(
+      process.env.RAG_KARPATHY_DIRECT_COVERAGE ?? '0.7',
+    ),
     sourceAuthorityRules: process.env.RAG_SOURCE_AUTHORITY_RULES ?? '',
   },
 

@@ -21,6 +21,18 @@ export class ConversationEntity {
   @Column({ type: 'varchar', length: 16, default: 'auto' })
   mode!: string;
 
+  /** 被压缩的早期会话摘要；Redis 丢失时用于恢复上下文。 */
+  @Column({ type: 'text', nullable: true, default: null })
+  contextSummary!: string | null;
+
+  /** 摘要结构版本，便于后续安全升级格式。 */
+  @Column({ type: 'int', default: 0 })
+  contextSummaryVersion!: number;
+
+  /** 最近一次持久化摘要的时间。 */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  contextSummaryUpdatedAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

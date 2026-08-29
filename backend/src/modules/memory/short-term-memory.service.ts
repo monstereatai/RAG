@@ -12,8 +12,12 @@
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
+import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -70,6 +74,10 @@ export class ShortTermMemoryService {
   constructor(
     private readonly redis: RedisProvider,
     private readonly llmProvider: LlmProvider,
+    @InjectRepository(ConversationEntity)
+    private readonly conversationRepo: Repository<ConversationEntity>,
+    @InjectRepository(MessageEntity)
+    private readonly messageRepo: Repository<MessageEntity>,
     @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
   ) {}
 
@@ -90,12 +98,23 @@ export class ShortTermMemoryService {
     truncatedHistory: boolean;
   }> {
     if (!this.redis.isEnabled()) {
-      return { systemMessage: null, recentTurns: [], truncatedHistory: false };
+      const summary = await this.resolvePersistentSummary(conversationId);
+      return {
+        systemMessage: summary ? this.toSummarySystemMessage(summary) : null,
+        recentTurns: [],
+        truncatedHistory: Boolean(summary),
+      };
     }
 
     const key = this.turnsKey(conversationId);
     const raw = await this.redis.zrange(key, 0, -1);
-    const summary = await this.redis.get(this.summaryKey(conversationId));
+    let summary = await this.redis.get(this.summaryKey(conversationId));
+    if (!summary) {
+      summary = await this.resolvePersistentSummary(conversationId);
+      if (summary) {
+        await this.redis.set(this.summaryKey(conversationId), summary, TTL_SECONDS);
+      }
+    }
 
     const turns: StoredTurn[] = raw.map((r) => JSON.parse(r) as StoredTurn);
 
@@ -222,6 +241,7 @@ export class ShortTermMemoryService {
         JSON.stringify(summary),
         TTL_SECONDS,
       );
+      await this.persistSummary(conversationId, summary);
     } catch (error) {
       const failed = {
         ...audit,
@@ -282,6 +302,78 @@ export class ShortTermMemoryService {
 
   private auditKey(conversationId: string): string {
     return `stm:${conversationId}:compactions`;
+  }
+
+  private async getPersistentSummary(conversationId: string): Promise<string | null> {
+    const conversation = await this.conversationRepo.findOne({
+      where: { id: conversationId },
+      select: {
+        id: true,
+        contextSummary: true,
+      },
+    });
+    return conversation?.contextSummary ?? null;
+  }
+
+  private async resolvePersistentSummary(
+    conversationId: string,
+  ): Promise<string | null> {
+    const existing = await this.getPersistentSummary(conversationId);
+    if (existing) return existing;
+
+    // 兼容摘要持久化上线前的历史会话：首次 Redis 丢失时从早期原文重建一次。
+    const messages = await this.messageRepo.find({
+      where: { conversationId },
+      order: { createdAt: 'ASC' },
+    });
+    const recentMessageCount = 10; // 与 PostgreSQL 最近 5 轮回退窗口一致。
+    if (messages.length <= recentMessageCount) return null;
+
+    const earlierMessages = messages.slice(0, -recentMessageCount);
+    const source = earlierMessages
+      .map((message) => `${message.role === 'ai' ? 'assistant' : 'user'}: ${message.content}`)
+      .join('\n');
+    let summary: StructuredMemorySummary;
+    try {
+      const raw = await this.llmProvider.invoke([
+        new SystemMessage(
+          `你是产研运上下文压缩器。只输出 JSON，必须符合：
+{"schemaVersion":1,"changes":[{"role":"岗位","module":"模块","before":"修改前，无则写未知","after":"修改后","version":"活动或文档版本，无则写未标注","effectiveFrom":"生效时间，无则写待确认","evidence":"原对话短句"}],"decisions":["已确认决策"],"openIssues":["待确认项"],"sourceDigest":"不超过500字的事实摘要"}。
+只保留产品规则、UI 参数、接口字段、测试口径、运营配置及明确决策；禁止补写输入中不存在的事实。具体接口和规则仍需从知识库召回，摘要不是权威事实源。`,
+        ),
+        { role: 'user' as const, content: `待恢复的早期对话：\n${source}` },
+      ]);
+      summary = this.parseStructuredSummary(raw);
+    } catch (error) {
+      this.logger.warn(
+        `Persistent summary recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      summary = this.fallbackSummary(null, source);
+    }
+
+    const rawSummary = JSON.stringify(summary);
+    await this.persistSummary(conversationId, summary);
+    if (this.redis.isEnabled()) {
+      await this.redis.set(this.summaryKey(conversationId), rawSummary, TTL_SECONDS);
+    }
+    return rawSummary;
+  }
+
+  private async persistSummary(
+    conversationId: string,
+    summary: StructuredMemorySummary,
+  ): Promise<void> {
+    await this.conversationRepo.update(conversationId, {
+      contextSummary: JSON.stringify(summary),
+      contextSummaryVersion: summary.schemaVersion,
+      contextSummaryUpdatedAt: new Date(),
+    });
+  }
+
+  private toSummarySystemMessage(summary: string): SystemMessage {
+    return new SystemMessage(
+      `【历史对话结构化变更摘要】\n${this.formatSummary(summary)}`,
+    );
   }
 
   private async saveAudit(

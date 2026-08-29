@@ -7,6 +7,7 @@ import { VectorStoreModule } from '../../providers/vector-store/vector-store.mod
 import { MetricsModule } from '../../modules/metrics/metrics.module';
 import { ObsidianKnowledgeModule } from '../../modules/obsidian/obsidian-knowledge.module';
 import { PromptModule } from '../prompts/prompt.module';
+import { ToolsModule } from '../../tools/tools.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PromptModule } from '../prompts/prompt.module';
     MetricsModule,
     ObsidianKnowledgeModule,
     PromptModule,
+    ToolsModule,
   ],
   providers: [KarpathyRagService],
   exports: [KarpathyRagService],

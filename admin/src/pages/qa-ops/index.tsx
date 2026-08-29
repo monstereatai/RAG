@@ -1210,9 +1210,15 @@ const QaOps: React.FC = () => {
                               <FileWordOutlined className="file-icon word" />
                               <div>
                                 <a
-                                  onClick={() =>
-                                    history.push(`/documents/${encodeURIComponent(item.docId)}`)
-                                  }
+                                  href={item.retrievalSource === "web" ? item.docId : undefined}
+                                  target={item.retrievalSource === "web" ? "_blank" : undefined}
+                                  rel={item.retrievalSource === "web" ? "noreferrer" : undefined}
+                                  onClick={(event) => {
+                                    if (item.retrievalSource !== "web") {
+                                      event.preventDefault();
+                                      history.push(`/documents/${encodeURIComponent(item.docId)}`);
+                                    }
+                                  }}
                                 >
                                   {item.docId || item.id}
                                 </a>

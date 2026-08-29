@@ -43,7 +43,16 @@ describe('ShortTermMemoryService structured compression', () => {
         }),
       ),
     };
-    const service = new ShortTermMemoryService(redis as never, llm as never);
+    const conversationRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ShortTermMemoryService(
+      redis as never,
+      llm as never,
+      conversationRepo as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+    );
 
     await service.trimAndSummarize('thread-1');
 
@@ -63,6 +72,10 @@ describe('ShortTermMemoryService structured compression', () => {
       'stm:thread-1:turns',
       0,
       3,
+    );
+    expect(conversationRepo.update).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({ contextSummaryVersion: 1 }),
     );
   });
 
@@ -90,6 +103,11 @@ describe('ShortTermMemoryService structured compression', () => {
     const service = new ShortTermMemoryService(
       redis as never,
       { invoke: jest.fn().mockRejectedValue(new Error('model down')) } as never,
+      {
+        findOne: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue(undefined),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
     );
 
     await service.trimAndSummarize('thread-2');
@@ -100,5 +118,72 @@ describe('ShortTermMemoryService structured compression', () => {
     };
     expect(parsed.openIssues[0]).toContain('结构化压缩失败');
     expect(parsed.sourceDigest).toContain('原始规则');
+  });
+
+  it('Redis 不可用时读取 PostgreSQL 持久化摘要', async () => {
+    const summary = JSON.stringify({
+      schemaVersion: 1,
+      changes: [],
+      decisions: ['已确认周年庆页面结构'],
+      openIssues: [],
+      sourceDigest: '早期会话摘要',
+    });
+    const service = new ShortTermMemoryService(
+      { isEnabled: () => false } as never,
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue({ contextSummary: summary }),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+    );
+
+    const context = await service.getContext('thread-persisted');
+
+    expect(context.recentTurns).toEqual([]);
+    expect(context.truncatedHistory).toBe(true);
+    expect(context.systemMessage?.content).toContain('已确认周年庆页面结构');
+  });
+
+  it('旧会话没有持久化摘要时，从 PostgreSQL 早期消息重建一次', async () => {
+    const messageRepo = {
+      find: jest.fn().mockResolvedValue(
+        Array.from({ length: 12 }, (_, index) => ({
+          role: index % 2 === 0 ? 'human' : 'ai',
+          content: `历史第${index}条消息`,
+          createdAt: new Date(2026, 0, index + 1),
+        })),
+      ),
+    };
+    const conversationRepo = {
+      findOne: jest.fn().mockResolvedValue({ contextSummary: null }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ShortTermMemoryService(
+      { isEnabled: () => false } as never,
+      {
+        invoke: jest.fn().mockResolvedValue(
+          JSON.stringify({
+            schemaVersion: 1,
+            changes: [],
+            decisions: ['周年庆活动采用抽奖玩法'],
+            openIssues: [],
+            sourceDigest: '旧会话恢复摘要',
+          }),
+        ),
+      } as never,
+      conversationRepo as never,
+      messageRepo as never,
+    );
+
+    const context = await service.getContext('thread-legacy');
+
+    expect(messageRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { conversationId: 'thread-legacy' } }),
+    );
+    expect(conversationRepo.update).toHaveBeenCalledWith(
+      'thread-legacy',
+      expect.objectContaining({ contextSummaryVersion: 1 }),
+    );
+    expect(context.systemMessage?.content).toContain('周年庆活动采用抽奖玩法');
   });
 });

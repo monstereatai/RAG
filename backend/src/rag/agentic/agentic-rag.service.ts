@@ -1454,9 +1454,7 @@ export class AgenticRagService {
       mode === 'simple'
         ? 'simple'
         : mode === 'auto'
-          ? fastPathGate?.sufficient
-            ? 'simple'
-            : 'agentic'
+          ? this.resolveAutoRoute(query, Boolean(fastPathGate?.sufficient))
           : this.classifyRoute(query, mode);
     observedRoute = route;
     onEvent?.({ type: 'routing', data: { mode, route } });
@@ -1466,6 +1464,7 @@ export class AgenticRagService {
         data: {
           sufficient: fastPathGate.sufficient,
           reason: fastPathGate.reason,
+          taskComplexity: this.shouldUseAgentic(query),
           obsidianPaths: fastPathGate.obsidianHits.map((hit) => hit.path),
           ragReferences: fastPathGate.chunks.map((chunk) => chunk.id),
         },
@@ -1479,7 +1478,12 @@ export class AgenticRagService {
         userId,
         memoryMessages,
         (token) => onEvent?.({ type: 'token', data: token }),
-        retrieveOptions,
+        fastPathGate
+          ? {
+              ...retrieveOptions,
+              prefetchedFastPath: fastPathGate.prefetchedFastPath,
+            }
+          : retrieveOptions,
       );
       onEvent?.({ type: 'citation', data: result.references });
       onEvent?.({ type: 'final', data: result });
@@ -1908,6 +1912,16 @@ export class AgenticRagService {
   ): 'simple' | 'agentic' {
     if (mode === 'simple') return 'simple';
     if (mode === 'agentic') return 'agentic';
+    if (query.length > this.maxAutoQueryLength) return 'simple';
+    return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
+  }
+
+  /** Auto 先看 Hybrid 证据，再将多步骤／分析类请求升级为 Agentic。 */
+  private resolveAutoRoute(
+    query: string,
+    fastPathSufficient: boolean,
+  ): 'simple' | 'agentic' {
+    if (!fastPathSufficient) return 'agentic';
     if (query.length > this.maxAutoQueryLength) return 'simple';
     return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
   }

@@ -44,6 +44,14 @@
 
 ## 当前结论
 
+- 已重新审计 `docs/interview/功能步骤流程.md` 的 36 张 Mermaid 架构图：每个节点和分组均补充括号注释，明确输入、处理动作、状态写入和输出；拆开 Simple 直接联网与 Auto 先升级 Agentic、再按子问题联网的路径，移除错误的 Redis→Mem0 直连和 Simple 默认图谱检索表述。记忆链路已统一为 Redis 工作记忆优先（摘要＋最近窗口）；会话压缩时，结构化摘要同步写入 PostgreSQL `conversations.contextSummary`（持久化源）与 Redis（热副本），Redis 为空、过期或不可用时由 PostgreSQL 持久化摘要＋最近约 5 轮容灾回退，并在 Redis 恢复后回暖摘要；历史会话若尚无持久化摘要，则从 PostgreSQL 早期消息一次性重建并保存。Mem0 与会话向量检索补充相关历史；Redis 在超过约 2,000 Token 或 30 条消息时压缩较早内容，保留最近约 1,200 Token，并以摘要、长期记忆、权限／版本／时间过滤共同控制模型上下文。已完成 Mermaid 节点注释、箭头样式索引和 Markdown 格式检查。
+
+- 三条问答链路已按分层策略收紧：Simple 首先执行 Bad Case 预检查，再尝试受治理 Karpathy 直答；只有 `docVersion` 完整、`effective`、有来源、权限范围匹配、处于生效时间、无待确认项且问题关键词覆盖度达到默认 70％的编译知识才能抽取式返回并附引用，不查询 Milvus、不调用 LLM。缺少任一治理字段的知识不会绕过常规检索与生成门禁。其余 Simple 问题使用联网兜底与自适应检索，Query 标准化只做 Unicode NFKC、空白清理、已登记错别字修正和少数领域规则补充；精确查询优先走本地 BM25，关键词证据不足才补一次 Embedding＋Milvus 向量检索，流程／对比／方案类问题则直接走混合检索。Auto 始终先执行一次完整 Hybrid Fast Path，并结合证据充分性与任务复杂度决定直接生成或升级 Agentic；直接生成时复用首轮证据，避免重复检索。Agentic 保持子问题并行 Hybrid 检索，按需补图谱、联网和受控工具，再执行反思、审批与 Checkpoint 恢复。Simple 本地证据不足时通过 Tool Registry 调用 Bocha Web Search，网页内容按不可信上下文清洗后交给 LLM 归纳并作为可点击来源返回；联网未配置、超时或无结果时才进入受限模型兜底。
+- 本轮实现已验证：Karpathy 直答正例能在治理字段齐全时只走本地 BM25 抽取答案，缺少版本字段时会回到常规向量／生成门禁；Karpathy、Agentic 和 Chat 相关测试共 34 项通过，Backend TypeScript 检查通过，健康接口返回 200。
+- Simple 流程文档已补充模块级架构图：明确 `ChatService`、`BadCaseFlywheelService`、`KarpathyRagService`、`Bm25Store`、`VectorStoreProvider／Milvus`、`ToolExecutionPolicyService`、`BochaSearchService` 和 `LlmProvider` 的调用关系，并与数据／状态流转步骤对齐。
+- Agentic 文档已改为「一个共享 Runtime、两条受控状态机」：Chat Agentic 专注子问题取证、工具补充和答案汇总；Task Agentic 专注岗位 DAG、Artifact、审批和任务导出。普通问答不再被表述为必须走岗位协作或产出 Artifact，Task 的审批与局部重跑也不再混入 Chat 问答路径。
+- 《功能步骤流程》第六至第九章已按真实职责重构：LangFuse 追踪、Prometheus 指标／告警与健康检查独立说明；Agent 运营后台区分 Chat 诊断入口和 Task 工作流入口；Prompt Injection 的不可信证据隔离与 Tool Registry 的工具准入／审批拆开；质量、性能、稳定性、成本脚本统一产出 Evidence 报告，由人工决定灰度或回滚，不再表述为脚本自动发布。
+
 - 优化运行中心展开行的结果展示：结果摘要复用 AI 问答列表的 `AssistantMarkdown`（注：统一 Markdown 预览）组件，目标状态支持长文本换行，避免 `ant-descriptions-item-content` 中原始长字符串挤压页面。
 - 已在功能步骤文档补充插件选型说明：明确每个内置插件的适用场景、不适用场景、三条问答链路限制、插件叠加成本和产研运／只读审查选择原则。
 - 优化 AI 智能问答插件选择：改为带标签的 Ant Design 多选控件，按当前 Simple／Auto／Agentic 模式过滤可用插件，支持响应式标签、清空和空状态提示；已通过 Admin TypeScript 检查和生产构建。
@@ -567,6 +575,10 @@
 - Deployment 文档：CHECKLIST.md + deploy.sh
 - Vision 集成到文档上传：图片 OCR/视频理解 + 自动降级
 ### 2026-08-11
+
+- **功能流程图图例与公共能力分流重构**：在《功能步骤流程.md》前部新增全项目完整功能链路图；35 张 Mermaid 图均补充独立图例，颜色按单图解释、不要求全文统一；所有图例统一使用「起点节点 → 中间节点 → 终点节点」的具体箭头说明；1.1 项目总体架构图补齐知识、问答、Agent、运营、状态恢复和观测的彩色实际连线与节点图例；总览和三条核心职责图补充底部公共能力汇入与按需分流。
+
+- **1.5 五项技术难点总体架构图补齐**：新增多 Agent 可控协作、复杂度路由、混合检索、回答可信纠错、长流程恢复与可观测五条难点链路的同图总览；底部明确 PostgreSQL、Redis 与 LLM Gateway 的共享状态和治理关系，并为每种颜色补充节点箭头式图例。
 
 - **问答上下文机制文档补齐**：在《功能步骤流程.md》明确记录 Thread 会话隔离、PostgreSQL 完整历史、Redis 短期窗口与结构化摘要、Mem0 长期记忆、历史会话向量召回、约 2,000 tokens／约 30 条消息的自动压缩阈值，以及 Simple／Auto／Agentic 的上下文差异和压缩审计事件。
 

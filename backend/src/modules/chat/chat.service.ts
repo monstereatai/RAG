@@ -65,9 +65,16 @@ export class ChatService {
     const threadId =
       req.threadId ??
       (await this.conversationService.create(req.query, 'auto', userId));
-    const history =
-      req.history ??
-      (await this.conversationService.getRecentHistory(threadId, 5, userId));
+    const shortTermContext = await this.shortTermMemory.getContext(threadId);
+    let history = req.history ?? [];
+    if (!req.history) {
+      history = shortTermContext.recentTurns.length > 0
+        ? shortTermContext.recentTurns.map((turn) => ({
+            role: turn.role === 'assistant' ? ('ai' as const) : ('human' as const),
+            content: turn.content,
+          }))
+        : await this.conversationService.getRecentHistory(threadId, 5, userId);
+    }
     const runtimePlan = this.runtime
       ? await this.runtime.createPlan({ objective: req.query, mode })
       : undefined;
@@ -160,14 +167,13 @@ export class ChatService {
 
     // Redis 短期记忆注入：最近 N 轮对话 + 历史摘要
     if (threadId) {
-      const stmContext = await this.shortTermMemory.getContext(threadId);
-      if (stmContext.systemMessage) {
+      if (shortTermContext.systemMessage) {
         memoryMessages.push({
           role: 'system',
-          content: stmContext.systemMessage.content as string,
+          content: shortTermContext.systemMessage.content as string,
         });
         this.logger.debug(
-          `Short-term memory injected: ${stmContext.recentTurns.length} recent turns, truncated=${stmContext.truncatedHistory}`,
+          `Short-term memory injected: ${shortTermContext.recentTurns.length} recent turns, truncated=${shortTermContext.truncatedHistory}`,
         );
       }
       if (run) {
@@ -175,9 +181,9 @@ export class ChatService {
           eventType: 'memory.context.loaded',
           target: 'short_term_memory',
           payload: {
-            recentTurns: stmContext.recentTurns.length,
-            truncatedHistory: stmContext.truncatedHistory,
-            summaryLoaded: Boolean(stmContext.systemMessage),
+            recentTurns: shortTermContext.recentTurns.length,
+            truncatedHistory: shortTermContext.truncatedHistory,
+            summaryLoaded: Boolean(shortTermContext.systemMessage),
           },
         });
       }
@@ -214,7 +220,11 @@ export class ChatService {
           userId,
           memoryMessages,
           undefined,
-          retrievalOptions,
+          {
+            ...retrievalOptions,
+            adaptiveVectorSearch: true,
+            karpathyDirectAnswer: true,
+          },
         );
       } catch (error) {
         await this.finishFailedRun(run, req.query, mode, error);

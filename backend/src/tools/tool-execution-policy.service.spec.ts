@@ -24,9 +24,9 @@ describe('ToolExecutionPolicyService', () => {
     ).toMatchObject({ allowed: false });
   });
 
-  it('does not allow network search in Simple mode', () => {
+  it('allows network search in Simple mode only as an evidence-shortage fallback', () => {
     expect(service.decide('bocha_web_search', { mode: 'simple' })).toMatchObject({
-      allowed: false,
+      allowed: true,
     });
   });
 

@@ -41,9 +41,9 @@ export const BUILTIN_PLUGIN_MANIFESTS: PluginManifest[] = [
   },
   {
     key: 'rag.web-research', version: '1.0.0', displayName: '联网研究能力包',
-    description: '允许 Agentic 链路在本地证据不足时查询公开网络资料。',
+    description: '允许 Simple／Auto／Agentic 链路在本地证据不足时查询公开网络资料。',
     type: 'tool', capabilities: ['web-search'], permissions: ['network.outbound'],
-    tools: ['bocha_web_search'], modes: ['auto', 'agentic'], status: 'enabled', builtin: true,
+    tools: ['bocha_web_search'], modes: ['simple', 'auto', 'agentic'], status: 'enabled', builtin: true,
   },
   {
     key: 'coding.mcp-context', version: '1.0.0', displayName: 'MCP 编码上下文包',

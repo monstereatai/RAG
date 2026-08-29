@@ -105,6 +105,30 @@ describe('AgenticRagService budget boundaries', () => {
     expect(route).toBe('simple');
   });
 
+  it('upgrades complex auto queries even when the fast path has evidence', () => {
+    const { service } = createService({ 'agentic.maxAutoQueryLength': 500 });
+
+    const route = (
+      service as unknown as {
+        resolveAutoRoute(query: string, fastPathSufficient: boolean): 'simple' | 'agentic';
+      }
+    ).resolveAutoRoute('请对比周年庆活动在不同地区的玩法差异和上线风险', true);
+
+    expect(route).toBe('agentic');
+  });
+
+  it('keeps simple auto queries on the fast path when evidence is sufficient', () => {
+    const { service } = createService({ 'agentic.maxAutoQueryLength': 500 });
+
+    const route = (
+      service as unknown as {
+        resolveAutoRoute(query: string, fastPathSufficient: boolean): 'simple' | 'agentic';
+      }
+    ).resolveAutoRoute('ACT100 的状态是什么？', true);
+
+    expect(route).toBe('simple');
+  });
+
   it('caps retrieval query count and returned chunks', async () => {
     const { service, karpathyRagService } = createService();
     karpathyRagService.retrieve.mockResolvedValue([

@@ -22,7 +22,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     audit: true,
     fallback: '跳过联网搜索，继续使用本地 RAG / BM25 / ES 证据。',
     owner: 'rag-backend',
-    modes: ['auto', 'agentic'],
+    modes: ['simple', 'auto', 'agentic'],
   },
   {
     name: 'dashscope_rerank',

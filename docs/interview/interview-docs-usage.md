@@ -347,7 +347,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 | 图里的方向             | 你的项目怎么讲                                                          | 面试重点                                          |
 | ---------------------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
-| Agent 记忆机制         | Redis 短期记忆摘要 + Mem0 长期记忆 + Admin 记忆管理                     | 记忆分层、污染控制、摘要压缩、用户隔离            |
+| Agent 记忆机制         | Redis 最近消息／摘要优先；Redis 缺失时 PostgreSQL 持久化摘要＋近期会话回退，旧会话无摘要时从早期消息重建一次并持久化；再按需注入 Mem0 长期记忆＋会话向量检索 | 记忆分层、污染控制、摘要压缩、用户隔离            |
 | Agent 架构与工作流     | simple / auto / agentic 分层路由，复杂需求走 LangGraph                  | 简单问题 fast path，复杂问题 Agentic Workflow     |
 | LangGraph 节点/边/状态 | routing、retrieval、sufficiency、rerank、generate、citation、reflection | 为什么用图编排，而不是单次 LLM 调用               |
 | Agent 工程落地         | RAG 后端、Admin、评测脚本、MCP 工具服务                                 | 能运营、能评测、能被 AI Coding 工具调用           |

@@ -59,6 +59,13 @@ describe('KarpathyRagService exception scenarios', () => {
       retrieveMatches: jest.fn().mockResolvedValue([]),
       formatPrompt: jest.fn().mockReturnValue(''),
     } as unknown as BadCaseFlywheelService;
+    const bochaSearchService = {
+      isEnabled: jest.fn().mockReturnValue(false),
+      search: jest.fn().mockResolvedValue([]),
+    };
+    const toolPolicy = {
+      decide: jest.fn().mockReturnValue({ allowed: true }),
+    };
 
     const service = new KarpathyRagService(
       embeddingProvider,
@@ -69,6 +76,8 @@ describe('KarpathyRagService exception scenarios', () => {
       metricsService,
       obsidianKnowledge,
       badCaseFlywheel,
+      bochaSearchService as unknown as import('../../tools/bocha-search.service').BochaSearchService,
+      toolPolicy as unknown as import('../../tools/tool-execution-policy.service').ToolExecutionPolicyService,
     );
     (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
       save: jest.fn(),
@@ -80,6 +89,7 @@ describe('KarpathyRagService exception scenarios', () => {
       vectorStoreProvider,
       metricsService,
       observeRetrievalHits,
+      bochaSearchService,
     };
   }
 
@@ -92,9 +102,29 @@ describe('KarpathyRagService exception scenarios', () => {
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；已使用模型兜底回答',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses Bocha web search when local evidence is insufficient', async () => {
+    const { service, bochaSearchService } = createService();
+    bochaSearchService.isEnabled.mockReturnValue(true);
+    bochaSearchService.search.mockResolvedValue([
+      {
+        title: '官方活动说明',
+        url: 'https://example.com/activity',
+        snippet: '活动开放时间为周末。',
+        summary: '官方活动摘要',
+      },
+    ]);
+
+    await expect(service.answer('活动什么时候开放？')).resolves.toMatchObject({
+      retrievalSufficient: true,
+      references: [{ docId: 'https://example.com/activity', retrievalSource: 'web' }],
+      retrievalReason: expect.stringContaining('Bocha 联网搜索'),
+    });
+    expect(bochaSearchService.search).toHaveBeenCalledWith('活动什么时候开放？', 5);
   });
 
   it('returns a friendly answer when no related document is found', async () => {
@@ -119,7 +149,7 @@ describe('KarpathyRagService exception scenarios', () => {
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；已使用模型兜底回答',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
@@ -147,6 +177,170 @@ describe('KarpathyRagService exception scenarios', () => {
       retrievalReason: '检索片段和答案引用通过本地质量闸门',
     });
     expect(result.references).toHaveLength(1);
+  });
+
+  it('Simple 自适应检索对精确查询先使用关键词索引，不调用向量库', async () => {
+    const { service, llmInvoke, vectorStoreProvider } = createService();
+    llmInvoke.mockResolvedValueOnce('活动 ID ACT100 的状态是已上线。[片段1]');
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-act100',
+          content: '活动 ID ACT100 的状态是已上线。',
+          docId: 'activity-doc',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.answer(
+      '活动 ID ACT100 的状态是什么？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { adaptiveVectorSearch: true },
+    );
+
+    expect(result.retrievalSufficient).toBe(true);
+    expect(vectorStoreProvider.similaritySearch).not.toHaveBeenCalled();
+  });
+
+  it('Simple 自适应检索对流程类问题直接使用混合检索', async () => {
+    const { service, llmInvoke, vectorStoreProvider } = createService();
+    llmInvoke.mockResolvedValueOnce('先创建活动，再配置奖池。[片段1]');
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-process',
+          content: '配置抽奖活动时，先创建活动，再配置奖池。',
+          docId: 'activity-process-doc',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+
+    await service.answer(
+      '如何配置抽奖活动流程？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { adaptiveVectorSearch: true },
+    );
+
+    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('Simple 关键词证据不足时补查向量库', async () => {
+    const { service, llmInvoke, vectorStoreProvider } = createService({
+      vectorStoreProvider: {
+        similaritySearch: jest.fn().mockResolvedValue([
+          {
+            id: 'chunk-semantic',
+            content: '活动 ID ACT100 的状态是已上线。',
+            docId: 'activity-semantic-doc',
+            chunkIndex: 0,
+            score: 0.98,
+          },
+        ]),
+      },
+    });
+    llmInvoke.mockResolvedValueOnce('活动 ID ACT100 的状态是已上线。[片段1]');
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-semantic',
+          content: '活动 ID ACT100 的状态是已上线。',
+          docId: 'activity-semantic-doc',
+          chunkIndex: 0,
+        },
+      ],
+      'user-1',
+    );
+    jest
+      .spyOn(
+        service as unknown as { searchLocalBm25: jest.Mock },
+        'searchLocalBm25',
+      )
+      .mockReturnValue([]);
+
+    const result = await service.answer(
+      '活动 ID ACT100 的状态是什么？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { adaptiveVectorSearch: true },
+    );
+
+    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(result.retrievalSufficient).toBe(true);
+  });
+
+  it('受治理 Karpathy 精确命中时直接抽取回答，不调用向量库或 LLM', async () => {
+    const { service, llmInvoke, vectorStoreProvider } = createService();
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-governed-direct',
+          content: '活动 ID ACT100 的状态是已上线。',
+          docId: 'governed-activity-doc',
+          chunkIndex: 0,
+          lifecycleStatus: 'effective',
+          docVersion: '2026.01',
+          effectiveAt: new Date('2026-01-01T00:00:00.000Z'),
+          sourceAuthority: 'official',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.answer(
+      '活动 ID ACT100 的状态是什么？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { karpathyDirectAnswer: true },
+    );
+
+    expect(result.answer).toContain('活动 ID ACT100 的状态是已上线');
+    expect(result.retrievalReason).toContain('受治理 Karpathy 编译知识');
+    expect(vectorStoreProvider.similaritySearch).not.toHaveBeenCalled();
+    expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
+  it('缺少版本元数据的 Karpathy 知识不能绕过检索与生成门禁', async () => {
+    const { service, vectorStoreProvider } = createService();
+    service.indexChunks(
+      [
+        {
+          id: 'chunk-missing-version',
+          content: '活动 ID ACT101 的状态是已上线。',
+          docId: 'missing-version-doc',
+          chunkIndex: 0,
+          lifecycleStatus: 'effective',
+          effectiveAt: new Date('2026-01-01T00:00:00.000Z'),
+          sourceAuthority: 'official',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.answer(
+      '活动 ID ACT101 的状态是什么？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { karpathyDirectAnswer: true },
+    );
+
+    expect(result.retrievalReason).not.toContain('受治理 Karpathy 编译知识');
+    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an LLM answer without citations when no extractive answer can be built', async () => {
@@ -315,7 +509,7 @@ describe('KarpathyRagService exception scenarios', () => {
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；已使用模型兜底回答',
+        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
     });
     expect(llmInvoke).toHaveBeenCalledTimes(1);
   });
