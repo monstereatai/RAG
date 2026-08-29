@@ -44,11 +44,11 @@
 
 ## 当前结论
 
-- 已重新审计 `docs/interview/功能步骤流程.md` 的 36 张 Mermaid 架构图：每个节点和分组均补充括号注释，明确输入、处理动作、状态写入和输出；拆开 Simple 直接联网与 Auto 先升级 Agentic、再按子问题联网的路径，移除错误的 Redis→Mem0 直连和 Simple 默认图谱检索表述。记忆链路已统一为 Redis 工作记忆优先（摘要＋最近窗口）；会话压缩时，结构化摘要同步写入 PostgreSQL `conversations.contextSummary`（持久化源）与 Redis（热副本），Redis 为空、过期或不可用时由 PostgreSQL 持久化摘要＋最近约 5 轮容灾回退，并在 Redis 恢复后回暖摘要；历史会话若尚无持久化摘要，则从 PostgreSQL 早期消息一次性重建并保存。Mem0 与会话向量检索补充相关历史；Redis 在超过约 2,000 Token 或 30 条消息时压缩较早内容，保留最近约 1,200 Token，并以摘要、长期记忆、权限／版本／时间过滤共同控制模型上下文。已完成 Mermaid 节点注释、箭头样式索引和 Markdown 格式检查。
+- 已重构 `docs/interview/功能步骤流程.md` 为 12 章的实现核对版：删去与参考项目归档重复的流程叙述，统一 Simple、Auto、Chat Agentic 与 Task Agentic 的定义；按用户操作、数据／状态流、代码入口和生产边界重写核心链路。已修复目录锚点，并对 16 张 Mermaid 图逐一校验箭头样式索引；参考项目内容统一链接至 `docs/interview/开源项目参考能力归档.md`，不再作为实现状态的重复来源。
 
 - 三条问答链路已按分层策略收紧：Simple 首先执行 Bad Case 预检查，再尝试受治理 Karpathy 直答；只有 `docVersion` 完整、`effective`、有来源、权限范围匹配、处于生效时间、无待确认项且问题关键词覆盖度达到默认 70％的编译知识才能抽取式返回并附引用，不查询 Milvus、不调用 LLM。缺少任一治理字段的知识不会绕过常规检索与生成门禁。其余 Simple 问题使用联网兜底与自适应检索，Query 标准化只做 Unicode NFKC、空白清理、已登记错别字修正和少数领域规则补充；精确查询优先走本地 BM25，关键词证据不足才补一次 Embedding＋Milvus 向量检索，流程／对比／方案类问题则直接走混合检索。Auto 始终先执行一次完整 Hybrid Fast Path，并结合证据充分性与任务复杂度决定直接生成或升级 Agentic；直接生成时复用首轮证据，避免重复检索。Agentic 保持子问题并行 Hybrid 检索，按需补图谱、联网和受控工具，再执行反思、审批与 Checkpoint 恢复。Simple 本地证据不足时通过 Tool Registry 调用 Bocha Web Search，网页内容按不可信上下文清洗后交给 LLM 归纳并作为可点击来源返回；联网未配置、超时或无结果时才进入受限模型兜底。
 - 本轮实现已验证：Karpathy 直答正例能在治理字段齐全时只走本地 BM25 抽取答案，缺少版本字段时会回到常规向量／生成门禁；Karpathy、Agentic 和 Chat 相关测试共 34 项通过，Backend TypeScript 检查通过，健康接口返回 200。
-- Simple 流程文档已补充模块级架构图：明确 `ChatService`、`BadCaseFlywheelService`、`KarpathyRagService`、`Bm25Store`、`VectorStoreProvider／Milvus`、`ToolExecutionPolicyService`、`BochaSearchService` 和 `LlmProvider` 的调用关系，并与数据／状态流转步骤对齐。
+- Simple 运行时已明确模块调用关系：`ChatService`、`BadCaseFlywheelService`、`KarpathyRagService`、`Bm25Store`、`VectorStoreProvider／Milvus`、`ToolExecutionPolicyService`、`BochaSearchService` 和 `LlmProvider` 分别负责请求编排、纠错预检、检索、工具策略与生成；流程文档只保留面试所需的主链路与代码入口。
 - Agentic 文档已改为「一个共享 Runtime、两条受控状态机」：Chat Agentic 专注子问题取证、工具补充和答案汇总；Task Agentic 专注岗位 DAG、Artifact、审批和任务导出。普通问答不再被表述为必须走岗位协作或产出 Artifact，Task 的审批与局部重跑也不再混入 Chat 问答路径。
 - 《功能步骤流程》第六至第九章已按真实职责重构：LangFuse 追踪、Prometheus 指标／告警与健康检查独立说明；Agent 运营后台区分 Chat 诊断入口和 Task 工作流入口；Prompt Injection 的不可信证据隔离与 Tool Registry 的工具准入／审批拆开；质量、性能、稳定性、成本脚本统一产出 Evidence 报告，由人工决定灰度或回滚，不再表述为脚本自动发布。
 

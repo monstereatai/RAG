@@ -189,7 +189,7 @@ ROADMAP.md
 
 ```text
 docs/interview/开源项目参考能力归档.md
-docs/interview/功能步骤流程.md 的“Dify／RAGFlow／AutoGPT／MetaGPT／CrewAI／AutoGen”章节
+docs/interview/功能步骤流程.md 的“十二、参考项目归档与面试表达”章节
 ROADMAP.md
 ```
 
