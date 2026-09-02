@@ -152,3 +152,34 @@ test('RagApiClient refreshes token and retries once on unauthorized', async () =
   assert.equal(loginCount, 1);
   assert.equal(searchCount, 2);
 });
+
+test('RagApiClient calls governance, workflow and scheduled-job read endpoints', async () => {
+  const paths: string[] = [];
+  const client = new RagApiClient({
+    baseUrl: 'http://rag.test/api/v1',
+    token: 'test-token',
+    fetchImpl: async (url) => {
+      paths.push(new URL(String(url)).pathname);
+      return new Response(JSON.stringify({ code: 0, data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  await client.productionWorkflowStatus('thread 1');
+  await client.listDocuments();
+  await client.documentStatus('doc 1');
+  await client.documentTaskStatus('task 1');
+  await client.listScheduledJobs();
+  await client.scheduledJobExecutions('job 1');
+
+  assert.deepEqual(paths, [
+    '/api/v1/workflows/production/thread%201',
+    '/api/v1/documents',
+    '/api/v1/documents/doc%201',
+    '/api/v1/documents/tasks/task%201',
+    '/api/v1/jobs',
+    '/api/v1/jobs/job%201/executions',
+  ]);
+});

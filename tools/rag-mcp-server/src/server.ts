@@ -166,6 +166,83 @@ export async function createServer(): Promise<McpServer> {
       }),
   );
 
+  server.registerTool(
+    'rag_production_workflow_status',
+    {
+      title: 'Inspect production workflow status',
+      description:
+        'Return the current user-visible production workflow status, stages, approval state and artifacts by thread ID. This is read-only; use Admin to approve or resume.',
+      inputSchema: {
+        threadId: z.string().min(1).describe('Production workflow thread ID returned by rag_production_workflow_activities.'),
+      },
+    },
+    async ({ threadId }) => runTool(async () => client.productionWorkflowStatus(threadId)),
+  );
+
+  server.registerTool(
+    'rag_document_governance_list',
+    {
+      title: 'List visible document governance state',
+      description:
+        'List only documents visible to the current MCP user, including lifecycle, review, version and graph indexing status. Read-only; review approval stays in Admin.',
+      inputSchema: {},
+    },
+    async () =>
+      runTool(async () =>
+        (await client.listDocuments()).map((document) => compactDocumentStatus(document)),
+      ),
+  );
+
+  server.registerTool(
+    'rag_document_governance_status',
+    {
+      title: 'Inspect one document governance state',
+      description:
+        'Inspect one current-user document, including lifecycle, review, version and indexing status. Read-only.',
+      inputSchema: {
+        docId: z.string().min(1).describe('Document ID from rag_document_governance_list.'),
+      },
+    },
+    async ({ docId }) => runTool(async () => compactDocumentStatus(await client.documentStatus(docId))),
+  );
+
+  server.registerTool(
+    'rag_document_task_status',
+    {
+      title: 'Inspect document ingestion task',
+      description:
+        'Inspect the current user document asynchronous ingestion task, including progress, stage and failure reason. Read-only.',
+      inputSchema: {
+        taskId: z.string().min(1).describe('Task ID returned by document asynchronous upload.'),
+      },
+    },
+    async ({ taskId }) => runTool(async () => client.documentTaskStatus(taskId)),
+  );
+
+  server.registerTool(
+    'rag_scheduled_analysis_jobs',
+    {
+      title: 'List scheduled analysis jobs',
+      description:
+        'List scheduled analysis job definitions and their versions. The backend enforces the current user role; this MCP tool is read-only.',
+      inputSchema: {},
+    },
+    async () => runTool(async () => client.listScheduledJobs()),
+  );
+
+  server.registerTool(
+    'rag_scheduled_analysis_executions',
+    {
+      title: 'Inspect scheduled analysis executions',
+      description:
+        'Inspect execution history and generated reports for one scheduled analysis job. The backend enforces the current user role; this MCP tool is read-only.',
+      inputSchema: {
+        jobId: z.string().min(1).describe('Scheduled job ID from rag_scheduled_analysis_jobs.'),
+      },
+    },
+    async ({ jobId }) => runTool(async () => client.scheduledJobExecutions(jobId)),
+  );
+
   registerGameTool(server, client, 'rag_game_plan', 'plan');
   registerGameTool(server, client, 'rag_game_checklist', 'checklist');
   registerGameTool(server, client, 'rag_game_tracking', 'tracking');
@@ -298,6 +375,20 @@ function compactChunk(chunk: object): Record<string, unknown> {
   };
 }
 
+function compactDocumentStatus(document: Record<string, unknown>): Record<string, unknown> {
+  return {
+    docId: document.docId ?? document.id,
+    filename: document.filename ?? document.title ?? document.name,
+    chunkCount: document.chunkCount ?? 0,
+    lifecycleStatus: document.lifecycleStatus ?? null,
+    reviewStatus: document.reviewStatus ?? null,
+    docVersion: document.docVersion ?? null,
+    effectiveAt: document.effectiveAt ?? null,
+    expiredAt: document.expiredAt ?? null,
+    graphIndexStatus: document.graphIndexStatus ?? null,
+  };
+}
+
 function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
 }
@@ -335,6 +426,12 @@ function helpText(): string {
     '  rag_agent_pipeline',
     '  rag_production_workflow_context',
     '  rag_production_workflow_activities',
+    '  rag_production_workflow_status',
+    '  rag_document_governance_list',
+    '  rag_document_governance_status',
+    '  rag_document_task_status',
+    '  rag_scheduled_analysis_jobs',
+    '  rag_scheduled_analysis_executions',
     '  rag_game_plan',
     '  rag_game_checklist',
     '  rag_game_tracking',

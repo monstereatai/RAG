@@ -53,6 +53,7 @@
 - Task Agentic 的驳回修订补齐“修订包”闭环：待修订页面可录入缺失资料、已核验来源和业务约束，并只能从被驳回岗位中选择局部重试；补充资料进入当前修订的检索与模型上下文，但明确标记为待核验，不能单独作为事实声明证据。修订包、局部重试范围和时间写入版本历史及运行事件；下游保持过期，待修订版本审批通过后按 DAG 继续。
 
 - Agent 运营已新增通用定时任务闭环：管理员可用自然语言或 Markdown 定义周期分析任务，先解析并人工确认 Cron、统计窗口、数据范围、岗位和部门，再保存到 `scheduled_jobs`；现有 `JobsService` 支持启动恢复、启停、立即执行、重入保护和 `job_executions` 历史。执行时并行汇总规则文档、问答质量、负反馈代理指标与产研运任务，先生成可复核快照，再由 LLM 输出受证据约束的 Markdown 建议；后台可展开最近报告和逐次历史。Backend 定向 2 套件／6 项测试、Admin Backend 与 Admin TypeScript 检查通过；真实客服工单与企业微信等通知 API 仍是外部接入边界。
+- MCP／CLI 已对齐当前运营能力：MCP 新增工作流状态、文档治理／异步入库状态、定时任务及执行报告的只读工具；CLI 新增 `doc task`、`workflow list/show/context`、`admin job list/versions/executions/run/copy/start/stop`。所有请求仍经后端 JWT、数据范围和管理员角色校验；MCP 不开放审批、发布、删除或任务启停，CLI 不直连数据库或环境变量。Backend TypeScript、MCP 9 项测试和 CLI 12 项测试通过。
 
 - Simple／Auto 已补齐 Base Case 并发召回闭环：Direct Answer Gate 未命中后，Base Case、正式 Hybrid RAG 与 Obsidian 同时启动；已审核的 `exact`／`correction` 候选转换为可引用证据，进入统一合并与充分性门禁，Auto 的 `prefetchedFastPath` 同步复用 Base Case 快照。新增受限中文姓名单字纠错，只接受同长度、同首字且仅一个中文字符不同的近似问题；“韦永春是谁”可纠正到已审核的“韦水春是谁”，不同姓氏和数字版本不会自动合并。真实接口回放确认 Simple 与 Auto 均返回 `retrievalSufficient=true`、实际路由 `simple`、1 条 Base Case 引用；Backend 3 个定向测试套件／43 项测试、生产构建和《功能步骤流程》19 张 Mermaid 图解析通过。
 

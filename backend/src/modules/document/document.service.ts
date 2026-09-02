@@ -75,6 +75,9 @@ export interface UploadOptions {
 export interface DocMeta extends UploadResult {
   filename: string;
   createdAt: string;
+  reviewStatus?: 'draft' | 'pending_review' | 'approved' | 'rejected';
+  reviewedAt?: string | null;
+  reviewComment?: string | null;
 }
 
 type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
@@ -745,6 +748,9 @@ export class DocumentService {
       roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
       documentType: meta.documentType as GameDocumentType,
       lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      reviewStatus: meta.reviewStatus,
+      reviewedAt: meta.reviewedAt?.toISOString() ?? null,
+      reviewComment: meta.reviewComment,
       graphIndexStatus: meta.graphIndexStatus,
       graphIndexedAt: meta.graphIndexedAt?.toISOString() ?? null,
       graphIndexError: meta.graphIndexError,
@@ -780,6 +786,9 @@ export class DocumentService {
       roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
       documentType: meta.documentType as GameDocumentType,
       lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      reviewStatus: meta.reviewStatus,
+      reviewedAt: meta.reviewedAt?.toISOString() ?? null,
+      reviewComment: meta.reviewComment,
       graphIndexStatus: meta.graphIndexStatus,
       graphIndexedAt: meta.graphIndexedAt?.toISOString() ?? null,
       graphIndexError: meta.graphIndexError,

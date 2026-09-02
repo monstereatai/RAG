@@ -87,6 +87,28 @@ interface ProductionWorkflowSummary {
   selectedRoles?: string[];
 }
 
+export interface DocumentGovernanceItem {
+  docId: string;
+  filename: string;
+  chunkCount: number;
+  lifecycleStatus?: string;
+  reviewStatus?: string;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  graphIndexStatus?: string;
+  [key: string]: unknown;
+}
+
+export interface ScheduledJobSummary {
+  id: string;
+  name?: string;
+  status?: string;
+  schedule?: string;
+  version?: number;
+  isCurrent?: boolean;
+  [key: string]: unknown;
+}
+
 interface LoginResult {
   accessToken?: string;
   token?: string;
@@ -187,6 +209,32 @@ export class RagApiClient {
 
   async productionWorkflowActivities(): Promise<ProductionWorkflowSummary[]> {
     return this.request<ProductionWorkflowSummary[]>('/workflows/production');
+  }
+
+  async productionWorkflowStatus(threadId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(threadId)}`,
+    );
+  }
+
+  async listDocuments(): Promise<DocumentGovernanceItem[]> {
+    return this.request<DocumentGovernanceItem[]>('/documents');
+  }
+
+  async documentStatus(docId: string): Promise<DocumentGovernanceItem> {
+    return this.request<DocumentGovernanceItem>(`/documents/${encodeURIComponent(docId)}`);
+  }
+
+  async documentTaskStatus(taskId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/documents/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async listScheduledJobs(): Promise<ScheduledJobSummary[]> {
+    return this.request<ScheduledJobSummary[]>('/jobs');
+  }
+
+  async scheduledJobExecutions(jobId: string): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>(`/jobs/${encodeURIComponent(jobId)}/executions`);
   }
 
   private async request<T>(

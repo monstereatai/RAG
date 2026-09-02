@@ -99,6 +99,12 @@ API Key 不使用登录 JWT 的 7 天有效期；后端只保存 hash，明文�
 | `rag_agent_pipeline` | 调用 Supervisor 多 Agent 管线，返回 researcher/analyst/writer/critic/editor 阶段 |
 | `rag_production_workflow_context` | 按活动名称查找最近一条已完成产研运工作流，并返回审批后代码交接物，供 Codex 在当前代码目录实施 |
 | `rag_production_workflow_activities` | 查询当前用户可见的产研运活动、状态、完成岗位和更新时间 |
+| `rag_production_workflow_status` | 按 Thread 查询当前用户可见的工作流阶段、审批和 Artifact 状态，只读 |
+| `rag_document_governance_list` | 查询当前 MCP 用户可见文档的版本、生命周期、审核和索引状态，只读 |
+| `rag_document_governance_status` | 查询一份当前用户文档的详细治理状态，只读 |
+| `rag_document_task_status` | 查询当前用户异步入库任务的进度、阶段和失败原因，只读 |
+| `rag_scheduled_analysis_jobs` | 查询版本化定时分析任务；后端仍校验当前用户角色，只读 |
+| `rag_scheduled_analysis_executions` | 查询某个定时分析任务的执行历史和报告，只读 |
 | `rag_game_plan` | 生成游戏活动/官网营销方案上下文 |
 | `rag_game_checklist` | 生成上线前 checklist |
 | `rag_game_tracking` | 生成埋点方案草案 |
@@ -120,7 +126,7 @@ Agent 自动用系统：MCP
 3. 使用 MCP 时，在 Codex 中配置本 MCP Server，先调用 `rag_production_workflow_activities` 查看活动列表，再调用 `rag_production_workflow_context`，参数传入活动名称，例如 `act10`，不需要手动复制 Thread ID。MCP 会自动匹配最近一条已完成工作流。
 4. Codex 读取返回的产品、设计、前端、后端、测试和运营交接物，在当前代码目录中实现；写代码前仍应先检查本地代码和测试，不把 Markdown 交接物直接当成已验证代码。
 
-MCP 工具只读取已完成的工作流，不直接写入本机目录。目录写入由浏览器在用户明确选择目录后完成，避免服务端获得任意文件系统写权限。
+MCP 工具不会直接写入本机目录。目录写入由浏览器在用户明确选择目录后完成，避免服务端获得任意文件系统写权限。MCP 新增的文档治理、入库任务、定时任务和工作流状态工具均为只读：审核、发布、删除、恢复和定时任务启停仍必须从 Admin 或 CLI 调用后端受角色校验的接口完成。
 
 | 触发场景 | 推荐工具 |
 |----------|----------|

@@ -25,4 +25,16 @@ export function registerDocCommand(program: Command, deps: CommandDeps): void {
       }, runtime.output);
     },
   );
+
+  addBaseOptions(doc.command('task').argument('<taskId>', 'asynchronous ingestion task id')).action(
+    async (taskId: string, rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Loading document task', () =>
+          runtime.apiClient.getDocumentTask(taskId),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
 }

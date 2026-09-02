@@ -12,6 +12,7 @@ import { registerEvalCommand } from './commands/eval.js';
 import { registerGraphCommand } from './commands/graph.js';
 import { registerSearchCommand } from './commands/search.js';
 import { registerSkillCommand } from './commands/skill.js';
+import { registerWorkflowCommand } from './commands/workflow.js';
 
 const program = new Command();
 const deps = {
@@ -32,6 +33,7 @@ registerAskCommand(program, deps);
 registerContextCommand(program, deps);
 registerSkillCommand(program, deps);
 registerDocCommand(program, deps);
+registerWorkflowCommand(program, deps);
 registerAdminCommand(program, deps);
 registerGraphCommand(program, deps);
 registerEvalCommand(program, deps);

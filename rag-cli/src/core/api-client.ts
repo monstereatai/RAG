@@ -205,6 +205,56 @@ export class RagApiClient {
     return this.request<DocumentItem>(`/documents/${encodeURIComponent(docId)}`);
   }
 
+  async getDocumentTask(taskId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/documents/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async listProductionWorkflows(): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>('/workflows/production');
+  }
+
+  async getProductionWorkflow(threadId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(threadId)}`,
+    );
+  }
+
+  async getProductionWorkflowCodingContext(threadId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(threadId)}/coding-context`,
+    );
+  }
+
+  async listScheduledJobs(): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>('/jobs');
+  }
+
+  async getScheduledJobVersions(jobId: string): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>(`/jobs/${encodeURIComponent(jobId)}/versions`);
+  }
+
+  async getScheduledJobExecutions(jobId: string): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>(`/jobs/${encodeURIComponent(jobId)}/executions`);
+  }
+
+  async runScheduledJob(jobId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/jobs/${encodeURIComponent(jobId)}/run`, {
+      method: 'POST',
+    });
+  }
+
+  async copyScheduledJob(jobId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/jobs/${encodeURIComponent(jobId)}/copy`, {
+      method: 'POST',
+    });
+  }
+
+  async setScheduledJobStatus(jobId: string, status: 'start' | 'stop'): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/jobs/${encodeURIComponent(jobId)}/${status}`, {
+      method: 'PATCH',
+    });
+  }
+
   private async request<T>(
     path: string,
     options: {

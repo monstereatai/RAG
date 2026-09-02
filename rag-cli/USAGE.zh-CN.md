@@ -213,6 +213,41 @@ node dist/src/bin.js doc list
 node dist/src/bin.js doc show <document-id>
 ```
 
+查看异步入库进度或失败原因：
+
+```bash
+node dist/src/bin.js doc task <task-id>
+```
+
+查看自己可见的产研运工作流、阶段产物和已审批代码交接物：
+
+```bash
+node dist/src/bin.js workflow list
+node dist/src/bin.js workflow show <thread-id>
+node dist/src/bin.js workflow context <thread-id>
+```
+
+`workflow context` 只读取已完成工作流，不能用 CLI 绕过审批或继续运行。
+
+查看定时分析任务及其版本／执行报告：
+
+```bash
+node dist/src/bin.js admin job list
+node dist/src/bin.js admin job versions <job-id>
+node dist/src/bin.js admin job executions <job-id>
+```
+
+管理员可在终端执行受后端角色校验的操作：
+
+```bash
+node dist/src/bin.js admin job run <job-id>
+node dist/src/bin.js admin job copy <job-id>
+node dist/src/bin.js admin job start <job-id>
+node dist/src/bin.js admin job stop <job-id>
+```
+
+这些写操作仍由后端 `admin` 角色校验；普通用户会收到权限错误，不会因为 CLI 而获得额外权限。
+
 查看搜索运营状态：
 
 ```bash

@@ -64,3 +64,42 @@ test('RagApiClient parses chat SSE events with CRLF delimiters', async () => {
     ['token', 'token', 'final'],
   );
 });
+
+test('RagApiClient calls document, workflow and scheduled-job endpoints', async () => {
+  const requestedPaths: string[] = [];
+  const client = new RagApiClient({
+    baseUrl: 'http://example.test/api/v1',
+    token: 'token',
+    fetchImpl: async (url) => {
+      requestedPaths.push(new URL(String(url)).pathname);
+      return new Response(JSON.stringify({ code: 200, data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  await client.getDocumentTask('task 1');
+  await client.listProductionWorkflows();
+  await client.getProductionWorkflow('thread 1');
+  await client.getProductionWorkflowCodingContext('thread 1');
+  await client.listScheduledJobs();
+  await client.getScheduledJobVersions('job 1');
+  await client.getScheduledJobExecutions('job 1');
+  await client.runScheduledJob('job 1');
+  await client.copyScheduledJob('job 1');
+  await client.setScheduledJobStatus('job 1', 'stop');
+
+  assert.deepEqual(requestedPaths, [
+    '/api/v1/documents/tasks/task%201',
+    '/api/v1/workflows/production',
+    '/api/v1/workflows/production/thread%201',
+    '/api/v1/workflows/production/thread%201/coding-context',
+    '/api/v1/jobs',
+    '/api/v1/jobs/job%201/versions',
+    '/api/v1/jobs/job%201/executions',
+    '/api/v1/jobs/job%201/run',
+    '/api/v1/jobs/job%201/copy',
+    '/api/v1/jobs/job%201/stop',
+  ]);
+});

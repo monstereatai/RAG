@@ -13,6 +13,9 @@ type AdminSearchKind = (typeof adminSearchKinds)[number];
 
 export function registerAdminCommand(program: Command, deps: CommandDeps): void {
   const admin = program.command('admin').description('Inspect RAG admin operations');
+  const job = admin
+    .command('job')
+    .description('Manage scheduled analysis jobs; write operations require the admin role');
 
   addBaseOptions(
     admin
@@ -33,6 +36,80 @@ export function registerAdminCommand(program: Command, deps: CommandDeps): void 
       runtime.output.write({ status: 'ok', data: result });
     }, runtime.output);
   });
+
+  addBaseOptions(job.command('list').description('List scheduled analysis jobs')).action(
+    async (rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Loading scheduled jobs', () =>
+          runtime.apiClient.listScheduledJobs(),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
+
+  addBaseOptions(job.command('versions').argument('<jobId>', 'job id')).action(
+    async (jobId: string, rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Loading job versions', () =>
+          runtime.apiClient.getScheduledJobVersions(jobId),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
+
+  addBaseOptions(job.command('executions').argument('<jobId>', 'job id')).action(
+    async (jobId: string, rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Loading job executions', () =>
+          runtime.apiClient.getScheduledJobExecutions(jobId),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
+
+  addBaseOptions(job.command('run').argument('<jobId>', 'job id')).action(
+    async (jobId: string, rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Running scheduled job', () =>
+          runtime.apiClient.runScheduledJob(jobId),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
+
+  addBaseOptions(job.command('copy').argument('<jobId>', 'job id')).action(
+    async (jobId: string, rawOptions) => {
+      const runtime = await createRuntime(deps, rawOptions);
+      await runCommand(async () => {
+        const result = await withSpinner(runtime.options, 'Copying scheduled job', () =>
+          runtime.apiClient.copyScheduledJob(jobId),
+        );
+        runtime.output.write({ status: 'ok', data: result });
+      }, runtime.output);
+    },
+  );
+
+  for (const status of ['start', 'stop'] as const) {
+    addBaseOptions(job.command(status).argument('<jobId>', 'job id')).action(
+      async (jobId: string, rawOptions) => {
+        const runtime = await createRuntime(deps, rawOptions);
+        await runCommand(async () => {
+          const result = await withSpinner(runtime.options, `${status === 'start' ? 'Enabling' : 'Disabling'} scheduled job`, () =>
+            runtime.apiClient.setScheduledJobStatus(jobId, status),
+          );
+          runtime.output.write({ status: 'ok', data: result });
+        }, runtime.output);
+      },
+    );
+  }
 }
 
 function parseAdminSearchKind(raw: unknown): AdminSearchKind {

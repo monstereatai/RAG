@@ -73,7 +73,17 @@ rag ask "question" --stream
 rag context "coding task" --format json
 rag skill match "task"
 rag doc list
+rag doc task <task-id>
+rag workflow list
+rag workflow show <thread-id>
+rag workflow context <thread-id>
 rag admin search --kind popular
+rag admin job list
+rag admin job executions <job-id>
+rag admin job run <job-id>
+rag admin job copy <job-id>
+rag admin job start <job-id>
+rag admin job stop <job-id>
 rag graph query "which systems depend on Milvus?"
 rag eval status
 rag eval run --dataset rag-smoke --mode offline
@@ -88,6 +98,9 @@ Current backend alignment:
 - `rag search` and `rag context` prefer the formal `/rag/search` and `/rag/context` APIs, then conservatively fall back when talking to an older backend.
 - `rag ask --stream` consumes backend SSE directly. It does not simulate a typewriter effect on the client.
 - `rag admin search`, `rag graph query`, `rag eval status`, and `rag eval run` expose existing backend operation, GraphRAG, and evaluation entrypoints.
+- `rag doc list/show/task` exposes only the current user's document lifecycle, review/version/indexing and asynchronous ingest task state.
+- `rag workflow list/show/context` reads the current user's production workflow and its approved coding handoff. `context` only succeeds for a completed workflow.
+- `rag admin job list/versions/executions` reads versioned scheduled-analysis jobs; `run/copy/start/stop` are still checked by the backend admin role and are not a CLI bypass.
 - The CLI does not manage Milvus, databases, production configs, or keys. Current project-level status is recorded in the root `ROADMAP.md`: maturity `93/100`, project RAG eval `28/28`; Milvus runtime timeout remains a backend/runtime blocker.
 
 ## Output Contract
