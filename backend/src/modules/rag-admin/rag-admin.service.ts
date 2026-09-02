@@ -21,6 +21,7 @@ import {
   DocumentLifecycleStatus,
   GameDocumentType,
 } from '../document/document-profile.util';
+import { DomainEventsService } from '../domain-events/domain-events.service';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -111,6 +112,7 @@ export class RagAdminService {
     private readonly documentReviewRepo: Repository<DocumentReviewEntity>,
     @InjectRepository(FactConflictEntity)
     private readonly factConflictRepo: Repository<FactConflictEntity>,
+    private readonly domainEvents: DomainEventsService,
   ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
@@ -379,6 +381,7 @@ export class RagAdminService {
       doc.userId,
       lifecycleStatus,
     );
+    if (updated) await this.domainEvents.emit({ eventType: 'document.lifecycle_changed', aggregateType: 'document', aggregateId: docId, payload: { lifecycleStatus } });
     return updated ? { docId, lifecycleStatus } : null;
   }
 
@@ -395,6 +398,7 @@ export class RagAdminService {
       target.userId,
       versions.map((version) => version.docId),
     );
+    if (updated) await this.domainEvents.emit({ eventType: 'document.effective', aggregateType: 'document', aggregateId: docId, payload: { docVersion: target.docVersion ?? null } });
     return updated ? { docId, lifecycleStatus: 'effective' } : null;
   }
 
@@ -459,6 +463,7 @@ export class RagAdminService {
         comment: comment?.trim() || null,
       }),
     );
+    if (action === 'approved' || action === 'rejected') await this.domainEvents.emit({ eventType: `document.review_${action}`, aggregateType: 'document', aggregateId: docId, payload: { reviewStatus, operatorId: operatorId ?? null } });
     return { docId, reviewStatus, action };
   }
 

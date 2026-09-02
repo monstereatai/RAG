@@ -34,6 +34,8 @@ import { ArtifactDependencyEntity } from './entities/artifact-dependency.entity'
 import { DecisionRecordEntity } from './entities/decision-record.entity';
 import { AgentTaskEntity } from './entities/agent-task.entity';
 import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
+import { DomainEventOutboxEntity } from './entities/domain-event-outbox.entity';
+import { DomainEventSubscriptionEntity } from './entities/domain-event-subscription.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -103,6 +105,8 @@ import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
             DecisionRecordEntity,
             AgentTaskEntity,
             AgentRuntimeEventEntity,
+            DomainEventOutboxEntity,
+            DomainEventSubscriptionEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -147,6 +151,8 @@ import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
       DecisionRecordEntity,
       AgentTaskEntity,
       AgentRuntimeEventEntity,
+      DomainEventOutboxEntity,
+      DomainEventSubscriptionEntity,
     ]),
   ],
   exports: [TypeOrmModule],

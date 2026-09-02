@@ -27,6 +27,7 @@ describe('RagAdminService document versions', () => {
     docMetaRepo as never,
     documentReviewRepo as never,
     {} as never,
+    { emit: jest.fn() } as never,
   );
 
   beforeEach(() => {

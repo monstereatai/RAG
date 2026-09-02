@@ -14,6 +14,7 @@ import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { AgentTaskEntity } from '../../providers/db/entities/agent-task.entity';
 import { MetricsModule } from '../metrics/metrics.module';
 import { LlmModule } from '../../providers/llm/llm.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { LlmModule } from '../../providers/llm/llm.module';
     SupervisorModule,
     MetricsModule,
     LlmModule,
+    DomainEventsModule,
   ],
   controllers: [JobsController],
   providers: [JobsService, ScheduledAnalysisService, RolesGuard],

@@ -15,6 +15,7 @@ import type { CreateJobInput } from './job.types';
 import { SupervisorService } from '../supervisor/supervisor.service';
 import { ScheduledAnalysisService } from './scheduled-analysis.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { DomainEventsService } from '../domain-events/domain-events.service';
 
 @Injectable()
 export class JobsService implements OnModuleInit {
@@ -30,6 +31,7 @@ export class JobsService implements OnModuleInit {
     private readonly supervisorService: SupervisorService,
     private readonly scheduledAnalysis: ScheduledAnalysisService,
     private readonly metricsService: MetricsService,
+    private readonly domainEvents: DomainEventsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -357,6 +359,7 @@ export class JobsService implements OnModuleInit {
         durationMs / 1000,
       );
       this.refreshNextRun(job);
+      await this.domainEvents.emit({ eventType: 'job.completed', aggregateType: 'scheduled_job', aggregateId: job.id, payload: { executionId, taskKind: job.taskKind, durationMs } });
       return execution;
     } catch (err) {
       const durationMs = Date.now() - startedAt;
@@ -382,6 +385,7 @@ export class JobsService implements OnModuleInit {
         'failed',
         durationMs / 1000,
       );
+      await this.domainEvents.emit({ eventType: 'job.failed', aggregateType: 'scheduled_job', aggregateId: job.id, payload: { executionId, taskKind: job.taskKind, durationMs, reason: errorMsg } });
       return execution;
     } finally {
       this.executingJobs.delete(id);

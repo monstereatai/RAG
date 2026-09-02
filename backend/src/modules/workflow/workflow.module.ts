@@ -12,6 +12,7 @@ import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-
 import { ToolsModule } from '../../tools/tools.module';
 import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
     ToolsModule,
     AgentRunsModule,
     PluginRuntimeModule,
+    DomainEventsModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

@@ -14,6 +14,7 @@ import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.en
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DocumentReviewEntity } from '../../providers/db/entities/document-revie
     KarpathyRagModule,
     VectorStoreModule,
     ObsidianKnowledgeModule,
+    DomainEventsModule,
   ],
   controllers: [RagAdminController],
   providers: [RagAdminService, QueryLogService],

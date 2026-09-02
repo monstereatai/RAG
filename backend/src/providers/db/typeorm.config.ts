@@ -48,6 +48,8 @@ import { DecisionRecordEntity } from './entities/decision-record.entity';
 import { AgentTaskEntity } from './entities/agent-task.entity';
 import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
 import { DocumentReviewEntity } from './entities/document-review.entity';
+import { DomainEventOutboxEntity } from './entities/domain-event-outbox.entity';
+import { DomainEventSubscriptionEntity } from './entities/domain-event-subscription.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -93,6 +95,8 @@ export default new DataSource({
     AgentTaskEntity,
     AgentRuntimeEventEntity,
     DocumentReviewEntity,
+    DomainEventOutboxEntity,
+    DomainEventSubscriptionEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

@@ -73,6 +73,7 @@ describe('JobsService', () => {
       mockSupervisorService,
       mockScheduledAnalysis,
       { observeScheduledJob: jest.fn() } as any,
+      { emit: jest.fn() } as any,
     );
   });
 

@@ -51,6 +51,7 @@ import { AgentCollaborationModule } from './modules/agent-collaboration/agent-co
 import { AgentTasksModule } from './modules/agent-tasks/agent-tasks.module';
 import { AgentRuntimeEventsModule } from './modules/agent-runtime-events/agent-runtime-events.module';
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
+import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module
     AgentTasksModule,
     AgentRuntimeEventsModule,
     AgentRuntimeModule,
+    DomainEventsModule,
   ],
   providers: [
     {

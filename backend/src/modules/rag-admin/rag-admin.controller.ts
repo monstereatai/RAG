@@ -14,6 +14,7 @@ import { RagAdminService } from './rag-admin.service';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { RagFeedbackService } from '../chat/rag-feedback.service';
+import { DomainEventsService } from '../domain-events/domain-events.service';
 import {
   DEFAULT_ROLE_PRESET_ID,
   listRolePresets,
@@ -27,6 +28,7 @@ export class RagAdminController {
   constructor(
     private readonly ragAdminService: RagAdminService,
     private readonly ragFeedbackService: RagFeedbackService,
+    private readonly domainEvents: DomainEventsService,
   ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
@@ -43,6 +45,20 @@ export class RagAdminController {
       roles: listRolePresets(),
     };
   }
+
+  @Get('domain-events/subscriptions')
+  listDomainEventSubscriptions() { return this.domainEvents.listSubscriptions(); }
+
+  @Post('domain-events/subscriptions')
+  saveDomainEventSubscription(@Body() body: { id?: string; name: string; eventTypes: string[]; channel: 'enterprise_wechat' | 'webhook'; endpointKey: string; enabled?: boolean }) {
+    return this.domainEvents.upsertSubscription(body);
+  }
+
+  @Get('domain-events/outbox')
+  listDomainEventOutbox(@Query('limit') limit?: string) { return this.domainEvents.listOutbox(Number(limit) || 100); }
+
+  @Post('domain-events/outbox/:id/retry')
+  retryDomainEvent(@Param('id') id: string) { return this.domainEvents.retry(id); }
 
   // ─── Documents ──────────────────────────────────────────────
 

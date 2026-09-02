@@ -37,6 +37,7 @@ import { ToolExecutionService } from '../../tools/tool-execution.service';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import { DomainEventsService } from '../domain-events/domain-events.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -124,6 +125,7 @@ export class ProductionWorkflowService {
     @Optional() private readonly agentRuns?: AgentRunsService,
     @Optional() private readonly agentGoals?: AgentGoalService,
     @Optional() private readonly plugins?: PluginRuntimeService,
+    @Optional() private readonly domainEvents?: DomainEventsService,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
@@ -1272,6 +1274,7 @@ export class ProductionWorkflowService {
   private async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
     const runId = state.runId;
     if (state.status === 'revision_required') {
+      await this.emitDomainEvent('workflow.revision_required', state, { roles: state.rerunRoles, revision: state.revisionNumber ?? 1 });
       await this.emitRuntimeEvent(state, 'workflow.revision_required', 'production_workflow', {
         revision: state.revisionNumber ?? 1,
         roles: state.rerunRoles,
@@ -1296,6 +1299,7 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'pending_approval') {
+      await this.emitDomainEvent('workflow.approval_required', state, { roles: state.pendingApprovalRoles });
       await this.emitRuntimeEvent(state, 'approval.required', 'production_workflow', {
         roles: state.pendingApprovalRoles,
       });
@@ -1317,6 +1321,7 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'completed') {
+      await this.emitDomainEvent('workflow.completed', state, { completedRoles: state.completedRoles });
       await this.emitRuntimeEvent(state, 'workflow.completed', 'production_workflow', {
         completedRoles: state.completedRoles,
       });
@@ -1336,6 +1341,7 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'failed') {
+      await this.emitDomainEvent('workflow.failed', state, { error: state.error ?? null });
       await this.emitRuntimeEvent(state, 'workflow.failed', 'production_workflow', {
         error: state.error,
       });
@@ -1377,6 +1383,14 @@ export class ProductionWorkflowService {
       this.logger.warn(
         `Runtime event skipped: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+
+  private async emitDomainEvent(eventType: string, state: ProductionWorkflowStateType, payload: Record<string, unknown>): Promise<void> {
+    try {
+      await this.domainEvents?.emit({ eventType, aggregateType: 'production_workflow', aggregateId: state.threadId, payload: { projectId: state.projectId, runId: state.runId ?? null, ...payload } });
+    } catch (error) {
+      this.logger.warn(`Domain event skipped: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
