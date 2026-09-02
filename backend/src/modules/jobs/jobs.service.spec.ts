@@ -14,6 +14,7 @@ describe('JobsService', () => {
   let mockJobRepo: any;
   let mockJobsMap: Map<string, any>;
   let mockSupervisorService: any;
+  let mockScheduledAnalysis: any;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -22,14 +23,7 @@ describe('JobsService', () => {
     mockJobRepo = {
       create: jest.fn().mockImplementation((dto) => {
         return {
-          id: dto.id,
-          type: dto.type,
-          instruction: dto.instruction,
-          enabled: dto.enabled,
-          running: dto.running,
-          cron: dto.cron,
-          everyMs: dto.everyMs,
-          at: dto.at,
+          ...dto,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -61,11 +55,24 @@ describe('JobsService', () => {
         answer: 'done',
       }),
     };
+    mockScheduledAnalysis = {
+      parseDefinition: jest.fn().mockReturnValue({
+        name: '每日规则报告',
+        type: 'cron',
+        cron: '0 9 * * *',
+      }),
+      execute: jest.fn().mockResolvedValue({
+        markdown: '# 每日规则报告',
+        snapshot: {},
+      }),
+    };
     service = new JobsService(
       scheduler,
       mockJobRepo,
       mockExecutionRepo as any,
       mockSupervisorService,
+      mockScheduledAnalysis,
+      { observeScheduledJob: jest.fn() } as any,
     );
   });
 
@@ -124,5 +131,45 @@ describe('JobsService', () => {
         instruction: 'too frequent',
       }),
     ).rejects.toThrow('type=every requires everyMs >= 1000');
+  });
+
+  it('executes an analysis job and persists its markdown report', async () => {
+    const job = await service.create({
+      name: '每日规则报告',
+      taskKind: 'analysis',
+      sourceType: 'natural_language',
+      type: 'cron',
+      cron: '0 9 * * *',
+      instruction: '每天统计最新规则',
+      analysisConfig: {
+        window: 'today',
+        dataScopes: ['rules'],
+        roles: ['产品'],
+        departments: ['产品部'],
+      },
+      enabled: false,
+    });
+
+    const execution = await service.runNow(job.id);
+
+    expect(mockScheduledAnalysis.execute).toHaveBeenCalled();
+    expect(execution.status).toBe('completed');
+    expect(execution.result).toContain('每日规则报告');
+    expect(mockSupervisorService.query).not.toHaveBeenCalled();
+  });
+
+  it('copies a task as a disabled next version and switches versions on start', async () => {
+    const first = await service.create({ name: '规则报告', taskKind: 'analysis', type: 'cron', cron: '0 9 * * *', instruction: '每天统计规则', enabled: false });
+    const copied = await service.copy(first.id);
+    expect(copied.version).toBe(2);
+    expect(copied.versionGroupId).toBe(first.versionGroupId);
+    expect(copied.enabled).toBe(false);
+    await service.start(copied.id);
+    const old = await service.get(first.id);
+    const current = await service.get(copied.id);
+    expect(old.isCurrent).toBe(false);
+    expect(old.enabled).toBe(false);
+    expect(current.isCurrent).toBe(true);
+    expect(current.running).toBe(true);
   });
 });

@@ -41,6 +41,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  sourceQuery?: string;
   references?: ReferenceChunk[];
   route?: string;
   confidence?: number;
@@ -51,10 +52,20 @@ interface Message {
   events?: string[]; // SSE 事件追踪
 }
 
+const modeOptions: Array<{
+  value: ChatMode;
+  label: string;
+  title: string;
+}> = [
+  { value: 'simple', label: '极速', title: '单次检索并快速回答' },
+  { value: 'auto', label: '自动', title: '根据证据和复杂度自动选择处理方式' },
+  { value: 'agentic', label: '深度', title: '执行子问题规划、补充检索和反思' },
+];
+
 function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [mode, setMode] = useState<ChatMode>('simple');
+  const [mode, setMode] = useState<ChatMode>('auto');
   const [roles, setRoles] = useState<RolePreset[]>([]);
   const [rolePresetId, setRolePresetId] = useState(
     () => localStorage.getItem('rolePresetId') ?? 'business-owner',
@@ -64,6 +75,7 @@ function ChatPage() {
   const [voiceError, setVoiceError] = useState('');
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseInputRef = useRef('');
 
@@ -104,6 +116,24 @@ function ChatPage() {
     setInput(question);
   };
 
+  const prepareClarification = (query: string) => {
+    setInput(`${query}\n\n补充信息：`);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const retryWithMode = async (query: string, nextMode: ChatMode) => {
+    if (!query.trim() || loading) return;
+    setMode(nextMode);
+    setMessages((prev) => [...prev, { role: 'user', content: query }]);
+    setLoading(true);
+    if (nextMode === 'simple') {
+      await sendNonStream(query, nextMode);
+    } else {
+      await sendStream(query, nextMode);
+    }
+    setLoading(false);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     const query = input.trim();
@@ -131,6 +161,7 @@ function ChatPage() {
         {
           role: 'assistant',
           content: res.answer,
+          sourceQuery: query,
           references: res.references,
           route: res.route,
           confidence: res.confidence,
@@ -160,6 +191,7 @@ function ChatPage() {
           {
             role: 'assistant',
             content: '',
+            sourceQuery: query,
             status: 'streaming',
             events: [],
           },
@@ -457,20 +489,14 @@ function ChatPage() {
           {activeRole && <span className="role-summary">{activeRole.summary}</span>}
         </div>
         <div className="mode-switcher" aria-label="问答模式">
-          {(['simple', 'agentic', 'auto'] as ChatMode[]).map((m) => (
+          {modeOptions.map((option) => (
             <button
-              key={m}
-              className={mode === m ? 'active' : ''}
-              onClick={() => setMode(m)}
-              title={
-                m === 'simple'
-                  ? '直接检索并回答'
-                  : m === 'agentic'
-                    ? '多轮检索和反思'
-                    : '自动选择处理方式'
-              }
+              key={option.value}
+              className={mode === option.value ? 'active' : ''}
+              onClick={() => setMode(option.value)}
+              title={option.title}
             >
-              {m}
+              {option.label}
             </button>
           ))}
         </div>
@@ -559,7 +585,32 @@ function ChatPage() {
                 </div>
               )}
               {msg.retrievalReason && (
-                <div className="message-meta">检索评估: {msg.retrievalReason}</div>
+                <details className="retrieval-details">
+                  <summary>查看检索详情</summary>
+                  <div>{msg.retrievalReason}</div>
+                </details>
+              )}
+              {msg.role === 'assistant' &&
+                msg.status === 'done' &&
+                msg.retrievalSufficient === false &&
+                msg.sourceQuery && (
+                  <div className="fallback-actions">
+                    <span>资料还不够明确，可以补充条件或继续深度查找。</span>
+                    <div>
+                      <button onClick={() => prepareClarification(msg.sourceQuery!)}>
+                        补充问题信息
+                      </button>
+                      {msg.route !== 'agentic' && (
+                        <button
+                          className="primary"
+                          onClick={() => void retryWithMode(msg.sourceQuery!, 'agentic')}
+                          disabled={loading}
+                        >
+                          使用深度检索
+                        </button>
+                      )}
+                    </div>
+                  </div>
               )}
               {msg.references && msg.references.length > 0 && (
                 <ReferenceList references={msg.references} />
@@ -575,6 +626,7 @@ function ChatPage() {
 
       <div className="input-area">
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}

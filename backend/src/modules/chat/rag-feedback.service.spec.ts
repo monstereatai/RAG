@@ -5,7 +5,10 @@ import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackService } from './rag-feedback.service';
 
 describe('RagFeedbackService', () => {
-  function createService(queryLog: Partial<QueryLogEntity> | null) {
+  function createService(
+    queryLog: Partial<QueryLogEntity> | null,
+    documentService?: { upload: jest.Mock },
+  ) {
     const feedbackRepo = {
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
@@ -26,6 +29,8 @@ describe('RagFeedbackService', () => {
         queryLogRepo,
         badCaseFlywheel as never,
         conversationService as never,
+        undefined,
+        documentService as never,
       ),
       feedbackRepo,
       badCaseFlywheel,
@@ -115,7 +120,83 @@ describe('RagFeedbackService', () => {
     );
   });
 
-  it('removes the vector example when regression inclusion is revoked', async () => {
+  it('indexes an approved correction even when it is not added to the regression set', async () => {
+    const queryLog = {
+      id: '11111111-1111-4111-8111-111111111111',
+      query: '泰语活动页换行规则是什么？',
+      answer: '错误回答',
+    } as QueryLogEntity;
+    const { service, feedbackRepo, badCaseFlywheel } = createService(queryLog);
+    (feedbackRepo as unknown as { findOne: jest.Mock }).findOne = jest
+      .fn()
+      .mockResolvedValue({
+        id: 'feedback-1',
+        queryLogId: queryLog.id,
+        feedback: 'negative',
+        correctedAnswer: null,
+        includeInRegression: false,
+        status: 'pending',
+        errorType: 'incomplete_answer',
+      });
+
+    await service.review('feedback-1', {
+      status: 'reviewed',
+      correctedAnswer: '泰语按词组断行，并覆盖窄屏验收。',
+      includeInRegression: false,
+      reviewedBy: 'admin-1',
+    });
+
+    expect(badCaseFlywheel.indexApproved).toHaveBeenCalled();
+  });
+
+  it('promotes an approved correction into a governed formal document', async () => {
+    const queryLog = {
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'user-1',
+      query: '泰语活动页换行规则是什么？',
+      answer: '错误回答',
+    } as QueryLogEntity;
+    const documentService = {
+      upload: jest.fn().mockResolvedValue({ docId: 'formal-doc-1', docVersion: '2026-08-v2' }),
+    };
+    const { service, feedbackRepo, badCaseFlywheel } = createService(
+      queryLog,
+      documentService,
+    );
+    (feedbackRepo as unknown as { findOne: jest.Mock }).findOne = jest
+      .fn()
+      .mockResolvedValue({
+        id: 'feedback-1',
+        queryLogId: queryLog.id,
+        userId: 'user-1',
+        feedback: 'negative',
+        correctedAnswer: '泰语按词组断行，并覆盖窄屏验收。',
+        includeInRegression: false,
+        status: 'reviewed',
+        errorType: 'incomplete_answer',
+        promotionSource: null,
+      });
+
+    const result = await service.review('feedback-1', {
+      status: 'reviewed',
+      reviewedBy: 'admin-1',
+      promotionAction: 'promote',
+      promotionSource: 'https://example.com/official-spec',
+      promotionVersion: '2026-08-v2',
+    });
+
+    expect(documentService.upload).toHaveBeenCalledWith(
+      expect.stringContaining('bad-case-feedback'),
+      expect.stringContaining('https://example.com/official-spec'),
+      'user-1',
+      expect.objectContaining({ businessMetadata: expect.objectContaining({ docVersion: '2026-08-v2' }) }),
+    );
+    expect(result.knowledgeLayer).toBe('formal');
+    expect(result.promotedDocument?.docId).toBe('formal-doc-1');
+    expect(badCaseFlywheel.removeApproved).toHaveBeenCalledWith('feedback-1');
+  });
+
+  it('removes the vector example when an approved correction is revoked', async () => {
     const queryLog = {
       id: '11111111-1111-4111-8111-111111111111',
       query: '泰语活动页换行规则是什么？',

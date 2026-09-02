@@ -30,6 +30,11 @@ const injectionPatterns: Array<{
     pattern: /(call|invoke|execute|run)\s+(any\s+)?tool\s+without\s+(approval|permission|validation)/i,
   },
   {
+    name: 'destructive_document_operation',
+    severity: 'high',
+    pattern: /(?:delete|remove|destroy|erase)\s+(?:all|every|the\s+entire)?\s*(?:documents?|files?|knowledge\s*base)/i,
+  },
+  {
     name: 'chinese_ignore_instructions',
     severity: 'high',
     pattern: /(忽略|无视|覆盖).{0,12}(之前|以上|上面).{0,12}(指令|规则|要求)/,
@@ -43,6 +48,11 @@ const injectionPatterns: Array<{
     name: 'chinese_secret_exfiltration',
     severity: 'high',
     pattern: /(泄露|输出|展示|打印).{0,16}(系统提示词|开发者提示词|密钥|token|密码)/i,
+  },
+  {
+    name: 'chinese_destructive_document_operation',
+    severity: 'high',
+    pattern: /(删除|清空|销毁).{0,12}(全部|所有).{0,12}(文档|文件|知识库)/,
   },
 ];
 
@@ -68,7 +78,10 @@ export function sanitizeUntrustedContext(text: string): string {
     .map((line) => {
       const findings = detectPromptInjection(line);
       if (findings.some((finding) => finding.severity === 'high')) {
-        return `[已移除疑似提示注入指令：${line.slice(0, 80)}]`;
+        return `[已移除疑似提示注入指令：${findings
+          .filter((finding) => finding.severity === 'high')
+          .map((finding) => finding.pattern)
+          .join('、')}]`;
       }
       return line;
     })
@@ -80,4 +93,3 @@ function compactExcerpt(text: string, index: number): string {
   const end = Math.min(text.length, index + 120);
   return text.slice(start, end).replace(/\s+/g, ' ').trim();
 }
-

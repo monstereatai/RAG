@@ -17,6 +17,7 @@ import {
 import { ProductionWorkflowService } from './production-workflow.service';
 import {
   ResumeProductionWorkflowDto,
+  ReviseProductionWorkflowDto,
   StartProductionWorkflowDto,
 } from './production-workflow.dto';
 
@@ -50,6 +51,15 @@ export class WorkflowController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.productionWorkflow.resumeAsync(threadId, body, user.userId);
+  }
+
+  @Post('production/:threadId/revise')
+  reviseProduction(
+    @Param('threadId') threadId: string,
+    @Body() body: ReviseProductionWorkflowDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.productionWorkflow.reviseAsync(threadId, body, user.userId);
   }
 
   @Get('production/:threadId/coding-context')

@@ -86,3 +86,17 @@ export class ResumeProductionWorkflowDto {
   @IsIn(PRODUCTION_ROLES, { each: true })
   rerunRoles?: ProductionRole[];
 }
+
+export class ReviseProductionWorkflowDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(PRODUCTION_ROLES, { each: true })
+  rerunRoles?: ProductionRole[];
+
+  /** 审核人补充的业务资料、已核验来源或实施约束，仅用于本次修订上下文。 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(12_000)
+  supplementalMaterials?: string;
+}

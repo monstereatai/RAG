@@ -23,6 +23,7 @@ import { DocumentMetaEntity } from './entities/document-meta.entity';
 import { DocumentChunkEntity } from './entities/document-chunk.entity';
 import { FactConflictEntity } from './entities/fact-conflict.entity';
 import { ScheduledJobEntity } from './entities/job.entity';
+import { JobExecutionEntity } from './entities/job-execution.entity';
 import { DocumentTaskEntity } from './entities/document-task.entity';
 import { DocumentResourceEntity } from './entities/document-resource.entity';
 import { DocumentPermissionEntity } from './entities/document-permission.entity';
@@ -46,6 +47,7 @@ import { ArtifactDependencyEntity } from './entities/artifact-dependency.entity'
 import { DecisionRecordEntity } from './entities/decision-record.entity';
 import { AgentTaskEntity } from './entities/agent-task.entity';
 import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
+import { DocumentReviewEntity } from './entities/document-review.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -66,6 +68,7 @@ export default new DataSource({
     DocumentChunkEntity,
     FactConflictEntity,
     ScheduledJobEntity,
+    JobExecutionEntity,
     DocumentTaskEntity,
     DocumentResourceEntity,
     DocumentPermissionEntity,
@@ -89,6 +92,7 @@ export default new DataSource({
     DecisionRecordEntity,
     AgentTaskEntity,
     AgentRuntimeEventEntity,
+    DocumentReviewEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

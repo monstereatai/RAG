@@ -17,11 +17,14 @@ export type WorkflowApproval = 'approved' | 'rejected' | null;
 export type ProductionWorkflowStatus =
   | 'running'
   | 'pending_approval'
+  | 'revision_required'
   | 'completed'
   | 'failed';
 
 export interface ProductionStageResult {
   role: ProductionRole;
+  revision: number;
+  reviewStatus: 'pending' | 'approved' | 'rejected' | 'stale';
   summary: string;
   deliverables: ProductionDeliverable[];
   claims: ProductionClaim[];
@@ -34,6 +37,18 @@ export interface ProductionStageResult {
   generatedArtifact?: ProductionGeneratedArtifact;
   readyForApproval: boolean;
   completedAt: string;
+}
+
+export interface ProductionRevisionRecord {
+  revision: number;
+  rejectedAt: string;
+  feedback: string;
+  rejectedRoles: ProductionRole[];
+  staleRoles: ProductionRole[];
+  supplementalMaterials?: string;
+  revisedAt?: string;
+  rerunRoles?: ProductionRole[];
+  results: Partial<Record<ProductionRole, ProductionStageResult>>;
 }
 
 export interface ProductionDeliverable {
@@ -165,6 +180,18 @@ export const ProductionWorkflowState = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => [],
   }),
+  staleRoles: Annotation<ProductionRole[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  revisionNumber: Annotation<number>({
+    reducer: (_previous, next) => next,
+    default: () => 1,
+  }),
+  revisionHistory: Annotation<ProductionRevisionRecord[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
   status: Annotation<ProductionWorkflowStatus>({
     reducer: (_previous, next) => next,
     default: () => 'running',
@@ -174,6 +201,10 @@ export const ProductionWorkflowState = Annotation.Root({
     default: () => null,
   }),
   feedback: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
+  }),
+  supplementalMaterials: Annotation<string>({
     reducer: (_previous, next) => next,
     default: () => '',
   }),

@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { In, Repository } from 'typeorm';
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
+import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { UserEntity } from '../../providers/db/entities/user.entity';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 
 export interface PermissionSubject {
@@ -15,6 +17,10 @@ export class DocumentPermissionService {
   constructor(
     @InjectRepository(DocumentPermissionEntity)
     private readonly permissionRepo: Repository<DocumentPermissionEntity>,
+    @InjectRepository(DocumentMetaEntity)
+    private readonly documentMetaRepo: Repository<DocumentMetaEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepo: Repository<UserEntity>,
     private readonly redisProvider: RedisProvider,
   ) {}
 
@@ -49,8 +55,10 @@ export class DocumentPermissionService {
   async getAllowedDocIds(
     userId: string,
     roles: string[] = [],
+    departmentIds: string[] = [],
   ): Promise<Set<string>> {
-    const cacheKey = this.cacheKey(userId, roles);
+    const resolvedRoles = await this.resolveRoles(userId, roles);
+    const cacheKey = this.cacheKey(userId, resolvedRoles, departmentIds);
     const cached = await this.redisProvider.get(cacheKey);
     if (cached) {
       return new Set(JSON.parse(cached) as string[]);
@@ -60,18 +68,36 @@ export class DocumentPermissionService {
       where: [
         { subjectType: 'public', action: 'read' },
         { subjectType: 'user', subjectId: userId, action: 'read' },
-        ...(roles.length > 0
+        ...(resolvedRoles.length > 0
           ? [
               {
                 subjectType: 'role' as const,
-                subjectId: In(roles),
+                subjectId: In(resolvedRoles),
+                action: 'read' as const,
+              },
+            ]
+          : []),
+        ...(departmentIds.length > 0
+          ? [
+              {
+                subjectType: 'department' as const,
+                subjectId: In(departmentIds),
                 action: 'read' as const,
               },
             ]
           : []),
       ],
     });
-    const ids = [...new Set(permissions.map((item) => item.docId))];
+    const owned = await this.documentMetaRepo.find({
+      select: ['docId'],
+      where: { userId },
+    });
+    const ids = [
+      ...new Set([
+        ...permissions.map((item) => item.docId),
+        ...owned.map((item) => item.docId),
+      ]),
+    ];
     await this.redisProvider.set(cacheKey, JSON.stringify(ids), 300);
     return new Set(ids);
   }
@@ -85,8 +111,21 @@ export class DocumentPermissionService {
     return allowed.has(docId);
   }
 
-  private cacheKey(userId: string, roles: string[]): string {
-    return `doc-acl:${userId}:${roles.sort().join(',')}`;
+  private async resolveRoles(userId: string, roles: string[]): Promise<string[]> {
+    if (roles.length > 0) return [...new Set(roles)].sort();
+    const user = await this.userRepo.findOne({
+      select: ['role'],
+      where: { id: userId },
+    });
+    return user?.role ? [user.role] : [];
+  }
+
+  private cacheKey(
+    userId: string,
+    roles: string[],
+    departmentIds: string[],
+  ): string {
+    return `doc-acl:${userId}:${roles.sort().join(',')}:${departmentIds.sort().join(',')}`;
   }
 
   private async invalidateAllPermissionCache(): Promise<void> {

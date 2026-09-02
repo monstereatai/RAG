@@ -7,6 +7,7 @@ import type { ElasticsearchProvider } from '../../providers/elasticsearch/elasti
 import type { MetricsService } from '../../modules/metrics/metrics.service';
 import type { ObsidianKnowledgeService } from '../../modules/obsidian/obsidian-knowledge.service';
 import type { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
+import type { DocumentPermissionService } from '../../modules/document/document-permission.service';
 
 describe('KarpathyRagService exception scenarios', () => {
   function createService(overrides?: {
@@ -55,8 +56,9 @@ describe('KarpathyRagService exception scenarios', () => {
       }),
       formatHitsForPrompt: jest.fn().mockReturnValue(''),
     } as unknown as ObsidianKnowledgeService;
+    const retrieveBadCaseMatches = jest.fn().mockResolvedValue([]);
     const badCaseFlywheel = {
-      retrieveMatches: jest.fn().mockResolvedValue([]),
+      retrieveMatches: retrieveBadCaseMatches,
       formatPrompt: jest.fn().mockReturnValue(''),
     } as unknown as BadCaseFlywheelService;
     const bochaSearchService = {
@@ -65,6 +67,9 @@ describe('KarpathyRagService exception scenarios', () => {
     };
     const toolPolicy = {
       decide: jest.fn().mockReturnValue({ allowed: true }),
+    };
+    const documentPermissionService = {
+      getAllowedDocIds: jest.fn().mockResolvedValue(new Set()),
     };
 
     const service = new KarpathyRagService(
@@ -78,6 +83,7 @@ describe('KarpathyRagService exception scenarios', () => {
       badCaseFlywheel,
       bochaSearchService as unknown as import('../../tools/bocha-search.service').BochaSearchService,
       toolPolicy as unknown as import('../../tools/tool-execution-policy.service').ToolExecutionPolicyService,
+      documentPermissionService as unknown as DocumentPermissionService,
     );
     (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
       save: jest.fn(),
@@ -89,22 +95,78 @@ describe('KarpathyRagService exception scenarios', () => {
       vectorStoreProvider,
       metricsService,
       observeRetrievalHits,
+      obsidianKnowledge,
+      retrieveBadCaseMatches,
       bochaSearchService,
     };
   }
 
-  it('returns a friendly answer when the knowledge base is empty', async () => {
+  it('merges reviewed Base Case evidence into the Simple answer gate', async () => {
+    const { service, llmInvoke, retrieveBadCaseMatches } = createService();
+    llmInvoke.mockResolvedValue(
+      '你可能想问的是韦水春。韦水春是临床病理工作人员。',
+    );
+    retrieveBadCaseMatches.mockResolvedValue([
+      {
+        id: 'feedback-1',
+        query: '韦水春是谁',
+        text: '正确处理标准：韦水春是临床病理工作人员。',
+        score: 0.96,
+        mode: 'correction',
+      },
+    ]);
+
+    const result = await service.answer('韦水春是谁');
+
+    expect(result).toMatchObject({
+      retrievalSufficient: true,
+      references: [
+        expect.objectContaining({
+          id: 'reviewed-bad-case:feedback-1',
+          sourceAuthority: 'reviewed_bad_case',
+        }),
+      ],
+    });
+    expect(result.answer).toContain('韦水春');
+    expect(result.retrievalReason).toContain('Base Case 纠正证据');
+  });
+
+  it('includes Base Case in the Auto Fast Path gate and reusable snapshot', async () => {
+    const { service, retrieveBadCaseMatches } = createService();
+    retrieveBadCaseMatches.mockResolvedValue([
+      {
+        id: 'feedback-1',
+        query: '韦水春是谁',
+        text: '正确处理标准：韦水春是临床病理工作人员。',
+        score: 0.96,
+        mode: 'correction',
+      },
+    ]);
+
+    const result = await service.assessFastPath('韦水春是谁');
+
+    expect(result.sufficient).toBe(true);
+    expect(result.chunks[0]).toMatchObject({
+      id: 'reviewed-bad-case:feedback-1',
+      sourceAuthority: 'reviewed_bad_case',
+    });
+    expect(result.prefetchedFastPath.badCaseMatches).toHaveLength(1);
+    expect(result.reason).toContain('Base Case:');
+  });
+
+  it('refuses when the knowledge base and web search have no evidence', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('今天是星期三。');
 
     await expect(service.answer('anything')).resolves.toMatchObject({
-      answer: '今天是星期三。',
+      answer:
+        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已进入安全降级',
     });
-    expect(llmInvoke).toHaveBeenCalledTimes(1);
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
   it('uses Bocha web search when local evidence is insufficient', async () => {
@@ -127,7 +189,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(bochaSearchService.search).toHaveBeenCalledWith('活动什么时候开放？', 5);
   });
 
-  it('returns a friendly answer when no related document is found', async () => {
+  it('refuses when no related document or web evidence is found', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('量子物理研究微观粒子的行为。');
     service.indexChunks(
@@ -145,13 +207,14 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('quantum physics', [], 'user-1'),
     ).resolves.toMatchObject({
-      answer: '量子物理研究微观粒子的行为。',
+      answer:
+        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已进入安全降级',
     });
-    expect(llmInvoke).toHaveBeenCalledTimes(1);
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
   it('returns an answer only when retrieval and citation support pass', async () => {
@@ -179,7 +242,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.references).toHaveLength(1);
   });
 
-  it('Simple 自适应检索对精确查询先使用关键词索引，不调用向量库', async () => {
+  it('Simple 直答未命中后对精确查询也执行统一混合检索', async () => {
     const { service, llmInvoke, vectorStoreProvider } = createService();
     llmInvoke.mockResolvedValueOnce('活动 ID ACT100 的状态是已上线。[片段1]');
     service.indexChunks(
@@ -204,7 +267,7 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    expect(vectorStoreProvider.similaritySearch).not.toHaveBeenCalled();
+    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalled();
   });
 
   it('Simple 自适应检索对流程类问题直接使用混合检索', async () => {
@@ -361,7 +424,8 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('LangChain RAG', [], 'user-1'),
     ).resolves.toMatchObject({
-      answer: '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
+      answer:
+        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
       retrievalReason: '答案缺少显式片段引用',
@@ -475,7 +539,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.answer).toContain('[片段1]');
   });
 
-  it('uses model fallback for vector-only hits with no query token overlap', async () => {
+  it('refuses for vector-only hits with no query token overlap', async () => {
     const { service, llmInvoke } = createService({
       vectorStoreProvider: {
         similaritySearch: jest.fn().mockResolvedValue([
@@ -505,16 +569,17 @@ describe('KarpathyRagService exception scenarios', () => {
     await expect(
       service.answer('quantum physics', [], 'user-1'),
     ).resolves.toMatchObject({
-      answer: '量子物理关注微观粒子和能量的行为。',
+      answer:
+        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；联网搜索不可用，已使用模型兜底回答',
+        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；联网搜索不可用，已进入安全降级',
     });
-    expect(llmInvoke).toHaveBeenCalledTimes(1);
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-  it('uses model fallback for weak Chinese overlap when only a generic word matches', async () => {
+  it('refuses for weak Chinese overlap when only a generic word matches', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       '公司宠物医疗报销额度需要以公司福利制度为准。',
@@ -538,12 +603,13 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result).toMatchObject({
-      answer: '公司宠物医疗报销额度需要以公司福利制度为准。',
+      answer:
+        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
     });
-    expect(result.retrievalReason).toContain('已使用模型兜底回答');
-    expect(llmInvoke).toHaveBeenCalledTimes(1);
+    expect(result.retrievalReason).toContain('已进入安全降级');
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
   it('falls back to BM25 when vector search is unavailable', async () => {

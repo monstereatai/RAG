@@ -57,15 +57,43 @@ export class ChatService {
 
     const mode: ChatMode = req.mode ?? 'simple';
     const startTime = Date.now();
-    const pluginComposition = req.pluginKeys?.length && this.plugins
-      ? await this.plugins.resolve(req.pluginKeys, mode)
-      : undefined;
-
-    // 对话历史管理：threadId 不传则新建
-    const threadId =
-      req.threadId ??
-      (await this.conversationService.create(req.query, 'auto', userId));
-    const shortTermContext = await this.shortTermMemory.getContext(threadId);
+    // 插件策略与会话创建互不依赖，先并发完成请求准备。
+    const [pluginComposition, threadId] = await Promise.all([
+      req.pluginKeys?.length && this.plugins
+        ? this.plugins.resolve(req.pluginKeys, mode)
+        : Promise.resolve(undefined),
+      req.threadId
+        ? Promise.resolve(req.threadId)
+        : this.conversationService.create(req.query, 'auto', userId),
+    ]);
+    const shouldSearchHistory = Boolean(req.threadId);
+    const [
+      shortTermContext,
+      memoryResult,
+      historySearch,
+      runtimePlan,
+      retrievalProfile,
+    ] = await Promise.all([
+      // 短期记忆服务内部统一读取最近窗口和压缩摘要，负责裁剪、回退和去重。
+      this.shortTermMemory.getContext(threadId),
+      // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
+      this.memoryService.searchMemory(req.query, userId, threadId),
+      // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
+      shouldSearchHistory
+        ? this.conversationEmbeddingService.searchHistory(
+            req.query,
+            2,
+            userId,
+        )
+        : Promise.resolve([]),
+      this.runtime
+        ? this.runtime.createPlan({ objective: req.query, mode })
+        : Promise.resolve(undefined),
+      this.resolveRetrievalProfile(
+        req.query,
+        req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
+      ),
+    ]);
     let history = req.history ?? [];
     if (!req.history) {
       history = shortTermContext.recentTurns.length > 0
@@ -75,16 +103,6 @@ export class ChatService {
           }))
         : await this.conversationService.getRecentHistory(threadId, 5, userId);
     }
-    const runtimePlan = this.runtime
-      ? await this.runtime.createPlan({ objective: req.query, mode })
-      : undefined;
-
-    // Mem0 长期记忆搜索：chat 前注入记忆上下文
-    const memoryResult = await this.memoryService.searchMemory(
-      req.query,
-      userId,
-      threadId,
-    );
     const memoryMessages: Array<{ role: string; content: string }> = [];
     const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
     memoryMessages.push({
@@ -95,10 +113,6 @@ export class ChatService {
       ...req.scope,
       role: roleContext.role,
     };
-    const retrievalProfile = await this.resolveRetrievalProfile(
-      req.query,
-      req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
-    );
     const retrievalOptions = {
       scope: retrievalScope,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
@@ -189,15 +203,7 @@ export class ChatService {
       }
     }
 
-    // 对话历史向量化搜索：检索相关的历史对话作为上下文
-    const shouldSearchHistory = Boolean(req.threadId);
-    const historySearch = shouldSearchHistory
-      ? await this.conversationEmbeddingService.searchHistory(
-          req.query,
-          2,
-          userId,
-        )
-      : [];
+    // 对话历史向量化搜索结果已与短期／长期记忆并发取得，此处只负责格式化注入。
     if (historySearch.length > 0) {
       const historyContext =
         this.conversationEmbeddingService.formatHistoryContext(historySearch);

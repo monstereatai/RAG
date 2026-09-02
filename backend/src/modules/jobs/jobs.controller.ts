@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateJobDto } from './dto/create-job.dto';
+import { ParseAnalysisJobDto } from './dto/parse-analysis-job.dto';
 import { JobsService } from './jobs.service';
 
 @Controller('jobs')
@@ -28,6 +29,32 @@ export class JobsController {
   @Roles('admin')
   create(@Body() body: CreateJobDto) {
     return this.jobsService.create(body);
+  }
+
+  @Post('analysis/parse')
+  @Roles('admin')
+  parseAnalysis(@Body() body: ParseAnalysisJobDto) {
+    return this.jobsService.parseAnalysisDefinition(
+      body.sourceText,
+      body.sourceType,
+    );
+  }
+
+  @Post(':id/copy')
+  @Roles('admin')
+  copy(@Param('id') id: string) {
+    return this.jobsService.copy(id);
+  }
+
+  @Get(':id/versions')
+  listVersions(@Param('id') id: string) {
+    return this.jobsService.listVersions(id);
+  }
+
+  @Post(':id/run')
+  @Roles('admin')
+  runNow(@Param('id') id: string) {
+    return this.jobsService.runNow(id);
   }
 
   @Patch(':id/start')

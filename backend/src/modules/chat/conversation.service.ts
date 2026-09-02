@@ -176,44 +176,48 @@ export class ConversationService {
       updatedAt: string;
     }>
   > {
-    const where: { userId?: string } = {};
+    // 一次聚合消息数量和最后更新时间，避免逐会话执行 count + findOne
+    // 导致会话列表出现 N+1 查询，在数据量较大时超过管理接口超时。
+    const query = this.conversationRepo
+      .createQueryBuilder('conversation')
+      .leftJoin(
+        MessageEntity,
+        'message',
+        '"message"."conversationId" = "conversation"."id"',
+      )
+      .select('conversation.id', 'threadId')
+      .addSelect('conversation.title', 'title')
+      .addSelect('conversation.mode', 'mode')
+      .addSelect('COUNT(message.id)', 'messageCount')
+      .addSelect('conversation.createdAt', 'createdAt')
+      .addSelect('COALESCE(MAX(message.createdAt), conversation.createdAt)', 'updatedAt')
+      .groupBy('conversation.id')
+      .addGroupBy('conversation.title')
+      .addGroupBy('conversation.mode')
+      .addGroupBy('conversation.createdAt')
+      .orderBy('COALESCE(MAX(message.createdAt), conversation.createdAt)', 'DESC');
+
     if (userId) {
-      where.userId = userId;
+      query.where('conversation.userId = :userId', { userId });
     }
 
-    const conversations = await this.conversationRepo.find({
-      where,
-      order: { createdAt: 'DESC' },
-    });
+    const rows = await query.getRawMany<{
+      threadId: string;
+      title: string;
+      mode: string;
+      messageCount: string | number;
+      createdAt: Date | string;
+      updatedAt: Date | string;
+    }>();
 
-    const results = [];
-    for (const conv of conversations) {
-      const messageCount = await this.messageRepo.count({
-        where: { conversationId: conv.id },
-      });
-
-      const lastMsg = await this.messageRepo.findOne({
-        where: { conversationId: conv.id },
-        order: { createdAt: 'DESC' },
-      });
-
-      results.push({
-        threadId: conv.id,
-        title: conv.title,
-        mode: conv.mode,
-        messageCount,
-        createdAt: conv.createdAt.toISOString(),
-        updatedAt: (lastMsg?.createdAt ?? conv.createdAt).toISOString(),
-      });
-    }
-
-    // 按最后更新时间降序排列（最新对话排最前）
-    results.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
-
-    return results;
+    return rows.map((row) => ({
+      threadId: row.threadId,
+      title: row.title,
+      mode: row.mode,
+      messageCount: Number(row.messageCount),
+      createdAt: new Date(row.createdAt).toISOString(),
+      updatedAt: new Date(row.updatedAt).toISOString(),
+    }));
   }
 
   /**

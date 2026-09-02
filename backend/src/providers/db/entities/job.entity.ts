@@ -21,6 +21,35 @@ export class ScheduledJobEntity {
   @Column({ type: 'text' })
   instruction!: string;
 
+  /** 后台展示名称；历史任务为空时回退到 instruction 摘要。 */
+  @Column({ type: 'varchar', length: 128, nullable: true, default: null })
+  name!: string | null;
+
+  /** agent：历史 Supervisor 任务；analysis：运营分析定时任务。 */
+  @Column({ type: 'varchar', length: 24, default: 'agent' })
+  taskKind!: 'agent' | 'analysis';
+
+  /** natural_language 或 markdown。 */
+  @Column({ type: 'varchar', length: 24, default: 'natural_language' })
+  sourceType!: 'natural_language' | 'markdown';
+
+  /** 解析后且经管理员确认的数据范围、统计窗口、岗位和部门配置。 */
+  @Column({ type: 'text', default: '{}' })
+  analysisConfig!: string;
+
+  /** 同一任务的版本组；旧数据为空时按任务自身 ID 兼容。 */
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  versionGroupId!: string | null;
+
+  @Column({ type: 'integer', default: 1 })
+  version!: number;
+
+  @Column({ type: 'boolean', default: true })
+  isCurrent!: boolean;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  copiedFromId!: string | null;
+
   @Column({ type: 'boolean', default: true })
   enabled!: boolean;
 

@@ -248,7 +248,7 @@ docs/assets/processon-ai-application-mindmap.png
 建议这样说：
 
 ```text
-我这个项目主线是企业级 RAG 和 Agentic Workflow。资料入库后进入 Hybrid Search 和 GraphRAG，简单问题走 Karpathy + Obsidian fast path，复杂活动需求走 LangGraph 拆成方案、接口、埋点、风险和验收 checklist。为了让结果可信，我做了 Rerank、引用校验、低相关拒答、Prompt Injection 检测和评测集回归；为了配合 AI Coding，又通过 MCP 把检索和方案能力暴露给 Codex / Claude Code / Trae。
+我这个项目主线是企业级统一 Hybrid RAG 和 Agentic Workflow（智能体工作流）。资料入库后进入 Hybrid Search（混合检索）和 GraphRAG；Simple 与 Auto 先精确直答，未命中后执行统一混合检索，复杂活动需求再由 LangGraph 拆成方案、接口、埋点、风险和验收 checklist（检查清单）。为了让结果可信，我做了 Rerank（重排）、引用校验、低相关拒答、Prompt Injection（提示注入）检测和评测集回归；为了配合 AI Coding（人工智能辅助编码），又通过 MCP（模型上下文协议）把检索和方案能力暴露给 Codex／Claude Code／Trae。
 ```
 
 一句话记忆：

@@ -9,7 +9,12 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import type { JobType } from '../job.types';
+import type {
+  JobType,
+  ScheduledAnalysisConfig,
+  ScheduledJobKind,
+  ScheduledJobSourceType,
+} from '../job.types';
 
 export class CreateJobDto {
   @IsIn(['cron', 'every', 'at'])
@@ -18,6 +23,21 @@ export class CreateJobDto {
   @IsString()
   @MinLength(1)
   instruction: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsIn(['agent', 'analysis'])
+  taskKind?: ScheduledJobKind;
+
+  @IsOptional()
+  @IsIn(['natural_language', 'markdown'])
+  sourceType?: ScheduledJobSourceType;
+
+  @IsOptional()
+  analysisConfig?: ScheduledAnalysisConfig;
 
   @ValidateIf((dto: CreateJobDto) => dto.type === 'cron')
   @IsString()

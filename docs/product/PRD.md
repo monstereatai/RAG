@@ -160,6 +160,7 @@
 - Neo4j schema 接口返回 `enabled=true`。
 - 图谱为空时返回空 schema，不报错。
 - 支持实体关系抽取、导入和图谱查询接口。
+- 文档主入库成功后，在 Neo4j 可用时异步构建图谱；图谱失败不阻塞文档版本生效，并可查询 `pending`／`indexed`／`failed`／`skipped` 状态。
 - dev / staging / prod Docker Compose 都能通过 `graphrag` profile 启动 Neo4j。
 
 ## 6. 功能范围

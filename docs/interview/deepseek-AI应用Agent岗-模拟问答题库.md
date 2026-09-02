@@ -175,12 +175,12 @@
 
 ### Q10. Agentic 为什么这样编排？三档路由怎么设计的？
 
-**30 秒结论**：简单问题走 Karpathy 快路径（省 token、延迟低），复杂问题才升级到 Agentic 完整链——用检索充分性判断做自动升降级，不做一刀切。
+**30 秒结论**：Simple 与 Auto 先走 Direct Answer Gate（精确直答门禁），未命中后统一执行 Hybrid RAG（混合检索增强生成）；Auto 再按证据充分性和复杂度升级 Agentic，不用问题长度一刀切。
 
 **2 分钟展开**：
 > 这是成本和质量平衡的核心决策。全部走 Agentic 太贵太慢，全部走 simple 又答不了复杂问题。设计了三档：
-> **simple**：固定走 Karpathy + Obsidian Fast Path——本地 BM25/向量快速检索 + 直接生成，秒级返回。
-> **auto**：先跑 Fast Path，再用 sufficiency gate 判断——compiled 命中、证据、引用覆盖、置信度综合评分，不达标自动升级。
+> **simple**：先精确直答，未命中后执行完整关键词、向量与 Obsidian 混合检索，不进入多步 Agentic。
+> **auto**：先精确直答，再跑完整 Fast Path（快速路径），根据证据充分性和复杂度决定轻量生成或升级。
 > **agentic**：完整 Research Path——routing 路由 → query augment 扩展 → retrieval 多路检索 → sufficiency 充分性评估 → 不足触发 web search → rerank → generate → citation → reflection 反思 → final。
 > 用 LangGraph 状态机编排，每个节点可观测、可恢复，最大步骤限制防死循环。
 
@@ -216,15 +216,15 @@
 
 **红线边界**：不吹「实时联网检索」——实际是配置 key 后可用的能力，真实联网增强 smoke 需补 key 后验证。
 
-### Q13. Karpathy + Obsidian 双链路是什么？为什么这么做？
+### Q13. Karpathy + Obsidian 现在放在什么位置？为什么这样调整？
 
-**30 秒结论**：Karpathy 把 RAG 索引层和 Obsidian 知识层统一编排——同一份内容双写进向量库和 Obsidian（raw/notes/compiled/index），simple 走 Obsidian Fast Path 秒回，agentic 把 Obsidian compiled 当高优先级上下文，两条链路互补不互相吞数据。
+**30 秒结论**：它们现在是统一 Hybrid RAG 的内部知识资产：Karpathy 本地知识负责受治理直答和降级，Obsidian 编译知识作为一类候选进入统一证据融合，不再单独包装成“双链路”。
 
 **2 分钟展开**：
 > 传统 RAG 只有「向量库」一层，检索命中就是黑盒。项目加了一层 Obsidian 知识管理：
 > ① **双写**：URL/文件/手动输入统一走 ingestion，既写 RAG（DB/Milvus/ES/BM25）也写 Obsidian（raw 原文 + source note + compiled 编译层 + index 索引）；
 > ② **分层**：raw 永久保留、source note 带摘要要点标签、compiled 生成实体页/结论页/开放问题、index 汇总 sources/tags；
-> ③ **取用**：simple 读 Obsidian compiled/index 快速命中，命中转伪片段参与引用校验；auto 先 Fast Path 再 sufficiency gate 决定升级；agentic 注入 Obsidian 高优先级上下文。
+> ③ **取用**：Simple 与 Auto 先过精确直答门禁，未命中后由关键词、向量和 Obsidian 候选统一融合；Auto 再按充分性门禁决定是否升级，Agentic 按子问题复用同一检索能力。
 > 价值：检索不只是「向量命中」，还能看到「知识怎么组织的」；且 Obsidian 是给人看的知识沉淀，RAG 是可检索的数据，互补。去重靠 content_hash + rag_doc_id，Obsidian 负责沉淀去重，RAG 负责当前用户可检索数据。
 
 **追问应对**：

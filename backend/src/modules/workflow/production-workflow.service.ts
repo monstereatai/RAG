@@ -19,6 +19,7 @@ import {
 } from './production-workflow.state';
 import {
   ResumeProductionWorkflowDto,
+  ReviseProductionWorkflowDto,
   StartProductionWorkflowDto,
 } from './production-workflow.dto';
 import {
@@ -178,6 +179,9 @@ export class ProductionWorkflowService {
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
+    if (dto.approval === 'rejected') {
+      return this.rejectForRevision(threadId, current, dto, userId);
+    }
     const state = await this.app.invoke(
       {
         approval: dto.approval,
@@ -208,6 +212,9 @@ export class ProductionWorkflowService {
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
+    if (dto.approval === 'rejected') {
+      return this.resume(threadId, dto, userId);
+    }
     const pending = {
       ...current,
       status: 'running' as const,
@@ -218,6 +225,78 @@ export class ProductionWorkflowService {
     this.pendingStates.set(threadId, pending);
     void this.saveWorkflowIndex(this.view(threadId, pending, userId));
     this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
+    return this.view(threadId, pending, userId);
+  }
+
+  async revise(
+    threadId: string,
+    dto: ReviseProductionWorkflowDto,
+    userId: string,
+  ) {
+    const current = await this.getOwnedState(threadId, userId);
+    if (current.status !== 'revision_required') {
+      throw new Error(`workflow does not require revision: ${current.status}`);
+    }
+    const allowed = current.rerunRoles.length ? current.rerunRoles : current.currentBatch;
+    const requested = dto.rerunRoles?.length
+      ? dto.rerunRoles.filter((role) => allowed.includes(role))
+      : allowed;
+    if (!requested.length) throw new Error('at least one rejected role must be revised');
+    const supplementalMaterials = dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
+    const revisionHistory = this.withRevisionPackage(
+      current.revisionHistory ?? [],
+      supplementalMaterials,
+      requested,
+    );
+    await this.app.updateState(this.config(threadId), {
+      status: 'running',
+      rerunRoles: requested,
+      pendingApprovalRoles: [],
+      approval: null,
+      supplementalMaterials,
+      revisionHistory,
+      error: '',
+    });
+    const state = await this.getOwnedState(threadId, userId);
+    await this.emitRuntimeEvent(state, 'revision.started', 'human_reviewer', {
+      revision: state.revisionNumber ?? 1,
+      rerunRoles: requested,
+      feedback: state.feedback,
+      supplementalMaterialsLength: supplementalMaterials.length,
+    });
+    const settled = await this.runUntilSettled(threadId, state);
+    await this.traceLangfuse(settled);
+    const result = this.view(threadId, settled, userId);
+    await this.emitWorkflowState(settled);
+    await this.saveWorkflowIndex(result);
+    return result;
+  }
+
+  async reviseAsync(
+    threadId: string,
+    dto: ReviseProductionWorkflowDto,
+    userId: string,
+  ) {
+    const current = await this.getOwnedState(threadId, userId);
+    if (current.status !== 'revision_required') {
+      throw new Error(`workflow does not require revision: ${current.status}`);
+    }
+    const allowed = current.rerunRoles.length ? current.rerunRoles : current.currentBatch;
+    const requested = dto.rerunRoles?.length
+      ? dto.rerunRoles.filter((role) => allowed.includes(role))
+      : allowed;
+    if (!requested.length) throw new Error('at least one rejected role must be revised');
+    const supplementalMaterials = dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
+    const pending = {
+      ...current,
+      status: 'running' as const,
+      rerunRoles: requested,
+      pendingApprovalRoles: [],
+      supplementalMaterials,
+    };
+    this.pendingStates.set(threadId, pending);
+    void this.saveWorkflowIndex(this.view(threadId, pending, userId));
+    this.schedule(threadId, userId, () => this.revise(threadId, dto, userId));
     return this.view(threadId, pending, userId);
   }
 
@@ -396,9 +475,13 @@ export class ProductionWorkflowService {
       riskApprovalThreshold: dto.riskApprovalThreshold ?? 'high',
       pendingApprovalRoles: [],
       rerunRoles: [],
+      staleRoles: [],
+      revisionNumber: 1,
+      revisionHistory: [],
       status: 'running',
       approval: null,
       feedback: '',
+      supplementalMaterials: '',
       results: {},
       error: '',
     };
@@ -474,11 +557,11 @@ export class ProductionWorkflowService {
       objective: String(item.brief ?? projectId),
       maxRounds: maxSteps,
     });
-    if (status === 'completed' || status === 'failed' || status === 'pending_approval') {
+    if (status === 'completed' || status === 'failed' || status === 'pending_approval' || status === 'revision_required') {
       await this.agentRuns.finish(run.id, {
         route: 'production_workflow',
-        status: status === 'pending_approval' ? 'waiting_approval' : status,
-        requiresApproval: status === 'pending_approval',
+        status: status === 'pending_approval' || status === 'revision_required' ? 'waiting_approval' : status,
+        requiresApproval: status === 'pending_approval' || status === 'revision_required',
         errorMessage: status === 'failed' ? String(item.error ?? '历史工作流失败') : undefined,
         resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
       });
@@ -553,9 +636,9 @@ export class ProductionWorkflowService {
     return graph.compile({ checkpointer: this.checkpointer });
   }
 
-  private prepareNode(
+  private async prepareNode(
     state: ProductionWorkflowStateType,
-  ): Partial<ProductionWorkflowStateType> {
+  ): Promise<Partial<ProductionWorkflowStateType>> {
     if (state.status === 'completed' || state.status === 'failed') return {};
     if (state.stepCount >= state.maxSteps) {
       return {
@@ -564,25 +647,37 @@ export class ProductionWorkflowService {
       };
     }
 
+    if (state.status === 'running' && state.rerunRoles.length > 0) {
+      return { stepCount: state.stepCount + 1, error: '' };
+    }
+
     let batchIndex = state.batchIndex;
     let completedRoles = state.completedRoles;
+    let resultUpdates: ProductionWorkflowStateType['results'] = {};
     if (state.status === 'pending_approval') {
       if (!state.approval) return {};
       if (state.approval === 'approved') {
         completedRoles = this.unionRoles(completedRoles, state.currentBatch);
         batchIndex += 1;
-      } else {
-        const requested = state.rerunRoles.length
-          ? state.rerunRoles.filter((role) => state.currentBatch.includes(role))
-          : state.currentBatch;
-        return {
-          status: 'running',
-          approval: null,
-          pendingApprovalRoles: [],
-          rerunRoles: requested.length ? requested : state.currentBatch,
-          stepCount: state.stepCount + 1,
-          error: '',
-        };
+        resultUpdates = Object.fromEntries(
+          state.currentBatch.map((role) => [
+            role,
+            state.results[role]
+              ? { ...state.results[role], reviewStatus: 'approved' as const }
+              : state.results[role],
+          ]),
+        );
+        await Promise.all(
+          state.currentBatch.map((role) => {
+            const artifactId = state.results[role]?.generatedArtifact?.id;
+            return artifactId
+              ? this.artifacts.markReviewState(artifactId, {
+                  reviewStatus: 'approved',
+                  revision: state.results[role]?.revision ?? 1,
+                })
+              : Promise.resolve();
+          }),
+        );
       }
     }
     if (batchIndex >= state.executionBatches.length) {
@@ -595,6 +690,7 @@ export class ProductionWorkflowService {
         feedback: '',
         pendingApprovalRoles: [],
         rerunRoles: [],
+        results: resultUpdates,
       };
     }
     const currentBatch = state.executionBatches[batchIndex];
@@ -608,6 +704,7 @@ export class ProductionWorkflowService {
       approval: null,
       pendingApprovalRoles: [],
       rerunRoles: [],
+      results: resultUpdates,
       stepCount: state.stepCount + 1,
       error: '',
     };
@@ -628,8 +725,10 @@ export class ProductionWorkflowService {
       Record<ProductionRole, ProductionStageResult>
     >;
     const mergedResults = { ...state.results, ...results };
+    const isRevisionRun = (state.revisionNumber ?? 1) > 1 && state.rerunRoles.length > 0;
     const pendingApprovalRoles = state.currentBatch.filter((role) => {
       const result = mergedResults[role];
+      if (isRevisionRun) return rolesToRun.includes(role) && Boolean(result);
       return result ? this.requiresRoleApproval(role, result, state) : false;
     });
     if (pendingApprovalRoles.length === 0) {
@@ -687,7 +786,7 @@ export class ProductionWorkflowService {
       }));
     const toolResult = await this.roleTools.gather(role, {
       projectId: state.projectId,
-      brief: state.brief,
+      brief: this.revisionAwareBrief(state),
       userId: state.userId,
       threadId: state.threadId,
       runId: state.runId || undefined,
@@ -705,6 +804,7 @@ export class ProductionWorkflowService {
       promptVersion: 'production-role/v1',
       projectId: state.projectId,
       briefLength: state.brief.length,
+      supplementalMaterialsLength: (state.supplementalMaterials ?? '').length,
       dependencyRoles: dependencies,
       evidenceIds: toolResult.evidence.map((item) => item.id),
       evidenceCount: toolResult.evidence.length,
@@ -728,7 +828,7 @@ export class ProductionWorkflowService {
               },
               {
                 role: 'user',
-                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
+                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n人工补充资料（待核验，不能单独作为 supported 声明依据）：${state.supplementalMaterials || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
               },
             ],
             { signal: AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS) },
@@ -743,6 +843,8 @@ export class ProductionWorkflowService {
         const evidenceCoverage = this.evidenceCoverage(claims);
         const result: ProductionStageResult = {
           role,
+          revision: state.revisionNumber ?? 1,
+          reviewStatus: 'pending',
           ...output,
           claims,
           evidence: toolResult.evidence,
@@ -854,6 +956,8 @@ export class ProductionWorkflowService {
       : '- 当前没有检索到可用证据。';
     return {
       role,
+      revision: state.revisionNumber ?? 1,
+      reviewStatus: 'pending',
       summary: `${role} 节点模型调用失败，已生成证据保全版交付物，待人工补充。`,
       deliverables: [
         {
@@ -1167,6 +1271,30 @@ export class ProductionWorkflowService {
 
   private async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
     const runId = state.runId;
+    if (state.status === 'revision_required') {
+      await this.emitRuntimeEvent(state, 'workflow.revision_required', 'production_workflow', {
+        revision: state.revisionNumber ?? 1,
+        roles: state.rerunRoles,
+        staleRoles: state.staleRoles,
+        feedback: state.feedback,
+      });
+      await this.emitRuntimeEvent(state, 'goal.paused', 'production_workflow', {
+        objective: state.brief,
+        status: 'paused',
+        round: state.stepCount,
+        maxRounds: state.maxSteps,
+        reason: 'Artifact 已驳回，等待人工确认后启动修订。',
+      });
+      if (runId) {
+        await this.agentRuns?.finish(runId, {
+          route: 'production_workflow',
+          status: 'waiting_approval',
+          requiresApproval: true,
+          resultSummary: `${state.projectId}：Artifact 已驳回，等待 v${state.revisionNumber} 修订。`,
+        });
+      }
+      return;
+    }
     if (state.status === 'pending_approval') {
       await this.emitRuntimeEvent(state, 'approval.required', 'production_workflow', {
         roles: state.pendingApprovalRoles,
@@ -1277,11 +1405,140 @@ export class ProductionWorkflowService {
       approvalRoles: state.approvalRoles,
       riskApprovalThreshold: state.riskApprovalThreshold,
       pendingApprovalRoles: state.pendingApprovalRoles,
+      rerunRoles: state.rerunRoles,
+      staleRoles: state.staleRoles,
+      revisionNumber: state.revisionNumber ?? 1,
+      revisionHistory: state.revisionHistory ?? [],
       status: state.status,
       feedback: state.feedback,
+      supplementalMaterials: state.supplementalMaterials ?? '',
       results: state.results,
       error: state.error,
       requiresApproval: state.status === 'pending_approval',
+      requiresRevision: state.status === 'revision_required',
     };
+  }
+
+  private revisionAwareBrief(state: ProductionWorkflowStateType): string {
+    if (!state.supplementalMaterials) return state.brief;
+    return `${state.brief}\n\n本次修订的人工补充资料（待核验）：\n${state.supplementalMaterials}`;
+  }
+
+  private withRevisionPackage(
+    history: ProductionWorkflowStateType['revisionHistory'],
+    supplementalMaterials: string,
+    rerunRoles: ProductionRole[],
+  ) {
+    return history.map((record, index) =>
+      index === history.length - 1
+        ? {
+            ...record,
+            supplementalMaterials,
+            revisedAt: new Date().toISOString(),
+            rerunRoles,
+          }
+        : record,
+    );
+  }
+
+  private async rejectForRevision(
+    threadId: string,
+    current: ProductionWorkflowStateType,
+    dto: ResumeProductionWorkflowDto,
+    userId: string,
+  ) {
+    const feedback = dto.feedback?.trim() ?? '';
+    if (!feedback) throw new Error('rejection feedback is required');
+    const requested = dto.rerunRoles?.length
+      ? dto.rerunRoles.filter((role) => current.currentBatch.includes(role))
+      : current.pendingApprovalRoles;
+    const rejectedRoles = requested.length ? requested : current.currentBatch;
+    const staleRoles = this.downstreamRoles(rejectedRoles, current.selectedRoles);
+    const rejectedResults = Object.fromEntries(
+      Object.entries(current.results).map(([role, result]) => [
+        role,
+        result
+          ? { ...result, reviewStatus: rejectedRoles.includes(role as ProductionRole) ? 'rejected' : current.currentBatch.includes(role as ProductionRole) ? 'approved' : staleRoles.includes(role as ProductionRole) ? 'stale' : result.reviewStatus }
+          : result,
+      ]),
+    ) as ProductionWorkflowStateType['results'];
+    const revisionHistory = [
+      ...(current.revisionHistory ?? []),
+      {
+        revision: current.revisionNumber ?? 1,
+        rejectedAt: new Date().toISOString(),
+        feedback,
+        rejectedRoles,
+        staleRoles,
+        results: rejectedResults,
+      },
+    ];
+    await this.app.updateState(this.config(threadId), {
+      status: 'revision_required',
+      approval: null,
+      feedback,
+      pendingApprovalRoles: [],
+      rerunRoles: rejectedRoles,
+      staleRoles,
+      revisionNumber: (current.revisionNumber ?? 1) + 1,
+      revisionHistory,
+      results: rejectedResults,
+      error: '',
+    });
+    const state = await this.getOwnedState(threadId, userId);
+    await Promise.all([
+      ...rejectedRoles.map((role) => this.tasks?.updateForRole(threadId, role, { status: 'revision_required', summary: feedback, approvalRequired: true })),
+      ...staleRoles.map((role) => this.tasks?.updateForRole(threadId, role, { status: 'stale', summary: `上游产物被驳回：${feedback}`, approvalRequired: false })),
+    ]);
+    await Promise.all(
+      Object.entries(rejectedResults).map(([role, result]) => {
+        const artifactId = result?.generatedArtifact?.id;
+        if (!artifactId) return Promise.resolve();
+        const productionRole = role as ProductionRole;
+        const reviewStatus = rejectedRoles.includes(productionRole)
+          ? 'rejected'
+          : staleRoles.includes(productionRole)
+            ? 'stale'
+            : null;
+        return reviewStatus
+          ? this.artifacts.markReviewState(artifactId, {
+              reviewStatus,
+              revision: result.revision ?? current.revisionNumber ?? 1,
+              feedback,
+            })
+          : Promise.resolve();
+      }),
+    );
+    await this.emitRuntimeEvent(state, 'revision.required', 'human_reviewer', {
+      revision: current.revisionNumber ?? 1,
+      nextRevision: state.revisionNumber,
+      feedback,
+      rejectedRoles,
+      staleRoles,
+    });
+    const result = this.view(threadId, state, userId);
+    await this.emitWorkflowState(state);
+    await this.saveWorkflowIndex(result);
+    return result;
+  }
+
+  private downstreamRoles(
+    roots: ProductionRole[],
+    selectedRoles: ProductionRole[],
+  ): ProductionRole[] {
+    const affected = new Set<ProductionRole>();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const role of selectedRoles) {
+        if (roots.includes(role) || affected.has(role)) continue;
+        const dependencies = dependenciesForProductionRole(role, selectedRoles);
+        if (dependencies.some((dependency) => roots.includes(dependency) || affected.has(dependency))) {
+          affected.add(role);
+          changed = true;
+        }
+      }
+    }
+    return [...affected];
   }
 }

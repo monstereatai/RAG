@@ -26,7 +26,14 @@ import {
   updateDocumentPermissions,
   getDocumentVersions,
   createDocumentVersion,
+  promoteDocumentVersion,
+  updateDocumentLifecycle,
   rollbackDocumentVersion,
+  submitDocumentReview,
+  approveDocumentReview,
+  rejectDocumentReview,
+  getFailedDocumentTasks,
+  retryFailedDocumentTask,
   type DocumentItem,
   type DocumentVersionItem,
   type DocumentPermissionInput,
@@ -60,6 +67,13 @@ const statusMap: Record<string, { color: string; text: string }> = {
   failed: { color: 'error', text: '解析失败' },
 };
 
+const graphStatusMap: Record<string, { color: string; text: string }> = {
+  pending: { color: 'processing', text: '构建中' },
+  indexed: { color: 'green', text: '已入图谱' },
+  failed: { color: 'error', text: '构建失败' },
+  skipped: { color: 'default', text: '未启用' },
+};
+
 const Documents: React.FC = () => {
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
@@ -70,6 +84,7 @@ const Documents: React.FC = () => {
   const [versionItems, setVersionItems] = useState<DocumentVersionItem[]>([]);
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionSaving, setVersionSaving] = useState(false);
+  const [versionActionDocId, setVersionActionDocId] = useState<string>();
   const [userOptions, setUserOptions] = useState<{ label: string; value: string }[]>([]);
   const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<
@@ -94,8 +109,9 @@ const Documents: React.FC = () => {
     ])
       .then(([docRes, userRes, roleRes, orgRes]: [any, any, any, any]) => {
         const raw = docRes?.data ?? docRes;
-        const items = raw?.data?.items ?? (Array.isArray(raw) ? raw : []);
-        const rawTotal = raw?.data?.total ?? raw?.total ?? (Array.isArray(items) ? items.length : 0);
+        const payload = raw?.data ?? raw;
+        const items = payload?.items ?? (Array.isArray(payload) ? payload : []);
+        const rawTotal = payload?.total ?? (Array.isArray(items) ? items.length : 0);
 
         const userRaw = userRes?.data ?? userRes;
         const userList = normalizeList(userRaw);
@@ -150,6 +166,10 @@ const Documents: React.FC = () => {
               metadata: { category: repairMojibake(item.category), title: repairMojibake(item.title) },
               docVersion: item.docVersion,
               lifecycleStatus: item.lifecycleStatus,
+              reviewStatus: item.reviewStatus,
+              graphIndexStatus: item.graphIndexStatus,
+              graphIndexedAt: item.graphIndexedAt,
+              graphIndexError: item.graphIndexError,
               supersedesDocId: item.supersedesDocId,
               effectiveAt: item.effectiveAt,
               expiredAt: item.expiredAt,
@@ -160,6 +180,8 @@ const Documents: React.FC = () => {
           setTotal(Number(rawTotal) || items.length);
           setPageState('data');
         } else {
+          setDocs([]);
+          setTotal(0);
           setPageState('empty');
         }
       })
@@ -231,9 +253,8 @@ const Documents: React.FC = () => {
     try {
       await createDocumentVersion(versionDoc.id, {
         ...values,
-        lifecycleStatus: 'effective',
       });
-      message.success('新版本已创建，旧版本已自动废弃');
+      message.success('新版本已创建为草稿；索引完成后可设为生效');
       setVersionDoc(null);
       fetchDocs();
     } catch (error) {
@@ -243,7 +264,69 @@ const Documents: React.FC = () => {
     }
   };
 
+  const handlePromote = async (item: DocumentVersionItem) => {
+    setVersionActionDocId(item.docId);
+    try {
+      await promoteDocumentVersion(item.docId);
+      message.success(`${item.docVersion} 已设为生效，旧版本已自动废弃`);
+      if (versionDoc) openVersionModal(versionDoc);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '版本生效失败');
+    } finally {
+      setVersionActionDocId(undefined);
+    }
+  };
+
+  const handleReview = async (item: DocumentVersionItem, action: 'submit' | 'approve' | 'reject') => {
+    setVersionActionDocId(item.docId);
+    try {
+      if (action === 'submit') await submitDocumentReview(item.docId);
+      if (action === 'approve') await approveDocumentReview(item.docId);
+      if (action === 'reject') await rejectDocumentReview(item.docId);
+      message.success(action === 'submit' ? '已提交审核' : action === 'approve' ? '审核已通过' : '已驳回，请补充资料后新建版本');
+      if (versionDoc) openVersionModal(versionDoc);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '审核操作失败');
+    } finally {
+      setVersionActionDocId(undefined);
+    }
+  };
+
+  const handleRetryFailedTasks = async () => {
+    try {
+      const result: any = await getFailedDocumentTasks();
+      const tasks = result?.data ?? result ?? [];
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        message.info('当前没有可重放的失败任务');
+        return;
+      }
+      const failed = await Promise.all(tasks.map((task: any) => retryFailedDocumentTask(task.id)));
+      const retried = failed.filter((item: any) => (item?.data ?? item)?.retried).length;
+      message.success(`已提交 ${retried} 个失败任务重放`);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '失败任务加载失败');
+    }
+  };
+
+  const handleDeprecate = async (item: DocumentVersionItem) => {
+    setVersionActionDocId(item.docId);
+    try {
+      await updateDocumentLifecycle(item.docId, 'deprecated');
+      message.success(`${item.docVersion} 已废弃`);
+      if (versionDoc) openVersionModal(versionDoc);
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '版本废弃失败');
+    } finally {
+      setVersionActionDocId(undefined);
+    }
+  };
+
   const handleRollback = async (item: DocumentVersionItem) => {
+    setVersionActionDocId(item.docId);
     try {
       await rollbackDocumentVersion(item.docId);
       message.success(`已回滚到 ${item.docVersion}`);
@@ -251,6 +334,8 @@ const Documents: React.FC = () => {
       fetchDocs();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '版本回滚失败');
+    } finally {
+      setVersionActionDocId(undefined);
     }
   };
 
@@ -292,6 +377,9 @@ const Documents: React.FC = () => {
             {record.docVersion || '未标注版本'}
           </Tag>
           <Tag>{record.lifecycleStatus || 'confirmed'}</Tag>
+          <Tag color={record.reviewStatus === 'approved' ? 'green' : record.reviewStatus === 'rejected' ? 'red' : 'orange'}>
+            {record.reviewStatus || 'approved'}
+          </Tag>
         </Space>
       ),
     },
@@ -313,8 +401,23 @@ const Documents: React.FC = () => {
         ),
     },
     {
+      title: '图谱',
+      width: 130,
+      render: (_, record) => {
+        const graph = graphStatusMap[record.graphIndexStatus ?? 'skipped'];
+        return record.graphIndexError ? (
+          <Tooltip title={record.graphIndexError}>
+            <Tag color={graph.color}>{graph.text}</Tag>
+          </Tooltip>
+        ) : (
+          <Tag color={graph.color}>{graph.text}</Tag>
+        );
+      },
+    },
+    {
       title: '操作',
-      width: 150,
+      fixed: 'right',
+      width: 190,
       render: (_, record) => (
         <Space size="middle">
           <EyeOutlined />
@@ -329,9 +432,10 @@ const Documents: React.FC = () => {
             icon={<HistoryOutlined />}
             onClick={() => openVersionModal(record)}
             size="small"
-            title="版本治理"
             type="text"
-          />
+          >
+            版本治理
+          </Button>
           <MoreOutlined />
         </Space>
       ),
@@ -343,6 +447,7 @@ const Documents: React.FC = () => {
       <div className="rag-panel document-toolbar">
         <Input prefix={<SearchOutlined />} placeholder="搜索文档名称、内容、上传人等" />
         <Button icon={<UploadOutlined />} type="primary">批量上传</Button>
+        <Button onClick={handleRetryFailedTasks}>重放失败任务</Button>
         <Button>新建文件夹</Button>
         <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
         <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
@@ -382,6 +487,7 @@ const Documents: React.FC = () => {
           <Table
             columns={columns}
             dataSource={docs}
+            scroll={{ x: 1400, y: 'calc(100vh - 470px)' }}
             pagination={{
               current: pagination.current,
               pageSize: pagination.pageSize,
@@ -521,19 +627,32 @@ const Documents: React.FC = () => {
           columns={[
             { title: '版本', dataIndex: 'docVersion' },
             { title: '状态', dataIndex: 'lifecycleStatus' },
+            { title: '审核', dataIndex: 'reviewStatus', render: (value: string) => <Tag color={value === 'approved' ? 'green' : value === 'rejected' ? 'red' : 'orange'}>{value || 'approved'}</Tag> },
             { title: '生效时间', dataIndex: 'effectiveAt' },
             { title: '创建时间', dataIndex: 'createdAt' },
             {
               title: '操作',
-              render: (_: unknown, item: DocumentVersionItem) => (
-                <Button
-                  disabled={item.lifecycleStatus === 'effective'}
-                  onClick={() => handleRollback(item)}
-                  size="small"
-                >
-                  回滚到此版本
-                </Button>
-              ),
+              render: (_: unknown, item: DocumentVersionItem) => {
+                if (item.lifecycleStatus === 'effective') {
+                  return <Tag color="success">当前生效</Tag>;
+                }
+                if (item.lifecycleStatus === 'deprecated') {
+                  return (
+                    <Button loading={versionActionDocId === item.docId} onClick={() => handleRollback(item)} size="small">
+                      回滚到此版本
+                    </Button>
+                  );
+                }
+                return (
+                  <Space size={4}>
+                    {item.reviewStatus === 'approved' ? <Button loading={versionActionDocId === item.docId} onClick={() => handlePromote(item)} size="small" type="primary">设为生效</Button> : item.reviewStatus === 'pending_review' ? <Button loading={versionActionDocId === item.docId} onClick={() => handleReview(item, 'approve')} size="small" type="primary">审核通过</Button> : <Button loading={versionActionDocId === item.docId} onClick={() => handleReview(item, 'submit')} size="small" type="primary">提交审核</Button>}
+                    {item.reviewStatus === 'pending_review' && <Button loading={versionActionDocId === item.docId} danger onClick={() => handleReview(item, 'reject')} size="small">驳回</Button>}
+                    <Button disabled={versionActionDocId === item.docId} onClick={() => handleDeprecate(item)} size="small">
+                      废弃
+                    </Button>
+                  </Space>
+                );
+              },
             },
           ] as ColumnsType<DocumentVersionItem>}
         />

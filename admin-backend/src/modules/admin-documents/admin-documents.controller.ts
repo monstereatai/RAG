@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
@@ -62,6 +62,54 @@ export class AdminDocumentsController {
   lifecycle(@Param('docId') docId: string, @Body() body: unknown) {
     const lifecycleStatus = (body as { lifecycleStatus?: string })?.lifecycleStatus;
     return this.ragClient.updateDocumentLifecycle(docId, lifecycleStatus ?? 'deprecated');
+  }
+
+  @Post(':docId/promote')
+  @AuditLog('documents', 'promote-version')
+  @ApiOperation({ summary: '将已索引的文档版本设为生效' })
+  @RequirePermission('admin:documents:write')
+  promote(@Param('docId') docId: string) {
+    return this.ragClient.promoteDocumentVersion(docId);
+  }
+
+  @Post(':docId/review/submit')
+  @AuditLog('documents', 'review-submit')
+  @RequirePermission('admin:documents:write')
+  submitReview(@Param('docId') docId: string, @Body() body: unknown, @Req() req: { user?: { userId?: string; sub?: string } }) {
+    return this.ragClient.submitDocumentReview(docId, this.withOperator(body, req));
+  }
+
+  @Post(':docId/review/approve')
+  @AuditLog('documents', 'review-approve')
+  @RequirePermission('admin:documents:write')
+  approveReview(@Param('docId') docId: string, @Body() body: unknown, @Req() req: { user?: { userId?: string; sub?: string } }) {
+    return this.ragClient.approveDocumentReview(docId, this.withOperator(body, req));
+  }
+
+  @Post(':docId/review/reject')
+  @AuditLog('documents', 'review-reject')
+  @RequirePermission('admin:documents:write')
+  rejectReview(@Param('docId') docId: string, @Body() body: unknown, @Req() req: { user?: { userId?: string; sub?: string } }) {
+    return this.ragClient.rejectDocumentReview(docId, this.withOperator(body, req));
+  }
+
+  @Get(':docId/reviews')
+  @RequirePermission('admin:documents:read')
+  reviews(@Param('docId') docId: string) {
+    return this.ragClient.getDocumentReviews(docId);
+  }
+
+  @Get('tasks/failed')
+  @RequirePermission('admin:documents:read')
+  failedTasks() {
+    return this.ragClient.getFailedDocumentTasks();
+  }
+
+  @Post('tasks/:taskId/retry')
+  @AuditLog('documents', 'retry-failed-task')
+  @RequirePermission('admin:documents:write')
+  retryFailedTask(@Param('taskId') taskId: string) {
+    return this.ragClient.retryFailedDocumentTask(taskId);
   }
 
   @Post(':docId/rollback')
@@ -160,5 +208,10 @@ export class AdminDocumentsController {
         result.status && result.status >= 400 ? result.status : 502,
       );
     }
+  }
+
+  private withOperator(body: unknown, req: { user?: { userId?: string; sub?: string } }) {
+    const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+    return { ...payload, operatorId: req.user?.userId ?? req.user?.sub ?? 'admin-system' };
   }
 }

@@ -20,6 +20,7 @@ import { RagFeedbackService } from './rag-feedback.service';
 import { PromptModule } from '../../rag/prompts/prompt.module';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
+import { DocumentModule } from '../document/document.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
     AgentRunsModule,
     PluginRuntimeModule,
     AgentRuntimeModule,
+    DocumentModule,
   ],
   controllers: [ChatController],
   providers: [

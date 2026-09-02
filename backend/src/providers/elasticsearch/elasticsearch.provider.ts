@@ -210,6 +210,7 @@ export class ElasticsearchProvider implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      highlightFragments?: string[];
     }>,
     userId?: string,
   ): Promise<void> {
@@ -385,6 +386,11 @@ export class ElasticsearchProvider implements OnModuleInit {
         index: this.indexName,
         query: queryObj,
         size: topK,
+        highlight: {
+          fields: { content: { fragment_size: 180, number_of_fragments: 2 } },
+          pre_tags: ['<em>'],
+          post_tags: ['</em>'],
+        },
       });
 
       return result.hits.hits.map((hit) => {
@@ -415,6 +421,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           documentType: src?.documentType,
           lifecycleStatus: src?.lifecycleStatus,
           supersedesDocId: src?.supersedesDocId,
+          highlightFragments: (hit.highlight?.content ?? []).map((fragment) =>
+            String(fragment).replace(/<\/?em>/g, ''),
+          ),
         };
       });
     } catch (err) {

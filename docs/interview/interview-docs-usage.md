@@ -404,7 +404,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 你的项目回答：
 - 支持 PDF / DOCX / Markdown / URL / HTML / Obsidian 笔记等多来源入库。
-- 入库后进入 RAG 索引层，同时和 Karpathy + Obsidian 编译层互补。
+- 入库后并发构建关键词、向量及 Obsidian 编译知识等索引；Karpathy 本地知识只作为受治理直答与降级资产，不单独形成在线路由。
 - Chunk 不只按长度切，还保留标题、来源、元数据、引用信息。
 - 多租户 userId 隔离，权限相关问题不能跨用户召回。
 ```
@@ -420,7 +420,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 - 召回不准怎么优化？
 
 你的项目回答：
-- 简单问题走 Karpathy + Obsidian fast path，先保证低延迟和低成本。
+- 简单问题先走 Direct Answer Gate（精确直答门禁），未命中再走统一 Hybrid RAG（混合检索增强生成），兼顾低延迟、低成本和召回完整性。
 - 复杂问题走 Hybrid Search，Milvus 负责语义相似，BM25/ES 负责精确词和业务术语，RRF 做融合。
 - Rerank 放在召回之后、生成之前，用来过滤噪声和提升证据排序。
 - 如果低相关或证据不足，走拒答、补检索或人工确认，而不是硬生成。
@@ -565,7 +565,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 | 面试追问                   | 一句话回答                                                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------------ |
 | 为什么不用纯向量？         | 纯向量能找相似，但业务术语、精确规则和关系依赖容易漏，所以用 Hybrid Search + GraphRAG。    |
-| simple 模式解决什么？      | 解决简单知识查询的延迟和成本问题，先走 Karpathy + Obsidian fast path。                     |
+| simple 模式解决什么？      | 解决简单知识查询的延迟和成本问题：先精确直答，未命中再执行统一 Hybrid RAG。              |
 | 什么时候走 Agentic？       | 只有复杂需求、证据不足、需要拆方案和补风险时才走 Agentic。                                 |
 | GraphRAG 有什么用？        | 用来补齐活动玩法、页面、接口、埋点、地区版本、风险项之间的关系。                           |
 | 记忆污染怎么办？           | 写入前分类，短期和长期分层，长期只沉淀稳定事实，错误和临时上下文不固化。                   |
@@ -583,7 +583,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 ```text
 我没有把所有问题都做成复杂 Agent，而是做了分层路由。
-简单知识查询走 Karpathy + Obsidian fast path，保证低延迟和低成本。
+简单知识查询先走 Direct Answer Gate，未命中再执行统一 Hybrid RAG，保证低延迟、低成本和证据完整性。
 复杂活动需求再走 LangGraph Agentic Workflow，把需求拆成页面结构、接口清单、埋点方案、风险检查和验收 checklist。
 ```
 

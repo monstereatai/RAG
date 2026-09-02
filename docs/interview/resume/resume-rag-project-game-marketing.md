@@ -146,7 +146,7 @@ NestJS + React + LangGraph.js + Milvus + Elasticsearch/BM25 + Redis + Neo4j + MC
 - 面向游戏节假日、周年庆、版本更新、新角色宣发、充值/抽奖营销、小程序/H5 活动页和 PC/H5 官网等场景，从 0 到 1 设计并落地 Agentic RAG 知识协同平台试点；结合当前业务链路搭建活动类型、营销玩法、页面模块、前端工程规范、埋点规范、地区适配和上线验收清单框架，辅助业务负责人快速形成可评审的技术方案初稿。
 - 设计统一知识入库链路，支持活动模板、官网规范、前端经验、Obsidian 笔记、URL 文章和官方文档进入 RAG/Karpathy/Obsidian 索引层，通过 metadata 标注玩法类型、页面形态、地区版本、技术关注点和风险边界，让知识库能随着后续活动上线和复盘持续扩充，避免做成一次性活动规则库。
 - 实现 Milvus 向量召回 + Elasticsearch/BM25 关键词召回 + RRF 融合 + Rerank + 引用校验的 Hybrid Search 链路，用于检索抽奖、充值返利、微信分享裂变、角色宣发、官网 SEO/性能、埋点和地区适配等知识，保证生成结果有来源、可追溯、低置信度可拒答。
-- 基于 LangGraph 构建 simple / auto / agentic 分层编排：简单问题走 Karpathy + Obsidian fast path，复杂活动需求升级到 Agentic Workflow，输出活动理解、页面结构、素材需求、接口清单、埋点清单、风险检查、地区适配和测试验收 checklist。
+- 基于 LangGraph 构建 simple／auto／agentic 分层编排：Simple 与 Auto 先走 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG（混合检索增强生成）；Auto 按证据充分性和复杂度升级到 Agentic Workflow（智能体工作流），输出活动理解、页面结构、素材需求、接口清单、埋点清单、风险检查、地区适配和测试验收 checklist（检查清单）。
 - 引入 GraphRAG 表达活动类型、营销玩法、页面模块、接口、埋点、地区版本和风险项之间的关系；同时通过 MCP 暴露 `rag_context`、`rag_search`、`rag_game_plan` 等工具，让 Codex/Claude Code/Trae 在编码前自动获取内部组件、活动模板、埋点规范和地区适配上下文。
 - 建设 Admin 管理后台与评测体系，覆盖文档治理、问答运营、GraphOps 节点编辑、权限/审计、指标观测、Prompt Injection 检测和业务回归；在真实活动数据积累不足阶段，先建立本地仿真评测和游戏活动/官网营销专项样本，用于验证链路、拒答边界和后续数据回流方法。
 ```
@@ -160,7 +160,7 @@ NestJS + React + LangGraph.js + Milvus + Elasticsearch/BM25 + Redis + Neo4j + MC
 
 - 面向游戏活动、营销 H5、小程序活动页和 PC/H5 官网业务线，从 0 到 1 设计并落地 Agentic RAG 知识协同平台试点；结合当前业务链路搭建活动类型、营销玩法、页面模块、前端工程规范、埋点规范、地区适配和上线验收清单框架，辅助需求快速转成技术方案初稿。
 - 实现 Milvus 向量召回 + Elasticsearch/BM25 关键词召回 + RRF 融合 + Rerank + 引用校验的 Hybrid Search 链路，支撑抽奖、充值返利、微信分享裂变、角色宣发、官网 SEO/性能、埋点和地区适配等知识检索。
-- 基于 LangGraph 构建 simple / auto / agentic 分层编排，简单问题走 Karpathy + Obsidian fast path，复杂活动需求升级到 Agentic Workflow，输出页面结构、接口清单、埋点清单、风险检查和测试验收 checklist。
+- 基于 LangGraph 构建 simple／auto／agentic 分层编排：先精确直答，未命中后统一混合检索，Auto 在证据不足或复杂时升级 Agentic Workflow，输出页面结构、接口清单、埋点清单、风险检查和测试验收 checklist（检查清单）。
 - 引入 GraphRAG 和 MCP，表达活动类型、玩法、页面模块、接口、埋点和风险之间的关系，并通过 `rag_context/rag_search/rag_game_plan` 等工具为 Codex/Claude Code/Trae 提供编码前上下文；在真实活动数据积累不足阶段，先用本地仿真评测和专项样本验证链路可行性，为后续活动复盘数据回流预留闭环。
 ```
 
@@ -223,7 +223,7 @@ NestJS + React + LangGraph.js + Milvus + Elasticsearch/BM25 + Redis + Neo4j + MC
 
 | 业务能力 | 项目能力 |
 |----------|----------|
-| 快速理解活动类型和营销玩法 | Karpathy + Obsidian fast path、Hybrid Search |
+| 快速理解活动类型和营销玩法 | Direct Answer Gate、统一 Hybrid Search（混合检索） |
 | 生成技术方案思路 | LangGraph Agentic Workflow、项目决策编排 |
 | 检索官网和小程序/H5 工程规范 | 文档解析、metadata、Milvus + ES/BM25 |
 | 玩法/页面/接口/埋点/地区关系 | GraphRAG、Neo4j、GraphOps |
@@ -565,7 +565,7 @@ Checklist -> verifies -> PageModule / TrackingEvent / ApiContract / RiskItem
 ### 30 秒版本
 
 ```text
-这个项目我主要负责四块：第一是整体架构，包括 RAG 后端、Admin 管理后台、MCP 工具服务和评测脚本；第二是知识入库和检索链路，包括 Karpathy + Obsidian fast path、Hybrid Search 和 GraphRAG；第三是 Agentic Workflow，把复杂活动需求拆成方案、接口、埋点、风险和验收 checklist；第四是质量和工具化，包括引用校验、低相关拒答、评测回归、MCP 接入 Codex / Claude Code 这类 AI Coding 工具。
+这个项目我主要负责四块：第一是整体架构，包括 RAG 后端、Admin（管理端）后台、MCP（模型上下文协议）工具服务和评测脚本；第二是知识入库和检索链路，包括 Direct Answer Gate（精确直答门禁）、统一 Hybrid Search（混合检索）和 GraphRAG（图检索增强生成）；第三是 Agentic Workflow（智能体工作流），把复杂活动需求拆成方案、接口、埋点、风险和验收 checklist（检查清单）；第四是质量和工具化，包括引用校验、低相关拒答、评测回归、MCP 接入 Codex／Claude Code 这类 AI Coding（人工智能辅助编码）工具。
 ```
 
 ### 1 分钟版本
@@ -575,7 +575,7 @@ Checklist -> verifies -> PageModule / TrackingEvent / ApiContract / RiskItem
 
 第一块是整体架构，包括 NestJS RAG 后端、React Admin 管理后台、MCP 工具服务和评测脚本，保证系统能被管理、被评测，也能给 AI 编程工具调用。
 
-第二块是知识和检索链路。资料进来后会进入 RAG 索引和 Obsidian 知识层，简单问题走 Karpathy + Obsidian fast path，复杂问题再走 Hybrid Search 和 GraphRAG。
+第二块是知识和检索链路。资料进来后会并发构建关键词、向量、图谱和 Obsidian 编译知识；Simple 与 Auto 先精确直答，未命中后执行统一 Hybrid Search，复杂问题再按需补充 GraphRAG。Karpathy 本地知识只负责受治理直答和降级，不是独立在线链路。
 
 第三块是问答编排。简单查询走 simple，系统判断证据不足时进入 auto，复杂活动需求走 agentic，通过 LangGraph 拆成页面方案、接口清单、埋点方案、风险检查和验收 checklist。
 
@@ -603,8 +603,8 @@ MCP 是给 AI Coding 工具用的。比如 Codex / Claude Code 写代码前，�
 ### 被问“simple / auto / agentic 怎么分”
 
 ```text
-simple 适合明确知识查询，走 Karpathy + Obsidian fast path，速度快、成本低。
-auto 会先走 fast path，如果证据不足再升级到复杂链路。
+simple 适合明确知识查询，先精确直答，未命中后执行统一 Hybrid RAG，不进入多步 Agentic。
+auto 共用精确直答和 Hybrid Fast Path，再按证据充分性与复杂度决定轻量回答或升级。
 agentic 适合复杂活动方案，会通过 LangGraph 拆任务、查资料、补接口埋点和风险项，最后生成结构化方案。
 ```
 
@@ -620,7 +620,7 @@ ProcessOn「AI 应用」思维导图适合当作 Agent / RAG 面试补课地图�
 
 ```text
 1. RAG 主链路：入库、切片、Embedding、召回、Rerank、生成、引用校验。
-2. 分层路由：simple / Karpathy fast path、auto、agentic。
+2. 分层路由：Direct Answer Gate（精确直答门禁）、统一 Hybrid Fast Path（混合快速路径）与按需 Agentic。
 3. Hybrid Search：Milvus 向量召回 + BM25/ES 精确召回 + RRF + Rerank。
 4. GraphRAG：用图谱补齐活动玩法、页面、接口、埋点、风险项之间的关系。
 5. Agentic Workflow：复杂需求拆成方案、接口、埋点、风险和验收 checklist。
@@ -645,7 +645,7 @@ ProcessOn「AI 应用」思维导图适合当作 Agent / RAG 面试补课地图�
 
 ```text
 这个项目不是所有问题都走复杂链路，我做了分层路由。
-简单知识查询走 simple / Karpathy fast path，直接用 Obsidian 编译知识和 BM25 快速回答，保证低延迟和低成本。
+简单知识查询先过 Direct Answer Gate，未命中后统一执行关键词、向量与 Obsidian 混合召回，在低延迟和低成本之外保证证据完整性。
 复杂方案类问题再进入 Hybrid Search + GraphRAG，用向量找相似模板，BM25/ES 做精确召回，图谱补齐玩法、页面、接口、埋点和风险项之间的关系。
 ```
 
@@ -668,7 +668,7 @@ ProcessOn「AI 应用」思维导图适合当作 Agent / RAG 面试补课地图�
 ### 总回答
 
 ```text
-这个 RAG 项目不是单纯做知识问答，而是围绕游戏活动和官网业务，把不稳定的活动规则沉淀成稳定的玩法、页面、接口、埋点和验收知识；检索上做 simple / Karpathy fast path 和复杂链路分层，简单问题低延迟返回，复杂问题再用 Hybrid Search + GraphRAG 补召回和关系；生成上用引用校验、低相关拒答和 Prompt Injection 检测控制幻觉，复杂需求再通过 Agentic Workflow 拆成可评审、可开发、可验收的方案。
+这个 RAG 项目不是单纯做知识问答，而是围绕游戏活动和官网业务，把不稳定的活动规则沉淀成稳定的玩法、页面、接口、埋点和验收知识；检索上先过 Direct Answer Gate，未命中后统一执行 Hybrid Search（混合检索），Auto 根据证据和复杂度按需用 GraphRAG（图检索增强生成）补关系；生成上用引用校验、低相关拒答和 Prompt Injection（提示注入）检测控制幻觉，复杂需求再通过 Agentic Workflow（智能体工作流）拆成可评审、可开发、可验收的方案。
 ```
 
 ## 面试追问回答

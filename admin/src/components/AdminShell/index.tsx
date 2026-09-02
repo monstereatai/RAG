@@ -99,6 +99,12 @@ export const agentOpsNav: SideNavItem[] = [
     path: '/agent-ops/run-center',
   },
   {
+    key: 'schedules',
+    label: '定时任务',
+    icon: <ClockCircleOutlined />,
+    path: '/agent-ops/schedules',
+  },
+  {
     key: 'collaboration',
     label: '协作编排',
     icon: <ApartmentOutlined />,

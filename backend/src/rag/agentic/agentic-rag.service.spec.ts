@@ -34,9 +34,20 @@ describe('AgenticRagService budget boundaries', () => {
       getModel: getModelMock,
     } as unknown as LlmProvider;
     const karpathyRagService = {
+      answerDirect: jest.fn().mockResolvedValue(null),
+      assessFastPath: jest.fn(),
+      answer: jest.fn(),
       retrieve: jest.fn(),
       retrieveBm25Only: jest.fn(),
+      getObsidianContext: jest
+        .fn()
+        .mockResolvedValue({ hits: [], context: '' }),
       hasIndexedChunks: jest.fn().mockReturnValue(true),
+      unsupportedReliableAnswer: jest
+        .fn()
+        .mockReturnValue(
+          '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
+        ),
     } as unknown as jest.Mocked<KarpathyRagService>;
     const bochaSearchService = {
       isEnabled: jest.fn().mockReturnValue(false),
@@ -90,7 +101,7 @@ describe('AgenticRagService budget boundaries', () => {
     expect(result).toEqual(['问题 A', '问题 B']);
   });
 
-  it('routes overly long auto queries to simple mode', () => {
+  it('does not force overly long complex auto queries to simple mode', () => {
     const { service } = createService();
 
     const route = (
@@ -102,7 +113,7 @@ describe('AgenticRagService budget boundaries', () => {
       }
     ).classifyRoute('请分析'.repeat(40), 'auto');
 
-    expect(route).toBe('simple');
+    expect(route).toBe('agentic');
   });
 
   it('upgrades complex auto queries even when the fast path has evidence', () => {
@@ -127,6 +138,72 @@ describe('AgenticRagService budget boundaries', () => {
     ).resolveAutoRoute('ACT100 的状态是什么？', true);
 
     expect(route).toBe('simple');
+  });
+
+  it('returns an Auto direct answer before running the Hybrid Fast Path', async () => {
+    const { service, karpathyRagService } = createService();
+    karpathyRagService.answerDirect.mockResolvedValue({
+      answer: 'ACT100 已上线。',
+      references: [],
+      retrievalSufficient: true,
+      retrievalReason: '命中受治理本地直答',
+    });
+
+    await expect(service.run('ACT100 的状态是什么？', 'auto')).resolves.toMatchObject({
+      answer: 'ACT100 已上线。',
+      route: 'simple',
+      retrievalSufficient: true,
+    });
+    expect(karpathyRagService.assessFastPath).not.toHaveBeenCalled();
+  });
+
+  it('reuses a sufficient Base Case Fast Path result in Auto simple route', async () => {
+    const { service, karpathyRagService } = createService();
+    const reviewedChunk = chunk('reviewed-bad-case:feedback-1', 0.96);
+    const prefetchedFastPath = {
+      retrieval: {
+        chunks: [],
+        diagnostics: {},
+        profile: {},
+      },
+      obsidianHits: [],
+      badCaseMatches: [
+        {
+          id: 'feedback-1',
+          query: '韦水春是谁',
+          text: '正确处理标准：韦水春是临床病理工作人员。',
+          score: 0.96,
+          mode: 'correction',
+        },
+      ],
+    } as never;
+    karpathyRagService.assessFastPath.mockResolvedValue({
+      sufficient: true,
+      reason: 'Base Case 证据充分',
+      chunks: [reviewedChunk],
+      obsidianHits: [],
+      prefetchedFastPath,
+    });
+    karpathyRagService.answer.mockResolvedValue({
+      answer: '韦水春是临床病理工作人员。',
+      references: [reviewedChunk],
+      retrievalSufficient: true,
+      retrievalReason: 'Base Case 证据充分',
+    });
+
+    await expect(service.run('韦水春是谁', 'auto')).resolves.toMatchObject({
+      answer: '韦水春是临床病理工作人员。',
+      route: 'simple',
+      retrievalSufficient: true,
+    });
+    expect(karpathyRagService.answer.mock.calls[0]).toEqual([
+      '韦水春是谁',
+      [],
+      undefined,
+      [],
+      expect.any(Function),
+      expect.objectContaining({ prefetchedFastPath }),
+    ]);
   });
 
   it('caps retrieval query count and returned chunks', async () => {

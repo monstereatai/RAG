@@ -1,6 +1,6 @@
 # RAG 知识库系统
 
-Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护** 与 **多租户物理/逻辑数据硬隔离** 能力。
+企业级 Hybrid RAG（混合检索增强生成）与 Agentic RAG（智能体式检索增强生成）Web 应用，具备 **JWT 安全防护** 与 **多租户物理／逻辑数据硬隔离** 能力。
 
 当前项目基于 NestJS、LangChain.js、LangGraph.js、deepagents、Milvus、PostgreSQL、Redis、React 和 Vite 进行构建。
 
@@ -16,7 +16,7 @@ Agentic RAG + Karpathy-style RAG Web 应用，具备企业级 **JWT 安全防护
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
 - **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在真实后端跑到 28/28 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
-- **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch、Karpathy 和 Obsidian 索引；公开快照用于验证链路，不代表真实企业线上效果。
+- **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch 及 Obsidian 编译知识索引；Karpathy 本地知识作为受治理直答与降级资产，不是独立在线检索链路。公开快照用于验证链路，不代表真实企业线上效果。
 - **部署目标**：当前固定为 Docker Compose，见 `docs/architecture/DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
 详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./docs/plans/rag-plan.md)。

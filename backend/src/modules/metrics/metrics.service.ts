@@ -98,6 +98,19 @@ export class MetricsService implements OnModuleInit {
     labelNames: ['route'] as const,
   });
 
+  private readonly scheduledJobRunsTotal = new Counter({
+    name: 'rag_scheduled_job_runs_total',
+    help: 'Scheduled job runs by task kind and status',
+    labelNames: ['task_kind', 'status'] as const,
+  });
+
+  private readonly scheduledJobDuration = new Histogram({
+    name: 'rag_scheduled_job_duration_seconds',
+    help: 'Scheduled job execution duration in seconds',
+    labelNames: ['task_kind', 'status'] as const,
+    buckets: [0.1, 0.5, 1, 3, 5, 10, 30, 60, 120],
+  });
+
   onModuleInit(): void {
     collectDefaultMetrics({ register, prefix: 'rag_' });
   }
@@ -180,6 +193,16 @@ export class MetricsService implements OnModuleInit {
 
   observeAgentEmptyRetrieval(route: string): void {
     this.agentEmptyRetrievalTotal.inc({ route });
+  }
+
+  observeScheduledJob(
+    taskKind: string,
+    status: 'completed' | 'failed',
+    durationSeconds: number,
+  ): void {
+    const labels = { task_kind: taskKind || 'unknown', status };
+    this.scheduledJobRunsTotal.inc(labels);
+    this.scheduledJobDuration.observe(labels, durationSeconds);
   }
 
   contentType(): string {

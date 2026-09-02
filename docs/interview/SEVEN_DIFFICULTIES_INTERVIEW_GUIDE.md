@@ -134,7 +134,7 @@ ReAct 适合路径未知的探索型任务。产研流程的岗位依赖和上�
 
 ### 4. 具体实现
 
-- Fast Path 使用 Karpathy RAG＋Obsidian 高优先级知识上下文。
+- Fast Path 统一并发召回 BM25／Elasticsearch、Milvus 与 Obsidian 编译知识；Karpathy 本地知识只用于受治理直答和降级。
 - 充分性不足时进入 LangGraph，执行查询扩展、检索、充分性判断、Rerank、生成、按需审批和反思。
 - 对查询扩展数、检索次数、Chunk 数、联网结果、Rerank TopN 和反思次数设置预算。
 - 向量、联网或 Rerank 失败时可以降级，不让单个外部能力拖垮整条链路。

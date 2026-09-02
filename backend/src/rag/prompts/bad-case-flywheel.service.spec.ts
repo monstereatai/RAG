@@ -41,6 +41,63 @@ describe('BadCaseFlywheelService', () => {
     );
   });
 
+  it('treats a highly similar but different question as a correction hint, not an exact override', async () => {
+    const { service, client } = createService();
+    client.search.mockResolvedValue({
+      results: [
+        {
+          id: 'badcase-1',
+          query: '泰语活动页换行规则是什么？',
+          text: '正确处理标准：按词组断行。',
+          score: 0.98,
+        },
+      ],
+    });
+
+    const matches = await service.retrieveMatches('泰语窄屏页面怎么换行？', 1);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].mode).toBe('correction');
+  });
+
+  it('recalls a reviewed Base Case for a same-surname single Chinese name typo', async () => {
+    const { service, client } = createService();
+    client.search.mockResolvedValue({
+      results: [
+        {
+          id: 'badcase-name-1',
+          query: '韦水春是谁',
+          text: '正确处理标准：韦水春是临床病理工作人员。',
+          score: 0.72,
+        },
+      ],
+    });
+
+    const matches = await service.retrieveMatches('韦永春是谁', 1);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({
+      id: 'badcase-name-1',
+      mode: 'correction',
+    });
+  });
+
+  it('does not merge different surnames as a Chinese name typo', async () => {
+    const { service, client } = createService();
+    client.search.mockResolvedValue({
+      results: [
+        {
+          id: 'badcase-name-2',
+          query: '李水春是谁',
+          text: '正确处理标准：李水春是另一位人员。',
+          score: 0.72,
+        },
+      ],
+    });
+
+    await expect(service.retrieveMatches('韦水春是谁', 1)).resolves.toEqual([]);
+  });
+
   it('upserts only the approved correction payload passed by the review gate', async () => {
     const { service, client } = createService();
 

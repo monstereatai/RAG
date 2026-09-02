@@ -1,5 +1,6 @@
 import { Annotation } from '@langchain/langgraph';
 import type { RetrievedChunk } from '../karpathy/karpathy-rag.service';
+import type { BadCaseMatch } from '../prompts/bad-case-flywheel.service';
 
 export interface AgenticSubQuestion {
   id: string;
@@ -90,6 +91,12 @@ export const AgenticRagState = Annotation.Root({
 
   /** 显式子问题计划：每个子问题独立检索、评估和补检索。 */
   subQuestions: Annotation<AgenticSubQuestion[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
+
+  /** 与子问题规划并行获取的纠正层候选，供生成节点统一门禁。 */
+  badCaseMatches: Annotation<BadCaseMatch[]>({
     reducer: (_prev, next) => next,
     default: () => [],
   }),

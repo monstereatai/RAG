@@ -10,6 +10,7 @@ import { AgentCollaborationModule } from '../agent-collaboration/agent-collabora
 import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ArtifactsModule } from '../artifacts/artifacts.module';
     AgentTasksModule,
     AgentRuntimeEventsModule,
     ArtifactsModule,
+    JobsModule,
   ],
   controllers: [AgentOpsAdminController],
 })

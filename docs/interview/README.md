@@ -70,8 +70,8 @@ flowchart TB
   end
 
   subgraph QUERY[问答链路]
-    Router[Simple／Auto／Agentic\n路由与工作流]
-    Retrieve[Karpathy／Obsidian\nBM25／向量／图谱召回]
+    Router[精确直答／Simple／Auto／Agentic\n路由与工作流]
+    Retrieve[统一 Hybrid RAG\nBM25／ES／向量／Obsidian／按需图谱]
     Gate[RRF／Rerank／权限版本过滤\n引用门禁／充分性判断]
     Answer[LLM Gateway\n生成答案／降级／工具调用]
   end
@@ -80,7 +80,7 @@ flowchart TB
     Index[(Milvus／Elasticsearch／Neo4j\n语义／关键词／关系索引)]
     Knowledge[(PostgreSQL\n文档／版本／会话／Query Log／Bad Case／Artifact)]
     Memory[(Redis\n缓存／队列／Checkpoint／短期记忆)]
-    Obsidian[(Karpathy／Obsidian\ncompiled／index／notes)]
+    Obsidian[(本地编译知识\nKarpathy 直答资产／Obsidian notes)]
   end
 
   subgraph FLYWHEEL[质量闭环]
@@ -194,8 +194,8 @@ flowchart TB
 1. **入口区**：用户、管理员和运营人员都从 React 页面进入；普通用户提问，管理员管理规范和版本，运营人员处理 Bad Case、评测和审计。
 2. **服务入口区**：React 请求先进入 `admin-backend` 或 `rag-backend`。`admin-backend` 主要负责管理端认证、权限、审计和代理；真正的问答、入库和 Agent 执行由 `rag-backend` 完成。
 3. **知识入库区**：文件、URL、公开资料和手工笔记经过解析、质量门禁、父子切块和版本治理，再由 BullMQ Worker 异步写入索引。
-4. **问答区**：问题进入 Simple／Auto／Agentic 路由，随后检索证据、执行质量门禁，再交给 LLM Gateway 生成答案。
-5. **数据区**：PostgreSQL 保存业务状态和审计；Milvus、Elasticsearch、Neo4j 负责不同类型的检索；Redis 保存运行时状态；Karpathy／Obsidian 保存编译知识和快速检索内容。
+4. **问答区**：Simple 与 Auto 先经过 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG；Auto 再按证据和复杂度决定是否升级 Agentic。
+5. **数据区**：PostgreSQL 保存业务状态和审计；Milvus、Elasticsearch、Neo4j 负责不同类型的检索；Redis 保存运行时状态；Karpathy 本地知识和 Obsidian 保存编译资产，其中 Karpathy 不构成独立在线路由。
 6. **质量闭环区**：错误答案不是直接覆盖，而是经过 Bad Case 审核、回灌、重新召回和回归验证后才再次参与回答。
 
 #### 再看四条主要链路
@@ -210,7 +210,7 @@ flowchart TB
   → BullMQ Worker 异步处理
   → PostgreSQL 保存元数据
   → Milvus／Elasticsearch／Neo4j 建立索引
-  → Karpathy／Obsidian 双写知识层
+  → 按文档适用性并发生成 Obsidian 编译知识与 Karpathy 本地直答资产
 ```
 
 这条链路解决“知识怎么进入系统，以及最新规范如何替换旧规范”。新版本索引成功后，旧版本变成 `deprecated`（注：已废弃），默认检索不再使用旧版本。
@@ -220,16 +220,16 @@ flowchart TB
 ```text
 用户问题
   → Chat API
-  → Simple／Auto／Agentic 路由
-  → Karpathy／Obsidian、关键词、向量、图谱召回
+  → Simple／Auto 先过 Direct Answer Gate；显式 Agentic 进入复杂状态机
+  → 未直答命中后统一召回关键词、向量与 Obsidian，Agentic 按需补图谱
   → RRF 融合和 Rerank 重排
   → 权限／版本过滤和引用门禁
   → LLM Gateway
   → AG-UI／SSE 返回答案和引用
 ```
 
-- `Simple`（注：简单链路）优先低延迟回答。
-- `Auto`（注：自动链路）先走 Simple，证据不足才升级。
+- `Simple`（注：简单链路）先精确直答，未命中后执行完整 Hybrid RAG，不进入多步 Agentic。
+- `Auto`（注：自动链路）复用同一精确直答和 Hybrid Fast Path，再按证据充分性与复杂度决定轻量回答或升级。
 - `Agentic`（注：代理链路）可以拆分子问题、循环检索、调用工具和协调多 Agent。
 
 **第三条：Agent 工具链路，从 Router 横向到右侧。**
@@ -346,6 +346,9 @@ Tool、MCP、Skill 分别是什么？
 | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------- |
 | [deepseek-AI应用Agent岗-10小时冲刺指南.md](./deepseek-AI应用Agent岗-10小时冲刺指南.md)                     | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 | 面试前必读 |
 | [deepseek-AI应用Agent岗-模拟问答题库.md](./deepseek-AI应用Agent岗-模拟问答题库.md)                         | 33 道高频模拟题逐题可背答案、追问应对和边界红线（覆盖检索/Agentic/Prompt/安全/多租户/可观测等全知识面） | 面试前必读 |
+| [AI复盘四场面试问题与RAG项目回答.md](./AI复盘四场面试问题与RAG项目回答.md) | 外部 MHTML 去重后的 58 个显式／隐含问题，结合当前项目给出可核验回答、HR 模板和生产边界 | 事实核对版 |
+| [AI复盘四场面试问题与RAG项目回答-面试表达版.md](./AI复盘四场面试问题与RAG项目回答-面试表达版.md) | 保留完整 58 题，以“业务问题—设计取舍—工程价值”重写核心回答，并补齐英文术语中文解释 | 面试背诵版 |
+| [Agent-Task-Artifact结构验收与驳回重跑.md](./Agent-Task-Artifact结构验收与驳回重跑.md) | Artifact 的三层结构、Schema、证据与岗位验收，以及工作流驳回修改、岗位重跑和“单任务重跑”真实边界 | 专题理解 |
 | [林芮瑭简历大模型面试问题.md](./林芮瑭简历大模型面试问题.md) | 针对多模态算法/Agent 简历的高频追问、回答要点、项目可信度核验和岗位定位 | 简历定向复习 |
 | [平台型Agent开源框架参考.md](./平台型Agent开源框架参考.md) | DeepSeek Harness、OpenHands、SWE-agent、Letta、Microsoft Agent Framework、Dify、RAGFlow 等平台型 Agent 框架的学习重点和当前项目映射 | 框架调研 |
 | [SEVEN_DIFFICULTIES_CHEATSHEET.md](./SEVEN_DIFFICULTIES_CHEATSHEET.md)                                   | 七个难点的一页式速查和回答框架                       | 面试前必读 |

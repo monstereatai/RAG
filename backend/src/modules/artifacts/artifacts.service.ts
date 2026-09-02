@@ -95,6 +95,26 @@ export class ArtifactsService implements OnModuleInit {
     }));
   }
 
+  async markReviewState(
+    id: string,
+    input: {
+      reviewStatus: 'approved' | 'rejected' | 'stale';
+      revision: number;
+      feedback?: string;
+    },
+  ): Promise<void> {
+    const artifact = await this.artifacts.findOne({ where: { id } });
+    if (!artifact) return;
+    artifact.metadata = JSON.stringify({
+      ...this.parseMetadata(artifact.metadata),
+      reviewStatus: input.reviewStatus,
+      revision: input.revision,
+      reviewFeedback: input.feedback?.trim() || undefined,
+      reviewedAt: new Date().toISOString(),
+    });
+    await this.artifacts.save(artifact);
+  }
+
   async getOwned(id: string, ownerUserId: string) {
     const artifact = await this.artifacts.findOne({
       where: { id, ownerUserId },
@@ -223,7 +243,10 @@ export class ArtifactsService implements OnModuleInit {
       artifact.storageUrl = stored.url;
       artifact.contentType = file.contentType;
       artifact.size = file.body.length;
-      artifact.metadata = file.metadata ? JSON.stringify(file.metadata) : null;
+      artifact.metadata = JSON.stringify({
+        ...this.parseMetadata(artifact.metadata),
+        ...(file.metadata ?? {}),
+      });
       artifact.status = 'ready';
       await this.artifacts.save(artifact);
     } catch (error) {
@@ -353,10 +376,13 @@ export class ArtifactsService implements OnModuleInit {
     return safe || 'artifact';
   }
 
-  private parseMetadata(value: string | null): unknown {
+  private parseMetadata(value: string | null): Record<string, unknown> | null {
     if (!value) return null;
     try {
-      return JSON.parse(value) as unknown;
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
     } catch {
       return null;
     }

@@ -20,9 +20,13 @@ import {
   detectRetrievalProfile,
   RetrievalProfile,
 } from './context-builder';
-import { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
+import {
+  BadCaseFlywheelService,
+  type BadCaseMatch,
+} from '../prompts/bad-case-flywheel.service';
 import { BochaSearchService, BochaSearchResult } from '../../tools/bocha-search.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
+import { DocumentPermissionService } from '../../modules/document/document-permission.service';
 
 export interface RetrievedChunk {
   id: string;
@@ -137,18 +141,18 @@ export interface DetailedRetrievalResult {
 export interface PrefetchedFastPath {
   retrieval: DetailedRetrievalResult;
   obsidianHits: ObsidianSearchHit[];
+  badCaseMatches?: BadCaseMatch[];
 }
 
 export interface RetrieveOptions {
   vectorSearch?: boolean;
   /**
-   * Simple 链路的低延迟策略：精确查询先走关键词检索；关键词证据不足时再补向量检索。
-   * 流程／对比／方案类问题仍直接使用混合检索。
+   * 旧版 Simple 自适应向量参数，仅保留调用兼容；当前直答未命中后统一执行混合检索。
    */
   adaptiveVectorSearch?: boolean;
   /** Simple 链路启用受治理 Karpathy 知识卡直答。 */
   karpathyDirectAnswer?: boolean;
-  /** Auto 通过充分性门禁后复用的 Hybrid Fast Path 结果，避免重复检索。 */
+  /** Auto 通过充分性门禁后复用 Base Case、正式检索与 Obsidian 快照，避免重复检索。 */
   prefetchedFastPath?: PrefetchedFastPath;
   scope?: RetrievalScope;
   profile?: RetrievalProfile;
@@ -235,7 +239,7 @@ export class KarpathyRagService implements OnModuleInit {
   private readonly rrfK = 60;
   private readonly contextBuilder = new ContextBuilder();
   private readonly unsupportedAnswer =
-    '知识库片段不足以支撑可靠回答，暂不生成确定结论。';
+    '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。';
 
   private getBm25Instance(userId?: string): BM25 {
     const key = userId || 'default';
@@ -258,6 +262,7 @@ export class KarpathyRagService implements OnModuleInit {
     private readonly badCaseFlywheel: BadCaseFlywheelService,
     private readonly bochaSearchService: BochaSearchService,
     private readonly toolPolicy: ToolExecutionPolicyService,
+    private readonly documentPermissionService: DocumentPermissionService,
   ) {}
 
   /**
@@ -505,23 +510,27 @@ export class KarpathyRagService implements OnModuleInit {
     const normalizedQuery = this.normalizeQuery(query);
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
 
+    const allowedDocIds = userId
+      ? await this.documentPermissionService.getAllowedDocIds(userId)
+      : null;
+    const candidateDepth = allowedDocIds ? profile.candidateDepth * 3 : profile.candidateDepth;
     const localBm25Hits = this.searchLocalBm25(
       normalizedQuery,
       userId,
-      profile.candidateDepth,
+      candidateDepth,
     );
     let bm25Hits = localBm25Hits;
     if (this.elasticsearchProvider.isEnabled()) {
       const esHits = await this.elasticsearchProvider.search(
         normalizedQuery,
-        profile.candidateDepth,
+        candidateDepth,
         userId,
         options.scope,
       );
       bm25Hits = this.mergeRankedHits(
         esHits,
         localBm25Hits,
-        profile.candidateDepth,
+        candidateDepth,
       );
     }
     this.metricsService.observeRetrievalHits(
@@ -539,7 +548,7 @@ export class KarpathyRagService implements OnModuleInit {
         const queryVector = await this.embeddingProvider.embedQuery(query);
         cosineHits = await this.vectorStoreProvider.similaritySearch(
           queryVector,
-          profile.candidateDepth,
+          candidateDepth,
           userId,
         );
         cosineHits = this.filterActiveVectorHits(cosineHits, userId);
@@ -557,7 +566,9 @@ export class KarpathyRagService implements OnModuleInit {
       cosineHits.length,
     );
 
-    const fused = this.fuseByRrf(bm25Hits, cosineHits);
+    const fused = this.fuseByRrf(bm25Hits, cosineHits).filter(
+      (chunk) => !allowedDocIds || allowedDocIds.has(chunk.docId),
+    );
     const fusedCandidateCount = fused.length;
     const scoped = this.applySourceAuthority(fused)
       .filter((chunk) => this.matchesScope(chunk, options.scope))
@@ -622,23 +633,27 @@ export class KarpathyRagService implements OnModuleInit {
   ): Promise<RetrievedChunk[]> {
     const normalizedQuery = this.normalizeQuery(query);
     const profile = detectRetrievalProfile(normalizedQuery);
+    const allowedDocIds = userId
+      ? await this.documentPermissionService.getAllowedDocIds(userId)
+      : null;
+    const candidateDepth = allowedDocIds ? profile.candidateDepth * 3 : profile.candidateDepth;
     const localBm25Hits = this.searchLocalBm25(
       normalizedQuery,
       userId,
-      profile.candidateDepth,
+      candidateDepth,
     );
     let bm25Hits = localBm25Hits;
     if (includeElasticsearch && this.elasticsearchProvider.isEnabled()) {
       const esHits = await this.elasticsearchProvider.search(
         normalizedQuery,
-        profile.candidateDepth,
+        candidateDepth,
         userId,
         scope,
       );
       bm25Hits = this.mergeRankedHits(
         esHits,
         localBm25Hits,
-        profile.candidateDepth,
+        candidateDepth,
       );
     }
 
@@ -648,8 +663,11 @@ export class KarpathyRagService implements OnModuleInit {
       bm25Hits.length,
     );
 
-    const bm25MaxScore = Math.max(...bm25Hits.map((h) => h.score), 1);
-    return bm25Hits
+    const permittedBm25Hits = bm25Hits.filter(
+      (hit) => !allowedDocIds || allowedDocIds.has(hit.docId),
+    );
+    const bm25MaxScore = Math.max(...permittedBm25Hits.map((h) => h.score), 1);
+    return permittedBm25Hits
       .map((hit, index) => {
         const normalizedBm25 = hit.score / bm25MaxScore;
         return {
@@ -682,18 +700,74 @@ export class KarpathyRagService implements OnModuleInit {
     retrieveOptions: RetrieveOptions = {},
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
-    const [badCaseMatches, directKarpathyAnswer] = await Promise.all([
-      this.badCaseFlywheel.retrieveMatches(normalizedQuery, 2),
-      retrieveOptions.karpathyDirectAnswer
-        ? this.tryKarpathyDirectAnswer(
+    const profile =
+      retrieveOptions.profile ?? detectRetrievalProfile(normalizedQuery);
+    const canUseVector = retrieveOptions.vectorSearch !== false;
+    // 直答未命中后统一执行完整 Hybrid RAG；旧的 adaptiveVectorSearch
+    // 参数仅保留调用兼容，不再让 lookup 查询跳过向量召回。
+    const startsWithVector = canUseVector;
+    const initialRetrieveOptions: RetrieveOptions = {
+      ...retrieveOptions,
+      profile,
+      vectorSearch: startsWithVector,
+    };
+    const prefetchedFastPath = retrieveOptions.prefetchedFastPath;
+
+    const retrieveFormalKnowledge = () =>
+      prefetchedFastPath
+        ? Promise.resolve(prefetchedFastPath.retrieval)
+        : this.retrieveDetailed(
             normalizedQuery,
+            initialRetrieveOptions,
             userId,
-            retrieveOptions.scope,
-          )
-        : Promise.resolve(null),
-    ]);
+          );
+    const retrieveBaseCaseKnowledge = () =>
+      prefetchedFastPath?.badCaseMatches
+        ? Promise.resolve(prefetchedFastPath.badCaseMatches)
+        : this.badCaseFlywheel.retrieveMatches(normalizedQuery, 2);
+    const retrieveObsidianKnowledge = () =>
+      prefetchedFastPath
+        ? Promise.resolve(prefetchedFastPath.obsidianHits)
+        : this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
+            this.logger.warn(
+              `Obsidian fast path failed: ${(error as Error).message}`,
+            );
+            return [] as ObsidianSearchHit[];
+          });
+
+    let badCaseMatches: BadCaseMatch[];
+    let initialRetrieval: Awaited<ReturnType<typeof this.retrieveDetailed>>;
+    let obsidianHits: ObsidianSearchHit[];
+    if (retrieveOptions.karpathyDirectAnswer) {
+      // Karpathy 直答保留精确纠错覆盖检查：它只查 PostgreSQL 精确问题，
+      // 与本地 BM25 直答并行，不触发 Milvus 语义检索。
+      const direct = await this.answerDirect(
+        query,
+        history,
+        userId,
+        memoryMessages,
+        onToken,
+        retrieveOptions.scope,
+      );
+      if (direct) {
+        return direct;
+      }
+      // 未走成直答后，纠正语义候选与正式 Hybrid RAG 同时构建。
+      [badCaseMatches, initialRetrieval, obsidianHits] = await Promise.all([
+        retrieveBaseCaseKnowledge(),
+        retrieveFormalKnowledge(),
+        retrieveObsidianKnowledge(),
+      ]);
+    } else {
+      // 常规问答没有额外 Bad Case 往返：纠正层与正式知识层并行召回。
+      [badCaseMatches, initialRetrieval, obsidianHits] = await Promise.all([
+        retrieveBaseCaseKnowledge(),
+        retrieveFormalKnowledge(),
+        retrieveObsidianKnowledge(),
+      ]);
+    }
     const exactBadCase = badCaseMatches.find(
-      (match) => match.mode === 'exact' || match.mode === 'correction',
+      (match) => match.mode === 'exact',
     );
     if (exactBadCase) {
       const correctedAnswer = this.extractCorrectedAnswer(exactBadCase.text);
@@ -704,6 +778,7 @@ export class KarpathyRagService implements OnModuleInit {
           history,
           memoryMessages,
           onToken,
+          exactBadCase.query,
         );
         return {
           answer,
@@ -713,60 +788,52 @@ export class KarpathyRagService implements OnModuleInit {
         };
       }
     }
-    if (directKarpathyAnswer) {
-      onToken?.(directKarpathyAnswer.answer);
-      return directKarpathyAnswer;
-    }
-
-    const profile =
-      retrieveOptions.profile ?? detectRetrievalProfile(normalizedQuery);
-    const canUseVector = retrieveOptions.vectorSearch !== false;
-    const startsWithVector =
-      canUseVector &&
-      (retrieveOptions.vectorSearch === true ||
-        !retrieveOptions.adaptiveVectorSearch ||
-        profile.intent !== 'lookup');
-    const initialRetrieveOptions: RetrieveOptions = {
-      ...retrieveOptions,
-      profile,
-      vectorSearch: startsWithVector,
-    };
-    const prefetchedFastPath = retrieveOptions.prefetchedFastPath;
-    let [retrieval, obsidianHits] = await Promise.all([
-      prefetchedFastPath
-        ? Promise.resolve(prefetchedFastPath.retrieval)
-        : this.retrieveDetailed(normalizedQuery, initialRetrieveOptions, userId),
-      prefetchedFastPath
-        ? Promise.resolve(prefetchedFastPath.obsidianHits)
-        : this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
-            this.logger.warn(
-              `Obsidian fast path failed: ${(error as Error).message}`,
-            );
-            return [] as ObsidianSearchHit[];
-          }),
-    ]);
-    let retrievalGate =
+    const retrieval = initialRetrieval;
+    const reviewedBaseCaseChunks =
+      this.toReviewedEvidenceChunks(badCaseMatches);
+    const baseCaseGate = this.assessReviewedBaseCaseEvidence(
+      badCaseMatches,
+      reviewedBaseCaseChunks,
+    );
+    const formalRetrievalGate =
       retrieval.chunks.length === 0
         ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
         : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
-
-    // Simple 的精确查询先走 Karpathy／BM25；关键词证据不足才补一次语义检索。
-    if (
-      retrieveOptions.adaptiveVectorSearch &&
-      canUseVector &&
-      !startsWithVector &&
-      !retrievalGate.sufficient
-    ) {
-      retrieval = await this.retrieveDetailed(
-        normalizedQuery,
-        { ...initialRetrieveOptions, vectorSearch: true },
-        userId,
+    const chunks = formalRetrievalGate.sufficient
+      ? [...retrieval.chunks, ...reviewedBaseCaseChunks]
+      : [...reviewedBaseCaseChunks, ...retrieval.chunks];
+    const retrievalGate = {
+      sufficient: baseCaseGate.sufficient || formalRetrievalGate.sufficient,
+      reason: baseCaseGate.sufficient
+        ? `Base Case: ${baseCaseGate.reason}; RAG: ${formalRetrievalGate.reason}`
+        : formalRetrievalGate.reason,
+    };
+    const correctionBaseCase = badCaseMatches.find(
+      (match) => match.mode === 'correction',
+    );
+    if (baseCaseGate.sufficient && !formalRetrievalGate.sufficient && correctionBaseCase) {
+      const correctedAnswer = this.extractCorrectedAnswer(
+        correctionBaseCase.text,
       );
-      retrievalGate =
-        retrieval.chunks.length === 0
-          ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-          : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
+      if (correctedAnswer) {
+        const answer = await this.generateCorrectionAnswer(
+          query,
+          correctedAnswer,
+          history,
+          memoryMessages,
+          onToken,
+          correctionBaseCase.query,
+        );
+        return {
+          answer,
+          references: this.toReferences(reviewedBaseCaseChunks),
+          retrievalSufficient: true,
+          retrievalReason: `命中已审核 Base Case 纠正证据（${correctionBaseCase.mode}，${correctionBaseCase.score.toFixed(3)}）`,
+          retrievalDiagnostics: retrieval.diagnostics,
+        };
+      }
     }
+
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
       obsidianHits,
@@ -777,7 +844,6 @@ export class KarpathyRagService implements OnModuleInit {
     const generationMemory = badCasePrompt
       ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
       : memoryMessages;
-    const chunks = retrieval.chunks;
     const obsidianChunks = this.toObsidianChunks(obsidianHits);
     const evidenceBuild = this.contextBuilder.build(
       [...chunks, ...obsidianChunks],
@@ -812,20 +878,15 @@ export class KarpathyRagService implements OnModuleInit {
         onToken,
         retrieveOptions,
       );
-      const answer = webFallback?.answer ?? await this.generateModelFallbackAnswer(
-        query,
-        `没有检索到候选片段；${obsidianGate.reason}`,
-        history,
-        generationMemory,
-        onToken,
-      );
+      const answer = webFallback?.answer ?? this.unsupportedReliableAnswer();
+      if (!webFallback) onToken?.(answer);
       return {
         answer,
         references: webFallback?.references ?? [],
         retrievalSufficient: Boolean(webFallback),
         retrievalReason: webFallback
           ? `没有检索到本地证据；${obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
-          : `没有检索到候选片段；${obsidianGate.reason}；联网搜索不可用，已使用模型兜底回答`,
+          : `没有检索到候选片段；${obsidianGate.reason}；联网搜索不可用，已进入安全降级`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
         retrievalDiagnostics: retrieval.diagnostics,
@@ -859,20 +920,15 @@ export class KarpathyRagService implements OnModuleInit {
         onToken,
         retrieveOptions,
       );
-      const answer = webFallback?.answer ?? await this.generateModelFallbackAnswer(
-        query,
-        `${retrievalGate.reason}；${obsidianGate.reason}`,
-        history,
-        generationMemory,
-        onToken,
-      );
+      const answer = webFallback?.answer ?? this.unsupportedReliableAnswer();
+      if (!webFallback) onToken?.(answer);
       return {
         answer,
         references: webFallback?.references ?? [],
         retrievalSufficient: Boolean(webFallback),
         retrievalReason: webFallback
           ? `${retrievalGate.reason}；${obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
-          : `${retrievalGate.reason}；${obsidianGate.reason}；联网搜索不可用，已使用模型兜底回答`,
+          : `${retrievalGate.reason}；${obsidianGate.reason}；联网搜索不可用，已进入安全降级`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
         retrievalDiagnostics: retrieval.diagnostics,
@@ -983,6 +1039,7 @@ export class KarpathyRagService implements OnModuleInit {
     history: Array<{ role: 'human' | 'ai'; content: string }>,
     memoryMessages: Array<{ role: string; content: string }>,
     onToken?: (token: string) => void,
+    reviewedQuery?: string,
   ): Promise<string> {
     const historyText = history
       .slice(-6)
@@ -997,12 +1054,15 @@ export class KarpathyRagService implements OnModuleInit {
 已审核纠错事实：
 ${correction}
 
+已审核问题：${reviewedQuery || '未记录'}
+
 回答要求：
 1. 直接回答用户问题，并对事实进行自然、清晰的组织和改写，不要原样复制纠错文本。
 2. 只使用纠错事实能够支持的内容，不要补充无法确认的新事实。
 3. 不要提及 Bad Case、纠错记录、Prompt 或内部处理过程。
 4. 如果纠错事实不足以回答问题，明确说明已知范围，不要编造。
-5. 输出简洁完整的中文答案。
+5. 如果用户问题中的实体名称与已审核问题不一致，先简要说明可能存在名称误写，再使用已审核问题中的名称回答，不能把纠错事实改写成另一个人的信息。
+6. 输出简洁完整的中文答案。
 
 最近对话：
 ${historyText || '无'}
@@ -1063,7 +1123,15 @@ ${memoryText || '无'}
     prefetchedFastPath: PrefetchedFastPath;
   }> {
     const normalizedQuery = this.normalizeQuery(query);
-    const [retrieval, obsidianHits] = await Promise.all([
+    const [badCaseMatches, retrieval, obsidianHits] = await Promise.all([
+      this.badCaseFlywheel
+        .retrieveMatches(normalizedQuery, 2)
+        .catch((error) => {
+          this.logger.warn(
+            `Fast path Base Case retrieval failed: ${(error as Error).message}`,
+          );
+          return [] as BadCaseMatch[];
+        }),
       this.retrieveDetailed(normalizedQuery, options, userId).catch((error) => {
         this.logger.warn(
           `Fast path RAG retrieval failed: ${(error as Error).message}`,
@@ -1089,22 +1157,31 @@ ${memoryText || '无'}
         return [] as ObsidianSearchHit[];
       }),
     ]);
-    const chunks = retrieval.chunks;
+    const reviewedBaseCaseChunks =
+      this.toReviewedEvidenceChunks(badCaseMatches);
+    const chunks = [...reviewedBaseCaseChunks, ...retrieval.chunks];
+    const baseCaseGate = this.assessReviewedBaseCaseEvidence(
+      badCaseMatches,
+      reviewedBaseCaseChunks,
+    );
     const ragGate =
-      chunks.length === 0
+      retrieval.chunks.length === 0
         ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-        : this.assessRetrievalQuality(normalizedQuery, chunks);
+        : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
       obsidianHits,
     );
 
     return {
-      sufficient: ragGate.sufficient || obsidianGate.sufficient,
-      reason: `RAG: ${ragGate.reason}; Obsidian: ${obsidianGate.reason}`,
+      sufficient:
+        baseCaseGate.sufficient ||
+        ragGate.sufficient ||
+        obsidianGate.sufficient,
+      reason: `Base Case: ${baseCaseGate.reason}; RAG: ${ragGate.reason}; Obsidian: ${obsidianGate.reason}`,
       chunks,
       obsidianHits,
-      prefetchedFastPath: { retrieval, obsidianHits },
+      prefetchedFastPath: { retrieval, obsidianHits, badCaseMatches },
     };
   }
 
@@ -1133,25 +1210,49 @@ ${memoryText || '无'}
     limit = 2,
   ): Promise<RetrievedChunk[]> {
     const matches = await this.badCaseFlywheel.retrieveMatches(query, limit);
+    return this.toReviewedEvidenceChunks(matches);
+  }
+
+  private toReviewedEvidenceChunks(matches: BadCaseMatch[]): RetrievedChunk[] {
     return matches
       .filter((match) => match.mode === 'exact' || match.mode === 'correction')
       .flatMap((match, index): RetrievedChunk[] => {
         const correctedAnswer = this.extractCorrectedAnswer(match.text);
         if (!correctedAnswer) return [];
 
-        return [{
-          id: `reviewed-bad-case:${match.id}`,
-          docId: `reviewed-bad-case:${match.id}`,
-          content: `已审核问题：${match.query}\n正确处理标准：${correctedAnswer}`,
-          chunkIndex: index,
-          bm25Score: match.score,
-          cosineScore: match.score,
-          totalScore: match.score,
-          sourceAuthority: 'reviewed_bad_case',
-          retrievalSource: 'expansion',
-          contextRole: 'hit',
-        } satisfies RetrievedChunk];
+        return [
+          {
+            id: `reviewed-bad-case:${match.id}`,
+            docId: `reviewed-bad-case:${match.id}`,
+            content: `已审核问题：${match.query}\n正确处理标准：${correctedAnswer}`,
+            chunkIndex: index,
+            bm25Score: match.score,
+            cosineScore: match.score,
+            totalScore: match.score,
+            sourceAuthority: 'reviewed_bad_case',
+            retrievalSource: 'expansion',
+            contextRole: 'hit',
+          } satisfies RetrievedChunk,
+        ];
       });
+  }
+
+  private assessReviewedBaseCaseEvidence(
+    matches: BadCaseMatch[],
+    chunks: RetrievedChunk[],
+  ): { sufficient: boolean; reason: string } {
+    if (chunks.length === 0) {
+      return { sufficient: false, reason: '未命中已审核纠正证据' };
+    }
+    const strongest = matches
+      .filter((match) => match.mode === 'exact' || match.mode === 'correction')
+      .sort((left, right) => right.score - left.score)[0];
+    return {
+      sufficient: true,
+      reason: strongest
+        ? `命中已审核 ${strongest.mode} 证据（${strongest.score.toFixed(3)}）`
+        : '命中已审核纠正证据',
+    };
   }
 
   validateAnswerCitationSupport(
@@ -1163,6 +1264,48 @@ ${memoryText || '无'}
 
   unsupportedReliableAnswer(): string {
     return this.unsupportedAnswer;
+  }
+
+  /**
+   * 公共精确直答门禁：并发检查已审核精确纠正与受治理本地 BM25 知识。
+   * 返回 null 表示必须继续统一 Hybrid RAG，不能据此自由生成答案。
+   */
+  async answerDirect(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    userId?: string,
+    memoryMessages: Array<{ role: string; content: string }> = [],
+    onToken?: (token: string) => void,
+    scope?: RetrievalScope,
+  ): Promise<KarpathyRagResult | null> {
+    const normalizedQuery = this.normalizeQuery(query);
+    const [exactMatches, direct] = await Promise.all([
+      this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1) ??
+        this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1),
+      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope),
+    ]);
+    const exact = exactMatches.find((match) => match.mode === 'exact');
+    if (exact) {
+      const correctedAnswer = this.extractCorrectedAnswer(exact.text);
+      if (correctedAnswer) {
+        const answer = await this.generateCorrectionAnswer(
+          query,
+          correctedAnswer,
+          history,
+          memoryMessages,
+          onToken,
+          exact.query,
+        );
+        return {
+          answer,
+          references: [],
+          retrievalSufficient: true,
+          retrievalReason: `命中已审核 Bad Case 纠错证据（${exact.mode}，${exact.score.toFixed(3)}）`,
+        };
+      }
+    }
+    if (direct) onToken?.(direct.answer);
+    return direct;
   }
 
   /**

@@ -24,7 +24,7 @@
 
 ## 一句话定位
 
-这是一个企业级 Agentic RAG + Karpathy-style RAG 知识库系统，核心不是“接了一个大模型接口”，而是围绕 **查得准、答得稳、引用能撑住、不会瞎编** 做了完整工程闭环：文档解析、混合检索、Agentic 编排、GraphRAG、MCP、语音、多租户隔离、观测、评测门禁和 Docker Compose 部署。
+这是一个企业级统一 Hybrid RAG（混合检索增强生成）与 Agentic RAG（智能体式检索增强生成）知识库系统，核心不是“接了一个大模型接口”，而是围绕 **查得准、答得稳、引用能撑住、不会瞎编** 做完整工程闭环：文档解析、精确直答、混合检索、Agentic 编排、GraphRAG（图检索增强生成）、MCP（模型上下文协议）、语音、多租户隔离、观测、评测门禁和 Docker Compose（容器编排）部署。
 
 简历上可以写：
 
@@ -141,7 +141,7 @@ simple 解决低延迟简单问答，auto 先快后慢，agentic 只处理复杂
 项目做法：
 
 ```text
-simple 优先走 Karpathy + Obsidian fast path，再补必要 RAG evidence，适合查规范、查组件、查活动模板这种明确问题。
+simple 先走 Direct Answer Gate（精确直答门禁），未命中后执行完整 Hybrid RAG（混合检索增强生成），适合查规范、查组件、查活动模板这类明确问题。
 
 auto 先走 simple，如果 sufficiency gate 判断证据不足，再升级到复杂检索或 Agentic。
 
@@ -254,7 +254,7 @@ Rerank 有成本，所以不能无限重排。项目里会限制 rerank topN，�
 ```text
 短期记忆放 Redis，按会话保留最近对话并做摘要压缩；长期记忆走 Mem0，用来保存跨会话稳定偏好和事实；Obsidian/Karpathy 更像 artifact memory，用来沉淀可复用知识产物。
 
-缓存上，简单问题优先走 Karpathy + Obsidian fast path；检索结果、摘要、会话状态、Provider 状态都可以按 TTL 和 userId 做缓存。权限变化、文档删除、版本更新时要让相关缓存和索引失效。
+缓存上，简单问题优先复用受治理直答与统一 Hybrid RAG 的检索结果；摘要、会话状态、Provider（能力提供方）状态都可以按 TTL（生存时间）和 userId（用户标识）缓存。权限变化、文档删除、版本更新时要让相关缓存和索引失效。
 ```
 
 追问边界：
@@ -694,7 +694,7 @@ MCP 在这个项目里负责把 Agent 和外部工具解耦。系统支持配置
 - `AGENTIC_MAX_RETRIEVED_CHUNKS`：限制上下文注入。
 - `AGENTIC_MAX_WEB_SEARCH_RESULTS`：限制联网兜底。
 - `AGENTIC_MAX_RERANK_TOP_N`：限制重排成本。
-- `AGENTIC_MAX_AUTO_QUERY_LENGTH`：auto 模式超长问题回退 simple，避免把超大问题直接丢给 Agent。
+- `AGENTIC_MAX_AUTO_QUERY_LENGTH`：仅保留配置兼容，不再单独决定 auto 路由；长问题通过子问题数、上下文、Token（令牌）、时间和成本预算约束，证据不足或复杂时仍可升级 Agentic。
 
 ### 11. Agent 调用外部工具的方式
 
@@ -1326,7 +1326,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 ### 30 秒总回答
 
 ```text
-这个项目是企业级 Agentic RAG 知识库系统。我做的不是单纯向量问答，而是完整的知识工程链路：文档解析、结构化切片、Milvus 向量索引、BM25/ES 中文关键词索引、Neo4j GraphRAG、Karpathy + Obsidian 知识编译层、Rerank、引用校验和低相关拒答。
+这个项目是企业级统一 Hybrid RAG 与 Agentic RAG 知识库系统。我做的不是单纯向量问答，而是完整的知识工程链路：文档解析、结构化切片、Direct Answer Gate（精确直答门禁）、Milvus（向量数据库）、BM25／Elasticsearch 中文关键词索引、Neo4j GraphRAG、Obsidian 编译知识、Rerank（重排）、引用校验和低相关拒答。Karpathy 本地知识保留为受治理直答与降级资产，不是独立在线路由。
 
 简单问题走 simple，也就是稳定 hybrid retrieval；复杂问题走 auto/agentic，由 LangGraph 状态机编排 query augment、retrieval、sufficiency、web search、rerank、generate、reflection。工程上有多租户隔离、AG-UI/SSE 流式输出、后台运营、Prometheus 指标和评测门禁。本地工程成熟度 93/100，项目级仿真实业务评测 28/28，但我不会把它说成真实生产准确率，因为还需要公司真实题库和生产环境验证。
 ```
@@ -1338,7 +1338,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 
 第一条是传统企业 RAG 链路：文件或 URL 进入系统后，先做解析、清洗、结构化切片，切片会带 docId、chunkId、userId、章节、来源、生效期、权限等 metadata。之后同一份 chunk 同步进入 Milvus 向量索引、BM25/Elasticsearch 关键词索引和数据库元数据。查询时先做 query normalize，再做向量召回和关键词召回，用融合排序和 rerank 选证据，最后生成答案并做引用校验、claim support 和拒答判断。
 
-第二条是 Karpathy + Obsidian 知识编译链路。URL、文件、手动输入、官方文档同步都会同时进入 RAG 索引层和 Obsidian 知识层。simple 模式优先读已经沉淀的 compiled/index/notes，再补 RAG evidence；auto 模式先跑 fast path，如果证据不足再升级 agentic；agentic 也不会绕开 Obsidian，而是把它当高优先级上下文源。
+第二条是知识编译与统一检索链路。URL、文件、手动输入、官方文档同步会按文档适用性并发构建关键词、向量和 Obsidian 编译知识。simple 与 auto 都先过 Direct Answer Gate，未命中后执行完整 Hybrid RAG；auto 在证据不足或问题复杂时升级 agentic。Karpathy 本地知识只负责受治理直答和降级，Obsidian 候选进入统一证据融合，不再表述成两条独立 fast path。
 
 复杂问题会进入 LangGraph 编排，但我没有让所有问题默认走 Agent。Agentic 节点包括 routing、query augment、retrieval、sufficiency、web search、rerank、generate、citation、reflection、final，每个节点都有状态、预算和可观测事件。这样能控制成本，也能定位慢在哪里、错在哪里。
 
@@ -1477,7 +1477,7 @@ Query -> normalize -> vector recall + keyword recall + graph hints
 
 第二个问题是召回片段语义相似，但不能支撑最终答案。解决方式是生成后做 citation 和 reflection，关键 claim 必须能被引用片段支撑。
 
-第三个问题是空库或低相关时模型容易胡说。我的处理是低分拒答、检索不足标记，必要时模型兜底但不伪造引用。
+第三个问题是空库或低相关时模型容易胡说。我的处理是低分拒答、检索不足标记和受控联网补证；本地与网页都没有可靠证据时明确拒答，不用模型常识自由补齐，也不伪造引用。
 
 第四个问题是 GraphRAG 的真实数据和可用态。Neo4j 不可用、图谱为空、接口错误、演示数据都必须区分，后台不能静默 mock。
 
@@ -1735,7 +1735,7 @@ RAG 不能只看 accuracy。召回层看 Recall@K、Hit Rate、MRR；排序层�
 | RAG / Agent 融合 | 不是只会调接口，而是能让知识理解和任务执行结合 | simple / auto / agentic 三模式，RAG 证据不足再升级 Agentic | 强调 Agentic 不是默认路径，复杂任务才升级 |
 | Planning / Acting / Reflection | 会不会设计 Agent 执行闭环 | LangGraph 节点：routing、query augment、retrieval、sufficiency、generate、reflection | 不要说“Agent 自己想办法”，要说状态机 + 预算 |
 | Tool Calling / MCP / Function Calling | 工具调用是否安全、可控、可观测 | Web Search、Rerank、Graph、MCP、ASR/TTS 接入和降级 | 重点讲 schema、权限、超时、审计、降级 |
-| Memory 长短期记忆 | Agent 是否能跨轮次、跨任务沉淀上下文 | 会话记忆、Karpathy + Obsidian compiled/index/notes | 区分 conversation memory、semantic memory、artifact memory |
+| Memory（记忆）长短期记忆 | Agent 是否能跨轮次、跨任务沉淀上下文 | 会话记忆、摘要、长期语义记忆与 Obsidian 编译知识 | 区分 conversation memory（会话记忆）、semantic memory（语义记忆）、artifact memory（产物记忆） |
 | Eval / Benchmark | 能不能证明效果，而不是只演示 | eval:rag:quality、project eval、maturity gate、失败样本回流 | 讲 Recall@K、citation accuracy、tool success、latency、cost |
 | Observability | 出错能不能定位 | SSE 事件、traceparent、Prometheus、后台运营状态 | 讲一次回答可追踪到检索、rerank、LLM、工具 |
 | 多模态 | 文档、图片、音频、视频是否能进入知识库 | 已有 OCR/ASR/视频 sidecar 和元数据链路 | 诚实说真实视觉向量和视频理解要等模型 key/样本 |
@@ -1873,7 +1873,7 @@ AI 应用的前端不是聊天框，而是状态机可视化、人机协同界�
 可以在简历或面试开场里换成这个版本：
 
 ```text
-主导企业级 Agentic RAG 知识库系统，覆盖文档解析、Hybrid Search、GraphRAG、Karpathy + Obsidian 知识编译、LangGraph Agentic Workflow、Tool Calling/MCP 接入、AG-UI/SSE 流式输出、权限过滤、引用校验、拒答策略、评测门禁和后台运营。项目对齐 AI 应用开发、Agent 开发和企业知识库落地场景，重点解决 Agent 成功率、检索可信度、工具调用安全、延迟成本和可观测问题。
+主导企业级统一 Hybrid RAG 与 Agentic RAG 知识库系统，覆盖文档解析、Direct Answer Gate（精确直答门禁）、Hybrid Search（混合检索）、GraphRAG、Obsidian 知识编译、LangGraph Agentic Workflow（智能体工作流）、Tool Calling（工具调用）／MCP 接入、AG-UI／SSE（服务端事件）流式输出、权限过滤、引用校验、拒答策略、评测门禁和后台运营。项目对齐 AI 应用开发、Agent 开发和企业知识库落地场景，重点解决 Agent 成功率、检索可信度、工具调用安全、延迟成本和可观测问题。
 ```
 
 ## 面试时最好主动承认的边界

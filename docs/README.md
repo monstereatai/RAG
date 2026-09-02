@@ -64,6 +64,17 @@
 | `architecture-decisions/README.md`                  | Workflow First、混合检索、证据门禁、分层记忆和降级恢复五项 ADR 索引                       |
 | `evidence/EVIDENCE_COLLECTION_TEMPLATES.md`         | 跨团队交付、事故复盘和架构决策口述模板                                                    |
 
+## 参考资料
+
+| 文档 | 用途 |
+| --- | --- |
+| `reference/SUMMARY.md` | 本仓库课程参考代码能力总览 |
+| `reference/企业级知识库课程与v1-v9对照优化建议.md` | 对照 11 份课程 PDF、knowledge-hub-backend v1～v9 与当前项目，区分已有能力、真实缺口、推荐优化和不建议照搬项 |
+
+## 文档治理补强
+
+文档管理已补齐统一 ACL 检索过滤、独立审核状态机、PPTX 结构化解析降级、ES 命中片段高亮和 BullMQ 失败任务幂等重放。数据迁移文件已生成，执行仍需由部署环境按迁移流程完成。
+
 ## 维护规则
 
 - 根目录只保留 `README.md`、`CLAUDE.md`、`ROADMAP.md`、版本和工程配置；新增项目文档不要继续堆在根目录。

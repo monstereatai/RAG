@@ -17,6 +17,7 @@ import { RagFeedbackService } from '../chat/rag-feedback.service';
 import { TracingService } from '../tracing/tracing.service';
 import {
   ResumeProductionWorkflowDto,
+  ReviseProductionWorkflowDto,
   StartProductionWorkflowDto,
 } from '../workflow/production-workflow.dto';
 import { ProductionWorkflowService } from '../workflow/production-workflow.service';
@@ -27,6 +28,11 @@ import { AgentCollaborationService } from '../agent-collaboration/agent-collabor
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
+import { JobsService } from '../jobs/jobs.service';
+import type {
+  CreateJobInput,
+  ScheduledJobSourceType,
+} from '../jobs/job.types';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -43,7 +49,58 @@ export class AgentOpsAdminController {
     private readonly tasks: AgentTasksService,
     private readonly runtimeEvents: AgentRuntimeEventsService,
     private readonly artifacts: ArtifactsService,
+    private readonly jobs: JobsService,
   ) {}
+
+  @Get('schedules')
+  scheduledJobs() {
+    return this.jobs.listAnalysis();
+  }
+
+  @Post('schedules/parse')
+  parseScheduledAnalysis(
+    @Body() body: { sourceText: string; sourceType: ScheduledJobSourceType },
+  ) {
+    return this.jobs.parseAnalysisDefinition(body.sourceText, body.sourceType);
+  }
+
+  @Post('schedules')
+  createScheduledJob(
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: CreateJobInput,
+  ) {
+    return this.jobs.create({
+      ...body,
+      taskKind: 'analysis',
+      userId: ownerUserId,
+    });
+  }
+
+  @Post('schedules/:id/run')
+  runScheduledJob(@Param('id') id: string) {
+    return this.jobs.runNow(id);
+  }
+
+  @Patch('schedules/:id/start')
+  startScheduledJob(@Param('id') id: string) {
+    return this.jobs.start(id);
+  }
+
+  @Patch('schedules/:id/stop')
+  stopScheduledJob(@Param('id') id: string) {
+    return this.jobs.stop(id);
+  }
+
+  @Get('schedules/:id/executions')
+  scheduledJobExecutions(@Param('id') id: string) {
+    return this.jobs.getExecutions(id, 50);
+  }
+
+  @Post('schedules/:id/copy')
+  copyScheduledJob(@Param('id') id: string) { return this.jobs.copy(id); }
+
+  @Get('schedules/:id/versions')
+  scheduledJobVersions(@Param('id') id: string) { return this.jobs.listVersions(id); }
 
   @Post('workflows')
   startWorkflow(
@@ -65,6 +122,15 @@ export class AgentOpsAdminController {
     @Body() body: ResumeProductionWorkflowDto,
   ) {
     return this.workflows.resumeAsync(threadId, body, ownerUserId);
+  }
+
+  @Post('workflows/:threadId/revise')
+  reviseWorkflow(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: ReviseProductionWorkflowDto,
+  ) {
+    return this.workflows.reviseAsync(threadId, body, ownerUserId);
   }
 
   @Get('workflows/:threadId/coding-context')
@@ -127,6 +193,9 @@ export class AgentOpsAdminController {
       correctedAnswer?: string;
       includeInRegression?: boolean;
       reviewedBy?: string;
+      promotionAction?: 'correction' | 'request' | 'promote' | 'reject';
+      promotionSource?: string;
+      promotionVersion?: string;
     },
   ) {
     return this.feedback.review(id, body);

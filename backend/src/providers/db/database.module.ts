@@ -12,6 +12,7 @@ import { QueryLogEntity } from './entities/query-log.entity';
 import { WeeklySummaryEntity } from './entities/weekly-summary.entity';
 import { JobExecutionEntity } from './entities/job-execution.entity';
 import { DocumentTaskEntity } from './entities/document-task.entity';
+import { DocumentReviewEntity } from './entities/document-review.entity';
 import { DocumentResourceEntity } from './entities/document-resource.entity';
 import { DocumentPermissionEntity } from './entities/document-permission.entity';
 import { RagFeedbackEntity } from './entities/rag-feedback.entity';
@@ -80,6 +81,7 @@ import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
             WeeklySummaryEntity,
             JobExecutionEntity,
             DocumentTaskEntity,
+            DocumentReviewEntity,
             DocumentResourceEntity,
             DocumentPermissionEntity,
             RagFeedbackEntity,
@@ -123,6 +125,7 @@ import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
       WeeklySummaryEntity,
       JobExecutionEntity,
       DocumentTaskEntity,
+      DocumentReviewEntity,
       DocumentResourceEntity,
       DocumentPermissionEntity,
       RagFeedbackEntity,

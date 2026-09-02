@@ -45,6 +45,25 @@ export class RagFeedbackEntity {
   @Column({ type: 'boolean', default: false })
   includeInRegression!: boolean;
 
+  /** correction：独立纠正层；formal：已晋升为正式版本知识；inactive：不参与检索。 */
+  @Column({ type: 'varchar', length: 16, default: 'correction' })
+  knowledgeLayer!: 'correction' | 'formal' | 'inactive';
+
+  @Column({ type: 'varchar', length: 24, default: 'not_requested' })
+  promotionStatus!: 'not_requested' | 'pending' | 'promoted' | 'rejected';
+
+  @Column({ type: 'text', nullable: true, default: null })
+  promotionSource!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  promotedDocId!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  promotedBy!: string | null;
+
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  promotedAt!: Date | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   reviewedBy!: string | null;
 

@@ -9,6 +9,7 @@ export default {
   'menu.qa-ops': '问答运营',
   'menu.agent-ops': 'Agent 运营',
   'menu.agent-ops.agent-ops-run-center': '运行中心',
+  'menu.agent-ops.agent-ops-schedules': '定时任务',
   'menu.agent-ops.agent-ops-collaboration': '协作编排',
   'menu.agent-ops.agent-ops-bad-cases': 'Bad Case 审核',
   'menu.agent-ops.agent-ops-evals': 'Agent Evals',

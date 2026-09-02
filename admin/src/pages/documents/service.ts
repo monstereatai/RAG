@@ -22,6 +22,10 @@ export interface DocumentItem {
   obsidianStatus?: 'linked' | 'missing';
   docVersion?: string | null;
   lifecycleStatus?: string | null;
+  reviewStatus?: 'draft' | 'pending_review' | 'approved' | 'rejected';
+  graphIndexStatus?: 'pending' | 'indexed' | 'failed' | 'skipped';
+  graphIndexedAt?: string | null;
+  graphIndexError?: string | null;
   supersedesDocId?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;
@@ -32,6 +36,7 @@ export interface DocumentVersionItem {
   filename: string;
   docVersion: string;
   lifecycleStatus: string;
+  reviewStatus?: string;
   supersedesDocId?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;
@@ -54,7 +59,7 @@ export async function getDocuments(params?: {
 }) {
   return authRequest<{ data: DocumentItem[]; total: number }>(
     '/api/admin/documents',
-    { params },
+    { params, headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } },
   );
 }
 
@@ -134,6 +139,30 @@ export async function updateDocumentLifecycle(id: string, lifecycleStatus: strin
     method: 'POST',
     data: { lifecycleStatus },
   });
+}
+
+export async function promoteDocumentVersion(id: string) {
+  return authRequest(`/api/admin/documents/${id}/promote`, { method: 'POST' });
+}
+
+export async function submitDocumentReview(id: string, comment?: string) {
+  return authRequest(`/api/admin/documents/${id}/review/submit`, { method: 'POST', data: { comment } });
+}
+
+export async function approveDocumentReview(id: string, comment?: string) {
+  return authRequest(`/api/admin/documents/${id}/review/approve`, { method: 'POST', data: { comment } });
+}
+
+export async function rejectDocumentReview(id: string, comment?: string) {
+  return authRequest(`/api/admin/documents/${id}/review/reject`, { method: 'POST', data: { comment } });
+}
+
+export async function getFailedDocumentTasks() {
+  return authRequest<any[]>('/api/admin/documents/tasks/failed');
+}
+
+export async function retryFailedDocumentTask(taskId: string) {
+  return authRequest(`/api/admin/documents/tasks/${taskId}/retry`, { method: 'POST' });
 }
 
 export async function rollbackDocumentVersion(id: string) {

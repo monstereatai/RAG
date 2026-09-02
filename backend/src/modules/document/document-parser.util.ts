@@ -389,15 +389,43 @@ async function extractPptxText(buffer: Buffer): Promise<string> {
   const slides: string[] = [];
   for (const [index, filename] of slideFiles.entries()) {
     const xml = await zip.files[filename].async('text');
-    const texts = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)]
-      .map((match) => decodeXmlEntities(match[1]).trim())
-      .filter(Boolean);
-    if (texts.length > 0) {
-      slides.push(`## Slide ${index + 1}\n\n${texts.join('\n')}`);
+    const blocks = extractPptxTextBlocks(xml);
+    if (blocks.length > 0) {
+      const [title, ...body] = blocks;
+      slides.push(
+        [`## Slide ${index + 1}${title ? `：${title}` : ''}`, '', ...body]
+          .join('\n')
+          .trim(),
+      );
     }
   }
 
+  if (slides.length === 0) {
+    return extractPrintableText(buffer, 'PowerPoint Document (fallback)');
+  }
   return ['# PowerPoint Document', '', ...slides].join('\n\n').trim();
+}
+
+/**
+ * 按段落而不是按 XML 文字节点展开：保留标题、项目符号和表格单元格的阅读顺序。
+ * Office XML 异常时由调用方降级为二进制可打印文本，避免整份文档入库失败。
+ */
+function extractPptxTextBlocks(xml: string): string[] {
+  const paragraphs = [...xml.matchAll(/<a:p(?:\s[^>]*)?>([\s\S]*?)<\/a:p>/g)]
+    .map((paragraph) => {
+      const text = [...paragraph[1].matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)]
+        .map((match) => decodeXmlEntities(match[1]).trim())
+        .filter(Boolean)
+        .join('');
+      const bullet = /<a:bu(?:Char|AutoNum|Blip)\b/.test(paragraph[1]);
+      return text ? `${bullet ? '- ' : ''}${text}` : '';
+    })
+    .filter(Boolean);
+  return paragraphs.length > 0
+    ? paragraphs
+    : [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)]
+        .map((match) => decodeXmlEntities(match[1]).trim())
+        .filter(Boolean);
 }
 
 function extractPrintableText(buffer: Buffer, title: string): string {

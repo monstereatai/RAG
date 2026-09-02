@@ -108,7 +108,7 @@ describe('ChatModes Integration', () => {
     );
   });
 
-  it('should route simple mode to KarpathyRagService', async () => {
+  it('should route simple mode through direct answer and unified Hybrid RAG', async () => {
     const query = 'Who are you?';
     const mockResponse = {
       answer: 'I am simple RAG',
@@ -124,7 +124,11 @@ describe('ChatModes Integration', () => {
       'user-1',
       expect.any(Array),
       undefined,
-      { scope: { role: undefined } },
+      {
+        adaptiveVectorSearch: true,
+        karpathyDirectAnswer: true,
+        scope: { role: undefined },
+      },
     );
     expect(agenticRagService.run).not.toHaveBeenCalled();
     expect(res.answer).toBe('I am simple RAG');
@@ -225,6 +229,10 @@ describe('ChatModes Integration', () => {
         message.content.includes('当前服务对象岗位：产品经理'),
       ),
     ).toBe(true);
-    expect(call?.[5]).toEqual({ scope: { role: 'product-manager' } });
+    expect(call?.[5]).toEqual({
+      adaptiveVectorSearch: true,
+      karpathyDirectAnswer: true,
+      scope: { role: 'product-manager' },
+    });
   });
 });

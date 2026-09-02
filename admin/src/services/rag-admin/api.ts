@@ -4,7 +4,7 @@ const getToken = () => localStorage.getItem('access_token');
 
 export const authRequest = <T = any>(
   url: string,
-  options?: { method?: string; data?: any; params?: any },
+  options?: { method?: string; data?: any; params?: any; headers?: Record<string, string> },
 ): Promise<T> => {
   const token = getToken();
   return request<T>(url, {
@@ -12,6 +12,7 @@ export const authRequest = <T = any>(
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
       'Content-Type': 'application/json',
+      ...options?.headers,
     },
   });
 };

@@ -5,7 +5,7 @@ import { Button, Card, Collapse, Descriptions, Form, Input, Result, Select, Spin
 import React from "react";
 import { XMarkdown } from "@ant-design/x-markdown";
 import "@ant-design/x-markdown/es/XMarkdown/index.css";
-import { downloadProductionWorkflowProjectZip, getProductionWorkflow, getProductionWorkflowCodingContext, resumeProductionWorkflow, unwrapData, type ProductionRole, type ProductionWorkflow } from "../service";
+import { downloadProductionWorkflowProjectZip, getProductionWorkflow, getProductionWorkflowCodingContext, resumeProductionWorkflow, reviseProductionWorkflow, unwrapData, type ProductionRole, type ProductionWorkflow } from "../service";
 
 const ROLE_LABELS: Record<ProductionRole, string> = {
   product: "产品",
@@ -19,6 +19,7 @@ const ROLE_LABELS: Record<ProductionRole, string> = {
 const STATUS_LABELS: Record<ProductionWorkflow["status"], string> = {
   running: "运行中",
   pending_approval: "待审批",
+  revision_required: "待修订",
   completed: "已完成",
   failed: "失败",
 };
@@ -43,7 +44,10 @@ export default function ProductionWorkflowDetailPage() {
       const detail = unwrapData<ProductionWorkflow>(result);
       if (!detail?.threadId) throw new Error("工作流不存在");
       setWorkflow(detail);
-      form.setFieldValue("rerunRoles", detail.pendingApprovalRoles);
+      form.setFieldsValue({
+        rerunRoles: detail.requiresRevision ? detail.rerunRoles : detail.pendingApprovalRoles,
+        supplementalMaterials: detail.supplementalMaterials ?? "",
+      });
     } catch {
       setWorkflow(null);
       message.error("工作流详情加载失败，请返回列表重试");
@@ -64,18 +68,40 @@ export default function ProductionWorkflowDetailPage() {
 
   const handleResume = async (approval: "approved" | "rejected") => {
     if (!workflow) return;
+    const feedback = String(form.getFieldValue("feedback") ?? "").trim();
+    if (approval === "rejected" && !feedback) {
+      message.error("驳回时必须填写具体修改意见");
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await resumeProductionWorkflow(workflow.threadId, {
         approval,
-        feedback: form.getFieldValue("feedback"),
+        feedback,
         rerunRoles: form.getFieldValue("rerunRoles"),
       });
       setWorkflow(unwrapData<ProductionWorkflow>(result));
       form.resetFields(["feedback"]);
-      message.success(approval === "approved" ? "已批准并继续执行" : "已驳回并按选择岗位重新执行");
+      message.success(approval === "approved" ? "已批准并继续执行" : "已驳回，工作流已暂停并进入待修订状态");
     } catch {
       message.error("审批操作失败，请刷新后重试");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRevise = async () => {
+    if (!workflow) return;
+    setSubmitting(true);
+    try {
+      const result = await reviseProductionWorkflow(workflow.threadId, {
+        rerunRoles: form.getFieldValue("rerunRoles"),
+        supplementalMaterials: String(form.getFieldValue("supplementalMaterials") ?? "").trim(),
+      });
+      setWorkflow(unwrapData<ProductionWorkflow>(result));
+      message.success("已按驳回意见生成新版本，完成后将重新进入审批");
+    } catch {
+      message.error("修订任务启动失败，请刷新后重试");
     } finally {
       setSubmitting(false);
     }
@@ -186,7 +212,7 @@ export default function ProductionWorkflowDetailPage() {
           status: workflow.status === "failed" && index === workflow.stageIndex ? "error" : workflow.completedRoles.includes(role) ? "finish" : workflow.currentBatch.includes(role) ? "process" : "wait",
         }))} />
         <Descriptions column={2} style={{ marginTop: 24 }} items={[
-          { key: "status", label: "状态", children: <Tag color={workflow.status === "completed" ? "green" : workflow.status === "failed" ? "red" : workflow.status === "pending_approval" ? "orange" : "blue"}>{STATUS_LABELS[workflow.status]}</Tag> },
+          { key: "status", label: "状态", children: <Tag color={workflow.status === "completed" ? "green" : workflow.status === "failed" ? "red" : workflow.status === "pending_approval" || workflow.status === "revision_required" ? "orange" : "blue"}>{STATUS_LABELS[workflow.status]}</Tag> },
           { key: "steps", label: "执行步数", children: `${workflow.stepCount}/${workflow.maxSteps}` },
           { key: "thread", label: "Thread ID", children: workflow.threadId },
           { key: "batch", label: "当前批次", children: workflow.currentBatch.map((role) => ROLE_LABELS[role]).join("＋") || "已完成" },
@@ -201,13 +227,15 @@ export default function ProductionWorkflowDetailPage() {
           if (!result) return null;
           return {
             key: role,
-            label: <span>{ROLE_LABELS[role]}：{result.summary} <Tag color={result.riskLevel === "high" ? "red" : result.riskLevel === "medium" ? "orange" : "green"}>风险：{result.riskLevel}</Tag><Tag color={result.evidenceCoverage === 1 ? "green" : "orange"}>证据覆盖：{Math.round(result.evidenceCoverage * 100)}%</Tag></span>,
+            label: <span>{ROLE_LABELS[role]}：{result.summary} <Tag>v{result.revision ?? 1}</Tag><Tag color={result.reviewStatus === "approved" ? "green" : result.reviewStatus === "rejected" ? "red" : result.reviewStatus === "stale" ? "orange" : "blue"}>{result.reviewStatus ?? "pending"}</Tag><Tag color={result.riskLevel === "high" ? "red" : result.riskLevel === "medium" ? "orange" : "green"}>风险：{result.riskLevel}</Tag><Tag color={result.evidenceCoverage === 1 ? "green" : "orange"}>证据覆盖：{Math.round(result.evidenceCoverage * 100)}%</Tag></span>,
             children: <div className="agent-stage-output">{result.deliverables.map((deliverable) => <section key={`${deliverable.type}-${deliverable.title}`}><strong>{deliverable.title}</strong><XMarkdown content={normalizeMarkdown(deliverable.markdown)} escapeRawHtml openLinksInNewTab paragraphTag="div" /></section>)}<p>问题：{result.issues.join("；") || "无"}</p><p>下游风险：{result.downstreamRisks.join("；") || "无"}</p></div>,
           };
         }).filter((item): item is NonNullable<typeof item> => item !== null)} />
       </Card>
 
-      {workflow.requiresApproval && <Card title="审批操作" style={{ marginTop: 16 }}><Form form={form} layout="vertical"><Form.Item name="feedback" label="审批意见"><Input.TextArea rows={3} placeholder="驳回时填写修改意见" /></Form.Item><Form.Item name="rerunRoles" label="驳回后重跑岗位"><SelectRoles roles={workflow.currentBatch} /></Form.Item><Button icon={<CheckOutlined />} type="primary" loading={submitting} onClick={() => void handleResume("approved")}>批准并继续</Button><Button icon={<CloseOutlined />} danger loading={submitting} onClick={() => void handleResume("rejected")} style={{ marginLeft: 8 }}>驳回并重新处理</Button></Form></Card>}
+      {workflow.requiresApproval && <Card title="审批操作" style={{ marginTop: 16 }}><Form form={form} layout="vertical"><Form.Item name="feedback" label="审批意见"><Input.TextArea rows={3} placeholder="驳回时必须填写具体修改意见" /></Form.Item><Form.Item name="rerunRoles" label="需要修订的岗位"><SelectRoles roles={workflow.currentBatch} /></Form.Item><Button icon={<CheckOutlined />} type="primary" loading={submitting} onClick={() => void handleResume("approved")}>批准并继续</Button><Button icon={<CloseOutlined />} danger loading={submitting} onClick={() => void handleResume("rejected")} style={{ marginLeft: 8 }}>驳回并要求修订</Button></Form></Card>}
+      {workflow.requiresRevision && <Card title={`待修订：准备生成 v${workflow.revisionNumber ?? 2}`} style={{ marginTop: 16 }}><Form form={form} layout="vertical"><p><strong>驳回意见：</strong>{workflow.feedback}</p><p><strong>受影响下游：</strong>{(workflow.staleRoles ?? []).map((role) => ROLE_LABELS[role]).join("、") || "无"}</p><Form.Item name="rerunRoles" label="本次局部重试岗位" extra="只能从被驳回的岗位中选择；受影响下游会在修订版本审批通过后按依赖重新执行。"><SelectRoles roles={workflow.rerunRoles} /></Form.Item><Form.Item name="supplementalMaterials" label="补充缺失资料／已核验来源／业务约束" extra="可填写规则补充、接口字段、来源链接或验收约束。本次仅作为待核验修订上下文；要成为正式知识请另行走文档入库和审核。"><Input.TextArea rows={6} maxLength={12000} showCount placeholder="例如：库存扣减以 reward_stock.remaining 为准；发奖失败须写入 compensation_queue；已核验来源：https://…" /></Form.Item><Button type="primary" loading={submitting} onClick={() => void handleRevise()}>提交修订包并局部重试</Button></Form></Card>}
+      {(workflow.revisionHistory ?? []).length > 0 && <Card title="产物版本历史" style={{ marginTop: 16 }}><Collapse items={(workflow.revisionHistory ?? []).map((record) => ({ key: String(record.revision), label: `v${record.revision} · 已驳回 · ${new Date(record.rejectedAt).toLocaleString()}`, children: <div><p><strong>驳回意见：</strong>{record.feedback}</p><p><strong>驳回岗位：</strong>{record.rejectedRoles.map((role) => ROLE_LABELS[role]).join("、")}</p><p><strong>下游过期：</strong>{record.staleRoles.map((role) => ROLE_LABELS[role]).join("、") || "无"}</p>{record.revisedAt && <><p><strong>局部重试：</strong>{(record.rerunRoles ?? []).map((role) => ROLE_LABELS[role]).join("、")}</p><p><strong>补充资料：</strong>{record.supplementalMaterials || "未补充"}</p></>}</div> }))} /></Card>}
     </>
   );
 

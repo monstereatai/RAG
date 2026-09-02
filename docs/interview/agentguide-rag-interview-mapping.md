@@ -82,7 +82,7 @@
 
 1. **工程链路比较完整**：不只是“上传文档 + 问答”，而是把入库、检索、生成、引用、拒答、后台运营、评测、MCP、GraphOps 串起来了。
 2. **检索路线合理**：Milvus 负责语义召回，BM25/ES 负责精确词，RRF 做融合，Rerank 做精排，GraphRAG 补关系，符合一线项目常见演进路线。
-3. **Agentic 不是硬套概念**：simple / auto / agentic 分层，简单问题走 fast path，复杂问题才进 LangGraph，能解释“速度和效果怎么权衡”。
+3. **Agentic 不是硬套概念**：simple／auto／agentic 分层，Simple 与 Auto 先精确直答、未命中后走统一 Hybrid Fast Path（混合快速路径），Auto 在证据不足或复杂时才进 LangGraph，能解释“速度和效果怎么权衡”。
 4. **业务包装贴合你的经历**：游戏活动、营销 H5、小程序、PC/H5 官网、台湾服 / 东南亚服 / 海外适配，比泛泛“企业知识库”更像真实业务项目。
 5. **有 AI Coding 亮点**：MCP 让 Codex / Trae / Claude Code 在写代码前自动查内部组件、活动模板、埋点规范和地区适配经验，这个比单纯聊天更有差异化。
 6. **知道边界**：文档里已经把真实数据、生产化、合规、多模态闭环、A2A、模型训练等缺口讲清楚，面试时不容易被追问穿。
@@ -248,7 +248,7 @@ BM25 解决精确词、专有名词、组件名、埋点名、制度编号这类
 
 | 位置 | 节省方式 | 当前项目做法 |
 |---|---|---|
-| 路由层 | 简单问题不进复杂 Agent | `auto` 默认简单问题走 simple fast path |
+| 路由层 | 简单问题不进复杂 Agent | `auto` 先精确直答和统一 Hybrid Fast Path，再按证据与复杂度决定是否升级 |
 | 检索层 | 控制候选数量 | `topK`、`maxRetrievedChunks`、`maxRerankTopN` 控制上下文规模 |
 | 多查询层 | 控制 query augment 数量 | `maxAugmentedQueries`、`maxRetrievalQueries` |
 | 记忆层 | 历史摘要压缩 | 最近 N 轮保留原文，更早历史压缩成 100 字摘要 |
@@ -861,7 +861,7 @@ query
 ```text
 请求入口：
   mode=auto
-  简单问题 -> simple fast path
+  简单问题 -> Direct Answer Gate -> 统一 Hybrid Fast Path
   复杂问题 -> agentic
 
 检索阶段：
@@ -1172,7 +1172,7 @@ GraphRAG 我不会拿来替代向量检索，而是补关系。向量检索负�
 ### 1. 你的 RAG 项目怎么做的？
 
 ```text
-我这个项目不是单纯向量库问答，主链路是：文档/URL/Obsidian/官方文档进入系统后做解析、结构化切片和 metadata 标注，然后写入 Milvus、BM25/ES、Karpathy/Obsidian 索引层。查询时先根据模式走 simple / auto / agentic：普通问题走 fast path，复杂问题进入 LangGraph Agentic RAG。检索阶段用 Milvus 做语义召回，BM25/ES 做关键词召回，RRF 融合后可选 Rerank，最后生成回答时做引用校验和低相关拒答。
+我这个项目不是单纯向量库问答，主链路是：文档／URL／Obsidian／官方文档进入系统后做解析、结构化切片和 metadata（元数据）标注，再按适用性写入 Milvus、BM25／Elasticsearch、Neo4j 和 Obsidian 编译知识。查询时，Simple 与 Auto 先过 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG；Auto 根据证据充分性和复杂度升级 LangGraph Agentic RAG。检索阶段用 Milvus 做语义召回，BM25／Elasticsearch 做关键词召回，RRF（倒数排名融合）后可选 Rerank（重排），最后做引用校验和低相关拒答。Karpathy 本地知识只用于受治理直答和降级。
 
 业务上我把它收敛到游戏活动和官网营销场景，不沉淀每次变化的具体奖励规则，而是沉淀活动类型、营销玩法、页面模块、接口模式、埋点规范、地区适配和上线验收清单。
 ```
@@ -1382,7 +1382,7 @@ Agentic RAG、Hybrid Search、Milvus、Elasticsearch/BM25、RRF、Rerank、Graph
 | 游戏营销证据说明 | `docs/interview/resume/game-marketing-rag-evidence.md` |
 | JD 与项目代码对照 | `docs/interview/jd/jd-requirements-project-mapping.md` |
 | JD 差距状态 | `docs/interview/jd/jd-gap-implementation-status.md` |
-| Karpathy RAG 主链路 | `backend/src/rag/karpathy/karpathy-rag.service.ts` |
+| 精确直答与统一 Hybrid RAG 主链路（保留 Karpathy 文件名兼容） | `backend/src/rag/karpathy/karpathy-rag.service.ts` |
 | Agentic RAG 状态机 | `backend/src/rag/agentic/agentic-rag.service.ts` |
 | 多 Agent Supervisor | `backend/src/modules/supervisor/supervisor.service.ts` |
 | 子 Agent 管线 | `backend/src/rag/agents/agent-pipeline.service.ts` |

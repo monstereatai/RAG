@@ -63,6 +63,17 @@ export interface ProductionWorkflowTracePayload {
   }>;
 }
 
+export interface ScheduledAnalysisTracePayload {
+  jobId: string;
+  userId?: string;
+  name: string;
+  instruction: string;
+  window: string;
+  dataScopes: string[];
+  snapshotCounts: Record<string, number>;
+  report: string;
+}
+
 @Injectable()
 export class LangfuseProvider implements OnModuleDestroy {
   private readonly logger = new Logger(LangfuseProvider.name);
@@ -329,6 +340,44 @@ export class LangfuseProvider implements OnModuleDestroy {
       this.lastError = (err as Error).message;
       this.logger.warn(
         `LangFuse production workflow trace failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  async traceScheduledAnalysis(
+    payload: ScheduledAnalysisTracePayload,
+  ): Promise<void> {
+    if (!this.client) return;
+    try {
+      const trace = this.client.trace({
+        name: 'agent.scheduled.analysis',
+        userId: payload.userId,
+        sessionId: payload.jobId,
+        input: {
+          name: payload.name,
+          instruction: payload.instruction,
+          window: payload.window,
+          dataScopes: payload.dataScopes,
+        },
+        output: {
+          snapshotCounts: payload.snapshotCounts,
+          report: payload.report,
+        },
+        metadata: { taskKind: 'analysis', jobId: payload.jobId },
+      });
+      trace.generation({
+        name: 'agent.scheduled.analysis.report',
+        input: payload.snapshotCounts,
+        output: payload.report,
+        model: 'scheduled-analysis',
+        metadata: { window: payload.window, dataScopes: payload.dataScopes },
+      });
+      this.tracesSent += 1;
+      await this.flush();
+    } catch (err) {
+      this.lastError = (err as Error).message;
+      this.logger.warn(
+        `LangFuse scheduled analysis trace failed: ${(err as Error).message}`,
       );
     }
   }

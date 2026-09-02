@@ -82,6 +82,7 @@ export class KarpathyObsidianIngestService {
       };
     }
 
+    let obsidian: ObsidianWriteResult | null = null;
     const rag = await this.documentService.upload(
       params.filename,
       content,
@@ -90,18 +91,20 @@ export class KarpathyObsidianIngestService {
         originalBuffer: params.extracted.snapshot,
         contentType: params.extracted.contentType || 'text/plain',
         businessMetadata: params.businessMetadata,
+        onQualityAccepted: async (docId) => {
+          obsidian = await this.obsidianKnowledge.writeSource({
+            title,
+            sourceUrl: params.extracted.finalUrl || params.url,
+            content,
+            ragDocId: docId,
+            sourceType: 'url',
+            contentType: params.extracted.contentType || 'text/plain',
+            filename: params.filename,
+          });
+        },
       },
     );
-
-    const obsidian = await this.obsidianKnowledge.writeSource({
-      title,
-      sourceUrl: params.extracted.finalUrl || params.url,
-      content,
-      ragDocId: rag.docId,
-      sourceType: 'url',
-      contentType: params.extracted.contentType || 'text/plain',
-      filename: params.filename,
-    });
+    if (!obsidian) throw new Error('Obsidian source write did not complete');
 
     return { rag, obsidian };
   }
@@ -172,6 +175,7 @@ export class KarpathyObsidianIngestService {
       };
     }
 
+    let obsidian: ObsidianWriteResult | null = null;
     const rag = await this.documentService.upload(
       params.filename,
       params.content,
@@ -182,18 +186,20 @@ export class KarpathyObsidianIngestService {
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',
         businessMetadata: params.businessMetadata,
+        onQualityAccepted: async (docId) => {
+          obsidian = await this.obsidianKnowledge.writeSource({
+            title: params.title,
+            sourceUrl: params.sourceUrl,
+            content: params.content,
+            ragDocId: docId,
+            sourceType: params.sourceType,
+            contentType: params.contentType,
+            filename: params.filename,
+          });
+        },
       },
     );
-
-    const obsidian = await this.obsidianKnowledge.writeSource({
-      title: params.title,
-      sourceUrl: params.sourceUrl,
-      content: params.content,
-      ragDocId: rag.docId,
-      sourceType: params.sourceType,
-      contentType: params.contentType,
-      filename: params.filename,
-    });
+    if (!obsidian) throw new Error('Obsidian source write did not complete');
 
     return { rag, obsidian };
   }

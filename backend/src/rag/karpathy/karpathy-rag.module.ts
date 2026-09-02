@@ -8,6 +8,7 @@ import { MetricsModule } from '../../modules/metrics/metrics.module';
 import { ObsidianKnowledgeModule } from '../../modules/obsidian/obsidian-knowledge.module';
 import { PromptModule } from '../prompts/prompt.module';
 import { ToolsModule } from '../../tools/tools.module';
+import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ToolsModule } from '../../tools/tools.module';
     ObsidianKnowledgeModule,
     PromptModule,
     ToolsModule,
+    DocumentPermissionModule,
   ],
   providers: [KarpathyRagService],
   exports: [KarpathyRagService],

@@ -41,12 +41,55 @@
 | `tools/rag-mcp-server/README.md` | RAG MCP Server 接入说明，给 Codex/Trae/Claude Code/Cursor 自动取上下文 |
 | `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md` | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 |
 | `docs/interview/deepseek-AI应用Agent岗-模拟问答题库.md` | 高级 AI 应用/Agent 岗 33 道高频模拟题逐题可背答案、追问应对和边界红线，覆盖检索/Agentic/Prompt/安全/多租户/可观测全知识面 |
+| `docs/interview/AI复盘四场面试问题与RAG项目回答.md` | 外部 MHTML 面试复盘材料的 58 个去重问题、当前项目回答、证据索引和表达边界 |
+| `docs/interview/AI复盘四场面试问题与RAG项目回答-面试表达版.md` | 保留 58 题并强化业务价值、架构取舍、工程结果和术语解释的面试背诵版本 |
+| `docs/interview/Agent-Task-Artifact结构验收与驳回重跑.md` | Chat／Task／文件 Artifact 结构、自动与人工验收，以及驳回修改和岗位重跑操作说明 |
+| `docs/reference/企业级知识库课程与v1-v9对照优化建议.md` | 课程 11 份 PDF、knowledge-hub-backend v1～v9 与当前项目的能力核验、取舍和分批优化建议 |
 
 ## 当前结论
 
+- 已完成企业级知识库课程与 `knowledge-hub-backend` `v1`～`v9` 的对照补强：统一 ACL 已在 Karpathy 本地 BM25、Elasticsearch 与 Milvus 候选融合后按文档可访问集合过滤，文档所属人默认可读；新增独立 `document_reviews` 审核审计和 `reviewStatus`，草稿必须提交／审核通过才允许晋升；PPTX 解析改为按段落与项目符号保留结构并在空内容时降级；ES 检索返回命中片段；BullMQ 失败任务可按原 taskId 幂等重放，后台补齐审核和重放入口。已启动本地 Docker PostgreSQL，并执行数据库中此前积压的 16 个项目迁移；`1787500000000-AddDocumentReviewWorkflow` 已成功记录，`documents_meta` 的四个审核字段和 `document_reviews` 表已实查存在。MongoDB 双库与 RabbitMQ 替换不建议照搬。Backend TypeScript 和生产构建已通过；Jest 受现有 Jest 30 ModuleMocker 兼容错误阻断，管理后台全量 TypeScript 仍受既有 React 类型冲突阻断。
+- Task Agentic 的 Artifact 驳回已改为两阶段修订闭环：驳回只保存意见、修订岗位和旧版本，将工作流暂停为 `revision_required`，并把被驳回／受影响下游状态同步写入 Artifact metadata；管理员点击「按意见重新生成」后才局部重跑并产生新版本，新版本重新审批通过后才继续下游。管理后台已展示版本号、审核状态、待修订范围、受影响下游和版本历史。
+- Task Agentic 的驳回修订补齐“修订包”闭环：待修订页面可录入缺失资料、已核验来源和业务约束，并只能从被驳回岗位中选择局部重试；补充资料进入当前修订的检索与模型上下文，但明确标记为待核验，不能单独作为事实声明证据。修订包、局部重试范围和时间写入版本历史及运行事件；下游保持过期，待修订版本审批通过后按 DAG 继续。
+
+- Agent 运营已新增通用定时任务闭环：管理员可用自然语言或 Markdown 定义周期分析任务，先解析并人工确认 Cron、统计窗口、数据范围、岗位和部门，再保存到 `scheduled_jobs`；现有 `JobsService` 支持启动恢复、启停、立即执行、重入保护和 `job_executions` 历史。执行时并行汇总规则文档、问答质量、负反馈代理指标与产研运任务，先生成可复核快照，再由 LLM 输出受证据约束的 Markdown 建议；后台可展开最近报告和逐次历史。Backend 定向 2 套件／6 项测试、Admin Backend 与 Admin TypeScript 检查通过；真实客服工单与企业微信等通知 API 仍是外部接入边界。
+
+- Simple／Auto 已补齐 Base Case 并发召回闭环：Direct Answer Gate 未命中后，Base Case、正式 Hybrid RAG 与 Obsidian 同时启动；已审核的 `exact`／`correction` 候选转换为可引用证据，进入统一合并与充分性门禁，Auto 的 `prefetchedFastPath` 同步复用 Base Case 快照。新增受限中文姓名单字纠错，只接受同长度、同首字且仅一个中文字符不同的近似问题；“韦永春是谁”可纠正到已审核的“韦水春是谁”，不同姓氏和数字版本不会自动合并。真实接口回放确认 Simple 与 Auto 均返回 `retrievalSufficient=true`、实际路由 `simple`、1 条 Base Case 引用；Backend 3 个定向测试套件／43 项测试、生产构建和《功能步骤流程》19 张 Mermaid 图解析通过。
+
+- 问答无可靠证据时已从“生硬拒答”改为安全友好降级：后端仍禁止无证据生成，但统一返回可继续操作的说明，内部 `retrievalReason` 使用“安全降级”而非“明确拒答”；用户端默认模式改为 Auto，并将模式展示为「极速／自动／深度」。检索不足时页面显示「补充问题信息」，非 Agentic 路由还可一键「使用深度检索」；技术检索原因默认折叠在「查看检索详情」，不再直接暴露给普通用户。已同步《功能步骤流程》，Backend 构建、Karpathy／Agentic 34 项相关单测、用户端生产构建及 19 张 Mermaid 图校验通过。
+
+- 《功能步骤流程》三种问答模式已按真实执行策略重新分层：路由总览改为「共用检索与证据治理底座＋三种独立策略」；Simple 明确为精确直答后单次 Hybrid RAG、最多一次网页补证且不拆题／不查图谱／不循环；Auto 明确为 Direct Answer Gate 后执行 Fast Path，并按证据充分性与复杂度选择轻量回答或升级；显式 Chat Agentic 明确不走直答捷径，先预取 Fast Path 证据，再进入查询增强、子问题并发检索、按需图谱／工具补证和受预算约束的反思重试。已对照 `ChatService`、`AgenticRagService.run` 与 `KarpathyRagService` 修正图文，19 张 Mermaid 图语法及箭头样式校验通过。
+
+- 图谱已接入文档入库后的可选异步补充索引：PostgreSQL、Embedding→Milvus、Karpathy／BM25＋Elasticsearch、Obsidian 四项必要分支成功后，Neo4j 可用时以 `docId` 为来源启动实体／关系抽取；`documents_meta` 持久化 `pending`／`indexed`／`failed`／`skipped` 状态、完成时间与失败原因。图谱失败不阻塞草稿入库、人工生效或版本回滚。Neo4j 实体与关系维护多来源 `sourceIds`，删除文档只移除该文档来源，仍被其他文档引用的图谱事实保留；文档管理列表已展示图谱状态和失败原因。已同步《功能步骤流程》、架构和 PRD，Backend 生产构建、全量 51 套件／224 项单测、管理后台 TypeScript／生产构建及 19 张 Mermaid 图校验通过。数据库存在此前未执行的 Bad Case 迁移，因此本次新增图谱状态迁移尚未执行，避免顺带执行未复核的既有迁移。
+
+- 文档入库已改为四路并发：质量门禁和父子切块后，PostgreSQL `draft` 文档／Chunk／权限／质量元数据、Embedding→Milvus、Karpathy／BM25＋Elasticsearch、Obsidian 来源笔记同时执行；全部必要分支成功后才恢复目标生命周期并标记任务完成。任一分支失败时，PostgreSQL 草稿保留供排障，同时补偿清理 Milvus、Elasticsearch、Karpathy／BM25 等已完成的外部索引。高风险 Prompt Injection（提示注入）仍在并发前隔离，因此不会写入任何检索索引或 Obsidian。已同步《功能步骤流程》入库图；Backend 全量 51 个测试套件、223 项测试和生产构建通过。
+
+- 三种问答模式已收敛为唯一运行主干「Direct Answer Gate（精确直答门禁）→ 统一 Hybrid RAG（混合检索增强生成）→ 按需 Agentic（智能体式执行）」：Simple 直答未命中后固定执行关键词、向量与 Obsidian 混合召回；Auto 先直答、再执行完整 Fast Path，并按证据充分性和复杂度升级，问题长度不再强制回到 Simple；Chat Agentic 在空库或本地证据不足时仍进入状态机尝试联网补证，本地与网页均无可靠证据则明确拒答，不使用自由模型兜底。Karpathy 本地知识保留为受治理直答与降级资产，不再表述为独立在线链路。已同步架构、面试口径和《功能步骤流程》18 张图；Backend 全量 51 个测试套件、223 项测试及生产构建通过，18 张图的 `linkStyle` 均覆盖全部箭头且无越界。
+- 已全量复核并修正《功能步骤流程》18 张 Mermaid 图：版本创建图补齐 `draft` 入库后的人工生效门禁，并按当前实现区分 Milvus、Karpathy／BM25、Elasticsearch、PostgreSQL、Obsidian 与可选 Neo4j；检索图改为 BM25／Milvus 经 RRF 后先做来源、权限、版本与作用域过滤，再合并按需图谱证据和可选 Rerank；Bad Case 晋升改为正式入库与状态保存成功后串行删除纠正向量；Task Agentic 明确产品后设计／后端并发、前端汇合、测试与运营依赖批次及逐批审批。Simple 增加并发直答结果汇合与优先级，记忆图修正 Redis／PostgreSQL 回退方向，Checkpoint 增加副作用结果未知时阻断自动重放，Chat Artifact 补充 PostgreSQL 持久副本，Prompt Injection 区分高风险隔离、中风险告警和生成前清洗；同时补齐三条遗漏的箭头样式。18 张图均通过 Mermaid 11.15 语法解析，所有 `linkStyle` 索引覆盖完整且无越界。
+- 新增《AI复盘四场面试问题与RAG项目回答－面试表达版》并保留原事实核对版：明确 58 题由原文 49 个正式问题和正文提炼的 9 个追问组成；将项目总述和核心题改写为“业务问题—设计取舍—工程价值”表达；补齐 Milvus、BM25、RRF、MRR、NDCG、RBAC、ABAC、JWT、Smoke Test、Diff Review、PoC 等术语注释；校准追加式事件、节点级重试、按 Profile 写索引、知识生命周期与配置发布门禁等实现边界。仅更新面试文档与导航，未修改运行时代码。
+- 新增《AI复盘四场面试问题与RAG项目回答》：对 MHTML 中重复三次的正文去重，收录 9 个正文隐含追问、42 个附录问题和 7 个通用追问层级；技术题绑定当前项目证据，HR 题使用待替换模板，并明确本地工程闭环与生产 IAM、DLP、SLA、长期压测等未验收边界。
+- 已为《AI复盘四场面试问题与RAG项目回答》补充英文术语注释表，并在 `TopK`、`effective`、Agent、Checkpoint、MCP、DLP、SLA 等首次出现处标注中文含义，方便直接作为面试背诵材料。
+- 新增《Agent Task Artifact 结构、验收与驳回重跑》：说明三层 Artifact 数据形态、岗位结果 Schema、Claim／Evidence 证据门禁、文件与代码验收，以及后台“工作流详情→填写修改意见→选择岗位→驳回并重新处理”的正确路径；同时明确协作编排“单任务重跑”当前只重置 Task 状态并记录重试，尚未触发岗位实际执行。
+
+- 文档版本治理已改为「草稿入库、人工生效、原子切换」：后台创建新版本固定为 `draft`，索引未完成或失败不会影响当前 `effective` 版本；管理员在「文档管理」每行操作区点击明确的「版本治理」按钮，可对草稿执行「设为生效」或「废弃」，对历史 `deprecated` 版本执行回滚。RAG 后端在 PostgreSQL 事务中同步文档元数据与切块生命周期：目标版本设为 `effective`，同一版本链其余版本设为 `deprecated`，随后同步 Elasticsearch 与 Karpathy 索引；原始资料和历史版本均不覆盖、不删除。已通过 RAG 后端版本服务单测、Backend／Admin Backend／管理后台 TypeScript 检查，以及 Backend／管理后台生产构建；本地真实接口联调已验证「创建草稿（1 Chunk）→设为生效（旧版废弃）→回滚原版本（测试版废弃）」全链路，联调临时文档保留在该版本链中供审计。
+- 管理后台文档列表已补充缓存规避和响应包裹兼容：请求通过 `Cache-Control`／`Pragma` 请求头避免复用旧 `304` 空列表，不向严格查询 DTO 注入额外参数；前端同时兼容 Admin Backend 与 RAG Backend 的多层 `data` 响应；已通过管理后台目录内 TypeScript 检查和生产构建。
+- 管理后台文档表格已增加横向／纵向滚动，并固定右侧「操作」列，长列布局下「版本治理」按钮仍保持可见；管理后台 TypeScript 检查和 Diff 检查通过。
+- 《功能步骤流程.md》已重新写明版本治理后台操作：文档列表进入「版本治理」、创建 `draft`、等待索引完成、点击「设为生效」、草稿「废弃」和历史版本「回滚」，并补充横向滚动及固定操作列的使用说明。
+- 《功能步骤流程.md》第十章已拆分文档版本治理与 Prompt／模型／工具配置发布两张图：前者只描述草稿、索引、生效、废弃与回滚；后者才描述评测、Evidence、灰度与配置回滚，避免两条链路混淆。
+- 已全量复核《功能步骤流程.md》18 张 Mermaid 图的连线与样式索引，并修正三处流程语义：文档入库须在全部索引完成后才切换生命周期；Bad Case 审核结果为互斥决策而非并行处理；高风险 Prompt Injection 内容隔离后不进入检索。
+
+- 已完成运行时异步调用链复核与低风险并发改造：`ChatService` 并发准备插件策略、会话 ID、短期记忆／摘要、Mem0 长期记忆、历史问答向量、运行计划和检索 Profile；`ObsidianKnowledgeService` 并发枚举三个知识目录，并以每批 8 个文件的上限并发读取内容。Obsidian 索引刷新现在以单飞锁合并并发请求；刷新期间有新笔记落盘会补跑一轮，避免快照遗漏；`sources`／`tags` 索引与标签、实体、结论、图谱种子等互不覆盖的产物并发生成，其中页面写入保持每批最多 8 个。关联笔记仍在索引产物完成后串行回写。`docs/interview/功能步骤流程.md` 已同步这一流程与并发边界。Agentic 子问题检索和后台聚合原本已并发。解析→质量门禁→切片→索引、审核→来源核验→正式知识晋升、版本切换及同一资源的删除／写入继续保持串行。已通过 Backend TypeScript 检查、生产构建、`ChatService` 单测和本地后端／管理后台健康检查；Obsidian 尚无对应单测文件。
+
+- 已补全《功能步骤流程》6.1 的 PostgreSQL 状态流：短期记忆优先读取 Redis 热窗口与摘要，摘要缺失或 Redis 不可用时回退 PostgreSQL 的会话摘要持久副本与历史消息；压缩后摘要同步写入 PostgreSQL 与 Redis。
+
+- 已补齐 Prompt Injection 双阶段防护：入库阶段检测高风险指令，保留原始资料并把任务标记为 `failed／security_review`，停止切块和所有索引写入；中风险内容记入质量告警。检索生成前继续逐行清洗，高风险行仅保留风险标签，不回显原指令；工具调用仍由独立权限、审批、预算策略拦截。新增检测单测，连同文档质量门禁测试共 6 项通过，Backend TypeScript 检查、生产构建和 Diff 检查通过。
+
+- 已重绘《功能步骤流程》第七章 Agent 运营与审计图：拆分为「运行时写入与状态收口」和「运营后台按 Run 展开审计」两张图，明确 `runId`／`threadId` 关联、`agent_runs`／运行事件／工具动作的 PostgreSQL 落点、Chat Redis Checkpoint、Task 文件型 Artifact 与对象存储、Artifact 审计的并发读取，以及 Failure Onset（失败起点）的派生位置。
+
 - 已重构 `docs/interview/功能步骤流程.md` 为 12 章的实现核对版：删去与参考项目归档重复的流程叙述，统一 Simple、Auto、Chat Agentic 与 Task Agentic 的定义；按用户操作、数据／状态流、代码入口和生产边界重写核心链路。已修复目录锚点，并对 16 张 Mermaid 图逐一校验箭头样式索引；每张图例均改为「起点节点 → 中间节点 → 终点节点」的箭头说明；参考项目内容统一链接至 `docs/interview/开源项目参考能力归档.md`，不再作为实现状态的重复来源。
 
-- 三条问答链路已按分层策略收紧：Simple 首先执行 Bad Case 预检查，再尝试受治理 Karpathy 直答；只有 `docVersion` 完整、`effective`、有来源、权限范围匹配、处于生效时间、无待确认项且问题关键词覆盖度达到默认 70％的编译知识才能抽取式返回并附引用，不查询 Milvus、不调用 LLM。缺少任一治理字段的知识不会绕过常规检索与生成门禁。其余 Simple 问题使用联网兜底与自适应检索，Query 标准化只做 Unicode NFKC、空白清理、已登记错别字修正和少数领域规则补充；精确查询优先走本地 BM25，关键词证据不足才补一次 Embedding＋Milvus 向量检索，流程／对比／方案类问题则直接走混合检索。Auto 始终先执行一次完整 Hybrid Fast Path，并结合证据充分性与任务复杂度决定直接生成或升级 Agentic；直接生成时复用首轮证据，避免重复检索。Agentic 保持子问题并行 Hybrid 检索，按需补图谱、联网和受控工具，再执行反思、审批与 Checkpoint 恢复。Simple 本地证据不足时通过 Tool Registry 调用 Bocha Web Search，网页内容按不可信上下文清洗后交给 LLM 归纳并作为可点击来源返回；联网未配置、超时或无结果时才进入受限模型兜底。
+- 当前问答运行时以《功能步骤流程》第二章为唯一口径；历史计划中的“Karpathy 独立 fast path”“Simple 精确查询跳过向量”“Auto 长问题强制 Simple”和“无证据模型兜底”均不再代表当前实现。
+- 流程文档中的关键英文术语已在首次面试语境出现处补充中文释义，例如 `SubQuestion Plan`（子问题计划）、`Evidence Bundle`（证据包）、`Answer Contract`（答案契约）、`Checkpoint`（检查点）、`Query Log`（查询日志）和 `Hybrid Fast Path`（混合快速路径）；代码标识符保持原样，便于回到仓库核对实现。
 - 本轮实现已验证：Karpathy 直答正例能在治理字段齐全时只走本地 BM25 抽取答案，缺少版本字段时会回到常规向量／生成门禁；Karpathy、Agentic 和 Chat 相关测试共 34 项通过，Backend TypeScript 检查通过，健康接口返回 200。
 - Simple 运行时已明确模块调用关系：`ChatService`、`BadCaseFlywheelService`、`KarpathyRagService`、`Bm25Store`、`VectorStoreProvider／Milvus`、`ToolExecutionPolicyService`、`BochaSearchService` 和 `LlmProvider` 分别负责请求编排、纠错预检、检索、工具策略与生成；流程文档只保留面试所需的主链路与代码入口。
 - Agentic 文档已改为「一个共享 Runtime、两条受控状态机」：Chat Agentic 专注子问题取证、工具补充和答案汇总；Task Agentic 专注岗位 DAG、Artifact、审批和任务导出。普通问答不再被表述为必须走岗位协作或产出 Artifact，Task 的审批与局部重跑也不再混入 Chat 问答路径。
@@ -89,6 +132,10 @@
 - 验证：admin-backend 定向测试与构建、admin 前端构建；本地接口验证确认 RAG 端仍有 752 个会话、261 篇文档。
 
 ### 最近完成：DeepSeek Harness 剩余适配能力一次闭环（2026-08-14）
+
+- **双层知识、并行召回与晋升治理**：Bad Case 审核后可选择保留在可撤销的纠正层、标记待晋升，或在填写核验来源后通过 `DocumentService` 晋升为带版本的正式知识；晋升成功即移除对应纠正向量，避免双层重复命中。Simple 的 Karpathy 直答只做 PostgreSQL 精确纠正覆盖检查；常规 Simple／Auto／Chat Agentic 让纠正层候选与正式 Hybrid RAG 并行，再由 Correction Gate 按精确度、证据、版本与引用裁决。`includeInRegression` 仅创建评测用例，不再决定纠正知识是否生效。已新增 TypeORM 迁移与后台审核入口，待完成迁移、定向测试和构建验证后标记为已验证。
+- **Task Agentic Checkpoint 操作闭环**：在 `功能步骤流程.md` 第三章补充启动、切页／中断、详情页继续、未知副作用核验和恢复后状态展示的用户操作与 Redis Checkpoint 状态流；与第六章的底层恢复规则分开记录。
+- 修正第三章 Task Agentic 总流程图的 Checkpoint 断线：明确初始化后先保存节点状态，再进入产品阶段；详细的中断恢复仍由下方专用流程图展开。
 
 - **请求可复现**：Simple／Auto／Agentic 创建 Run 后写入 `request.snapshot`，保存查询 Hash、模式、角色预设、检索 Profile、历史／记忆计数、Prompt 版本和工具策略；产研运岗位调用保存依赖岗位、证据 ID、审批模式和工具清单。原始敏感 Prompt 不进入运行事件。
 - **统一工具执行**：新增 `ToolExecutionService`，覆盖 Agentic 的 Bocha Web Search、DashScope Rerank、GraphRAG，以及产研运岗位检索、岗位 Artifact 写入和可运行项目代码生成：统一记录 `tool.call` → 权限校验 → 写入审批对 `approval.asked`／`approval.decided` → `tool.result`／`tool.failed`；未注册工具默认拒绝，审批不可用按拒绝优先处理。
@@ -290,7 +337,7 @@
 
 ### 可观测 & 工程化
 - Prometheus 指标（rag_llm_calls_total 等）+ traceparent + LangFuse 可选 provider + `/api/v1/observability/langfuse/status`
-- 定时任务 JobsService 复用 Supervisor 执行（cron/every/at）
+- 定时任务 JobsService 支持历史 Supervisor 任务和运营分析任务（cron／every／at），分析任务保留解析配置、统计快照、Markdown 报告与执行历史
 - TS 0 错误，lint/build/test/verify 全部通过
 - Admin QA：TTS 播放按钮补齐连接中/合成中/播放中/失败状态
 - Admin QA 产物中心：生成任务独立 BullMQ 队列、对象存储、文件抽屉、外部匿名分享页与移动端适配
@@ -389,6 +436,8 @@
 ## 最近验证
 
 ### 2026-08-11
+
+- **定时任务版本治理与复制**：定时分析任务增加版本组、版本号、当前版本和复制来源；后台支持复制新版本、查看版本历史和启用指定版本。新版本默认停用，启用时自动停用同组旧版本，旧版本及执行历史保留。
 
 - **产研运工作流列表与详情闭环**：新增按用户隔离的工作流列表接口和 Redis 索引，管理后台可按列表查看运行状态、完成岗位和当前批次，点击后加载 Thread 详情、阶段交付物及审批／驳回操作；Redis 不可用时保留进程内列表兜底。
 - **工作流完成态展示优化**：运行中的工作流继续在当前区域自动刷新；完成或失败后自动收起当前详情和表单状态，历史工作流保留在列表中，点击列表行可再次打开详情和阶段产物。

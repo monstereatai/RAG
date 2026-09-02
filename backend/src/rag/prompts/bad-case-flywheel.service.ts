@@ -128,8 +128,24 @@ export class BadCaseFlywheelService implements OnModuleInit {
   }
 
   async retrieveMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
-    const exactMatches = await this.findExactReviewedMatches(query, limit);
-    if (exactMatches.length > 0) return exactMatches;
+    // 纠正层与正式 RAG 同时构建候选；这里也把精确命中和语义命中并行，
+    // 最终仍优先精确命中，避免把向量检索串行叠加到主问答延迟上。
+    const [exactMatches, semanticMatches] = await Promise.all([
+      this.findExactReviewedMatches(query, limit),
+      this.findSemanticMatches(query, limit),
+    ]);
+    return exactMatches.length > 0 ? exactMatches : semanticMatches;
+  }
+
+  /** 只查询已审核纠正层的精确问题，用于 Karpathy 直答前的低成本覆盖检查。 */
+  async retrieveExactMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
+    return this.findExactReviewedMatches(query, limit);
+  }
+
+  private async findSemanticMatches(
+    query: string,
+    limit: number,
+  ): Promise<BadCaseMatch[]> {
     if (!this.initialized || !this.client) return [];
     try {
       const vector = await this.embeddingProvider.embedQuery(query);
@@ -158,7 +174,8 @@ export class BadCaseFlywheelService implements OnModuleInit {
           (item) =>
             item.text &&
             (item.score >= this.similarityThreshold ||
-              this.hasLexicalEntityMatch(query, item.query)),
+              this.hasLexicalEntityMatch(query, item.query) ||
+              this.isSingleChineseNameTypo(query, item.query)),
         )
         .slice(0, Math.min(Math.max(limit, 1), 2));
     } catch (error) {
@@ -185,6 +202,9 @@ export class BadCaseFlywheelService implements OnModuleInit {
         .where('feedback.feedback = :feedback', { feedback: 'negative' })
         .andWhere('feedback.status IN (:...statuses)', {
           statuses: ['reviewed', 'resolved'],
+        })
+        .andWhere('feedback."knowledgeLayer" = :knowledgeLayer', {
+          knowledgeLayer: 'correction',
         })
         .andWhere('feedback."correctedAnswer" IS NOT NULL')
         .andWhere('LOWER(queryLog.query) = LOWER(:query)', {
@@ -226,12 +246,13 @@ export class BadCaseFlywheelService implements OnModuleInit {
   }
 
   private modeOf(score: number, query: string, storedQuery: string): BadCaseMatchMode {
-    if (
-      query.trim().toLowerCase() === storedQuery.trim().toLowerCase() ||
-      score >= 0.95 ||
-      this.hasLexicalEntityMatch(query, storedQuery)
-    ) {
+    // 只有 PostgreSQL 精确比对或向量记录本身的同一问题才允许走“精确覆盖”。
+    // 高向量分、包含关系都只是相似候选，不能绕过正式知识的版本和引用门禁。
+    if (query.trim().toLowerCase() === storedQuery.trim().toLowerCase()) {
       return 'exact';
+    }
+    if (this.isSingleChineseNameTypo(query, storedQuery)) {
+      return 'correction';
     }
     return score >= 0.88 ? 'correction' : 'hint';
   }
@@ -240,6 +261,39 @@ export class BadCaseFlywheelService implements OnModuleInit {
     const left = query.trim().toLowerCase();
     const right = storedQuery.trim().toLowerCase();
     return left.length >= 2 && right.length >= 2 && (left.includes(right) || right.includes(left));
+  }
+
+  /**
+   * 受限中文姓名错字识别：同长度、同姓、仅一个中文字符不同。
+   * 只用于召回已审核 Base Case，不能把不同姓氏或版本号差异自动合并。
+   */
+  private isSingleChineseNameTypo(query: string, storedQuery: string): boolean {
+    const normalize = (value: string) =>
+      value
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[\s，。！？、,.!?]/g, '');
+    const left = normalize(query);
+    const right = normalize(storedQuery);
+    if (
+      left.length < 4 ||
+      left.length > 12 ||
+      left.length !== right.length ||
+      left[0] !== right[0]
+    ) {
+      return false;
+    }
+
+    const differences = [...left].flatMap((character, index) =>
+      character === [...right][index]
+        ? []
+        : [{ left: character, right: [...right][index] }],
+    );
+    return (
+      differences.length === 1 &&
+      /[\u3400-\u9fff]/.test(differences[0].left) &&
+      /[\u3400-\u9fff]/.test(differences[0].right)
+    );
   }
 
   private async ensureCollection(): Promise<void> {

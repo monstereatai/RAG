@@ -4,7 +4,7 @@
 
 ## 1. 架构目标
 
-本项目是面向企业知识问答场景的 Agentic RAG + Karpathy-style RAG Web 应用，目标是在可控成本下提供：
+本项目是面向企业知识问答场景的统一 Hybrid RAG（混合检索增强生成）与 Agentic RAG（智能体式检索增强生成）Web 应用，目标是在可控成本下提供：
 
 - 多租户隔离的知识库问答能力
 - simple / agentic / auto 三种问答路径
@@ -35,7 +35,7 @@ flowchart LR
   Chunker --> ES["Elasticsearch IK Index"]
   Document --> Postgres["PostgreSQL Metadata"]
 
-  Chat --> SimpleRag["Karpathy-style RAG"]
+  Chat --> SimpleRag["Direct Answer + Unified Hybrid RAG"]
   Chat --> AgenticRag["LangGraph Agentic RAG"]
   Chat --> Memory
   AgenticRag --> Bocha["Bocha Web Search"]
@@ -78,7 +78,7 @@ backend/src
 
 - `modules/*` 负责业务入口和用例编排。
 - `providers/*` 负责外部系统或可替换能力封装。
-- `rag/karpathy` 保持透明、可调试的简单 RAG 管线。
+- `rag/karpathy` 保持透明、可调试的精确直答与统一 Hybrid RAG 管线；文件名保留兼容，不代表独立 Karpathy 在线路由。
 - `rag/agentic` 负责 LangGraph 工作流和多步骤 Agentic RAG。
 - `common` 放横切能力，不承载业务规则。
 
@@ -135,17 +135,16 @@ sequenceDiagram
 flowchart TD
   Q["User Query"] --> Mode{"mode"}
   Role["Role preset + starter task"] --> Q
-  Mode -->|simple| Simple["Karpathy RAG"]
+  Mode -->|simple／auto| Direct["Direct Answer Gate"]
+  Direct -->|hit| Final["Answer + references"]
+  Direct -->|miss| Retrieve["Unified Hybrid: BM25／ES + Milvus + Obsidian"]
   Mode -->|agentic| Agentic["Agentic RAG"]
-  Mode -->|auto| Router["Routing"]
-  Router --> Simple
-  Router --> Agentic
-
-  Simple --> Intent["Intent profile + business／role scope"]
-  Intent --> Retrieve["BM25 + Milvus + ES"]
+  Retrieve --> Router{"mode + evidence + complexity"}
+  Router -->|simple／auto sufficient| Sufficiency["Sufficiency check"]
+  Router -->|auto insufficient／complex| Agentic
   Agentic --> Plan["Query augment / planning"]
-  Plan --> Retrieve
-  Retrieve --> Sufficiency["Sufficiency check"]
+  Plan --> AgentRetrieve["Per-subquestion unified Hybrid retrieval"]
+  AgentRetrieve --> Sufficiency
   Sufficiency -->|insufficient| Web["Bocha web search"]
   Sufficiency -->|sufficient| Rerank["DashScope rerank"]
   Web --> Rerank
@@ -153,19 +152,21 @@ flowchart TD
   Expand --> Context["Dedup + diversity + budget"]
   Context --> Generate["LLM generation"]
   Generate --> Reflect["Reflection"]
-  Reflect -->|pass| Final["Answer + references"]
+  Reflect -->|pass| Final
   Reflect -->|retry| Plan
 ```
 
 模式策略：
 
-- `simple`：低延迟、透明、可调试，优先用于简单知识库问答。
+- `simple`：先执行精确直答，未命中后执行完整 Hybrid RAG；低延迟、透明、可调试，不进入多步骤 Agentic。
 - `agentic`：多步检索、查询扩展、联网兜底、Rerank、反思评估；通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制成本边界。
-- `auto`：根据问题复杂度和上下文自动选择路径；超出 `AGENTIC_MAX_AUTO_QUERY_LENGTH` 的长问题默认回到 simple，避免普通入口误触发高成本 Agentic 链路。
+- `auto`：与 simple 共用精确直答和 Hybrid Fast Path，再按证据充分性与复杂度决定轻量回答或升级 Agentic。问题长度只影响上下文、Token、时间和成本预算，不单独决定路由；`AGENTIC_MAX_AUTO_QUERY_LENGTH` 仅保留配置兼容。
 
 ### 5.3 GraphRAG 链路
 
 GraphRAG 默认可配置开启。当前 Neo4j 已在 dev / staging / prod compose 中支持：
+
+文档主入库完成后，系统在 Neo4j 可用时异步抽取图谱；图谱失败不阻塞文档版本生效。实体和关系维护来源 `sourceIds`（来源标识列表），使多个文档可以共享同一实体关系；删除文档时只移除该文档来源，不删除仍被其他文档引用的图谱事实。
 
 - dev：`docker compose -f docker/docker-compose.dev.yml --profile graphrag up -d neo4j`
 - staging：`docker compose -f docker/docker-compose.staging.yml --profile graphrag up -d`

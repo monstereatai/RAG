@@ -106,6 +106,8 @@ export interface ObsidianGraphSeed {
 @Injectable()
 export class ObsidianKnowledgeService {
   private readonly logger = new Logger(ObsidianKnowledgeService.name);
+  private refreshIndexesInFlight?: Promise<void>;
+  private refreshIndexesPending = false;
 
   constructor(
     private readonly config: ConfigService,
@@ -176,30 +178,42 @@ export class ObsidianKnowledgeService {
 
   async search(query: string, limit = 5): Promise<ObsidianSearchHit[]> {
     await this.ensureVault();
-    const files = [
-      ...(await this.listMarkdownFiles(this.compiledDir(), 'compiled')),
-      ...(await this.listMarkdownFiles(this.indexDir(), 'index')),
-      ...(await this.listMarkdownFiles(this.notesDir(), 'note')),
-    ];
+    // 三个目录相互独立；并发枚举可缩短 Obsidian 检索的准备时间。
+    const [compiledFiles, indexFiles, noteFiles] = await Promise.all([
+      this.listMarkdownFiles(this.compiledDir(), 'compiled'),
+      this.listMarkdownFiles(this.indexDir(), 'index'),
+      this.listMarkdownFiles(this.notesDir(), 'note'),
+    ]);
+    const files = [...compiledFiles, ...indexFiles, ...noteFiles];
     const tokens = this.extractTokens(query);
+    // 文件内容彼此独立，按固定小批次并发读取，避免大知识库一次打开过多文件。
+    const readConcurrency = 8;
+    const batches = Array.from(
+      { length: Math.ceil(files.length / readConcurrency) },
+      (_, index) => files.slice(index * readConcurrency, (index + 1) * readConcurrency),
+    );
     const hits: ObsidianSearchHit[] = [];
-
-    for (const file of files) {
-      const content = await readFile(file.path, 'utf8');
-      const frontmatter = this.parseFrontmatter(content);
-      const body = content.replace(/^---[\s\S]*?---\s*/m, '').trim();
-      const score = this.scoreText(tokens, `${frontmatter.title ?? ''}\n${body}`);
-      if (score <= 0) continue;
-      hits.push({
-        path: file.path,
-        type: file.type,
-        title: String(frontmatter.title || this.titleFromMarkdown(body) || basename(file.path, '.md')),
-        content: this.snippet(body, tokens),
-        score: file.type === 'compiled' ? score + 3 : file.type === 'index' ? score + 1 : score,
-        ragDocId: this.frontmatterString(frontmatter.rag_doc_id),
-        sourceUrl: this.frontmatterString(frontmatter.source_url),
-        tags: this.frontmatterTags(frontmatter.tags),
-      });
+    for (const batch of batches) {
+      const batchHits = await Promise.all(
+        batch.map(async (file): Promise<ObsidianSearchHit | null> => {
+          const content = await readFile(file.path, 'utf8');
+          const frontmatter = this.parseFrontmatter(content);
+          const body = content.replace(/^---[\s\S]*?---\s*/m, '').trim();
+          const score = this.scoreText(tokens, `${frontmatter.title ?? ''}\n${body}`);
+          if (score <= 0) return null;
+          return {
+            path: file.path,
+            type: file.type,
+            title: String(frontmatter.title || this.titleFromMarkdown(body) || basename(file.path, '.md')),
+            content: this.snippet(body, tokens),
+            score: file.type === 'compiled' ? score + 3 : file.type === 'index' ? score + 1 : score,
+            ragDocId: this.frontmatterString(frontmatter.rag_doc_id),
+            sourceUrl: this.frontmatterString(frontmatter.source_url),
+            tags: this.frontmatterTags(frontmatter.tags),
+          };
+        }),
+      );
+      hits.push(...batchHits.filter((hit): hit is ObsidianSearchHit => Boolean(hit)));
     }
 
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -555,9 +569,33 @@ export class ObsidianKnowledgeService {
   }
 
   private async refreshIndexes(): Promise<void> {
+    if (this.refreshIndexesInFlight) {
+      // 新笔记可能在当前刷新读取快照之后才落盘；标记补刷，避免漏索引。
+      this.refreshIndexesPending = true;
+      return this.refreshIndexesInFlight;
+    }
+
+    const refresh = (async () => {
+      do {
+        this.refreshIndexesPending = false;
+        await this.refreshIndexesOnce();
+      } while (this.refreshIndexesPending);
+    })();
+    this.refreshIndexesInFlight = refresh;
+
+    try {
+      await refresh;
+    } finally {
+      this.refreshIndexesInFlight = undefined;
+    }
+  }
+
+  private async refreshIndexesOnce(): Promise<void> {
     const notes = await this.readAllNotes();
-    await mkdir(this.indexDir(), { recursive: true });
-    await mkdir(this.compiledDir(), { recursive: true });
+    await Promise.all([
+      mkdir(this.indexDir(), { recursive: true }),
+      mkdir(this.compiledDir(), { recursive: true }),
+    ]);
 
     const tags = new Map<string, Array<{ title: string; path: string; summary: string }>>();
     const entities = new Map<string, Array<{ title: string; path: string; summary: string }>>();
@@ -622,25 +660,40 @@ export class ObsidianKnowledgeService {
       }
     }
 
-    await writeFile(
-      resolve(this.indexDir(), 'sources.md'),
-      ['# Sources Index', '', ...sources.sort(), ''].join('\n'),
-      'utf8',
-    );
-    await writeFile(
-      resolve(this.indexDir(), 'tags.md'),
-      [
-        '# Tags Index',
-        '',
-        ...[...tags.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([tag, list]) => `## ${tag}\n\n${list.map((item) => `- [[${this.vaultRelative(item.path).replace(/\.md$/, '')}|${item.title}]]`).join('\n')}`)
-          .flatMap((block) => [block, '']),
-      ].join('\n'),
-      'utf8',
-    );
+    await Promise.all([
+      writeFile(
+        resolve(this.indexDir(), 'sources.md'),
+        ['# Sources Index', '', ...sources.sort(), ''].join('\n'),
+        'utf8',
+      ),
+      writeFile(
+        resolve(this.indexDir(), 'tags.md'),
+        [
+          '# Tags Index',
+          '',
+          ...[...tags.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([tag, list]) => `## ${tag}\n\n${list.map((item) => `- [[${this.vaultRelative(item.path).replace(/\.md$/, '')}|${item.title}]]`).join('\n')}`)
+            .flatMap((block) => [block, '']),
+        ].join('\n'),
+        'utf8',
+      ),
+    ]);
 
-    for (const [tag, list] of tags) {
+    await Promise.all([
+      this.writeTagCompiledPages(tags),
+      this.writeEntityCompiledPages(entities),
+      this.writeConclusionCompiledPages(conclusions),
+      this.writeGraphSeedIndex(),
+    ]);
+
+    await this.refreshRelated(noteRecords);
+  }
+
+  private async writeTagCompiledPages(
+    tags: Map<string, Array<{ title: string; path: string; summary: string }>>,
+  ): Promise<void> {
+    await this.runInBatches([...tags.entries()], 8, async ([tag, list]) => {
       const filePath = resolve(this.compiledDir(), `${this.safeFilename(tag)}.md`);
       this.assertInsideVault(filePath);
       await writeFile(
@@ -667,13 +720,17 @@ export class ObsidianKnowledgeService {
         ].join('\n'),
         'utf8',
       );
+    });
+  }
+
+  private async runInBatches<T>(
+    items: readonly T[],
+    concurrency: number,
+    worker: (item: T) => Promise<void>,
+  ): Promise<void> {
+    for (let index = 0; index < items.length; index += concurrency) {
+      await Promise.all(items.slice(index, index + concurrency).map(worker));
     }
-
-    await this.writeEntityCompiledPages(entities);
-    await this.writeConclusionCompiledPages(conclusions);
-    await this.writeGraphSeedIndex();
-
-    await this.refreshRelated(noteRecords);
   }
 
   private async refreshRelated(
@@ -778,14 +835,22 @@ export class ObsidianKnowledgeService {
     const dir = resolve(this.compiledDir(), 'entities');
     await mkdir(dir, { recursive: true });
     const indexLines = ['# Entities Index', ''];
-    for (const [entity, list] of [...entities.entries()].sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      const filePath = resolve(dir, `${this.safeFilename(entity)}.md`);
-      this.assertInsideVault(filePath);
+    const pages = [...entities.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([entity, list]) => {
+        const filePath = resolve(dir, `${this.safeFilename(entity)}.md`);
+        this.assertInsideVault(filePath);
+        return { entity, list, filePath };
+      });
+
+    for (const { entity, list, filePath } of pages) {
       indexLines.push(
         `- [[${this.vaultRelative(filePath).replace(/\.md$/, '')}|${entity}]]（${list.length}）`,
       );
+    }
+
+    await this.runInBatches(pages, 8, async ({ entity, list, filePath }) => {
+      this.assertInsideVault(filePath);
       await writeFile(
         filePath,
         [
@@ -830,7 +895,7 @@ export class ObsidianKnowledgeService {
         ].join('\n'),
         'utf8',
       );
-    }
+    });
     await writeFile(
       resolve(this.indexDir(), 'entities.md'),
       `${indexLines.join('\n')}\n`,
@@ -858,13 +923,20 @@ export class ObsidianKnowledgeService {
       list.push(item);
       grouped.set(key, list);
     }
-    for (const [key, list] of grouped) {
+    const pages = [...grouped.entries()].map(([key, list]) => {
       const title = list[0]?.conclusion ?? key;
       const filePath = resolve(dir, `${key}.md`);
       this.assertInsideVault(filePath);
+      return { title, list, filePath };
+    });
+
+    for (const { title, list, filePath } of pages) {
       indexLines.push(
         `- [[${this.vaultRelative(filePath).replace(/\.md$/, '')}|${title}]]（${list.length}）`,
       );
+    }
+
+    await this.runInBatches(pages, 8, async ({ title, list, filePath }) => {
       await writeFile(
         filePath,
         [
@@ -912,7 +984,7 @@ export class ObsidianKnowledgeService {
         ].join('\n'),
         'utf8',
       );
-    }
+    });
     await writeFile(
       resolve(this.indexDir(), 'conclusions.md'),
       `${indexLines.join('\n')}\n`,

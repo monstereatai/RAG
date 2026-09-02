@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -11,6 +11,8 @@ import { VectorStoreProvider } from '../../providers/vector-store/vector-store.p
 import { QueryLogService } from './query-log.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
+import { randomUUID } from 'node:crypto';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
@@ -105,6 +107,8 @@ export class RagAdminService {
     private readonly chunkRepo: Repository<DocumentChunkEntity>,
     @InjectRepository(DocumentMetaEntity)
     private readonly docMetaRepo: Repository<DocumentMetaEntity>,
+    @InjectRepository(DocumentReviewEntity)
+    private readonly documentReviewRepo: Repository<DocumentReviewEntity>,
     @InjectRepository(FactConflictEntity)
     private readonly factConflictRepo: Repository<FactConflictEntity>,
   ) {}
@@ -234,6 +238,7 @@ export class RagAdminService {
           sourceAuthority: doc.sourceAuthority ?? 'normal',
           docVersion: doc.docVersion ?? 'unknown',
           lifecycleStatus: doc.lifecycleStatus,
+          reviewStatus: doc.reviewStatus,
           supersedesDocId: doc.supersedesDocId,
           effectiveAt: doc.effectiveAt?.toISOString() ?? null,
           expiredAt: doc.expiredAt?.toISOString() ?? null,
@@ -269,11 +274,21 @@ export class RagAdminService {
       obsidianStatus: obsidianPath ? 'linked' : 'missing',
       docVersion: doc.docVersion ?? 'unknown',
       lifecycleStatus: doc.lifecycleStatus,
+      reviewStatus: doc.reviewStatus,
+      reviewedBy: doc.reviewedBy,
+      reviewedAt: doc.reviewedAt?.toISOString() ?? null,
+      reviewComment: doc.reviewComment,
       supersedesDocId: doc.supersedesDocId,
       effectiveAt: doc.effectiveAt?.toISOString() ?? null,
       expiredAt: doc.expiredAt?.toISOString() ?? null,
       createdAt: doc.createdAt.toISOString(),
     };
+  }
+
+  async searchDocuments(query: string, limit = 20) {
+    const normalized = query.trim();
+    if (!normalized) return [];
+    return this.elasticsearchProvider.search(normalized, Math.min(Math.max(limit, 1), 50));
   }
 
   async listDocumentVersions(docId: string) {
@@ -340,7 +355,7 @@ export class RagAdminService {
           channel: previous.channel,
           roleScope,
           documentType: body.documentType ?? (previous.documentType as GameDocumentType),
-          lifecycleStatus: body.lifecycleStatus ?? 'effective',
+          lifecycleStatus: 'draft',
           supersedesDocId: docId,
           docVersion: body.docVersion ?? null,
           effectiveAt: body.effectiveAt ?? null,
@@ -356,6 +371,9 @@ export class RagAdminService {
   ) {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc || !doc.userId) return null;
+    if (lifecycleStatus === 'effective') {
+      return this.promoteDocumentVersion(docId);
+    }
     const updated = await this.documentService.updateLifecycle(
       docId,
       doc.userId,
@@ -364,16 +382,84 @@ export class RagAdminService {
     return updated ? { docId, lifecycleStatus } : null;
   }
 
-  async rollbackDocumentVersion(docId: string) {
+  async promoteDocumentVersion(docId: string) {
+    const target = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!target || !target.userId) return null;
+    if (target.reviewStatus !== 'approved') {
+      throw new BadRequestException('document must be approved before promotion');
+    }
     const versions = await this.listDocumentVersions(docId);
     if (!versions) return null;
-    for (const version of versions) {
-      await this.updateDocumentLifecycle(
-        version.docId,
-        version.docId === docId ? 'effective' : 'deprecated',
-      );
-    }
-    return { activeDocId: docId, versions };
+    const updated = await this.documentService.activateVersion(
+      docId,
+      target.userId,
+      versions.map((version) => version.docId),
+    );
+    return updated ? { docId, lifecycleStatus: 'effective' } : null;
+  }
+
+  async rollbackDocumentVersion(docId: string) {
+    const activated = await this.promoteDocumentVersion(docId);
+    if (!activated) return null;
+    return {
+      activeDocId: docId,
+      versions: await this.listDocumentVersions(docId),
+    };
+  }
+
+  async submitDocumentReview(docId: string, operatorId?: string, comment?: string) {
+    return this.updateDocumentReview(docId, 'pending_review', 'submitted', operatorId, comment);
+  }
+
+  async approveDocumentReview(docId: string, operatorId?: string, comment?: string) {
+    return this.updateDocumentReview(docId, 'approved', 'approved', operatorId, comment);
+  }
+
+  async rejectDocumentReview(docId: string, operatorId?: string, comment?: string) {
+    return this.updateDocumentReview(docId, 'rejected', 'rejected', operatorId, comment);
+  }
+
+  async listDocumentReviews(docId: string) {
+    return this.documentReviewRepo.find({
+      where: { docId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  getFailedDocumentTasks(limit?: number) {
+    return this.documentService.getFailedTasks(limit);
+  }
+
+  retryFailedDocumentTask(taskId: string) {
+    return this.documentService.retryFailedTask(taskId);
+  }
+
+  private async updateDocumentReview(
+    docId: string,
+    reviewStatus: DocumentMetaEntity['reviewStatus'],
+    action: DocumentReviewEntity['action'],
+    operatorId?: string,
+    comment?: string,
+  ) {
+    const doc = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!doc) return null;
+    const now = new Date();
+    await this.docMetaRepo.update(docId, {
+      reviewStatus,
+      reviewedBy: operatorId ?? null,
+      reviewedAt: action === 'submitted' ? null : now,
+      reviewComment: comment?.trim() || null,
+    });
+    await this.documentReviewRepo.save(
+      this.documentReviewRepo.create({
+        id: randomUUID(),
+        docId,
+        action,
+        operatorId: operatorId ?? null,
+        comment: comment?.trim() || null,
+      }),
+    );
+    return { docId, reviewStatus, action };
   }
 
   private toDocumentVersionItem(doc: DocumentMetaEntity) {
@@ -382,6 +468,7 @@ export class RagAdminService {
       filename: doc.filename,
       docVersion: doc.docVersion ?? 'unknown',
       lifecycleStatus: doc.lifecycleStatus,
+      reviewStatus: doc.reviewStatus,
       supersedesDocId: doc.supersedesDocId,
       effectiveAt: doc.effectiveAt?.toISOString() ?? null,
       expiredAt: doc.expiredAt?.toISOString() ?? null,

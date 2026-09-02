@@ -14,6 +14,7 @@ import {
 @Entity('documents_meta')
 @Index('IDX_documents_meta_project_activity', ['projectId', 'activityId'])
 @Index('IDX_documents_meta_lifecycle', ['lifecycleStatus'])
+@Index('IDX_documents_meta_review', ['reviewStatus'])
 export class DocumentMetaEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   docId!: string;
@@ -94,6 +95,19 @@ export class DocumentMetaEntity {
   @Column({ type: 'varchar', length: 32, default: 'effective' })
   lifecycleStatus!: string;
 
+  /** 审核状态独立于 lifecycle；只有 approved 才可晋升 effective。 */
+  @Column({ type: 'varchar', length: 24, default: 'approved' })
+  reviewStatus!: 'draft' | 'pending_review' | 'approved' | 'rejected';
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  reviewedBy!: string | null;
+
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  reviewedAt!: Date | null;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  reviewComment!: string | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   supersedesDocId!: string | null;
 
@@ -102,6 +116,16 @@ export class DocumentMetaEntity {
 
   @Column({ type: 'text', nullable: true, default: null })
   chunkStrategy!: string | null;
+
+  /** 可选 Neo4j 图谱索引状态，不阻塞文档主入库与版本生效。 */
+  @Column({ type: 'varchar', length: 24, default: 'skipped' })
+  graphIndexStatus!: 'pending' | 'indexed' | 'failed' | 'skipped';
+
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  graphIndexedAt!: Date | null;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  graphIndexError!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

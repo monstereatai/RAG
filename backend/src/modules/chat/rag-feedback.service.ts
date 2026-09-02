@@ -13,6 +13,7 @@ import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-cas
 import { ChatFeedbackDto } from './chat-feedback.dto';
 import { BadCaseFlywheelService } from '../../rag/prompts/bad-case-flywheel.service';
 import { ConversationService } from './conversation.service';
+import { DocumentService } from '../document/document.service';
 
 export interface ReviewRagFeedback {
   status?: RagFeedbackEntity['status'];
@@ -20,6 +21,9 @@ export interface ReviewRagFeedback {
   correctedAnswer?: string;
   includeInRegression?: boolean;
   reviewedBy?: string;
+  promotionAction?: 'correction' | 'request' | 'promote' | 'reject';
+  promotionSource?: string;
+  promotionVersion?: string;
 }
 
 @Injectable()
@@ -34,6 +38,8 @@ export class RagFeedbackService {
     @Optional()
     @InjectRepository(EvaluationCaseEntity)
     private readonly evaluationCaseRepo?: Repository<EvaluationCaseEntity>,
+    @Optional()
+    private readonly documentService?: DocumentService,
   ) {}
 
   async create(
@@ -141,7 +147,11 @@ export class RagFeedbackService {
   async review(
     id: string,
     patch: ReviewRagFeedback,
-  ): Promise<RagFeedbackEntity & { indexing?: Record<string, unknown>; evaluationCaseId?: string }> {
+  ): Promise<RagFeedbackEntity & {
+    indexing?: Record<string, unknown>;
+    evaluationCaseId?: string;
+    promotedDocument?: { docId: string; docVersion: string | null };
+  }> {
     const entity = await this.feedbackRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException(`feedback ${id} not found`);
     entity.status = patch.status ?? entity.status;
@@ -151,42 +161,112 @@ export class RagFeedbackService {
       patch.includeInRegression ?? entity.includeInRegression;
     entity.reviewedBy = patch.reviewedBy ?? entity.reviewedBy;
     entity.reviewedAt = new Date();
+    if (patch.promotionAction === 'request') {
+      entity.promotionStatus = 'pending';
+    } else if (patch.promotionAction === 'reject') {
+      entity.promotionStatus = 'rejected';
+    }
+    if (patch.promotionSource !== undefined) {
+      entity.promotionSource = patch.promotionSource.trim() || null;
+    }
     const saved = await this.feedbackRepo.save(entity);
     const correctedAnswer = saved.correctedAnswer;
-    const shouldIndex =
+    const correctionEligible =
       saved.feedback === 'negative' &&
       correctedAnswer &&
-      saved.includeInRegression &&
       (saved.status === 'reviewed' || saved.status === 'resolved');
-    if (shouldIndex) {
+    const shouldPromote = patch.promotionAction === 'promote';
+    if (saved.knowledgeLayer === 'formal' && !shouldPromote) {
+      // 已经晋升的内容由文档版本治理负责失效、替换和回滚，不能因再次审核
+      // 意外降级回纠正层，否则会出现两层同时命中和来源不一致。
+      return {
+        ...saved,
+        indexing: { indexed: false, reason: 'formal_document_governed' },
+        ...(saved.promotedDocId
+          ? { promotedDocument: { docId: saved.promotedDocId, docVersion: null } }
+          : {}),
+      };
+    }
+    if (shouldPromote) {
+      if (!correctionEligible) {
+        throw new BadRequestException('只有审核通过且包含纠正答案的 Bad Case 才能晋升正式知识');
+      }
+      const source = saved.promotionSource?.trim();
+      if (!source) {
+        throw new BadRequestException('晋升正式知识必须填写已核验的来源或规范文档地址');
+      }
+      if (!this.documentService) {
+        throw new BadRequestException('文档服务不可用，暂时无法晋升正式知识');
+      }
       const queryLog = saved.queryLogId
         ? await this.queryLogRepo.findOne({ where: { id: saved.queryLogId } })
         : null;
       if (!queryLog) {
-        return {
-          ...saved,
-          indexing: { indexed: false, reason: 'query_log_missing' },
-        };
+        throw new BadRequestException('原始 Query Log 缺失，无法建立正式知识来源链路');
+      }
+      const version = patch.promotionVersion?.trim() || `badcase-${saved.id.slice(0, 8)}`;
+      const formalContent = this.buildPromotedKnowledgeDocument({
+        query: queryLog.query,
+        correctedAnswer,
+        source,
+        feedbackId: saved.id,
+        version,
+      });
+      const uploaded = await this.documentService.upload(
+        `bad-case-${saved.id.slice(0, 8)}-knowledge.md`,
+        formalContent,
+        saved.userId ?? queryLog.userId ?? 'system',
+        {
+          businessMetadata: {
+            docVersion: version,
+            effectiveAt: new Date().toISOString(),
+            documentType: 'general',
+            lifecycleStatus: 'effective',
+          },
+        },
+      );
+      saved.knowledgeLayer = 'formal';
+      saved.promotionStatus = 'promoted';
+      saved.promotedDocId = uploaded.docId;
+      saved.promotedBy = saved.reviewedBy;
+      saved.promotedAt = new Date();
+      const promoted = await this.feedbackRepo.save(saved);
+      const indexing = await this.badCaseFlywheel.removeApproved(promoted.id);
+      return {
+        ...promoted,
+        indexing,
+        promotedDocument: { docId: uploaded.docId, docVersion: uploaded.docVersion ?? null },
+      };
+    }
+
+    if (correctionEligible) {
+      saved.knowledgeLayer = 'correction';
+      const active = await this.feedbackRepo.save(saved);
+      const queryLog = active.queryLogId
+        ? await this.queryLogRepo.findOne({ where: { id: active.queryLogId } })
+        : null;
+      if (!queryLog) {
+        return { ...active, indexing: { indexed: false, reason: 'query_log_missing' } };
       }
       let evaluationCaseId: string | undefined;
-      if (this.evaluationCaseRepo) {
+      if (active.includeInRegression && this.evaluationCaseRepo) {
         const existing = await this.evaluationCaseRepo.findOne({
-          where: { sourceFeedbackId: saved.id, status: 'active' },
+          where: { sourceFeedbackId: active.id, status: 'active' },
         });
         const evaluationCase = existing ?? this.evaluationCaseRepo.create({
           id: randomUUID(),
-          sourceFeedbackId: saved.id,
+          sourceFeedbackId: active.id,
           workspaceId: 'default',
           query: queryLog.query,
           expectedAnswer: correctedAnswer,
           expectedReferences: queryLog.retrievalSnapshot || '[]',
           status: 'active',
-          createdBy: saved.reviewedBy ?? null,
+          createdBy: active.reviewedBy ?? null,
         });
         if (existing) {
           evaluationCase.expectedAnswer = correctedAnswer;
           evaluationCase.expectedReferences = queryLog.retrievalSnapshot || '[]';
-          evaluationCase.createdBy = saved.reviewedBy ?? existing.createdBy;
+          evaluationCase.createdBy = active.reviewedBy ?? existing.createdBy;
         }
         const savedCase = await this.evaluationCaseRepo.save(evaluationCase);
         evaluationCaseId = savedCase.id;
@@ -194,11 +274,11 @@ export class RagFeedbackService {
       let indexing: Record<string, unknown>;
       try {
         indexing = await this.badCaseFlywheel.indexApproved({
-          id: saved.id,
+          id: active.id,
           query: queryLog.query,
           wrongAnswer: queryLog.answer ?? '',
           correctedAnswer,
-          errorType: saved.errorType,
+          errorType: active.errorType,
         });
       } catch (error) {
         indexing = {
@@ -207,11 +287,13 @@ export class RagFeedbackService {
           error: error instanceof Error ? error.message : String(error),
         };
       }
-      return { ...saved, indexing, ...(evaluationCaseId ? { evaluationCaseId } : {}) };
+      return { ...active, indexing, ...(evaluationCaseId ? { evaluationCaseId } : {}) };
     }
+    saved.knowledgeLayer = 'inactive';
+    const inactive = await this.feedbackRepo.save(saved);
     let indexing: Record<string, unknown>;
     try {
-      indexing = await this.badCaseFlywheel.removeApproved(saved.id);
+      indexing = await this.badCaseFlywheel.removeApproved(inactive.id);
     } catch (error) {
       indexing = {
         indexed: false,
@@ -221,10 +303,34 @@ export class RagFeedbackService {
     }
     if (this.evaluationCaseRepo) {
       await this.evaluationCaseRepo.update(
-        { sourceFeedbackId: saved.id, status: 'active' },
+        { sourceFeedbackId: inactive.id, status: 'active' },
         { status: 'disabled' },
       );
     }
-    return { ...saved, indexing };
+    return { ...inactive, indexing };
+  }
+
+  private buildPromotedKnowledgeDocument(input: {
+    query: string;
+    correctedAnswer: string;
+    source: string;
+    feedbackId: string;
+    version: string;
+  }): string {
+    return [
+      '# 已审核纠正知识',
+      '',
+      `- 版本：${input.version}`,
+      `- 来源：${input.source}`,
+      `- Bad Case：${input.feedbackId}`,
+      '',
+      '## 适用问题',
+      input.query,
+      '',
+      '## 已审核结论',
+      input.correctedAnswer,
+      '',
+      '> 本文档由审核通过的 Bad Case 晋升生成；后续若正式规范变化，应以新版本文档替代本文档。',
+    ].join('\n');
   }
 }

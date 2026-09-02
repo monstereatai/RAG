@@ -51,6 +51,11 @@ export class RagAdminController {
     return this.ragAdminService.listDocuments(query);
   }
 
+  @Get('documents/search')
+  searchDocuments(@Query('q') query: string, @Query('limit') limit?: string) {
+    return this.ragAdminService.searchDocuments(query ?? '', Number(limit) || 20);
+  }
+
   @Get('documents/:docId')
   async getDocument(@Param('docId') docId: string) {
     const doc = await this.ragAdminService.getDocument(docId);
@@ -115,6 +120,33 @@ export class RagAdminController {
     return result;
   }
 
+  @Post('documents/:docId/promote')
+  async promoteDocumentVersion(@Param('docId') docId: string) {
+    const result = await this.ragAdminService.promoteDocumentVersion(docId);
+    if (!result) throw new NotFoundException(`doc ${docId} not found or is not ready`);
+    return result;
+  }
+
+  @Post('documents/:docId/review/submit')
+  submitDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
+    return this.ragAdminService.submitDocumentReview(docId, body.operatorId, body.comment);
+  }
+
+  @Post('documents/:docId/review/approve')
+  approveDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
+    return this.ragAdminService.approveDocumentReview(docId, body.operatorId, body.comment);
+  }
+
+  @Post('documents/:docId/review/reject')
+  rejectDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
+    return this.ragAdminService.rejectDocumentReview(docId, body.operatorId, body.comment);
+  }
+
+  @Get('documents/:docId/reviews')
+  listDocumentReviews(@Param('docId') docId: string) {
+    return this.ragAdminService.listDocumentReviews(docId);
+  }
+
   @Post('documents/:docId/rollback')
   async rollbackDocumentVersion(@Param('docId') docId: string) {
     const result = await this.ragAdminService.rollbackDocumentVersion(docId);
@@ -148,6 +180,16 @@ export class RagAdminController {
       throw new NotFoundException(`doc ${docId} not found`);
     }
     return result;
+  }
+
+  @Get('documents/tasks/failed')
+  getFailedDocumentTasks(@Query('limit') limit?: string) {
+    return this.ragAdminService.getFailedDocumentTasks(Number(limit) || 50);
+  }
+
+  @Post('documents/tasks/:taskId/retry')
+  retryFailedDocumentTask(@Param('taskId') taskId: string) {
+    return this.ragAdminService.retryFailedDocumentTask(taskId);
   }
 
   @Post('documents/:docId/archive')
@@ -303,6 +345,9 @@ export class RagAdminController {
       correctedAnswer?: string;
       includeInRegression?: boolean;
       reviewedBy?: string;
+      promotionAction?: 'correction' | 'request' | 'promote' | 'reject';
+      promotionSource?: string;
+      promotionVersion?: string;
     },
   ) {
     return this.ragFeedbackService.review(id, body);

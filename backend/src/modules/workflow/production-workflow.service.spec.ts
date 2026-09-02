@@ -62,7 +62,7 @@ describe('ProductionWorkflowService', () => {
   };
 
   it('completes a normal task without manual approval', async () => {
-    const { service, invoke } = createService();
+    const { service, invoke, gather } = createService();
     const state = await service.start(
       {
         projectId: 'anniversary',
@@ -224,8 +224,8 @@ describe('ProductionWorkflowService', () => {
     ]);
   });
 
-  it('reruns only the rejected role inside a parallel batch', async () => {
-    const { service, invoke } = createService();
+  it('pauses on rejection and reruns only after an explicit revision action', async () => {
+    const { service, invoke, gather } = createService();
     let state = await service.start(
       {
         projectId: 'anniversary',
@@ -251,8 +251,27 @@ describe('ProductionWorkflowService', () => {
       'user-1',
     );
     expect(state.currentRole).toBe('design');
-    expect(state.status).toBe('pending_approval');
+    expect(state.status).toBe('revision_required');
     expect(state.currentBatch).toEqual(['design', 'backend']);
+    expect(state.revisionNumber).toBe(2);
+    expect(state.rerunRoles).toEqual(['backend']);
+    expect(state.staleRoles).toEqual(['frontend', 'qa', 'operations']);
+    expect(invoke).toHaveBeenCalledTimes(3);
+
+    state = await service.revise(
+      state.threadId,
+      {
+        rerunRoles: ['backend'],
+        supplementalMaterials: '已核验：发奖失败必须进入 compensation_queue，且保留幂等键。',
+      },
+      'user-1',
+    );
+    expect(state.status).toBe('pending_approval');
+    expect(state.results.backend?.revision).toBe(2);
+    expect(state.supplementalMaterials).toContain('compensation_queue');
+    expect(state.revisionHistory.at(-1)?.rerunRoles).toEqual(['backend']);
+    expect(state.revisionHistory.at(-1)?.supplementalMaterials).toContain('compensation_queue');
+    expect(gather.mock.calls.at(-1)?.[1].brief).toContain('compensation_queue');
     expect(invoke).toHaveBeenCalledTimes(4);
   });
 

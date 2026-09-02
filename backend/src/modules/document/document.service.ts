@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
@@ -17,6 +17,9 @@ import { ObjectStorageProvider } from '../../providers/object-storage/object-sto
 import { DocumentPermissionService } from './document-permission.service';
 import { PermissionSubject } from './document-permission.service';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
+import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
+import { GraphService } from '../graph/graph.service';
+import { DocumentQueueService } from './document-queue.service';
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
@@ -45,6 +48,9 @@ export interface UploadResult {
   roleScope?: string[];
   documentType?: GameDocumentType;
   lifecycleStatus?: DocumentLifecycleStatus;
+  graphIndexStatus?: GraphIndexStatus;
+  graphIndexedAt?: string | null;
+  graphIndexError?: string | null;
   supersedesDocId?: string | null;
   ingestionQuality?: IngestionQualityReport;
   chunkStrategy?: { chunkSize: number; chunkOverlap: number };
@@ -63,12 +69,15 @@ export interface UploadOptions {
   originalBuffer?: Buffer;
   contentType?: string;
   businessMetadata?: DocumentBusinessMetadata;
+  onQualityAccepted?: (docId: string) => Promise<void>;
 }
 
 export interface DocMeta extends UploadResult {
   filename: string;
   createdAt: string;
 }
+
+type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
 
 /**
  * 文档服务：接收已解析文本 → 切分 → Embedding → 写入 Milvus + BM25 + ES
@@ -77,6 +86,8 @@ export interface DocMeta extends UploadResult {
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
   private readonly pendingMilvusDeletes = new Map<string, number>();
+  private readonly pendingGraphIndexes = new Map<string, Promise<void>>();
+  private readonly cancelledGraphIndexes = new Set<string>();
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -96,6 +107,8 @@ export class DocumentService {
     private readonly metadataExtractor: DocumentMetadataExtractor,
     private readonly objectStorageProvider: ObjectStorageProvider,
     private readonly permissionService: DocumentPermissionService,
+    private readonly graphService: GraphService,
+    private readonly documentQueueService: DocumentQueueService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
   ) {}
@@ -131,6 +144,33 @@ export class DocumentService {
         });
       }
 
+      const promptInjectionFindings = detectPromptInjection(content);
+      const highRiskPromptInjection = promptInjectionFindings.filter(
+        (finding) => finding.severity === 'high',
+      );
+      if (highRiskPromptInjection.length > 0) {
+        // 隔离时仍保留原始资料，供人工复核；不进入切片和任何检索索引。
+        if (!options.originalBuffer) {
+          await this.saveOriginalResource({
+            docId,
+            taskId,
+            userId,
+            filename,
+            buffer: Buffer.from(content, 'utf8'),
+            contentType: options.contentType ?? 'text/plain',
+          });
+        }
+        const patterns = highRiskPromptInjection
+          .map((finding) => finding.pattern)
+          .join(', ');
+        this.logger.warn(
+          `Document quarantined for prompt injection review: docId=${docId}, patterns=${patterns}`,
+        );
+        throw new Error(
+          `document quarantined for security review: ${patterns}`,
+        );
+      }
+
       const detectedBusiness = detectGameDocumentMetadata(filename, content);
       const business = this.mergeBusinessMetadata(
         detectedBusiness,
@@ -146,6 +186,16 @@ export class DocumentService {
         content,
         structuredChunks,
       );
+      const mediumRiskPromptInjection = promptInjectionFindings.filter(
+        (finding) => finding.severity === 'medium',
+      );
+      if (mediumRiskPromptInjection.length > 0) {
+        ingestionQuality.warnings.push(
+          `检测到需留意的提示注入文本：${mediumRiskPromptInjection
+            .map((finding) => finding.pattern)
+            .join('、')}`,
+        );
+      }
       const extractedGovernance = this.extractGovernanceMetadata(
         filename,
         content,
@@ -165,21 +215,17 @@ export class DocumentService {
         throw new Error('document failed ingestion quality gate');
       }
       this.logger.log(`Split into ${chunks.length} chunks`);
-      await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
-
-      const vectors = await this.embeddingProvider.embedDocuments(chunks);
-      await this.updateTask(taskId, { stage: 'vector_index', progress: 50 });
-
+      const indexingGovernance: DocumentGovernanceMetadata = {
+        ...governance,
+        lifecycleStatus: 'draft',
+      };
       const records = chunks.map((chunk, idx) => ({
         id: randomUUID(),
-        vector: vectors[idx],
         content: chunk,
         docId,
         chunkIndex: idx,
         userId,
       }));
-      await this.vectorStoreProvider.insert(records);
-
       const chunkDocs = chunks.map((chunk, idx) => ({
         id: records[idx].id,
         content: chunk,
@@ -193,24 +239,22 @@ export class DocumentService {
         tableRef: structuredChunks[idx]?.tableRef ?? null,
         sourceStart: structuredChunks[idx]?.sourceStart ?? null,
         sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,
-        docVersion: governance.docVersion,
-        effectiveAt: governance.effectiveAt,
-        expiredAt: governance.expiredAt,
-        sourceAuthority: governance.sourceAuthority,
-        projectId: governance.projectId,
-        activityId: governance.activityId,
-        region: governance.region,
-        locale: governance.locale,
-        channel: governance.channel,
-        roleScope: governance.roleScope,
-        documentType: governance.documentType,
-        lifecycleStatus: governance.lifecycleStatus,
-        supersedesDocId: governance.supersedesDocId,
+        docVersion: indexingGovernance.docVersion,
+        effectiveAt: indexingGovernance.effectiveAt,
+        expiredAt: indexingGovernance.expiredAt,
+        sourceAuthority: indexingGovernance.sourceAuthority,
+        projectId: indexingGovernance.projectId,
+        activityId: indexingGovernance.activityId,
+        region: indexingGovernance.region,
+        locale: indexingGovernance.locale,
+        channel: indexingGovernance.channel,
+        roleScope: indexingGovernance.roleScope,
+        documentType: indexingGovernance.documentType,
+        lifecycleStatus: indexingGovernance.lifecycleStatus,
+        reviewStatus:
+          indexingGovernance.lifecycleStatus === 'draft' ? 'draft' : 'approved',
+        supersedesDocId: indexingGovernance.supersedesDocId,
       }));
-      this.karpathyRagService.indexChunks(chunkDocs, userId);
-      await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
-      await this.updateTask(taskId, { stage: 'metadata', progress: 80 });
-
       const metadataPromise = this.metadataExtractor
         .extract(content)
         .catch((err) => {
@@ -225,41 +269,83 @@ export class DocumentService {
         filename,
         chunkCount: chunks.length,
         userId,
-        docVersion: governance.docVersion,
-        effectiveAt: governance.effectiveAt,
-        expiredAt: governance.expiredAt,
-        sourceAuthority: governance.sourceAuthority,
-        projectId: governance.projectId,
-        activityId: governance.activityId,
-        region: governance.region,
-        locale: governance.locale,
-        channel: governance.channel,
+        docVersion: indexingGovernance.docVersion,
+        effectiveAt: indexingGovernance.effectiveAt,
+        expiredAt: indexingGovernance.expiredAt,
+        sourceAuthority: indexingGovernance.sourceAuthority,
+        projectId: indexingGovernance.projectId,
+        activityId: indexingGovernance.activityId,
+        region: indexingGovernance.region,
+        locale: indexingGovernance.locale,
+        channel: indexingGovernance.channel,
         roleScope:
-          governance.roleScope.length > 0
-            ? JSON.stringify(governance.roleScope)
+          indexingGovernance.roleScope.length > 0
+            ? JSON.stringify(indexingGovernance.roleScope)
             : null,
-        documentType: governance.documentType,
-        lifecycleStatus: governance.lifecycleStatus,
-        supersedesDocId: governance.supersedesDocId,
+        documentType: indexingGovernance.documentType,
+        lifecycleStatus: indexingGovernance.lifecycleStatus,
+        supersedesDocId: indexingGovernance.supersedesDocId,
         ingestionQuality: JSON.stringify(ingestionQuality),
         chunkStrategy: JSON.stringify(strategy),
+        graphIndexStatus: this.graphService.isEnabled() ? 'pending' : 'skipped',
       });
-      await this.docMetaRepo.save(docMeta);
-      if (governance.supersedesDocId) {
-        await this.deprecateSupersededDocument(
-          governance.supersedesDocId,
-          userId,
-        );
-      }
-      await this.permissionService.grantOwner(docId, userId);
-      await this.saveChunkMetadata(
-        docId,
-        userId,
-        records,
-        structuredChunks,
-        governance,
+
+      const indexResults = await Promise.allSettled([
+        (async () => {
+          await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
+          const vectors = await this.embeddingProvider.embedDocuments(chunks);
+          await this.updateTask(taskId, {
+            stage: 'vector_index',
+            progress: 50,
+          });
+          await this.vectorStoreProvider.insert(
+            records.map((record, index) => ({
+              ...record,
+              vector: vectors[index],
+            })),
+          );
+        })(),
+        (async () => {
+          this.karpathyRagService.indexChunks(chunkDocs, userId);
+          await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
+        })(),
+        (async () => {
+          await this.docMetaRepo.save(docMeta);
+          await this.permissionService.grantOwner(docId, userId);
+          await this.saveChunkMetadata(
+            docId,
+            userId,
+            records,
+            structuredChunks,
+            indexingGovernance,
+          );
+          await this.detectAndSaveFactConflicts(
+            docId,
+            userId,
+            records,
+            indexingGovernance,
+          );
+        })(),
+        options.onQualityAccepted?.(docId) ?? Promise.resolve(),
+      ]);
+      const failedIndex = indexResults.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
       );
-      await this.detectAndSaveFactConflicts(docId, userId, records, governance);
+      if (failedIndex) {
+        await this.cleanupFailedExternalIndexes(docId, userId);
+        throw failedIndex.reason;
+      }
+
+      if (governance.lifecycleStatus !== 'draft') {
+        await this.updateLifecycle(docId, userId, governance.lifecycleStatus);
+      }
+      const graphIndexStatus: GraphIndexStatus = this.graphService.isEnabled()
+        ? 'pending'
+        : 'skipped';
+      if (graphIndexStatus === 'pending') {
+        this.scheduleOptionalGraphIndex({ docId, userId, content });
+      }
+      await this.updateTask(taskId, { stage: 'metadata', progress: 80 });
 
       const metadata = await metadataPromise;
       if (metadata) {
@@ -311,19 +397,110 @@ export class DocumentService {
         roleScope: governance.roleScope,
         documentType: governance.documentType,
         lifecycleStatus: governance.lifecycleStatus,
+        graphIndexStatus,
         supersedesDocId: governance.supersedesDocId,
         ingestionQuality,
         chunkStrategy: strategy,
         metadata: metadata || undefined,
       };
     } catch (err) {
+      const message = (err as Error).message;
       await this.updateTask(taskId, {
         status: 'failed',
-        stage: 'failed',
-        errorMessage: (err as Error).message,
+        stage: message.startsWith('document quarantined for security review:')
+          ? 'security_review'
+          : 'failed',
+        errorMessage: message,
         finishedAt: new Date(),
       });
       throw err;
+    }
+  }
+
+  /** 并发入库失败时移除可能已写入的外部检索索引，保留 PostgreSQL 草稿供排障。 */
+  private async cleanupFailedExternalIndexes(
+    docId: string,
+    userId: string,
+  ): Promise<void> {
+    const cleanupResults = await Promise.allSettled([
+      this.vectorStoreProvider.deleteByDocId(docId),
+      this.elasticsearchProvider.deleteByDocId(docId, userId),
+      Promise.resolve().then(() =>
+        this.karpathyRagService.removeDocChunks(docId, userId),
+      ),
+    ]);
+    cleanupResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const target = ['Milvus', 'Elasticsearch', 'Karpathy/BM25'][index];
+        this.logger.warn(
+          `Failed to compensate ${target} index for docId=${docId}: ${String(result.reason)}`,
+        );
+      }
+    });
+  }
+
+  /** 图谱是非阻塞补充索引：失败不回滚主入库，也不影响版本切换。 */
+  private scheduleOptionalGraphIndex(params: {
+    docId: string;
+    userId: string;
+    content: string;
+  }): void {
+    const job = new Promise<void>((resolve) => {
+      const timer = setImmediate(() => {
+        void (async () => {
+          try {
+            if (this.cancelledGraphIndexes.has(params.docId)) return;
+            const result = await this.graphService.importText(
+              params.content,
+              params.userId,
+              params.docId,
+            );
+            if (this.cancelledGraphIndexes.has(params.docId)) {
+              await this.graphService.removeSource(params.docId, params.userId);
+              return;
+            }
+            await this.docMetaRepo.update(
+              { docId: params.docId, userId: params.userId },
+              {
+                graphIndexStatus: 'indexed',
+                graphIndexedAt: new Date(),
+                graphIndexError: null,
+              },
+            );
+            this.logger.log(
+              `Graph index completed: docId=${params.docId}, nodes=${result.nodeCount}, relationships=${result.relationshipCount}`,
+            );
+          } catch (err) {
+            const message = (err as Error).message;
+            await this.docMetaRepo.update(
+              { docId: params.docId, userId: params.userId },
+              { graphIndexStatus: 'failed', graphIndexError: message },
+            );
+            this.logger.warn(
+              `Graph index failed without blocking document ingestion: docId=${params.docId}, error=${message}`,
+            );
+          } finally {
+            this.pendingGraphIndexes.delete(params.docId);
+            resolve();
+          }
+        })();
+      });
+      timer.unref?.();
+    });
+    this.pendingGraphIndexes.set(params.docId, job);
+  }
+
+  private async removeGraphSource(docId: string, userId: string): Promise<void> {
+    this.cancelledGraphIndexes.add(docId);
+    try {
+      await this.pendingGraphIndexes.get(docId);
+      await this.graphService.removeSource(docId, userId);
+    } catch (err) {
+      this.logger.warn(
+        `Graph source cleanup failed for docId=${docId}: ${(err as Error).message}`,
+      );
+    } finally {
+      this.cancelledGraphIndexes.delete(docId);
     }
   }
 
@@ -344,6 +521,26 @@ export class DocumentService {
 
   getTask(taskId: string, userId: string): Promise<DocumentTaskEntity | null> {
     return this.taskRepo.findOne({ where: { id: taskId, userId } });
+  }
+
+  async getFailedTasks(limit = 50): Promise<DocumentTaskEntity[]> {
+    return this.taskRepo.find({
+      where: { status: 'failed' },
+      order: { updatedAt: 'DESC' },
+      take: Math.min(Math.max(limit, 1), 100),
+    });
+  }
+
+  async retryFailedTask(taskId: string) {
+    const task = await this.taskRepo.findOne({ where: { id: taskId } });
+    if (!task || task.status !== 'failed') return { taskId, retried: false, reason: 'failed task not found' };
+    const result = await this.documentQueueService.retryFailed(taskId);
+    if (result.retried) {
+      await this.updateTask(taskId, {
+        status: 'queued', stage: 'retry_queued', progress: 0, errorMessage: null, finishedAt: null,
+      });
+    }
+    return result;
   }
 
   async hasDoc(docId: string, userId: string): Promise<boolean> {
@@ -401,7 +598,10 @@ export class DocumentService {
     // 3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
     await this.elasticsearchProvider.deleteByDocId(docId, userId);
 
-    // 4. 删除数据库元数据与结构化事实索引
+    // 4. 删除可选图谱来源；共享实体和关系保留其余文档来源。
+    await this.removeGraphSource(docId, userId);
+
+    // 5. 删除数据库元数据与结构化事实索引
     await this.factConflictRepo.delete({ docId, userId });
     await this.docChunkRepo.delete({ docId, userId });
     await this.resourceRepo.update({ docId, userId }, { docId: null });
@@ -545,6 +745,9 @@ export class DocumentService {
       roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
       documentType: meta.documentType as GameDocumentType,
       lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      graphIndexStatus: meta.graphIndexStatus,
+      graphIndexedAt: meta.graphIndexedAt?.toISOString() ?? null,
+      graphIndexError: meta.graphIndexError,
       supersedesDocId: meta.supersedesDocId,
       ingestionQuality: meta.ingestionQuality
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
@@ -577,6 +780,9 @@ export class DocumentService {
       roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
       documentType: meta.documentType as GameDocumentType,
       lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
+      graphIndexStatus: meta.graphIndexStatus,
+      graphIndexedAt: meta.graphIndexedAt?.toISOString() ?? null,
+      graphIndexError: meta.graphIndexError,
       supersedesDocId: meta.supersedesDocId,
       ingestionQuality: meta.ingestionQuality
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
@@ -838,6 +1044,67 @@ export class DocumentService {
       lifecycleStatus,
       userId,
     );
+    return true;
+  }
+
+  async activateVersion(
+    docId: string,
+    userId: string,
+    versionDocIds: string[],
+  ): Promise<boolean> {
+    const docIds = [...new Set(versionDocIds)];
+    if (!docIds.includes(docId)) return false;
+
+    const documents = await this.docMetaRepo.find({
+      where: { docId: In(docIds), userId },
+    });
+    const target = documents.find((document) => document.docId === docId);
+    if (!target || target.chunkCount < 1 || documents.length !== docIds.length) {
+      return false;
+    }
+
+    const deprecatedDocIds = docIds.filter((id) => id !== docId);
+    await this.docMetaRepo.manager.transaction(async (manager) => {
+      const docMetaRepo = manager.getRepository(DocumentMetaEntity);
+      const docChunkRepo = manager.getRepository(DocumentChunkEntity);
+      if (deprecatedDocIds.length > 0) {
+        await Promise.all([
+          docMetaRepo.update(
+            { docId: In(deprecatedDocIds), userId },
+            { lifecycleStatus: 'deprecated' },
+          ),
+          docChunkRepo.update(
+            { docId: In(deprecatedDocIds), userId },
+            { lifecycleStatus: 'deprecated' },
+          ),
+        ]);
+      }
+      await Promise.all([
+        docMetaRepo.update(
+          { docId, userId },
+          { lifecycleStatus: 'effective' },
+        ),
+        docChunkRepo.update(
+          { docId, userId },
+          { lifecycleStatus: 'effective' },
+        ),
+      ]);
+    });
+
+    for (const id of deprecatedDocIds) {
+      await this.elasticsearchProvider.updateDocumentLifecycle(
+        id,
+        'deprecated',
+        userId,
+      );
+      this.karpathyRagService.updateDocumentLifecycle(id, 'deprecated', userId);
+    }
+    await this.elasticsearchProvider.updateDocumentLifecycle(
+      docId,
+      'effective',
+      userId,
+    );
+    this.karpathyRagService.updateDocumentLifecycle(docId, 'effective', userId);
     return true;
   }
 }

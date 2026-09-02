@@ -29,6 +29,7 @@ import {
 import React from "react";
 import { XMarkdown } from "@ant-design/x-markdown";
 import "@ant-design/x-markdown/es/XMarkdown/index.css";
+import { ScheduledAnalysisPanel } from "./scheduled-analysis-panel";
 import {
   type AgentBadCase,
   type AgenticRunOption,
@@ -115,6 +116,7 @@ const CURRENT_PRODUCTION_WORKFLOW_KEY = "agent-ops.current-production-workflow";
 const WORKFLOW_STATUS_LABELS: Record<ProductionWorkflow["status"], string> = {
   running: "运行中",
   pending_approval: "待审批",
+  revision_required: "待修订",
   completed: "已完成",
   failed: "失败",
 };
@@ -534,6 +536,8 @@ export default function AgentOpsPage() {
         )
       ) {
         message.warning("审核已保存，但 Milvus 不可用，暂未完成回灌，请稍后重试");
+      } else if (result.knowledgeLayer === "formal") {
+        message.success("审核已保存，纠正内容已晋升为正式知识并进入主知识库索引");
       } else if (result.indexing?.removed) {
         message.success("审核结果已保存，历史 Bad Case 索引已撤销");
       } else {
@@ -568,7 +572,7 @@ export default function AgentOpsPage() {
           })}
           columns={[
             { title: "项目／活动", dataIndex: "projectId" },
-            { title: "状态", dataIndex: "status", render: (value: ProductionWorkflow["status"]) => <Tag color={value === "completed" ? "green" : value === "failed" ? "red" : value === "pending_approval" ? "orange" : "blue"}>{WORKFLOW_STATUS_LABELS[value] ?? value}</Tag> },
+            { title: "状态", dataIndex: "status", render: (value: ProductionWorkflow["status"]) => <Tag color={value === "completed" ? "green" : value === "failed" ? "red" : value === "pending_approval" || value === "revision_required" ? "orange" : "blue"}>{WORKFLOW_STATUS_LABELS[value] ?? value}</Tag> },
             { title: "完成岗位", render: (_, record) => `${record.completedRoles?.length ?? 0}/${record.selectedRoles?.length ?? 0}` },
             { title: "当前批次", render: (_, record) => record.currentBatch?.map((role: ProductionRole) => ROLE_LABELS[role]).join("＋") || "已完成" },
             { title: "Thread", dataIndex: "threadId", ellipsis: true },
@@ -1310,6 +1314,8 @@ export default function AgentOpsPage() {
       activeKey={
         history.location.pathname.endsWith("/bad-cases")
           ? "bad-cases"
+          : history.location.pathname.endsWith("/schedules")
+            ? "schedules"
           : history.location.pathname.endsWith("/run-center")
             ? "run-center"
           : history.location.pathname.endsWith("/collaboration")
@@ -1336,6 +1342,8 @@ export default function AgentOpsPage() {
           activeKey={
             history.location.pathname.endsWith("/bad-cases")
               ? "bad-cases"
+              : history.location.pathname.endsWith("/schedules")
+                ? "schedules"
               : history.location.pathname.endsWith("/run-center")
                 ? "run-center"
               : history.location.pathname.endsWith("/collaboration")
@@ -1355,6 +1363,7 @@ export default function AgentOpsPage() {
               workflow: "/agent-ops",
               evals: "/agent-ops/evals",
               "bad-cases": "/agent-ops/bad-cases",
+              schedules: "/agent-ops/schedules",
               "run-center": "/agent-ops/run-center",
               collaboration: "/agent-ops/collaboration",
               traces: "/agent-ops/traces",
@@ -1365,6 +1374,7 @@ export default function AgentOpsPage() {
           }}
           items={[
             { key: "workflow", label: "产研运工作流", children: workflowPanel },
+            { key: "schedules", label: "定时任务", children: <ScheduledAnalysisPanel /> },
             { key: "run-center", label: "运行中心", children: runCenterPanel },
             { key: "collaboration", label: "协作编排", children: collaborationPanel },
             { key: "evals", label: "Agent Evals", children: evalPanel },
@@ -1406,6 +1416,22 @@ export default function AgentOpsPage() {
                         ),
                       },
                       {
+                        title: "知识层",
+                        dataIndex: "knowledgeLayer",
+                        render: (value) => (
+                          <Tag color={value === "formal" ? "blue" : value === "correction" ? "orange" : "default"}>
+                            {value === "formal" ? "正式知识" : value === "correction" ? "纠正层" : "未生效"}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "晋升状态",
+                        dataIndex: "promotionStatus",
+                        render: (value, record) => (
+                          <span>{value === "promoted" ? `已晋升${record.promotedDocId ? ` · ${record.promotedDocId.slice(0, 8)}` : ""}` : value === "pending" ? "待晋升" : value === "rejected" ? "已拒绝" : "未申请"}</span>
+                        ),
+                      },
+                      {
                         title: "纠正答案",
                         dataIndex: "correctedAnswer",
                         ellipsis: true,
@@ -1416,16 +1442,20 @@ export default function AgentOpsPage() {
                         render: (_, record) => (
                           <Button
                             size="small"
+                            disabled={record.knowledgeLayer === "formal"}
+                            title={record.knowledgeLayer === "formal" ? "已晋升内容请到文档管理中进行版本治理" : undefined}
                             onClick={() => {
                               setSelectedBadCase(record);
                               reviewForm.setFieldsValue({
                                 status: "reviewed",
                                 correctedAnswer: record.correctedAnswer,
                                 includeInRegression: true,
+                                promotionAction: "correction",
+                                promotionSource: record.promotionSource,
                               });
                             }}
                           >
-                            审核
+                            {record.knowledgeLayer === "formal" ? "已晋升" : "审核"}
                           </Button>
                         ),
                       },
@@ -1640,6 +1670,35 @@ export default function AgentOpsPage() {
                 { value: "ignored", label: "忽略" },
               ]}
             />
+          </Form.Item>
+          <Form.Item label="知识处理方式" name="promotionAction" initialValue="correction">
+            <Select
+              options={[
+                { value: "correction", label: "保留在纠正知识层（默认，可撤销）" },
+                { value: "request", label: "标记待晋升（暂不写入正式知识）" },
+                { value: "promote", label: "晋升正式知识（需已核验来源）" },
+                { value: "reject", label: "拒绝晋升申请" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="正式来源／规范地址"
+            name="promotionSource"
+            dependencies={["promotionAction"]}
+            extra="仅在“晋升正式知识”时必填。来源会写入新正式文档，不能用用户修正答案替代来源。"
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (getFieldValue("promotionAction") !== "promote" || value?.trim()) return Promise.resolve();
+                  return Promise.reject(new Error("晋升正式知识必须填写已核验来源或规范文档地址"));
+                },
+              }),
+            ]}
+          >
+            <Input placeholder="https://… 或内部规范文档 ID" />
+          </Form.Item>
+          <Form.Item label="正式知识版本（可选）" name="promotionVersion" extra="不填时系统按 Bad Case 编号生成版本号。">
+            <Input placeholder="例如 2026-08-v2" />
           </Form.Item>
           <Form.Item
             label="纠正答案"

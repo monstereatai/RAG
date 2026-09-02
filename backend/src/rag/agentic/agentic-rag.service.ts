@@ -72,7 +72,6 @@ export class AgenticRagService {
   private readonly maxRetrievedChunks: number;
   private readonly maxWebSearchResults: number;
   private readonly maxRerankTopN: number;
-  private readonly maxAutoQueryLength: number;
   private readonly webSearchFallbackEnabled: boolean;
   private readonly rerankEnabled: boolean;
   private readonly graphSearchEnabled: boolean;
@@ -131,12 +130,6 @@ export class AgenticRagService {
       10,
     );
     this.maxRerankTopN = this.intConfig('agentic.maxRerankTopN', 5, 1, 10);
-    this.maxAutoQueryLength = this.intConfig(
-      'agentic.maxAutoQueryLength',
-      500,
-      80,
-      4000,
-    );
     this.webSearchFallbackEnabled =
       this.configService.get<boolean>('agentic.webSearchFallbackEnabled') ??
       true;
@@ -274,6 +267,11 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const badCaseMatchesPromise = this.withTimeout(
+      this.badCaseFlywheel.retrieveMatches(state.query, 2),
+      2_000,
+      'Bad case candidate retrieval',
+    ).catch(() => [] as BadCaseMatch[]);
     const deepAgentQueries = await this.planQueriesWithDeepAgent(state.query);
     let queries: string[];
 
@@ -352,7 +350,12 @@ export class AgenticRagService {
       subQuestions,
     });
     onEvent?.({ type: 'artifact', data: artifact });
-    return { augmentedQueries: queries, subQuestions, artifacts: [artifact] };
+    return {
+      augmentedQueries: queries,
+      subQuestions,
+      badCaseMatches: await badCaseMatchesPromise,
+      artifacts: [artifact],
+    };
   }
 
   /**
@@ -894,11 +897,7 @@ export class AgenticRagService {
       role: string;
       content: string;
     }>;
-    const badCaseMatches = await this.withTimeout(
-      this.badCaseFlywheel.retrieveMatches(state.query, 2),
-      2_000,
-      'Bad case selection',
-    ).catch(() => [] as BadCaseMatch[]);
+    const badCaseMatches = state.badCaseMatches ?? [];
     const badCasePrompt = badCaseMatches.length
       ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
       : '';
@@ -906,7 +905,7 @@ export class AgenticRagService {
       ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
       : memoryMessages;
     const strongBadCase = badCaseMatches.find(
-      (match) => match.mode === 'exact' || match.mode === 'correction',
+      (match) => match.mode === 'exact',
     );
     const correction = strongBadCase
       ? this.karpathyRagService.extractCorrectedAnswer(strongBadCase.text)
@@ -918,6 +917,7 @@ export class AgenticRagService {
         history,
         memoryMessages,
         (token) => onEvent?.({ type: 'token', data: token }),
+        strongBadCase.query,
       );
       onEvent?.({ type: 'citation', data: state.retrievedChunks });
       const artifacts = this.withAnswerArtifact(
@@ -941,27 +941,22 @@ export class AgenticRagService {
         state.retrievedChunks.length === 0
           ? '没有检索到任何可用片段'
           : state.retrievalReason || '检索不足';
-      const ans = await this.karpathyRagService.generateModelFallbackAnswer(
-        state.query,
-        reason,
-        history,
-        generationMemory,
-        (token) => onEvent?.({ type: 'token', data: token }),
-      );
+      const ans = this.karpathyRagService.unsupportedReliableAnswer();
+      onEvent?.({ type: 'token', data: ans });
       onEvent?.({ type: 'citation', data: [] });
       const artifacts = this.withAnswerArtifact(
         state,
         ans,
         false,
         0,
-        '检索不足，使用模型兜底回答',
+        '本地与联网证据不足，已进入安全降级',
       );
       onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
       return {
         answer: ans,
         retrievedChunks: [],
         retrievalSufficient: false,
-        retrievalReason: `${reason}；已使用模型兜底回答`,
+        retrievalReason: `${reason}；本地与联网证据不足，已进入安全降级`,
         artifacts,
       };
     }
@@ -1081,7 +1076,7 @@ export class AgenticRagService {
           confidence: 1,
           passed: true,
           retryCount: state.retryCount,
-          reason: '检索不足时已使用模型兜底，不再按引用支撑标准重试',
+          reason: '本地与联网证据不足时已进入安全降级，不再生成无证据答案',
         },
       });
       return { confidence: 1, passed: true, retryCount: state.retryCount };
@@ -1442,6 +1437,36 @@ export class AgenticRagService {
       }
       downstreamOnEvent?.(event);
     };
+    if (mode === 'auto') {
+      const direct = await this.karpathyRagService.answerDirect(
+        query,
+        history,
+        userId,
+        memoryMessages,
+        (token) => onEvent?.({ type: 'token', data: token }),
+        retrieveOptions.scope,
+      );
+      if (direct) {
+        observedRoute = 'simple';
+        onEvent?.({
+          type: 'routing',
+          data: { mode, route: 'simple', reason: 'direct_answer' },
+        });
+        onEvent?.({ type: 'citation', data: direct.references });
+        onEvent?.({ type: 'final', data: direct });
+        return {
+          answer: direct.answer,
+          references: direct.references,
+          route: 'simple',
+          confidence: 1,
+          retryCount: 0,
+          retrievalSufficient: direct.retrievalSufficient,
+          retrievalReason: direct.retrievalReason,
+          obsidianPaths: direct.obsidianPaths,
+        };
+      }
+    }
+
     let fastPathGate =
       mode !== 'simple'
         ? await this.karpathyRagService.assessFastPath(
@@ -1525,54 +1550,6 @@ export class AgenticRagService {
         retrieveOptions,
       );
     }
-    const approvedCorrection = await this.tryApprovedBadCaseCorrection(
-      query,
-      onEvent,
-      history,
-      memoryMessages,
-      fastPathGate.sufficient,
-    );
-    if (approvedCorrection) {
-      return approvedCorrection;
-    }
-
-    if (!this.karpathyRagService.hasIndexedChunks(userId)) {
-      const reason = '当前用户没有已索引的知识库片段';
-      const answer = await this.karpathyRagService.generateModelFallbackAnswer(
-        query,
-        reason,
-        history,
-        memoryMessages,
-        (token) => onEvent?.({ type: 'token', data: token }),
-      );
-      const result = {
-        answer,
-        references: [],
-        route: 'agentic' as const,
-        confidence: 1,
-        retryCount: 0,
-        retrievalSufficient: false,
-        retrievalReason: `${reason}；已使用模型兜底回答`,
-        obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
-      };
-      await this.persistStructuredArtifacts(
-        threadId,
-        userId,
-        buildStructuredDeliveryArtifacts(query, [], answer, false),
-      );
-      onEvent?.({ type: 'retrieval', data: [] });
-      onEvent?.({
-        type: 'sufficiency',
-        data: {
-          sufficient: false,
-          reason: result.retrievalReason,
-        },
-      });
-      onEvent?.({ type: 'citation', data: [] });
-      onEvent?.({ type: 'final', data: result });
-      return result;
-    }
-
     // 通过 LangGraph StateGraph 执行 agentic 流程
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
@@ -1847,62 +1824,6 @@ export class AgenticRagService {
       : {};
   }
 
-  private async tryApprovedBadCaseCorrection(
-    query: string,
-    onEvent: SseCallback | undefined,
-    history: Array<{ role: 'human' | 'ai'; content: string }>,
-    memoryMessages: Array<{ role: string; content: string }>,
-    currentEvidenceSufficient: boolean,
-  ): Promise<{
-    answer: string;
-    references: RetrievedChunk[];
-    route: 'agentic';
-    confidence: number;
-    retryCount: number;
-    retrievalSufficient: boolean;
-    retrievalReason: string;
-  } | null> {
-    if (currentEvidenceSufficient) return null;
-    const matches = await this.withTimeout(
-      this.badCaseFlywheel.retrieveMatches(query, 2),
-      2_000,
-      'Bad case preflight selection',
-    ).catch(() => [] as BadCaseMatch[]);
-    const match = matches.find(
-      (item) => item.mode === 'exact' || item.mode === 'correction',
-    );
-    if (!match) return null;
-    const correction = this.karpathyRagService.extractCorrectedAnswer(
-      match.text,
-    );
-    if (!correction) return null;
-    const answer = await this.karpathyRagService.generateCorrectionAnswer(
-      query,
-      correction,
-      history,
-      memoryMessages,
-      (token) => onEvent?.({ type: 'token', data: token }),
-    );
-    const retrievalReason = `命中已审核 Bad Case 纠错证据（${match.mode}，${match.score.toFixed(3)}）`;
-    const result = {
-      answer,
-      references: [],
-      route: 'agentic' as const,
-      confidence: 1,
-      retryCount: 0,
-      retrievalSufficient: true,
-      retrievalReason,
-    };
-    onEvent?.({ type: 'retrieval', data: [] });
-    onEvent?.({
-      type: 'sufficiency',
-      data: { sufficient: true, reason: retrievalReason },
-    });
-    onEvent?.({ type: 'citation', data: [] });
-    onEvent?.({ type: 'final', data: result });
-    return result;
-  }
-
   /**
    * auto 模式下用 LLM 判断问题复杂度
    */
@@ -1912,7 +1833,6 @@ export class AgenticRagService {
   ): 'simple' | 'agentic' {
     if (mode === 'simple') return 'simple';
     if (mode === 'agentic') return 'agentic';
-    if (query.length > this.maxAutoQueryLength) return 'simple';
     return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
   }
 
@@ -1922,7 +1842,6 @@ export class AgenticRagService {
     fastPathSufficient: boolean,
   ): 'simple' | 'agentic' {
     if (!fastPathSufficient) return 'agentic';
-    if (query.length > this.maxAutoQueryLength) return 'simple';
     return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
   }
 

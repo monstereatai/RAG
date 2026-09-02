@@ -106,6 +106,7 @@ export class GraphService {
     this.assertEnabled();
     const activeSourceId = sourceId ?? randomUUID();
     const graph = await this.extract(text);
+    await this.removeSource(activeSourceId, userId);
     await this.writeGraph(graph, userId, activeSourceId);
     return {
       sourceId: activeSourceId,
@@ -113,6 +114,51 @@ export class GraphService {
       relationshipCount: graph.relationships.length,
       graph,
     };
+  }
+
+  /** 移除一个来源的归属；共享实体和关系继续保留其余来源。 */
+  async removeSource(sourceId: string, userId: string): Promise<void> {
+    if (!this.isEnabled()) return;
+
+    await this.neo4jProvider.executeWrite(
+      `
+      MATCH ()-[r:GRAPH_RELATION {userId: $userId}]->()
+      WHERE $sourceId IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+      WITH r, [id IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) WHERE id <> $sourceId] AS remaining
+      WHERE size(remaining) = 0
+      DELETE r
+      `,
+      { sourceId, userId },
+    );
+    await this.neo4jProvider.executeWrite(
+      `
+      MATCH ()-[r:GRAPH_RELATION {userId: $userId}]->()
+      WHERE $sourceId IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+      WITH r, [id IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) WHERE id <> $sourceId] AS remaining
+      SET r.sourceIds = remaining,
+          r.sourceId = coalesce(head(remaining), '')
+      `,
+      { sourceId, userId },
+    );
+    await this.neo4jProvider.executeWrite(
+      `
+      MATCH (n:GraphEntity {userId: $userId})
+      WHERE $sourceId IN coalesce(n.sourceIds, [coalesce(n.sourceId, '')])
+      WITH n, [id IN coalesce(n.sourceIds, [coalesce(n.sourceId, '')]) WHERE id <> $sourceId] AS remaining
+      SET n.sourceIds = remaining,
+          n.sourceId = coalesce(head(remaining), '')
+      `,
+      { sourceId, userId },
+    );
+    await this.neo4jProvider.executeWrite(
+      `
+      MATCH (n:GraphEntity {userId: $userId})
+      WHERE size(coalesce(n.sourceIds, [])) = 0
+        AND NOT (n)-[:GRAPH_RELATION {userId: $userId}]-(:GraphEntity)
+      DELETE n
+      `,
+      { userId },
+    );
   }
 
   async queryGraph(query: string, userId: string): Promise<GraphQueryResult> {
@@ -381,6 +427,11 @@ export class GraphService {
       SET n.label = node.label,
           n.aliases = node.aliases,
           n.sourceId = node.sourceId,
+          n.sourceIds = CASE
+            WHEN node.sourceId IN coalesce(n.sourceIds, [coalesce(n.sourceId, '')])
+              THEN coalesce(n.sourceIds, [coalesce(n.sourceId, '')])
+            ELSE coalesce(n.sourceIds, [coalesce(n.sourceId, '')]) + node.sourceId
+          END,
           n.properties = node.properties,
           n.updatedAt = datetime()
       `,
@@ -403,6 +454,11 @@ export class GraphService {
         type: rel.type
       }]->(target)
       SET r.sourceId = rel.sourceId,
+          r.sourceIds = CASE
+            WHEN rel.sourceId IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+              THEN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+            ELSE coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) + rel.sourceId
+          END,
           r.properties = rel.properties,
           r.confidence = rel.confidence,
           r.updatedAt = datetime()

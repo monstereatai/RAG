@@ -103,6 +103,13 @@ export class RagClientService {
     );
   }
 
+  reviseProductionWorkflow(threadId: string, ownerUserId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/revise${this.toQueryString({ ownerUserId })}`,
+      body
+    );
+  }
+
   getProductionWorkflow(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}${this.toQueryString({ ownerUserId })}`
@@ -237,6 +244,54 @@ export class RagClientService {
   delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', body); }
   listRuntimeEvents(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events${this.toQueryString({ threadId, runId })}`); }
   getRuntimeEventMetrics(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events/metrics${this.toQueryString({ threadId, runId })}`); }
+
+  listScheduledAnalysisJobs() {
+    return this.getJson<Record<string, unknown>[]>('/rag/admin/agent-ops/schedules');
+  }
+
+  parseScheduledAnalysisJob(body: unknown) {
+    return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/schedules/parse', body);
+  }
+
+  createScheduledAnalysisJob(ownerUserId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/schedules${this.toQueryString({ ownerUserId })}`,
+      body,
+    );
+  }
+
+  runScheduledAnalysisJob(id: string) {
+    return this.request<Record<string, unknown>>(
+      `/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/run`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      },
+      true,
+      130_000,
+    );
+  }
+
+  startScheduledAnalysisJob(id: string) {
+    return this.patchJson<Record<string, unknown>>(`/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/start`, {});
+  }
+
+  stopScheduledAnalysisJob(id: string) {
+    return this.patchJson<Record<string, unknown>>(`/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/stop`, {});
+  }
+
+  listScheduledAnalysisExecutions(id: string) {
+    return this.getJson<Record<string, unknown>[]>(`/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/executions`);
+  }
+
+  copyScheduledAnalysisJob(id: string) {
+    return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/copy`, {});
+  }
+
+  listScheduledAnalysisVersions(id: string) {
+    return this.getJson<Record<string, unknown>[]>(`/rag/admin/agent-ops/schedules/${encodeURIComponent(id)}/versions`);
+  }
 
   listPlatformPlugins() {
     return this.getJson<Record<string, unknown>>('/platform-governance/plugins');
@@ -394,6 +449,47 @@ export class RagClientService {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/documents/${encodeURIComponent(docId)}/lifecycle`,
       { lifecycleStatus }
+    );
+  }
+
+  promoteDocumentVersion(docId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/promote`,
+      {}
+    );
+  }
+
+  submitDocumentReview(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/submit`, body,
+    );
+  }
+
+  approveDocumentReview(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/approve`, body,
+    );
+  }
+
+  rejectDocumentReview(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/reject`, body,
+    );
+  }
+
+  getDocumentReviews(docId: string) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/reviews`,
+    );
+  }
+
+  getFailedDocumentTasks() {
+    return this.getJson<Record<string, unknown>[]>('/rag/admin/documents/tasks/failed');
+  }
+
+  retryFailedDocumentTask(taskId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/tasks/${encodeURIComponent(taskId)}/retry`, {},
     );
   }
 

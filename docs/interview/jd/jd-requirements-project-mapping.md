@@ -86,7 +86,7 @@ BOSS/公开 JD 补充观察：
 | MCP | 已实现基础 | 读取 `mcp-servers.yaml`，用 `MultiServerMCPClient` 初始化 server，加载工具并带 source | `backend/src/providers/mcp/mcp.provider.ts:31`、`backend/src/providers/mcp/mcp.provider.ts:71` | 是 MCP Provider 和 smoke 能力，不是接了一堆真实业务 MCP server |
 | A2A | 未实现 | 当前没有 Agent-to-Agent 协议实现 | 无 | 只能说了解概念，项目没有接 |
 | Memory 长短期记忆 | 已实现 | Mem0 user/session 分层；会话前检索记忆，回答后分类写入 | `backend/src/modules/memory/memory.service.ts:10`、`backend/src/modules/memory/memory.service.ts:89`、`backend/src/modules/memory/memory.service.ts:132` | 可以讲 conversation memory / semantic memory；别说有复杂遗忘策略和合规留存 |
-| Obsidian / Karpathy 知识编译 | 已实现 | simple fast path 读取 Obsidian；RAG chunks 和 Obsidian hits 合并成 evidence | `backend/src/rag/karpathy/karpathy-rag.service.ts:446`、`backend/src/rag/karpathy/karpathy-rag.service.ts:636`、`backend/src/modules/obsidian/obsidian-knowledge.service.ts` | 可以讲个人知识库和企业 RAG 互补 |
+| Obsidian／Karpathy 知识编译 | 已实现 | Karpathy 本地知识进入精确直答门禁；直答未命中后，RAG chunks（检索片段）和 Obsidian hits（命中项）合并成统一 evidence（证据） | `backend/src/rag/karpathy/karpathy-rag.service.ts`、`backend/src/modules/obsidian/obsidian-knowledge.service.ts` | 可以讲个人知识库和企业 RAG 互补，但不表述为独立在线链路 |
 | GraphRAG | 已实现基础 | Neo4j Provider、Graph service、GraphOps、seed 数据、Graph Search | `backend/src/modules/graph/graph.service.ts`、`backend/src/providers/neo4j/neo4j.provider.ts`、`admin/src/pages/graph-ops/index.tsx` | 真实业务图谱仍是模拟，不要说已经接公司真实知识图谱 |
 | 多智能体协同 | 部分实现 | 更准确是 LangGraph 多节点状态机，不是多个自治 Agent 互相协商 | `backend/src/rag/agentic/agentic-rag.service.ts:111` | 面试要主动纠正：“我这里不是自由聊天多 Agent” |
 | Human-in-the-loop | 已实现后端基础 | `enableInterrupt=true` 时生成后暂停，等待 approve/reject，再 resume graph | `backend/src/rag/agentic/agentic-rag.service.ts:783`、`backend/src/rag/agentic/agentic-rag.service.ts:844`、`backend/src/modules/chat/chat.controller.ts:196` | 后端能力有，完整前端审批工作台/业务审批流不算生产完成 |
@@ -247,7 +247,7 @@ BOSS/公开 JD 补充观察：
 1. **不是纯向量 RAG**：Milvus + BM25 + ES + RRF + Rerank。
 2. **Agentic 不是黑盒**：LangGraph 状态机节点可观测、可预算、可回放。
 3. **Simple / Auto / Agentic 路由**：成本和稳定性优先。
-4. **Karpathy + Obsidian Fast Path**：个人知识库与企业 RAG 互补。
+4. **本地编译知识层**：Karpathy 本地知识用于受治理直答与降级，Obsidian 候选进入统一 Hybrid RAG，个人知识与企业证据治理互补。
 5. **GraphRAG 有工程入口**：Neo4j、GraphOps、图上编辑、CLI query。
 6. **AG-UI/SSE 真实流式**：不是前端假打字效果。
 7. **Memory 分层**：user/session memory 由分类器判断写入。

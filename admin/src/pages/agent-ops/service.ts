@@ -10,6 +10,8 @@ export type ProductionRole =
 
 export interface ProductionStageResult {
   role: ProductionRole;
+  revision: number;
+  reviewStatus: "pending" | "approved" | "rejected" | "stale";
   summary: string;
   deliverables: Array<{ type: string; title: string; markdown: string }>;
   claims: Array<{
@@ -64,11 +66,27 @@ export interface ProductionWorkflow {
   approvalRoles: ProductionRole[];
   riskApprovalThreshold: "medium" | "high";
   pendingApprovalRoles: ProductionRole[];
-  status: "running" | "pending_approval" | "completed" | "failed";
+  status: "running" | "pending_approval" | "revision_required" | "completed" | "failed";
+  rerunRoles: ProductionRole[];
+  staleRoles: ProductionRole[];
+  revisionNumber: number;
+  revisionHistory: Array<{
+    revision: number;
+    rejectedAt: string;
+    feedback: string;
+    rejectedRoles: ProductionRole[];
+    staleRoles: ProductionRole[];
+    supplementalMaterials?: string;
+    revisedAt?: string;
+    rerunRoles?: ProductionRole[];
+    results: Partial<Record<ProductionRole, ProductionStageResult>>;
+  }>;
   feedback: string;
+  supplementalMaterials?: string;
   results: Partial<Record<ProductionRole, ProductionStageResult>>;
   error: string;
   requiresApproval: boolean;
+  requiresRevision: boolean;
 }
 
 export interface AgentEvalResult {
@@ -91,6 +109,11 @@ export interface AgentBadCase {
   correctedAnswer?: string | null;
   status: "pending" | "reviewed" | "resolved" | "ignored";
   includeInRegression: boolean;
+  knowledgeLayer: "correction" | "formal" | "inactive";
+  promotionStatus: "not_requested" | "pending" | "promoted" | "rejected";
+  promotionSource?: string | null;
+  promotedDocId?: string | null;
+  promotedAt?: string | null;
   createdAt: string;
   indexing?: {
     indexed?: boolean;
@@ -107,6 +130,59 @@ export interface TraceSnapshot {
   status: number;
   durationMs: number;
   startedAt: string;
+}
+
+export interface ScheduledAnalysisConfig {
+  window: "today" | "week" | "month";
+  dataScopes: Array<"rules" | "complaints" | "qa" | "workflow">;
+  roles: string[];
+  departments: string[];
+}
+
+export interface ScheduledAnalysisJob {
+  id: string;
+  name?: string | null;
+  type: "cron" | "every" | "at";
+  taskKind: "analysis";
+  sourceType: "natural_language" | "markdown";
+  instruction: string;
+  analysisConfig: string;
+  enabled: boolean;
+  running: boolean;
+  cron?: string | null;
+  everyMs?: number | null;
+  at?: string | null;
+  lastRun?: string | null;
+  lastResult?: string | null;
+  lastError?: string | null;
+  lastDurationMs?: number | null;
+  nextRunAt?: string | null;
+  createdAt: string;
+  versionGroupId?: string | null;
+  version?: number;
+  isCurrent?: boolean;
+  copiedFromId?: string | null;
+}
+
+export interface ScheduledAnalysisExecution {
+  id: string;
+  jobId: string;
+  status: "running" | "completed" | "failed";
+  result?: string | null;
+  errorMessage?: string | null;
+  durationMs?: number | null;
+  startedAt: string;
+}
+
+export interface ParsedScheduledAnalysis {
+  name: string;
+  type: "cron" | "every" | "at";
+  cron?: string;
+  everyMs?: number;
+  at?: string;
+  sourceType: "natural_language" | "markdown";
+  instruction: string;
+  analysisConfig: ScheduledAnalysisConfig;
 }
 
 export interface AgenticArtifact {
@@ -185,6 +261,15 @@ export const resumeProductionWorkflow = (
     { method: "POST", data: body },
   );
 
+export const reviseProductionWorkflow = (
+  threadId: string,
+  body: { rerunRoles?: ProductionRole[]; supplementalMaterials?: string },
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/revise`,
+    { method: "POST", data: body },
+  );
+
 export const getProductionWorkflow = (threadId: string) =>
   authRequest<unknown>(
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}`,
@@ -237,6 +322,33 @@ export const getRuntimeEvents = (threadId?: string, runId?: string) =>
 
 export const getRuntimeEventMetrics = (threadId?: string, runId?: string) =>
   authRequest<unknown>("/api/admin/agent-ops/runtime-events/metrics", { params: { threadId, runId } });
+
+export const getScheduledAnalysisJobs = () =>
+  authRequest<unknown>("/api/admin/agent-ops/schedules");
+
+export const parseScheduledAnalysisJob = (body: {
+  sourceText: string;
+  sourceType: "natural_language" | "markdown";
+}) => authRequest<unknown>("/api/admin/agent-ops/schedules/parse", { method: "POST", data: body });
+
+export const createScheduledAnalysisJob = (body: Record<string, unknown>) =>
+  authRequest<unknown>("/api/admin/agent-ops/schedules", { method: "POST", data: body });
+
+export const runScheduledAnalysisJob = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/run`, { method: "POST", data: {} });
+
+export const startScheduledAnalysisJob = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/start`, { method: "PATCH", data: {} });
+
+export const stopScheduledAnalysisJob = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/stop`, { method: "PATCH", data: {} });
+
+export const getScheduledAnalysisExecutions = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/executions`);
+export const copyScheduledAnalysisJob = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/copy`, { method: "POST", data: {} });
+export const getScheduledAnalysisVersions = (id: string) =>
+  authRequest<unknown>(`/api/admin/agent-ops/schedules/${encodeURIComponent(id)}/versions`);
 
 export const delegateAgentTask = (body: Record<string, unknown>) =>
   authRequest<unknown>("/api/admin/agent-ops/tasks/delegate", { method: "POST", data: body });

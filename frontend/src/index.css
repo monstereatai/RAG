@@ -399,6 +399,61 @@ body {
   margin-top: 4px;
 }
 
+.retrieval-details {
+  margin-top: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.retrieval-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.retrieval-details div {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fafafa;
+  line-height: 1.6;
+}
+
+.fallback-actions {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d9e8ff;
+  border-radius: 8px;
+  background: #f5f9ff;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.fallback-actions > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.fallback-actions button {
+  padding: 5px 10px;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #fff;
+  color: #1677ff;
+  cursor: pointer;
+}
+
+.fallback-actions button.primary {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+
+.fallback-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .message.loading {
   color: #999;
   font-style: italic;

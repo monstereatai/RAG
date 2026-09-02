@@ -54,10 +54,11 @@ describe('GraphService governance metadata', () => {
 
     await service.importText('AKB 依赖 Redis。', 'user-1', 'source-1');
 
-    const [nodeCypher, nodePayload] = executeWrite.mock.calls[0];
+    const [nodeCypher, nodePayload] = executeWrite.mock.calls[4];
     const [relationshipCypher, relationshipPayload] =
-      executeWrite.mock.calls[1];
+      executeWrite.mock.calls[5];
     expect(nodeCypher).toContain('n.aliases = node.aliases');
+    expect(nodeCypher).toContain('n.sourceIds = CASE');
     expect(nodePayload).toMatchObject({
       nodes: [
         {
@@ -71,6 +72,7 @@ describe('GraphService governance metadata', () => {
       ],
     });
     expect(relationshipCypher).toContain('r.confidence = rel.confidence');
+    expect(relationshipCypher).toContain('r.sourceIds = CASE');
     expect(relationshipPayload).toMatchObject({
       relationships: [
         {
@@ -78,5 +80,17 @@ describe('GraphService governance metadata', () => {
         },
       ],
     });
+  });
+
+  it('clears only the requested source and preserves other source ids', async () => {
+    const { service, executeWrite } = createService();
+
+    await service.removeSource('source-1', 'user-1');
+
+    expect(executeWrite).toHaveBeenCalledTimes(4);
+    expect(executeWrite.mock.calls[0][0]).toContain('DELETE r');
+    expect(executeWrite.mock.calls[1][0]).toContain('r.sourceIds = remaining');
+    expect(executeWrite.mock.calls[2][0]).toContain('n.sourceIds = remaining');
+    expect(executeWrite.mock.calls[3][0]).toContain('DELETE n');
   });
 });

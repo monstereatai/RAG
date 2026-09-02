@@ -20,6 +20,56 @@ import { RagClientService } from '../rag-client/rag-client.service';
 export class AgentOpsController {
   constructor(private readonly ragClient: RagClientService) {}
 
+  @Get('schedules')
+  @RequirePermission('admin:qa-ops:read')
+  schedules() {
+    return this.ragClient.listScheduledAnalysisJobs();
+  }
+
+  @Post('schedules/parse')
+  @RequirePermission('admin:qa-ops:write')
+  parseSchedule(@Body() body: unknown) {
+    return this.ragClient.parseScheduledAnalysisJob(body);
+  }
+
+  @Post('schedules')
+  @RequirePermission('admin:qa-ops:write')
+  createSchedule(@Body() body: unknown, @Req() req: Request) {
+    return this.ragClient.createScheduledAnalysisJob(this.userId(req), body);
+  }
+
+  @Post('schedules/:id/run')
+  @RequirePermission('admin:qa-ops:write')
+  runSchedule(@Param('id') id: string) {
+    return this.ragClient.runScheduledAnalysisJob(id);
+  }
+
+  @Patch('schedules/:id/start')
+  @RequirePermission('admin:qa-ops:write')
+  startSchedule(@Param('id') id: string) {
+    return this.ragClient.startScheduledAnalysisJob(id);
+  }
+
+  @Patch('schedules/:id/stop')
+  @RequirePermission('admin:qa-ops:write')
+  stopSchedule(@Param('id') id: string) {
+    return this.ragClient.stopScheduledAnalysisJob(id);
+  }
+
+  @Get('schedules/:id/executions')
+  @RequirePermission('admin:qa-ops:read')
+  scheduleExecutions(@Param('id') id: string) {
+    return this.ragClient.listScheduledAnalysisExecutions(id);
+  }
+
+  @Post('schedules/:id/copy')
+  @RequirePermission('admin:qa-ops:write')
+  copySchedule(@Param('id') id: string) { return this.ragClient.copyScheduledAnalysisJob(id); }
+
+  @Get('schedules/:id/versions')
+  @RequirePermission('admin:qa-ops:read')
+  scheduleVersions(@Param('id') id: string) { return this.ragClient.listScheduledAnalysisVersions(id); }
+
   @Post('workflows')
   @ApiOperation({ summary: '启动产研运工作流' })
   @RequirePermission('admin:qa-ops:write')
@@ -46,6 +96,17 @@ export class AgentOpsController {
       this.userId(req),
       body
     );
+  }
+
+  @Post('workflows/:threadId/revise')
+  @ApiOperation({ summary: '按驳回意见生成新版本并局部重跑' })
+  @RequirePermission('admin:qa-ops:write')
+  reviseWorkflow(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request
+  ) {
+    return this.ragClient.reviseProductionWorkflow(threadId, this.userId(req), body);
   }
 
   @Get('workflows/:threadId/coding-context')

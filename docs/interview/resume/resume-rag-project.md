@@ -23,9 +23,9 @@
 企业级 Agentic RAG 知识治理与问答平台｜NestJS、React、LangGraph.js、Milvus、Elasticsearch、Neo4j
 
 - 主导设计并实现企业级 Agentic RAG 知识治理与问答平台，围绕“数据接入、知识索引、可信问答、权限过滤、评测回归、后台运营”搭建完整闭环，支持企业文档、图谱、个人知识库和多模态素材的统一治理。
-- 设计文档入库链路，支持多格式解析、URL 抓取、结构化分块、metadata 标注、Karpathy + Obsidian 知识编译、向量索引、关键词索引和 GraphRAG 实体关系沉淀，保证知识进入系统后可检索、可追踪、可运营。
+- 设计文档入库链路，支持多格式解析、URL 抓取、结构化分块、metadata（元数据）标注、Obsidian 知识编译、向量索引、关键词索引和 GraphRAG（图检索增强生成）实体关系沉淀；Karpathy 本地知识用于受治理直答与降级，保证知识可检索、可追踪、可运营。
 - 实现 Milvus 向量召回 + BM25/Elasticsearch 关键词召回 + RRF 融合 + DashScope Rerank + 引用支撑校验的 Hybrid Search 链路，配合 query rewrite、低相关拒答和权限过滤，降低企业知识库无依据回答风险。
-- 基于 LangGraph 构建 simple / auto / agentic 分层问答编排，简单问题优先走 Karpathy + Obsidian fast path，复杂问题升级到 query augment、retrieval、sufficiency、web search fallback、rerank、generate、reflection、human approval 等节点，并通过预算、超时和降级控制成本与稳定性。
+- 基于 LangGraph 构建 simple／auto／agentic 分层问答编排：Simple 与 Auto 先过 Direct Answer Gate（精确直答门禁），未命中后统一执行 Hybrid RAG；Auto 按证据和复杂度升级到 query augment（查询增强）、retrieval（检索）、sufficiency（充分性判断）、web search fallback（联网补证）、rerank（重排）、generate（生成）和 reflection（反思）等节点，答案审批仅在显式开启时进入 human approval（人工审批），并通过预算、超时和拒答控制成本与稳定性。
 - 接入 MCP Provider、Bocha Web Search、DashScope Rerank、Graph Search、ASR/TTS、Vision Provider 等工具能力，补充 Tool Registry、Prompt Registry、Prompt Injection 检测、工具超时、审计和 fallback 机制，形成 Agent 工具调用治理边界。
 - 建设管理后台与评测体系，覆盖文档治理、AI 问答运营、GraphOps 节点编辑、权限管理、审计日志、指标观测、业务回归集、项目级仿真实业务评测和 Agent 任务评测；当前本地工程成熟度 93/100，项目级仿真实业务评测 28/28 通过。
 ```
@@ -36,7 +36,7 @@
 - **Agent 编排**：LangGraph 节点化工作流、simple/auto/agentic 分层路由、预算参数、超时降级、human approval，能说明 Agent 不是黑盒自由运行。
 - **GraphRAG**：Neo4j provider、实体/关系/别名、GraphOps、图谱查询、节点编辑，用来补足向量检索缺少关系推理的问题。
 - **MCP / 工具治理**：MCP Provider、Tool Registry、Prompt Registry、Bocha、Rerank、Graph Search、ASR/TTS/Vision Provider，强调工具权限、超时、审计和 fallback。
-- **Karpathy + Obsidian**：simple 模式优先走本地知识 fast path，auto 模式按 sufficiency gate 决定是否升级 agentic，适合回答“低延迟和复杂问题怎么兼顾”。
+- **本地编译知识**：Karpathy 本地知识负责受治理直答和降级，Obsidian 候选进入统一 Hybrid RAG；Auto 按 sufficiency gate（充分性门禁）决定是否升级 Agentic，适合回答“低延迟和复杂问题怎么兼顾”。
 - **AG-UI / SSE**：真实流式 token 输出、Markdown/代码块/图片/引用渲染、事件轨迹去噪、历史会话恢复，适合回答“SSE vs WebSocket”和“富文本怎么输出”。
 - **评测闭环**：业务回归集、项目级仿真评测、成熟度评分、Prompt Injection 检测、Agent 任务评测脚手架，避免只靠主观体验调参。
 - **后台运营**：文档治理、问答记录、GraphOps、权限管理、审计日志、指标观测、模型配置和系统管理，突出企业级可运营能力。

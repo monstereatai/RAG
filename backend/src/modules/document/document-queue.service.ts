@@ -199,6 +199,37 @@ export class DocumentQueueService implements OnModuleDestroy {
     return { enabled: true, waiting, active, completed, failed };
   }
 
+  /** 供运营后台定位失败任务；任务 ID 即 BullMQ jobId，重放不会新建重复任务。 */
+  async listFailed(limit = 50): Promise<
+    Array<{
+      taskId: string;
+      filename: string;
+      failedReason: string | null;
+      attemptsMade: number;
+      failedAt: number | null;
+    }>
+  > {
+    if (!this.enabled) return [];
+    const jobs = await this.queue.getFailed(0, Math.max(0, limit - 1));
+    return jobs.map((job) => ({
+      taskId: job.data.taskId,
+      filename: job.data.filename,
+      failedReason: job.failedReason ?? null,
+      attemptsMade: job.attemptsMade,
+      failedAt: job.finishedOn ?? null,
+    }));
+  }
+
+  async retryFailed(taskId: string): Promise<{ taskId: string; retried: boolean; reason?: string }> {
+    if (!this.enabled) return { taskId, retried: false, reason: 'queue is disabled' };
+    const job = await this.queue.getJob(taskId);
+    if (!job) return { taskId, retried: false, reason: 'job was expired or not found' };
+    const state = await job.getState();
+    if (state !== 'failed') return { taskId, retried: false, reason: `job state is ${state}` };
+    await job.retry();
+    return { taskId, retried: true };
+  }
+
   async onModuleDestroy() {
     if (!this.enabled) return;
     await this.worker.close();
