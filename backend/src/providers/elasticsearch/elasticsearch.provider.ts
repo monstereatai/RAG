@@ -89,8 +89,18 @@ export class ElasticsearchProvider implements OnModuleInit {
   private enabled = false;
   private readonly indexName = 'rag_chunks';
   private readonly documentIndexName = 'kh_document';
+  /** dense_vector 维度：必须与嵌入模型输出维度一致（RAG_ES_EMBEDDING_DIM，默认 1024） */
+  private readonly embeddingDim: number;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    const rawDim = this.config.get<string | number>('RAG_ES_EMBEDDING_DIM');
+    const parsedDim =
+      typeof rawDim === 'string' ? Number.parseInt(rawDim, 10) : rawDim;
+    this.embeddingDim =
+      typeof parsedDim === 'number' && Number.isFinite(parsedDim) && parsedDim > 0
+        ? parsedDim
+        : 1024;
+  }
 
   async onModuleInit(): Promise<void> {
     const node = this.config.get<string>('elasticsearch.node') ?? '';
@@ -121,6 +131,18 @@ export class ElasticsearchProvider implements OnModuleInit {
   }
 
   /**
+   * rag_chunks 的 dense_vector 向量字段定义（单 ES 混合检索的 kNN 向量通道）
+   */
+  private embeddingMappingProperty(): estypes.MappingProperty {
+    return {
+      type: 'dense_vector',
+      dims: this.embeddingDim,
+      index: true,
+      similarity: 'cosine',
+    };
+  }
+
+  /**
    * 确保 rag_chunks 索引存在（含中文分词配置）
    */
   private async ensureIndex(): Promise<void> {
@@ -144,12 +166,38 @@ export class ElasticsearchProvider implements OnModuleInit {
           );
           await this.client.indices.delete({ index: this.indexName });
         } else {
+          // 幂等补字段：为存量索引补齐业务元数据与 dense_vector embedding 字段
+          // ES 支持给现有索引新增字段；失败仅告警，不阻塞启动，也绝不删除存量索引
+          const patch: Record<string, estypes.MappingProperty> = {};
           if (!properties?.projectId) {
-            await this.client.indices.putMapping({
-              index: this.indexName,
-              properties: BUSINESS_PROPERTIES,
-            });
-            this.logger.log('ES business metadata mapping added');
+            Object.assign(patch, BUSINESS_PROPERTIES);
+          }
+          if (!properties?.embedding) {
+            patch.embedding = this.embeddingMappingProperty();
+          }
+          if (Object.keys(patch).length > 0) {
+            try {
+              await this.client.indices.putMapping({
+                index: this.indexName,
+                properties: patch,
+              });
+              this.logger.log(
+                `ES mapping patched for "${this.indexName}": added ${Object.keys(patch).join(', ')}`,
+              );
+            } catch (patchErr) {
+              this.logger.warn(
+                `ES putMapping (fields: ${Object.keys(patch).join(', ')}) failed, kNN channel unavailable until patched, startup continues: ${(patchErr as Error).message}`,
+              );
+            }
+          } else {
+            const existingDims = (
+              properties?.embedding as { dims?: number } | undefined
+            )?.dims;
+            if (existingDims !== undefined && existingDims !== this.embeddingDim) {
+              this.logger.warn(
+                `ES index "${this.indexName}" embedding dims=${existingDims} != RAG_ES_EMBEDDING_DIM=${this.embeddingDim}, kNN 检索将不可用；请统一配置或重建索引`,
+              );
+            }
           }
           return;
         }
@@ -196,6 +244,8 @@ export class ElasticsearchProvider implements OnModuleInit {
           expiredAt: { type: 'date' },
           sourceAuthority: { type: 'keyword' },
           ...BUSINESS_PROPERTIES,
+          // dense_vector：kNN 向量通道，维度需与嵌入模型一致（写入时可缺省）
+          embedding: this.embeddingMappingProperty(),
           createdAt: { type: 'date' },
         },
       },
@@ -282,6 +332,9 @@ export class ElasticsearchProvider implements OnModuleInit {
 
   /**
    * 批量写入 chunks 到 ES
+   *
+   * @param vectors 可选，与 chunks 一一对应的嵌入向量（null/缺省表示该块无向量）；
+   *                有向量的块会把 embedding 写进 ES 文档（kNN 通道），没有的正常写
    */
   async indexChunks(
     chunks: Array<{
@@ -313,40 +366,57 @@ export class ElasticsearchProvider implements OnModuleInit {
       highlightFragments?: string[];
     }>,
     userId?: string,
+    vectors?: Array<number[] | null>,
   ): Promise<void> {
     if (!this.enabled || chunks.length === 0) return;
 
     try {
-      const operations = chunks.flatMap((c) => [
-        { index: { _index: this.indexName, _id: c.id } },
-        {
-          docId: c.docId,
-          chunkIndex: c.chunkIndex,
-          content: c.content,
-          userId: c.userId || userId,
-          parentChunkId: c.parentChunkId,
-          headingPath: c.headingPath,
-          sectionId: c.sectionId,
-          clauseId: c.clauseId,
-          tableRef: c.tableRef,
-          sourceStart: c.sourceStart,
-          sourceEnd: c.sourceEnd,
-          docVersion: c.docVersion,
-          effectiveAt: c.effectiveAt?.toISOString() ?? null,
-          expiredAt: c.expiredAt?.toISOString() ?? null,
-          sourceAuthority: c.sourceAuthority,
-          projectId: c.projectId,
-          activityId: c.activityId,
-          region: c.region,
-          locale: c.locale,
-          channel: c.channel,
-          roleScope: c.roleScope,
-          documentType: c.documentType,
-          lifecycleStatus: c.lifecycleStatus,
-          supersedesDocId: c.supersedesDocId,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      let dimMismatchWarned = false;
+      const operations = chunks.flatMap((c, i) => {
+        const rawVector = vectors?.[i] ?? null;
+        const usableVector =
+          rawVector && rawVector.length === this.embeddingDim
+            ? rawVector
+            : null;
+        if (rawVector && !usableVector && !dimMismatchWarned) {
+          dimMismatchWarned = true;
+          this.logger.warn(
+            `ES indexChunks: embedding dims mismatch (vector=${rawVector.length}, configured=${this.embeddingDim}), skip embedding for docId=${c.docId}`,
+          );
+        }
+        return [
+          { index: { _index: this.indexName, _id: c.id } },
+          {
+            docId: c.docId,
+            chunkIndex: c.chunkIndex,
+            content: c.content,
+            userId: c.userId || userId,
+            parentChunkId: c.parentChunkId,
+            headingPath: c.headingPath,
+            sectionId: c.sectionId,
+            clauseId: c.clauseId,
+            tableRef: c.tableRef,
+            sourceStart: c.sourceStart,
+            sourceEnd: c.sourceEnd,
+            docVersion: c.docVersion,
+            effectiveAt: c.effectiveAt?.toISOString() ?? null,
+            expiredAt: c.expiredAt?.toISOString() ?? null,
+            sourceAuthority: c.sourceAuthority,
+            projectId: c.projectId,
+            activityId: c.activityId,
+            region: c.region,
+            locale: c.locale,
+            channel: c.channel,
+            roleScope: c.roleScope,
+            documentType: c.documentType,
+            lifecycleStatus: c.lifecycleStatus,
+            supersedesDocId: c.supersedesDocId,
+            // 有向量写向量（kNN 检索通道）；无向量/维度不符时缺省，不影响关键词字段写入
+            ...(usableVector ? { embedding: usableVector } : {}),
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      });
 
       const result = await this.client.bulk({ operations, refresh: true });
       if (result.errors) {
@@ -540,6 +610,65 @@ export class ElasticsearchProvider implements OnModuleInit {
       });
     } catch (err) {
       this.logger.warn(`ES search failed: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * dense_vector kNN 向量检索（rag_chunks.embedding 字段）
+   *
+   * - 单 ES 混合检索的向量通道：与 search()（BM25 关键词）互补，关键词与向量召回都落在 ES
+   * - Milvus 故障时的向量降级通道
+   * - 过滤条件挂在 knn.filter 上（在过滤后的候选集内取 top-K），
+   *   而不是全局取完 top-K 再过滤，避免 top-K 被无权限/草稿文档占满导致过滤后为空
+   */
+  async knnSearch(
+    vector: number[],
+    topK: number,
+    userId?: string,
+    opts?: { includeDeprecated?: boolean },
+  ): Promise<Array<{ id: string; score: number }>> {
+    if (!this.enabled) return [];
+    if (!Array.isArray(vector) || vector.length === 0) return [];
+
+    try {
+      const filter: estypes.QueryDslQueryContainer[] = userId
+        ? [{ term: { userId } }]
+        : [];
+      if (!opts?.includeDeprecated) {
+        filter.push({
+          bool: {
+            must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
+          },
+        });
+      }
+      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
+      filter.push({
+        bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] },
+      });
+
+      const k = Math.max(1, Math.floor(topK) || 1);
+      const numCandidates = Math.min(k * 4, 200);
+
+      const result = await this.client.search<IndexedChunk>({
+        index: this.indexName,
+        knn: {
+          field: 'embedding',
+          query_vector: vector,
+          k,
+          num_candidates: numCandidates,
+          filter,
+        },
+        size: k,
+        _source: false,
+      });
+
+      return result.hits.hits.map((hit) => ({
+        id: hit._id ?? '',
+        score: hit._score ?? 0,
+      }));
+    } catch (err) {
+      this.logger.warn(`ES knnSearch failed: ${(err as Error).message}`);
       return [];
     }
   }

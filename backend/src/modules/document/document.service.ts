@@ -297,14 +297,20 @@ export class DocumentService {
         graphIndexStatus: this.graphService.isEnabled() ? 'pending' : 'skipped',
       });
 
+      // 嵌入提前到并行入库之前：同一条向量既要写 Milvus，也要随 chunk 写入 ES（dense_vector kNN 通道）。
+      // 失败语义与原先一致：嵌入失败 => 清理外部索引并整体入库失败（原先对应 allSettled 首分支拒绝路径）。
+      await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
+      let vectors: number[][];
+      try {
+        vectors = await this.embeddingProvider.embedDocuments(chunks);
+      } catch (embeddingErr) {
+        await this.cleanupFailedExternalIndexes(docId, userId);
+        throw embeddingErr;
+      }
+      await this.updateTask(taskId, { stage: 'vector_index', progress: 50 });
+
       const indexResults = await Promise.allSettled([
         (async () => {
-          await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
-          const vectors = await this.embeddingProvider.embedDocuments(chunks);
-          await this.updateTask(taskId, {
-            stage: 'vector_index',
-            progress: 50,
-          });
           await this.vectorStoreProvider.insert(
             records.map((record, index) => ({
               ...record,
@@ -315,7 +321,7 @@ export class DocumentService {
         (async () => {
           this.karpathyRagService.indexChunks(chunkDocs, userId);
           await Promise.all([
-            this.elasticsearchProvider.indexChunks(chunkDocs, userId),
+            this.elasticsearchProvider.indexChunks(chunkDocs, userId, vectors),
             this.elasticsearchProvider.indexDocument({
               docId,
               filename,
