@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { ApiTokenService } from './api-token.service';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, RefreshTokenDto } from './dto/login.dto';
 import type { LoginResponse } from './dto/login.dto';
 import { CreateApiTokenDto } from './dto/api-token.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -19,6 +19,15 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto): Promise<LoginResponse> {
     return this.authService.login(dto);
+  }
+
+  /**
+   * 刷新双 token：携带 refresh token 换发新的 access + refresh
+   * 注意不挂 JwtAuthGuard——refresh token 会被业务 Guard 以 401 拒绝
+   */
+  @Post('refresh')
+  refresh(@Body() dto: RefreshTokenDto): Promise<LoginResponse> {
+    return this.authService.refresh(dto.refreshToken);
   }
 
   @Get('profile')
