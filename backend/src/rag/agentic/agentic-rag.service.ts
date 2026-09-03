@@ -48,6 +48,7 @@ import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifact
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
 import { randomUUID } from 'node:crypto';
+import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 
 /**
  * Agentic RAG 服务
@@ -88,6 +89,7 @@ export class AgenticRagService {
     private readonly metricsService: MetricsService,
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
+    private readonly agentLoop: AgentLoopService,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly graphService?: GraphService,
     @Optional()
@@ -965,33 +967,74 @@ export class AgenticRagService {
       .map((c, i) => `[片段 ${i + 1}]\n${sanitizeUntrustedContext(c.content)}`)
       .join('\n\n---\n\n');
 
+    type GenerationLoopState = {
+      answer: string;
+      citationGate?: { sufficient: boolean; reason: string };
+    };
     const model = this.llmProvider.getModel();
-    const messages = await generateAnswerPrompt.formatMessages({
-      context,
-      query: state.query,
-      history,
-      memory: generationMemory,
+    const loop = await this.agentLoop.run<GenerationLoopState, GenerationLoopState>({
+      threadId: this.threadIdFromConfig(config) || 'agentic-rag',
+      runId: this.runIdFromConfig(config),
+      actor: 'agentic_answer',
+      initialState: { answer: '' },
+      maxSteps: 3,
+      maxToolCalls: 1,
+      timeoutMs: 90_000,
+      decide: (loopState) => {
+        if (!loopState.answer) {
+          return {
+            type: 'model' as const,
+            name: 'generate_grounded_answer',
+            execute: async () => {
+              const messages = await generateAnswerPrompt.formatMessages({
+                context,
+                query: state.query,
+                history,
+                memory: generationMemory,
+              });
+              const stream = await model.stream(messages);
+              let draft = '';
+              for await (const chunk of stream) {
+                const token = typeof chunk.content === 'string'
+                  ? chunk.content
+                  : JSON.stringify(chunk.content);
+                if (!token) continue;
+                draft += token;
+                onEvent?.({ type: 'token', data: token });
+              }
+              return this.karpathyRagService.addVersionConflictNotice(
+                draft,
+                state.retrievedChunks,
+              );
+            },
+            reduce: (current: GenerationLoopState, answer: string) => ({ ...current, answer }),
+          };
+        }
+        if (!loopState.citationGate) {
+          return {
+            type: 'tool' as const,
+            name: 'citation_validate',
+            mode: 'agentic' as const,
+            ownerUserId: this.userIdFromConfig(config),
+            input: { answerLength: loopState.answer.length, evidenceCount: state.retrievedChunks.length },
+            execute: async () => this.karpathyRagService.validateAnswerCitationSupport(
+              loopState.answer,
+              state.retrievedChunks,
+            ),
+            reduce: (
+              current: GenerationLoopState,
+              citationGate: { sufficient: boolean; reason: string },
+            ) => ({ ...current, citationGate }),
+          };
+        }
+        return { type: 'complete' as const, output: loopState, reason: loopState.citationGate.sufficient ? '引用门禁通过' : loopState.citationGate.reason };
+      },
     });
-    const stream = await model.stream(messages);
-    let answer = '';
-    for await (const chunk of stream) {
-      const token =
-        typeof chunk.content === 'string'
-          ? chunk.content
-          : JSON.stringify(chunk.content);
-      if (!token) continue;
-      answer += token;
-      onEvent?.({ type: 'token', data: token });
+    if (loop.status !== 'completed' || !loop.output?.citationGate) {
+      throw new Error(`Agent Loop 未完成：${loop.terminationReason}`);
     }
-    answer = this.karpathyRagService.addVersionConflictNotice(
-      answer,
-      state.retrievedChunks,
-    );
-
-    const citationGate = this.karpathyRagService.validateAnswerCitationSupport(
-      answer,
-      state.retrievedChunks,
-    );
+    const answer = loop.output.answer;
+    const citationGate = loop.output.citationGate;
     if (!citationGate.sufficient) {
       if (citationGate.reason === '答案缺少显式片段引用') {
         const fallbackAnswer = this.karpathyRagService.buildExtractiveAnswer(
@@ -1580,6 +1623,7 @@ export class AgenticRagService {
           memoryMessages,
           enableInterrupt,
           retrieveOptions,
+          runtimeRunId: retrieveOptions.runtimeRunId,
           fastPathChunks: fastPathGate.chunks,
           subQuestionLimit:
             mode === 'auto'
@@ -2000,6 +2044,11 @@ export class AgenticRagService {
   private userIdFromConfig(config?: RunnableConfig): string | undefined {
     const value = config?.configurable?.userId;
     return typeof value === 'string' && value ? value : undefined;
+  }
+
+  private runIdFromConfig(config?: RunnableConfig): string | undefined {
+    const retrieveOptions = config?.configurable?.retrieveOptions as RetrieveOptions | undefined;
+    return retrieveOptions?.runtimeRunId;
   }
 
   private numberConfig(

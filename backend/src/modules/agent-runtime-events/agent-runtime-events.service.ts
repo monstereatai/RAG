@@ -50,6 +50,9 @@ export class AgentRuntimeEventsService {
       goalsCompleted: count('goal.completed'), goalsBlocked: count('goal.blocked'),
       requestSnapshots: count('request.snapshot'), toolResults: count('tool.result'), toolBlocked: count('tool.blocked'),
       approvalAsked: count('approval.asked'), approvalDecided: count('approval.decided'), recoveredToolCalls: events.filter((event) => event.eventType === 'tool.result' && Boolean((event.payload as { recovered?: boolean }).recovered)).length,
+      loopStarts: count('agent.loop.started'), loopRounds: count('agent.loop.round.completed'),
+      loopCompletions: count('agent.loop.completed'), loopFailures: count('agent.loop.failed'),
+      loopBlocked: count('agent.loop.blocked'), loopBudgetExceeded: count('agent.loop.budget_exceeded'),
     };
   }
 

@@ -32,6 +32,17 @@ const EVENT_LABELS: Record<string, string> = {
   "goal.completed": "目标完成",
   "goal.blocked": "目标阻塞",
   "artifact.published": "产物发布",
+  "agent.loop.started": "Agent Loop 开始",
+  "agent.loop.round.started": "Loop 轮次开始",
+  "agent.loop.model.started": "模型决策开始",
+  "agent.loop.model.completed": "模型决策完成",
+  "agent.loop.checkpoint.saved": "Loop 快照保存",
+  "agent.loop.checkpoint.skipped": "Loop 快照跳过",
+  "agent.loop.round.completed": "Loop 轮次完成",
+  "agent.loop.completed": "Agent Loop 完成",
+  "agent.loop.blocked": "Agent Loop 阻断",
+  "agent.loop.failed": "Agent Loop 失败",
+  "agent.loop.budget_exceeded": "Loop 预算超限",
 };
 
 const tagColor = (eventType: string) => {
@@ -102,6 +113,8 @@ export default function AgentRunDetailPage() {
   const runtimePlanEvent = (run?.events ?? []).find((event: any) => event.eventType === "agent.plan.created");
   const runtimePlan = runtimePlanEvent?.payload;
   const failureOnset = run?.failureOnset;
+  const loopEvents = (run?.events ?? []).filter((event: any) => String(event.eventType).startsWith("agent.loop."));
+  const loopFinalEvent = [...loopEvents].reverse().find((event: any) => /agent\.loop\.(completed|blocked|failed|budget_exceeded)/.test(event.eventType));
   const scrollToArtifacts = () => {
     document.getElementById("run-artifacts")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -126,6 +139,20 @@ export default function AgentRunDetailPage() {
           { key: "summary", label: "结果预览", span: 3, children: run.resultSummary ? <div className="answer-card run-result-preview"><AssistantMarkdown content={run.resultSummary} status="done" /></div> : run.errorMessage || "运行中，尚未生成最终结果" },
           { key: "failure", label: "失败起点", span: 3, children: failureOnset?.found ? `${failureOnset.eventType}／序号 ${failureOnset.sequence ?? "-"}：${failureOnset.reason}；建议：${failureOnset.recommendation}` : "未发现明确失败起点" },
         ]} />
+      </Card>
+
+      <Card title="Agent Loop 执行摘要" style={{ marginTop: 16 }}>
+        {loopEvents.length === 0 ? (
+          <Alert showIcon type="info" title="本次运行未进入 Agent Loop" description="Simple 快速问答不使用循环；历史运行或在 Loop 接入前完成的记录也不会产生循环事件。" />
+        ) : (
+          <Descriptions bordered column={4} size="small" items={[
+            { key: "starts", label: "循环实例", children: run.metrics?.loopStarts ?? 0 },
+            { key: "rounds", label: "完成轮次", children: run.metrics?.loopRounds ?? 0 },
+            { key: "checkpoints", label: "Redis 快照", children: loopEvents.filter((event: any) => event.eventType === "agent.loop.checkpoint.saved").length },
+            { key: "status", label: "终止状态", children: loopFinalEvent ? <Tag color={tagColor(loopFinalEvent.eventType)}>{EVENT_LABELS[loopFinalEvent.eventType] ?? loopFinalEvent.eventType}</Tag> : "运行中" },
+            { key: "reason", label: "终止原因", span: 4, children: loopFinalEvent?.payload?.terminationReason || "尚未产生终止事件" },
+          ]} />
+        )}
       </Card>
 
       <Card title="Agent Runtime 计划" style={{ marginTop: 16 }}>

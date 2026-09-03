@@ -48,6 +48,10 @@
 
 ## 当前结论
 
+- 已新增受控通用 `AgentLoopService`，复用 Tool Registry、工具权限／审批／幂等外壳、Agent Runtime Event 和 Redis：Chat Agentic 在 LangGraph 生成节点内执行「模型草稿→引用校验工具→终止」，Task Agentic 在每个岗位内执行「岗位工具→结果回填→终止」，Simple 保持固定线性 Fast Path，不进入循环。运行中心新增 Loop 实例、完成轮次、快照数量、终止状态与原因，并可展开逐轮事件。Backend 生产构建、Tool Registry 校验、编译产物 Loop smoke 和 Admin 生产构建通过；新增 2 项 Loop 单测，但 Jest 30 运行时仍被项目既有 `clearMocksOnScope` 兼容错误阻断，Admin 全量 TypeScript 仍被项目既有 React 类型重复冲突阻断。
+- 新增《Agent 记忆、工具、权限与 Hooks 面试速记》，按当前代码记录四类能力的用户操作、数据／状态流、代码入口、后台入口和面试简答，明确 Hooks 使用领域事件＋Outbox，不开放任意脚本执行。
+- 重写《AI复盘四场面试问题与RAG项目回答-面试表达版》：保留 58 题覆盖和当前项目事实，删除大段术语堆叠，改为“业务问题→个人判断→具体做法→边界”的口语化表达，并增加 30 秒／2 分钟项目总述和三个可复述案例，方便面试现场自然展开。
+
 - 已完成企业级知识库课程与 `knowledge-hub-backend` `v1`～`v9` 的对照补强：统一 ACL 已在 Karpathy 本地 BM25、Elasticsearch 与 Milvus 候选融合后按文档可访问集合过滤，文档所属人默认可读；新增独立 `document_reviews` 审核审计和 `reviewStatus`，草稿必须提交／审核通过才允许晋升；PPTX 解析改为按段落与项目符号保留结构并在空内容时降级；ES 检索返回命中片段；BullMQ 失败任务可按原 taskId 幂等重放，后台补齐审核和重放入口。已启动本地 Docker PostgreSQL，并执行数据库中此前积压的 16 个项目迁移；`1787500000000-AddDocumentReviewWorkflow` 已成功记录，`documents_meta` 的四个审核字段和 `document_reviews` 表已实查存在。MongoDB 双库与 RabbitMQ 替换不建议照搬。Backend TypeScript 和生产构建已通过；Jest 受现有 Jest 30 ModuleMocker 兼容错误阻断，管理后台全量 TypeScript 仍受既有 React 类型冲突阻断。
 - Task Agentic 的 Artifact 驳回已改为两阶段修订闭环：驳回只保存意见、修订岗位和旧版本，将工作流暂停为 `revision_required`，并把被驳回／受影响下游状态同步写入 Artifact metadata；管理员点击「按意见重新生成」后才局部重跑并产生新版本，新版本重新审批通过后才继续下游。管理后台已展示版本号、审核状态、待修订范围、受影响下游和版本历史。
 - Task Agentic 的驳回修订补齐“修订包”闭环：待修订页面可录入缺失资料、已核验来源和业务约束，并只能从被驳回岗位中选择局部重试；补充资料进入当前修订的检索与模型上下文，但明确标记为待核验，不能单独作为事实声明证据。修订包、局部重试范围和时间写入版本历史及运行事件；下游保持过期，待修订版本审批通过后按 DAG 继续。

@@ -372,7 +372,7 @@ export class ChatService {
         userId,
         memoryMessages,
         false,
-        retrievalOptions,
+        { ...retrievalOptions, runtimeRunId: run?.id },
       );
     } catch (error) {
       await this.finishFailedRun(run, req.query, mode, error);

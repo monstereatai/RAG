@@ -13,6 +13,7 @@ import { ToolsModule } from '../../tools/tools.module';
 import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { AgentLoopModule } from '../agent-loop/agent-loop.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     AgentRunsModule,
     PluginRuntimeModule,
     DomainEventsModule,
+    AgentLoopModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

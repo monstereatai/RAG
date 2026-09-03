@@ -10,6 +10,7 @@ import { GraphModule } from '../../modules/graph/graph.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
+import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-d
     TracingModule,
     GraphModule,
     TypeOrmModule.forFeature([AgenticStructuredArtifactEntity, ArtifactDependencyEntity]),
+    AgentLoopModule,
   ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],

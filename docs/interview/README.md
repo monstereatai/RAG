@@ -336,6 +336,7 @@ Tool、MCP、Skill 分别是什么？
 | 文件                                                                             | 内容                                                                                                  | 优先级 |
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------ |
 | [AI_TOOLING_INTERVIEW_GUIDE.md](./AI_TOOLING_INTERVIEW_GUIDE.md)                 | Agent、多 Agent、Function Calling、Tool、MCP Server、Skill 的定义、关系、伪代码、业务场景、设计和评测 | 必读   |
+| [Agent记忆工具权限Hooks面试速记.md](./Agent记忆工具权限Hooks面试速记.md)         | 当前项目中记忆、工具、权限和自动事件 Hooks 的用户流程、状态流、代码入口和面试简答 | 面试速记 |
 | [AGENT_ARCHITECTURE_SELECTION_GUIDE.md](./AGENT_ARCHITECTURE_SELECTION_GUIDE.md) | 11 类架构、5 套主流方案、6 个执行原语、决策树、优缺点和项目选择                                       | 必读   |
 | [agentguide-rag-interview-mapping.md](./agentguide-rag-interview-mapping.md)     | AgentGuide 高频知识和项目能力、代码证据、不能夸大的边界                                               | 深挖   |
 | [processon-ai-application-mindmap.md](./processon-ai-application-mindmap.md)     | AI 应用全景知识图谱逐节点整理                                                                         | 查漏   |

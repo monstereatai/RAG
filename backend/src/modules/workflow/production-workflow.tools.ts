@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
-import { ToolExecutionService } from '../../tools/tool-execution.service';
+import { AgentLoopService } from '../agent-loop/agent-loop.service';
 import {
   type ProductionEvidence,
   type ProductionRole,
@@ -88,7 +88,7 @@ export class ProductionWorkflowTools {
   constructor(
     private readonly rag: KarpathyRagService,
     private readonly toolPolicy: ToolExecutionPolicyService,
-    private readonly toolExecution: ToolExecutionService,
+    private readonly agentLoop: AgentLoopService,
   ) {}
 
   async gather(
@@ -119,36 +119,52 @@ export class ProductionWorkflowTools {
     }
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
     try {
-      const execution = await this.toolExecution.execute({
-        toolName: tool,
+      type GatherLoopState = {
+        retrieval?: Awaited<ReturnType<KarpathyRagService['retrieveDetailed']>>;
+      };
+      const loop = await this.agentLoop.run<GatherLoopState, GatherLoopState>({
         threadId: context.threadId ?? `production:${context.projectId}`,
         runId: context.runId,
-        ownerUserId: context.userId,
-        mode: 'production',
-        role,
         actor: role,
-        pluginKeys: context.pluginKeys,
-        allowedToolNames: context.pluginTools,
-        input: { query, focus: ROLE_SEARCH_FOCUS[role] },
-        execute: () => this.withTimeout(
-          this.rag.retrieveDetailed(query, { scope: { role } }, context.userId),
-          policy.timeoutMs,
-        ),
+        initialState: {},
+        maxSteps: 2,
+        maxToolCalls: policy.maxCalls,
+        timeoutMs: policy.timeoutMs + 1_000,
+        decide: (state) => state.retrieval
+          ? { type: 'complete', output: state, reason: `${role} 岗位证据检索完成` }
+          : {
+              type: 'tool',
+              name: tool,
+              mode: 'production',
+              role,
+              ownerUserId: context.userId,
+              pluginKeys: context.pluginKeys,
+              allowedToolNames: context.pluginTools,
+              input: { query, focus: ROLE_SEARCH_FOCUS[role] },
+              execute: () => this.withTimeout(
+                this.rag.retrieveDetailed(query, { scope: { role } }, context.userId),
+                policy.timeoutMs,
+              ),
+              reduce: (current: GatherLoopState, retrieval: Awaited<ReturnType<KarpathyRagService['retrieveDetailed']>>) => ({
+                ...current,
+                retrieval,
+              }),
+            },
       });
-      if (!execution.output) {
+      const result = loop.output?.retrieval;
+      if (!result) {
         return {
           evidence: [],
           executions: [{
             tool,
-            status: execution.status === 'blocked' ? 'blocked' : 'failed',
-            durationMs: execution.durationMs,
+            status: loop.status === 'blocked' ? 'blocked' : 'failed',
+            durationMs: Date.now() - startedAt,
             evidenceCount: 0,
             fallback: policy.fallback,
-            error: execution.error,
+            error: loop.terminationReason,
           }],
         };
       }
-      const result = execution.output;
       const evidence = result.chunks
         .slice(0, this.evidenceLimit)
         .map((chunk) => ({
@@ -168,7 +184,7 @@ export class ProductionWorkflowTools {
           {
             tool,
             status: evidence.length > 0 ? 'success' : 'degraded',
-            durationMs: execution.durationMs,
+            durationMs: Date.now() - startedAt,
             evidenceCount: evidence.length,
             fallback: evidence.length > 0 ? undefined : policy.fallback,
           },

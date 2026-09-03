@@ -145,6 +145,8 @@ export interface PrefetchedFastPath {
 }
 
 export interface RetrieveOptions {
+  /** 运行中心关联 ID，仅用于把 Agent Loop 事件归入当前 Run。 */
+  runtimeRunId?: string;
   vectorSearch?: boolean;
   /**
    * 旧版 Simple 自适应向量参数，仅保留调用兼容；当前直答未命中后统一执行混合检索。

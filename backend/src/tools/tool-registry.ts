@@ -47,6 +47,17 @@ export const toolRegistry: ToolRegistryEntry[] = [
     modes: ['auto', 'agentic'],
   },
   {
+    name: 'citation_validate',
+    source: 'builtin',
+    risk: 'low',
+    permission: 'read',
+    timeoutMs: 3000,
+    audit: true,
+    fallback: '引用校验不可用时按不通过处理，不直接输出无证据答案。',
+    owner: 'rag-backend',
+    modes: ['agentic'],
+  },
+  {
     name: 'mcp_tools',
     source: 'mcp',
     risk: 'medium',

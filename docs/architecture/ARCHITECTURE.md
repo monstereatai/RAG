@@ -150,8 +150,9 @@ flowchart TD
   Web --> Rerank
   Rerank --> Expand["Section + neighbor expansion"]
   Expand --> Context["Dedup + diversity + budget"]
-  Context --> Generate["LLM generation"]
-  Generate --> Reflect["Reflection"]
+  Context --> Generate["Agent Loop: LLM draft"]
+  Generate --> CitationTool["citation_validate tool"]
+  CitationTool --> Reflect["Reflection"]
   Reflect -->|pass| Final
   Reflect -->|retry| Plan
 ```
@@ -159,7 +160,7 @@ flowchart TD
 模式策略：
 
 - `simple`：先执行精确直答，未命中后执行完整 Hybrid RAG；低延迟、透明、可调试，不进入多步骤 Agentic。
-- `agentic`：多步检索、查询扩展、联网兜底、Rerank、反思评估；通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制成本边界。
+- `agentic`：外层 LangGraph 负责多步检索、查询扩展、联网兜底、Rerank 与反思重试；内层 `AgentLoopService` 统一执行模型／工具动作、工具次数与总步数限制、超时、Redis 状态快照和运行事件。通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制外层成本边界。
 - `auto`：与 simple 共用精确直答和 Hybrid Fast Path，再按证据充分性与复杂度决定轻量回答或升级 Agentic。问题长度只影响上下文、Token、时间和成本预算，不单独决定路由；`AGENTIC_MAX_AUTO_QUERY_LENGTH` 仅保留配置兼容。
 
 ### 5.3 GraphRAG 链路
