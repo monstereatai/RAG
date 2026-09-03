@@ -77,6 +77,26 @@ export class RagAdminController {
     return this.ragAdminService.reindexDocumentSearch(Number(limit) || 1000);
   }
 
+  // ─── Image Search（文搜图）──────────────────────────────────
+
+  @Get('images/search')
+  searchImages(
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+    @Query('userId') userId?: string,
+  ) {
+    return this.ragAdminService.searchImages(
+      query ?? '',
+      Number(limit) || 20,
+      userId || undefined,
+    );
+  }
+
+  @Get('documents/stats')
+  getDocumentStats() {
+    return this.ragAdminService.getDocumentStats();
+  }
+
   @Get('documents/:docId')
   async getDocument(@Param('docId') docId: string) {
     const doc = await this.ragAdminService.getDocument(docId);
@@ -310,6 +330,11 @@ export class RagAdminController {
   }
 
   // ─── Search Operations ──────────────────────────────────────
+
+  @Get('queries/trend')
+  async getQueryDailyTrend(@Query('days') days?: string) {
+    return this.ragAdminService.getQueryDailyTrend(Number(days) || 14);
+  }
 
   @Get('search/queries/popular')
   async getSearchPopularQueries() {

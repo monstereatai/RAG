@@ -19,6 +19,7 @@ import { DocumentResourceEntity } from '../../providers/db/entities/document-res
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { DocumentPermissionModule } from './document-permission.module';
+import { ImageIndexModule } from '../image-index/image-index.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { DocumentPermissionModule } from './document-permission.module';
     ObsidianKnowledgeModule,
     GraphModule,
     DocumentPermissionModule,
+    ImageIndexModule,
   ],
   controllers: [DocumentController],
   providers: [

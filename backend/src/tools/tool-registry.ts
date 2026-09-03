@@ -47,6 +47,18 @@ export const toolRegistry: ToolRegistryEntry[] = [
     modes: ['auto', 'agentic'],
   },
   {
+    name: 'image_search_tool',
+    source: 'builtin',
+    risk: 'low',
+    permission: 'read',
+    timeoutMs: 8000,
+    audit: true,
+    fallback:
+      '图片检索不可用（嵌入 Key 未配置或向量库异常）时跳过图片结果，仅使用文本 RAG 证据继续回答。',
+    owner: 'rag-backend',
+    modes: ['simple', 'auto', 'agentic'],
+  },
+  {
     name: 'citation_validate',
     source: 'builtin',
     risk: 'low',

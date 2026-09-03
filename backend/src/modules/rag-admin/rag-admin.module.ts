@@ -8,6 +8,7 @@ import { GraphModule } from '../graph/graph.module';
 import { ChatModule } from '../chat/chat.module';
 import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
+import { ImageIndexModule } from '../image-index/image-index.module';
 import { ObsidianKnowledgeModule } from '../obsidian/obsidian-knowledge.module';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
@@ -30,6 +31,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     ChatModule,
     KarpathyRagModule,
     VectorStoreModule,
+    ImageIndexModule,
     ObsidianKnowledgeModule,
     DomainEventsModule,
   ],

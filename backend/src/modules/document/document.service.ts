@@ -20,6 +20,8 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
 import { GraphService } from '../graph/graph.service';
 import { DocumentQueueService } from './document-queue.service';
+import { detectDocumentKind } from './document-parser.util';
+import { ImageIndexService } from '../image-index/image-index.service';
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
@@ -114,6 +116,7 @@ export class DocumentService {
     private readonly documentQueueService: DocumentQueueService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
+    private readonly imageIndexService: ImageIndexService,
   ) {}
 
   async upload(
@@ -135,9 +138,10 @@ export class DocumentService {
       startedAt: new Date(),
     });
 
+    let originalUrl: string | null = null;
     try {
       if (options.originalBuffer) {
-        await this.saveOriginalResource({
+        originalUrl = await this.saveOriginalResource({
           docId,
           taskId,
           userId,
@@ -362,6 +366,20 @@ export class DocumentService {
 
       if (governance.lifecycleStatus !== 'draft') {
         await this.updateLifecycle(docId, userId, governance.lifecycleStatus);
+      }
+      // 文搜图：图片文档入库成功后把原图写入图片向量库；失败仅告警，不阻塞入库
+      if (
+        originalUrl &&
+        detectDocumentKind(filename) === 'image' &&
+        this.imageIndexService.isEnabled()
+      ) {
+        this.imageIndexService
+          .indexImage({ docId, userId, url: originalUrl, meta: { filename } })
+          .catch((err: Error) =>
+            this.logger.warn(
+              `Image index failed for docId=${docId}: ${err.message}`,
+            ),
+          );
       }
       const graphIndexStatus: GraphIndexStatus = this.graphService.isEnabled()
         ? 'pending'
@@ -622,6 +640,15 @@ export class DocumentService {
     // 3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
     await this.elasticsearchProvider.deleteByDocId(docId, userId);
 
+    // 3.5 文搜图：清理图片向量库（未启用/失败不阻塞删除主流程）
+    try {
+      await this.imageIndexService.deleteByDoc(docId, userId);
+    } catch (err) {
+      this.logger.warn(
+        `Image index delete failed for docId=${docId}: ${(err as Error).message}`,
+      );
+    }
+
     // 4. 删除可选图谱来源；共享实体和关系保留其余文档来源。
     await this.removeGraphSource(docId, userId);
 
@@ -641,7 +668,7 @@ export class DocumentService {
     filename: string;
     buffer: Buffer;
     contentType?: string;
-  }): Promise<void> {
+  }): Promise<string> {
     const key = [
       params.userId,
       params.docId,
@@ -667,6 +694,7 @@ export class DocumentService {
         size: params.buffer.length,
       }),
     );
+    return stored.url;
   }
 
   private async resolveChunkStrategy(

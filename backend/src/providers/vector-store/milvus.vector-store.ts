@@ -8,6 +8,8 @@ import {
 } from '@zilliz/milvus2-sdk-node';
 import {
   IVectorStoreProvider,
+  ImageSearchHit,
+  ImageVectorRecord,
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
@@ -17,6 +19,7 @@ import {
 /**
  * Milvus VectorStore Provider
  * 集合 schema：id(主键) / vector / content / doc_id / chunk_index
+ * 图片集合 schema（rag_images）：id(主键) / vector / doc_id / user_id / url / meta
  */
 @Injectable()
 export class MilvusVectorStoreProvider
@@ -26,6 +29,8 @@ export class MilvusVectorStoreProvider
   private client!: MilvusClient;
   private readonly collection: string;
   private readonly dimension: number;
+  private readonly imageCollection: string;
+  private readonly imageDimension: number;
   private readonly host: string;
   private readonly port: number;
   private readonly indexType: IndexType;
@@ -51,6 +56,16 @@ export class MilvusVectorStoreProvider
       this.config.get<string>('vectorStore.milvus.collection') ?? 'rag_chunks';
     this.dimension =
       this.config.get<number>('vectorStore.milvus.dimension') ?? 1024;
+    // 图片独立集合：MILVUS_IMAGE_DIMENSION > MULTIMODAL_EMBEDDING_DIM > 主集合维度
+    // （读取惯例与 getCapabilities 中 RERANK_PROVIDER 一致：ConfigService 回落 process.env）
+    const imageDimEnv =
+      this.config.get<string>('MILVUS_IMAGE_DIMENSION') ??
+      this.config.get<string>('MULTIMODAL_EMBEDDING_DIM');
+    this.imageCollection =
+      this.config.get<string>('MILVUS_IMAGE_COLLECTION') ?? 'rag_images';
+    this.imageDimension = imageDimEnv
+      ? parseInt(imageDimEnv, 10)
+      : this.dimension;
     this.indexType = this.resolveIndexType(
       this.config.get<string>('vectorStore.milvus.indexType') ?? 'HNSW',
     );
@@ -83,6 +98,14 @@ export class MilvusVectorStoreProvider
       this.recordSuccess();
       this.logger.log(`Milvus connected at ${this.host}:${this.port}`);
       await this.ensureCollection();
+      // 图片集合独立初始化：失败仅降级图片检索，不影响文本 RAG 启动
+      try {
+        await this.ensureImageCollection();
+      } catch (imageErr) {
+        this.logger.error(
+          `Milvus image collection init failed (${this.imageCollection}): ${(imageErr as Error).message}. Image search APIs will degrade.`,
+        );
+      }
       // 预热：触发 Milvus 加载索引到内存，避免首次 search 超时
       await this.warmup();
     } catch (err) {
@@ -327,6 +350,222 @@ export class MilvusVectorStoreProvider
         circuitOpenMs: this.circuitOpenMs,
         circuitFailureThreshold: this.circuitFailureThreshold,
       },
+    };
+  }
+
+  // ─── 图片集合（rag_images，以图搜图 / 文搜图）──────────────────
+
+  /**
+   * 初始化图片独立集合：不存在则创建 + 建索引 + load；
+   * schema 缺少必要字段（如历史脏集合）时重建。
+   */
+  async ensureImageCollection(): Promise<void> {
+    const has = await this.client.hasCollection({
+      collection_name: this.imageCollection,
+    });
+    if (has.value) {
+      this.logger.log(
+        `Image collection ${this.imageCollection} already exists, checking schema...`,
+      );
+      try {
+        const desc = await this.client.describeCollection({
+          collection_name: this.imageCollection,
+        });
+        const fieldNames = new Set(desc.schema.fields.map((f) => f.name));
+        const requiredFields = ['id', 'vector', 'doc_id', 'user_id', 'url'];
+        const outdated = requiredFields.some((f) => !fieldNames.has(f));
+        if (outdated) {
+          this.logger.warn(
+            `Image collection schema outdated (missing required fields). Re-creating...`,
+          );
+          await this.client.dropCollection({
+            collection_name: this.imageCollection,
+          });
+        } else {
+          await this.client.loadCollection({
+            collection_name: this.imageCollection,
+          });
+          this.logger.log(`Image collection ${this.imageCollection} loaded`);
+          return;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to describe image collection: ${(err as Error).message}. Retrying recreate...`,
+        );
+        await this.client
+          .dropCollection({ collection_name: this.imageCollection })
+          .catch(() => {});
+      }
+    }
+
+    this.logger.log(`Creating image collection ${this.imageCollection}...`);
+    await this.client.createCollection({
+      collection_name: this.imageCollection,
+      fields: [
+        {
+          name: 'id',
+          data_type: DataType.VarChar,
+          max_length: 64,
+          is_primary_key: true,
+        },
+        {
+          name: 'vector',
+          data_type: DataType.FloatVector,
+          dim: this.imageDimension,
+        },
+        {
+          name: 'doc_id',
+          data_type: DataType.VarChar,
+          max_length: 64,
+        },
+        {
+          name: 'user_id',
+          data_type: DataType.VarChar,
+          max_length: 64,
+        },
+        {
+          name: 'url',
+          data_type: DataType.VarChar,
+          max_length: 4096,
+        },
+        {
+          name: 'meta',
+          data_type: DataType.VarChar,
+          max_length: 8192,
+        },
+      ],
+    });
+
+    await this.client.createIndex({
+      collection_name: this.imageCollection,
+      field_name: 'vector',
+      index_type: this.indexType,
+      metric_type: MetricType.COSINE,
+      params: this.getCreateIndexParams(),
+    });
+
+    await this.client.loadCollection({
+      collection_name: this.imageCollection,
+    });
+    this.logger.log(
+      `Image collection ${this.imageCollection} created (dim=${this.imageDimension}) and loaded`,
+    );
+  }
+
+  async insertImages(records: ImageVectorRecord[]): Promise<void> {
+    if (records.length === 0) return;
+    const data = records.map((r) => ({
+      id: r.id,
+      vector: r.vector,
+      doc_id: r.docId,
+      user_id: r.userId ?? '',
+      url: r.url,
+      meta: r.meta ?? '',
+    }));
+    const result = await this.client.insert({
+      collection_name: this.imageCollection,
+      data,
+    });
+    await this.client.flushSync({ collection_names: [this.imageCollection] });
+    this.logger.log(
+      `Inserted ${result.insert_cnt} image records into ${this.imageCollection}`,
+    );
+  }
+
+  async searchImages(
+    queryVector: number[],
+    k: number,
+    userId?: string,
+  ): Promise<ImageSearchHit[]> {
+    if (this.isCircuitOpen()) {
+      throw new Error('Milvus image search circuit is open');
+    }
+
+    const searchParams = {
+      collection_name: this.imageCollection,
+      vector: queryVector,
+      limit: k,
+      metric_type: MetricType.COSINE,
+      params: this.getSearchParams(),
+      output_fields: ['id', 'doc_id', 'user_id', 'url', 'meta'],
+      expr: userId ? `user_id == "${userId}"` : undefined,
+      timeout: this.searchTimeoutMs,
+    };
+
+    let searchResult: Awaited<ReturnType<MilvusClient['search']>>;
+    try {
+      searchResult = await this.withTimeout(
+        this.client.search(searchParams),
+        this.searchTimeoutMs + 200,
+        'Milvus image search',
+      );
+      this.recordSuccess();
+    } catch (err) {
+      this.recordFailure(err);
+      throw err;
+    }
+
+    return (searchResult.results as Array<Record<string, unknown>>).map(
+      (hit) => ({
+        id:
+          typeof hit['id'] === 'string' || typeof hit['id'] === 'number'
+            ? String(hit['id'])
+            : '',
+        docId:
+          typeof hit['doc_id'] === 'string' || typeof hit['doc_id'] === 'number'
+            ? String(hit['doc_id'])
+            : '',
+        userId: typeof hit['user_id'] === 'string' ? hit['user_id'] : '',
+        url: typeof hit['url'] === 'string' ? hit['url'] : '',
+        meta:
+          typeof hit['meta'] === 'string' && hit['meta'] !== ''
+            ? hit['meta']
+            : undefined,
+        score:
+          typeof hit['score'] === 'number'
+            ? hit['score']
+            : Number(hit['score'] ?? 0),
+      }),
+    );
+  }
+
+  async deleteImagesByDocId(docId: string, userId?: string): Promise<void> {
+    try {
+      await this.withTimeout(
+        this.client.deleteEntities({
+          collection_name: this.imageCollection,
+          filter:
+            userId !== undefined
+              ? 'doc_id == $docId && user_id == $userId'
+              : 'doc_id == $docId',
+          exprValues: userId !== undefined ? { docId, userId } : { docId },
+          timeout: this.deleteTimeoutMs,
+        }),
+        this.deleteTimeoutMs + 200,
+        'Milvus delete images by docId',
+      );
+      this.recordSuccess();
+      this.logger.log(
+        `Deleted image records for doc_id=${docId}${userId ? ` user_id=${userId}` : ''}`,
+      );
+    } catch (err) {
+      this.recordFailure(err);
+      this.logger.warn(
+        `Milvus image delete failed for doc_id=${docId}: ${(err as Error).message}`,
+      );
+      throw err;
+    }
+  }
+
+  getImageCollectionInfo(): {
+    collection: string;
+    dimension: number;
+    indexType: IndexType;
+  } {
+    return {
+      collection: this.imageCollection,
+      dimension: this.imageDimension,
+      indexType: this.indexType,
     };
   }
 

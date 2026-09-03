@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +28,7 @@ import {
   GameDocumentType,
 } from '../document/document-profile.util';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { ImageIndexService } from '../image-index/image-index.service';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -113,6 +120,8 @@ export class RagAdminService {
     @InjectRepository(FactConflictEntity)
     private readonly factConflictRepo: Repository<FactConflictEntity>,
     private readonly domainEvents: DomainEventsService,
+    // 图片检索（以图搜图/文搜图）可选依赖：未注册（模块未导入）时保持降级
+    @Optional() private readonly imageIndexService?: ImageIndexService,
   ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
@@ -194,6 +203,75 @@ export class RagAdminService {
   }
 
   // ─── Documents ───────────────────────────────────────────────
+
+  async getDocumentStats() {
+    const allDocs = await this.docMetaRepo.find({
+      order: { createdAt: 'DESC' },
+    });
+
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate(),
+      ).padStart(2, '0')}`;
+
+    const tally = (values: string[]) => {
+      const counts = new Map<string, number>();
+      for (const value of values) {
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+      return [...counts.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+    };
+
+    // 近 14 日上传趋势（含空日补零）
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - 13);
+    const uploadsByDay = new Map<string, number>();
+    for (const doc of allDocs) {
+      const createdAt = new Date(doc.createdAt);
+      if (Number.isNaN(createdAt.getTime()) || createdAt < since) continue;
+      const key = dayKey(createdAt);
+      uploadsByDay.set(key, (uploadsByDay.get(key) ?? 0) + 1);
+    }
+    const uploadsTrend: { date: string; count: number }[] = [];
+    for (let i = 0; i < 14; i++) {
+      const day = new Date(since);
+      day.setDate(since.getDate() + i);
+      const key = dayKey(day);
+      uploadsTrend.push({ date: key, count: uploadsByDay.get(key) ?? 0 });
+    }
+
+    const byFileType = tally(
+      allDocs.map((doc) => {
+        const dot = doc.filename.lastIndexOf('.');
+        return dot >= 0 ? doc.filename.slice(dot + 1).toLowerCase() : 'other';
+      }),
+    );
+
+    return {
+      available: true,
+      data: {
+        total: allDocs.length,
+        totalChunks: allDocs.reduce((sum, doc) => sum + (doc.chunkCount ?? 0), 0),
+        categoryCount: new Set(allDocs.map((doc) => doc.category ?? '其他')).size,
+        last7DaysNew: uploadsTrend.slice(-7).reduce((sum, item) => sum + item.count, 0),
+        byCategory: tally(allDocs.map((doc) => doc.category ?? '其他')),
+        byLifecycleStatus: tally(allDocs.map((doc) => doc.lifecycleStatus ?? 'unknown')),
+        byReviewStatus: tally(allDocs.map((doc) => doc.reviewStatus ?? 'unknown')),
+        byFileType,
+        uploadsTrend,
+        latest: allDocs.slice(0, 5).map((doc) => ({
+          docId: doc.docId,
+          filename: doc.filename,
+          category: doc.category ?? '其他',
+          chunkCount: doc.chunkCount,
+          createdAt: doc.createdAt.toISOString(),
+        })),
+      },
+    };
+  }
 
   async listDocuments(query: RagDocumentQueryDto) {
     const allDocs = await this.docMetaRepo.find({
@@ -291,6 +369,55 @@ export class RagAdminService {
     const normalized = query.trim();
     if (!normalized) return [];
     return this.elasticsearchProvider.search(normalized, Math.min(Math.max(limit, 1), 50));
+  }
+
+  /**
+   * 文搜图（rag_images 独立图片集合）。
+   * 嵌入 Key 未配置或 Milvus 异常时不抛 500：返回空列表 + reason 降级字段。
+   */
+  async searchImages(query: string, limit = 20, userId?: string) {
+    const normalized = query.trim();
+    const capped = Math.min(Math.max(limit, 1), 50);
+    if (!normalized) {
+      return {
+        query,
+        limit: capped,
+        userId: userId ?? null,
+        reason: '查询词为空',
+        results: [],
+      };
+    }
+    if (!this.imageIndexService?.isEnabled()) {
+      return {
+        query,
+        limit: capped,
+        userId: userId ?? null,
+        reason: '图片检索未启用：缺少 MULTIMODAL_EMBEDDING_API_KEY（或 DASHSCOPE_API_KEY）',
+        results: [],
+      };
+    }
+    try {
+      const results = await this.imageIndexService.searchText(normalized, {
+        topK: capped,
+        userId,
+      });
+      return {
+        query,
+        limit: capped,
+        userId: userId ?? null,
+        reason: null,
+        results,
+      };
+    } catch (err) {
+      this.logger.warn(`Image search degraded: ${(err as Error).message}`);
+      return {
+        query,
+        limit: capped,
+        userId: userId ?? null,
+        reason: `图片检索降级：${(err as Error).message}`,
+        results: [],
+      };
+    }
   }
 
   async reindexDocumentSearch(limit = 1000) {
@@ -777,6 +904,11 @@ export class RagAdminService {
   }
 
   // ─── Search Operations ───────────────────────────────────────
+
+  async getQueryDailyTrend(days = 14) {
+    const items = await this.queryLogService.getDailyTrend(days);
+    return { available: true, data: items };
+  }
 
   async getSearchPopularQueries() {
     const queries = await this.queryLogService.getPopularQueries(20);

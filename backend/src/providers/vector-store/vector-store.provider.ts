@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   IVectorStoreProvider,
+  ImageSearchHit,
+  ImageVectorRecord,
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
@@ -60,5 +62,25 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
 
   getRuntimeStatus(): VectorStoreRuntimeStatus {
     return this.provider.getRuntimeStatus();
+  }
+
+  ensureImageCollection(): Promise<void> {
+    return this.provider.ensureImageCollection();
+  }
+
+  insertImages(records: ImageVectorRecord[]): Promise<void> {
+    return this.provider.insertImages(records);
+  }
+
+  searchImages(
+    queryVector: number[],
+    k: number,
+    userId?: string,
+  ): Promise<ImageSearchHit[]> {
+    return this.provider.searchImages(queryVector, k, userId);
+  }
+
+  deleteImagesByDocId(docId: string, userId?: string): Promise<void> {
+    return this.provider.deleteImagesByDocId(docId, userId);
   }
 }
