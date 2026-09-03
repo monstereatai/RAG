@@ -176,6 +176,11 @@ export default [
         component: './system/users',
       },
       {
+        path: '/system/teams',
+        name: 'teams',
+        component: './system/teams',
+      },
+      {
         path: '/system/roles',
         name: 'roles',
         component: './system/roles',

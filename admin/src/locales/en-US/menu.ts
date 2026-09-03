@@ -29,6 +29,7 @@ export default {
   'menu.graph-ops.graph-ops-stats': 'Graph Stats',
   'menu.system': 'System',
   'menu.system.users': 'Users',
+  'menu.system.teams': 'Teams',
   'menu.system.roles': 'Roles',
   'menu.system.permissions': 'Permissions',
   'menu.system.config': 'System Config',

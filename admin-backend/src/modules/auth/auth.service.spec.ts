@@ -3,12 +3,18 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { UserService } from '../user/user.service';
+import { PermissionService } from '../permission/permission.service';
 
 const mockUserService = {
   validateUser: jest.fn(),
   findOne: jest.fn(),
   findByUsername: jest.fn(),
   getPermissionCodes: jest.fn(),
+};
+
+const mockPermissionService = {
+  // 默认返回空并集，具体用例按需 mockResolvedValue 覆盖
+  resolveUserPermissionCodes: jest.fn(() => Promise.resolve([])),
 };
 
 const mockJwtService = {
@@ -31,6 +37,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         { provide: UserService, useValue: mockUserService },
+        { provide: PermissionService, useValue: mockPermissionService },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -94,13 +101,14 @@ describe('AuthService', () => {
   });
 
   describe('refreshToken', () => {
-    it('刷新 token 时保留 username 和权限', async () => {
+    it('刷新 token 时保留 username 和权限（角色权限 ∪ 用户直赋权限的并集）', async () => {
       mockJwtService.verify.mockReturnValue({ sub: 1, username: 'john' });
       mockUserService.findOne.mockResolvedValue({ id: 1, username: 'john', role: 'admin' });
-      mockUserService.getPermissionCodes.mockResolvedValue(['admin:role:read']);
+      mockPermissionService.resolveUserPermissionCodes.mockResolvedValue(['admin:role:read']);
 
       await service.refreshToken('refresh.jwt.token');
 
+      expect(mockPermissionService.resolveUserPermissionCodes).toHaveBeenCalledWith(1);
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(1, {
         sub: 1,
         username: 'john',

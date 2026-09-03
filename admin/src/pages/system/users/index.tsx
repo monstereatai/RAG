@@ -1,17 +1,55 @@
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Checkbox, DatePicker, Input, Result, Select, Skeleton, Space, Table, Tag } from 'antd';
+import {
+  Button,
+  Checkbox,
+  DatePicker,
+  Input,
+  Modal,
+  Result,
+  Select,
+  Skeleton,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Tree,
+  message,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { DataNode } from 'antd/es/tree';
 import React, { useCallback, useEffect, useState } from 'react';
-import { getUsers, type UserItem } from './service';
+import {
+  getPermissionOptions,
+  getUserDirectPermissions,
+  getUsers,
+  grantUserPermissions,
+  revokeUserPermissions,
+  type DirectPermissionItem,
+  type PermissionOption,
+  type UserItem,
+} from './service';
 import { ModulePage, systemNav } from '@/components/AdminShell';
 
 type PageState = 'loading' | 'data' | 'error' | 'empty';
 
 type DisplayUser = UserItem & { name?: string; department?: string };
 
+/** 权限树节点 key 约定：分组节点用 `group:` 前缀，叶子节点用权限 ID */
+const GROUP_KEY_PREFIX = 'group:';
+
 const Users: React.FC = () => {
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
+
+  // 「直接授权」弹窗状态
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [grantUser, setGrantUser] = useState<DisplayUser | null>(null);
+  const [grantLoading, setGrantLoading] = useState(false);
+  const [grantSaving, setGrantSaving] = useState(false);
+  const [grantTreeData, setGrantTreeData] = useState<DataNode[]>([]);
+  // initialKeys 记录打开时的直赋权限，保存时与其做差量（授予/撤销）
+  const [grantInitialKeys, setGrantInitialKeys] = useState<number[]>([]);
+  const [grantCheckedKeys, setGrantCheckedKeys] = useState<number[]>([]);
 
   const fetchUsers = useCallback(() => {
     setPageState('loading');
@@ -37,6 +75,94 @@ const Users: React.FC = () => {
     fetchUsers();
   }, [fetchUsers]);
 
+  // ===== 直接授权：权限树构建 + 勾选保存（授予/撤销差量提交） =====
+
+  /** 把平铺权限列表按 code 中段（如 admin:documents:read -> documents）分组成树 */
+  const buildPermissionTree = (permissions: PermissionOption[]): DataNode[] => {
+    const groups = new Map<string, DataNode[]>();
+    permissions.forEach((permission) => {
+      const moduleKey = permission.code.split(':')[1] ?? 'other';
+      const children = groups.get(moduleKey) ?? [];
+      children.push({
+        title: `${permission.name} (${permission.code})`,
+        key: String(permission.id),
+      });
+      groups.set(moduleKey, children);
+    });
+    return Array.from(groups.entries()).map(([moduleKey, children]) => ({
+      title: moduleKey,
+      key: `${GROUP_KEY_PREFIX}${moduleKey}`,
+      children,
+    }));
+  };
+
+  const openGrantModal = async (record: DisplayUser) => {
+    setGrantUser(record);
+    setGrantOpen(true);
+    setGrantLoading(true);
+    setGrantTreeData([]);
+    setGrantInitialKeys([]);
+    setGrantCheckedKeys([]);
+    try {
+      // 并行拉取全量权限（建树）与该用户直赋权限（回显勾选）
+      const [permissionRes, directRes] = await Promise.all([
+        getPermissionOptions(),
+        getUserDirectPermissions(record.id),
+      ]);
+      const permissionList: PermissionOption[] = ((permissionRes as any)?.data ??
+        permissionRes ??
+        []) as PermissionOption[];
+      const directList: DirectPermissionItem[] = ((directRes as any)?.data ??
+        directRes ??
+        []) as DirectPermissionItem[];
+      const directIds = directList.map((item) => Number(item.permissionId));
+      setGrantTreeData(buildPermissionTree(permissionList));
+      setGrantInitialKeys(directIds);
+      setGrantCheckedKeys(directIds);
+    } catch (e) {
+      message.error('权限加载失败');
+      setGrantOpen(false);
+    } finally {
+      setGrantLoading(false);
+    }
+  };
+
+  const handleGrantCheck = (checked: any) => {
+    const keys = Array.isArray(checked) ? checked : checked?.checked ?? [];
+    // 只保留叶子节点（权限 ID），分组节点不参与保存
+    setGrantCheckedKeys(
+      keys
+        .filter((key: any) => !String(key).startsWith(GROUP_KEY_PREFIX))
+        .map((key: any) => Number(key)),
+    );
+  };
+
+  const handleGrantSave = async () => {
+    if (!grantUser) return;
+    const toGrant = grantCheckedKeys.filter((id) => !grantInitialKeys.includes(id));
+    const toRevoke = grantInitialKeys.filter((id) => !grantCheckedKeys.includes(id));
+    if (toGrant.length === 0 && toRevoke.length === 0) {
+      message.info('权限未发生变化');
+      setGrantOpen(false);
+      return;
+    }
+    setGrantSaving(true);
+    try {
+      if (toGrant.length > 0) {
+        await grantUserPermissions(grantUser.id, toGrant);
+      }
+      if (toRevoke.length > 0) {
+        await revokeUserPermissions(grantUser.id, toRevoke);
+      }
+      message.success('直接授权已保存，用户重新登录/刷新令牌后生效');
+      setGrantOpen(false);
+    } catch (e) {
+      message.error('保存失败，请重试');
+    } finally {
+      setGrantSaving(false);
+    }
+  };
+
   const columns: ColumnsType<DisplayUser> = [
     { title: <Checkbox />, width: 48, render: () => <Checkbox /> },
     { title: '用户ID', dataIndex: 'id', width: 110 },
@@ -60,11 +186,11 @@ const Users: React.FC = () => {
     { title: '创建时间', dataIndex: 'createdAt', width: 180 },
     {
       title: '操作',
-      width: 160,
+      width: 220,
       render: (_, record) => (
         <Space>
+          <Button type="link" onClick={() => openGrantModal(record)}>直接授权</Button>
           <Button type="link">编辑</Button>
-          <Button type="link">{record.status === 'inactive' ? '启用' : '禁用'}</Button>
           <Button danger type="link">删除</Button>
         </Space>
       ),
@@ -127,6 +253,35 @@ const Users: React.FC = () => {
       <div className="rag-panel system-panel">
         {renderBody()}
       </div>
+
+      {/* 直接授权弹窗：勾选的权限写入 user_permissions（用户直赋权限） */}
+      <Modal
+        title={`直接授权 - ${grantUser?.username ?? ''}`}
+        open={grantOpen}
+        onOk={handleGrantSave}
+        onCancel={() => setGrantOpen(false)}
+        okText="保存"
+        confirmLoading={grantSaving}
+        width={520}
+        destroyOnHidden
+      >
+        <p style={{ color: '#999', marginTop: 0 }}>
+          仅维护「用户直赋权限」，最终生效权限 = 角色权限 ∪ 直赋权限
+        </p>
+        <Spin spinning={grantLoading}>
+          <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+            {!grantLoading && grantTreeData.length > 0 && (
+              <Tree
+                key={grantUser?.id ?? 'tree'}
+                checkable
+                defaultExpandAll
+                onCheck={handleGrantCheck}
+                treeData={grantTreeData}
+              />
+            )}
+          </div>
+        </Spin>
+      </Modal>
     </div></ModulePage>
   );
 };

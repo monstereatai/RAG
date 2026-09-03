@@ -22,6 +22,7 @@ import { SystemConfigModule } from '../modules/system-config/system-config.modul
 import { AccountSecurityModule } from '../modules/account-security/account-security.module';
 import { AdminMenusModule } from '../modules/admin-menus/admin-menus.module';
 import { MenusModule } from '../modules/menus/menus.module';
+import { TeamsModule } from '../modules/teams/teams.module';
 import { SearchOpsModule } from '../modules/search-ops/search-ops.module';
 import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
 import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
@@ -53,6 +54,7 @@ import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
     AccountSecurityModule,
     AdminMenusModule,
     MenusModule,
+    TeamsModule,
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,
@@ -83,6 +85,7 @@ import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
     AccountSecurityModule,
     AdminMenusModule,
     MenusModule,
+    TeamsModule,
     SearchOpsModule,
     QaOpsModule,
     GraphOpsModule,

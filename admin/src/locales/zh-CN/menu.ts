@@ -22,6 +22,7 @@ export default {
   'menu.graph-ops.graph-ops-stats': '图谱统计',
   'menu.system': '系统管理',
   'menu.system.users': '用户管理',
+  'menu.system.teams': '组织架构',
   'menu.system.roles': '角色管理',
   'menu.system.permissions': '权限管理',
   'menu.system.config': '系统配置',

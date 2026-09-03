@@ -35,5 +35,9 @@ export default function access(
     canReadNotifications: hasPermission('admin:notifications:read'),
     canWriteNotifications: hasPermission('admin:notifications:write'),
     canReadAccountSecurity: hasPermission('admin:account-security:read'),
+    // 团队/部门组织架构
+    canManageTeams: hasPermission('admin:team:read'),
+    // 用户直接赋权（角色权限 ∪ 直赋权限）
+    canAssignUserPermissions: hasPermission('admin:permission:update'),
   };
 }

@@ -8,6 +8,9 @@ import { Order } from './entities/order.entity';
 import { Payment } from './entities/payment.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { Notification } from './entities/notification.entity';
+import { Team } from './entities/team.entity';
+import { TeamMember } from './entities/team-member.entity';
+import { UserPermission } from './entities/user-permission.entity';
 import { ShardingService } from './sharding/sharding.service';
 
 const databaseEnabled = isDatabaseEnabled();
@@ -21,7 +24,7 @@ const databaseEnabled = isDatabaseEnabled();
               const baseConfig = {
                 type: 'mysql' as const,
                 database: process.env.DB_DATABASE || 'nestjs_enterprise',
-                entities: [User, Role, Permission, Order, Payment, AuditLog, Notification],
+                entities: [User, Role, Permission, Order, Payment, AuditLog, Notification, Team, TeamMember, UserPermission],
                 synchronize: process.env.DB_SYNCHRONIZE === 'true',
                 logging: process.env.DB_LOGGING === 'true',
                 retryAttempts: 1,
@@ -61,7 +64,7 @@ const databaseEnabled = isDatabaseEnabled();
               };
             },
           }),
-          TypeOrmModule.forFeature([User, Role, Permission, Order, Payment, AuditLog, Notification]),
+          TypeOrmModule.forFeature([User, Role, Permission, Order, Payment, AuditLog, Notification, Team, TeamMember, UserPermission]),
         ]
       : []),
   ],

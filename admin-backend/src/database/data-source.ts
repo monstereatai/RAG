@@ -22,6 +22,9 @@ import { Order } from './entities/order.entity';
 import { Payment } from './entities/payment.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { Notification } from './entities/notification.entity';
+import { Team } from './entities/team.entity';
+import { TeamMember } from './entities/team-member.entity';
+import { UserPermission } from './entities/user-permission.entity';
 
 // CLI 默认读取开发配置；容器和 CI 通过环境变量覆盖。
 dotenv.config({ path: `.env.${process.env.NODE_ENV || 'development'}`, quiet: true });
@@ -34,7 +37,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME || 'root',
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE || 'nestjs_enterprise',
-  entities: [User, Role, Permission, Order, Payment, AuditLog, Notification],
+  entities: [User, Role, Permission, Order, Payment, AuditLog, Notification, Team, TeamMember, UserPermission],
   migrations: [`${__dirname}/migrations/*{.ts,.js}`],
   // 生产环境 CLI 迁移时 synchronize 必须为 false
   synchronize: false,

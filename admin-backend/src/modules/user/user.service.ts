@@ -50,6 +50,10 @@ export class UserService {
       'admin:notifications:read',
       'admin:notifications:write',
       'admin:account-security:read',
+      'admin:team:read',
+      'admin:team:create',
+      'admin:team:update',
+      'admin:team:delete',
     ];
 
     this.users = [
@@ -183,6 +187,13 @@ export class UserService {
     return null;
   }
 
+  /**
+   * 仅展开「角色权限」 codes。
+   *
+   * 注意：完整的有效权限解析（角色权限 ∪ 用户直赋权限的并集）
+   * 已收敛到 PermissionService.resolveUserPermissionCodes，
+   * 登录/刷新令牌走那里；本方法保留给只关心角色权限的调用方。
+   */
   async getPermissionCodes(id: number): Promise<string[]> {
     const user = await this.findOne(id);
     if (!user?.roles) {

@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
+import { PermissionService } from '../permission/permission.service';
 
 @Injectable()
 export class AuthService {
@@ -9,6 +10,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly userService: UserService,
     private readonly configService: ConfigService,
+    private readonly permissionService: PermissionService,
   ) {}
 
   /**
@@ -27,14 +29,22 @@ export class AuthService {
   }
 
   /**
-   * 生成 JWT access_token，payload 携带 userId / username / role。
+   * 生成 JWT access_token，payload 携带 userId / username / role / permissions。
+   *
+   * permissions 为用户有效权限：
+   *   角色权限 ∪ 用户直赋权限（并集，见 PermissionService.resolveUserPermissionCodes）。
+   * 内存模式登录时上游可能已带扁平 permissions（历史约定），为避免重复查询直接沿用。
    */
   async login(user: { id: number; username: string; role?: string; permissions?: string[] }) {
+    const permissions = user.permissions?.length
+      ? user.permissions
+      : await this.permissionService.resolveUserPermissionCodes(user.id);
+
     const payload = {
       sub: user.id,
       username: user.username,
       role: user.role ?? 'user',
-      permissions: user.permissions ?? [],
+      permissions,
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -67,7 +77,9 @@ export class AuthService {
         id: user.id,
         username: user.username,
         role: user.role,
-        permissions: await this.userService.getPermissionCodes(user.id),
+        // 刷新令牌时重新解析有效权限（角色权限 ∪ 用户直赋权限），
+        // 保证授权变更在 token 刷新后即时生效
+        permissions: await this.permissionService.resolveUserPermissionCodes(user.id),
       });
     } catch (e) {
       throw new UnauthorizedException('token 失效，请重新登录');

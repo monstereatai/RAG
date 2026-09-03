@@ -159,6 +159,7 @@ export const accountNav: SideNavItem[] = [
 
 export const systemNav: SideNavItem[] = [
   { key: 'users', label: '用户管理', icon: <UserOutlined />, path: '/system/users' },
+  { key: 'teams', label: '组织架构', icon: <TeamOutlined />, path: '/system/teams' },
   { key: 'roles', label: '角色权限', icon: <AuditOutlined />, path: '/system/roles' },
   { key: 'permissions', label: '权限管理', icon: <LockOutlined />, path: '/system/permissions' },
   { key: 'config', label: '系统配置', icon: <SettingOutlined />, path: '/system/config' },
