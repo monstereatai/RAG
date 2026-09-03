@@ -1,0 +1,188 @@
+{
+  "schema_version": 2,
+  "base_commit": "e4028205df8d2e2131697f224b454f9a2700558b",
+  "initial_snapshots": {
+    "\"Users/monster/Documents/GitHub/code/RAG/docs/interview/\\345\\274\\200\\346\\272\\220\\351\\241\\271\\347\\233\\256\\345\\217\\202\\350\\200\\203\\350\\203\\275\\345\\212\\233\\345\\275\\222\\346\\241\\243.md\"": {
+      "kind": "missing"
+    },
+    "\"\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.png\"": {
+      "kind": "missing"
+    },
+    "\"\\346\\234\\252\\345\\221\\275\\345\\220\\215 1.base\"": {
+      "kind": "missing"
+    },
+    "\"\\346\\234\\252\\345\\221\\275\\345\\220\\215.base\"": {
+      "kind": "missing"
+    },
+    "\"\\346\\234\\252\\345\\221\\275\\345\\220\\215.canvas\"": {
+      "kind": "missing"
+    },
+    "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"": {
+      "kind": "missing"
+    },
+    ".obsidian/community-plugins.json": {
+      "kind": "file",
+      "sha256": "c5f6883961eabd7583a4199f38bcba79187479abf0ba3d3545a96e5f230fee77"
+    },
+    ".obsidian/plugins/config-sync/main.js": {
+      "kind": "file",
+      "sha256": "15d134d2e8cd9e619ed6a32db0f7687c2cba367414f129977b1fffc01f5200d4"
+    },
+    ".obsidian/plugins/config-sync/manifest.json": {
+      "kind": "file",
+      "sha256": "e26944cd765676415bbe9159746fb81466ac1804b30ba2bd00a85d3d392c5d35"
+    },
+    ".obsidian/plugins/config-sync/styles.css": {
+      "kind": "file",
+      "sha256": "8f16b14c7db41527e462e7402621df853154fdea0a5cae2f06b22a763b45bd03"
+    },
+    ".obsidian/plugins/mermaid-zoom/main.js": {
+      "kind": "file",
+      "sha256": "869779630868a8057e2d48690ee7a146df91ee704d44c98e573ed28e3ae40a45"
+    },
+    ".obsidian/plugins/mermaid-zoom/manifest.json": {
+      "kind": "file",
+      "sha256": "65f3b46a966dd72f7b47999b834f84727973624a6c2d196c5a874fca04e8d692"
+    },
+    ".obsidian/plugins/mermaid-zoom/styles.css": {
+      "kind": "file",
+      "sha256": "e1d6f5f7f06651330f2aa7e456086fb79f57d75834d5236f2cf6b8e1f8d25771"
+    },
+    ".obsidian/plugins/obsidian-vault-sync/main.js": {
+      "kind": "file",
+      "sha256": "84d8ca2a1bbea042db9483a80dc0f0152aa5d9040ac7ebb646ea0ced15cab3ab"
+    },
+    ".obsidian/plugins/obsidian-vault-sync/manifest.json": {
+      "kind": "file",
+      "sha256": "eaed71acc01928fa367a1eba150c0fb9980b06fa15a05226fb5167b8d80da70d"
+    },
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "3d839ec8242f6a4584650a860ca8261fa60c2f4e3afe4498772440757ee56d9b"
+    },
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "ce1aa35cc1db46c9250981bbf74f532815342fdeec9fee53906f3d000d8b9b03"
+    },
+    "admin-backend/.env.development": {
+      "kind": "file",
+      "sha256": "ef6dff56c2e59261f3675d6de02bcca7b6938492db88fa81003384cf272b53cd"
+    },
+    "admin-backend/.env.example": {
+      "kind": "file",
+      "sha256": "f94f9652647bd6693a936a357586133424861b810d1970f215f4dc020912b0af"
+    },
+    "admin-backend/.env.production": {
+      "kind": "file",
+      "sha256": "2d946feb42979e37872db190b632e3ea3d63ac00d4f47163a54eb6ec3eb962bd"
+    },
+    "admin-backend/src/modules/admin-documents/admin-documents.controller.ts": {
+      "kind": "file",
+      "sha256": "15f801cb4b03ed4ad037adebd61f69703330fdacbd771be09dd0927450dd6901"
+    },
+    "admin-backend/src/modules/rag-client/rag-client.service.ts": {
+      "kind": "file",
+      "sha256": "056db6e235da6fe1480a1188b7943d9743b7272340fa9f58dd7bdb9755638b8a"
+    },
+    "admin/src/pages/agent-ops/index.tsx": {
+      "kind": "file",
+      "sha256": "fe9cba2360c7a08bf4b97cbda0c47c7a8832f4a9ca7dc54503f064be451e6470"
+    },
+    "admin/src/pages/agent-ops/service.ts": {
+      "kind": "file",
+      "sha256": "2f32ef720dcf475e70323108f4d7544218d2333d63c9ad888d97e79eede223e8"
+    },
+    "admin/src/pages/documents/index.tsx": {
+      "kind": "file",
+      "sha256": "00907c446a18289a16b6a53320a2bc45f9daa144149b4a914b1bfe33c8cd7925"
+    },
+    "admin/src/pages/documents/service.ts": {
+      "kind": "file",
+      "sha256": "6fa8ca2787d65344acb51d14c5273c0442be4cabff26270ff8622be6379bfbc9"
+    },
+    "backend/src/migrations/1787100000000-AddBadCaseKnowledgePromotion.ts": {
+      "kind": "file",
+      "sha256": "baf6aee54438bbf8d62e442fab07ac51222c25fbc6440624dbf9a1fdbd5d4999"
+    },
+    "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts": {
+      "kind": "file",
+      "sha256": "d577f42540d28639d92eda06bfaae8ba9c80307876cf7d2bd39af8a6695f4434"
+    },
+    "backend/src/modules/chat/chat.module.ts": {
+      "kind": "file",
+      "sha256": "d825097a04b7acd74a66545609923315f5c132c6227f6cca6442d3d0ec92a39b"
+    },
+    "backend/src/modules/chat/chat.service.ts": {
+      "kind": "file",
+      "sha256": "b0b59e4716ceb9ff419f6aa4e411bf91930b0bbdf846c793e390dd423f002681"
+    },
+    "backend/src/modules/chat/rag-feedback.service.spec.ts": {
+      "kind": "file",
+      "sha256": "2c11966b4e62cf8f47b98fdb48a2756329d452e4d2ebb28df0a814cf8f3d126d"
+    },
+    "backend/src/modules/chat/rag-feedback.service.ts": {
+      "kind": "file",
+      "sha256": "ab449055fcd3cad07315a1842102d1cf39fed305ac28295aa39e5d3636c4e7af"
+    },
+    "backend/src/modules/document/document.service.ts": {
+      "kind": "file",
+      "sha256": "c39cbc014b904e4b3be090443c171361fa1f5c0fa74ec7592d0b1e3144da4cba"
+    },
+    "backend/src/modules/obsidian/obsidian-knowledge.service.ts": {
+      "kind": "file",
+      "sha256": "d881950440271585fb9f5b6008e03e47ec967d466f6521199462f622cc823473"
+    },
+    "backend/src/modules/rag-admin/rag-admin.controller.ts": {
+      "kind": "file",
+      "sha256": "b516f76a2069b429175a2aa875ee4daa0aa29a88786af3798ef8a3d50cf83819"
+    },
+    "backend/src/modules/rag-admin/rag-admin.service.spec.ts": {
+      "kind": "file",
+      "sha256": "fd27a278907c41b7f02c6e771204e31779dba34dc94d54f722dab5d0225a4db4"
+    },
+    "backend/src/modules/rag-admin/rag-admin.service.ts": {
+      "kind": "file",
+      "sha256": "0ba663194798071175aaa345c12ea940ab3a5acd6e35ac80fe7642803dc7b4d5"
+    },
+    "backend/src/providers/db/entities/rag-feedback.entity.ts": {
+      "kind": "file",
+      "sha256": "0e5bd9ad3df1c0ab2fdf06b82ab66949b87a7457d2809f28e37103918f260148"
+    },
+    "backend/src/rag/agentic/agentic-rag.service.ts": {
+      "kind": "file",
+      "sha256": "2041f31d8ba67eb35080d101a69a798b252af1dacc1d3db4e0e41258d0829ad2"
+    },
+    "backend/src/rag/agentic/agentic-rag.state.ts": {
+      "kind": "file",
+      "sha256": "112ee1c31c5c308c2df823c50fc48e5bbbde18acc4c902ec089b6d9c3ef033aa"
+    },
+    "backend/src/rag/karpathy/karpathy-rag.service.ts": {
+      "kind": "file",
+      "sha256": "c82ee8dc3d45b8a00135ce0e27402cd484a6cf9d5cf18fa16f02df5d38510c89"
+    },
+    "backend/src/rag/prompts/bad-case-flywheel.service.spec.ts": {
+      "kind": "file",
+      "sha256": "115945564fd61d0a1115388be8e1d4b2e0267d3e1e715c5090fe31b573d6f790"
+    },
+    "backend/src/rag/prompts/bad-case-flywheel.service.ts": {
+      "kind": "file",
+      "sha256": "fac144db42bcd83a4bdd3af8a2fa677953cb7c8e89285b1cb1b56fa7bd5bb134"
+    },
+    "backend/src/rag/prompts/prompt-injection.guard.spec.ts": {
+      "kind": "file",
+      "sha256": "786bd49905806a4f4d90304372f1290410a1941f48f7d53b35bc2edf12984ef5"
+    },
+    "backend/src/rag/prompts/prompt-injection.guard.ts": {
+      "kind": "file",
+      "sha256": "356ae07be5871855040ff631815e7d2d265b535ab2984d96009f57ca88982bdb"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "05aa201e0ea831a4844498b195470abd8dc284c9c829081a715f850da55f3483"
+    }
+  },
+  "internal_patterns": [
+    "specs/001-version-lifecycle-switch/**",
+    "specs/001-version-lifecycle-switch/scope-baseline-T003.json"
+  ]
+}

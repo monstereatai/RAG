@@ -1,0 +1,621 @@
+{
+  "schema_version": 2,
+  "change_id": "001-version-lifecycle-switch",
+  "mode": "standard",
+  "status": "verifying",
+  "current_task": null,
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/001-version-lifecycle-switch/spec.md",
+    "plan": "specs/001-version-lifecycle-switch/plan.md",
+    "tasks": "specs/001-version-lifecycle-switch/tasks.md",
+    "verify": "specs/001-version-lifecycle-switch/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "off"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-08-31T02:06:14Z",
+      "approver": "主人",
+      "evidence": "用户明确回复：可以。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-08-31T02:06:14Z",
+      "approver": "主人",
+      "evidence": "用户明确回复：可以。",
+      "review_report": null
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "创建新版本不影响当前有效版本。"
+    },
+    "AC-02": {
+      "description": "管理员可切换生效版本。"
+    },
+    "AC-03": {
+      "description": "回滚使用同一切换规则。"
+    },
+    "AC-04": {
+      "description": "后台可见且可操作版本切换。"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "allowed_paths": [
+        "backend/src/modules/document/document.service.ts",
+        "backend/src/modules/rag-admin/rag-admin.service.ts",
+        "backend/src/modules/rag-admin/rag-admin.controller.ts",
+        "backend/src/modules/rag-admin/rag-admin.service.spec.ts",
+        ".obsidian/workspace.json"
+      ],
+      "commands": [
+        "pnpm --filter backend test -- rag-admin.service.spec.ts --runInBand"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T001-unit"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-baseline-T001.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/001-version-lifecycle-switch/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-report-T001.json",
+        "sha256": "886f52120b95c62bcdef041b8962ad0dc3d96b5a32bd136d038ee4dcda4970df"
+      }
+    },
+    "T002": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "admin-backend/src/modules/rag-client/rag-client.service.ts",
+        "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+        "admin/src/pages/documents/service.ts",
+        "admin/src/pages/documents/index.tsx",
+        ".obsidian/workspace.json"
+      ],
+      "commands": [
+        "pnpm --filter admin-backend exec tsc --noEmit && pnpm --filter admin exec tsc --noEmit && pnpm --filter admin build"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T002-build"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-baseline-T002.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/001-version-lifecycle-switch/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-report-T002.json",
+        "sha256": "6f2f8be38dfefac21bf8dd7d0d6615e2ac934230b28adffadc02fc9857421790"
+      }
+    },
+    "T003": {
+      "depends_on": [
+        "T001",
+        "T002"
+      ],
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "allowed_paths": [
+        "docs/interview/功能步骤流程.md",
+        "ROADMAP.md",
+        "specs/001-version-lifecycle-switch/verify.md",
+        ".obsidian/workspace.json"
+      ],
+      "commands": [
+        "pnpm --filter backend exec tsc --noEmit && pnpm --filter backend build && git diff --check -- backend/src/modules/document/document.service.ts backend/src/modules/rag-admin/rag-admin.service.ts backend/src/modules/rag-admin/rag-admin.controller.ts backend/src/modules/rag-admin/rag-admin.service.spec.ts admin-backend/src/modules/rag-client/rag-client.service.ts admin-backend/src/modules/admin-documents/admin-documents.controller.ts admin/src/pages/documents/service.ts admin/src/pages/documents/index.tsx docs/interview/功能步骤流程.md ROADMAP.md"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T003-backend-scoped"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-baseline-T003.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/001-version-lifecycle-switch/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-report-T003.json",
+        "sha256": "00cdcd94647d86d6cace770dfad0abb24b6318dcf121b3cb16f94c82f4a200f4"
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "T001-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "command": "pnpm --filter backend test -- rag-admin.service.spec.ts --runInBand",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-08-31T02:09:07Z",
+      "duration_ms": 2428,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/001-version-lifecycle-switch/evidence/T001-unit.stdout.log",
+      "stderr_log": "specs/001-version-lifecycle-switch/evidence/T001-unit.stderr.log",
+      "git": {
+        "head": "e4028205df8d2e2131697f224b454f9a2700558b",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "admin-backend/.env.development",
+          "admin-backend/.env.example",
+          "admin-backend/.env.production",
+          "admin/src/pages/agent-ops/index.tsx",
+          "admin/src/pages/agent-ops/service.ts",
+          "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "backend/src/modules/chat/chat.module.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/chat/rag-feedback.service.spec.ts",
+          "backend/src/modules/chat/rag-feedback.service.ts",
+          "backend/src/modules/document/document.service.ts",
+          "backend/src/modules/obsidian/obsidian-knowledge.service.ts",
+          "backend/src/modules/rag-admin/rag-admin.controller.ts",
+          "backend/src/modules/rag-admin/rag-admin.service.ts",
+          "backend/src/providers/db/entities/rag-feedback.entity.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/agentic/agentic-rag.state.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.spec.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.ts",
+          "backend/src/rag/prompts/prompt-injection.guard.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "1c6eed716b1b4b376b6ea9a355c624fc144cba372b4684f52004437a7a12d68c"
+      }
+    },
+    {
+      "id": "T002-build",
+      "type": "command",
+      "kind": "build",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "command": "pnpm --filter admin-backend exec tsc --noEmit && pnpm --filter admin exec tsc --noEmit && pnpm --filter admin build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-08-31T02:11:34Z",
+      "duration_ms": 3225,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/001-version-lifecycle-switch/evidence/T002-build.stdout.log",
+      "stderr_log": "specs/001-version-lifecycle-switch/evidence/T002-build.stderr.log",
+      "git": {
+        "head": "e4028205df8d2e2131697f224b454f9a2700558b",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "admin-backend/.env.development",
+          "admin-backend/.env.example",
+          "admin-backend/.env.production",
+          "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+          "admin-backend/src/modules/rag-client/rag-client.service.ts",
+          "admin/src/pages/agent-ops/index.tsx",
+          "admin/src/pages/agent-ops/service.ts",
+          "admin/src/pages/documents/index.tsx",
+          "admin/src/pages/documents/service.ts",
+          "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "backend/src/modules/chat/chat.module.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/chat/rag-feedback.service.spec.ts",
+          "backend/src/modules/chat/rag-feedback.service.ts",
+          "backend/src/modules/document/document.service.ts",
+          "backend/src/modules/obsidian/obsidian-knowledge.service.ts",
+          "backend/src/modules/rag-admin/rag-admin.controller.ts",
+          "backend/src/modules/rag-admin/rag-admin.service.ts",
+          "backend/src/providers/db/entities/rag-feedback.entity.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/agentic/agentic-rag.state.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.spec.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.ts",
+          "backend/src/rag/prompts/prompt-injection.guard.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "3f50c03b8df71d0f64ade65d4ba29939248e5641710e12b8fda3785f6738a358"
+      }
+    },
+    {
+      "id": "T003-backend",
+      "type": "command",
+      "kind": "build",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "pnpm --filter backend exec tsc --noEmit && pnpm --filter backend build && git diff --check",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-08-31T02:13:02Z",
+      "duration_ms": 11346,
+      "exit_code": 2,
+      "result": "fail",
+      "stdout_log": "specs/001-version-lifecycle-switch/evidence/T003-backend.stdout.log",
+      "stderr_log": "specs/001-version-lifecycle-switch/evidence/T003-backend.stderr.log",
+      "git": {
+        "head": "e4028205df8d2e2131697f224b454f9a2700558b",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "admin-backend/.env.development",
+          "admin-backend/.env.example",
+          "admin-backend/.env.production",
+          "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+          "admin-backend/src/modules/rag-client/rag-client.service.ts",
+          "admin/src/pages/agent-ops/index.tsx",
+          "admin/src/pages/agent-ops/service.ts",
+          "admin/src/pages/documents/index.tsx",
+          "admin/src/pages/documents/service.ts",
+          "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "backend/src/modules/chat/chat.module.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/chat/rag-feedback.service.spec.ts",
+          "backend/src/modules/chat/rag-feedback.service.ts",
+          "backend/src/modules/document/document.service.ts",
+          "backend/src/modules/obsidian/obsidian-knowledge.service.ts",
+          "backend/src/modules/rag-admin/rag-admin.controller.ts",
+          "backend/src/modules/rag-admin/rag-admin.service.ts",
+          "backend/src/providers/db/entities/rag-feedback.entity.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/agentic/agentic-rag.state.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.spec.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.ts",
+          "backend/src/rag/prompts/prompt-injection.guard.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "a495631d7581dc7bf06fe3c4bd706c1991f0b50a04ae6bbdb3bb6ce483513141"
+      }
+    },
+    {
+      "id": "T003-backend-scoped",
+      "type": "command",
+      "kind": "build",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "pnpm --filter backend exec tsc --noEmit && pnpm --filter backend build && git diff --check -- backend/src/modules/document/document.service.ts backend/src/modules/rag-admin/rag-admin.service.ts backend/src/modules/rag-admin/rag-admin.controller.ts backend/src/modules/rag-admin/rag-admin.service.spec.ts admin-backend/src/modules/rag-client/rag-client.service.ts admin-backend/src/modules/admin-documents/admin-documents.controller.ts admin/src/pages/documents/service.ts admin/src/pages/documents/index.tsx docs/interview/功能步骤流程.md ROADMAP.md",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-08-31T02:14:24Z",
+      "duration_ms": 10756,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/001-version-lifecycle-switch/evidence/T003-backend-scoped.stdout.log",
+      "stderr_log": "specs/001-version-lifecycle-switch/evidence/T003-backend-scoped.stderr.log",
+      "git": {
+        "head": "e4028205df8d2e2131697f224b454f9a2700558b",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "admin-backend/.env.development",
+          "admin-backend/.env.example",
+          "admin-backend/.env.production",
+          "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+          "admin-backend/src/modules/rag-client/rag-client.service.ts",
+          "admin/src/pages/agent-ops/index.tsx",
+          "admin/src/pages/agent-ops/service.ts",
+          "admin/src/pages/documents/index.tsx",
+          "admin/src/pages/documents/service.ts",
+          "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "backend/src/modules/chat/chat.module.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/chat/rag-feedback.service.spec.ts",
+          "backend/src/modules/chat/rag-feedback.service.ts",
+          "backend/src/modules/document/document.service.ts",
+          "backend/src/modules/obsidian/obsidian-knowledge.service.ts",
+          "backend/src/modules/rag-admin/rag-admin.controller.ts",
+          "backend/src/modules/rag-admin/rag-admin.service.ts",
+          "backend/src/providers/db/entities/rag-feedback.entity.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/agentic/agentic-rag.state.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.spec.ts",
+          "backend/src/rag/prompts/bad-case-flywheel.service.ts",
+          "backend/src/rag/prompts/prompt-injection.guard.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "b0cb673228c00d242219dd52fd022195c6f3b8f4729bbc02e3e2450958cf854a"
+      }
+    },
+    {
+      "id": "AC-01-review",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "observer": "Codex",
+      "evidence": "T001-unit 通过；新版本创建固定为 draft，上传阶段不再废弃旧版本。",
+      "result": "pass",
+      "at": "2026-08-31T02:15:43Z"
+    },
+    {
+      "id": "AC-02-review",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "observer": "Codex",
+      "evidence": "T001-unit 与 T003-backend-scoped 通过；生效接口以 PostgreSQL 事务切换同链生命周期。",
+      "result": "pass",
+      "at": "2026-08-31T02:15:43Z"
+    },
+    {
+      "id": "AC-03-review",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "observer": "Codex",
+      "evidence": "T001-unit 通过；rollbackDocumentVersion 复用 promoteDocumentVersion。",
+      "result": "pass",
+      "at": "2026-08-31T02:15:43Z"
+    },
+    {
+      "id": "AC-04-review",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "observer": "Codex",
+      "evidence": "T002-build 通过；版本弹窗按状态显示设为生效、废弃或回滚。",
+      "result": "pass",
+      "at": "2026-08-31T02:15:43Z"
+    },
+    {
+      "id": "AC-01-integration",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "observer": "Codex",
+      "evidence": "本地 RAG 接口创建 df06851f-9018-48f7-b8eb-b8e680dff918，返回 lifecycleStatus=draft、chunkCount=1，父版本仍为 effective。",
+      "result": "pass",
+      "at": "2026-08-31T05:12:45Z"
+    },
+    {
+      "id": "AC-02-integration",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "observer": "Codex",
+      "evidence": "POST /rag/admin/documents/df06851f-9018-48f7-b8eb-b8e680dff918/promote 返回 effective，父版本变为 deprecated。",
+      "result": "pass",
+      "at": "2026-08-31T05:12:45Z"
+    },
+    {
+      "id": "AC-03-integration",
+      "type": "observation",
+      "task": null,
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "observer": "Codex",
+      "evidence": "POST /rag/admin/documents/dd695e43-8242-42ba-a0b4-ea6938e11db2/rollback 后父版本恢复 effective，测试版本恢复 deprecated。",
+      "result": "pass",
+      "at": "2026-08-31T05:12:45Z"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "基于已确认需求建立 Spec。"
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户明确回复：可以。"
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "基于已批准方案登记实现任务。"
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T002."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T003."
+    },
+    {
+      "at": "2026-08-31T02:06:14Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by 主人: 用户明确回复：可以。"
+    },
+    {
+      "at": "2026-08-31T02:06:25Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    },
+    {
+      "at": "2026-08-31T02:09:09Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-unit: pass (pnpm --filter backend test -- rag-admin.service.spec.ts --runInBand)"
+    },
+    {
+      "at": "2026-08-31T02:09:53Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T001 with T001-unit."
+    },
+    {
+      "at": "2026-08-31T02:09:53Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T002."
+    },
+    {
+      "at": "2026-08-31T02:11:37Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-build: pass (pnpm --filter admin-backend exec tsc --noEmit && pnpm --filter admin exec tsc --noEmit && pnpm --filter admin build)"
+    },
+    {
+      "at": "2026-08-31T02:11:59Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T002 with T002-build."
+    },
+    {
+      "at": "2026-08-31T02:11:59Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T003."
+    },
+    {
+      "at": "2026-08-31T02:13:13Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T003-backend: fail (pnpm --filter backend exec tsc --noEmit && pnpm --filter backend build && git diff --check)"
+    },
+    {
+      "at": "2026-08-31T02:14:35Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T003-backend-scoped: pass (pnpm --filter backend exec tsc --noEmit && pnpm --filter backend build && git diff --check -- backend/src/modules/document/document.service.ts backend/src/modules/rag-admin/rag-admin.service.ts backend/src/modules/rag-admin/rag-admin.controller.ts backend/src/modules/rag-admin/rag-admin.service.spec.ts admin-backend/src/modules/rag-client/rag-client.service.ts admin-backend/src/modules/admin-documents/admin-documents.controller.ts admin/src/pages/documents/service.ts admin/src/pages/documents/index.tsx docs/interview/功能步骤流程.md ROADMAP.md)"
+    },
+    {
+      "at": "2026-08-31T02:14:53Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T003 with T003-backend-scoped."
+    },
+    {
+      "at": "2026-08-31T02:14:53Z",
+      "action": "begin_verify",
+      "status": "verifying",
+      "note": "All registered tasks are complete."
+    },
+    {
+      "at": "2026-08-31T02:15:43Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-01-review: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T02:15:43Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-02-review: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T02:15:43Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-03-review: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T02:15:43Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-04-review: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T05:12:45Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-01-integration: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T05:12:45Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-02-integration: pass by Codex"
+    },
+    {
+      "at": "2026-08-31T05:12:45Z",
+      "action": "record_observation",
+      "status": "verifying",
+      "note": "AC-03-integration: pass by Codex"
+    }
+  ],
+  "created_at": "2026-08-31T02:06:14Z",
+  "updated_at": "2026-08-31T05:12:45Z"
+}

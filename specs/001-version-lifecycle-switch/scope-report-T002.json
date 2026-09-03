@@ -1,0 +1,33 @@
+{
+  "base_commit": "e4028205df8d2e2131697f224b454f9a2700558b",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/001-version-lifecycle-switch/scope-baseline-T002.json",
+  "new_files": [
+    "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+    "admin-backend/src/modules/rag-client/rag-client.service.ts",
+    "admin/src/pages/documents/index.tsx",
+    "admin/src/pages/documents/service.ts"
+  ],
+  "modified_preexisting_files": [
+    ".obsidian/workspace.json"
+  ],
+  "touched_files": [
+    "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+    "admin-backend/src/modules/rag-client/rag-client.service.ts",
+    "admin/src/pages/documents/index.tsx",
+    "admin/src/pages/documents/service.ts",
+    ".obsidian/workspace.json"
+  ],
+  "allow_patterns": [
+    "admin-backend/src/modules/rag-client/rag-client.service.ts",
+    "admin-backend/src/modules/admin-documents/admin-documents.controller.ts",
+    "admin/src/pages/documents/service.ts",
+    "admin/src/pages/documents/index.tsx",
+    ".obsidian/workspace.json"
+  ],
+  "internal_patterns": [
+    "specs/001-version-lifecycle-switch/**",
+    "specs/001-version-lifecycle-switch/scope-baseline-T002.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

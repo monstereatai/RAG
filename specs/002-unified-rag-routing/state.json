@@ -1,0 +1,248 @@
+{
+  "schema_version": 2,
+  "change_id": "002-unified-rag-routing",
+  "mode": "standard",
+  "status": "executing",
+  "current_task": "T001",
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/002-unified-rag-routing/spec.md",
+    "plan": "specs/002-unified-rag-routing/plan.md",
+    "tasks": "specs/002-unified-rag-routing/tasks.md",
+    "verify": "specs/002-unified-rag-routing/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "off"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-08-31T15:05:45Z",
+      "approver": "主人",
+      "evidence": "用户明确回复：可以，按照你的来。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-08-31T15:06:14Z",
+      "approver": "主人",
+      "evidence": "用户明确回复：可以，按照你的来。",
+      "review_report": null
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "三种模式统一为精确直答、统一 Hybrid RAG、按需 Agentic。"
+    },
+    "AC-02": {
+      "description": "Simple 无可靠本地或联网证据时明确拒答。"
+    },
+    "AC-03": {
+      "description": "Auto 前置精确直答并按证据和复杂度路由且复用证据。"
+    },
+    "AC-04": {
+      "description": "Agentic 无本地索引仍尝试联网，无证据时拒答。"
+    },
+    "AC-05": {
+      "description": "活跃面试材料只有一套权威流程口径。"
+    },
+    "AC-06": {
+      "description": "兼容 API 与旧参数且定向测试、Lint、Build 通过。"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-05"
+      ],
+      "allowed_paths": [
+        "README.md",
+        "docs/architecture/ARCHITECTURE.md",
+        "docs/interview/功能步骤流程.md",
+        "docs/interview/README.md",
+        "docs/interview/interview-docs-usage.md",
+        "docs/interview/AI复盘四场面试问题与RAG项目回答.md",
+        "docs/interview/AI复盘四场面试问题与RAG项目回答-面试表达版.md",
+        "docs/interview/INTERVIEW_PLAYBOOK.md"
+      ],
+      "commands": [
+        "node --input-type=module -e 'import fs from \"node:fs\"; import { JSDOM } from \"./admin/node_modules/jsdom/lib/api.js\"; const dom=new JSDOM(\"<!doctype html><html><body></body></html>\",{url:\"http://localhost\"}); globalThis.window=dom.window; globalThis.document=dom.window.document; globalThis.CSS=dom.window.CSS ?? {escape:(value)=>value}; const {default:mermaid}=await import(\"./admin/node_modules/.pnpm/mermaid@11.15.0/node_modules/mermaid/dist/mermaid.esm.mjs\"); const source=fs.readFileSync(\"docs/interview/功能步骤流程.md\",\"utf8\"); const blocks=source.split(\"```mermaid\").slice(1).map((part)=>part.split(\"```\")[0].trim()); mermaid.initialize({startOnLoad:false}); for (const block of blocks) await mermaid.parse(block); process.stdout.write(String(blocks.length)+\" Mermaid blocks: ok\\\\n\");'"
+      ],
+      "status": "in_progress",
+      "check_ids": [],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/002-unified-rag-routing/scope-baseline-T001.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/002-unified-rag-routing/**"
+        ]
+      }
+    },
+    "T002": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-06"
+      ],
+      "allowed_paths": [
+        "backend/src/rag/karpathy/karpathy-rag.service.ts",
+        "backend/src/rag/karpathy/karpathy-rag.service.spec.ts",
+        "backend/src/modules/chat/chat.service.ts"
+      ],
+      "commands": [
+        "cd backend && npm test -- --runInBand src/rag/karpathy/karpathy-rag.service.spec.ts"
+      ],
+      "status": "pending",
+      "check_ids": []
+    },
+    "T003": {
+      "depends_on": [
+        "T002"
+      ],
+      "acceptance_criteria": [
+        "AC-03",
+        "AC-04",
+        "AC-06"
+      ],
+      "allowed_paths": [
+        "backend/src/rag/agentic/agentic-rag.service.ts",
+        "backend/src/rag/agentic/agentic-rag.service.spec.ts"
+      ],
+      "commands": [
+        "cd backend && npm test -- --runInBand src/rag/agentic/agentic-rag.service.spec.ts"
+      ],
+      "status": "pending",
+      "check_ids": []
+    },
+    "T004": {
+      "depends_on": [
+        "T003"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "AC-06"
+      ],
+      "allowed_paths": [
+        "ROADMAP.md"
+      ],
+      "commands": [
+        "cd backend && npm test -- --runInBand src/rag/karpathy/karpathy-rag.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts",
+        "cd backend && npx eslint src/rag/karpathy/karpathy-rag.service.ts src/rag/karpathy/karpathy-rag.service.spec.ts src/rag/agentic/agentic-rag.service.ts src/rag/agentic/agentic-rag.service.spec.ts src/modules/chat/chat.service.ts",
+        "cd backend && npm run build"
+      ],
+      "status": "pending",
+      "check_ids": []
+    }
+  },
+  "checks": [],
+  "events": [
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "用户已确认实施范围，登记 Spec。"
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-05."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-06."
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户明确回复：可以，按照你的来。"
+    },
+    {
+      "at": "2026-08-31T15:05:45Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "按用户批准范围登记实施计划。"
+    },
+    {
+      "at": "2026-08-31T15:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-08-31T15:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T002."
+    },
+    {
+      "at": "2026-08-31T15:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T003."
+    },
+    {
+      "at": "2026-08-31T15:06:14Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T004."
+    },
+    {
+      "at": "2026-08-31T15:06:14Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by 主人: 用户明确回复：可以，按照你的来。"
+    },
+    {
+      "at": "2026-08-31T15:06:28Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    }
+  ],
+  "created_at": "2026-08-31T15:05:45Z",
+  "updated_at": "2026-08-31T15:06:28Z"
+}
