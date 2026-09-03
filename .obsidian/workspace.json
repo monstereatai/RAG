@@ -4,35 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "4be533f2cc986fd6",
+        "id": "a1c72a42d5259c01",
         "type": "tabs",
         "children": [
           {
-            "id": "6a43767c10f2a87e",
+            "id": "3e8c1ebe1cc3bd86",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md",
-                "mode": "preview",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "AI_TOOLING_INTERVIEW_GUIDE"
-            }
-          },
-          {
-            "id": "a307500bae52aae5",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "知识点.md",
+                "file": "docs/interview/AI复盘四场面试问题与RAG项目回答.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "知识点"
+              "title": "AI复盘四场面试问题与RAG项目回答"
             }
           }
         ]
@@ -110,8 +96,8 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/agentguide-rag-interview-mapping.md",
-                "collapseAll": false,
+                "file": "docs/interview/功能步骤流程.md",
+                "collapseAll": true,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
                 "showSearch": false,
@@ -120,7 +106,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "agentguide-rag-interview-mapping 的反向链接列表"
+              "title": "反向链接"
             }
           },
           {
@@ -172,21 +158,21 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/agentguide-rag-interview-mapping.md",
+                "file": "docs/interview/AI复盘四场面试问题与RAG项目回答.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "agentguide-rag-interview-mapping 的大纲"
+              "title": "大纲"
             }
           }
-        ]
+        ],
+        "currentTab": 4
       }
     ],
     "direction": "horizontal",
-    "width": 300,
-    "collapsed": true
+    "width": 300
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -196,36 +182,60 @@
       "daily-notes:打开/创建今天的日记": false,
       "templates:插入模板": false,
       "command-palette:打开命令面板": false,
-      "bases:新建数据库": false
+      "bases:新建数据库": false,
+      "config-sync:Config Sync": false
     }
   },
-  "active": "6a43767c10f2a87e",
+  "active": "3e8c1ebe1cc3bd86",
   "lastOpenFiles": [
-    "docs/interview/interview-docs-usage.md",
-    "docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md",
-    "docs/interview/agentguide-rag-interview-mapping.md",
-    "docs/interview/AGENT_ARCHITECTURE_SELECTION_GUIDE.md",
-    "docs/interview/README.md",
-    "docs/interview/SEVEN_DIFFICULTIES_CHEATSHEET.md",
-    "docs/README.md",
-    "docs/interview/USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md",
-    "INTERVIEW_PLAYBOOK.md",
-    "知识点.md",
-    "AI_AGENT_CORE_KNOWLEDGE.md",
-    "docs/resume-rag-project.md",
-    "docs/interview-docs-usage.md",
-    "CLAUDE.md",
-    "CLI_ARCHITECTURE.md",
-    "CLI_PRD.md",
-    "docs/processon-ai-application-mindmap.md",
-    "docs/remaining-enhancement-plan.md",
+    "admin/dist/404.html",
+    "admin/dist/account/settings/index.html",
+    "admin/dist/account/memories/index.html",
+    "admin/dist/account/center/index.html",
+    "admin/dist/account/settings",
+    "admin/dist/account/memories",
+    "admin/dist/account/index.html",
+    "admin/dist/account/center",
+    "admin/dist/account",
+    "admin/dist/account-security/index.html",
+    "admin/dist/account-security",
+    "admin/dist/logo.svg",
+    "admin/dist/icons/icon-512x512.png",
+    "admin/dist/icons/icon-128x128.png",
+    "admin/dist/icons/icon-192x192.png",
+    "admin/dist/pro_icon.svg",
+    "docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md",
+    "docs/interview/AI复盘四场面试问题与RAG项目回答-面试表达版.md",
+    "docs/interview/功能步骤流程.md",
+    "docs/interview/平台型Agent开源框架参考.md",
+    "docs/interview/开源项目参考能力归档.md",
+    "docs/interview/林芮瑭简历大模型面试问题.md",
+    "docs/interview/Agent记忆工具权限Hooks面试速记.md",
+    "docs/architecture/DOMAIN_EVENT_OUTBOX_USAGE.md",
+    "docs/reference/企业级知识库课程与v1-v9对照优化建议.md",
+    "rag_spc.md",
+    "功能步骤流程 3.png",
     "ROADMAP.md",
-    "README.md",
-    "rag-plan.md",
-    "MULTIMODAL_RAG_BLUEPRINT_GAP.md",
-    "z-面试简答.md",
-    "自用.md",
-    "docs/agentguide-rag-interview-mapping.md",
-    "docs/karpathy-obsidian-dual-ingest-plan.md"
+    "未命名.md",
+    "未命名 2.canvas",
+    "workspace/obsidian/notes/2026-07-03-cicd-workflow.txt.md",
+    "workspace/obsidian/90-system/logs/related-2026-08-11.md",
+    "workspace/obsidian/90-system/logs/related-2026-08-31.md",
+    "workspace/obsidian/90-system/logs/related-2026-07-03.md",
+    "workspace/object-storage/2/0a9bd846-cccb-42eb-be4f-062fbeb35690/original/1786459102214-top100-pc-21-_-official-site.md",
+    "workspace/object-storage/artifacts/1/afc1c798-5b2f-4c21-b318-22bc4ce86e88/8月店庆活动-product-交付物.md",
+    "specs/002-unified-rag-routing/verify.md",
+    "specs/002-unified-rag-routing/tasks.md",
+    "specs/002-unified-rag-routing/spec.md",
+    "specs/002-unified-rag-routing/plan.md",
+    "docs/interview/AI复盘四场面试问题与RAG项目回答.md",
+    "未命名 1.canvas",
+    "功能步骤流程 2.png",
+    "功能步骤流程 1.png",
+    "docs/interview/Agent-Task-Artifact结构验收与驳回重跑.md",
+    "workspace/obsidian/compiled/entities/版本治理联调临时文档-202608311338.md.md",
+    "未命名.canvas",
+    "功能步骤流程.png",
+    "tmp/pdfs/resume-2.png"
   ]
 }
