@@ -70,6 +70,8 @@
     "smoke:video-parse": "node scripts/smoke-video-parse.mjs",
     "smoke:embed-images": "node scripts/smoke-embed-images.mjs",
     "smoke:image-search": "node scripts/smoke-image-search.mjs",
+    "smoke:es-knn": "node scripts/smoke-es-knn.mjs",
+    "smoke:rag-pipeline": "node scripts/smoke-rag-pipeline.mjs",
     "smoke:redis-checkpointer": "node scripts/smoke-redis-checkpointer.mjs",
     "smoke:langfuse": "node scripts/smoke-langfuse.mjs",
     "smoke:adoption": "node scripts/smoke-adoption-summary.mjs",
