@@ -22,6 +22,7 @@ import {
   extractUrlContent,
   SupportedDocumentKind,
   DocumentImageExtractionOptions,
+  DocumentVideoExtractionOptions,
 } from './document-parser.util';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -349,36 +350,9 @@ export class DocumentController {
       }
     }
 
-    // 视频：调用视觉 provider 做视频理解
-    if (kind === 'video') {
-      try {
-        if (this.visionProvider.getCapabilities().videoUnderstanding) {
-          const videoDesc = await this.visionProvider.describeVideo(
-            file.buffer,
-            file.mimetype,
-          );
-          return [
-            '# Video Document',
-            '',
-            '## 视频摘要',
-            '',
-            videoDesc.summary,
-            '',
-            videoDesc.transcript
-              ? ['## 音频转写', '', videoDesc.transcript].join('\n')
-              : '',
-          ].join('\n');
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Vision processing failed for video ${file.originalname}: ${
-            (err as Error).message
-          }`,
-        );
-        // 降级到默认 fallback
-      }
-    }
-
+    // 视频：ffmpeg 抽音轨（腾讯 ASR 转写）+ 关键帧（Vision 逐帧描述）后合成 Markdown。
+    // 大小护栏超限、ffmpeg/ffprobe 缺失、封装损坏、抽轨/抽帧失败都会抛出明确错误，不静默降级；
+    // ASR / Vision 未配置时对应段落写降级文案，帧图仍上传，不阻塞入库。
     // PDF 无文本层（扫描件）时，extractDocumentText 会用 vision provider 兜底 OCR；
     // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
     // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
@@ -387,6 +361,7 @@ export class DocumentController {
       kind,
       this.visionProvider,
       this.buildImageExtractionOptions(),
+      this.buildVideoExtractionOptions(file.originalname),
     );
   }
 
@@ -407,6 +382,26 @@ export class DocumentController {
     return {
       storage: this.objectStorageProvider,
       vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+    };
+  }
+
+  /**
+   * 组装视频入库参数（video → ffmpeg 抽音轨/关键帧 → ASR / Vision → 合成 Markdown）。
+   *
+   * - TENCENT_SECRET_ID/KEY 已配置时传 speech 委托（腾讯云一句话识别，16kHz 单声道 WAV）；
+   *   未配置时解析器在「音频转写」段写降级文案，不发起任何 ASR 调用；
+   * - VISION_PROVIDER 已配置时传 vision 委托，逐帧生成画面描述（并发 ≤2）；
+   *   未配置时「画面要点」只保留帧图与时间戳；
+   * - 帧图经对象存储委托上传到 documents/{docId}/frames/。
+   */
+  private buildVideoExtractionOptions(
+    filename: string,
+  ): DocumentVideoExtractionOptions {
+    return {
+      storage: this.objectStorageProvider,
+      asr: process.env.TENCENT_SECRET_ID ? this.speechProvider : undefined,
+      vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+      filename,
     };
   }
 
