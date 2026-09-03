@@ -72,6 +72,11 @@ export class RagAdminController {
     return this.ragAdminService.searchDocuments(query ?? '', Number(limit) || 20);
   }
 
+  @Post('documents/search/reindex')
+  reindexDocumentSearch(@Query('limit') limit?: string) {
+    return this.ragAdminService.reindexDocumentSearch(Number(limit) || 1000);
+  }
+
   @Get('documents/:docId')
   async getDocument(@Param('docId') docId: string) {
     const doc = await this.ragAdminService.getDocument(docId);

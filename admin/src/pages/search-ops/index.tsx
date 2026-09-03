@@ -9,9 +9,9 @@ import {
   TableOutlined,
 } from '@ant-design/icons';
 import { ModulePage, searchNav } from '@/components/AdminShell';
-import { Button, Input, Select, Skeleton, Space, Tag } from 'antd';
+import { Button, Input, Select, Skeleton, Space, Tag, Tabs, Empty, List, Typography } from 'antd';
 import React, { useEffect, useState } from 'react';
-import { getPopularQueries, getSearchRecords, getSearchStats, type PopularQuery, type SearchRecord } from './service';
+import { getPopularQueries, getSearchRecords, getSearchStats, reindexSearchDocuments, searchDocuments, searchGraph, type FullTextResult, type GraphSearchResult, type PopularQuery, type SearchRecord } from './service';
 
 type PageState = 'loading' | 'data' | 'error' | 'empty';
 
@@ -23,6 +23,13 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 const SearchOps: React.FC = () => {
+  const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState<'documents' | 'graph'>('documents');
+  const [fullTextResults, setFullTextResults] = useState<FullTextResult[]>([]);
+  const [graphResults, setGraphResults] = useState<GraphSearchResult>({ nodes: [], edges: [] });
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
   const [records, setRecords] = useState<SearchRecord[]>([]);
   const [popularQueries, setPopularQueries] = useState<PopularQuery[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
@@ -64,14 +71,61 @@ const SearchOps: React.FC = () => {
       });
   }, []);
 
+  const runSearch = async (value = query) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    setSearching(true);
+    setSearched(true);
+    try {
+      if (searchType === 'documents') {
+        const response = await searchDocuments(normalized);
+        const payload: any = (response as any)?.data ?? response;
+        setFullTextResults(Array.isArray(payload) ? payload : payload?.data ?? []);
+      } else {
+        const response = await searchGraph(normalized);
+        const payload: any = (response as any)?.data ?? response;
+        const data = payload?.data ?? payload;
+        setGraphResults({ nodes: data?.nodes ?? [], edges: data?.edges ?? [] });
+      }
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const rebuildFullTextIndex = async () => {
+    setReindexing(true);
+    try {
+      await reindexSearchDocuments();
+      if (searchType === 'documents' && query.trim()) await runSearch();
+    } finally {
+      setReindexing(false);
+    }
+  };
+
+  const renderHighlight = (fragment: string) => {
+    const parts = fragment.split(/(<em>|<\/em>)/g);
+    let highlighted = false;
+    return parts.map((part, index) => {
+      if (part === '<em>') { highlighted = true; return null; }
+      if (part === '</em>') { highlighted = false; return null; }
+      return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+    });
+  };
+
   return (
     <ModulePage activeKey="history" navItems={searchNav} title="智能搜索">
       <div className="rag-panel search-hero">
         <div className="search-line">
-          <Input allowClear placeholder="搜索文档名称、内容..." prefix={<SearchOutlined />} size="large" />
-          <Button size="large" type="primary">搜索</Button>
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} onPressEnter={() => void runSearch()} allowClear placeholder={searchType === 'documents' ? '搜索文档名称、正文内容...' : '搜索实体、文档或关系...'} prefix={<SearchOutlined />} size="large" />
+          <Button loading={searching} onClick={() => void runSearch()} size="large" type="primary">搜索</Button>
           <Button type="text">高级搜索⌄</Button>
+          <Button loading={reindexing} onClick={() => void rebuildFullTextIndex()} type="link">补建全文索引</Button>
         </div>
+        <Tabs
+          activeKey={searchType}
+          onChange={(key) => setSearchType(key as 'documents' | 'graph')}
+          items={[{ key: 'documents', label: '文档全文检索' }, { key: 'graph', label: '知识图谱检索' }]}
+        />
         <div className="filter-line">
           <span>文件类型:</span>
           <Select defaultValue="全部类型" options={[{ value: '全部类型' }]} />
@@ -85,6 +139,31 @@ const SearchOps: React.FC = () => {
           <Button type="link">展开⌄</Button>
         </div>
       </div>
+
+      {searched && (
+        <div className="rag-panel search-results">
+          <div className="panel-head">
+            <span>{searchType === 'documents' ? `全文检索结果（${fullTextResults.length}）` : `图谱检索结果（${graphResults.nodes.length} 个节点，${graphResults.edges.length} 条关系）`}</span>
+          </div>
+          {searching && <Skeleton active paragraph={{ rows: 5 }} />}
+          {!searching && searchType === 'documents' && fullTextResults.length === 0 && <Empty description="没有找到匹配文档" />}
+          {!searching && searchType === 'documents' && fullTextResults.map((item) => (
+            <List.Item key={item.docId}>
+              <List.Item.Meta
+                title={<span>{item.title || item.filename} <Tag color="blue">{item.docVersion || '未标版本'}</Tag></span>}
+                description={<div>{item.highlightFragments.length ? item.highlightFragments.map((fragment, index) => <Typography.Paragraph key={index} style={{ marginBottom: 4 }}>{renderHighlight(fragment)}</Typography.Paragraph>) : item.summary || '正文命中，但没有返回高亮片段。'}</div>}
+              />
+            </List.Item>
+          ))}
+          {!searching && searchType === 'graph' && graphResults.nodes.length === 0 && graphResults.edges.length === 0 && <Empty description="没有找到匹配节点或关系" />}
+          {!searching && searchType === 'graph' && (graphResults.nodes.length > 0 || graphResults.edges.length > 0) && (
+            <List
+              dataSource={graphResults.nodes}
+              renderItem={(node) => <List.Item><List.Item.Meta title={`${node.label}（${node.type}）`} description={`节点 ID：${node.id}${node.sourceId ? `，来源：${node.sourceId}` : ''}`} /></List.Item>}
+            />
+          )}
+        </div>
+      )}
 
       {popularQueries.length > 0 && (
         <div className="rag-panel" style={{ padding: '10px 26px', marginBottom: 12 }}>

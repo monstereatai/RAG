@@ -293,6 +293,51 @@ export class RagAdminService {
     return this.elasticsearchProvider.search(normalized, Math.min(Math.max(limit, 1), 50));
   }
 
+  async reindexDocumentSearch(limit = 1000) {
+    const documents = await this.docMetaRepo.find({ take: Math.min(Math.max(limit, 1), 5000) });
+    const chunks = await this.chunkRepo.find({ order: { chunkIndex: 'ASC' } });
+    const chunksByDoc = new Map<string, DocumentChunkEntity[]>();
+    for (const chunk of chunks) {
+      const items = chunksByDoc.get(chunk.docId) ?? [];
+      items.push(chunk);
+      chunksByDoc.set(chunk.docId, items);
+    }
+    const results = await Promise.allSettled(documents.map((doc) => {
+      const content = (chunksByDoc.get(doc.docId) ?? []).map((chunk) => chunk.content).join('\n\n');
+      let roleScope: string[] = [];
+      try {
+        roleScope = doc.roleScope ? JSON.parse(doc.roleScope) as string[] : [];
+      } catch {
+        roleScope = [];
+      }
+      return this.elasticsearchProvider.indexDocument({
+        docId: doc.docId,
+        filename: doc.filename,
+        content,
+        userId: doc.userId,
+        title: doc.title,
+        summary: doc.summary,
+        sourceAuthority: doc.sourceAuthority,
+        projectId: doc.projectId,
+        activityId: doc.activityId,
+        region: doc.region,
+        locale: doc.locale,
+        channel: doc.channel,
+        roleScope,
+        documentType: doc.documentType,
+        lifecycleStatus: doc.lifecycleStatus,
+        docVersion: doc.docVersion,
+        effectiveAt: doc.effectiveAt,
+        expiredAt: doc.expiredAt,
+      });
+    }));
+    return {
+      indexed: results.filter((result) => result.status === 'fulfilled').length,
+      skipped: documents.length - results.filter((result) => result.status === 'fulfilled').length,
+      total: documents.length,
+    };
+  }
+
   async listDocumentVersions(docId: string) {
     const root = await this.docMetaRepo.findOne({ where: { docId } });
     if (!root) return null;

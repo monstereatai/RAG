@@ -28,6 +28,27 @@ type IndexedChunk = {
   supersedesDocId?: string | null;
 };
 
+type IndexedDocument = {
+  docId: string;
+  filename: string;
+  title?: string | null;
+  summary?: string | null;
+  content: string;
+  userId?: string | null;
+  sourceAuthority?: string;
+  projectId?: string | null;
+  activityId?: string | null;
+  region?: string | null;
+  locale?: string | null;
+  channel?: string | null;
+  roleScope?: string[];
+  documentType?: string;
+  lifecycleStatus?: string;
+  docVersion?: string | null;
+  effectiveAt?: string | null;
+  expiredAt?: string | null;
+};
+
 export interface ElasticsearchSearchScope {
   projectId?: string;
   activityId?: string;
@@ -67,6 +88,7 @@ export class ElasticsearchProvider implements OnModuleInit {
   private client!: Client;
   private enabled = false;
   private readonly indexName = 'rag_chunks';
+  private readonly documentIndexName = 'kh_document';
 
   constructor(private readonly config: ConfigService) {}
 
@@ -85,6 +107,7 @@ export class ElasticsearchProvider implements OnModuleInit {
       this.enabled = true;
       this.logger.log(`Elasticsearch connected at ${node}`);
       await this.ensureIndex();
+      await this.ensureDocumentIndex();
     } catch (err) {
       this.logger.warn(
         `Elasticsearch not available (${(err as Error).message}), ES search disabled`,
@@ -180,6 +203,83 @@ export class ElasticsearchProvider implements OnModuleInit {
     this.logger.log(`ES index "${this.indexName}" created`);
   }
 
+  /** 独立文档全文索引：只服务文档搜索，不参与 RAG 分块召回。 */
+  private async ensureDocumentIndex(): Promise<void> {
+    const exists = await this.client.indices.exists({ index: this.documentIndexName });
+    if (exists) return;
+
+    await this.client.indices.create({
+      index: this.documentIndexName,
+      settings: {
+        analysis: {
+          analyzer: {
+            ik_smart_analyzer: { type: 'custom', tokenizer: 'ik_smart' },
+          },
+        },
+      },
+      mappings: {
+        properties: {
+          docId: { type: 'keyword' },
+          filename: { type: 'text', analyzer: 'ik_smart_analyzer', fields: { keyword: { type: 'keyword' } } },
+          title: { type: 'text', analyzer: 'ik_smart_analyzer' },
+          summary: { type: 'text', analyzer: 'ik_smart_analyzer' },
+          content: { type: 'text', analyzer: 'ik_smart_analyzer' },
+          userId: { type: 'keyword' },
+          sourceAuthority: { type: 'keyword' },
+          projectId: { type: 'keyword' },
+          activityId: { type: 'keyword' },
+          region: { type: 'keyword' },
+          locale: { type: 'keyword' },
+          channel: { type: 'keyword' },
+          roleScope: { type: 'keyword' },
+          documentType: { type: 'keyword' },
+          lifecycleStatus: { type: 'keyword' },
+          docVersion: { type: 'keyword' },
+          effectiveAt: { type: 'date' },
+          expiredAt: { type: 'date' },
+        },
+      },
+    });
+    this.logger.log(`ES document index "${this.documentIndexName}" created`);
+  }
+
+  async indexDocument(document: {
+    docId: string;
+    filename: string;
+    content: string;
+    userId?: string | null;
+    title?: string | null;
+    summary?: string | null;
+    sourceAuthority?: string;
+    projectId?: string | null;
+    activityId?: string | null;
+    region?: string | null;
+    locale?: string | null;
+    channel?: string | null;
+    roleScope?: string[];
+    documentType?: string;
+    lifecycleStatus?: string;
+    docVersion?: string | null;
+    effectiveAt?: Date | null;
+    expiredAt?: Date | null;
+  }): Promise<void> {
+    if (!this.enabled || !document.content.trim()) return;
+    try {
+      await this.client.index({
+        index: this.documentIndexName,
+        id: document.docId,
+        refresh: true,
+        document: {
+          ...document,
+          effectiveAt: document.effectiveAt?.toISOString() ?? null,
+          expiredAt: document.expiredAt?.toISOString() ?? null,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`ES indexDocument failed: ${(err as Error).message}`);
+    }
+  }
+
   /**
    * 批量写入 chunks 到 ES
    */
@@ -273,6 +373,7 @@ export class ElasticsearchProvider implements OnModuleInit {
         index: this.indexName,
         query: { term: { docId } },
       });
+      await this.client.delete({ index: this.documentIndexName, id: docId, refresh: true }).catch(() => undefined);
       this.logger.log(
         `ES deleted chunks for docId=${docId} and userId=${_userId ?? 'none'}`,
       );
@@ -292,6 +393,15 @@ export class ElasticsearchProvider implements OnModuleInit {
     try {
       await this.client.updateByQuery({
         index: this.indexName,
+        query: { bool: { filter } },
+        script: {
+          source: 'ctx._source.lifecycleStatus = params.status',
+          params: { status: lifecycleStatus },
+        },
+        refresh: true,
+      });
+      await this.client.updateByQuery({
+        index: this.documentIndexName,
         query: { bool: { filter } },
         script: {
           source: 'ctx._source.lifecycleStatus = params.status',
@@ -421,13 +531,89 @@ export class ElasticsearchProvider implements OnModuleInit {
           documentType: src?.documentType,
           lifecycleStatus: src?.lifecycleStatus,
           supersedesDocId: src?.supersedesDocId,
-          highlightFragments: (hit.highlight?.content ?? []).map((fragment) =>
-            String(fragment).replace(/<\/?em>/g, ''),
-          ),
+          highlightFragments: (hit.highlight?.content ?? []).map((fragment) => String(fragment)),
         };
       });
     } catch (err) {
       this.logger.warn(`ES search failed: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  /** 独立文档全文检索，返回 ES highlight 片段，不与分块 RAG 检索混用。 */
+  async searchDocuments(
+    query: string,
+    topK = 20,
+    userId?: string,
+    scope: ElasticsearchSearchScope = {},
+  ): Promise<Array<{
+    docId: string;
+    filename: string;
+    title?: string | null;
+    summary?: string | null;
+    score: number;
+    highlightFragments: string[];
+    docVersion?: string | null;
+    lifecycleStatus?: string;
+    sourceAuthority?: string;
+  }>> {
+    if (!this.enabled || !query.trim()) return [];
+    try {
+      const filter: estypes.QueryDslQueryContainer[] = userId ? [{ term: { userId } }] : [];
+      for (const [field, value] of Object.entries({
+        projectId: scope.projectId,
+        activityId: scope.activityId,
+        region: scope.region,
+        locale: scope.locale,
+        channel: scope.channel,
+        documentType: scope.documentType,
+      })) {
+        if (value) filter.push({ term: { [field]: value } });
+      }
+      if (scope.role) filter.push({ term: { roleScope: scope.role } });
+      if (!scope.includeDeprecated) {
+        filter.push({ bool: { must_not: [{ term: { lifecycleStatus: 'deprecated' } }] } });
+      }
+      const result = await this.client.search<IndexedDocument>({
+        index: this.documentIndexName,
+        query: {
+          bool: {
+            must: [{ multi_match: { query, fields: ['title^3', 'filename^2', 'summary', 'content'], type: 'best_fields' } }],
+            ...(filter.length ? { filter } : {}),
+          },
+        },
+        size: Math.min(Math.max(topK, 1), 50),
+        highlight: {
+          fields: {
+            content: { fragment_size: 220, number_of_fragments: 3 },
+            title: { number_of_fragments: 1 },
+            summary: { fragment_size: 180, number_of_fragments: 1 },
+          },
+          pre_tags: ['<em>'],
+          post_tags: ['</em>'],
+        },
+      });
+      return result.hits.hits.map((hit) => {
+        const source = hit._source;
+        const highlights = [
+          ...(hit.highlight?.title ?? []),
+          ...(hit.highlight?.summary ?? []),
+          ...(hit.highlight?.content ?? []),
+        ].map(String);
+        return {
+          docId: source?.docId ?? hit._id ?? '',
+          filename: source?.filename ?? '',
+          title: source?.title ?? null,
+          summary: source?.summary ?? null,
+          score: hit._score ?? 0,
+          highlightFragments: highlights,
+          docVersion: source?.docVersion,
+          lifecycleStatus: source?.lifecycleStatus,
+          sourceAuthority: source?.sourceAuthority,
+        };
+      });
+    } catch (err) {
+      this.logger.warn(`ES document search failed: ${(err as Error).message}`);
       return [];
     }
   }

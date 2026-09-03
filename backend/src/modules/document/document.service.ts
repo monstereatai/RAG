@@ -310,7 +310,28 @@ export class DocumentService {
         })(),
         (async () => {
           this.karpathyRagService.indexChunks(chunkDocs, userId);
-          await this.elasticsearchProvider.indexChunks(chunkDocs, userId);
+          await Promise.all([
+            this.elasticsearchProvider.indexChunks(chunkDocs, userId),
+            this.elasticsearchProvider.indexDocument({
+              docId,
+              filename,
+              content,
+              userId,
+              title: filename,
+              sourceAuthority: indexingGovernance.sourceAuthority,
+              projectId: indexingGovernance.projectId,
+              activityId: indexingGovernance.activityId,
+              region: indexingGovernance.region,
+              locale: indexingGovernance.locale,
+              channel: indexingGovernance.channel,
+              roleScope: indexingGovernance.roleScope,
+              documentType: indexingGovernance.documentType,
+              lifecycleStatus: indexingGovernance.lifecycleStatus,
+              docVersion: indexingGovernance.docVersion,
+              effectiveAt: indexingGovernance.effectiveAt,
+              expiredAt: indexingGovernance.expiredAt,
+            }),
+          ]);
         })(),
         (async () => {
           await this.docMetaRepo.save(docMeta);

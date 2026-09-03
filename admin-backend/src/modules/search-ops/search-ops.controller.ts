@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -76,6 +76,27 @@ export class SearchOpsController {
         zeroHitRate: 0.12,
       },
     };
+  }
+
+  @Get('documents')
+  @ApiOperation({ summary: '文档全文检索（关键词高亮）' })
+  @RequirePermission('admin:search-ops:read')
+  searchDocuments(@Query('q') query = '', @Query('limit') limit?: string) {
+    return this.ragClient.searchDocuments(query, Number(limit) || 20);
+  }
+
+  @Post('documents/reindex')
+  @ApiOperation({ summary: '补建已有文档的全文索引' })
+  @RequirePermission('admin:documents:write')
+  reindexDocuments(@Query('limit') limit?: string) {
+    return this.ragClient.reindexDocumentSearch(Number(limit) || 1000);
+  }
+
+  @Get('graph')
+  @ApiOperation({ summary: '知识图谱关键词检索' })
+  @RequirePermission('admin:search-ops:read')
+  searchGraph(@Query('query') query = '', @Query('limit') limit?: string) {
+    return this.ragClient.searchGraph(query, Number(limit) || 100);
   }
 
   @Get('queries/popular')

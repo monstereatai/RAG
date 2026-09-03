@@ -672,9 +672,10 @@ export class RagClientService {
     );
   }
 
-  searchGraph(query: Record<string, unknown>) {
+  searchGraph(query: string | Record<string, unknown>, limit = 100) {
+    const params = typeof query === 'string' ? { query, limit } : query;
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/graph/search${this.toQueryString(query)}`
+      `/rag/admin/graph/search${this.toQueryString(params)}`
     );
   }
 
@@ -684,6 +685,19 @@ export class RagClientService {
 
   getGraphConflicts() {
     return this.getJson<Record<string, unknown>>("/rag/admin/graph/conflicts");
+  }
+
+  searchDocuments(query: string, limit = 20) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/documents/search${this.toQueryString({ q: query, limit })}`
+    );
+  }
+
+  reindexDocumentSearch(limit = 1000) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/search/reindex${this.toQueryString({ limit })}`,
+      {}
+    );
   }
 
   // ─── Document Actions ───────────────────────────────────────

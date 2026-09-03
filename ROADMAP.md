@@ -49,6 +49,7 @@
 ## 当前结论
 
 - **项目阶段已结项（2026-09-03）**：面试与本地演示范围的知识入库、Simple／Auto／Chat Agentic、Task Agentic、版本治理、Bad Case 闭环、运行审计和管理后台能力均已完成并有构建或回放验证。后续不再扩展本地演示功能；生产上线所需的真实 IAM、外部事件订阅、性能压测、Milvus 超时治理、告警与合规配置保留为独立生产化事项，不影响本阶段结项。
+- **已补齐独立全文与图谱检索（2026-09-03）**：文档入库新增完整正文的 Elasticsearch `kh_document` 索引，管理后台「智能搜索」新增文档全文检索（IK 倒排＋关键词高亮）和知识图谱检索入口；两者与 RAG 分块混合召回链路分离，默认复用文档生命周期过滤。Backend、Admin Backend、Admin 和 Frontend 构建通过，新增接口鉴权与健康检查通过。
 
 - 已新增受控通用 `AgentLoopService`，复用 Tool Registry、工具权限／审批／幂等外壳、Agent Runtime Event 和 Redis：Chat Agentic 在 LangGraph 生成节点内执行「模型草稿→引用校验工具→终止」，Task Agentic 在每个岗位内执行「岗位工具→结果回填→终止」，Simple 保持固定线性 Fast Path，不进入循环。运行中心新增 Loop 实例、完成轮次、快照数量、终止状态与原因，并可展开逐轮事件。Backend 生产构建、Tool Registry 校验、编译产物 Loop smoke 和 Admin 生产构建通过；新增 2 项 Loop 单测，但 Jest 30 运行时仍被项目既有 `clearMocksOnScope` 兼容错误阻断，Admin 全量 TypeScript 仍被项目既有 React 类型重复冲突阻断。
 - 新增《Agent 记忆、工具、权限与 Hooks 面试速记》，按当前代码记录四类能力的用户操作、数据／状态流、代码入口、后台入口和面试简答，明确 Hooks 使用领域事件＋Outbox，不开放任意脚本执行。
