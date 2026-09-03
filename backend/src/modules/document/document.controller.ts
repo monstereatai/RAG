@@ -21,12 +21,14 @@ import {
   extractDocumentText,
   extractUrlContent,
   SupportedDocumentKind,
+  DocumentImageExtractionOptions,
 } from './document-parser.util';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { VisionProvider } from '../../providers/vision/vision.provider';
+import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 import {
   DocumentLifecycleStatus,
@@ -64,6 +66,7 @@ export class DocumentController {
     private readonly visionProvider: VisionProvider,
     private readonly documentQueue: DocumentQueueService,
     private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
+    private readonly objectStorageProvider: ObjectStorageProvider,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
       return this.processAsyncUpload(
@@ -378,7 +381,33 @@ export class DocumentController {
 
     // PDF 无文本层（扫描件）时，extractDocumentText 会用 vision provider 兜底 OCR；
     // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
-    return extractDocumentText(file.buffer, kind, this.visionProvider);
+    // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
+    return extractDocumentText(
+      file.buffer,
+      kind,
+      this.visionProvider,
+      this.buildImageExtractionOptions(),
+    );
+  }
+
+  /**
+   * 组装内嵌图片提取参数（PDF / PPTX → 对象存储 → Markdown ![alt](url)）。
+   *
+   * - 开关 DOCUMENT_EXTRACT_IMAGES 关闭（解析器默认开启）时不提取；
+   * - VISION_PROVIDER 已配置时传 vision 委托，用视觉模型批量生成 alt 描述；
+   *   未配置时解析器直接用文件名作 alt，不发起任何 vision 调用；
+   * - 对象存储异常由解析器静默降级为纯文本，不影响主入库链路。
+   */
+  private buildImageExtractionOptions():
+    | DocumentImageExtractionOptions
+    | undefined {
+    if (process.env.DOCUMENT_EXTRACT_IMAGES === 'false') {
+      return undefined;
+    }
+    return {
+      storage: this.objectStorageProvider,
+      vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+    };
   }
 
   private parseBusinessMetadata(

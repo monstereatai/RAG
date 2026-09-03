@@ -57,6 +57,64 @@ interface PdfPageImage {
   mimeType: string;
 }
 
+/* ── 内嵌图片提取：对象存储 / alt 描述的注入接口 ──
+ *
+ * 与 DocumentOcrDelegate 同一风格：解析器只依赖最小能力接口，
+ * Nest 侧直接把 ObjectStorageProvider / VisionProvider 传入（方法签名天然对齐）。
+ */
+
+/**
+ * 内嵌图片上传所需的对象存储最小能力接口。
+ * ObjectStorageProvider.putObject 天然满足该结构。
+ */
+export interface DocumentImageStorageDelegate {
+  putObject(params: {
+    key: string;
+    body: Buffer;
+    contentType?: string;
+  }): Promise<{ key: string; url: string }>;
+}
+
+/**
+ * 内嵌图片 alt 描述所需的最小能力接口。
+ * VisionProvider.describeImage 天然满足该结构（返回值只需含 description）。
+ */
+export interface DocumentImageAltDelegate {
+  describeImage(
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<{ description: string }>;
+}
+
+/** 内嵌图片提取的注入参数（由控制器组装后传入 extractDocumentText） */
+export interface DocumentImageExtractionOptions {
+  /** 对象存储上传委托；缺省或调用异常时整个提取功能静默跳过，不影响主入库链路 */
+  storage: DocumentImageStorageDelegate;
+  /** 可选的图片描述委托（通常传 VisionProvider）；未提供时 alt 直接使用文件名 */
+  vision?: DocumentImageAltDelegate;
+  /** 对象存储路径中的文档标识；缺省用时间戳占位 */
+  docId?: string;
+}
+
+/** 提取到的内嵌图片（已归属到页/slide，等待上传） */
+interface EmbeddedImageAsset {
+  /** 归属标签，同时用于对象存储 key（如 page-2 / slide-3 / misc） */
+  placement: string;
+  /** 归属序号：PDF 页码或 PPTX slide 序号；0 表示无法归属（统一进「文稿插图」） */
+  position: number;
+  buffer: Buffer;
+  mimeType: string;
+  /** 兜底文件名（未配置 vision 或 alt 生成失败时用作 alt） */
+  filename: string;
+}
+
+/** 上传完成并生成 alt 后的内嵌图片，可直接渲染为 `![alt](url)` */
+interface UploadedEmbeddedImage {
+  position: number;
+  url: string;
+  alt: string;
+}
+
 interface PlaywrightModule {
   chromium: {
     launch(options: { headless: boolean }): Promise<PlaywrightBrowser>;
@@ -141,21 +199,27 @@ export function detectDocumentKind(filename: string): SupportedDocumentKind {
  * 仅 PDF 分支支持可选的 OCR 兜底：当 PDF 没有文本层（扫描件）时，
  * 会把页面渲染成图片并调用 `ocr` 识别，其他格式行为与原先完全一致。
  *
+ * PDF / PPTX 分支额外支持可选的内嵌图片提取（`images`）：把文档里的内嵌图
+ * 上传到对象存储并在 Markdown 中插入 `![alt](url)`；扫描件走 OCR 路径时
+ * 不再重复提取（OCR 页图是渲染产物，不是内嵌图）。
+ *
  * @param buffer 文档二进制内容
  * @param kind 文档类型
  * @param ocr 可选的 OCR 依赖（通常传 VisionProvider）；扫描件 PDF 缺少它时会抛出明确错误
+ * @param images 可选的内嵌图片提取参数；未提供或对象存储异常时保持纯文本提取
  */
 export async function extractDocumentText(
   buffer: Buffer,
   kind: SupportedDocumentKind,
   ocr?: DocumentOcrDelegate,
+  images?: DocumentImageExtractionOptions,
 ): Promise<string> {
   switch (kind) {
     case 'markdown':
     case 'text':
       return buffer.toString('utf-8');
     case 'pdf':
-      return extractPdfText(buffer, ocr);
+      return extractPdfText(buffer, ocr, images);
     case 'docx':
       return extractDocxText(buffer);
     case 'doc':
@@ -164,7 +228,7 @@ export async function extractDocumentText(
     case 'xls':
       return extractWorkbookText(buffer);
     case 'pptx':
-      return extractPptxText(buffer);
+      return extractPptxText(buffer, images);
     case 'ppt':
       return extractPrintableText(buffer, 'Legacy PowerPoint Document');
     case 'csv':
@@ -391,6 +455,7 @@ const OCR_MAX_ATTEMPTS_PER_PAGE = 2;
 async function extractPdfText(
   buffer: Buffer,
   ocr?: DocumentOcrDelegate,
+  images?: DocumentImageExtractionOptions,
 ): Promise<string> {
   const parser = new PDFParse({ data: buffer });
   let textResult;
@@ -400,11 +465,570 @@ async function extractPdfText(
     await parser.destroy();
   }
 
-  if (!isScannedPdf(textResult)) {
+  if (isScannedPdf(textResult)) {
+    // 扫描件走 OCR 兜底：页图是渲染产物而非内嵌图，与内嵌图片提取互斥，不再重复提取
+    return ocrScannedPdf(buffer, textResult.total, ocr);
+  }
+
+  const text = textResult.text;
+  if (!images || !isImageExtractionEnabled() || !hasImageStorage(images)) {
+    return text;
+  }
+  try {
+    return await composeTextPdfWithImages(buffer, textResult, images);
+  } catch (err) {
+    // 内嵌图片提取属于增强能力：对象存储不可用等任何异常都静默降级为纯文本，绝不阻塞入库
+    console.warn(
+      `PDF embedded image extraction skipped, falling back to plain text: ${
+        (err as Error).message
+      }`,
+    );
+    return text;
+  }
+}
+
+/* ── PDF 内嵌图片提取 ──
+ *
+ * 用 pdfjs-dist 逐页遍历 operator list 里的 paintImageXObject 调用（天然带页码归属），
+ * 字节来源两级策略：
+ *   1. 原始字节直传：DCTDecode（JPEG）且能在原文件中按对象号定位到流时，直接取原始 JPEG；
+ *   2. 像素回退：pdfjs 已解码的位图（FlateDecode 等的统一产物）用 @napi-rs/canvas 重编码为 PNG；
+ * 两者都不可用（JBIG2/JPX 等异构编码解码失败）时计 skipped 并跳过，绝不中断解析。
+ */
+
+/** pdfjs 解码产物的图片种类（ImageKind） */
+const PDFJS_IMAGE_KIND = {
+  GRAYSCALE_1BPP: 1,
+  RGB_24BPP: 2,
+  RGBA_32BPP: 3,
+} as const;
+
+/** 等待 pdfjs 图片对象解码完成的兜底超时（getOperatorList 后 objs 可能尚未就绪） */
+const PDFJS_IMAGE_RESOLVE_TIMEOUT_MS = 2_000;
+
+/** alt 批量生成的并发上限（视觉模型调用温和节流） */
+const IMAGE_ALT_CONCURRENCY = 2;
+
+/**
+ * 有文本层 PDF 的内嵌图合成：提取 → 上传 → 按「## 第 N 页」分页重组 Markdown。
+ * 图片紧跟对应页标题之后；页面无文字且无图片时跳过该页。
+ */
+async function composeTextPdfWithImages(
+  buffer: Buffer,
+  textResult: {
+    text: string;
+    pages: Array<{ num: number; text: string }>;
+    total: number;
+  },
+  images: DocumentImageExtractionOptions,
+): Promise<string> {
+  // 页数上限跟随扫描件渲染页数（PDF_OCR_MAX_PAGES），可用 PDF_IMAGE_MAX_PAGES 单独覆盖
+  const maxPages = Math.min(
+    Math.max(
+      1,
+      envPositiveNumber(
+        'PDF_IMAGE_MAX_PAGES',
+        envPositiveNumber('PDF_OCR_MAX_PAGES', 20),
+      ),
+    ),
+    Math.max(1, textResult.total || textResult.pages.length || 1),
+  );
+  const { assets, skipped } = await extractPdfEmbeddedImages(buffer, maxPages);
+  if (skipped > 0) {
+    console.warn(
+      `PDF embedded image extraction skipped ${skipped} unsupported image object(s) ` +
+        '(JBIG2/JPX/mask, decode failure or count limit).',
+    );
+  }
+  if (assets.length === 0) {
     return textResult.text;
   }
-  // 扫描件（图片型 PDF）：页面渲染成图片 → Vision OCR → 合成 Markdown
-  return ocrScannedPdf(buffer, textResult.total, ocr);
+  const uploaded = await uploadEmbeddedImages(assets, images);
+  return composePdfMarkdownWithPages(
+    textResult,
+    groupImagesByPosition(uploaded),
+  );
+}
+
+/** 有文本层 PDF 的 Markdown：插入 `## 第 N 页` 分页标题，图片紧跟标题之后 */
+function composePdfMarkdownWithPages(
+  textResult: { text: string; pages: Array<{ num: number; text: string }> },
+  imagesByPage: Map<number, UploadedEmbeddedImage[]>,
+): string {
+  const sections: string[] = [];
+  for (const page of textResult.pages) {
+    const imageLines = (imagesByPage.get(page.num) ?? []).map(
+      (image) => `![${image.alt}](${image.url})`,
+    );
+    const pageText = page.text.trim();
+    if (!pageText && imageLines.length === 0) {
+      continue;
+    }
+    sections.push(
+      [
+        `## 第 ${page.num} 页`,
+        '',
+        ...imageLines,
+        ...(pageText ? ['', pageText] : []),
+      ]
+        .join('\n')
+        .trim(),
+    );
+  }
+  if (sections.length === 0) {
+    return textResult.text;
+  }
+  return ['# PDF Document', '', ...sections].join('\n\n').trim();
+}
+
+/**
+ * 提取 PDF 内嵌图片：逐页遍历 paintImageXObject 算子并解析图片字节。
+ *
+ * 同一 XObject 被多页复用时只提取一次；达到 PDF_IMAGE_MAX_COUNT 上限后停止收集。
+ */
+async function extractPdfEmbeddedImages(
+  buffer: Buffer,
+  maxPages: number,
+): Promise<{ assets: EmbeddedImageAsset[]; skipped: number }> {
+  const canvasModule = await loadNapiCanvas();
+  polyfillCanvasGlobals(canvasModule);
+  const pdfjs = await loadPdfjs();
+  const restoreFakeWorker = await lockPdfjsFakeWorker(pdfjs);
+
+  const maxCount = Math.max(1, envPositiveNumber('PDF_IMAGE_MAX_COUNT', 30));
+  const assets: EmbeddedImageAsset[] = [];
+  let skipped = 0;
+  try {
+    // getDocument 会 transfer 底层 buffer，传入拷贝避免调用方的 buffer 被 detach
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      isEvalSupported: false,
+      useSystemFonts: true,
+    });
+    const doc = await loadingTask.promise;
+    try {
+      const seenRefs = new Set<string>();
+      const seqByPage = new Map<number, number>();
+      for (let num = 1; num <= Math.min(doc.numPages, maxPages); num += 1) {
+        if (assets.length >= maxCount) {
+          break;
+        }
+        const page = await doc.getPage(num);
+        try {
+          const ops = await page.getOperatorList();
+          const seenNames = new Set<string>();
+          for (let i = 0; i < ops.fnArray.length; i += 1) {
+            const fn = ops.fnArray[i];
+            if (
+              fn !== pdfjs.OPS.paintImageXObject &&
+              fn !== pdfjs.OPS.paintImageXObjectRepeat
+            ) {
+              continue;
+            }
+            const objId = ops.argsArray[i]?.[0];
+            if (typeof objId !== 'string' || seenNames.has(objId)) {
+              continue;
+            }
+            seenNames.add(objId);
+            if (assets.length >= maxCount) {
+              skipped += 1;
+              continue;
+            }
+            const imageData = await resolvePdfjsImageObject(page, objId);
+            if (!imageData) {
+              skipped += 1;
+              continue;
+            }
+            const refKey =
+              typeof imageData.ref === 'string' ? imageData.ref : '';
+            if (refKey && seenRefs.has(refKey)) {
+              continue; // 同一 XObject 被多页复用时只提取一次
+            }
+            const seq = (seqByPage.get(num) ?? 0) + 1;
+            const asset = buildPdfImageAsset(
+              canvasModule,
+              buffer,
+              imageData,
+              num,
+              `page-${num}-image-${seq}`,
+            );
+            if (!asset) {
+              skipped += 1;
+              continue;
+            }
+            seqByPage.set(num, seq);
+            if (refKey) {
+              seenRefs.add(refKey);
+            }
+            assets.push(asset);
+          }
+        } finally {
+          await page.cleanup();
+        }
+      }
+    } finally {
+      await loadingTask.destroy();
+    }
+  } finally {
+    restoreFakeWorker();
+  }
+  return { assets, skipped };
+}
+
+/** 组装单张 PDF 内嵌图：优先 JPEG 原始字节直传，失败回退像素重编码 PNG */
+function buildPdfImageAsset(
+  canvasModule: NapiCanvasModule,
+  raw: Buffer,
+  imageData: PdfjsImageData,
+  pageNum: number,
+  filenameBase: string,
+): EmbeddedImageAsset | null {
+  const refNum = parsePdfjsRefNumber(imageData.ref);
+  if (refNum !== null) {
+    const jpeg = extractRawJpegStream(raw, refNum);
+    if (jpeg) {
+      return {
+        placement: `page-${pageNum}`,
+        position: pageNum,
+        buffer: jpeg,
+        mimeType: 'image/jpeg',
+        filename: `${filenameBase}.jpg`,
+      };
+    }
+  }
+  const png = encodePdfjsImageToPng(canvasModule, imageData);
+  if (!png) {
+    return null;
+  }
+  return {
+    placement: `page-${pageNum}`,
+    position: pageNum,
+    buffer: png,
+    mimeType: 'image/png',
+    filename: `${filenameBase}.png`,
+  };
+}
+
+/** pdfjs 的图片 ref：新版是 "对象号R" 字符串（如 "5R"），旧版是 {num, gen}；解析出对象号 */
+function parsePdfjsRefNumber(ref: unknown): number | null {
+  if (typeof ref === 'string') {
+    const match = /^(\d+)R$/.exec(ref);
+    if (!match) {
+      return null;
+    }
+    const num = Number(match[1]);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  }
+  if (ref && typeof ref === 'object' && 'num' in ref) {
+    const num = Number(ref.num);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  }
+  return null;
+}
+
+/**
+ * 从原始 PDF 字节中定位 DCTDecode（JPEG）图片对象流，直接返回原始 JPEG 字节。
+ *
+ * 仅处理「普通 xref + 直接 /Length」的常见布局；对象流压缩、间接 /Length、
+ * 字节完整性校验失败等任何不匹配都返回 null，由调用方回退到像素重编码路径。
+ */
+function extractRawJpegStream(raw: Buffer, objNum: number): Buffer | null {
+  if (!Number.isInteger(objNum) || objNum <= 0) {
+    return null;
+  }
+  const head = Buffer.from(`${objNum} 0 obj`, 'latin1');
+  const start = raw.indexOf(head);
+  if (start < 0) {
+    return null;
+  }
+  const streamKeyword = raw.indexOf('stream', start + head.length);
+  if (streamKeyword < 0) {
+    return null;
+  }
+  const dict = raw.slice(start, streamKeyword).toString('latin1');
+  if (
+    !/\/Subtype\s*\/Image/.test(dict) ||
+    /\/ImageMask\s+true/.test(dict) ||
+    !/\/DCTDecode/.test(dict)
+  ) {
+    return null;
+  }
+  if (/\/Length\s+\d+\s+\d+\s+R/.test(dict)) {
+    return null; // 间接 /Length：放弃原始提取，走像素回退
+  }
+  let dataStart = streamKeyword + 'stream'.length;
+  // stream 关键字后必须紧跟 EOL（\r\n | \n | \r）
+  if (raw[dataStart] === 0x0d) {
+    dataStart += 1;
+  }
+  if (raw[dataStart] === 0x0a) {
+    dataStart += 1;
+  }
+  const lengthMatch = /\/Length\s+(\d+)/.exec(dict);
+  let stream: Buffer;
+  if (lengthMatch) {
+    stream = raw.slice(dataStart, dataStart + Number(lengthMatch[1]));
+  } else {
+    const end = raw.indexOf('endstream', dataStart);
+    if (end < 0) {
+      return null;
+    }
+    stream = raw.slice(dataStart, end);
+  }
+  // JPEG 完整性校验：SOI 开头、EOI 结尾（末尾允许少量填充空白）
+  if (stream.length < 4 || stream[0] !== 0xff || stream[1] !== 0xd8) {
+    return null;
+  }
+  let end = stream.length;
+  while (
+    end > 2 &&
+    (stream[end - 1] === 0x0a ||
+      stream[end - 1] === 0x0d ||
+      stream[end - 1] === 0x20)
+  ) {
+    end -= 1;
+  }
+  if (stream[end - 2] === 0xff && stream[end - 1] === 0xd9) {
+    return stream.subarray(0, end);
+  }
+  return null;
+}
+
+/** 等待 pdfjs 解码图片对象完成；超时或仓库不存在时返回 null（调用方计 skipped） */
+function resolvePdfjsImageObject(
+  page: PdfjsPage,
+  objId: string,
+): Promise<PdfjsImageData | null> {
+  const store = objId.startsWith('g_') ? page.commonObjs : page.objs;
+  if (!store) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const finish = (data: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise((data as PdfjsImageData) ?? null);
+    };
+    const timer = setTimeout(
+      () => finish(null),
+      PDFJS_IMAGE_RESOLVE_TIMEOUT_MS,
+    );
+    try {
+      store.get(objId, finish);
+      if (store.has?.(objId)) {
+        finish(store.get(objId));
+      }
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/**
+ * pdfjs 解码产物 → PNG 字节：支持 GRAYSCALE_1BPP / RGB_24BPP / RGBA_32BPP，
+ * 其余情况（异构编码未解码、数据不完整）返回 null 由调用方计 skipped。
+ */
+function encodePdfjsImageToPng(
+  canvasModule: NapiCanvasModule,
+  image: PdfjsImageData,
+): Buffer | null {
+  const { width, height, kind, data } = image;
+  if (
+    !width ||
+    !height ||
+    !(data instanceof Uint8Array || data instanceof Uint8ClampedArray)
+  ) {
+    return null;
+  }
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  if (kind === PDFJS_IMAGE_KIND.RGB_24BPP) {
+    if (data.length < width * height * 3) {
+      return null;
+    }
+    for (let i = 0, j = 0; i < width * height; i += 1, j += 4) {
+      rgba[j] = data[i * 3];
+      rgba[j + 1] = data[i * 3 + 1];
+      rgba[j + 2] = data[i * 3 + 2];
+      rgba[j + 3] = 255;
+    }
+  } else if (kind === PDFJS_IMAGE_KIND.RGBA_32BPP) {
+    if (data.length < width * height * 4) {
+      return null;
+    }
+    rgba.set(data.subarray(0, width * height * 4));
+  } else if (kind === PDFJS_IMAGE_KIND.GRAYSCALE_1BPP) {
+    const rowBytes = Math.ceil(width / 8);
+    if (data.length < rowBytes * height) {
+      return null;
+    }
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const bit = (data[y * rowBytes + (x >> 3)] >> (7 - (x & 7))) & 1;
+        const value = bit ? 255 : 0; // pdfjs 惯例：1 = 白
+        const j = (y * width + x) * 4;
+        rgba[j] = value;
+        rgba[j + 1] = value;
+        rgba[j + 2] = value;
+        rgba[j + 3] = 255;
+      }
+    }
+  } else {
+    return null;
+  }
+  const ImageDataCtor = (
+    globalThis as {
+      ImageData?: new (
+        data: Uint8ClampedArray,
+        width: number,
+        height: number,
+      ) => object;
+    }
+  ).ImageData;
+  if (!ImageDataCtor) {
+    return null;
+  }
+  const canvas = canvasModule.createCanvas(width, height);
+  const context = canvas.getContext('2d') as {
+    putImageData(imageData: object, dx: number, dy: number): void;
+  };
+  context.putImageData(new ImageDataCtor(rgba, width, height), 0, 0);
+  return canvas.toBuffer('image/png');
+}
+
+/* ── 内嵌图片：上传与 alt 生成（PDF / PPTX 共用） ── */
+
+/** 图片扩展名 → MIME（PPTX ppt/media 按扩展名识别） */
+const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+};
+
+/** MIME → 对象存储 key 的扩展名 */
+const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/bmp': 'bmp',
+};
+
+/**
+ * 通用上传流程：逐张写入对象存储（key 形如 documents/{docId}/images/page-2-1.png），
+ * 再批量生成 alt（并发 ≤2、总数上限 DOCUMENT_IMAGE_ALT_MAX_COUNT 张）。
+ *
+ * 任何上传异常向上抛出，由调用方整体降级为纯文本——保证不影响主入库链路。
+ */
+async function uploadEmbeddedImages(
+  assets: EmbeddedImageAsset[],
+  images: DocumentImageExtractionOptions,
+): Promise<UploadedEmbeddedImage[]> {
+  const folder = images.docId?.trim() || `doc-${Date.now()}`;
+  const counters = new Map<string, number>();
+  const uploaded: UploadedEmbeddedImage[] = [];
+  for (const asset of assets) {
+    const seq = (counters.get(asset.placement) ?? 0) + 1;
+    counters.set(asset.placement, seq);
+    const extension = IMAGE_EXTENSION_BY_MIME[asset.mimeType] ?? 'bin';
+    const stored = await images.storage.putObject({
+      key: `documents/${folder}/images/${asset.placement}-${seq}.${extension}`,
+      body: asset.buffer,
+      contentType: asset.mimeType,
+    });
+    uploaded.push({ position: asset.position, url: stored.url, alt: '' });
+  }
+
+  // alt 批量生成：并发 ≤2、总数有上限，失败或未配置 vision 时回退为文件名，绝不阻塞入库
+  const altLimit = Math.max(
+    0,
+    envPositiveNumber('DOCUMENT_IMAGE_ALT_MAX_COUNT', 10),
+  );
+  const alts = await mapWithConcurrency(
+    assets.slice(0, altLimit),
+    IMAGE_ALT_CONCURRENCY,
+    (asset) => describeEmbeddedImage(asset, images),
+  );
+  return uploaded.map((image, index) => ({
+    ...image,
+    alt:
+      index < alts.length
+        ? alts[index]
+        : toMarkdownAltText('', assets[index].filename),
+  }));
+}
+
+/** 单张图片的 alt：vision 描述失败时回退文件名 */
+async function describeEmbeddedImage(
+  asset: EmbeddedImageAsset,
+  images: DocumentImageExtractionOptions,
+): Promise<string> {
+  const fallback = toMarkdownAltText('', asset.filename);
+  const vision = images.vision;
+  if (!vision || typeof vision.describeImage !== 'function') {
+    return fallback;
+  }
+  try {
+    const result = await vision.describeImage(asset.buffer, asset.mimeType);
+    return toMarkdownAltText(result?.description, fallback);
+  } catch (err) {
+    console.warn(
+      `embedded image alt generation failed for ${asset.filename}: ${
+        (err as Error).message
+      }`,
+    );
+    return fallback;
+  }
+}
+
+/** 清洗 alt 文本：剔除会破坏 `![alt](url)` 语法的字符，空值回退文件名 */
+function toMarkdownAltText(
+  raw: string | undefined | null,
+  fallback: string,
+): string {
+  const cleaned = (raw ?? '')
+    .replace(/[[\]]/g, ' ')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) {
+    return fallback;
+  }
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned;
+}
+
+/** 图片按归属序号（页码/slide 号）分组，组内保持上传顺序 */
+function groupImagesByPosition(
+  uploaded: UploadedEmbeddedImage[],
+): Map<number, UploadedEmbeddedImage[]> {
+  const grouped = new Map<number, UploadedEmbeddedImage[]>();
+  for (const image of uploaded) {
+    const list = grouped.get(image.position) ?? [];
+    list.push(image);
+    grouped.set(image.position, list);
+  }
+  return grouped;
+}
+
+/** 功能开关：DOCUMENT_EXTRACT_IMAGES（默认开启；显式 false/0/off/no 关闭） */
+function isImageExtractionEnabled(): boolean {
+  const raw = (process.env.DOCUMENT_EXTRACT_IMAGES ?? '').trim().toLowerCase();
+  return !['false', '0', 'off', 'no'].includes(raw);
+}
+
+/** 内嵌图片提取参数是否带有可用的对象存储委托 */
+function hasImageStorage(
+  images?: DocumentImageExtractionOptions,
+): images is DocumentImageExtractionOptions {
+  return Boolean(
+    images && images.storage && typeof images.storage.putObject === 'function',
+  );
 }
 
 /**
@@ -654,10 +1278,12 @@ const dynamicImport = new Function(
 
 /**
  * pdfjs-dist legacy build 用到的最小 API 面。
- * 该包为 ESM-only 且版本迭代快，此处只声明渲染扫描页所需的方法。
+ * 该包为 ESM-only 且版本迭代快，此处只声明渲染扫描页、
+ * 遍历内嵌图片算子（getOperatorList/objs）所需的方法与常量。
  */
 interface PdfjsModule {
   GlobalWorkerOptions: { workerSrc: string };
+  OPS: Record<string, number>;
   getDocument(params: Record<string, unknown>): {
     promise: Promise<PdfjsDocument>;
     destroy(): Promise<void>;
@@ -673,6 +1299,29 @@ interface PdfjsPage {
   getViewport(params: { scale: number }): { width: number; height: number };
   render(params: Record<string, unknown>): { promise: Promise<unknown> };
   cleanup(): Promise<void>;
+  /** 页面算子表：内嵌图片经 paintImageXObject 等算子引用，args 里带 objId */
+  getOperatorList(): Promise<{
+    fnArray: number[];
+    argsArray: unknown[][];
+  }>;
+  /** 页面级对象仓库：图片解码结果按 objId 存放，getOperatorList 后可能尚未就绪 */
+  objs: PdfjsObjects;
+  commonObjs?: PdfjsObjects;
+}
+
+/** pdfjs 对象仓库（页内 objs / 文档级 commonObjs 的最小能力面） */
+interface PdfjsObjects {
+  get(objId: string, callback?: (data: unknown) => void): unknown;
+  has?(objId: string): boolean;
+}
+
+/** pdfjs 解码后的图片对象：kind 见 PDFJS_IMAGE_KIND，ref 为 PDF 对象引用 */
+interface PdfjsImageData {
+  width: number;
+  height: number;
+  kind?: number;
+  data?: Uint8Array | Uint8ClampedArray;
+  ref?: unknown;
 }
 
 /** @napi-rs/canvas 用到的最小 API 面（画布创建 + DOM 对象 polyfill） */
@@ -737,6 +1386,32 @@ function polyfillCanvasGlobals(canvasModule: NapiCanvasModule): void {
   }
 }
 
+/**
+ * 渲染 / 算子遍历期间把 globalThis.pdfjsWorker 临时替换为与当前 pdfjs 同版本的
+ * fake worker，返回恢复函数。
+ *
+ * pdf-parse 内嵌的旧版 pdfjs 会把 fake worker 挂到 globalThis.pdfjsWorker，
+ * 导致 pdfjs 版本错配（"API version does not match the Worker version"）；
+ * 页面渲染与内嵌图片提取共用此保护。
+ */
+async function lockPdfjsFakeWorker(pdfjs: PdfjsModule): Promise<() => void> {
+  const globals = globalThis as Record<string, unknown>;
+  const savedFakeWorker = globals.pdfjsWorker;
+  const workerModule = await dynamicImport<{ WorkerMessageHandler: unknown }>(
+    pdfjs.GlobalWorkerOptions.workerSrc,
+  );
+  globals.pdfjsWorker = {
+    WorkerMessageHandler: workerModule.WorkerMessageHandler,
+  };
+  return () => {
+    if (savedFakeWorker === undefined) {
+      delete globals.pdfjsWorker;
+    } else {
+      globals.pdfjsWorker = savedFakeWorker;
+    }
+  };
+}
+
 /** pdfjs-dist + @napi-rs/canvas 渲染：无 poppler 环境下的兜底渲染器 */
 async function renderPdfPageImagesWithPdfjs(
   buffer: Buffer,
@@ -746,17 +1421,8 @@ async function renderPdfPageImagesWithPdfjs(
     const canvasModule = await loadNapiCanvas();
     polyfillCanvasGlobals(canvasModule);
     const pdfjs = await loadPdfjs();
-    // pdf-parse 内嵌的旧版 pdfjs 会把 fake worker 挂到 globalThis.pdfjsWorker，
-    // 导致 pdfjs 版本错配（"API version does not match the Worker version"）。
-    // 渲染期间临时替换为锁定版本的 worker，结束后恢复，互不干扰。
-    const globals = globalThis as Record<string, unknown>;
-    const savedFakeWorker = globals.pdfjsWorker;
-    const workerModule = await dynamicImport<{ WorkerMessageHandler: unknown }>(
-      pdfjs.GlobalWorkerOptions.workerSrc,
-    );
-    globals.pdfjsWorker = {
-      WorkerMessageHandler: workerModule.WorkerMessageHandler,
-    };
+    // pdf-parse 内嵌旧版 pdfjs 会污染 globalThis.pdfjsWorker，渲染期间临时替换为锁定版本
+    const restoreFakeWorker = await lockPdfjsFakeWorker(pdfjs);
 
     const canvasFactory = {
       create(width: number, height: number) {
@@ -814,11 +1480,7 @@ async function renderPdfPageImagesWithPdfjs(
       return pages;
     } finally {
       await loadingTask.destroy();
-      if (savedFakeWorker === undefined) {
-        delete globals.pdfjsWorker;
-      } else {
-        globals.pdfjsWorker = savedFakeWorker;
-      }
+      restoreFakeWorker();
     }
   } catch (err) {
     throw new BadRequestException(
@@ -848,30 +1510,243 @@ function extractWorkbookText(buffer: Buffer): string {
   return ['# Spreadsheet Document', '', ...sections].join('\n\n').trim();
 }
 
-async function extractPptxText(buffer: Buffer): Promise<string> {
+async function extractPptxText(
+  buffer: Buffer,
+  images?: DocumentImageExtractionOptions,
+): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
   const slideFiles = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
+  // 内嵌图片提取：失败静默降级为纯文本，保证不影响主入库链路
+  let imagesBySlide: Map<number, UploadedEmbeddedImage[]> | null = null;
+  let miscImages: UploadedEmbeddedImage[] = [];
+  if (images && isImageExtractionEnabled() && hasImageStorage(images)) {
+    try {
+      const assets = await extractPptxImageAssets(zip, slideFiles);
+      const all = [
+        ...[...assets.bySlide.values()].flat(),
+        ...assets.unattributed,
+      ];
+      if (all.length > 0) {
+        const uploaded = await uploadEmbeddedImages(all, images);
+        imagesBySlide = groupImagesByPosition(
+          uploaded.filter((image) => image.position > 0),
+        );
+        miscImages = uploaded.filter((image) => image.position === 0);
+      }
+    } catch (err) {
+      console.warn(
+        `PPTX embedded image extraction skipped, falling back to plain text: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
   const slides: string[] = [];
   for (const [index, filename] of slideFiles.entries()) {
     const xml = await zip.files[filename].async('text');
     const blocks = extractPptxTextBlocks(xml);
-    if (blocks.length > 0) {
-      const [title, ...body] = blocks;
-      slides.push(
-        [`## Slide ${index + 1}${title ? `：${title}` : ''}`, '', ...body]
-          .join('\n')
-          .trim(),
-      );
+    // 图片归属按 slide 文件名里的真实序号（slideN.xml），与展示序号在合规文件中一致
+    const slideNum = Number(
+      /slide(\d+)\.xml$/.exec(filename)?.[1] ?? index + 1,
+    );
+    const imageLines = (imagesBySlide?.get(slideNum) ?? []).map(
+      (image) => `![${image.alt}](${image.url})`,
+    );
+    if (blocks.length === 0 && imageLines.length === 0) {
+      continue;
     }
+    const [title, ...body] = blocks;
+    const lines = [
+      `## Slide ${index + 1}${title ? `：${title}` : ''}`,
+      '',
+      ...body,
+    ];
+    // 插图放在对应 slide 段落之后
+    if (imageLines.length > 0) {
+      if (body.length > 0) {
+        lines.push('');
+      }
+      lines.push(...imageLines);
+    }
+    slides.push(lines.join('\n').trim());
+  }
+
+  // 归属不明的插图统一收进「文稿插图」段
+  if (miscImages.length > 0) {
+    slides.push(
+      [
+        '## 文稿插图',
+        '',
+        ...miscImages.map((image) => `![${image.alt}](${image.url})`),
+      ]
+        .join('\n')
+        .trim(),
+    );
   }
 
   if (slides.length === 0) {
     return extractPrintableText(buffer, 'PowerPoint Document (fallback)');
   }
   return ['# PowerPoint Document', '', ...slides].join('\n\n').trim();
+}
+
+/** PPTX 内嵌图提取结果：按 slide 归属 + 无法归属的统一段 */
+interface PptxImageAssets {
+  bySlide: Map<number, EmbeddedImageAsset[]>;
+  unattributed: EmbeddedImageAsset[];
+}
+
+/** 单个 PPTX 允许上传的内嵌图总数上限（恶意超大 media 目录的限流保护） */
+const PPTX_IMAGE_MAX_COUNT_DEFAULT = 30;
+
+/**
+ * 提取 PPTX 内嵌图：读 ppt/media/*，并通过 slideN.xml.rels 把图归属到对应 slide。
+ *
+ * 归属方式：slide XML 里按 blip 引用（r:embed）出现顺序，经 rels 的 rId → media
+ * 映射定位媒体文件；同一媒体被多页复用时只归属首次出现的 slide；
+ * rels 解析不了 / 未被引用的媒体统一放进 unattributed（渲染为「文稿插图」段）。
+ * EMF/WMF/TIFF 等无法在 Markdown 渲染的媒体类型直接忽略。
+ */
+async function extractPptxImageAssets(
+  zip: JSZip,
+  slideFiles: string[],
+): Promise<PptxImageAssets> {
+  const result: PptxImageAssets = { bySlide: new Map(), unattributed: [] };
+  const mediaByPath = new Map<string, { filename: string; mimeType: string }>();
+  for (const name of Object.keys(zip.files)) {
+    const match = /^ppt\/media\/([^/]+)$/.exec(name);
+    const mimeType = match
+      ? IMAGE_MIME_BY_EXTENSION[extensionOf(match[1])]
+      : undefined;
+    if (!match || zip.files[name].dir || !mimeType) {
+      continue;
+    }
+    mediaByPath.set(name, { filename: match[1], mimeType });
+  }
+  if (mediaByPath.size === 0) {
+    return result;
+  }
+
+  const maxCount = Math.max(
+    1,
+    envPositiveNumber('DOCUMENT_IMAGE_MAX_COUNT', PPTX_IMAGE_MAX_COUNT_DEFAULT),
+  );
+  let collected = 0;
+  let truncated = 0;
+
+  // 1. slide → rels → blip 引用顺序归属
+  const attributed = new Set<string>();
+  for (const filename of slideFiles) {
+    const slideNum = Number(/slide(\d+)\.xml$/.exec(filename)?.[1] ?? 0);
+    if (!slideNum) {
+      continue;
+    }
+    const relsEntry = zip.files[`ppt/slides/_rels/slide${slideNum}.xml.rels`];
+    if (!relsEntry) {
+      continue; // 没有 rels 的 slide 引用不到媒体，其余媒体留给「文稿插图」
+    }
+    let slideXml: string;
+    let relsXml: string;
+    try {
+      slideXml = await zip.files[filename].async('text');
+      relsXml = await relsEntry.async('text');
+    } catch {
+      continue; // 读取失败 → 该 slide 的媒体归属不了，统一进「文稿插图」
+    }
+    const targetByRid = parsePptxImageRelTargets(relsXml);
+    for (const match of slideXml.matchAll(/[\w.-]+:embed="([^"]+)"/g)) {
+      const mediaPath = targetByRid.get(match[1]);
+      if (
+        !mediaPath ||
+        !mediaByPath.has(mediaPath) ||
+        attributed.has(mediaPath)
+      ) {
+        continue;
+      }
+      attributed.add(mediaPath);
+      if (collected >= maxCount) {
+        truncated += 1;
+        continue;
+      }
+      const media = mediaByPath.get(mediaPath)!;
+      const buffer = await zip.files[mediaPath].async('nodebuffer');
+      if (!buffer || buffer.length === 0) {
+        continue;
+      }
+      const list = result.bySlide.get(slideNum) ?? [];
+      list.push({
+        placement: `slide-${slideNum}`,
+        position: slideNum,
+        buffer,
+        mimeType: media.mimeType,
+        filename: media.filename,
+      });
+      result.bySlide.set(slideNum, list);
+      collected += 1;
+    }
+  }
+
+  // 2. 未被任何 slide 引用（或归属解析失败）的媒体 → 「文稿插图」统一段
+  for (const [mediaPath, media] of mediaByPath) {
+    if (attributed.has(mediaPath)) {
+      continue;
+    }
+    if (collected >= maxCount) {
+      truncated += 1;
+      continue;
+    }
+    const buffer = await zip.files[mediaPath].async('nodebuffer');
+    if (!buffer || buffer.length === 0) {
+      continue;
+    }
+    result.unattributed.push({
+      placement: 'misc',
+      position: 0,
+      buffer,
+      mimeType: media.mimeType,
+      filename: media.filename,
+    });
+    collected += 1;
+  }
+
+  if (truncated > 0) {
+    console.warn(
+      `PPTX embedded image extraction truncated at ${maxCount} image(s), skipped ${truncated}.`,
+    );
+  }
+  return result;
+}
+
+/** 解析 slide rels：rId → ppt/media/xxx（只取 image 类型关系，Target 按文件名归一） */
+function parsePptxImageRelTargets(relsXml: string): Map<string, string> {
+  const targets = new Map<string, string>();
+  for (const tag of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const xml = tag[0];
+    const type = /Type="([^"]*)"/.exec(xml)?.[1] ?? '';
+    if (!/\/image$/.test(type)) {
+      continue;
+    }
+    const id = /Id="([^"]*)"/.exec(xml)?.[1];
+    const target = /Target="([^"]*)"/.exec(xml)?.[1];
+    if (!id || !target) {
+      continue;
+    }
+    const filename = decodeURIComponent(target).split(/[\\/]/).pop();
+    if (filename) {
+      targets.set(id, `ppt/media/${filename}`);
+    }
+  }
+  return targets;
+}
+
+/** 取小写扩展名（无扩展名返回空串） */
+function extensionOf(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : '';
 }
 
 /**
