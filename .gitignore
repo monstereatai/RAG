@@ -37,6 +37,9 @@ docker/volumes/
 # Test coverage
 coverage/
 
+# 冒烟脚本运行时生成的测试夹具
+backend/scripts/fixtures/
+
 # Misc
 .cache/
 tmp/

@@ -376,7 +376,9 @@ export class DocumentController {
       }
     }
 
-    return extractDocumentText(file.buffer, kind);
+    // PDF 无文本层（扫描件）时，extractDocumentText 会用 vision provider 兜底 OCR；
+    // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
+    return extractDocumentText(file.buffer, kind, this.visionProvider);
   }
 
   private parseBusinessMetadata(
