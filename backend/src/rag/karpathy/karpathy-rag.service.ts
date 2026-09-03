@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'node:path';
 import { BM25, BM25Doc } from './bm25.util';
@@ -26,6 +26,7 @@ import {
 } from '../prompts/bad-case-flywheel.service';
 import { BochaSearchService, BochaSearchResult } from '../../tools/bocha-search.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
+import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
 
 export interface RetrievedChunk {
@@ -36,6 +37,8 @@ export interface RetrievedChunk {
   bm25Score: number;
   cosineScore: number;
   totalScore: number;
+  /** DashScope 重排分（仅当 rerank 实际生效时携带） */
+  rerankScore?: number;
   sourceAuthorityWeight?: number;
   parentChunkId?: string | null;
   headingPath?: string[];
@@ -69,8 +72,12 @@ export interface KarpathyRagResult {
     docId: string;
     chunkIndex: number;
     totalScore: number;
+    /** 融合排序分的别名（与 totalScore 同值），方便下游统一按 score 消费 */
+    score: number;
     bm25Score: number;
     cosineScore: number;
+    /** DashScope 重排分（仅当 rerank 实际生效时携带） */
+    rerankScore?: number;
     sourceAuthorityWeight?: number;
     parentChunkId?: string | null;
     headingPath?: string[];
@@ -132,10 +139,17 @@ export interface RetrievalDiagnostics {
   };
 }
 
+/** 向量候选来源：milvus=主向量通道；elasticsearch=ES kNN 降级/并行通道；none=无向量候选 */
+export type RagVectorSource = 'milvus' | 'elasticsearch' | 'none';
+
 export interface DetailedRetrievalResult {
   chunks: RetrievedChunk[];
   diagnostics: RetrievalDiagnostics;
   profile: RetrievalProfile;
+  /** 本轮向量候选来自哪个通道（ES kNN 降级/并行通道可观测） */
+  vectorSource?: RagVectorSource;
+  /** 本轮是否执行了 DashScope 重排 */
+  rerankApplied?: boolean;
 }
 
 export interface PrefetchedFastPath {
@@ -265,6 +279,8 @@ export class KarpathyRagService implements OnModuleInit {
     private readonly bochaSearchService: BochaSearchService,
     private readonly toolPolicy: ToolExecutionPolicyService,
     private readonly documentPermissionService: DocumentPermissionService,
+    // DashScope 重排：ToolsModule 已导出；@Optional 保证缺失时仅跳过重排，不影响检索
+    @Optional() private readonly rerankService?: DashScopeRerankService,
   ) {}
 
   /**
@@ -541,19 +557,36 @@ export class KarpathyRagService implements OnModuleInit {
       bm25Hits.length,
     );
 
-    // 2. Cosine 检索 topK*2（通过 Milvus）
+    // 2. 向量检索：Milvus 为主通道；RAG_ES_KNN_MODE 控制 ES kNN 降级（fallback）/并行（always）通道
+    const esKnnMode = this.resolveEsKnnMode();
+    const esKnnReady = esKnnMode !== 'off' && this.elasticsearchProvider.isEnabled();
     let cosineHits: Awaited<
       ReturnType<VectorStoreProvider['similaritySearch']>
     > = [];
+    let vectorSource: RagVectorSource = 'none';
     if (vectorSearch) {
+      let milvusUsed = false;
+      let queryVector: number[] | null = null;
       try {
-        const queryVector = await this.embeddingProvider.embedQuery(query);
-        cosineHits = await this.vectorStoreProvider.similaritySearch(
-          queryVector,
-          candidateDepth,
-          userId,
-        );
-        cosineHits = this.filterActiveVectorHits(cosineHits, userId);
+        queryVector = await this.embeddingProvider.embedQuery(query);
+        const skipMilvus =
+          esKnnMode === 'fallback' &&
+          esKnnReady &&
+          !this.isMilvusRuntimeAvailable();
+        if (skipMilvus) {
+          // fallback 模式下 Milvus 运行时不可用：直接走 ES kNN，不浪费一次必然失败的调用
+          this.logger.warn(
+            'Milvus runtime unavailable, switching vector channel to ES kNN (RAG_ES_KNN_MODE=fallback)',
+          );
+        } else {
+          cosineHits = await this.vectorStoreProvider.similaritySearch(
+            queryVector,
+            candidateDepth,
+            userId,
+          );
+          cosineHits = this.filterActiveVectorHits(cosineHits, userId);
+          milvusUsed = true;
+        }
       } catch (err) {
         this.logger.warn(
           `Vector search failed, fallback to BM25 only: ${
@@ -561,6 +594,34 @@ export class KarpathyRagService implements OnModuleInit {
           }`,
         );
       }
+      // fallback：Milvus 失败/不可用时补 ES kNN；always：Milvus 正常也并行拉 ES kNN
+      if (queryVector && esKnnReady && (!milvusUsed || esKnnMode === 'always')) {
+        try {
+          const knnHits = await this.esKnnVectorHits(
+            queryVector,
+            candidateDepth,
+            userId,
+            options.scope,
+          );
+          if (knnHits.length > 0) {
+            // always 模式：两路向量候选按 chunk id 去重合并进 cosine 池再进 fuseByRrf
+            const seenIds = new Set(cosineHits.map((hit) => hit.id));
+            cosineHits = [
+              ...cosineHits,
+              ...knnHits.filter((hit) => !seenIds.has(hit.id)),
+            ];
+          }
+        } catch (err) {
+          this.logger.warn(
+            `ES kNN vector search failed: ${(err as Error).message}`,
+          );
+        }
+      }
+      vectorSource = milvusUsed
+        ? 'milvus'
+        : queryVector && esKnnReady
+          ? 'elasticsearch'
+          : 'none';
     }
     this.metricsService.observeRetrievalHits(
       'milvus',
@@ -575,7 +636,9 @@ export class KarpathyRagService implements OnModuleInit {
     const scoped = this.applySourceAuthority(fused)
       .filter((chunk) => this.matchesScope(chunk, options.scope))
       .sort((a, b) => b.totalScore - a.totalScore);
-    const ranked = scoped
+    // DashScope 重排：authority/scope 过滤排序后、最终截断前执行，只调整顺序并挂 rerankScore
+    const rerankOutcome = await this.applyRerank(normalizedQuery, scoped);
+    const ranked = rerankOutcome.chunks
       .slice(0, profile.candidateDepth)
       .map((chunk) => ({
         ...chunk,
@@ -620,7 +683,13 @@ export class KarpathyRagService implements OnModuleInit {
       diagnostics.expandedChunks,
       diagnostics.contextCharacters,
     );
-    return { chunks: built.chunks, diagnostics, profile };
+    return {
+      chunks: built.chunks,
+      diagnostics,
+      profile,
+      vectorSource,
+      rerankApplied: rerankOutcome.applied,
+    };
   }
 
   /**
@@ -1384,7 +1453,10 @@ ${memoryText || '无'}
     memoryMessages: Array<{ role: string; content: string }>,
     onToken?: (token: string) => void,
     retrieveOptions: RetrieveOptions = {},
-  ): Promise<{ answer: string; references: RetrievedChunk[] } | null> {
+  ): Promise<{
+    answer: string;
+    references: KarpathyRagResult['references'];
+  } | null> {
     const policy = this.toolPolicy.decide('bocha_web_search', {
       mode: 'simple',
       pluginKeys: retrieveOptions.pluginKeys,
@@ -1411,7 +1483,14 @@ ${memoryText || '无'}
         memoryMessages,
         onToken,
       );
-      return { answer, references };
+      // 对齐引用类型：web 来源同样携带 score（=totalScore）
+      return {
+        answer,
+        references: references.map((chunk) => ({
+          ...chunk,
+          score: chunk.totalScore,
+        })),
+      };
     } catch (error) {
       this.logger.warn(`Simple web fallback failed: ${(error as Error).message}`);
       return null;
@@ -1970,8 +2049,12 @@ ${context}
       docId: c.docId,
       chunkIndex: c.chunkIndex,
       totalScore: c.totalScore,
+      score: c.totalScore,
       bm25Score: c.bm25Score,
       cosineScore: c.cosineScore,
+      ...(c.rerankScore === undefined
+        ? {}
+        : { rerankScore: c.rerankScore }),
       sourceAuthorityWeight: c.sourceAuthorityWeight,
       parentChunkId: c.parentChunkId,
       headingPath: c.headingPath,
@@ -2189,6 +2272,136 @@ ${context}
     return hits.filter(
       (hit) => activeDocIds.has(hit.docId) && !draftDocIds.has(hit.docId),
     );
+  }
+
+  /**
+   * 读取 ES kNN 向量通道模式：off（关闭，行为与旧版一致）/ fallback（Milvus 失败才用）/ always（并行合并）。
+   * 非法值一律回落 fallback（代码默认值）。
+   */
+  private resolveEsKnnMode(): 'off' | 'fallback' | 'always' {
+    const raw = (
+      this.configService.get<string>('RAG_ES_KNN_MODE') ?? 'fallback'
+    )
+      .trim()
+      .toLowerCase();
+    return raw === 'off' || raw === 'always' ? raw : 'fallback';
+  }
+
+  /**
+   * 探测 Milvus 运行时是否可用（熔断/降级状态）。
+   * 探测失败时假定可用，交给 similaritySearch 的 try/catch 兜底，保持旧行为。
+   */
+  private isMilvusRuntimeAvailable(): boolean {
+    try {
+      return this.vectorStoreProvider.getRuntimeStatus().available;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * ES kNN 向量候选：knnSearch 只返回 {id, score}，
+   * 命中经 chunkMeta 映射补全 content/docId/chunkIndex（缺 meta 的跳过），
+   * draft/deprecated 门禁已由 knnSearch 的 filter 在 ES 侧完成。
+   */
+  private async esKnnVectorHits(
+    queryVector: number[],
+    candidateDepth: number,
+    userId?: string,
+    scope?: RetrievalScope,
+  ): Promise<Awaited<ReturnType<VectorStoreProvider['similaritySearch']>>> {
+    const knnHits = await this.elasticsearchProvider.knnSearch(
+      queryVector,
+      candidateDepth,
+      userId,
+      { includeDeprecated: scope?.includeDeprecated },
+    );
+    return knnHits.flatMap((hit) => {
+      const meta = this.chunkMeta.get(hit.id);
+      if (!meta || meta.userId !== userId) return [];
+      return [
+        {
+          id: hit.id,
+          content: meta.content,
+          docId: meta.docId,
+          chunkIndex: meta.chunkIndex,
+          score: hit.score,
+        },
+      ];
+    });
+  }
+
+  /**
+   * DashScope 重排：在 authority/scope 过滤排序后、最终截断前，对前 RAG_RERANK_TOP_N 个候选重排。
+   * 只按重排分调整顺序并挂 rerankScore；totalScore 保留融合分，保证下游质量闸门口径不变。
+   * RAG_RERANK_ENABLED=false、rerank 未配置 key 或调用失败时保持原序，绝不抛错阻断检索。
+   */
+  private async applyRerank(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): Promise<{ chunks: RetrievedChunk[]; applied: boolean }> {
+    if (
+      chunks.length < 2 ||
+      !this.isRerankEnabled() ||
+      !this.rerankService ||
+      !this.rerankService.isEnabled()
+    ) {
+      return { chunks, applied: false };
+    }
+    const topN = this.intConfig('RAG_RERANK_TOP_N', 20, 1, 50);
+    const candidates = chunks.slice(0, topN);
+    if (candidates.length < 2) {
+      return { chunks, applied: false };
+    }
+    try {
+      const reranked = await this.rerankService.rerank(query, candidates, topN);
+      // rerank 服务短路（未真正调用远端）时会原样返回同一数组，视为未生效
+      if (reranked === candidates || reranked.length === 0) {
+        return { chunks, applied: false };
+      }
+      const rerankScoreById = new Map(
+        reranked.map((chunk) => [chunk.id, chunk.totalScore]),
+      );
+      const orderById = new Map(reranked.map((chunk, index) => [chunk.id, index]));
+      const rerankedHead = candidates
+        .map((chunk) => {
+          const rerankScore = rerankScoreById.get(chunk.id);
+          return rerankScore === undefined ? chunk : { ...chunk, rerankScore };
+        })
+        .sort(
+          (a, b) =>
+            (orderById.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+            (orderById.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        );
+      return {
+        chunks: [...rerankedHead, ...chunks.slice(topN)],
+        applied: true,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `DashScope rerank failed, keep original order: ${(err as Error).message}`,
+      );
+      return { chunks, applied: false };
+    }
+  }
+
+  private isRerankEnabled(): boolean {
+    return this.configService.get<string>('RAG_RERANK_ENABLED') !== 'false';
+  }
+
+  /**
+   * 环境变量整型读取（兼容字符串型 process.env 原始值）并夹取到 [min, max]。
+   */
+  private intConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const raw = this.configService.get<string | number>(key);
+    const parsed = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, Math.trunc(parsed)));
   }
 
   private matchesScope(

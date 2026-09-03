@@ -71,6 +71,10 @@ describe('KarpathyRagService exception scenarios', () => {
     const documentPermissionService = {
       getAllowedDocIds: jest.fn().mockResolvedValue(new Set()),
     };
+    const dashscopeRerankService = {
+      isEnabled: jest.fn().mockReturnValue(false),
+      rerank: jest.fn(async (_query: string, chunks: unknown[]) => chunks),
+    };
 
     const service = new KarpathyRagService(
       embeddingProvider,
@@ -84,6 +88,7 @@ describe('KarpathyRagService exception scenarios', () => {
       bochaSearchService as unknown as import('../../tools/bocha-search.service').BochaSearchService,
       toolPolicy as unknown as import('../../tools/tool-execution-policy.service').ToolExecutionPolicyService,
       documentPermissionService as unknown as DocumentPermissionService,
+      dashscopeRerankService as unknown as import('../../tools/dashscope-rerank.service').DashScopeRerankService,
     );
     (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
       save: jest.fn(),
@@ -98,6 +103,7 @@ describe('KarpathyRagService exception scenarios', () => {
       obsidianKnowledge,
       retrieveBadCaseMatches,
       bochaSearchService,
+      dashscopeRerankService,
     };
   }
 

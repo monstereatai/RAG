@@ -12,10 +12,11 @@ export class RagGatewayService {
 
   async search(input: RagSearchDto, userId: string) {
     const limit = input.limit ?? 5;
-    const [retrievedChunks, reviewedEvidence] = await Promise.all([
-      this.karpathyRagService.retrieve(input.query, {}, userId),
+    const [retrieval, reviewedEvidence] = await Promise.all([
+      this.karpathyRagService.retrieveDetailed(input.query, {}, userId),
       this.karpathyRagService.retrieveReviewedEvidence(input.query, 2),
     ]);
+    const retrievedChunks = retrieval.chunks;
     const chunks = [...reviewedEvidence, ...retrievedChunks];
     const selectedChunks = chunks.slice(0, limit);
     const assessment =
@@ -40,6 +41,10 @@ export class RagGatewayService {
       cosineScore: chunk.cosineScore,
       totalScore: chunk.totalScore,
       score: chunk.totalScore,
+      // 溯源补强（只增不改）：rerank 实际生效时才携带 rerankScore
+      ...(chunk.rerankScore === undefined
+        ? {}
+        : { rerankScore: chunk.rerankScore }),
       retrievalSource: chunk.retrievalSource,
       contextRole: chunk.contextRole,
     }));
@@ -50,6 +55,9 @@ export class RagGatewayService {
       status: assessment.sufficient ? 'ok' : 'insufficient_context',
       retrievalSufficient: assessment.sufficient,
       retrievalReason: assessment.reason,
+      // 溯源补强（只增不改）：向量候选来源与重排标记，便于观测 ES kNN 降级与 rerank 生效情况
+      vectorSource: retrieval.vectorSource ?? 'none',
+      rerankApplied: retrieval.rerankApplied ?? false,
       results,
       chunks: results,
     };

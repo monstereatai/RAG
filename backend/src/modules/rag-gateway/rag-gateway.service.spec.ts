@@ -13,7 +13,13 @@ describe('RagGatewayService', () => {
 
   function createService(sufficient: boolean, reason: string) {
     const karpathyRagService = {
-      retrieve: jest.fn().mockResolvedValue([chunk]),
+      retrieveDetailed: jest.fn().mockResolvedValue({
+        chunks: [chunk],
+        diagnostics: {},
+        profile: {},
+        vectorSource: 'milvus',
+        rerankApplied: false,
+      }),
       retrieveReviewedEvidence: jest.fn().mockResolvedValue([]),
       assessRetrievedChunks: jest.fn().mockReturnValue({ sufficient, reason }),
     };
