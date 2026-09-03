@@ -1044,13 +1044,30 @@ export class DocumentService {
             ]
           : detected.roleScope,
       documentType: explicit?.documentType ?? detected.documentType,
-      lifecycleStatus: explicit?.lifecycleStatus ?? detected.lifecycleStatus,
+      lifecycleStatus: this.applyApprovalGate(
+        explicit?.lifecycleStatus ?? detected.lifecycleStatus,
+      ),
       supersedesDocId:
         explicit?.supersedesDocId?.trim() || detected.supersedesDocId,
       docVersion: explicit?.docVersion?.trim() || null,
       effectiveAt: explicit?.effectiveAt?.trim() || null,
       expiredAt: explicit?.expiredAt?.trim() || null,
     };
+  }
+
+  /**
+   * 审批门禁开关（DOCUMENT_REQUIRE_APPROVAL=true）：新文档一律先落 draft。
+   * draft 不进入任何检索口径（ES 分块/文档检索、本地 BM25、Milvus 向量通道均已过滤），
+   * 由管理后台审核提升为 effective 后自动可见；显式指定 lifecycleStatus 同样被拦下，避免绕过审批。
+   */
+  private applyApprovalGate(
+    lifecycleStatus: DocumentLifecycleStatus,
+  ): DocumentLifecycleStatus {
+    const raw = (process.env.DOCUMENT_REQUIRE_APPROVAL ?? '')
+      .trim()
+      .toLowerCase();
+    if (!['1', 'true', 'yes', 'on'].includes(raw)) return lifecycleStatus;
+    return 'draft';
   }
 
   async updateLifecycle(

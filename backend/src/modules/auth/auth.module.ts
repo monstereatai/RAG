@@ -4,11 +4,16 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { ApiTokenService } from './api-token.service';
+import { AuthUserStore } from './auth-user.store';
+import { TokenStoreService } from './token-store/token-store.service';
+import { MailModule } from '../mail/mail.module';
 
 @Global()
 @Module({
   imports: [
     ConfigModule,
+    // 邮件能力（激活 / 验证码邮件）；未配置 SMTP 时 MailService 走本地模拟
+    MailModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
@@ -21,7 +26,7 @@ import { ApiTokenService } from './api-token.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, ApiTokenService],
-  exports: [AuthService, ApiTokenService, JwtModule],
+  providers: [AuthService, ApiTokenService, AuthUserStore, TokenStoreService],
+  exports: [AuthService, ApiTokenService, AuthUserStore, JwtModule],
 })
 export class AuthModule {}

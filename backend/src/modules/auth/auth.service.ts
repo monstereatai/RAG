@@ -1,9 +1,32 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { MailService } from '../mail/mail.service';
+import { AuthUserRecord, AuthUserStore } from './auth-user.store';
+import { TokenStoreService } from './token-store/token-store.service';
 import { LoginDto, LoginResponse } from './dto/login.dto';
+import type { RegisterDto, RegisterResponse } from './dto/register.dto';
+import type {
+  PasswordResetCodeDto,
+  PasswordResetCodeResponse,
+  PasswordResetDto,
+  PasswordResetResponse,
+  VerifyEmailResponse,
+} from './dto/password-reset.dto';
+import {
+  buildActivationEmailHtml,
+  buildPasswordResetCodeHtml,
+} from './mail-templates';
 
 /** access token 默认有效期（JWT_ACCESS_EXPIRES 未配置时） */
 const DEFAULT_ACCESS_EXPIRES_IN = '2h';
@@ -11,46 +34,212 @@ const DEFAULT_ACCESS_EXPIRES_IN = '2h';
 /** refresh token 默认有效期（JWT_REFRESH_EXPIRES 未配置时） */
 const DEFAULT_REFRESH_EXPIRES_IN = '7d';
 
+/** 邮箱激活 token 有效期：24h */
+const ACTIVATION_TOKEN_TTL_SECONDS = 24 * 3600;
+
+/** 密码重置验证码有效期：10 分钟 */
+const PASSWORD_RESET_CODE_TTL_SECONDS = 10 * 60;
+
+/** 发码防枚举统一文案（邮箱存在与否返回一致，不暴露注册状态） */
+const PASSWORD_RESET_CODE_DISPATCHED_MESSAGE =
+  '如果该邮箱已注册，重置验证码已发送，请在 10 分钟内查收并完成重置';
+
 /**
- * 认证服务（双 token 机制）
+ * 认证服务（双 token + 注册激活 + 验证码重置密码）
  *
  * 签发 access / refresh 两种 token：
  *   - access：短有效期（默认 2h），用于访问业务接口（JwtAuthGuard 放行）
  *   - refresh：长有效期（默认 7d），仅用于 POST /auth/refresh 换发新双 token
  *
- * 当前使用硬编码测试用户，M2/M4 接入数据库后替换为真实用户校验（含禁用状态）。
- * 测试账号：
- *   - admin / admin123（role: admin）
- *   - user / user1234（role: user）
+ * 用户存储：AuthUserStore（内存 Map + workspace/auth-users.json 落盘，
+ * 原硬编码测试账号保留为种子）；一次性 token 走 TokenStoreService
+ * （Redis 可用走 Redis，不可用降级进程内存）；邮件经 MailService
+ * （未配置 SMTP 时本地模拟写入 workspace/mail-outbox/latest.json）。
+ * 种子账号：admin / admin123（admin），user / user1234（user）。
  */
 @Injectable()
 export class AuthService {
-  private readonly testUsers: Record<
-    string,
-    { password: string; payload: JwtPayload }
-  > = {
-    admin: {
-      password: 'admin123',
-      payload: { userId: '1', username: 'admin', role: 'admin' },
-    },
-    user: {
-      password: 'user1234',
-      payload: { userId: '2', username: 'user', role: 'user' },
-    },
-  };
+  /** DI 注入的用户存储（未注入时懒加载默认实现，保持手工构造兼容） */
+  private userStoreRef?: AuthUserStore;
+  private tokenStoreRef?: TokenStoreService;
+  private mailServiceRef?: MailService;
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) {}
+    @Optional() injectedUserStore?: AuthUserStore,
+    @Optional() injectedTokenStore?: TokenStoreService,
+    @Optional() injectedMailService?: MailService,
+  ) {
+    this.userStoreRef = injectedUserStore;
+    this.tokenStoreRef = injectedTokenStore;
+    this.mailServiceRef = injectedMailService;
+  }
+
+  private get userStore(): AuthUserStore {
+    this.userStoreRef ??= new AuthUserStore(this.configService);
+    return this.userStoreRef;
+  }
+
+  private get tokenStore(): TokenStoreService {
+    this.tokenStoreRef ??= new TokenStoreService();
+    return this.tokenStoreRef;
+  }
+
+  private get mailService(): MailService {
+    this.mailServiceRef ??= new MailService(this.configService);
+    return this.mailServiceRef;
+  }
 
   async login(dto: LoginDto): Promise<LoginResponse> {
-    const user = this.testUsers[dto.username];
-    if (!user || user.password !== dto.password) {
+    const user = await this.userStore.findByUsername(dto.username);
+    if (
+      !user ||
+      !AuthUserStore.verifyPassword(dto.password, user.passwordHash)
+    ) {
       throw new UnauthorizedException('invalid username or password');
     }
 
-    return this.issueTokenPair(user.payload);
+    // 先验口令再验激活状态：不向未持有正确口令的人泄露账号激活进度
+    if (this.requireEmailVerified && !user.emailVerified) {
+      throw new ForbiddenException(
+        'email not verified: please activate your account via the verification email',
+      );
+    }
+
+    return this.issueTokenPair(this.toPayload(user));
+  }
+
+  /**
+   * 注册新用户并发送激活邮件
+   *
+   * 流程：用户名 / 邮箱查重 → 建用户（emailVerified=false）
+   * → 生成一次性激活 token 存 TokenStore（24h）→ 发送激活邮件。
+   * 邮件在未配置 SMTP 时走本地模拟（写入 workspace/mail-outbox/latest.json），
+   * 不阻塞注册流程；真实 SMTP 发送失败则向上抛出。
+   */
+  async register(dto: RegisterDto): Promise<RegisterResponse> {
+    const username = dto.username.trim();
+    const email = dto.email.trim().toLowerCase();
+
+    if (await this.userStore.findByUsername(username)) {
+      throw new ConflictException('username already exists');
+    }
+    if (await this.userStore.findByEmail(email)) {
+      throw new ConflictException('email already registered');
+    }
+
+    const user = await this.userStore.createUser({
+      username,
+      email,
+      passwordHash: AuthUserStore.hashPassword(dto.password),
+      realName: dto.realName,
+    });
+
+    const activationToken = randomBytes(32).toString('base64url');
+    await this.tokenStore.set(
+      this.activationTokenKey(activationToken),
+      user.id,
+      ACTIVATION_TOKEN_TTL_SECONDS,
+    );
+
+    // 全局前缀 api + URI 版本 v1（见 main.ts），激活链接需与之保持一致
+    const verifyUrl = `${this.emailLinkBaseUrl}/api/v1/auth/verify-email?token=${activationToken}`;
+    await this.mailService.sendMail({
+      to: user.email,
+      subject: '【企业知识库】邮箱激活验证',
+      html: buildActivationEmailHtml(user.username, verifyUrl),
+    });
+
+    return {
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      realName: user.realName,
+      emailVerified: user.emailVerified,
+      message: '注册成功，激活邮件已发送，请在 24 小时内完成邮箱验证',
+    };
+  }
+
+  /**
+   * 邮箱激活：GET /auth/verify-email?token=xxx
+   *
+   * 原子消费激活 token（读取即删除，防重放），置 emailVerified=true。
+   * 已激活用户重复点击旧链接时返回 alreadyVerified=true（幂等）。
+   */
+  async verifyEmail(token: string): Promise<VerifyEmailResponse> {
+    if (!token) {
+      throw new BadRequestException('verification token is required');
+    }
+    const userId = await this.tokenStore.consume(
+      this.activationTokenKey(token),
+    );
+    const user = userId ? await this.userStore.findById(userId) : null;
+    if (!user) {
+      throw new BadRequestException('activation token invalid or expired');
+    }
+    if (!user.emailVerified) {
+      await this.userStore.markEmailVerified(user.id);
+    }
+    return {
+      verified: true,
+      alreadyVerified: user.emailVerified,
+      username: user.username,
+      email: user.email,
+    };
+  }
+
+  /**
+   * 发送密码重置验证码：POST /auth/password/reset-code
+   *
+   * 6 位数字验证码存 TokenStore（10 分钟），经 MailService 发送；
+   * 邮箱不存在时返回与成功一致的响应体，防止枚举注册邮箱。
+   */
+  async sendPasswordResetCode(
+    dto: PasswordResetCodeDto,
+  ): Promise<PasswordResetCodeResponse> {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.userStore.findByEmail(email);
+    if (user) {
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      await this.tokenStore.set(
+        this.passwordResetCodeKey(email),
+        code,
+        PASSWORD_RESET_CODE_TTL_SECONDS,
+      );
+      await this.mailService.sendMail({
+        to: email,
+        subject: '【企业知识库】密码重置验证码',
+        html: buildPasswordResetCodeHtml(code),
+      });
+    }
+    return {
+      sent: true,
+      message: PASSWORD_RESET_CODE_DISPATCHED_MESSAGE,
+    };
+  }
+
+  /**
+   * 验证码重置密码：POST /auth/password/reset
+   *
+   * 校验通过即更新口令并删除验证码（一次性），随后可用新密码登录。
+   */
+  async resetPassword(dto: PasswordResetDto): Promise<PasswordResetResponse> {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.userStore.findByEmail(email);
+    const storedCode = await this.tokenStore.get(
+      this.passwordResetCodeKey(email),
+    );
+    if (!user || !storedCode || !this.codeMatches(storedCode, dto.code)) {
+      throw new BadRequestException('reset code invalid or expired');
+    }
+
+    await this.userStore.updatePassword(
+      user.id,
+      AuthUserStore.hashPassword(dto.newPassword),
+    );
+    await this.tokenStore.delete(this.passwordResetCodeKey(email));
+    return { reset: true, message: '密码已重置，请使用新密码登录' };
   }
 
   /**
@@ -73,13 +262,13 @@ export class AuthService {
       throw new UnauthorizedException('refresh token type invalid');
     }
 
-    const user = this.testUsers[payload.username];
-    // 硬编码用户表即"存在且未禁用"名单；接入数据库后替换为 users 表查询 + 禁用状态校验
-    if (!user || user.payload.userId !== payload.userId) {
+    // 校验用户仍存在（未来接入禁用状态时在此扩展），且 username 与签发时一致
+    const user = await this.userStore.findById(payload.userId);
+    if (!user || user.username !== payload.username) {
       throw new UnauthorizedException('user not found or disabled');
     }
 
-    return this.issueTokenPair(user.payload);
+    return this.issueTokenPair(this.toPayload(user));
   }
 
   async verifyToken(token: string): Promise<JwtPayload> {
@@ -88,6 +277,43 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('token invalid or expired');
     }
+  }
+
+  /** 验证码比对（timingSafeEqual 防时序侧信道；长度不一致直接判否） */
+  private codeMatches(stored: string, provided: string): boolean {
+    const left = Buffer.from(stored, 'utf8');
+    const right = Buffer.from(provided, 'utf8');
+    return left.length === right.length && timingSafeEqual(left, right);
+  }
+
+  /** JwtPayload 组装（双 token 共用的基础声明） */
+  private toPayload(user: AuthUserRecord): JwtPayload {
+    return { userId: user.id, username: user.username, role: user.role };
+  }
+
+  /** 激活 token 的存储 key：email:activation:token:{token} → userId */
+  private activationTokenKey(token: string): string {
+    return `email:activation:token:${token}`;
+  }
+
+  /** 重置验证码的存储 key：email:password:reset:{email} → 6 位数字 */
+  private passwordResetCodeKey(email: string): string {
+    return `email:password:reset:${email.toLowerCase()}`;
+  }
+
+  /** 登录是否强制邮箱已激活（AUTH_REQUIRE_EMAIL_VERIFIED=false 可关闭，默认强制） */
+  private get requireEmailVerified(): boolean {
+    return (
+      this.configService.get<string>('AUTH_REQUIRE_EMAIL_VERIFIED') !== 'false'
+    );
+  }
+
+  /** 激活链接站点地址（拼接 /api/v1/auth/verify-email），默认本机 3000 端口 */
+  private get emailLinkBaseUrl(): string {
+    return (
+      this.configService.get<string>('AUTH_EMAIL_LINK_BASE_URL') ||
+      'http://localhost:3000'
+    );
   }
 
   /**
@@ -114,13 +340,10 @@ export class AuthService {
       this.jwtService.signAsync(accessPayload, {
         expiresIn: accessExpiresIn,
       } as unknown as JwtSignOptions),
-      this.jwtService.signAsync(
-        refreshPayload,
-        {
-          secret: this.refreshSecret,
-          expiresIn: refreshExpiresIn,
-        } as unknown as JwtSignOptions,
-      ),
+      this.jwtService.signAsync(refreshPayload, {
+        secret: this.refreshSecret,
+        expiresIn: refreshExpiresIn,
+      } as unknown as JwtSignOptions),
     ]);
 
     return {

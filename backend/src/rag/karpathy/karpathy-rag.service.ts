@@ -1939,7 +1939,9 @@ ${context}
           ...this.pickChunkMetadata(meta),
         };
       })
-      .filter((hit): hit is RankedRetrievalHit => hit !== null);
+      .filter((hit): hit is RankedRetrievalHit => hit !== null)
+      // 审批门禁：draft 文档未经审批，本地 BM25 检索不可见
+      .filter((hit) => hit.lifecycleStatus !== 'draft');
   }
 
   private mergeRankedHits(
@@ -2174,8 +2176,19 @@ ${context}
         .filter((entry) => entry.userId === userId)
         .map((entry) => entry.docId),
     );
+    // 审批门禁：draft 文档未经审批，向量检索通道同样不可见
+    const draftDocIds = new Set(
+      this.persistedEntries
+        .filter(
+          (entry) =>
+            entry.userId === userId && entry.lifecycleStatus === 'draft',
+        )
+        .map((entry) => entry.docId),
+    );
 
-    return hits.filter((hit) => activeDocIds.has(hit.docId));
+    return hits.filter(
+      (hit) => activeDocIds.has(hit.docId) && !draftDocIds.has(hit.docId),
+    );
   }
 
   private matchesScope(

@@ -83,6 +83,35 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * 读取并删除（GETDEL，Redis >= 6.2），用于激活 token / 验证码等
+   * 「一次性消费」场景：读取即删除，避免二次使用。
+   * 服务端版本过低不支持 GETDEL 时降级为 GET + DEL；Redis 不可用返回 null，
+   * 由调用方按「token 不存在」处理。
+   */
+  async getdel(key: string): Promise<string | null> {
+    if (!this.enabled) return null;
+    try {
+      return await this.client.getdel(key);
+    } catch (err) {
+      this.logger.warn(
+        `Redis GETDEL failed for key=${key}: ${(err as Error).message}`,
+      );
+      try {
+        const value = await this.client.get(key);
+        if (value !== null) {
+          await this.client.del(key);
+        }
+        return value;
+      } catch (fallbackErr) {
+        this.logger.warn(
+          `Redis GET+DEL fallback failed for key=${key}: ${(fallbackErr as Error).message}`,
+        );
+        return null;
+      }
+    }
+  }
+
+  /**
    * 写入缓存（支持 TTL 过期时间）
    */
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
@@ -146,7 +175,9 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
         value,
       );
     } catch (err) {
-      this.logger.warn(`Redis release lock failed for key=${key}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Redis release lock failed for key=${key}: ${(err as Error).message}`,
+      );
     }
   }
 

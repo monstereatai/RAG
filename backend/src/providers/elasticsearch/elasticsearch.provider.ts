@@ -477,6 +477,10 @@ export class ElasticsearchProvider implements OnModuleInit {
           },
         });
       }
+      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
+      filter.push({
+        bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] },
+      });
       const queryObj: estypes.QueryDslQueryContainer = {
         bool: {
           must: [
@@ -574,6 +578,8 @@ export class ElasticsearchProvider implements OnModuleInit {
       if (!scope.includeDeprecated) {
         filter.push({ bool: { must_not: [{ term: { lifecycleStatus: 'deprecated' } }] } });
       }
+      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
+      filter.push({ bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] } });
       const result = await this.client.search<IndexedDocument>({
         index: this.documentIndexName,
         query: {
