@@ -16,6 +16,10 @@ import type {
  */
 @Injectable()
 export class AgentLoopService {
+  /**
+   * 受预算约束的通用执行循环。这里集中处理步数、工具次数、总时限、检查点与审计事件，
+   * 业务模块只能提供 `decide`／`reduce`，不能绕过工具权限策略自行执行副作用。
+   */
   private readonly logger = new Logger(AgentLoopService.name);
 
   constructor(
@@ -24,6 +28,10 @@ export class AgentLoopService {
     private readonly redis: RedisProvider,
   ) {}
 
+  /**
+   * 执行「决策 → 动作 → 状态归约」直到完成、阻断或预算耗尽。
+   * 任一轮成功后才写检查点，因此未知副作用结果不会被自动安全地假定为可重放。
+   */
   async run<TState, TOutput>(
     input: AgentLoopInput<TState, TOutput>,
   ): Promise<AgentLoopResult<TState, TOutput>> {
@@ -67,6 +75,7 @@ export class AgentLoopService {
         return this.finish(input, state, step, toolCalls, 'blocked', decision.reason);
       }
 
+      // 工具动作经过 ToolExecutionService 的权限、审批和幂等保护；模型动作则受同一剩余时限约束。
       if (decision.type === 'tool') {
         if (toolCalls >= maxToolCalls) {
           return this.finish(input, state, step, toolCalls, 'budget_exceeded', `工具调用达到上限 ${maxToolCalls}`);

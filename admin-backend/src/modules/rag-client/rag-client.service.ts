@@ -30,6 +30,11 @@ const LIST_READ_TIMEOUT_MS = 10_000;
 
 @Injectable()
 export class RagClientService {
+  /**
+   * 管理后台到 RAG Backend 的唯一 HTTP 边界。
+   * 浏览器令牌绝不透传到 RAG 服务；本客户端统一附加内部服务令牌、超时和响应可用性标识，
+   * 防止管理端代码绕开权限、审计和降级约定直接访问 RAG 内部实现。
+   */
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly serviceToken: string;
@@ -79,12 +84,14 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>("/rag/admin/role-presets");
   }
 
+  /** 以服务身份查询指定已登录用户的长期记忆；ownerUserId 由网关从 JWT 解析，不信任浏览器传值。 */
   getUserMemories(ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,
     );
   }
 
+  /** 清空操作与读取走同一服务边界，避免 Admin JWT 与 RAG JWT 密钥不一致导致 401。 */
   clearUserMemories(ownerUserId: string) {
     return this.deleteJson<Record<string, unknown>>(
       `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,

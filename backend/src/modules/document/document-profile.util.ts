@@ -62,6 +62,10 @@ export interface IngestionQualityReport {
   };
 }
 
+/**
+ * 文档类型与切块策略的唯一映射。不同类型的结构密度不同：API／配置更重视完整段落，
+ * PRD／复盘需要更多相邻上下文；调用方不得在入库链路中临时覆盖这些默认值。
+ */
 const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
   prd: { chunkSize: 650, chunkOverlap: 80 },
   api: { chunkSize: 700, chunkOverlap: 40 },
@@ -72,6 +76,7 @@ const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
   general: { chunkSize: 500, chunkOverlap: 50 },
 };
 
+/** 从文件名和正文抽取可用于权限、版本和检索范围过滤的业务元数据；无法确认时返回安全默认值。 */
 export function detectGameDocumentMetadata(
   filename: string,
   content: string,
@@ -102,6 +107,10 @@ export function getChunkStrategy(type: GameDocumentType): ChunkStrategy {
   return STRATEGIES[type];
 }
 
+/**
+ * 入库质量门禁：检测空内容、重复切块、乱码替换字符和异常长度，
+ * 防止低质量资料污染向量、全文与本地索引。该报告会持久化供后台解释拒绝原因。
+ */
 export function assessIngestionQuality(
   content: string,
   chunks: StructuredChunk[],

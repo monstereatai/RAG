@@ -3,6 +3,10 @@ import { uploadDocument, listDocuments, deleteDocument } from '../api';
 import type { DocumentItem } from '../types';
 
 function UploadPage() {
+  /**
+   * 用户端文档管理页只发起上传／删除请求并展示任务结果；解析、质量门禁、索引与补偿
+   * 均在后端执行，前端不能因本地选择文件成功就提前标记为「已入库」。
+   */
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
@@ -16,6 +20,7 @@ function UploadPage() {
     setMessageType(type);
   }, []);
 
+  /** 操作成功后重新读取服务端列表，避免仅靠本地数组更新而遗漏异步入库或删除失败状态。 */
   const refreshDocs = useCallback(async () => {
     setLoading(true);
     try {
@@ -54,6 +59,7 @@ function UploadPage() {
     }
   };
 
+  /** 删除会联动检索索引，故要求浏览器二次确认；实际权限与物理清理由后端再次校验。 */
   const handleDelete = async (docId: string, filename: string) => {
     if (!confirm(`确定删除文档「${filename}」？\n此操作将同步删除 Milvus 向量和 BM25 索引，不可恢复。`)) {
       return;

@@ -17,6 +17,10 @@ import { GraphOpsMockService } from './graph-ops-mock.service';
 @ApiBearerAuth()
 @Controller('admin/graph-ops')
 export class GraphOpsController {
+  /**
+   * 图谱运营的 BFF（面向前端的后端）控制器：真实 RAG 图谱优先，
+   * 仅在上游完全无数据时显式标记 mock（演示）回退，避免混淆真实运营数据。
+   */
   constructor(
     private readonly ragClient: RagClientService,
     private readonly mockService: GraphOpsMockService,
@@ -62,6 +66,7 @@ export class GraphOpsController {
   @Get('stats')
   @ApiOperation({ summary: '图谱统计（前端 graph-ops 页面）' })
   @RequirePermission('admin:graph-ops:read')
+  /** 图谱统计需要实体、关系、孤立节点和冲突关系，四类上游查询可安全并行。 */
   async getStats() {
     const [entitiesRes, relationshipsRes, orphansRes, conflictsRes] = await Promise.all([
       this.ragClient.getGraphEntities(),
@@ -76,7 +81,7 @@ export class GraphOpsController {
     const entityList = this.asArray(entities);
     const relList = this.asArray(relationships);
 
-    // 上游无数据时 fallback 到 mock
+    // 只有实体和关系都为空才使用演示数据，且 withMeta 会把 mock 标记返回给页面。
     if (entityList.length === 0 && relList.length === 0) {
       return this.withMeta(this.mockService.getStats(), true);
     }

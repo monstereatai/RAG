@@ -7,11 +7,16 @@ import { RagClientService } from '../rag-client/rag-client.service';
 @ApiBearerAuth()
 @Controller('admin/search-ops')
 export class SearchOpsController {
+  /**
+   * 搜索运营网关：负责 RBAC（基于角色的访问控制）和上游包装拆除。
+   * 前端只能获得最终业务数据，不能感知 RAG Client 的 available／status 内部协议。
+   */
   constructor(private readonly ragClient: RagClientService) {}
 
   @Get('overview')
   @ApiOperation({ summary: '智能搜索运营概览' })
   @RequirePermission('admin:search-ops:read')
+  /** 多个分析指标独立拉取，允许部分可用并将上游健康状态保留给运营排障。 */
   async overview() {
     const [popular, noResult, recallIssues] = await Promise.all([
       this.ragClient.getSearchPopularQueries(),
@@ -143,6 +148,7 @@ export class SearchOpsController {
     return this.ragClient.getSearchRecallIssues();
   }
 
+  /** 将上游不可用转成明确的 503，不能把空对象伪装成「没有搜索结果」。 */
   private requireAvailable(result: {
     available: boolean;
     status: number | null;

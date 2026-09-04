@@ -45,6 +45,10 @@ export interface DailyTrendItem {
 
 @Injectable()
 export class QueryLogService {
+  /**
+   * 问答运营审计：记录的是查询指标和可复盘元数据，不在这里持久化模型完整上下文或密钥。
+   * 日志失败只能降级告警，绝不能影响用户问答主链路。
+   */
   private readonly logger = new Logger(QueryLogService.name);
 
   constructor(
@@ -52,6 +56,7 @@ export class QueryLogService {
     private readonly queryLogRepo: Repository<QueryLogEntity>,
   ) {}
 
+  /** 截断用户查询并持久化可统计字段，控制审计表增长和敏感内容暴露范围。 */
   async log(entry: QueryLogEntry): Promise<void> {
     try {
       const entity = this.queryLogRepo.create({
@@ -72,6 +77,10 @@ export class QueryLogService {
     }
   }
 
+  /**
+   * 以服务端本地日聚合趋势，避免依赖数据库时区函数导致前端日期错位；
+   * days 受限于 1～90，防止运营页一次读取无边界历史。
+   */
   async getDailyTrend(days = 14): Promise<DailyTrendItem[]> {
     const windowDays = Math.min(Math.max(Number(days) || 14, 1), 90);
     try {

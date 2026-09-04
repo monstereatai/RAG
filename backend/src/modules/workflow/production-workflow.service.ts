@@ -101,6 +101,10 @@ const ROLE_LLM_RETRY_BACKOFF_MS = 1_000;
 
 @Injectable()
 export class ProductionWorkflowService {
+  /**
+   * 产研运任务的状态机编排器：负责状态、依赖、审批与审计，不在控制器中直接执行岗位逻辑。
+   * `threadId` 是恢复、驳回局部重跑和 Artifact 版本关联的稳定主键。
+   */
   private readonly logger = new Logger(ProductionWorkflowService.name);
   private readonly checkpointer: RedisCheckpointer;
   private readonly app: ReturnType<ProductionWorkflowService['buildGraph']>;
@@ -131,6 +135,7 @@ export class ProductionWorkflowService {
     this.app = this.buildGraph();
   }
 
+  /** 创建初始状态并同步执行首轮工作流；异步入口复用相同状态创建逻辑。 */
   async start(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
     const initialState = await this.createInitialState(dto, userId, threadId);
@@ -230,6 +235,10 @@ export class ProductionWorkflowService {
     return this.view(threadId, pending, userId);
   }
 
+  /**
+   * 驳回后只让被指定岗位及其下游失效；保留原 Artifact 与审核意见，
+   * 避免把一次局部修订误当成全流程重新生成。
+   */
   async revise(
     threadId: string,
     dto: ReviseProductionWorkflowDto,

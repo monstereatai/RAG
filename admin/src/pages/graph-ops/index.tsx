@@ -56,6 +56,7 @@ const getActiveView = (pathname: string): GraphView => {
   return 'global';
 };
 
+/** 图谱网关已尽量拆包；此处保留兼容层，防止旧接口或演示数据的 data 包装使页面崩溃。 */
 const asPayload = <T,>(res: any): T => ((res?.data ?? res) || {}) as T;
 const asArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? value : []);
 
@@ -108,6 +109,10 @@ const GraphOps: React.FC = () => {
 };
 
 const GlobalGraphView: React.FC = () => {
+  /**
+   * 全局图谱视图将统计与关系检索并发请求；GraphRAG（图谱检索增强）被禁用时
+   * 单独显示 disabled，而不是把服务错误误导为「图谱为空」。
+   */
   const [form] = Form.useForm();
   const [graphState, setGraphState] = useState<GraphState>('loading');
   const [stats, setStats] = useState<GraphStats | null>(null);
@@ -154,6 +159,7 @@ const GlobalGraphView: React.FC = () => {
     form.setFieldsValue(toNodeFormValues(node));
   };
 
+  /** 节点编辑仅提交允许治理的字段，保存成功后重新取图，保证关系和统计与后端一致。 */
   const handleSaveNode = async () => {
     if (!editingNode) return;
     const values = await form.validateFields();

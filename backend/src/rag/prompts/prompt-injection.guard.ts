@@ -4,6 +4,10 @@ export interface PromptInjectionFinding {
   excerpt: string;
 }
 
+/**
+ * 面向「不可信输入」的规则型第一道防线。它不决定模型回答内容：高风险命中由入库链路隔离，
+ * 中风险仅形成质量告警；生成前再由 sanitizeUntrustedContext 清理已检索到的可疑指令。
+ */
 const injectionPatterns: Array<{
   name: string;
   severity: PromptInjectionFinding['severity'];
@@ -56,6 +60,9 @@ const injectionPatterns: Array<{
   },
 ];
 
+/**
+ * 返回可审计命中，而不是直接修改原文；调用方据 severity 决定隔离、告警或继续处理。
+ */
 export function detectPromptInjection(text: string): PromptInjectionFinding[] {
   const findings: PromptInjectionFinding[] = [];
 
@@ -72,6 +79,10 @@ export function detectPromptInjection(text: string): PromptInjectionFinding[] {
   return findings;
 }
 
+/**
+ * 生成前逐行移除高风险指令，保留替换标记让模型知道资料存在缺口；
+ * 绝不执行文本中的工具调用、删除或角色切换要求。
+ */
 export function sanitizeUntrustedContext(text: string): string {
   const lines = text.split(/\r?\n/);
   return lines

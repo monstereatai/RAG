@@ -51,9 +51,11 @@ import { randomUUID } from 'node:crypto';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 
 /**
- * Agentic RAG 服务
+ * 深度问答的 LangGraph 状态机。
  *
- * 工作流 (LangGraph)：START → queryAugment → retrieval → sufficiency → (rerank | webSearchFallback → rerank) → generate → reflection → (retrieval | END)
+ * 它只在显式 Agentic 或 Auto 的充分性／复杂度门禁要求升级时运行：
+ * 查询增强 → 并发检索 → 证据充分性判断 → 按需网页补证／重排 → 生成 → 反思重试。
+ * 每个节点将状态和事件写入检查点，支持中断后的受控恢复，而非盲目重新执行副作用。
  */
 @Injectable()
 export class AgenticRagService {
@@ -1438,6 +1440,10 @@ export class AgenticRagService {
   /**
    * 完整执行 Agentic RAG 工作流（带 SSE 回调）
    */
+  /**
+   * 运行一次可回放的深度问答。`onEvent` 是唯一的流式出口，因此此处统一记录
+   * 首 Token 延迟、工具成功率并向前端转发，避免节点各自发送不一致事件。
+   */
   async run(
     query: string,
     mode: 'simple' | 'agentic' | 'auto',
@@ -1480,6 +1486,7 @@ export class AgenticRagService {
       }
       downstreamOnEvent?.(event);
     };
+    // Auto 先尝试受治理的精确直答；命中时不进入状态机，以降低简单问题的时延和成本。
     if (mode === 'auto') {
       const direct = await this.karpathyRagService.answerDirect(
         query,

@@ -69,6 +69,10 @@ export interface ContextCompactionAudit {
 
 @Injectable()
 export class ShortTermMemoryService {
+  /**
+   * 会话短期上下文：Redis 保存热窗口，PostgreSQL 保存摘要持久副本。
+   * Redis 不可用时仅回退摘要而不阻断问答，确保缓存不是业务事实的唯一来源。
+   */
   private readonly logger = new Logger(ShortTermMemoryService.name);
 
   constructor(
@@ -88,6 +92,10 @@ export class ShortTermMemoryService {
   /**
    * 获取当前会话的短期记忆上下文
    * 返回：历史摘要（如有）+ 最近 N 轮对话
+   */
+  /**
+   * 按 token 预算返回「摘要 + 最近轮次」；摘要缺失时从 PostgreSQL 恢复并回写 Redis，
+   * 由调用方将结果并入本轮上下文，不能把原始完整历史无限制传给模型。
    */
   async getContext(
     conversationId: string,

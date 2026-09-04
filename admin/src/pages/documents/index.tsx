@@ -96,6 +96,10 @@ const Documents: React.FC<DocumentListPageProps> = ({
   emptyTitle = '暂无文档',
   emptyDescription = '知识库还没有文档，请上传文档开始使用。',
 }) => {
+  /**
+   * 文档治理列表复用页：通过 scope／lifecycleStatus 切换「我的／公共／部门／归档」视图，
+   * 因此数据加载必须同时刷新权限候选项，避免用上一视图的组织或角色数据提交授权。
+   */
   const isArchivePage = lifecycleStatus === 'archived';
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
@@ -123,6 +127,10 @@ const Documents: React.FC<DocumentListPageProps> = ({
     effectiveAt?: string;
   }>();
 
+  /**
+   * 列表、用户、角色和组织之间没有数据依赖，统一并发加载；随后在页面边界解开
+   * Admin Backend 与 RAG Backend 可能出现的多层 data 包装，组件内部只维护一种 DocumentItem。
+   */
   const fetchDocs = (nextPagination = pagination) => {
     setPageState('loading');
     Promise.all([
@@ -139,6 +147,7 @@ const Documents: React.FC<DocumentListPageProps> = ({
       getOrganizations(),
     ])
       .then(([docRes, userRes, roleRes, orgRes]: [any, any, any, any]) => {
+        // 响应包装兼容只留在这里，避免表格、弹窗和状态标签分别猜测接口结构。
         const raw = docRes?.data ?? docRes;
         const payload = raw?.data ?? raw;
         const items = payload?.items ?? (Array.isArray(payload) ? payload : []);

@@ -508,7 +508,10 @@ export class KarpathyRagService implements OnModuleInit {
   }
 
   /**
-   * 混合检索：BM25 + Cosine 加权融合
+   * 统一混合检索入口。
+   *
+   * 先召回关键词与向量候选，再经权限、来源权威性、业务 Scope（范围）过滤；
+   * RRF（倒数排名融合）仅合并候选，不替代权限判断。最后才按预算扩展上下文并可选重排。
    */
   async retrieve(
     query: string,
@@ -528,6 +531,7 @@ export class KarpathyRagService implements OnModuleInit {
     const normalizedQuery = this.normalizeQuery(query);
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
 
+    // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(userId)
       : null;
@@ -629,6 +633,7 @@ export class KarpathyRagService implements OnModuleInit {
       cosineHits.length,
     );
 
+    // RRF 消除不同检索通道的原始分数尺度差异；它不改变后面的版本、权限和范围门禁。
     const fused = this.fuseByRrf(bm25Hits, cosineHits).filter(
       (chunk) => !allowedDocIds || allowedDocIds.has(chunk.docId),
     );
@@ -759,8 +764,9 @@ export class KarpathyRagService implements OnModuleInit {
   }
 
   /**
-   * 完整 RAG：检索 + 生成
-   * @param history 多轮对话历史（可选，按时间顺序）
+   * Fast Path（快速路径）的完整 RAG：并发取得正式知识、审核过的 Base Case（基础案例）
+   * 与 Obsidian 本地笔记，统一做证据充分性判断后再生成带引用的回答。
+   * @param history 多轮对话历史（按时间顺序）
    */
   async answer(
     query: string,

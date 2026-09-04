@@ -3,6 +3,10 @@ import { RagClientService } from '../rag-client/rag-client.service';
 
 @Injectable()
 export class AdminDashboardService {
+  /**
+   * 个人中心和首页大盘的编排层。它只聚合可展示数据，不直接访问 RAG 数据库或 Provider，
+   * 所有跨服务请求均经 RagClientService，以便保留服务令牌与故障降级边界。
+   */
   constructor(private readonly ragClient: RagClientService) {}
 
   features() {
@@ -147,11 +151,13 @@ export class AdminDashboardService {
     };
   }
 
+  /** 当前用户只能读取自己的记忆；用户标识从已验证 JWT payload 解析。 */
   async getUserMemories(user: unknown) {
     const result = await this.ragClient.getUserMemories(this.resolveUserId(user));
     return result.available ? result.data : { enabled: false, memories: [] };
   }
 
+  /** 清空前端可见的长期记忆；上游不可用时返回 disabled，不能伪造成功。 */
   async clearUserMemories(user: unknown) {
     const result = await this.ragClient.clearUserMemories(this.resolveUserId(user));
     return result.available ? result.data : { enabled: false, memories: [] };
@@ -175,6 +181,10 @@ export class AdminDashboardService {
     return { data: items };
   }
 
+  /**
+   * 大盘指标互不依赖，使用并发聚合；每项由 pickTotal 单独安全降级，
+   * 避免单个 RAG 能力不可用时让整页统计失败。
+   */
   async overview() {
     const [
       documents,

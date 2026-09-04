@@ -14,6 +14,10 @@ export interface PermissionSubject {
 
 @Injectable()
 export class DocumentPermissionService {
+  /**
+   * 文档 ACL（访问控制列表）解析器。有效权限为 public、用户直授、角色、部门和文档所有者的并集；
+   * 结果短暂缓存，但每次权限写入都会失效全部 ACL 缓存，优先保证权限收敛正确性。
+   */
   constructor(
     @InjectRepository(DocumentPermissionEntity)
     private readonly permissionRepo: Repository<DocumentPermissionEntity>,
@@ -28,6 +32,7 @@ export class DocumentPermissionService {
     await this.setPermissions(docId, [{ type: 'user', id: userId }]);
   }
 
+  /** 用完整授权列表替换旧记录，避免增量写入留下已撤销主体的历史 read 权限。 */
   async setPermissions(
     docId: string,
     subjects: PermissionSubject[],
@@ -52,6 +57,10 @@ export class DocumentPermissionService {
     await this.invalidateAllPermissionCache();
   }
 
+  /**
+   * 返回当前用户可见文档集合。检索层必须将该集合作为强制过滤条件，
+   * 不能仅依赖召回结果中的 userId，以免共享／部门文档出现越权或遗漏。
+   */
   async getAllowedDocIds(
     userId: string,
     roles: string[] = [],

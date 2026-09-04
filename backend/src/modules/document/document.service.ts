@@ -85,7 +85,11 @@ export interface DocMeta extends UploadResult {
 type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
 
 /**
- * 文档服务：接收已解析文本 → 切分 → Embedding → 写入 Milvus + BM25 + ES
+ * 文档入库编排服务。
+ *
+ * 固定顺序为：安全扫描／质量门禁 → 结构化父子切块 → 生成向量 → 多存储并发写入。
+ * PostgreSQL 始终先以 draft（草稿）状态落库；只有索引成功且通过后续治理流程，
+ * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
  */
 @Injectable()
 export class DocumentService {
@@ -119,6 +123,10 @@ export class DocumentService {
     private readonly imageIndexService: ImageIndexService,
   ) {}
 
+  /**
+   * 接收解析后的正文并创建可审计的异步入库任务。
+   * `options.originalBuffer` 仅用于保留原始证据；它不会绕过提示注入和质量门禁。
+   */
   async upload(
     filename: string,
     content: string,
@@ -151,6 +159,8 @@ export class DocumentService {
         });
       }
 
+      // 安全门禁必须在切块与索引之前：高风险内容只能保留原始证据供人工审核，
+      // 不能进入任何可被检索或被模型读取的存储。
       const promptInjectionFindings = detectPromptInjection(content);
       const highRiskPromptInjection = promptInjectionFindings.filter(
         (finding) => finding.severity === 'high',
@@ -309,6 +319,8 @@ export class DocumentService {
       }
       await this.updateTask(taskId, { stage: 'vector_index', progress: 50 });
 
+      // 四个必要落点彼此独立，因此并发降低等待时间；allSettled 用于收集所有结果，
+      // 以便后续对已成功的外部索引做一致的补偿清理。
       const indexResults = await Promise.allSettled([
         (async () => {
           await this.vectorStoreProvider.insert(

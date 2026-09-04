@@ -63,6 +63,11 @@ const modeOptions: Array<{
 ];
 
 function ChatPage() {
+  /**
+   * 用户问答页：Simple 走一次性回答，Auto／Agentic 消费 AG-UI 事件流。
+   * `messages` 同时保存用户可见文本和最小审计字段（路由、引用、充分性），
+   * 不能在前端根据模型文本推断检索是否可靠。
+   */
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<ChatMode>('auto');
@@ -134,6 +139,7 @@ function ChatPage() {
     setLoading(false);
   };
 
+  /** 按模式选择传输方式；模式影响执行策略，但所有模式均由后端负责权限和证据门禁。 */
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     const query = input.trim();
@@ -179,7 +185,10 @@ function ChatPage() {
     }
   };
 
-  // SSE 流式（agentic/auto 模式）
+  /**
+   * 流式回答先插入占位消息，再用稳定下标原地更新。事件可能乱序或缺字段，
+   * 因此每次更新都保留既有内容，最终只以 RUN_FINISHED／RUN_ERROR 收束状态。
+   */
   const sendStream = (query: string, m: ChatMode) => {
     return new Promise<void>((resolve) => {
       // 先插入一条空的 assistant 消息，逐步更新

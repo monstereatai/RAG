@@ -127,6 +127,10 @@ const normalizeArtifactMarkdown = (content: string) =>
     .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, "```$1\n");
 
 export default function AgentOpsPage() {
+  /**
+   * Agent 运营工作台聚合多个独立运行面：工作流、评测、Bad Case、运行轨迹、Artifact 与协作。
+   * 它只展示后端状态，不在浏览器端推断审批结果或伪造岗位执行状态。
+   */
   const [workflowForm] = Form.useForm();
   const [evalForm] = Form.useForm();
   const [reviewForm] = Form.useForm();
@@ -176,6 +180,7 @@ export default function AgentOpsPage() {
   const [runtimeMetrics, setRuntimeMetrics] = React.useState<Record<string, number>>({});
   const [runtimeRunId, setRuntimeRunId] = React.useState<string>();
 
+  /** Bad Case 审核是运营闭环入口；加载失败提示服务状态，不将空数组误作「没有问题」。 */
   const loadBadCases = React.useCallback(async () => {
     try {
       const result = await getAgentBadCases();

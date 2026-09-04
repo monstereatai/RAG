@@ -82,6 +82,10 @@ export interface GraphAdminNodeUpdate {
 
 @Injectable()
 export class GraphService {
+  /**
+   * 图谱事实服务：抽取结果以 sourceId（来源文档）写入 Neo4j；删除来源时只移除该来源归属，
+   * 保留仍被其他文档引用的实体和关系，避免共享事实被误删。
+   */
   private readonly logger = new Logger(GraphService.name);
 
   constructor(
@@ -98,6 +102,10 @@ export class GraphService {
     return this.graphExtractor.extractFromText(text);
   }
 
+  /**
+   * 用同一 sourceId 替换该文档的图谱投影。先移除旧归属再写入新抽取结果，
+   * 使重建索引幂等，而不是不断累加重复的实体／关系。
+   */
   async importText(
     text: string,
     userId: string,

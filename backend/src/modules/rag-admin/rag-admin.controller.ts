@@ -26,6 +26,10 @@ import {
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
 export class RagAdminController {
+  /**
+   * RAG 的内部管理 API。它只接受 Admin Backend 持有的服务令牌，浏览器不得直接调用；
+   * ownerUserId 必须由 Admin Backend 的已验证登录态派生，用于保持用户数据隔离。
+   */
   private readonly logger = new Logger(RagAdminController.name);
 
   constructor(
@@ -64,6 +68,7 @@ export class RagAdminController {
   @Post('domain-events/outbox/:id/retry')
   retryDomainEvent(@Param('id') id: string) { return this.domainEvents.retry(id); }
 
+  /** 长期记忆的内部读取入口，供 Admin Backend 代用户访问，避免两套 JWT 直接互认。 */
   @Get('memories')
   async listMemories(@Query('ownerUserId') ownerUserId?: string) {
     const userId = this.requireOwnerUserId(ownerUserId);
@@ -71,6 +76,7 @@ export class RagAdminController {
     return { enabled: true, memories: await this.memoryService.listMemories(userId) };
   }
 
+  /** 清空是跨服务的不可逆操作；先校验 ownerUserId，再交给 MemoryService 执行。 */
   @Delete('memories')
   async clearMemories(@Query('ownerUserId') ownerUserId?: string) {
     const userId = this.requireOwnerUserId(ownerUserId);

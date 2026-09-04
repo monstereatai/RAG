@@ -187,6 +187,10 @@ const GraphSearchCanvas: React.FC<{
 };
 
 const SearchOps: React.FC = () => {
+  /**
+   * 搜索运营页同时承载全文检索与图谱检索；两者共用查询词和筛选条件，
+   * 但结果结构不同，必须分别存储，不能将图谱节点误渲染成文档列表。
+   */
   const [query, setQuery] = useState('');
   const [searchType, setSearchType] = useState<'documents' | 'graph'>('documents');
   const [fullTextResults, setFullTextResults] = useState<FullTextResult[]>([]);
@@ -210,6 +214,8 @@ const SearchOps: React.FC = () => {
   } | null>(null);
 
   useEffect(() => {
+    // 历史、统计、热门词互不依赖；筛选项属于增强能力，故在下方独立请求，
+    // 防止 facets（筛选聚合）失败阻断用户执行正常搜索。
     setPageState('loading');
 
     Promise.all([
@@ -251,6 +257,7 @@ const SearchOps: React.FC = () => {
       .catch(() => setFacets({ documentTypes: [], roles: [] }));
   }, []);
 
+  /** 根据当前 Tab 调用对应检索：全文结果需要高亮片段，图谱结果需要 nodes/edges（节点／边）成对保留。 */
   const runSearch = async (
     value = query,
     nextFilters = filters,

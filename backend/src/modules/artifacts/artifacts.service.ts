@@ -27,6 +27,10 @@ export interface ArtifactAccessContext {
 
 @Injectable()
 export class ArtifactsService implements OnModuleInit {
+  /**
+   * Artifact（可交付产物）生命周期服务：数据库保存可审计元数据，对象存储保存实际文件，
+   * 队列负责耗时生成。三者通过 artifactId 关联，不能只删除或更新其中一个。
+   */
   constructor(
     @InjectRepository(GeneratedArtifactEntity)
     private readonly artifacts: Repository<GeneratedArtifactEntity>,
@@ -44,6 +48,10 @@ export class ArtifactsService implements OnModuleInit {
     this.queue.registerProcessor((artifactId) => this.process(artifactId));
   }
 
+  /**
+   * 先创建 queued（排队）记录，再由队列异步生成文件；调用方可立即获得稳定的 artifactId
+   * 用于状态轮询和后续审批，避免 HTTP 请求等待模型或文件生成完成。
+   */
   async create(dto: CreateArtifactDto) {
     const id = randomUUID();
     const extension = this.extensionFor(dto.kind);

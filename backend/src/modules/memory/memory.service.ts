@@ -57,6 +57,10 @@ export interface MemoryClassifyResult {
 
 @Injectable()
 export class MemoryService {
+  /**
+   * 记忆分层门面：user 层用于跨会话长期事实，session 层仅保存当前 Thread 的临时上下文。
+   * 写入始终由分类器决定，不能因前端展示或一次性请求直接写入长期记忆。
+   */
   private readonly logger = new Logger(MemoryService.name);
 
   constructor(
@@ -128,6 +132,10 @@ export class MemoryService {
    * 分类并持久化本轮对话到 Mem0
    *
    * 在 chat 后调用，由 LLM 分类器判断是否写入
+   */
+  /**
+   * 在回答完成后异步判断本轮是否包含新事实，再分别写入 user／session 两层。
+   * 分类失败宁可不写入，也不能把未经判断的对话永久化。
    */
   async classifyAndPersist(
     userId: string,

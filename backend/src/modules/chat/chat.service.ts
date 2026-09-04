@@ -28,6 +28,10 @@ import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 
 @Injectable()
 export class ChatService {
+  /**
+   * 问答主编排入口：只负责准备上下文、选择执行模式和记录审计；
+   * 检索细节下沉到 KarpathyRagService，复杂推理下沉到 AgenticRagService。
+   */
   private readonly logger = new Logger(ChatService.name);
 
   constructor(
@@ -50,6 +54,13 @@ export class ChatService {
     @Optional() private readonly runtime?: AgentRuntimeService,
   ) {}
 
+  /**
+   * 执行一轮问答。
+   *
+   * 上下文准备阶段刻意并发：短期窗口、长期记忆、历史问答、运行计划和检索 Profile
+   * 没有相互依赖；全部就绪后才进入 Simple／Auto／Agentic 的单一执行主干，避免
+   * 让不同模式得到不一致的会话上下文。
+   */
   async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
     if (!req.query || req.query.trim().length === 0) {
       throw new BadRequestException('query is required');
@@ -118,6 +129,7 @@ export class ChatService {
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
       ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
     };
+    // 运行审计先于模型调用创建，确保失败、降级和中断也能在运行中心回放。
     const run = await this.agentRuns?.start({
       threadId,
       userId,

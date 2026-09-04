@@ -17,7 +17,10 @@ const api = axios.create({
   timeout: 120000, // agentic 模式可能较慢
 });
 
-// Add request interceptor to attach JWT token
+/**
+ * 用户端 API 边界：普通 HTTP 请求在此统一带 JWT；流式 SSE 受浏览器 EventSource 限制，
+ * 只能在下方以 URL 参数携带令牌，服务端必须对该参数执行同等认证和脱敏。
+ */
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -76,7 +79,10 @@ export async function debugChunks(query: string): Promise<DebugResponse> {
   return res.data.data;
 }
 
-// SSE 流式聊天
+/**
+ * 标准 SSE 问答流。Simple 使用普通 POST；Auto／Agentic 使用流式事件，
+ * 由调用方按事件类型更新临时回答和审计轨迹，而不是把未完成文本当最终答案。
+ */
 export function chatStream(
   query: string,
   mode: ChatMode,
@@ -111,7 +117,10 @@ export function chatStream(
   });
 }
 
-// AG-UI 协议流式聊天
+/**
+ * AG-UI 协议流：RUN_FINISHED／RUN_ERROR 是唯一终态，收到后必须主动关闭连接，
+ * 防止浏览器在服务端已完成后继续重连或重复追加 Token。
+ */
 export function aguiStream(
   query: string,
   mode: ChatMode,

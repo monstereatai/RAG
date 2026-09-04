@@ -56,6 +56,10 @@ const memoryPageTitle = (
 
 type PageState = 'loading' | 'data' | 'error' | 'empty' | 'disabled';
 
+/**
+ * 兼容 Admin Backend → RAG Backend 的统一响应包装；任何异常结构都安全降级为空，
+ * 防止页面把包装对象当数组处理后触发运行时错误。
+ */
 const unwrapMemoriesResponse = (response: unknown): MemoriesResponse => {
   let value = response;
   while (value && typeof value === 'object' && 'data' in value) {
@@ -73,6 +77,7 @@ const MemoryManagement: React.FC = () => {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [clearing, setClearing] = useState(false);
 
+  /** 读取结果明确区分服务未启用、空记忆、接口失败，避免将三种状态混成「暂无数据」。 */
   const loadMemories = () => {
     setPageState('loading');
     getMemories()
@@ -98,6 +103,7 @@ const MemoryManagement: React.FC = () => {
     loadMemories();
   }, []);
 
+  /** 清空是不可逆操作，必须经二次确认；成功后本地状态同步为空而不是重新猜测接口结果。 */
   const handleClear = () => {
     Modal.confirm({
       title: '确认清空长期记忆',

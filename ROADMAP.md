@@ -48,6 +48,7 @@
 
 ## 当前结论
 
+- **已补齐核心代码注释与维护边界（2026-09-04）**：为 27 个核心源文件补充 227 行业务注释，覆盖用户端问答／流式传输／文档操作，管理端文档治理、智能搜索、图谱、Agent 运营与跨服务网关，以及后端问答编排、混合检索、文档入库、权限 ACL、Prompt Injection（提示注入）防护、短期／长期记忆、Agent Loop、图谱来源、Artifact、工作流和运营审计。注释聚焦模块职责、输入输出、并发原因、权限／生命周期门禁、降级和不可逆操作，未对显而易见的语法逐行翻译。Backend、Admin Backend、Admin 与 Frontend 生产构建，以及 Diff 检查均通过。
 - **已补充长期记忆写入规则提示（2026-09-04）**：个人中心「长期记忆」标题旁新增可悬停或键盘聚焦的问号图标，明确说明系统在每轮对话结束后仅记录跨会话仍有价值的身份、长期偏好和长期约束；寒暄、一次性任务、纯确认及未采纳的助手建议不会写入。本页仅展示跨会话记忆。页面标题能力已支持提示内容；经现有页面复核，其余页面为用户主动操作或规则已直接可见，暂不添加无必要的提示图标。Admin Biome 检查与生产构建通过。
 - **已修复知识图谱运营关系页响应拆包（2026-09-04）**：`/graph-ops/relations` 与 `/graph-ops/relations/search` 不再把 RAG Backend 的 `code/data`、`available/data` 中间包装透传给页面；Admin Backend 统一拆到最终业务数据，关系列表返回真实数组，关系检索返回真实 `{ nodes, edges }`。前端关系页同步读取 `data` 和 `data.nodes`，避免有数据但被当成包装对象导致页面显示为空。新增 `GraphOpsController` 回归测试覆盖关系列表、关系检索和统计三类双层包装场景；`admin-backend pnpm test -- --runInBand src/modules/graph-ops/graph-ops.controller.spec.ts` ✅，`admin-backend pnpm run build` ✅，`admin/src/pages/graph-ops` 局部类型检查无新增错误。管理后台全量 `tsc` 仍受既有 React 类型重复问题阻断，非本次改动引入。
 - **已修复个人中心「长期记忆」页跨服务读取（2026-09-04）**：页面不再直接请求 RAG 后端的 `/api/memories`，避免开发代理误路由至 Admin Backend 且两套 JWT 不互认；改为调用 Admin Backend 的受登录态保护接口，由其通过服务令牌向 RAG Backend 查询当前用户的记忆。页面请求改用统一认证封装，自动携带浏览器保存的 `access_token`，避免接口 `401` 被全局拦截器清理令牌并跳转登录页。接口响应的多层 `data` 包装已在前端安全解包，非数组记忆结果降级为空列表；清空操作走相同的受控服务链路。Backend、Admin Backend 与 Admin 页面代码检查／构建均通过，带管理员登录态请求 `http://localhost:8000/api/admin/account/memories` 实测返回 `200`；未对真实记忆执行清空操作。
