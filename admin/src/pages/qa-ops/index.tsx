@@ -12,10 +12,10 @@ import {
   SendOutlined,
   ShareAltOutlined,
   SoundOutlined,
-} from "@ant-design/icons";
-import { AssistantMarkdown } from "@/components/AssistantMarkdown";
-import { ModulePage, qaNav } from "@/components/AdminShell";
-import { history } from "@umijs/max";
+} from '@ant-design/icons';
+import { AssistantMarkdown } from '@/components/AssistantMarkdown';
+import { ModulePage, qaNav } from '@/components/AdminShell';
+import { history } from '@umijs/max';
 import {
   Avatar,
   Button,
@@ -30,8 +30,8 @@ import {
   Switch,
   Tag,
   message as antdMessage,
-} from "antd";
-import React from "react";
+} from 'antd';
+import React from 'react';
 import {
   type AguiEvent,
   type ChatMode,
@@ -55,9 +55,9 @@ import {
   getQaPlugins,
   streamAguiAnswer,
   submitConversationBadCase,
-} from "./service";
+} from './service';
 
-const ROLE_PRESET_STORAGE_KEY = "qa_ops_role_preset";
+const ROLE_PRESET_STORAGE_KEY = 'qa_ops_role_preset';
 
 interface ArtifactFormValues {
   title: string;
@@ -67,17 +67,17 @@ interface ArtifactFormValues {
 }
 
 interface ShareFormValues {
-  visibility: "internal" | "external";
+  visibility: 'internal' | 'external';
   expiresInHours?: number;
   maxDownloads?: number;
 }
 
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   createdAt: string;
-  status?: "streaming" | "done" | "error";
+  status?: 'streaming' | 'done' | 'error';
   route?: string;
   confidence?: number;
   retryCount?: number;
@@ -92,7 +92,7 @@ interface ChatMessage {
 
 interface AnswerMedia {
   id: string;
-  type: "image";
+  type: 'image';
   url: string;
   alt?: string;
   title?: string;
@@ -103,38 +103,38 @@ interface EventTraceItem {
   count: number;
 }
 
-type TtsStatus = "connecting" | "synthesizing" | "playing" | "error";
+type TtsStatus = 'connecting' | 'synthesizing' | 'playing' | 'error';
 
 const toAnswerMedia = (value: unknown): AnswerMedia[] => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
   return items
     .map((item, index): AnswerMedia | null => {
-      if (typeof item === "string") {
+      if (typeof item === 'string') {
         return {
           id: `image-${index}-${item}`,
-          type: "image",
+          type: 'image',
           url: item,
         };
       }
-      if (!item || typeof item !== "object") return null;
+      if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
       const url =
-        typeof record.url === "string"
+        typeof record.url === 'string'
           ? record.url
-          : typeof record.src === "string"
+          : typeof record.src === 'string'
             ? record.src
-            : "";
+            : '';
       if (!url) return null;
-      const type = typeof record.type === "string" ? record.type : "image";
+      const type = typeof record.type === 'string' ? record.type : 'image';
       const mimeType =
-        typeof record.mimeType === "string" ? record.mimeType : "";
-      if (type !== "image" && !mimeType.startsWith("image/")) return null;
+        typeof record.mimeType === 'string' ? record.mimeType : '';
+      if (type !== 'image' && !mimeType.startsWith('image/')) return null;
       return {
-        id: typeof record.id === "string" ? record.id : `image-${index}-${url}`,
-        type: "image",
+        id: typeof record.id === 'string' ? record.id : `image-${index}-${url}`,
+        type: 'image',
         url,
-        alt: typeof record.alt === "string" ? record.alt : undefined,
-        title: typeof record.title === "string" ? record.title : undefined,
+        alt: typeof record.alt === 'string' ? record.alt : undefined,
+        title: typeof record.title === 'string' ? record.title : undefined,
       };
     })
     .filter((item): item is AnswerMedia => Boolean(item));
@@ -159,16 +159,16 @@ const mergeMedia = (
 const toAnswerArtifacts = (value: unknown): GeneratedArtifact[] => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
   return items.filter((item): item is GeneratedArtifact => {
-    if (!item || typeof item !== "object") return false;
+    if (!item || typeof item !== 'object') return false;
     const record = item as Record<string, unknown>;
     return (
-      typeof record.id === "string" &&
-      typeof record.title === "string" &&
-      typeof record.filename === "string" &&
-      ["markdown", "word", "excel", "architecture", "image"].includes(
+      typeof record.id === 'string' &&
+      typeof record.title === 'string' &&
+      typeof record.filename === 'string' &&
+      ['markdown', 'word', 'excel', 'architecture', 'image'].includes(
         String(record.kind),
       ) &&
-      ["queued", "generating", "ready", "failed"].includes(
+      ['queued', 'generating', 'ready', 'failed'].includes(
         String(record.status),
       )
     );
@@ -205,15 +205,36 @@ const formatEventTrace = (events: EventTraceItem[]) =>
     .map((event) =>
       event.count > 1 ? `${event.type} × ${event.count}` : event.type,
     )
-    .join(" → ");
+    .join(' → ');
+
+const routeLabel: Record<string, string> = {
+  simple: '极速回答',
+  agentic: '深度分析',
+};
+
+const insufficientEvidenceMessage = (route?: string) =>
+  route === 'agentic'
+    ? '已完成深度分析，但当前资料仍不足以支持可靠结论。'
+    : '当前资料未覆盖这个问题，暂时无法给出可靠结论。';
 
 const QaOps: React.FC = () => {
-  const [input, setInput] = React.useState("");
-  const [mode, setMode] = React.useState<ChatMode>("auto");
-  const [qaPlugins, setQaPlugins] = React.useState<Array<{ key: string; displayName?: string; status: string; modes?: string[] }>>([]);
+  const [input, setInput] = React.useState('');
+  const [mode, setMode] = React.useState<ChatMode>('auto');
+  const [qaPlugins, setQaPlugins] = React.useState<
+    Array<{
+      key: string;
+      displayName?: string;
+      status: string;
+      modes?: string[];
+    }>
+  >([]);
   const [pluginKeys, setPluginKeys] = React.useState<string[]>([]);
   const availableQaPlugins = React.useMemo(
-    () => qaPlugins.filter((plugin) => plugin.status === "enabled" && (plugin.modes ?? []).includes(mode)),
+    () =>
+      qaPlugins.filter(
+        (plugin) =>
+          plugin.status === 'enabled' && (plugin.modes ?? []).includes(mode),
+      ),
     [mode, qaPlugins],
   );
   const modelConfig = React.useMemo(() => getQaModelConfig(), []);
@@ -225,13 +246,13 @@ const QaOps: React.FC = () => {
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [rolePresets, setRolePresets] = React.useState<RolePreset[]>([]);
   const [rolePresetId, setRolePresetId] = React.useState(() =>
-    typeof window === "undefined"
-      ? "business-owner"
+    typeof window === 'undefined'
+      ? 'business-owner'
       : window.localStorage.getItem(ROLE_PRESET_STORAGE_KEY) ||
-        "business-owner",
+        'business-owner',
   );
   const [rolePresetsLoading, setRolePresetsLoading] = React.useState(true);
-  const [activeTitle, setActiveTitle] = React.useState("");
+  const [activeTitle, setActiveTitle] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [threadId, setThreadId] = React.useState<string | undefined>(undefined);
   const threadIdRef = React.useRef<string | undefined>(undefined);
@@ -270,7 +291,7 @@ const QaOps: React.FC = () => {
       setArtifacts(result.data ?? []);
     } catch (error) {
       antdMessage.error(
-        error instanceof Error ? error.message : "文件列表加载失败",
+        error instanceof Error ? error.message : '文件列表加载失败',
       );
     } finally {
       setArtifactLoading(false);
@@ -287,7 +308,7 @@ const QaOps: React.FC = () => {
   const hasPendingMessageArtifact = messages.some((item) =>
     item.artifacts?.some(
       (artifact) =>
-        artifact.status === "queued" || artifact.status === "generating",
+        artifact.status === 'queued' || artifact.status === 'generating',
     ),
   );
 
@@ -321,15 +342,15 @@ const QaOps: React.FC = () => {
     };
   }, [hasPendingMessageArtifact]);
 
-  const openArtifactModal = (kind: ArtifactKind = "word") => {
+  const openArtifactModal = (kind: ArtifactKind = 'word') => {
     const lastAnswer = [...messages]
       .reverse()
-      .find((item) => item.role === "assistant" && item.content)?.content;
+      .find((item) => item.role === 'assistant' && item.content)?.content;
     artifactForm.setFieldsValue({
-      title: activeTitle || "AI 问答产物",
+      title: activeTitle || 'AI 问答产物',
       kind,
       sourceText: lastAnswer || input,
-      prompt: kind === "image" ? input : undefined,
+      prompt: kind === 'image' ? input : undefined,
     });
     setArtifactModalOpen(true);
   };
@@ -339,7 +360,7 @@ const QaOps: React.FC = () => {
     setArtifactSubmitting(true);
     try {
       await createArtifact({ ...values, threadId });
-      antdMessage.success("已提交生成任务");
+      antdMessage.success('已提交生成任务');
       setArtifactModalOpen(false);
       setArtifactDrawerOpen(true);
       await loadArtifacts();
@@ -355,10 +376,10 @@ const QaOps: React.FC = () => {
     try {
       const result = await createArtifactShare(selectedArtifact.id, values);
       const token = result.data?.token;
-      if (!token) throw new Error(result.error || "分享链接创建失败");
+      if (!token) throw new Error(result.error || '分享链接创建失败');
       const url = `${window.location.origin}/shared/artifacts/${encodeURIComponent(token)}`;
       await navigator.clipboard.writeText(url);
-      antdMessage.success("分享链接已复制");
+      antdMessage.success('分享链接已复制');
       setShareModalOpen(false);
     } finally {
       setArtifactSubmitting(false);
@@ -366,11 +387,11 @@ const QaOps: React.FC = () => {
   };
 
   const artifactKindLabel: Record<ArtifactKind, string> = {
-    markdown: "Markdown",
-    word: "Word",
-    excel: "Excel",
-    architecture: "架构图",
-    image: "图片",
+    markdown: 'Markdown',
+    word: 'Word',
+    excel: 'Excel',
+    architecture: '架构图',
+    image: '图片',
   };
 
   // 自动滚动到底部
@@ -393,7 +414,9 @@ const QaOps: React.FC = () => {
       setConversations(res.data ?? []);
       setConvPage(1);
     } catch (error) {
-      antdMessage.error(error instanceof Error ? error.message : '会话列表加载失败，请重试');
+      antdMessage.error(
+        error instanceof Error ? error.message : '会话列表加载失败，请重试',
+      );
     } finally {
       setSidebarLoading(false);
     }
@@ -409,7 +432,10 @@ const QaOps: React.FC = () => {
         const payload: unknown = result?.data;
         const plugins = Array.isArray(payload)
           ? payload
-          : payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
+          : payload &&
+              typeof payload === 'object' &&
+              'data' in payload &&
+              Array.isArray(payload.data)
             ? payload.data
             : [];
         setQaPlugins(plugins);
@@ -418,7 +444,9 @@ const QaOps: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    const availableKeys = new Set(availableQaPlugins.map((plugin) => plugin.key));
+    const availableKeys = new Set(
+      availableQaPlugins.map((plugin) => plugin.key),
+    );
     setPluginKeys((current) => current.filter((key) => availableKeys.has(key)));
   }, [availableQaPlugins]);
 
@@ -435,7 +463,7 @@ const QaOps: React.FC = () => {
             return currentRolePresetId;
           }
           const nextRolePresetId =
-            catalog?.defaultRolePresetId || "business-owner";
+            catalog?.defaultRolePresetId || 'business-owner';
           window.localStorage.setItem(
             ROLE_PRESET_STORAGE_KEY,
             nextRolePresetId,
@@ -489,7 +517,7 @@ const QaOps: React.FC = () => {
     setTtsStatusByMessageId({});
     setMessages([]);
     setThreadId(undefined);
-    setActiveTitle("");
+    setActiveTitle('');
   };
 
   const handleClearConversation = async () => {
@@ -507,7 +535,7 @@ const QaOps: React.FC = () => {
     }
     setMessages([]);
     setThreadId(undefined);
-    setActiveTitle("");
+    setActiveTitle('');
   };
 
   const handleSelectConversation = async (item: ConversationSummary) => {
@@ -527,15 +555,15 @@ const QaOps: React.FC = () => {
       // 将后端的消息列表转为前端 ChatMessage 格式
       const chatMessages: ChatMessage[] = detail.messages.map((m, i) => ({
         id: `${m.role}-${i}`,
-        role: m.role === "human" ? "user" : "assistant",
+        role: m.role === 'human' ? 'user' : 'assistant',
         content: m.content,
         createdAt: m.createdAt
-          ? new Date(m.createdAt).toLocaleTimeString("zh-CN", {
-              hour: "2-digit",
-              minute: "2-digit",
+          ? new Date(m.createdAt).toLocaleTimeString('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
             })
-          : "",
-        status: "done" as const,
+          : '',
+        status: 'done' as const,
       }));
       setMessages(chatMessages);
     } catch {
@@ -558,11 +586,11 @@ const QaOps: React.FC = () => {
   };
 
   const getTtsButtonText = (status?: TtsStatus) => {
-    if (status === "connecting") return "连接中";
-    if (status === "synthesizing") return "合成中";
-    if (status === "playing") return "播放中";
-    if (status === "error") return "重试";
-    return "播放";
+    if (status === 'connecting') return '连接中';
+    if (status === 'synthesizing') return '合成中';
+    if (status === 'playing') return '播放中';
+    if (status === 'error') return '重试';
+    return '播放';
   };
 
   const handlePlayTts = (messageId: string, text: string) => {
@@ -571,18 +599,18 @@ const QaOps: React.FC = () => {
 
     ttsRef.current?.close();
     setTtsStatusByMessageId({});
-    setTtsStatus(messageId, "connecting");
+    setTtsStatus(messageId, 'connecting');
     const chunks: BlobPart[] = [];
     const ws = createTtsWebSocket(content.slice(0, 800));
     ttsRef.current = ws;
     ws.onopen = () => {
-      setTtsStatus(messageId, "synthesizing");
+      setTtsStatus(messageId, 'synthesizing');
     };
     ws.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
+      if (typeof event.data !== 'string') return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === "audio" && typeof payload.data === "string") {
+        if (payload.type === 'audio' && typeof payload.data === 'string') {
           const binary = atob(payload.data);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i += 1) {
@@ -590,26 +618,26 @@ const QaOps: React.FC = () => {
           }
           chunks.push(bytes);
         }
-        if (payload.type === "end") {
+        if (payload.type === 'end') {
           if (chunks.length === 0) {
-            setTtsStatus(messageId, "error");
+            setTtsStatus(messageId, 'error');
             return;
           }
-          const blob = new Blob(chunks, { type: "audio/wav" });
+          const blob = new Blob(chunks, { type: 'audio/wav' });
           if (audioRef.current) URL.revokeObjectURL(audioRef.current.src);
           const audio = new Audio(URL.createObjectURL(blob));
           audioRef.current = audio;
-          audio.onplay = () => setTtsStatus(messageId, "playing");
+          audio.onplay = () => setTtsStatus(messageId, 'playing');
           audio.onended = () => setTtsStatus(messageId);
-          audio.onerror = () => setTtsStatus(messageId, "error");
-          void audio.play().catch(() => setTtsStatus(messageId, "error"));
+          audio.onerror = () => setTtsStatus(messageId, 'error');
+          void audio.play().catch(() => setTtsStatus(messageId, 'error'));
         }
       } catch {
         // Ignore non-json websocket frames.
       }
     };
     ws.onerror = () => {
-      setTtsStatus(messageId, "error");
+      setTtsStatus(messageId, 'error');
     };
     ws.onclose = () => {
       if (ttsRef.current === ws) {
@@ -624,31 +652,31 @@ const QaOps: React.FC = () => {
 
     abortRef.current?.abort();
     abortRef.current = null;
-    setInput("");
+    setInput('');
     if (!activeTitle) {
       setActiveTitle(query);
     }
     setLoading(true);
 
-    const now = new Date().toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
+    const now = new Date().toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
     });
     const assistantId = `assistant-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       {
         id: `user-${Date.now()}`,
-        role: "user",
+        role: 'user',
         content: query,
         createdAt: now,
       },
       {
         id: assistantId,
-        role: "assistant",
-        content: "",
+        role: 'assistant',
+        content: '',
         createdAt: now,
-        status: "streaming",
+        status: 'streaming',
         events: [],
       },
     ]);
@@ -662,7 +690,7 @@ const QaOps: React.FC = () => {
         updateMessage(assistantId, (message) => ({
           ...message,
           content: message.content || `错误：${error.message}`,
-          status: "error",
+          status: 'error',
         }));
         setLoading(false);
       },
@@ -685,10 +713,10 @@ const QaOps: React.FC = () => {
       events: appendEventTrace(message.events, event.type),
     }));
 
-    if (event.type === "RUN_STARTED") {
+    if (event.type === 'RUN_STARTED') {
       // 保存后端返回的 threadId
       const eventThreadId =
-        typeof event.data?.threadId === "string"
+        typeof event.data?.threadId === 'string'
           ? event.data.threadId
           : undefined;
       if (eventThreadId) {
@@ -696,7 +724,7 @@ const QaOps: React.FC = () => {
       }
 
       const inputData = event.data?.input;
-      if (isRecord(inputData) && typeof inputData.mode === "string") {
+      if (isRecord(inputData) && typeof inputData.mode === 'string') {
         const route = inputData.mode;
         updateMessage(messageId, (message) => ({
           ...message,
@@ -713,9 +741,9 @@ const QaOps: React.FC = () => {
       return;
     }
 
-    if (event.type === "TEXT_MESSAGE_CONTENT") {
+    if (event.type === 'TEXT_MESSAGE_CONTENT') {
       const delta =
-        typeof event.data?.delta === "string" ? event.data.delta : "";
+        typeof event.data?.delta === 'string' ? event.data.delta : '';
       updateMessage(messageId, (message) => ({
         ...message,
         content: message.content + delta,
@@ -723,21 +751,21 @@ const QaOps: React.FC = () => {
       return;
     }
 
-    if (event.type === "STATE_DELTA") {
+    if (event.type === 'STATE_DELTA') {
       applyStateDelta(event, messageId);
       return;
     }
 
-    if (event.type === "CUSTOM") {
+    if (event.type === 'CUSTOM') {
       applyCustomEvent(event, messageId);
       return;
     }
 
-    if (event.type === "RUN_FINISHED") {
+    if (event.type === 'RUN_FINISHED') {
       const output = event.data?.output;
       if (isRecord(output)) {
         const outputAnswer =
-          typeof output.answer === "string" ? output.answer : undefined;
+          typeof output.answer === 'string' ? output.answer : undefined;
         updateMessage(messageId, (message) => ({
           ...message,
           content: outputAnswer ?? message.content,
@@ -754,35 +782,35 @@ const QaOps: React.FC = () => {
             toAnswerArtifacts(output.artifacts),
           ),
           route:
-            typeof output.route === "string" ? output.route : message.route,
+            typeof output.route === 'string' ? output.route : message.route,
           confidence:
-            typeof output.confidence === "number"
+            typeof output.confidence === 'number'
               ? output.confidence
               : message.confidence,
           retryCount:
-            typeof output.retryCount === "number"
+            typeof output.retryCount === 'number'
               ? output.retryCount
               : message.retryCount,
           model: isChatModel(output.model) ? output.model : message.model,
           retrievalSufficient:
-            typeof output.retrievalSufficient === "boolean"
+            typeof output.retrievalSufficient === 'boolean'
               ? output.retrievalSufficient
               : message.retrievalSufficient,
           retrievalReason:
-            typeof output.retrievalReason === "string"
+            typeof output.retrievalReason === 'string'
               ? output.retrievalReason
               : message.retrievalReason,
-          status: "done",
+          status: 'done',
         }));
       }
       return;
     }
 
-    if (event.type === "RUN_ERROR") {
+    if (event.type === 'RUN_ERROR') {
       updateMessage(messageId, (message) => ({
         ...message,
-        content: `错误：${String(event.data?.message ?? "流式问答失败")}`,
-        status: "error",
+        content: `错误：${String(event.data?.message ?? '流式问答失败')}`,
+        status: 'error',
       }));
     }
   };
@@ -794,21 +822,21 @@ const QaOps: React.FC = () => {
     for (const patch of delta) {
       if (!isRecord(patch)) continue;
       const value = patch.value;
-      if (patch.path === "/routing" && isRecord(value)) {
+      if (patch.path === '/routing' && isRecord(value)) {
         updateMessage(messageId, (message) => ({
           ...message,
-          route: typeof value.route === "string" ? value.route : message.route,
+          route: typeof value.route === 'string' ? value.route : message.route,
         }));
       }
-      if (patch.path === "/sufficiency" && isRecord(value)) {
+      if (patch.path === '/sufficiency' && isRecord(value)) {
         updateMessage(messageId, (message) => ({
           ...message,
           retrievalSufficient:
-            typeof value.sufficient === "boolean"
+            typeof value.sufficient === 'boolean'
               ? value.sufficient
               : message.retrievalSufficient,
           retrievalReason:
-            typeof value.reason === "string"
+            typeof value.reason === 'string'
               ? value.reason
               : message.retrievalReason,
         }));
@@ -819,7 +847,7 @@ const QaOps: React.FC = () => {
   const applyCustomEvent = (event: AguiEvent, messageId: string) => {
     const name = event.data?.name;
     const value = event.data?.value;
-    if (name === "rag.citation") {
+    if (name === 'rag.citation') {
       updateMessage(messageId, (message) => ({
         ...message,
         references: Array.isArray(value)
@@ -827,20 +855,20 @@ const QaOps: React.FC = () => {
           : message.references,
       }));
     }
-    if (name === "rag.reflection" && isRecord(value)) {
+    if (name === 'rag.reflection' && isRecord(value)) {
       updateMessage(messageId, (message) => ({
         ...message,
         confidence:
-          typeof value.confidence === "number"
+          typeof value.confidence === 'number'
             ? value.confidence
             : message.confidence,
         retryCount:
-          typeof value.retryCount === "number"
+          typeof value.retryCount === 'number'
             ? value.retryCount
             : message.retryCount,
       }));
     }
-    if (name === "rag.media" || name === "rag.image" || name === "rag.images") {
+    if (name === 'rag.media' || name === 'rag.image' || name === 'rag.images') {
       const media = toAnswerMedia(value);
       if (media.length > 0) {
         updateMessage(messageId, (message) => ({
@@ -852,21 +880,21 @@ const QaOps: React.FC = () => {
   };
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null;
+    typeof value === 'object' && value !== null;
 
   const isChatModel = (value: unknown): value is ChatModel =>
-    value === "qwen" || value === "deepseek";
+    value === 'qwen' || value === 'deepseek';
 
   const formatTime = (iso: string) => {
     try {
-      return new Date(iso).toLocaleDateString("zh-CN", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
+      return new Date(iso).toLocaleDateString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       });
     } catch {
-      return "";
+      return '';
     }
   };
 
@@ -880,23 +908,23 @@ const QaOps: React.FC = () => {
               menu={{
                 items: [
                   {
-                    key: "sortNewest",
-                    label: "按时间排序",
+                    key: 'sortNewest',
+                    label: '按时间排序',
                   },
                   {
-                    key: "sortCount",
-                    label: "按消息数排序",
+                    key: 'sortCount',
+                    label: '按消息数排序',
                   },
                 ],
                 onClick: ({ key }) => {
                   const sorted = [...conversations];
-                  if (key === "sortNewest") {
+                  if (key === 'sortNewest') {
                     sorted.sort(
                       (a, b) =>
                         new Date(b.updatedAt).getTime() -
                         new Date(a.updatedAt).getTime(),
                     );
-                  } else if (key === "sortCount") {
+                  } else if (key === 'sortCount') {
                     sorted.sort((a, b) => b.messageCount - a.messageCount);
                   }
                   setConversations(sorted);
@@ -925,12 +953,12 @@ const QaOps: React.FC = () => {
             ) : (
               conversations.slice(0, convPage * PAGE_SIZE).map((item) => (
                 <button
-                  className={`conv-item${item.threadId === threadId ? " active" : ""}`}
+                  className={`conv-item${item.threadId === threadId ? ' active' : ''}`}
                   key={item.threadId}
                   onClick={() => handleSelectConversation(item)}
                   type="button"
                   onKeyDown={(e) =>
-                    e.key === "Enter" && handleSelectConversation(item)
+                    e.key === 'Enter' && handleSelectConversation(item)
                   }
                 >
                   <strong>{item.title}</strong>
@@ -940,8 +968,8 @@ const QaOps: React.FC = () => {
                     menu={{
                       items: [
                         {
-                          key: "delete",
-                          label: "删除会话",
+                          key: 'delete',
+                          label: '删除会话',
                           danger: true,
                           icon: <DeleteOutlined />,
                         },
@@ -956,7 +984,7 @@ const QaOps: React.FC = () => {
                           if (threadId === item.threadId) {
                             setMessages([]);
                             setThreadId(undefined);
-                            setActiveTitle("");
+                            setActiveTitle('');
                           }
                         } catch {
                           // 删除失败
@@ -964,7 +992,7 @@ const QaOps: React.FC = () => {
                       },
                     }}
                     placement="bottomRight"
-                    trigger={["click"]}
+                    trigger={['click']}
                   >
                     <span
                       className="conv-more-btn"
@@ -989,7 +1017,7 @@ const QaOps: React.FC = () => {
         </aside>
         <section className="rag-panel qa-chat">
           <div className="chat-head">
-            <h2>{activeTitle || "AI 智能问答"}</h2>
+            <h2>{activeTitle || 'AI 智能问答'}</h2>
             <Space>
               <Button
                 icon={<FolderOpenOutlined />}
@@ -1018,17 +1046,17 @@ const QaOps: React.FC = () => {
               placeholder="选择岗位"
               value={rolePresetId}
             />
-            <p>{activeRolePreset?.summary ?? "正在加载岗位能力..."}</p>
+            <p>{activeRolePreset?.summary ?? '正在加载岗位能力...'}</p>
           </div>
           <div className="chat-body" ref={chatBodyRef}>
-            {messages.map((message) =>
-              message.role === "user" ? (
+            {messages.map((message, messageIndex) =>
+              message.role === 'user' ? (
                 <div className="message user" key={message.id}>
                   <div>
                     <p>{message.content}</p>
                     <span>{message.createdAt}</span>
                   </div>
-                  <Avatar style={{ background: "#f0f2f5", color: "#8c8c8c" }}>
+                  <Avatar style={{ background: '#f0f2f5', color: '#8c8c8c' }}>
                     <svg
                       viewBox="0 0 24 24"
                       width="18"
@@ -1049,27 +1077,31 @@ const QaOps: React.FC = () => {
                         <AssistantMarkdown
                           className="answer-markdown"
                           content={message.content}
-                          status={message.status === "streaming" ? "streaming" : "done"}
+                          status={
+                            message.status === 'streaming'
+                              ? 'streaming'
+                              : 'done'
+                          }
                         />
-                        {message.status === "streaming" && (
+                        {message.status === 'streaming' && (
                           <span className="answer-typing-caret" />
                         )}
                       </>
                     ) : (
-                      message.status === "streaming" && (
+                      message.status === 'streaming' && (
                         <p className="answer-loading">
                           正在通过 AG-UI 协议生成回答...
                         </p>
                       )
                     )}
-                    {message.status === "done" && message.content && (
+                    {message.status === 'done' && message.content && (
                       <Space>
                         <Button
                           className="answer-voice-btn"
                           icon={<SoundOutlined />}
                           loading={
-                            ttsStatusByMessageId[message.id] === "connecting" ||
-                            ttsStatusByMessageId[message.id] === "synthesizing"
+                            ttsStatusByMessageId[message.id] === 'connecting' ||
+                            ttsStatusByMessageId[message.id] === 'synthesizing'
                           }
                           onClick={() =>
                             handlePlayTts(message.id, message.content)
@@ -1084,7 +1116,10 @@ const QaOps: React.FC = () => {
                           onClick={() => {
                             setBadCaseMessage(message);
                             badCaseForm.resetFields();
-                            badCaseForm.setFieldValue("correctedAnswer", message.content);
+                            badCaseForm.setFieldValue(
+                              'correctedAnswer',
+                              message.content,
+                            );
                           }}
                           size="small"
                           type="text"
@@ -1098,7 +1133,7 @@ const QaOps: React.FC = () => {
                         {message.media.map((item) => (
                           <figure key={item.id}>
                             <img
-                              alt={item.alt ?? item.title ?? "回答图片"}
+                              alt={item.alt ?? item.title ?? '回答图片'}
                               loading="lazy"
                               src={item.url}
                             />
@@ -1120,24 +1155,24 @@ const QaOps: React.FC = () => {
                             </div>
                             <Tag
                               color={
-                                artifact.status === "ready"
-                                  ? "success"
-                                  : artifact.status === "failed"
-                                    ? "error"
-                                    : "processing"
+                                artifact.status === 'ready'
+                                  ? 'success'
+                                  : artifact.status === 'failed'
+                                    ? 'error'
+                                    : 'processing'
                               }
                             >
                               {
                                 {
-                                  queued: "排队中",
-                                  generating: "生成中",
-                                  ready: "可下载",
-                                  failed: "失败",
+                                  queued: '排队中',
+                                  generating: '生成中',
+                                  ready: '可下载',
+                                  failed: '失败',
                                 }[artifact.status]
                               }
                             </Tag>
                             <Button
-                              disabled={artifact.status !== "ready"}
+                              disabled={artifact.status !== 'ready'}
                               icon={<DownloadOutlined />}
                               onClick={() =>
                                 void downloadArtifact(
@@ -1151,12 +1186,12 @@ const QaOps: React.FC = () => {
                               title="下载"
                             />
                             <Button
-                              disabled={artifact.status !== "ready"}
+                              disabled={artifact.status !== 'ready'}
                               icon={<ShareAltOutlined />}
                               onClick={() => {
                                 setSelectedArtifact(artifact);
                                 shareForm.setFieldsValue({
-                                  visibility: "external",
+                                  visibility: 'external',
                                   expiresInHours: 72,
                                 });
                                 setShareModalOpen(true);
@@ -1170,36 +1205,73 @@ const QaOps: React.FC = () => {
                     )}
                     {message.route && (
                       <div className="answer-meta">
-                        <span>路由：{message.route}</span>
+                        <span>
+                          处理方式：{routeLabel[message.route] ?? message.route}
+                        </span>
                         {message.retrievalSufficient !== undefined && (
                           <span>
-                            检索：
-                            {message.retrievalSufficient ? "充分" : "不足"}
+                            证据：
+                            {message.retrievalSufficient
+                              ? '已确认'
+                              : '资料不足'}
                           </span>
                         )}
-                        {message.confidence !== undefined && (
-                          <span>置信度：{message.confidence.toFixed(2)}</span>
-                        )}
-                        {message.retryCount !== undefined && (
-                          <span>重试：{message.retryCount}</span>
-                        )}
+                        {message.retrievalSufficient !== false &&
+                          message.confidence !== undefined && (
+                            <span>
+                              回答评分：{message.confidence.toFixed(2)}
+                            </span>
+                          )}
+                        {message.retryCount !== undefined &&
+                          message.retryCount > 0 && (
+                            <span>重试：{message.retryCount}</span>
+                          )}
                         {message.model && (
                           <span>
                             模型：
-                            {message.model === "qwen" ? "通义千问" : "DeepSeek"}
+                            {message.model === 'qwen' ? '通义千问' : 'DeepSeek'}
                           </span>
                         )}
                       </div>
                     )}
-                    {message.retrievalReason && (
-                      <p className="retrieval-reason">
-                        检索评估：{message.retrievalReason}
-                      </p>
-                    )}
-                    {message.events && message.events.length > 0 && (
-                      <p className="event-trace">
-                        AG-UI：{formatEventTrace(message.events)}
-                      </p>
+                    {message.status === 'done' &&
+                      message.retrievalSufficient === false && (
+                        <div className="answer-insufficient">
+                          <strong>
+                            {insufficientEvidenceMessage(message.route)}
+                          </strong>
+                          <span>
+                            可补充版本、项目、时间范围或具体业务场景后重新提问。
+                          </span>
+                          <Button
+                            onClick={() => {
+                              const sourceQuery = messages
+                                .slice(0, messageIndex)
+                                .reverse()
+                                .find((item) => item.role === 'user')?.content;
+                              setInput(`${sourceQuery ?? ''}\n\n补充信息：`);
+                            }}
+                            size="small"
+                          >
+                            补充问题信息
+                          </Button>
+                        </div>
+                      )}
+                    {(message.retrievalReason ||
+                      (message.events && message.events.length > 0)) && (
+                      <details className="answer-debug-details">
+                        <summary>查看检索与运行详情</summary>
+                        {message.retrievalReason && (
+                          <p className="retrieval-reason">
+                            {message.retrievalReason}
+                          </p>
+                        )}
+                        {message.events && message.events.length > 0 && (
+                          <p className="event-trace">
+                            {formatEventTrace(message.events)}
+                          </p>
+                        )}
+                      </details>
                     )}
                     {message.references && message.references.length > 0 && (
                       <div className="reference-box">
@@ -1210,20 +1282,34 @@ const QaOps: React.FC = () => {
                               <FileWordOutlined className="file-icon word" />
                               <div>
                                 <a
-                                  href={item.retrievalSource === "web" ? item.docId : undefined}
-                                  target={item.retrievalSource === "web" ? "_blank" : undefined}
-                                  rel={item.retrievalSource === "web" ? "noreferrer" : undefined}
+                                  href={
+                                    item.retrievalSource === 'web'
+                                      ? item.docId
+                                      : undefined
+                                  }
+                                  target={
+                                    item.retrievalSource === 'web'
+                                      ? '_blank'
+                                      : undefined
+                                  }
+                                  rel={
+                                    item.retrievalSource === 'web'
+                                      ? 'noreferrer'
+                                      : undefined
+                                  }
                                   onClick={(event) => {
-                                    if (item.retrievalSource !== "web") {
+                                    if (item.retrievalSource !== 'web') {
                                       event.preventDefault();
-                                      history.push(`/documents/${encodeURIComponent(item.docId)}`);
+                                      history.push(
+                                        `/documents/${encodeURIComponent(item.docId)}`,
+                                      );
                                     }
                                   }}
                                 >
                                   {item.docId || item.id}
                                 </a>
                                 <span>
-                                  chunk #{item.chunkIndex} · score{" "}
+                                  chunk #{item.chunkIndex} · score{' '}
                                   {(item.totalScore ?? 0).toFixed(2)}
                                 </span>
                               </div>
@@ -1241,10 +1327,10 @@ const QaOps: React.FC = () => {
             <div className="qa-role-workspace">
               <div className="qa-role-intro">
                 <span className="qa-role-mark">
-                  {activeRolePreset?.shortName ?? "岗位"}
+                  {activeRolePreset?.shortName ?? '岗位'}
                 </span>
                 <div>
-                  <strong>{activeRolePreset?.name ?? "岗位能力加载中"}</strong>
+                  <strong>{activeRolePreset?.name ?? '岗位能力加载中'}</strong>
                   <p>{activeRolePreset?.summary}</p>
                 </div>
               </div>
@@ -1321,7 +1407,11 @@ const QaOps: React.FC = () => {
                 mode="multiple"
                 allowClear
                 maxTagCount="responsive"
-                placeholder={availableQaPlugins.length ? "选择插件能力包（可多选）" : "当前链路暂无可用插件"}
+                placeholder={
+                  availableQaPlugins.length
+                    ? '选择插件能力包（可多选）'
+                    : '当前链路暂无可用插件'
+                }
                 value={pluginKeys}
                 disabled={!availableQaPlugins.length}
                 options={availableQaPlugins.map((plugin) => ({
@@ -1365,26 +1455,32 @@ const QaOps: React.FC = () => {
           setBadCaseSubmitting(true);
           try {
             await submitConversationBadCase(threadId, values);
-            antdMessage.success("Bad Case 已提交，等待审核");
+            antdMessage.success('Bad Case 已提交，等待审核');
             setBadCaseMessage(null);
           } catch (error) {
-            antdMessage.error(error instanceof Error ? error.message : "提交失败");
+            antdMessage.error(
+              error instanceof Error ? error.message : '提交失败',
+            );
           } finally {
             setBadCaseSubmitting(false);
           }
         }}
       >
         <Form form={badCaseForm} layout="vertical">
-          <Form.Item label="错误类型" name="errorType" rules={[{ required: true }]}>
+          <Form.Item
+            label="错误类型"
+            name="errorType"
+            rules={[{ required: true }]}
+          >
             <Select
               options={[
-                { value: "retrieval_miss", label: "召回遗漏" },
-                { value: "ranking_error", label: "排序错误" },
-                { value: "citation_error", label: "引用错误" },
-                { value: "hallucination", label: "幻觉／编造" },
-                { value: "outdated_content", label: "内容过期" },
-                { value: "incomplete_answer", label: "回答不完整" },
-                { value: "other", label: "其他" },
+                { value: 'retrieval_miss', label: '召回遗漏' },
+                { value: 'ranking_error', label: '排序错误' },
+                { value: 'citation_error', label: '引用错误' },
+                { value: 'hallucination', label: '幻觉／编造' },
+                { value: 'outdated_content', label: '内容过期' },
+                { value: 'incomplete_answer', label: '回答不完整' },
+                { value: 'other', label: '其他' },
               ]}
             />
           </Form.Item>
@@ -1438,24 +1534,24 @@ const QaOps: React.FC = () => {
                   <Tag>{artifactKindLabel[artifact.kind]}</Tag>
                   <Tag
                     color={
-                      artifact.status === "ready"
-                        ? "success"
-                        : artifact.status === "failed"
-                          ? "error"
-                          : "processing"
+                      artifact.status === 'ready'
+                        ? 'success'
+                        : artifact.status === 'failed'
+                          ? 'error'
+                          : 'processing'
                     }
                   >
                     {
                       {
-                        queued: "排队中",
-                        generating: "生成中",
-                        ready: "可下载",
-                        failed: "失败",
+                        queued: '排队中',
+                        generating: '生成中',
+                        ready: '可下载',
+                        failed: '失败',
                       }[artifact.status]
                     }
                   </Tag>
                   <Button
-                    disabled={artifact.status !== "ready"}
+                    disabled={artifact.status !== 'ready'}
                     icon={<DownloadOutlined />}
                     onClick={() =>
                       void downloadArtifact(
@@ -1466,12 +1562,12 @@ const QaOps: React.FC = () => {
                     title="下载"
                   />
                   <Button
-                    disabled={artifact.status !== "ready"}
+                    disabled={artifact.status !== 'ready'}
                     icon={<ShareAltOutlined />}
                     onClick={() => {
                       setSelectedArtifact(artifact);
                       shareForm.setFieldsValue({
-                        visibility: "external",
+                        visibility: 'external',
                         expiresInHours: 72,
                       });
                       setShareModalOpen(true);
@@ -1497,7 +1593,7 @@ const QaOps: React.FC = () => {
           <Form.Item
             name="title"
             label="文件标题"
-            rules={[{ required: true, message: "请输入文件标题" }]}
+            rules={[{ required: true, message: '请输入文件标题' }]}
           >
             <Input maxLength={80} />
           </Form.Item>
@@ -1511,7 +1607,7 @@ const QaOps: React.FC = () => {
           <Form.Item
             name="sourceText"
             label="文件内容"
-            rules={[{ required: true, message: "请输入或保留问答内容" }]}
+            rules={[{ required: true, message: '请输入或保留问答内容' }]}
           >
             <Input.TextArea
               autoSize={{ minRows: 8, maxRows: 16 }}
@@ -1528,7 +1624,7 @@ const QaOps: React.FC = () => {
       </Modal>
       <Modal
         open={shareModalOpen}
-        title={`分享：${selectedArtifact?.title ?? ""}`}
+        title={`分享：${selectedArtifact?.title ?? ''}`}
         okText="创建并复制链接"
         cancelText="取消"
         confirmLoading={artifactSubmitting}
@@ -1543,20 +1639,20 @@ const QaOps: React.FC = () => {
           >
             <Select
               options={[
-                { value: "external", label: "外部分享，无需登录" },
-                { value: "internal", label: "内部分享，需要登录" },
+                { value: 'external', label: '外部分享，无需登录' },
+                { value: 'internal', label: '内部分享，需要登录' },
               ]}
             />
           </Form.Item>
           <Form.Item name="expiresInHours" label="有效时长（小时）">
-            <InputNumber min={1} max={8760} style={{ width: "100%" }} />
+            <InputNumber min={1} max={8760} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="maxDownloads" label="最多下载次数">
             <InputNumber
               min={1}
               max={100000}
               placeholder="不填则不限次数"
-              style={{ width: "100%" }}
+              style={{ width: '100%' }}
             />
           </Form.Item>
         </Form>

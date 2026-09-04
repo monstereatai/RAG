@@ -20,8 +20,10 @@ interface BochaWebPage {
 }
 
 interface BochaSearchResponse {
-  webPages?: {
-    value?: BochaWebPage[];
+  data?: {
+    webPages?: {
+      value?: BochaWebPage[];
+    };
   };
 }
 
@@ -51,7 +53,8 @@ export class BochaSearchService {
       },
       body: JSON.stringify({
         query,
-        freshness: 'oneYear',
+        // 常识类问题不应被近一年时间窗过滤，交由博查根据查询词选择范围。
+        freshness: 'noLimit',
         summary: true,
         count,
       }),
@@ -66,7 +69,8 @@ export class BochaSearchService {
     }
 
     const payload = (await response.json()) as BochaSearchResponse;
-    const pages = payload.webPages?.value ?? [];
+    // 博查的成功响应使用 data.webPages.value；此前少读取了一层 data，导致有效结果被当成空数组。
+    const pages = payload.data?.webPages?.value ?? [];
     return pages
       .map((page): BochaSearchResult | null => {
         const url = this.toString(page.url);

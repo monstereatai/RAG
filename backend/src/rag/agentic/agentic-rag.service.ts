@@ -643,12 +643,14 @@ export class AgenticRagService {
         })),
       };
     } catch (err) {
-      const topScore = Math.max(
-        ...state.retrievedChunks.map((chunk) => chunk.totalScore),
-        0,
+      // 结构化充分性判断失败时复用统一质量门禁；不能再用更高的硬编码分数阈值，
+      // 否则已通过关键词覆盖的网页证据会因 0.15 < 0.20 被错误拒答。
+      const fallbackGate = this.karpathyRagService.assessRetrievedChunks(
+        state.query,
+        state.retrievedChunks,
       );
-      const sufficient = topScore >= 0.2;
-      const reason = `充分性 LLM 评估失败，按 topScore=${topScore.toFixed(2)} 启发式判断`;
+      const sufficient = fallbackGate.sufficient;
+      const reason = `充分性 LLM 评估失败，按检索质量门禁判断：${fallbackGate.reason}`;
       this.logger.warn(`${reason}: ${(err as Error).message}`);
 
       onEvent?.({
@@ -735,8 +737,16 @@ export class AgenticRagService {
         })),
       );
       const webIdsByQuestion = new Map<string, string[]>();
-      const webChunks = searchResults.flatMap(({ results }) =>
-        results.map((result, index) => {
+      const webChunks: RetrievedChunk[] = [];
+      const maxResultsPerQuestion = Math.max(
+        ...searchResults.map(({ results }) => results.length),
+        0,
+      );
+      // 轮转合并：候选上限较小时，先保证每个子问题至少保留一条网页证据，再补充同题的更多结果。
+      for (let resultIndex = 0; resultIndex < maxResultsPerQuestion; resultIndex += 1) {
+        for (const { results } of searchResults) {
+          const result = results[resultIndex];
+          if (!result) continue;
           const parts = [
             `标题：${result.title}`,
             `来源：${result.siteName ?? result.url}`,
@@ -746,17 +756,17 @@ export class AgenticRagService {
             `URL：${result.url}`,
           ].filter(Boolean);
 
-          return {
+          webChunks.push({
             id: `web:${result.url}`,
             content: parts.join('\n'),
             docId: result.url,
-            chunkIndex: index,
+            chunkIndex: resultIndex,
             bm25Score: 0,
             cosineScore: 0,
             totalScore: 0.15,
-          } satisfies RetrievedChunk;
-        }),
-      );
+          });
+        }
+      }
       for (const { question, results } of searchResults) {
         webIdsByQuestion.set(
           question,
@@ -775,7 +785,8 @@ export class AgenticRagService {
         },
       });
       return {
-        retrievedChunks: [...state.retrievedChunks, ...webChunks].slice(
+        // 本地召回已占满上限时，网页补证必须优先进入后续重排和引用阶段，不能在末尾被 slice 丢弃。
+        retrievedChunks: [...webChunks, ...state.retrievedChunks].slice(
           0,
           this.maxRetrievedChunks,
         ),
@@ -1038,38 +1049,37 @@ export class AgenticRagService {
     const answer = loop.output.answer;
     const citationGate = loop.output.citationGate;
     if (!citationGate.sufficient) {
-      if (citationGate.reason === '答案缺少显式片段引用') {
-        const fallbackAnswer = this.karpathyRagService.buildExtractiveAnswer(
-          state.query,
+      // 联网或复杂问答中，模型可能已引用片段但不满足逐句覆盖；只要抽取式答案能通过校验，
+      // 就应保留已验证证据，而不是把可回答问题直接降级为拒答。
+      const fallbackAnswer = this.karpathyRagService.buildExtractiveAnswer(
+        state.query,
+        state.retrievedChunks,
+      );
+      if (fallbackAnswer) {
+        const fallbackGate = this.karpathyRagService.validateAnswerCitationSupport(
+          fallbackAnswer,
           state.retrievedChunks,
         );
-        if (fallbackAnswer) {
-          const fallbackGate =
-            this.karpathyRagService.validateAnswerCitationSupport(
-              fallbackAnswer,
-              state.retrievedChunks,
-            );
-          if (fallbackGate.sufficient) {
-            onEvent?.({ type: 'token', data: fallbackAnswer });
-            onEvent?.({ type: 'citation', data: state.retrievedChunks });
-            const artifacts = this.withAnswerArtifact(
-              state,
-              fallbackAnswer,
-              true,
-              this.getSubQuestionCoverage(state),
-              '抽取式答案通过引用校验',
-            );
-            onEvent?.({
-              type: 'artifact',
-              data: artifacts[artifacts.length - 1],
-            });
-            return {
-              answer: fallbackAnswer,
-              retrievalSufficient: true,
-              retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
-              artifacts,
-            };
-          }
+        if (fallbackGate.sufficient) {
+          onEvent?.({ type: 'token', data: fallbackAnswer });
+          onEvent?.({ type: 'citation', data: state.retrievedChunks });
+          const artifacts = this.withAnswerArtifact(
+            state,
+            fallbackAnswer,
+            true,
+            this.getSubQuestionCoverage(state),
+            '抽取式答案通过引用校验',
+          );
+          onEvent?.({
+            type: 'artifact',
+            data: artifacts[artifacts.length - 1],
+          });
+          return {
+            answer: fallbackAnswer,
+            retrievalSufficient: true,
+            retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+            artifacts,
+          };
         }
       }
 
@@ -1118,13 +1128,14 @@ export class AgenticRagService {
       onEvent?.({
         type: 'reflection',
         data: {
-          confidence: 1,
+          // 安全降级代表「没有编造答案」，不是「答案结论可信」。
+          confidence: 0,
           passed: true,
           retryCount: state.retryCount,
           reason: '本地与联网证据不足时已进入安全降级，不再生成无证据答案',
         },
       });
-      return { confidence: 1, passed: true, retryCount: state.retryCount };
+      return { confidence: 0, passed: true, retryCount: state.retryCount };
     }
 
     const answerContract = [...(state.artifacts ?? [])]
@@ -1566,7 +1577,8 @@ export class AgenticRagService {
         answer: result.answer,
         references: result.references,
         route: 'simple',
-        confidence: 1,
+        // 检索不足时即使安全返回了友好说明，也不能向 API／页面宣称结论满置信。
+        confidence: result.retrievalSufficient ? 1 : 0,
         retryCount: 0,
         retrievalSufficient: result.retrievalSufficient,
         retrievalReason: result.retrievalReason,
@@ -1926,13 +1938,17 @@ export class AgenticRagService {
     queries: string[],
     limit = this.maxSubQuestions,
   ): AgenticSubQuestion[] {
-    const normalized = [
-      original,
-      ...this.normalizeQueries(original, queries).filter(
-        (query) => query !== original,
-      ),
-    ];
-    return normalized.slice(0, limit).map((question, index) => ({
+    // 「某某是什么／是谁」这类原子事实问句无需被扩成多个验收项；否则联网已找到原问题证据，
+    // 仍可能因一个额外的延伸问题未覆盖而整体拒答。
+    const questions = this.isAtomicFactQuestion(original)
+      ? [original]
+      : [
+          original,
+          ...this.normalizeQueries(original, queries).filter(
+            (query) => query !== original,
+          ),
+        ];
+    return questions.slice(0, limit).map((question, index) => ({
       id: `subq-${index + 1}`,
       question,
       // 当前规划器生成互补问题；保留依赖字段，支持后续有向多跳计划。
@@ -1943,6 +1959,22 @@ export class AgenticRagService {
       sufficient: false,
       reason: '',
     }));
+  }
+
+  private isAtomicFactQuestion(query: string): boolean {
+    const normalized = query.trim();
+    const isBareEntity =
+      normalized.length >= 2 &&
+      normalized.length <= 16 &&
+      !/[，。！？；：、,.!?]/.test(normalized) &&
+      !/(对比|比较|区别|差异|为什么|原因|影响|风险|评估|分析|关联|关系|上下游|依赖|链路|方案|步骤|规划)/.test(
+        normalized,
+      );
+    return (
+      isBareEntity ||
+      (normalized.length <= 24 &&
+        /(?:是什么|是谁|指什么|在哪里|什么时候)$/.test(normalized))
+    );
   }
 
   private getSubQuestionLimit(config?: RunnableConfig): number {

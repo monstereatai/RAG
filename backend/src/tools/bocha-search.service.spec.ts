@@ -30,21 +30,23 @@ describe('BochaSearchService', () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          webPages: {
-            value: [
-              {
-                name: 'Example',
-                url: 'https://example.com',
-                snippet: 'Snippet',
-                summary: 'Summary',
-                siteName: 'example.com',
-                datePublished: '2026-06-19',
-              },
-              {
-                name: 'Missing URL',
-                snippet: 'Skipped',
-              },
-            ],
+          data: {
+            webPages: {
+              value: [
+                {
+                  name: 'Example',
+                  url: 'https://example.com',
+                  snippet: 'Snippet',
+                  summary: 'Summary',
+                  siteName: 'example.com',
+                  datePublished: '2026-06-19',
+                },
+                {
+                  name: 'Missing URL',
+                  snippet: 'Skipped',
+                },
+              ],
+            },
           },
         }),
     });
