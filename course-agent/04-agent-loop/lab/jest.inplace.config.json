@@ -1,0 +1,9 @@
+{
+  "rootDir": "../../../backend/src",
+  "roots": ["<rootDir>/../../course-agent/04-agent-loop/lab"],
+  "modulePaths": ["<rootDir>/../node_modules"],
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "testRegex": ".*\\.spec\\.ts$",
+  "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+  "testEnvironment": "<rootDir>/../node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node"
+}
