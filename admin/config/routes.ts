@@ -44,6 +44,18 @@ export default [
         component: './documents',
       },
       {
+        path: '/documents/public',
+        component: './documents/public',
+      },
+      {
+        path: '/documents/department',
+        component: './documents/department',
+      },
+      {
+        path: '/documents/archive',
+        component: './documents/archive',
+      },
+      {
         path: '/documents/:id',
         name: 'document-detail',
         component: './documents/detail',

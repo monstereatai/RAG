@@ -233,8 +233,9 @@ export class GraphService {
     const keyword = options.keyword?.trim();
     const rows = await this.neo4jProvider.executeRead<Record<string, unknown>>(
       `
-      MATCH (n:GraphEntity {userId: $userId})
-      WHERE ($type = '' OR n.label = $type)
+      MATCH (n:GraphEntity)
+      WHERE ($userId = '*' OR n.userId = $userId)
+        AND ($type = '' OR n.label = $type)
         AND (
           $keyword = ''
           OR toLower(n.id) CONTAINS toLower($keyword)
@@ -242,7 +243,8 @@ export class GraphService {
           OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS toLower($keyword))
           OR toLower(coalesce(n.properties, '')) CONTAINS toLower($keyword)
         )
-      OPTIONAL MATCH (n)-[r:GRAPH_RELATION {userId: $userId}]-(:GraphEntity {userId: $userId})
+      OPTIONAL MATCH (n)-[r:GRAPH_RELATION]-(:GraphEntity)
+      WHERE ($userId = '*' OR (r.userId = $userId AND startNode(r).userId = $userId AND endNode(r).userId = $userId))
       RETURN
         n.id AS id,
         n.label AS label,
@@ -345,8 +347,9 @@ export class GraphService {
     const query = options.query?.trim();
     const rows = await this.neo4jProvider.executeRead<Record<string, unknown>>(
       `
-      MATCH (source:GraphEntity {userId: $userId})-[r:GRAPH_RELATION {userId: $userId}]->(target:GraphEntity {userId: $userId})
-      WHERE ($relationType = '' OR r.type = $relationType)
+      MATCH (source:GraphEntity)-[r:GRAPH_RELATION]->(target:GraphEntity)
+      WHERE ($userId = '*' OR (source.userId = $userId AND target.userId = $userId AND r.userId = $userId))
+        AND ($relationType = '' OR r.type = $relationType)
         AND (
           $query = ''
           OR toLower(source.id) CONTAINS toLower($query)

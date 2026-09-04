@@ -13,7 +13,25 @@ export interface SearchRecord {
 export interface PopularQuery {
   query: string;
   count: number;
-  avgHitCount: number;
+  /** 平均命中数（当前查询日志聚合暂未提供，预留字段） */
+  avgHitCount?: number;
+  /** 平均响应耗时（ms），来自 query_logs 聚合 */
+  avgLatencyMs?: number;
+}
+
+export type UpdatedRange = 'day' | 'week' | 'month';
+
+/** 文档全文检索高级筛选（仅对「文档全文检索」tab 生效） */
+export interface SearchFilters {
+  fileType?: string;
+  updatedRange?: UpdatedRange;
+  documentType?: string;
+  role?: string;
+}
+
+export interface SearchFacets {
+  documentTypes: string[];
+  roles: string[];
 }
 
 export interface FullTextResult {
@@ -33,10 +51,18 @@ export interface GraphSearchResult {
   edges: Array<{ source: string; target: string; label: string; sourceLabel?: string; targetLabel?: string; confidence?: number }>;
 }
 
-export async function searchDocuments(query: string, limit = 20) {
+export async function searchDocuments(query: string, limit = 20, filters?: SearchFilters) {
+  const params: Record<string, unknown> = { q: query, limit };
+  for (const [key, value] of Object.entries(filters ?? {})) {
+    if (value !== undefined && value !== '') params[key] = value;
+  }
   return authRequest<{ data: FullTextResult[] }>('/api/admin/search-ops/documents', {
-    params: { q: query, limit },
+    params,
   });
+}
+
+export async function getSearchFacets() {
+  return authRequest<SearchFacets>('/api/admin/search-ops/documents/facets');
 }
 
 export async function reindexSearchDocuments(limit = 1000) {

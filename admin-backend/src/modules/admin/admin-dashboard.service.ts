@@ -147,6 +147,16 @@ export class AdminDashboardService {
     };
   }
 
+  async getUserMemories(user: unknown) {
+    const result = await this.ragClient.getUserMemories(this.resolveUserId(user));
+    return result.available ? result.data : { enabled: false, memories: [] };
+  }
+
+  async clearUserMemories(user: unknown) {
+    const result = await this.ragClient.clearUserMemories(this.resolveUserId(user));
+    return result.available ? result.data : { enabled: false, memories: [] };
+  }
+
   async trend(days: number = 7) {
     // 生成模拟趋势数据，真实数据可从 rag-backend 获取
     const now = new Date();
@@ -287,5 +297,11 @@ export class AdminDashboardService {
     }
 
     return null;
+  }
+
+  private resolveUserId(user: unknown): string {
+    const currentUser = (user && typeof user === 'object' ? user : {}) as Record<string, unknown>;
+    const userId = currentUser.userId ?? currentUser.id ?? currentUser.sub;
+    return userId === undefined || userId === null ? 'admin' : String(userId);
   }
 }

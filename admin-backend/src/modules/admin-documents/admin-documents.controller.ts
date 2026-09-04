@@ -180,6 +180,15 @@ export class AdminDocumentsController {
     return this.ragClient.archiveDocument(docId);
   }
 
+  @Post(':docId/unarchive')
+  @AuditLog('documents', 'unarchive')
+  @ApiOperation({ summary: '后台文档归档恢复（代理至 rag-backend）' })
+  @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
+  @RequirePermission('admin:documents:write')
+  unarchive(@Param('docId') docId: string) {
+    return this.ragClient.unarchiveDocument(docId);
+  }
+
   @Post(':docId/permissions')
   @AuditLog('documents', 'permissions')
   @ApiOperation({ summary: '后台文档权限范围（代理至 rag-backend）' })

@@ -1,4 +1,4 @@
-import { request } from '@umijs/max';
+import { authRequest } from '@/services/rag-admin/api';
 
 export interface MemoryItem {
   memory: string;
@@ -15,10 +15,10 @@ export interface MemoriesResponse {
 
 /** 获取当前用户的所有长期记忆 */
 export async function getMemories(): Promise<MemoriesResponse> {
-  return request<MemoriesResponse>('/api/memories', { method: 'GET' });
+  return authRequest<MemoriesResponse>('/api/admin/account/memories', { method: 'GET' });
 }
 
 /** 清空当前用户的所有长期记忆 */
 export async function clearMemories(): Promise<void> {
-  return request('/api/memories', { method: 'DELETE' });
+  return authRequest('/api/admin/account/memories', { method: 'DELETE' });
 }

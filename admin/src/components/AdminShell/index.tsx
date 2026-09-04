@@ -57,7 +57,12 @@ const moduleMatchers: Record<string, string[]> = {
 };
 
 export const dashboardNav: SideNavItem[] = [
-  { key: 'overview', label: '数据总览', icon: <PieChartOutlined />, path: '/dashboard' },
+  {
+    key: 'overview',
+    label: '数据总览',
+    icon: <PieChartOutlined />,
+    path: '/dashboard',
+  },
   { key: 'visits', label: '访问分析', icon: <ClockCircleOutlined /> },
   { key: 'documents', label: '文档统计', icon: <FileTextOutlined /> },
   { key: 'users', label: '用户统计', icon: <TeamOutlined /> },
@@ -66,14 +71,39 @@ export const dashboardNav: SideNavItem[] = [
 ];
 
 export const documentNav: SideNavItem[] = [
-  { key: 'mine', label: '我的文档', icon: <FolderOutlined />, path: '/documents' },
-  { key: 'public', label: '公共文档', icon: <GlobalOutlined /> },
-  { key: 'department', label: '部门文档', icon: <ApartmentOutlined /> },
-  { key: 'archive', label: '文档归档', icon: <DatabaseOutlined /> },
+  {
+    key: 'mine',
+    label: '我的文档',
+    icon: <FolderOutlined />,
+    path: '/documents',
+  },
+  {
+    key: 'public',
+    label: '公共文档',
+    icon: <GlobalOutlined />,
+    path: '/documents/public',
+  },
+  {
+    key: 'department',
+    label: '部门文档',
+    icon: <ApartmentOutlined />,
+    path: '/documents/department',
+  },
+  {
+    key: 'archive',
+    label: '文档归档',
+    icon: <DatabaseOutlined />,
+    path: '/documents/archive',
+  },
 ];
 
 export const searchNav: SideNavItem[] = [
-  { key: 'history', label: '搜索历史', icon: <ClockCircleOutlined />, path: '/search-ops' },
+  {
+    key: 'history',
+    label: '搜索历史',
+    icon: <ClockCircleOutlined />,
+    path: '/search-ops',
+  },
   { key: 'hot', label: '热门搜索', icon: <GlobalOutlined /> },
   { key: 'filter', label: '搜索筛选', icon: <SearchOutlined /> },
 ];
@@ -82,7 +112,12 @@ export const qaNav: SideNavItem[] = [
   { key: 'new', label: '新建对话', icon: <CommentOutlined />, path: '/qa-ops' },
   { key: 'history', label: '历史会话', icon: <HistoryOutlined /> },
   { key: 'records', label: '问答记录', icon: <FileTextOutlined /> },
-  { key: 'model', label: '模型配置', icon: <DatabaseOutlined />, path: '/qa-ops/model' },
+  {
+    key: 'model',
+    label: '模型配置',
+    icon: <DatabaseOutlined />,
+    path: '/qa-ops/model',
+  },
 ];
 
 export const agentOpsNav: SideNavItem[] = [
@@ -143,30 +178,110 @@ export const agentOpsNav: SideNavItem[] = [
 ];
 
 export const graphNav: SideNavItem[] = [
-  { key: 'global', label: '全局图谱', icon: <NodeIndexOutlined />, path: '/graph-ops' },
-  { key: 'nodes', label: '节点管理', icon: <ApartmentOutlined />, path: '/graph-ops/nodes' },
-  { key: 'relations', label: '关系检索', icon: <SearchOutlined />, path: '/graph-ops/relations' },
-  { key: 'stats', label: '图谱统计', icon: <PieChartOutlined />, path: '/graph-ops/stats' },
+  {
+    key: 'global',
+    label: '全局图谱',
+    icon: <NodeIndexOutlined />,
+    path: '/graph-ops',
+  },
+  {
+    key: 'nodes',
+    label: '节点管理',
+    icon: <ApartmentOutlined />,
+    path: '/graph-ops/nodes',
+  },
+  {
+    key: 'relations',
+    label: '关系检索',
+    icon: <SearchOutlined />,
+    path: '/graph-ops/relations',
+  },
+  {
+    key: 'stats',
+    label: '图谱统计',
+    icon: <PieChartOutlined />,
+    path: '/graph-ops/stats',
+  },
 ];
 
 export const accountNav: SideNavItem[] = [
-  { key: 'profile', label: '个人信息', icon: <UserOutlined />, path: '/account/center' },
-  { key: 'password', label: '密码修改', icon: <LockOutlined />, path: '/account-security' },
-  { key: 'memories', label: '长期记忆', icon: <DatabaseOutlined />, path: '/account/memories' },
+  {
+    key: 'profile',
+    label: '个人信息',
+    icon: <UserOutlined />,
+    path: '/account/center',
+  },
+  {
+    key: 'password',
+    label: '密码修改',
+    icon: <LockOutlined />,
+    path: '/account-security',
+  },
+  {
+    key: 'memories',
+    label: '长期记忆',
+    icon: <DatabaseOutlined />,
+    path: '/account/memories',
+  },
   { key: 'records', label: '登录记录', icon: <ClockCircleOutlined /> },
   { key: 'permissions', label: '权限查询', icon: <AuditOutlined /> },
 ];
 
 export const systemNav: SideNavItem[] = [
-  { key: 'users', label: '用户管理', icon: <UserOutlined />, path: '/system/users' },
-  { key: 'teams', label: '组织架构', icon: <TeamOutlined />, path: '/system/teams' },
-  { key: 'roles', label: '角色权限', icon: <AuditOutlined />, path: '/system/roles' },
-  { key: 'permissions', label: '权限管理', icon: <LockOutlined />, path: '/system/permissions' },
-  { key: 'config', label: '系统配置', icon: <SettingOutlined />, path: '/system/config' },
-  { key: 'logs', label: '日志管理', icon: <FileTextOutlined />, path: '/system/logs' },
-  { key: 'menus', label: '菜单管理', icon: <MenuOutlined />, path: '/system/menus' },
-  { key: 'notifications', label: '通知中心', icon: <BellOutlined />, path: '/system/notifications' },
-  { key: 'service', label: '服务配置', icon: <ControlOutlined />, path: '/system/system-config' },
+  {
+    key: 'users',
+    label: '用户管理',
+    icon: <UserOutlined />,
+    path: '/system/users',
+  },
+  {
+    key: 'teams',
+    label: '组织架构',
+    icon: <TeamOutlined />,
+    path: '/system/teams',
+  },
+  {
+    key: 'roles',
+    label: '角色权限',
+    icon: <AuditOutlined />,
+    path: '/system/roles',
+  },
+  {
+    key: 'permissions',
+    label: '权限管理',
+    icon: <LockOutlined />,
+    path: '/system/permissions',
+  },
+  {
+    key: 'config',
+    label: '系统配置',
+    icon: <SettingOutlined />,
+    path: '/system/config',
+  },
+  {
+    key: 'logs',
+    label: '日志管理',
+    icon: <FileTextOutlined />,
+    path: '/system/logs',
+  },
+  {
+    key: 'menus',
+    label: '菜单管理',
+    icon: <MenuOutlined />,
+    path: '/system/menus',
+  },
+  {
+    key: 'notifications',
+    label: '通知中心',
+    icon: <BellOutlined />,
+    path: '/system/notifications',
+  },
+  {
+    key: 'service',
+    label: '服务配置',
+    icon: <ControlOutlined />,
+    path: '/system/system-config',
+  },
 ];
 
 export function AdminShell({
@@ -216,7 +331,9 @@ export function AdminShell({
           >
             <Space className="rag-admin-avatar">
               <Avatar src={currentUser?.avatar} icon={<UserOutlined />} />
-              <span>{currentUser?.name ?? currentUser?.username ?? '管理员'}</span>
+              <span>
+                {currentUser?.name ?? currentUser?.username ?? '管理员'}
+              </span>
             </Space>
           </Dropdown>
         </div>
@@ -231,11 +348,14 @@ export function ModulePage({
   navItems,
   activeKey,
   children,
+  onNavChange,
 }: {
-  title: string;
+  title: React.ReactNode;
   navItems: SideNavItem[];
   activeKey: string;
   children: React.ReactNode;
+  /** 可选：点击侧边栏项时的回调（无 path 的项靠它切换视图；有 path 的项在导航外额外触发） */
+  onNavChange?: (key: string) => void;
 }) {
   return (
     <div className="rag-module-page">
@@ -250,18 +370,35 @@ export function ModulePage({
               </>
             );
             const className = item.key === activeKey ? 'active' : '';
+            const handleNav = onNavChange
+              ? () => onNavChange(item.key)
+              : undefined;
             return item.path ? (
-              <Link className={className} key={item.key} to={item.path}>
+              <Link
+                className={className}
+                key={item.key}
+                to={item.path}
+                onClick={handleNav}
+              >
                 {content}
               </Link>
             ) : (
-              <button className={className} key={item.key} type="button">
+              <button
+                className={className}
+                key={item.key}
+                type="button"
+                onClick={handleNav}
+              >
                 {content}
               </button>
             );
           })}
         </div>
-        <Button className="rag-collapse-btn" icon={<MenuFoldOutlined />} type="text">
+        <Button
+          className="rag-collapse-btn"
+          icon={<MenuFoldOutlined />}
+          type="text"
+        >
           收起菜单
         </Button>
       </aside>

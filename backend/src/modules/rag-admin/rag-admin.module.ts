@@ -15,7 +15,9 @@ import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.en
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
+import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { MemoryModule } from '../memory/memory.module';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
       FactConflictEntity,
       QueryLogEntity,
       DocumentReviewEntity,
+      DocumentPermissionEntity,
     ]),
     DocumentModule,
     GraphModule,
@@ -34,6 +37,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     ImageIndexModule,
     ObsidianKnowledgeModule,
     DomainEventsModule,
+    MemoryModule,
   ],
   controllers: [RagAdminController],
   providers: [RagAdminService, QueryLogService],

@@ -475,10 +475,10 @@ const RelationSearchView: React.FC = () => {
           setState('disabled');
           return;
         }
-        const edges = asArray<GraphEdge>(relationPayload ?? []);
+        const edges = asArray<GraphEdge>(relationPayload.data);
         setRelations(edges);
-        setGraphNodes(asArray<GraphNode>((graphPayload as any)?.nodes ?? []));
-        setMeta(undefined);
+        setGraphNodes(asArray<GraphNode>(graphPayload.data?.nodes));
+        setMeta(relationPayload.meta ?? graphPayload.meta);
         setState(edges.length > 0 ? 'data' : 'empty');
       })
       .catch(() => setState('error'));

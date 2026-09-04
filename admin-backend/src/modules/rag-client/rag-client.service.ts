@@ -79,6 +79,18 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>("/rag/admin/role-presets");
   }
 
+  getUserMemories(ownerUserId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,
+    );
+  }
+
+  clearUserMemories(ownerUserId: string) {
+    return this.deleteJson<Record<string, unknown>>(
+      `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,
+    );
+  }
+
   startProductionWorkflow(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId })}`,
@@ -420,6 +432,19 @@ export class RagClientService {
     );
   }
 
+  getDocumentStats() {
+    return this.getJson<Record<string, unknown>>(
+      '/rag/admin/documents/stats',
+      LIST_READ_TIMEOUT_MS,
+    );
+  }
+
+  getQueryDailyTrend(days = 14) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/queries/trend${this.toQueryString({ days })}`,
+    );
+  }
+
   getDocument(docId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/documents/${encodeURIComponent(docId)}`
@@ -687,9 +712,24 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>("/rag/admin/graph/conflicts");
   }
 
-  searchDocuments(query: string, limit = 20) {
+  searchDocuments(
+    query: string,
+    limit = 20,
+    filters: {
+      fileType?: string;
+      updatedRange?: string;
+      documentType?: string;
+      role?: string;
+    } = {},
+  ) {
     return this.getJson<Record<string, unknown>[]>(
-      `/rag/admin/documents/search${this.toQueryString({ q: query, limit })}`
+      `/rag/admin/documents/search${this.toQueryString({ q: query, limit, ...filters })}`
+    );
+  }
+
+  getDocumentSearchFacets() {
+    return this.getJson<Record<string, unknown>>(
+      "/rag/admin/documents/search/facets"
     );
   }
 
@@ -711,6 +751,13 @@ export class RagClientService {
   archiveDocument(docId: string) {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/documents/${encodeURIComponent(docId)}/archive`,
+      {}
+    );
+  }
+
+  unarchiveDocument(docId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/unarchive`,
       {}
     );
   }

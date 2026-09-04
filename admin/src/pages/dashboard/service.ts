@@ -27,3 +27,32 @@ export async function getTrendData(params?: { days?: number }) {
     params,
   });
 }
+
+/** 首页大盘二级菜单使用的现有后台数据源。 */
+export async function getDashboardDocuments() {
+  return authRequest<{ data: unknown[]; total: number }>(
+    '/api/admin/documents',
+    {
+      params: { current: 1, pageSize: 100 },
+    },
+  );
+}
+
+export async function getDashboardUsers() {
+  return authRequest<{ data: unknown[]; total: number }>('/api/admin/users', {
+    params: { current: 1, pageSize: 100 },
+  });
+}
+
+export async function getDashboardPopularQueries() {
+  return authRequest<{ data: unknown[] }>('/api/admin/search-ops/popular');
+}
+
+export async function getDashboardNotices() {
+  return authRequest<{ data: unknown[]; total: number; unread: number }>(
+    '/api/admin/notifications',
+    {
+      params: { current: 1, pageSize: 20 },
+    },
+  );
+}

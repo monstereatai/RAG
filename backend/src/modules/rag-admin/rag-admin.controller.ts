@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Patch,
   Post,
@@ -7,6 +8,7 @@ import {
   Query,
   Body,
   Logger,
+  BadRequestException,
   NotFoundException,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { RagFeedbackService } from '../chat/rag-feedback.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { MemoryService } from '../memory/memory.service';
 import {
   DEFAULT_ROLE_PRESET_ID,
   listRolePresets,
@@ -29,6 +32,7 @@ export class RagAdminController {
     private readonly ragAdminService: RagAdminService,
     private readonly ragFeedbackService: RagFeedbackService,
     private readonly domainEvents: DomainEventsService,
+    private readonly memoryService: MemoryService,
   ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
@@ -60,6 +64,21 @@ export class RagAdminController {
   @Post('domain-events/outbox/:id/retry')
   retryDomainEvent(@Param('id') id: string) { return this.domainEvents.retry(id); }
 
+  @Get('memories')
+  async listMemories(@Query('ownerUserId') ownerUserId?: string) {
+    const userId = this.requireOwnerUserId(ownerUserId);
+    if (!this.memoryService.isEnabled()) return { enabled: false, memories: [] };
+    return { enabled: true, memories: await this.memoryService.listMemories(userId) };
+  }
+
+  @Delete('memories')
+  async clearMemories(@Query('ownerUserId') ownerUserId?: string) {
+    const userId = this.requireOwnerUserId(ownerUserId);
+    if (!this.memoryService.isEnabled()) return { enabled: false, memories: [] };
+    await this.memoryService.clearMemories(userId);
+    return { enabled: true, memories: [] };
+  }
+
   // ─── Documents ──────────────────────────────────────────────
 
   @Get('documents')
@@ -68,8 +87,28 @@ export class RagAdminController {
   }
 
   @Get('documents/search')
-  searchDocuments(@Query('q') query: string, @Query('limit') limit?: string) {
-    return this.ragAdminService.searchDocuments(query ?? '', Number(limit) || 20);
+  searchDocuments(
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+    @Query('fileType') fileType?: string,
+    @Query('updatedRange') updatedRange?: string,
+    @Query('documentType') documentType?: string,
+    @Query('role') role?: string,
+  ) {
+    return this.ragAdminService.searchDocuments(query ?? '', Number(limit) || 20, {
+      fileType: fileType || undefined,
+      updatedRange:
+        updatedRange === 'day' || updatedRange === 'week' || updatedRange === 'month'
+          ? updatedRange
+          : undefined,
+      documentType: documentType || undefined,
+      role: role || undefined,
+    });
+  }
+
+  @Get('documents/search/facets')
+  getDocumentSearchFacets() {
+    return this.ragAdminService.getDocumentSearchFacets();
   }
 
   @Post('documents/search/reindex')
@@ -132,7 +171,7 @@ export class RagAdminController {
       docVersion?: string;
       effectiveAt?: string;
       expiredAt?: string;
-      lifecycleStatus?: 'draft' | 'confirmed' | 'effective' | 'deprecated';
+      lifecycleStatus?: 'draft' | 'confirmed' | 'effective' | 'deprecated' | 'archived';
       documentType?: string;
     },
   ) {
@@ -151,7 +190,8 @@ export class RagAdminController {
       | 'draft'
       | 'confirmed'
       | 'effective'
-      | 'deprecated',
+      | 'deprecated'
+      | 'archived',
   ) {
     const result = await this.ragAdminService.updateDocumentLifecycle(
       docId,
@@ -234,14 +274,21 @@ export class RagAdminController {
   }
 
   @Post('documents/:docId/archive')
-  archiveDocument(@Param('docId') docId: string) {
-    return {
-      docId,
-      archived: false,
-      blocked: true,
-      reason:
-        'Archive requires cold storage backend. Currently not implemented.',
-    };
+  async archiveDocument(@Param('docId') docId: string) {
+    const result = await this.ragAdminService.archiveDocument(docId);
+    if (!result) {
+      throw new NotFoundException(`doc ${docId} not found`);
+    }
+    return result;
+  }
+
+  @Post('documents/:docId/unarchive')
+  async unarchiveDocument(@Param('docId') docId: string) {
+    const result = await this.ragAdminService.unarchiveDocument(docId);
+    if (!result) {
+      throw new NotFoundException(`doc ${docId} not found`);
+    }
+    return result;
   }
 
   @Post('documents/:docId/permissions')
@@ -253,12 +300,63 @@ export class RagAdminController {
         type: 'user' | 'role' | 'department' | 'public';
         id: string;
       }>;
+      permissions?: Array<{
+        subjectType: 'user' | 'role' | 'department' | 'public';
+        subjectId: string;
+        scope?: string;
+      }>;
     },
   ) {
     return this.ragAdminService.updateDocumentPermissions(
       docId,
-      body.subjects ?? [],
+      this.normalizePermissionSubjects(body),
     );
+  }
+
+  /**
+   * 归一化两种权限保存契约（历史 bug：admin 前端发 permissions 字段被当成空权限清空）：
+   * - { subjects: [{ type, id }] }（旧格式）
+   * - { permissions: [{ subjectType, subjectId, scope? }] }（admin 前端格式，scope 忽略）
+   * 两个 key 都缺失抛 400；存在但是空数组维持清空语义。
+   * 非法主体类型、user/role/department 缺 subjectId 的项直接过滤；
+   * public 的 subjectId 统一为 'public'（与前端发送的数据一致）。
+   */
+  private normalizePermissionSubjects(
+    body: {
+      subjects?: Array<{ type?: string; id?: string }>;
+      permissions?: Array<{ subjectType?: string; subjectId?: string }>;
+    },
+  ): Array<{ type: 'user' | 'role' | 'department' | 'public'; id: string }> {
+    if (body.subjects === undefined && body.permissions === undefined) {
+      throw new BadRequestException('permissions or subjects required');
+    }
+    const rawItems = body.subjects !== undefined
+      ? body.subjects.map((item) => ({ type: item.type, id: item.id }))
+      : body.permissions!.map((item) => ({
+          type: item.subjectType,
+          id: item.subjectId,
+        }));
+    const validTypes = new Set(['user', 'role', 'department', 'public']);
+    const normalized: Array<{
+      type: 'user' | 'role' | 'department' | 'public';
+      id: string;
+    }> = [];
+    for (const item of rawItems) {
+      if (!item.type || !validTypes.has(item.type)) continue;
+      const type = item.type as 'user' | 'role' | 'department' | 'public';
+      if (type === 'public') {
+        normalized.push({ type: 'public', id: 'public' });
+        continue;
+      }
+      if (!item.id) continue;
+      normalized.push({ type, id: item.id });
+    }
+    return normalized;
+  }
+
+  private requireOwnerUserId(ownerUserId?: string): string {
+    if (!ownerUserId?.trim()) throw new BadRequestException('ownerUserId required');
+    return ownerUserId;
   }
 
   @Post('documents/batch')

@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, Query, UseGuards, SetMetadata } from '@nestjs/common';
+import { Controller, Delete, Get, Patch, Body, Query, UseGuards, SetMetadata } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../permission/roles.guard';
 import { AdminDashboardService } from './admin-dashboard.service';
@@ -48,6 +48,16 @@ export class AdminController {
   @ApiOperation({ summary: '更新当前管理员个人资料' })
   updateProfile(@UserInfo() user: unknown, @Body() body: { nickname?: string; email?: string; phone?: string }) {
     return this.dashboardService.updateProfile(user, body);
+  }
+
+  @Get('account/memories')
+  getUserMemories(@UserInfo() user: unknown) {
+    return this.dashboardService.getUserMemories(user);
+  }
+
+  @Delete('account/memories')
+  clearUserMemories(@UserInfo() user: unknown) {
+    return this.dashboardService.clearUserMemories(user);
   }
 
   @Get('boundary')

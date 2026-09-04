@@ -1,5 +1,6 @@
 import {
   AppstoreOutlined,
+  FileDoneOutlined,
   DownloadOutlined,
   EyeOutlined,
   FilePdfOutlined,
@@ -12,6 +13,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
   TableOutlined,
+  UndoOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
@@ -34,6 +36,8 @@ import {
   rejectDocumentReview,
   getFailedDocumentTasks,
   retryFailedDocumentTask,
+  archiveDocument,
+  unarchiveDocument,
   type DocumentItem,
   type DocumentVersionItem,
   type DocumentPermissionInput,
@@ -74,7 +78,25 @@ const graphStatusMap: Record<string, { color: string; text: string }> = {
   skipped: { color: 'default', text: '未启用' },
 };
 
-const Documents: React.FC = () => {
+export interface DocumentListPageProps {
+  /** 按权限主体过滤：public=公共文档，department=部门文档；不传为全部（我的文档） */
+  scope?: 'public' | 'department';
+  /** 按生命周期状态过滤，如 'archived'（文档归档页） */
+  lifecycleStatus?: string;
+  /** 侧边菜单高亮 key */
+  activeKey?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+}
+
+const Documents: React.FC<DocumentListPageProps> = ({
+  scope,
+  lifecycleStatus,
+  activeKey = 'mine',
+  emptyTitle = '暂无文档',
+  emptyDescription = '知识库还没有文档，请上传文档开始使用。',
+}) => {
+  const isArchivePage = lifecycleStatus === 'archived';
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
   const [total, setTotal] = useState(0);
@@ -85,6 +107,8 @@ const Documents: React.FC = () => {
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionSaving, setVersionSaving] = useState(false);
   const [versionActionDocId, setVersionActionDocId] = useState<string>();
+  const [archiveActionDocId, setArchiveActionDocId] = useState<string>();
+  const [departmentFilter, setDepartmentFilter] = useState<string>();
   const [userOptions, setUserOptions] = useState<{ label: string; value: string }[]>([]);
   const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<
@@ -102,7 +126,14 @@ const Documents: React.FC = () => {
   const fetchDocs = (nextPagination = pagination) => {
     setPageState('loading');
     Promise.all([
-      getDocuments(nextPagination),
+      getDocuments({
+        ...nextPagination,
+        ...(scope ? { scope } : {}),
+        ...(lifecycleStatus ? { lifecycleStatus } : {}),
+        ...(scope === 'department' && departmentFilter
+          ? { departmentId: departmentFilter }
+          : {}),
+      }),
       getUsers(),
       getRoles(),
       getOrganizations(),
@@ -175,6 +206,7 @@ const Documents: React.FC = () => {
               expiredAt: item.expiredAt,
               obsidianPath: repairMojibake(item.obsidianPath),
               obsidianStatus: item.obsidianStatus,
+              permissions: item.permissions,
             })),
           );
           setTotal(Number(rawTotal) || items.length);
@@ -339,6 +371,39 @@ const Documents: React.FC = () => {
     }
   };
 
+  const handleArchive = (record: DocumentItem) => {
+    Modal.confirm({
+      title: '确认归档该文档？',
+      content: '归档后文档不再参与智能搜索与 AI 问答召回，可在「文档归档」页恢复。',
+      okText: '归档',
+      onOk: async () => {
+        setArchiveActionDocId(record.id);
+        try {
+          await archiveDocument(record.id);
+          message.success('文档已归档');
+          fetchDocs();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '归档失败');
+        } finally {
+          setArchiveActionDocId(undefined);
+        }
+      },
+    });
+  };
+
+  const handleUnarchive = async (record: DocumentItem) => {
+    setArchiveActionDocId(record.id);
+    try {
+      await unarchiveDocument(record.id);
+      message.success('文档已恢复为生效状态');
+      fetchDocs();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '恢复失败');
+    } finally {
+      setArchiveActionDocId(undefined);
+    }
+  };
+
   const columns: ColumnsType<DocumentItem> = [
     {
       title: <Checkbox />,
@@ -385,8 +450,39 @@ const Documents: React.FC = () => {
     },
     {
       title: '权限范围',
-      width: 150,
-      render: (_, record) => <Tag color="blue">{record.metadata?.category ?? '部门可见'}</Tag>,
+      width: 180,
+      render: (_, record) => {
+        const departmentNameMap = new Map(
+          departmentOptions.map((option) => [option.value, option.label]),
+        );
+        const tags: React.ReactNode[] = [];
+        const hasPublic = record.permissions?.some(
+          (permission) => permission.subjectType === 'public',
+        );
+        if (hasPublic) {
+          tags.push(<Tag color="cyan" key="public">公共</Tag>);
+        }
+        record.permissions
+          ?.filter((permission) => permission.subjectType === 'department')
+          .forEach((permission) => {
+            tags.push(
+              <Tag color="blue" key={`department-${permission.subjectId}`}>
+                {departmentNameMap.get(permission.subjectId) ?? permission.subjectId}
+              </Tag>,
+            );
+          });
+        if (tags.length === 0) {
+          tags.push(
+            <Tag key="restricted">
+              {record.permissions && record.permissions.length > 0 ? '受限' : '未配置'}
+            </Tag>,
+          );
+        }
+        if (record.metadata?.category) {
+          tags.push(<Tag key="category">{record.metadata.category}</Tag>);
+        }
+        return <Space size={4} wrap>{tags}</Space>;
+      },
     },
     {
       title: 'Obsidian',
@@ -418,41 +514,90 @@ const Documents: React.FC = () => {
       title: '操作',
       fixed: 'right',
       width: 190,
-      render: (_, record) => (
-        <Space size="middle">
-          <EyeOutlined />
-          <DownloadOutlined />
-          <Button
-            icon={<LockOutlined />}
-            onClick={() => openPermissionModal(record)}
-            size="small"
-            type="text"
-          />
-          <Button
-            icon={<HistoryOutlined />}
-            onClick={() => openVersionModal(record)}
-            size="small"
-            type="text"
-          >
-            版本治理
-          </Button>
-          <MoreOutlined />
-        </Space>
-      ),
+      render: (_, record) =>
+        isArchivePage ? (
+          <Space size="middle">
+            <EyeOutlined />
+            <DownloadOutlined />
+            <Button
+              icon={<UndoOutlined />}
+              loading={archiveActionDocId === record.id}
+              onClick={() => handleUnarchive(record)}
+              size="small"
+              type="text"
+            >
+              恢复
+            </Button>
+          </Space>
+        ) : (
+          <Space size="middle">
+            <EyeOutlined />
+            <DownloadOutlined />
+            <Button
+              icon={<LockOutlined />}
+              onClick={() => openPermissionModal(record)}
+              size="small"
+              type="text"
+            />
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => openVersionModal(record)}
+              size="small"
+              type="text"
+            >
+              版本治理
+            </Button>
+            {(record.lifecycleStatus === 'effective' ||
+              record.lifecycleStatus === 'confirmed') && (
+              <Tooltip title="归档">
+                <Button
+                  icon={<FileDoneOutlined />}
+                  loading={archiveActionDocId === record.id}
+                  onClick={() => handleArchive(record)}
+                  size="small"
+                  type="text"
+                />
+              </Tooltip>
+            )}
+            <MoreOutlined />
+          </Space>
+        ),
     },
   ];
 
   return (
-    <ModulePage activeKey="mine" navItems={documentNav} title="文档管理">
+    <ModulePage activeKey={activeKey} navItems={documentNav} title="文档管理">
       <div className="rag-panel document-toolbar">
         <Input prefix={<SearchOutlined />} placeholder="搜索文档名称、内容、上传人等" />
-        <Button icon={<UploadOutlined />} type="primary">批量上传</Button>
-        <Button onClick={handleRetryFailedTasks}>重放失败任务</Button>
-        <Button>新建文件夹</Button>
-        <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
-        <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
-        <Select defaultValue="权限范围" options={[{ value: '权限范围' }]} />
-        <Button>更多筛选</Button>
+        {!isArchivePage && (
+          <>
+            <Button icon={<UploadOutlined />} type="primary">批量上传</Button>
+            <Button onClick={handleRetryFailedTasks}>重放失败任务</Button>
+            <Button>新建文件夹</Button>
+            <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
+            <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
+            {scope === 'department' ? (
+              <Select
+                allowClear
+                onChange={(value) => {
+                  setDepartmentFilter(value);
+                  const nextPagination = { ...pagination, current: 1 };
+                  setPagination(nextPagination);
+                  fetchDocs(nextPagination);
+                }}
+                options={departmentOptions}
+                placeholder="按部门筛选"
+                showSearch
+                optionFilterProp="label"
+                style={{ minWidth: 120 }}
+                value={departmentFilter}
+              />
+            ) : (
+              <Select defaultValue="权限范围" options={[{ value: '权限范围' }]} />
+            )}
+            <Button>更多筛选</Button>
+          </>
+        )}
         <Button icon={<ReloadOutlined />} onClick={() => fetchDocs()} type="text" />
       </div>
       <div className="view-switch">
@@ -476,11 +621,11 @@ const Documents: React.FC = () => {
         )}
         {pageState === 'empty' && (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
-            <h3>暂无文档</h3>
-            <p style={{ color: '#999', margin: '12px 0' }}>
-              知识库还没有文档，请上传文档开始使用。
-            </p>
-            <Button icon={<UploadOutlined />} type="primary">上传文档</Button>
+            <h3>{emptyTitle}</h3>
+            <p style={{ color: '#999', margin: '12px 0' }}>{emptyDescription}</p>
+            {!isArchivePage && (
+              <Button icon={<UploadOutlined />} type="primary">上传文档</Button>
+            )}
           </div>
         )}
         {pageState === 'data' && (
@@ -684,5 +829,7 @@ function normalizeList(raw: any): any[] {
   if (Array.isArray(raw?.list)) return raw.list;
   return [];
 }
+
+export { Documents };
 
 export default Documents;

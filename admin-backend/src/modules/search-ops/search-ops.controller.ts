@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query } from '@nestjs/common';
+import { Controller, Get, Post, Query, ServiceUnavailableException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -26,9 +26,9 @@ export class SearchOpsController {
           ? 'partial'
           : 'unavailable',
       data: {
-        popularQueries: popular.data ?? [],
-        noResultQueries: noResult.data ?? [],
-        recallIssues: recallIssues.data ?? [],
+        popularQueries: this.asArray(this.unwrapRagResult(popular)),
+        noResultQueries: this.asArray(this.unwrapRagResult(noResult)),
+        recallIssues: this.asArray(this.unwrapRagResult(recallIssues)),
       },
       upstream: { popular, noResult, recallIssues },
     };
@@ -41,7 +41,7 @@ export class SearchOpsController {
     const popular = await this.ragClient.getSearchPopularQueries();
     const page = Number(query.current) || 1;
     const pageSize = Number(query.pageSize) || 10;
-    const items = (Array.isArray(popular.data) ? popular.data : []) as any[];
+    const items = this.asArray(this.unwrapRagResult(popular));
     return {
       data: items.slice((page - 1) * pageSize, page * pageSize).map((item: any, index: number) => ({
         id: String(index + 1),
@@ -61,7 +61,7 @@ export class SearchOpsController {
   @RequirePermission('admin:search-ops:read')
   async getPopular() {
     const result = await this.ragClient.getSearchPopularQueries();
-    return { data: result.data ?? [] };
+    return { data: this.asArray(this.unwrapRagResult(result)) };
   }
 
   @Get('stats')
@@ -81,22 +81,45 @@ export class SearchOpsController {
   @Get('documents')
   @ApiOperation({ summary: '文档全文检索（关键词高亮）' })
   @RequirePermission('admin:search-ops:read')
-  searchDocuments(@Query('q') query = '', @Query('limit') limit?: string) {
-    return this.ragClient.searchDocuments(query, Number(limit) || 20);
+  async searchDocuments(
+    @Query('q') query = '',
+    @Query('limit') limit?: string,
+    @Query('fileType') fileType?: string,
+    @Query('updatedRange') updatedRange?: string,
+    @Query('documentType') documentType?: string,
+    @Query('role') role?: string,
+  ) {
+    const result = await this.ragClient.searchDocuments(query, Number(limit) || 20, {
+      fileType: fileType || undefined,
+      updatedRange: updatedRange || undefined,
+      documentType: documentType || undefined,
+      role: role || undefined,
+    });
+    return this.asArray(this.requireAvailable(result));
+  }
+
+  @Get('documents/facets')
+  @ApiOperation({ summary: '搜索筛选面板 facets（文档分类/权限范围）' })
+  @RequirePermission('admin:search-ops:read')
+  async getDocumentFacets() {
+    const result = await this.ragClient.getDocumentSearchFacets();
+    return this.requireAvailable(result);
   }
 
   @Post('documents/reindex')
   @ApiOperation({ summary: '补建已有文档的全文索引' })
   @RequirePermission('admin:documents:write')
-  reindexDocuments(@Query('limit') limit?: string) {
-    return this.ragClient.reindexDocumentSearch(Number(limit) || 1000);
+  async reindexDocuments(@Query('limit') limit?: string) {
+    const result = await this.ragClient.reindexDocumentSearch(Number(limit) || 1000);
+    return this.requireAvailable(result);
   }
 
   @Get('graph')
   @ApiOperation({ summary: '知识图谱关键词检索' })
   @RequirePermission('admin:search-ops:read')
-  searchGraph(@Query('query') query = '', @Query('limit') limit?: string) {
-    return this.ragClient.searchGraph(query, Number(limit) || 100);
+  async searchGraph(@Query('query') query = '', @Query('limit') limit?: string) {
+    const result = await this.ragClient.searchGraph(query, Number(limit) || 100);
+    return this.requireAvailable(result);
   }
 
   @Get('queries/popular')
@@ -118,5 +141,37 @@ export class SearchOpsController {
   @RequirePermission('admin:search-ops:read')
   async getRecallIssues() {
     return this.ragClient.getSearchRecallIssues();
+  }
+
+  private requireAvailable(result: {
+    available: boolean;
+    status: number | null;
+    data: unknown;
+    error?: string;
+  }): unknown {
+    if (!result.available) {
+      throw new ServiceUnavailableException(
+        result.error || `RAG 服务不可用${result.status ? `（${result.status}）` : ''}`,
+      );
+    }
+    return this.unwrapRagResult(result);
+  }
+
+  /** RAG 服务的统一响应只在网关边界拆包，前端永远只接收业务数据。 */
+  private unwrapRagResult(result: { data?: unknown } | unknown): unknown {
+    let payload = (result as { data?: unknown } | null)?.data ?? result;
+    if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {
+      payload = (payload as { data: unknown }).data;
+    }
+    // RAG 管理接口会在 HTTP 成功响应内携带 available/data；available 是网关状态，
+    // 不能继续透传给页面，否则页面会把它当成实际的节点或文档结果。
+    if (payload && typeof payload === 'object' && 'available' in payload && 'data' in payload) {
+      payload = (payload as { data: unknown }).data;
+    }
+    return payload;
+  }
+
+  private asArray(value: unknown): any[] {
+    return Array.isArray(value) ? value : [];
   }
 }

@@ -2019,8 +2019,12 @@ ${context}
         };
       })
       .filter((hit): hit is RankedRetrievalHit => hit !== null)
-      // 审批门禁：draft 文档未经审批，本地 BM25 检索不可见
-      .filter((hit) => hit.lifecycleStatus !== 'draft');
+      // 审批/归档门禁：draft 未经审批、archived 已归档，本地 BM25 检索不可见
+      .filter(
+        (hit) =>
+          hit.lifecycleStatus !== 'draft' &&
+          hit.lifecycleStatus !== 'archived',
+      );
   }
 
   private mergeRankedHits(
@@ -2259,18 +2263,20 @@ ${context}
         .filter((entry) => entry.userId === userId)
         .map((entry) => entry.docId),
     );
-    // 审批门禁：draft 文档未经审批，向量检索通道同样不可见
-    const draftDocIds = new Set(
+    // 审批/归档门禁：draft 未经审批、archived 已归档，向量检索通道同样不可见
+    const excludedDocIds = new Set(
       this.persistedEntries
         .filter(
           (entry) =>
-            entry.userId === userId && entry.lifecycleStatus === 'draft',
+            entry.userId === userId &&
+            (entry.lifecycleStatus === 'draft' ||
+              entry.lifecycleStatus === 'archived'),
         )
         .map((entry) => entry.docId),
     );
 
     return hits.filter(
-      (hit) => activeDocIds.has(hit.docId) && !draftDocIds.has(hit.docId),
+      (hit) => activeDocIds.has(hit.docId) && !excludedDocIds.has(hit.docId),
     );
   }
 

@@ -29,6 +29,10 @@ export interface DocumentItem {
   supersedesDocId?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;
+  permissions?: Array<{
+    subjectType: 'user' | 'role' | 'department' | 'public';
+    subjectId: string;
+  }>;
 }
 
 export interface DocumentVersionItem {
@@ -56,6 +60,9 @@ export async function getDocuments(params?: {
   filename?: string;
   status?: string;
   fileType?: string;
+  scope?: 'public' | 'department';
+  departmentId?: string;
+  lifecycleStatus?: string;
 }) {
   return authRequest<{ data: DocumentItem[]; total: number }>(
     '/api/admin/documents',
@@ -167,4 +174,12 @@ export async function retryFailedDocumentTask(taskId: string) {
 
 export async function rollbackDocumentVersion(id: string) {
   return authRequest(`/api/admin/documents/${id}/rollback`, { method: 'POST' });
+}
+
+export async function archiveDocument(id: string) {
+  return authRequest(`/api/admin/documents/${id}/archive`, { method: 'POST' });
+}
+
+export async function unarchiveDocument(id: string) {
+  return authRequest(`/api/admin/documents/${id}/unarchive`, { method: 'POST' });
 }

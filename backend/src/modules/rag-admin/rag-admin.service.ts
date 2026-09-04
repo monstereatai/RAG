@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DocumentService } from '../document/document.service';
 import { GraphService } from '../graph/graph.service';
@@ -18,6 +18,7 @@ import { QueryLogService } from './query-log.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
+import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { randomUUID } from 'node:crypto';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
@@ -81,6 +82,14 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
+/** 文档全文检索的高级筛选（全部可选；不传时行为与原先一致） */
+export interface DocumentSearchFilters {
+  fileType?: string;
+  updatedRange?: 'day' | 'week' | 'month';
+  documentType?: string;
+  role?: string;
+}
+
 export interface DocumentAdminItem {
   docId: string;
   filename: string;
@@ -119,6 +128,8 @@ export class RagAdminService {
     private readonly documentReviewRepo: Repository<DocumentReviewEntity>,
     @InjectRepository(FactConflictEntity)
     private readonly factConflictRepo: Repository<FactConflictEntity>,
+    @InjectRepository(DocumentPermissionEntity)
+    private readonly permissionRepo: Repository<DocumentPermissionEntity>,
     private readonly domainEvents: DomainEventsService,
     // 图片检索（以图搜图/文搜图）可选依赖：未注册（模块未导入）时保持降级
     @Optional() private readonly imageIndexService?: ImageIndexService,
@@ -299,13 +310,50 @@ export class RagAdminService {
         (doc) => doc.sourceAuthority === query.sourceAuthority,
       );
     }
+    if (query.lifecycleStatus) {
+      filtered = filtered.filter(
+        (doc) => doc.lifecycleStatus === query.lifecycleStatus,
+      );
+    }
 
-    const total = filtered.length;
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
+
+    // 按权限主体类型过滤（公共/部门文档）
+    if (query.scope) {
+      const readableDocIds = await this.listReadableDocIdsByScope(
+        query.scope,
+        query.departmentId,
+      );
+      // 权限集合为空：直接返回空页，避免无意义的分页查询
+      if (readableDocIds.size === 0) {
+        return { total: 0, page, pageSize, items: [] };
+      }
+      filtered = filtered.filter((doc) => readableDocIds.has(doc.docId));
+    }
+
+    const total = filtered.length;
     const start = (page - 1) * pageSize;
+    const pageDocs = filtered.slice(start, start + pageSize);
+
+    // 当页文档的权限摘要：一次 In() 查询 read 权限行，按 docId 分组（不去重跨类型）
+    const permissionRows = pageDocs.length
+      ? await this.permissionRepo.find({
+          where: { docId: In(pageDocs.map((doc) => doc.docId)), action: 'read' },
+        })
+      : [];
+    const permissionsByDoc = new Map<
+      string,
+      Array<{ subjectType: DocumentPermissionEntity['subjectType']; subjectId: string }>
+    >();
+    for (const row of permissionRows) {
+      const list = permissionsByDoc.get(row.docId) ?? [];
+      list.push({ subjectType: row.subjectType, subjectId: row.subjectId });
+      permissionsByDoc.set(row.docId, list);
+    }
+
     const items = await Promise.all(
-      filtered.slice(start, start + pageSize).map(async (doc) => {
+      pageDocs.map(async (doc) => {
         const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(
           doc.docId,
         );
@@ -326,11 +374,30 @@ export class RagAdminService {
           createdAt: doc.createdAt.toISOString(),
           obsidianPath,
           obsidianStatus: obsidianPath ? 'linked' : 'missing',
+          permissions: permissionsByDoc.get(doc.docId) ?? [],
         };
       }),
     );
 
     return { total, page, pageSize, items };
+  }
+
+  /** 按权限主体类型（public/department）查询可见 docId 集合，用于列表 scope 过滤 */
+  private async listReadableDocIdsByScope(
+    scope: 'public' | 'department',
+    departmentId?: string,
+  ): Promise<Set<string>> {
+    const rows = await this.permissionRepo.find({
+      where: {
+        subjectType: scope,
+        action: 'read',
+        // scope=department 时可按 subjectId（部门 id）二次过滤
+        ...(scope === 'department' && departmentId
+          ? { subjectId: departmentId }
+          : {}),
+      },
+    });
+    return new Set(rows.map((row) => row.docId));
   }
 
   async getDocument(docId: string) {
@@ -365,10 +432,59 @@ export class RagAdminService {
     };
   }
 
-  async searchDocuments(query: string, limit = 20) {
+  async searchDocuments(query: string, limit = 20, filters: DocumentSearchFilters = {}) {
     const normalized = query.trim();
     if (!normalized) return [];
-    return this.elasticsearchProvider.search(normalized, Math.min(Math.max(limit, 1), 50));
+    // 文档全文检索走 kh_document 独立索引（docId/filename/title/summary 口径，与 admin 前端契约一致）
+    const documentResults = await this.elasticsearchProvider.searchDocuments(
+      normalized,
+      Math.min(Math.max(limit, 1), 50),
+      undefined,
+      {
+        fileType: filters.fileType,
+        updatedRange: filters.updatedRange,
+        documentType: filters.documentType,
+        role: filters.role,
+      },
+    );
+    if (documentResults.length > 0) return documentResults;
+
+    // 存量文档可能只有 rag_chunks 索引（例如全文索引尚未补建），回退到分块 BM25，避免管理后台出现“索引有数据但查不到”。
+    const chunkResults = await this.elasticsearchProvider.search(
+      normalized,
+      Math.min(Math.max(limit, 1), 50),
+      undefined,
+      {
+        fileType: filters.fileType,
+        updatedRange: filters.updatedRange,
+        documentType: filters.documentType,
+        role: filters.role,
+      },
+    );
+    if (chunkResults.length === 0) return [];
+
+    const docIds = [...new Set(chunkResults.map((item) => item.docId).filter(Boolean))];
+    const metas = docIds.length ? await this.docMetaRepo.find({ where: { docId: In(docIds) } }) : [];
+    const metaById = new Map(metas.map((meta) => [meta.docId, meta]));
+    return chunkResults.map((chunk) => {
+      const meta = metaById.get(chunk.docId);
+      return {
+        docId: chunk.docId,
+        filename: meta?.filename ?? chunk.docId,
+        title: meta?.title ?? null,
+        summary: meta?.summary ?? null,
+        score: chunk.score,
+        highlightFragments: (chunk as typeof chunk & { highlightFragments?: string[] }).highlightFragments ?? [chunk.content.slice(0, 220)],
+        docVersion: meta?.docVersion ?? chunk.docVersion ?? null,
+        lifecycleStatus: meta?.lifecycleStatus ?? chunk.lifecycleStatus,
+        sourceAuthority: meta?.sourceAuthority ?? chunk.sourceAuthority,
+      };
+    });
+  }
+
+  /** 文档搜索筛选面板 facets（documentTypes / roles），ES 未启用时返回空数组 */
+  getDocumentSearchFacets() {
+    return this.elasticsearchProvider.getDocumentSearchFacets();
   }
 
   /**
@@ -555,6 +671,37 @@ export class RagAdminService {
     );
     if (updated) await this.domainEvents.emit({ eventType: 'document.lifecycle_changed', aggregateType: 'document', aggregateId: docId, payload: { lifecycleStatus } });
     return updated ? { docId, lifecycleStatus } : null;
+  }
+
+  /** 归档文档：仅 effective/confirmed 可归档，归档后从所有检索口径隐藏 */
+  async archiveDocument(docId: string) {
+    const doc = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!doc) return null;
+    if (doc.lifecycleStatus !== 'effective' && doc.lifecycleStatus !== 'confirmed') {
+      throw new BadRequestException(
+        `document lifecycle status is ${doc.lifecycleStatus ?? 'unknown'}, only effective/confirmed documents can be archived`,
+      );
+    }
+    const updated = await this.updateDocumentLifecycle(docId, 'archived');
+    if (!updated) return null;
+    return { docId, archived: true, lifecycleStatus: 'archived' as const };
+  }
+
+  /** 恢复归档：仅 archived 状态且审批通过（approved）可恢复为 effective */
+  async unarchiveDocument(docId: string) {
+    const doc = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!doc) return null;
+    if (doc.lifecycleStatus !== 'archived') {
+      throw new BadRequestException(
+        `document lifecycle status is ${doc.lifecycleStatus ?? 'unknown'}, only archived documents can be unarchived`,
+      );
+    }
+    if (doc.reviewStatus !== 'approved') {
+      throw new BadRequestException('document must be approved before unarchive');
+    }
+    const updated = await this.updateDocumentLifecycle(docId, 'effective');
+    if (!updated) return null;
+    return { docId, unarchived: true, lifecycleStatus: 'effective' as const };
   }
 
   async promoteDocumentVersion(docId: string) {
@@ -1067,11 +1214,13 @@ export class RagAdminService {
     }
 
     const [nodes, edges] = await Promise.all([
-      this.graphService.listEntities('admin', {
+      // 管理后台使用服务令牌访问，不绑定普通会话用户；图谱数据仍由 GraphService
+      // 对普通用户按 userId 隔离，管理查询使用 '*' 表示当前租户可见的全部图谱。
+      this.graphService.listEntities('*', {
         keyword: query.query,
         limit: query.limit ?? 100,
       }),
-      this.graphService.listRelationships('admin', query),
+      this.graphService.listRelationships('*', query),
     ]);
 
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));

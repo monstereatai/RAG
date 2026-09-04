@@ -73,8 +73,8 @@ export class GraphOpsController {
     const relationships = this.unwrapRagResult(relationshipsRes);
     const orphans = this.unwrapRagResult(orphansRes);
     const conflicts = this.unwrapRagResult(conflictsRes);
-    const entityList = this.asArray((entities as any)?.data);
-    const relList = this.asArray((relationships as any)?.data);
+    const entityList = this.asArray(entities);
+    const relList = this.asArray(relationships);
 
     // 上游无数据时 fallback 到 mock
     if (entityList.length === 0 && relList.length === 0) {
@@ -86,14 +86,14 @@ export class GraphOpsController {
       edgeCount: relList.length,
       entityTypes: this.countBy(entityList, 'type'),
       relationTypes: this.countBy(relList, 'label'),
-      orphanCount: this.asArray((orphans as any)?.data).length,
-      conflictCount: this.asArray((conflicts as any)?.data).length,
+      orphanCount: this.asArray(orphans).length,
+      conflictCount: this.asArray(conflicts).length,
       popularNodes: entityList
         .slice()
         .sort((a: any, b: any) => Number(b.relationshipCount ?? 0) - Number(a.relationshipCount ?? 0))
         .slice(0, 10),
-      orphanNodes: this.asArray((orphans as any)?.data).slice(0, 10),
-      conflictRelationships: this.asArray((conflicts as any)?.data).slice(0, 10),
+      orphanNodes: this.asArray(orphans).slice(0, 10),
+      conflictRelationships: this.asArray(conflicts).slice(0, 10),
     });
   }
 
@@ -103,7 +103,7 @@ export class GraphOpsController {
   async getSchema() {
     const result = await this.ragClient.getGraphSchema();
     const upstream = this.unwrapRagResult(result);
-    const schemaData = (upstream as any)?.data ?? upstream;
+    const schemaData = upstream;
     const schema = {
       nodeLabels: (schemaData as any)?.nodeLabels ?? (schemaData as any)?.labels ?? [],
       edgeTypes: (schemaData as any)?.edgeTypes ?? (schemaData as any)?.relationshipTypes ?? [],
@@ -123,7 +123,7 @@ export class GraphOpsController {
   async getNodes(@Query() query: any) {
     const entities = await this.ragClient.getGraphEntities();
     const upstream = this.unwrapRagResult(entities);
-    const items = this.asArray((upstream as any)?.data) as any[];
+    const items = this.asArray(upstream) as any[];
 
     // 上游无数据时 fallback 到 mock
     if (items.length === 0) {
@@ -146,7 +146,7 @@ export class GraphOpsController {
   async getNodeDetail(@Param('id') id: string) {
     const result = await this.ragClient.getGraphEntityDetail(id);
     const upstream = this.unwrapRagResult(result);
-    const item = (upstream as any)?.data;
+    const item = upstream;
     if (item) {
       return this.withMeta(item);
     }
@@ -171,7 +171,7 @@ export class GraphOpsController {
       );
     }
     const upstream = this.unwrapRagResult(result);
-    const item = (upstream as any)?.data ?? upstream;
+    const item = upstream;
     if (!item) {
       throw new NotFoundException(`graph node ${id} not found`);
     }
@@ -184,7 +184,7 @@ export class GraphOpsController {
   async searchRelations(@Query() query: any) {
     const result = await this.ragClient.searchGraph(query);
     const upstream = this.unwrapRagResult(result);
-    const data = (upstream as any)?.data;
+    const data = upstream as any;
     if (data?.nodes?.length || data?.edges?.length) {
       return this.withMeta(data);
     }
@@ -204,7 +204,7 @@ export class GraphOpsController {
   async getRelations(@Query() query: any) {
     const result = await this.ragClient.searchGraphRelationships(query);
     const upstream = this.unwrapRagResult(result);
-    const items = this.asArray((upstream as any)?.data);
+    const items = this.asArray(upstream);
     if (items.length > 0) {
       return {
         data: items,
@@ -226,7 +226,7 @@ export class GraphOpsController {
   async search(@Query('query') query?: string) {
     const result = await this.ragClient.searchGraph({ query, limit: 100 });
     const upstream = this.unwrapRagResult(result);
-    const data = (upstream as any)?.data;
+    const data = upstream as any;
 
     // 上游无数据时 fallback 到 mock
     if (!data?.nodes?.length && !data?.edges?.length) {
@@ -265,9 +265,14 @@ export class GraphOpsController {
   }
 
   private unwrapRagResult(result: any): unknown {
-    const payload = result?.data ?? result;
+    let payload = result?.data ?? result;
     if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {
-      return (payload as any).data;
+      payload = (payload as any).data;
+    }
+    // RAG 图谱管理接口的业务响应会再包一层 available/data。
+    // Admin Backend 只把最终业务数据交给前端，避免页面把包装对象当作节点或关系列表。
+    if (payload && typeof payload === 'object' && 'available' in payload && 'data' in payload) {
+      payload = (payload as any).data;
     }
     return payload;
   }

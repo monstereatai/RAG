@@ -58,6 +58,10 @@ export interface ElasticsearchSearchScope {
   role?: string;
   documentType?: string;
   includeDeprecated?: boolean;
+  /** 按文件扩展名过滤（filename.keyword wildcard `*.{fileType}`），如 'pdf' */
+  fileType?: string;
+  /** 按更新时间过滤：day=今天 / week=近7天 / month=近30天（updatedAt date math range） */
+  updatedRange?: 'day' | 'week' | 'month';
 }
 
 const BUSINESS_PROPERTIES = {
@@ -256,7 +260,34 @@ export class ElasticsearchProvider implements OnModuleInit {
   /** 独立文档全文索引：只服务文档搜索，不参与 RAG 分块召回。 */
   private async ensureDocumentIndex(): Promise<void> {
     const exists = await this.client.indices.exists({ index: this.documentIndexName });
-    if (exists) return;
+    if (exists) {
+      // 幂等补字段：为存量 kh_document 索引补齐 updatedAt（更新时间筛选依赖此字段）
+      // ES 支持给现有索引新增字段；失败仅告警，不阻塞启动，也绝不删除存量索引
+      try {
+        const mapping = await this.client.indices.getMapping({ index: this.documentIndexName });
+        const properties = mapping[this.documentIndexName]?.mappings?.properties as
+          | Record<string, unknown>
+          | undefined;
+        if (properties && !properties.updatedAt) {
+          try {
+            await this.client.indices.putMapping({
+              index: this.documentIndexName,
+              properties: { updatedAt: { type: 'date' } },
+            });
+            this.logger.log(`ES mapping patched for "${this.documentIndexName}": added updatedAt`);
+          } catch (patchErr) {
+            this.logger.warn(
+              `ES putMapping (updatedAt) for "${this.documentIndexName}" failed, updatedRange filter unavailable until patched, startup continues: ${(patchErr as Error).message}`,
+            );
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to inspect ES index "${this.documentIndexName}": ${(err as Error).message}`,
+        );
+      }
+      return;
+    }
 
     await this.client.indices.create({
       index: this.documentIndexName,
@@ -287,6 +318,7 @@ export class ElasticsearchProvider implements OnModuleInit {
           docVersion: { type: 'keyword' },
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
+          updatedAt: { type: 'date' },
         },
       },
     });
@@ -323,6 +355,8 @@ export class ElasticsearchProvider implements OnModuleInit {
           ...document,
           effectiveAt: document.effectiveAt?.toISOString() ?? null,
           expiredAt: document.expiredAt?.toISOString() ?? null,
+          // 每次写入都刷新 updatedAt，供搜索的更新时间筛选使用
+          updatedAt: new Date().toISOString(),
         },
       });
     } catch (err) {
@@ -540,6 +574,17 @@ export class ElasticsearchProvider implements OnModuleInit {
         if (value) filter.push({ term: { [field]: value } });
       }
       if (scope.role) filter.push({ term: { roleScope: scope.role } });
+      if (scope.fileType) {
+        filter.push({ wildcard: { 'filename.keyword': `*.${scope.fileType}` } });
+      }
+      if (scope.updatedRange) {
+        const gte = {
+          day: 'now-1d/d',
+          week: 'now-7d/d',
+          month: 'now-30d/d',
+        }[scope.updatedRange];
+        if (gte) filter.push({ range: { updatedAt: { gte } } });
+      }
       if (!scope.includeDeprecated) {
         filter.push({
           bool: {
@@ -547,9 +592,14 @@ export class ElasticsearchProvider implements OnModuleInit {
           },
         });
       }
-      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
+      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
       filter.push({
-        bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] },
+        bool: {
+          must_not: [
+            { term: { lifecycleStatus: 'draft' } },
+            { term: { lifecycleStatus: 'archived' } },
+          ],
+        },
       });
       const queryObj: estypes.QueryDslQueryContainer = {
         bool: {
@@ -642,9 +692,14 @@ export class ElasticsearchProvider implements OnModuleInit {
           },
         });
       }
-      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
+      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
       filter.push({
-        bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] },
+        bool: {
+          must_not: [
+            { term: { lifecycleStatus: 'draft' } },
+            { term: { lifecycleStatus: 'archived' } },
+          ],
+        },
       });
 
       const k = Math.max(1, Math.floor(topK) || 1);
@@ -704,11 +759,30 @@ export class ElasticsearchProvider implements OnModuleInit {
         if (value) filter.push({ term: { [field]: value } });
       }
       if (scope.role) filter.push({ term: { roleScope: scope.role } });
+      // 高级筛选：文件类型（filename.keyword 后缀匹配）与更新时间（updatedAt date math range）
+      if (scope.fileType) {
+        filter.push({ wildcard: { 'filename.keyword': `*.${scope.fileType}` } });
+      }
+      if (scope.updatedRange) {
+        const gte = {
+          day: 'now-1d/d',
+          week: 'now-7d/d',
+          month: 'now-30d/d',
+        }[scope.updatedRange];
+        if (gte) filter.push({ range: { updatedAt: { gte } } });
+      }
       if (!scope.includeDeprecated) {
         filter.push({ bool: { must_not: [{ term: { lifecycleStatus: 'deprecated' } }] } });
       }
-      // 审批门禁：draft 文档未经审批，任何检索口径都不可见
-      filter.push({ bool: { must_not: [{ term: { lifecycleStatus: 'draft' } }] } });
+      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
+      filter.push({
+        bool: {
+          must_not: [
+            { term: { lifecycleStatus: 'draft' } },
+            { term: { lifecycleStatus: 'archived' } },
+          ],
+        },
+      });
       const result = await this.client.search<IndexedDocument>({
         index: this.documentIndexName,
         query: {
@@ -750,6 +824,51 @@ export class ElasticsearchProvider implements OnModuleInit {
     } catch (err) {
       this.logger.warn(`ES document search failed: ${(err as Error).message}`);
       return [];
+    }
+  }
+
+  /**
+   * 文档搜索筛选面板的 facets：对 kh_document 做 terms 聚合，
+   * 返回可筛的文档分类（documentType）与权限范围（roleScope）。
+   * 聚合与检索同口径（排除 draft / deprecated），size 20；ES 未启用或查询失败返回空数组。
+   */
+  async getDocumentSearchFacets(): Promise<{ documentTypes: string[]; roles: string[] }> {
+    const empty: { documentTypes: string[]; roles: string[] } = {
+      documentTypes: [],
+      roles: [],
+    };
+    if (!this.enabled) return empty;
+    try {
+      const result = await this.client.search<IndexedDocument>({
+        index: this.documentIndexName,
+        size: 0,
+        query: {
+          bool: {
+            must_not: [
+              { term: { lifecycleStatus: 'draft' } },
+              { term: { lifecycleStatus: 'deprecated' } },
+            ],
+          },
+        },
+        aggs: {
+          documentTypes: { terms: { field: 'documentType', size: 20 } },
+          roles: { terms: { field: 'roleScope', size: 20 } },
+        },
+      });
+      const toKeys = (aggregate: unknown): string[] => {
+        const buckets = (aggregate as { buckets?: Array<{ key: unknown }> } | undefined)?.buckets ?? [];
+        return buckets.map((bucket) => String(bucket.key));
+      };
+      const aggs = result.aggregations as
+        | { documentTypes?: unknown; roles?: unknown }
+        | undefined;
+      return {
+        documentTypes: toKeys(aggs?.documentTypes),
+        roles: toKeys(aggs?.roles),
+      };
+    } catch (err) {
+      this.logger.warn(`ES document facets failed: ${(err as Error).message}`);
+      return empty;
     }
   }
 }

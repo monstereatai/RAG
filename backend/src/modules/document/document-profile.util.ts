@@ -13,7 +13,8 @@ export type DocumentLifecycleStatus =
   | 'draft'
   | 'confirmed'
   | 'effective'
-  | 'deprecated';
+  | 'deprecated'
+  | 'archived';
 
 export interface GameDocumentMetadata {
   projectId: string | null;

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class RagDocumentQueryDto {
   @IsOptional()
@@ -17,6 +17,21 @@ export class RagDocumentQueryDto {
   @IsOptional()
   @IsString()
   sourceAuthority?: string;
+
+  /** 按权限主体类型过滤：公共 / 部门文档 */
+  @IsOptional()
+  @IsIn(['public', 'department'])
+  scope?: string;
+
+  /** scope=department 时按部门 ID 二次过滤 */
+  @IsOptional()
+  @IsString()
+  departmentId?: string;
+
+  /** 按生命周期状态过滤（如 archived 归档） */
+  @IsOptional()
+  @IsString()
+  lifecycleStatus?: string;
 
   @IsOptional()
   @Type(() => Number)

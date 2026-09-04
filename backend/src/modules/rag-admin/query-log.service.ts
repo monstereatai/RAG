@@ -34,6 +34,15 @@ export interface CostSummary {
   byMode: Record<string, { queries: number; tokens: number }>;
 }
 
+export interface DailyTrendItem {
+  date: string;
+  total: number;
+  simple: number;
+  agentic: number;
+  auto: number;
+  avgLatencyMs: number;
+}
+
 @Injectable()
 export class QueryLogService {
   private readonly logger = new Logger(QueryLogService.name);
@@ -60,6 +69,75 @@ export class QueryLogService {
       await this.queryLogRepo.save(entity);
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
+    }
+  }
+
+  async getDailyTrend(days = 14): Promise<DailyTrendItem[]> {
+    const windowDays = Math.min(Math.max(Number(days) || 14, 1), 90);
+    try {
+      const since = new Date();
+      since.setHours(0, 0, 0, 0);
+      since.setDate(since.getDate() - (windowDays - 1));
+
+      // 窗口内数据量有限（本地量级），取回原始行在内存按天聚合，
+      // 避免依赖数据库会话时区导致与前端展示日期错位。
+      const rows = await this.queryLogRepo
+        .createQueryBuilder('q')
+        .select('q.createdAt', 'createdAt')
+        .addSelect('q.mode', 'mode')
+        .addSelect('q.latencyMs', 'latencyMs')
+        .where('q.createdAt >= :since', { since })
+        .getRawMany<{
+          createdAt: Date | string;
+          mode: string;
+          latencyMs: number;
+        }>();
+
+      const dayKey = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+          d.getDate(),
+        ).padStart(2, '0')}`;
+
+      const buckets = new Map<
+        string,
+        { total: number; simple: number; agentic: number; auto: number; latencySum: number }
+      >();
+      for (const row of rows) {
+        const createdAt = new Date(row.createdAt);
+        if (Number.isNaN(createdAt.getTime())) continue;
+        const key = dayKey(createdAt);
+        const bucket =
+          buckets.get(key) ??
+          { total: 0, simple: 0, agentic: 0, auto: 0, latencySum: 0 };
+        bucket.total += 1;
+        if (row.mode === 'simple') bucket.simple += 1;
+        else if (row.mode === 'agentic') bucket.agentic += 1;
+        else if (row.mode === 'auto') bucket.auto += 1;
+        bucket.latencySum += Number(row.latencyMs) || 0;
+        buckets.set(key, bucket);
+      }
+
+      const items: DailyTrendItem[] = [];
+      for (let i = 0; i < windowDays; i++) {
+        const day = new Date(since);
+        day.setDate(since.getDate() + i);
+        const key = dayKey(day);
+        const bucket = buckets.get(key);
+        items.push({
+          date: key,
+          total: bucket?.total ?? 0,
+          simple: bucket?.simple ?? 0,
+          agentic: bucket?.agentic ?? 0,
+          auto: bucket?.auto ?? 0,
+          avgLatencyMs:
+            bucket && bucket.total > 0
+              ? Math.round(bucket.latencySum / bucket.total)
+              : 0,
+        });
+      }
+      return items;
+    } catch {
+      return [];
     }
   }
 

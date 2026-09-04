@@ -16,6 +16,10 @@ describe('SearchOpsController', () => {
             getSearchPopularQueries: jest.fn(),
             getSearchNoResultQueries: jest.fn(),
             getSearchRecallIssues: jest.fn(),
+            searchDocuments: jest.fn(),
+            getDocumentSearchFacets: jest.fn(),
+            reindexDocumentSearch: jest.fn(),
+            searchGraph: jest.fn(),
           },
         },
       ],
@@ -159,6 +163,36 @@ describe('SearchOpsController', () => {
 
       expect(result.available).toBe(true);
       expect(result.data).toHaveLength(1);
+    });
+  });
+
+  describe('search response boundary', () => {
+    it('should unwrap the RAG response before returning document results', async () => {
+      jest.spyOn(ragClient, 'searchDocuments').mockResolvedValue({
+        available: true,
+        status: 200,
+        data: { code: 200, data: [{ docId: 'doc-1', filename: 'rag.md' }] } as any,
+      });
+
+      await expect(controller.searchDocuments('RAG', '20')).resolves.toEqual([
+        { docId: 'doc-1', filename: 'rag.md' },
+      ]);
+    });
+
+    it('should unwrap the RAG response before returning graph data', async () => {
+      jest.spyOn(ragClient, 'searchGraph').mockResolvedValue({
+        available: true,
+        status: 200,
+        data: {
+          code: 200,
+          data: { available: true, data: { nodes: [{ id: 'RAG' }], edges: [] } },
+        } as any,
+      });
+
+      await expect(controller.searchGraph('RAG', '100')).resolves.toEqual({
+        nodes: [{ id: 'RAG' }],
+        edges: [],
+      });
     });
   });
 });
