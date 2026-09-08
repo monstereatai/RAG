@@ -107,6 +107,7 @@ export interface ProductionWorkflow {
   feedback: string;
   supplementalMaterials?: string;
   results: Partial<Record<ProductionRole, ProductionStageResult>>;
+  schemaIssues?: string[];
   error: string;
   requiresApproval: boolean;
   requiresRevision: boolean;
@@ -322,6 +323,56 @@ export const downloadProductionWorkflowProjectZip = (threadId: string) =>
 
 export const getProductionWorkflows = () =>
   authRequest<unknown[]>('/api/admin/agent-ops/workflows');
+
+export interface PlaywayComponentRule {
+  type: string;
+  displayName: string;
+  description: string;
+  requires: string[];
+  configFields: string[];
+  emits: string[];
+  risk: string;
+  compliance: string[];
+}
+
+export interface PlaywayActivityTemplate {
+  id: string;
+  activity: string;
+  name: string;
+  goal: string;
+  requiredComponents: string[];
+  optionalComponents: string[];
+  requiredApis: string[];
+  requiredEvents: string[];
+  acceptanceChecks: string[];
+  riskNotes: string[];
+}
+
+export const getProductionComponentRules = (query = '', limit = 18) =>
+  authRequest<{ items: PlaywayComponentRule[]; total: number }>(
+    '/api/admin/agent-ops/component-rules',
+    { params: { q: query, limit } },
+  );
+
+export const getProductionActivityTemplates = (query = '', limit = 4) =>
+  authRequest<{ items: PlaywayActivityTemplate[]; total: number }>(
+    '/api/admin/agent-ops/activity-templates',
+    { params: { q: query, limit } },
+  );
+
+export const getProductionPlaywayPreview = (threadId: string) =>
+  authRequest<{ title: string; html: string; componentTypes: string[] }>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/playway-preview`,
+  );
+
+export const importProductionPlaywayGraph = (
+  query: string,
+  sourceId?: string,
+) =>
+  authRequest<unknown>('/api/admin/agent-ops/activity-graph/import', {
+    method: 'POST',
+    data: { query, sourceId },
+  });
 
 export const evaluateAgent = (body: Record<string, unknown>) =>
   authRequest<unknown>('/api/admin/agent-ops/evals', {

@@ -11,6 +11,7 @@ import { AgentTasksModule } from '../agent-tasks/agent-tasks.module';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { GraphModule } from '../graph/graph.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { JobsModule } from '../jobs/jobs.module';
     AgentRuntimeEventsModule,
     ArtifactsModule,
     JobsModule,
+    GraphModule,
   ],
   controllers: [AgentOpsAdminController],
 })

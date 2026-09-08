@@ -1,4 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
@@ -11,6 +16,7 @@ import {
   PRODUCTION_ROLES,
   ProductionClaim,
   ProductionDeliverable,
+  ProductionEvidence,
   ProductionLowCodeSchema,
   ProductionLowCodeSchemaKind,
   ProductionRole,
@@ -29,6 +35,12 @@ import {
   dependenciesForProductionRole,
   normalizeProductionRoles,
 } from './production-workflow.plan';
+import {
+  formatPlaywayRulesForPrompt,
+  formatPlaywayTemplatesForPrompt,
+  getPlaywayComponentRule,
+  PLAYWAY_COMPONENT_TYPES,
+} from './playway-component-registry';
 import { ProductionWorkflowTools } from './production-workflow.tools';
 import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
 import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
@@ -40,6 +52,7 @@ import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { renderPlaywayPreview } from './playway-preview';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -93,7 +106,10 @@ const roleSchema = z.object({
 });
 
 const projectFileSchema = z.object({
-  path: z.string().regex(/^[A-Za-z0-9_.\-/]+$/).max(180),
+  path: z
+    .string()
+    .regex(/^[A-Za-z0-9_.\-/]+$/)
+    .max(180),
   content: z.string().max(80_000),
   purpose: z.string().max(500),
 });
@@ -139,7 +155,10 @@ export class ProductionWorkflowService {
     string,
     ProductionWorkflowStateType
   >();
-  private readonly workflowIndexMemory = new Map<string, Record<string, unknown>>();
+  private readonly workflowIndexMemory = new Map<
+    string,
+    Record<string, unknown>
+  >();
 
   constructor(
     private readonly llmProvider: LlmProvider,
@@ -166,19 +185,29 @@ export class ProductionWorkflowService {
     const threadId = dto.threadId ?? randomUUID();
     const initialState = await this.createInitialState(dto, userId, threadId);
     await this.ensureRun(initialState);
-    await this.emitRuntimeEvent(initialState, 'workflow.started', 'production_workflow', {
-      projectId: initialState.projectId,
-      selectedRoles: initialState.selectedRoles,
-      processType: initialState.processType,
-      pluginKeys: initialState.pluginKeys,
-      pluginTools: initialState.pluginTools,
-    });
-    await this.emitRuntimeEvent(initialState, 'goal.active', 'production_workflow', {
-      objective: initialState.brief,
-      status: 'active',
-      round: 1,
-      maxRounds: initialState.maxSteps,
-    });
+    await this.emitRuntimeEvent(
+      initialState,
+      'workflow.started',
+      'production_workflow',
+      {
+        projectId: initialState.projectId,
+        selectedRoles: initialState.selectedRoles,
+        processType: initialState.processType,
+        pluginKeys: initialState.pluginKeys,
+        pluginTools: initialState.pluginTools,
+      },
+    );
+    await this.emitRuntimeEvent(
+      initialState,
+      'goal.active',
+      'production_workflow',
+      {
+        objective: initialState.brief,
+        status: 'active',
+        round: 1,
+        maxRounds: initialState.maxSteps,
+      },
+    );
     await this.initializeTasks(initialState);
     const state = await this.app.invoke(initialState, this.config(threadId));
     const settled = await this.runUntilSettled(threadId, state);
@@ -226,10 +255,15 @@ export class ProductionWorkflowService {
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
     const result = this.view(threadId, settled, userId);
-    await this.emitRuntimeEvent(settled, `approval.${dto.approval}`, 'human_reviewer', {
-      feedback: dto.feedback?.trim() ?? '',
-      rerunRoles: dto.rerunRoles ?? [],
-    });
+    await this.emitRuntimeEvent(
+      settled,
+      `approval.${dto.approval}`,
+      'human_reviewer',
+      {
+        feedback: dto.feedback?.trim() ?? '',
+        rerunRoles: dto.rerunRoles ?? [],
+      },
+    );
     await this.emitWorkflowState(settled);
     await this.saveWorkflowIndex(result);
     return result;
@@ -274,12 +308,16 @@ export class ProductionWorkflowService {
     if (current.status !== 'revision_required') {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
-    const allowed = current.rerunRoles.length ? current.rerunRoles : current.currentBatch;
+    const allowed = current.rerunRoles.length
+      ? current.rerunRoles
+      : current.currentBatch;
     const requested = dto.rerunRoles?.length
       ? dto.rerunRoles.filter((role) => allowed.includes(role))
       : allowed;
-    if (!requested.length) throw new Error('at least one rejected role must be revised');
-    const supplementalMaterials = dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
+    if (!requested.length)
+      throw new Error('at least one rejected role must be revised');
+    const supplementalMaterials =
+      dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
     const revisionHistory = this.withRevisionPackage(
       current.revisionHistory ?? [],
       supplementalMaterials,
@@ -318,12 +356,16 @@ export class ProductionWorkflowService {
     if (current.status !== 'revision_required') {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
-    const allowed = current.rerunRoles.length ? current.rerunRoles : current.currentBatch;
+    const allowed = current.rerunRoles.length
+      ? current.rerunRoles
+      : current.currentBatch;
     const requested = dto.rerunRoles?.length
       ? dto.rerunRoles.filter((role) => allowed.includes(role))
       : allowed;
-    if (!requested.length) throw new Error('at least one rejected role must be revised');
-    const supplementalMaterials = dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
+    if (!requested.length)
+      throw new Error('at least one rejected role must be revised');
+    const supplementalMaterials =
+      dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
     const pending = {
       ...current,
       status: 'running' as const,
@@ -364,7 +406,9 @@ export class ProductionWorkflowService {
       'REV',
     );
     const items = await Promise.all(
-      ids.map((threadId) => this.redisProvider.get(this.workflowIndexKey(userId, threadId))),
+      ids.map((threadId) =>
+        this.redisProvider.get(this.workflowIndexKey(userId, threadId)),
+      ),
     );
     const redisItems = items
       .filter((item): item is string => Boolean(item))
@@ -377,9 +421,12 @@ export class ProductionWorkflowService {
       const threadId = String(item.threadId ?? '');
       if (threadId) merged.set(threadId, item);
     });
-    const workflows = [...merged.values()]
-      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    await Promise.all(workflows.map((item) => this.ensureIndexedRun(item, userId)));
+    const workflows = [...merged.values()].sort((a, b) =>
+      String(b.updatedAt).localeCompare(String(a.updatedAt)),
+    );
+    await Promise.all(
+      workflows.map((item) => this.ensureIndexedRun(item, userId)),
+    );
     return workflows;
   }
 
@@ -407,58 +454,119 @@ export class ProductionWorkflowService {
           issues: result.issues,
           downstreamRisks: result.downstreamRisks,
           deliverables: result.deliverables,
+          evidence: result.evidence,
           generatedArtifact: result.generatedArtifact,
           lowCodeSchemas: result.lowCodeSchemas,
         })),
     };
   }
 
+  async playwayPreview(threadId: string, userId: string) {
+    const state = await this.getOwnedState(threadId, userId);
+    const activityContext = Object.values(state.results)
+      .flatMap((result) =>
+        result
+          ? [
+              result.summary,
+              ...result.deliverables.map((item) => item.markdown),
+            ]
+          : [],
+      )
+      .join('\n')
+      .slice(0, 40_000);
+    return renderPlaywayPreview(
+      Object.values(state.results).flatMap(
+        (result) => result?.lowCodeSchemas ?? [],
+      ),
+      `${state.projectId} 活动预览`,
+      activityContext,
+    );
+  }
+
   async generateProject(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
     const run = await this.agentRuns?.findLatestByThread(threadId);
     const handoff = context.stages
-      .map((stage) => `${stage.role}\n${stage.summary}\n\n结构化 Schema：\n${JSON.stringify(stage.lowCodeSchemas ?? []).slice(0, 12_000)}\n\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`)
+      .map(
+        (stage) =>
+          `${stage.role}\n${stage.summary}\n\n结构化 Schema：\n${JSON.stringify(stage.lowCodeSchemas ?? []).slice(0, 12_000)}\n\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`,
+      )
       .join('\n\n');
     const messages = [
-        {
-          role: 'system',
-          content:
-            '你是资深前端工程师。只返回一个 JSON 对象，不要返回解释文字、Markdown 围栏或只返回 notes。JSON 必须严格包含且只能包含这些字段：projectName（字符串）、framework（字符串）、files（数组）、runCommand（字符串）、notes（字符串数组）。files 至少 4 项，每项必须包含 path、content、purpose 三个字段；content 必须是完整可运行源码，不能用省略号代替。优先生成 React + Vite + TypeScript；不确定的后端接口使用 mock 数据并在 notes 数组说明。文件路径必须是相对路径，禁止绝对路径、..、node_modules 和二进制文件。',
-        },
-        {
-          role: 'user',
-          content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物和低代码 Schema：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须优先参考 pageSchema、apiSchema、trackingSchema、validationSchema 和 acceptanceSchema 生成代码；必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
-        },
-      ];
+      {
+        role: 'system',
+        content:
+          '你是资深前端工程师。只返回一个 JSON 对象，不要返回解释文字、Markdown 围栏或只返回 notes。JSON 必须严格包含且只能包含这些字段：projectName（字符串）、framework（字符串）、files（数组）、runCommand（字符串）、notes（字符串数组）。files 至少 4 项，每项必须包含 path、content、purpose 三个字段；content 必须是完整可运行源码，不能用省略号代替。优先生成 React + Vite + TypeScript；不确定的后端接口使用 mock 数据并在 notes 数组说明。文件路径必须是相对路径，禁止绝对路径、..、node_modules 和二进制文件。',
+      },
+      {
+        role: 'user',
+        content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物和低代码 Schema：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须优先参考 pageSchema、apiSchema、trackingSchema、validationSchema 和 acceptanceSchema 生成代码；必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
+      },
+    ];
     const generate = async () => {
       let lastError: unknown;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          const output = await this.llmProvider.getModel().withStructuredOutput(projectSchema, { method: 'jsonMode' }).invoke(messages);
+          const timeout = new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error('项目代码生成模型调用超时（15 秒）。')),
+              15_000,
+            );
+          });
+          const output = await Promise.race([
+            this.llmProvider
+              .getModel()
+              .withStructuredOutput(projectSchema, { method: 'jsonMode' })
+              .invoke(messages),
+            timeout,
+          ]);
           const normalized = {
             ...output,
-            notes: Array.isArray(output.notes) ? output.notes : [String(output.notes ?? '')].filter(Boolean),
+            notes: Array.isArray(output.notes)
+              ? output.notes
+              : [String(output.notes ?? '')].filter(Boolean),
           };
-          return this.validateGeneratedProject({ ...normalized, activityName: context.projectId, sourceThreadId: context.threadId });
+          return this.validateGeneratedProject({
+            ...normalized,
+            activityName: context.projectId,
+            sourceThreadId: context.threadId,
+          });
         } catch (error) {
           lastError = error;
-          if (attempt === 1) messages.push({
-            role: 'user',
-            content: '上一次输出不符合 JSON schema 或无法运行。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组，package.json 要有 dev 与 build 脚本，入口文件要实际挂载页面。',
-          });
+          if (attempt === 1)
+            messages.push({
+              role: 'user',
+              content:
+                '上一次输出不符合 JSON schema 或无法运行。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组，package.json 要有 dev 与 build 脚本，入口文件要实际挂载页面。',
+            });
         }
       }
-      throw new Error(`项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
+      return this.fallbackGeneratedProject(context, lastError);
     };
     const execution = this.toolExecution
       ? await this.toolExecution.execute({
-          toolName: 'artifact_generate', threadId, runId: run?.id, ownerUserId: userId, mode: 'production', actor: 'code_delivery',
-          input: { projectId: context.projectId, stageCount: context.stages.length, type: 'runnable_project' },
-          approvalPolicy: 'auto', approvalGranted: true,
+          toolName: 'artifact_generate',
+          threadId,
+          runId: run?.id,
+          ownerUserId: userId,
+          mode: 'production',
+          role: 'frontend',
+          actor: 'code_delivery',
+          input: {
+            projectId: context.projectId,
+            stageCount: context.stages.length,
+            type: 'runnable_project',
+          },
+          approvalPolicy: 'auto',
+          approvalGranted: true,
           execute: generate,
         })
       : { status: 'success' as const, output: await generate(), durationMs: 0 };
-    if (!execution.output) throw new Error(('error' in execution ? execution.error : undefined) ?? '项目代码生成未完成，请在运行中心查看工具执行记录。');
+    if (!execution.output)
+      throw new Error(
+        ('error' in execution ? execution.error : undefined) ??
+          '项目代码生成未完成，请在运行中心查看工具执行记录。',
+      );
     return execution.output;
   }
 
@@ -466,21 +574,97 @@ export class ProductionWorkflowService {
     const context = await this.codingContext(threadId, userId);
     const generated = await this.generateProject(threadId, userId);
     const zip = new JSZip();
-    generated.files.forEach((file) => zip.file(file.path, file.content));
-    zip.file('RAG_WORKFLOW_CONTEXT.json', JSON.stringify({ ...context, generatedProject: generated }, null, 2));
-    zip.file('LOW_CODE_SCHEMAS.json', JSON.stringify(context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []), null, 2));
-    zip.file('README.md', `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`);
-    zip.file('DELIVERY_VERIFICATION.json', JSON.stringify(this.deliveryVerification(generated), null, 2));
+    generated.files.forEach((file) =>
+      zip.file(`project/${file.path}`, file.content),
+    );
+    const preview = renderPlaywayPreview(
+      context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []),
+      `${context.projectId} 活动预览`,
+      context.stages
+        .flatMap((stage) => [
+          stage.summary,
+          ...stage.deliverables.map((item) => item.markdown),
+        ])
+        .join('\n'),
+    );
+    // ZIP 入口与 Playway 预览使用同一份渲染结果，避免页面结构漂移。
+    zip.file('project/index.html', preview.html);
+    zip.file(
+      'docs/rag/workflow-context.json',
+      JSON.stringify({ ...context, generatedProject: generated }, null, 2),
+    );
+    zip.file(
+      'docs/rag/low-code-schemas.json',
+      JSON.stringify(
+        context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []),
+        null,
+        2,
+      ),
+    );
+    const evidence = context.stages.flatMap((stage) =>
+      (stage.evidence ?? []).map((item) => ({ role: stage.role, ...item })),
+    );
+    zip.file('docs/evidence/evidence.json', JSON.stringify(evidence, null, 2));
+    zip.file('docs/evidence/evidence.md', this.buildEvidenceMarkdown(evidence));
+    zip.file('docs/handoff.md', this.buildHandoffMarkdown(context));
+    zip.file(
+      'README.md',
+      `# ${generated.projectName}\n\n框架：${generated.framework}\n\n进入 project/ 后启动：\`${generated.runCommand}\`\n\n## 目录说明\n\n- Playway 一致性入口：project/index.html\n- AI Coding 源码：project/src/\n- 工作流上下文与 Schema：docs/rag/、docs/schemas/\n- 证据与岗位交接：docs/evidence/、docs/handoff/\n- 交付校验：docs/delivery-verification.json\n\nproject/index.html 与 Playway 预览使用同源渲染器生成。\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`,
+    );
+    zip.file(
+      'docs/delivery-verification.json',
+      JSON.stringify(this.deliveryVerification(generated), null, 2),
+    );
     context.stages.forEach((stage) => {
       if ((stage.lowCodeSchemas ?? []).length > 0) {
-        zip.file(`schemas/${stage.role}.json`, JSON.stringify(stage.lowCodeSchemas, null, 2));
+        zip.file(
+          `docs/schemas/${stage.role}.json`,
+          JSON.stringify(stage.lowCodeSchemas, null, 2),
+        );
       }
       stage.deliverables.forEach((deliverable, index) => {
         const safeTitle = deliverable.title.replace(/[\\/:*?"<>|]/g, '-');
-        zip.file(`handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`, deliverable.markdown);
+        zip.file(
+          `docs/handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`,
+          deliverable.markdown,
+        );
       });
     });
     return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  }
+
+  private buildHandoffMarkdown(
+    context: Awaited<ReturnType<ProductionWorkflowService['codingContext']>>,
+  ): string {
+    const stages = context.stages.map((stage) =>
+      [
+        `## ${stage.role}`,
+        stage.summary,
+        ...stage.deliverables.map(
+          (item) => `### ${item.title}\n\n${item.markdown}`,
+        ),
+      ].join('\n\n'),
+    );
+    return [
+      `# ${context.projectId} 产研运交接包`,
+      '本文件供 Codex、Claude、Cursor 等 AI Coding 工具读取。结构化 Schema 见 `LOW_CODE_SCHEMAS.json` 或 `schemas/`，引用证据见 `RAG_EVIDENCE.md`。',
+      ...stages,
+    ].join('\n\n');
+  }
+
+  private buildEvidenceMarkdown(
+    evidence: Array<ProductionEvidence & { role: string }>,
+  ): string {
+    const lines = evidence.map(
+      (item) =>
+        `- [${item.role}] ${item.id}：文档 ${item.docId}／片段 ${item.chunkIndex}／评分 ${item.totalScore}\n  - ${item.excerpt}`,
+    );
+    return [
+      '# RAG 引用证据',
+      lines.length > 0
+        ? lines.join('\n')
+        : '本次工作流未检索到可引用的 RAG 证据。',
+    ].join('\n\n');
   }
 
   private async createInitialState(
@@ -490,8 +674,16 @@ export class ProductionWorkflowService {
   ): Promise<ProductionWorkflowStateType> {
     const selectedRoles = normalizeProductionRoles(dto.roles);
     const composition = this.plugins
-      ? await this.plugins.resolve(dto.pluginKeys, 'production', ['workflow.production-base'])
-      : { pluginKeys: dto.pluginKeys?.length ? dto.pluginKeys : ['workflow.production-base'], toolNames: [], manifests: [] };
+      ? await this.plugins.resolve(dto.pluginKeys, 'production', [
+          'workflow.production-base',
+        ])
+      : {
+          pluginKeys: dto.pluginKeys?.length
+            ? dto.pluginKeys
+            : ['workflow.production-base'],
+          toolNames: [],
+          manifests: [],
+        };
     return {
       threadId,
       projectId: dto.projectId.trim(),
@@ -529,29 +721,38 @@ export class ProductionWorkflowService {
     };
   }
 
-  private async initializeTasks(state: ProductionWorkflowStateType): Promise<void> {
+  private async initializeTasks(
+    state: ProductionWorkflowStateType,
+  ): Promise<void> {
     if (!this.tasks) return;
     const existing = await this.tasks.list(state.threadId);
     if (existing.length > 0) return;
-    await this.tasks.createPlan({ threadId: state.threadId, roles: state.selectedRoles, processType: state.processType });
+    await this.tasks.createPlan({
+      threadId: state.threadId,
+      roles: state.selectedRoles,
+      processType: state.processType,
+    });
   }
 
   private async ensureRun(state: ProductionWorkflowStateType): Promise<void> {
     if (!this.agentRuns || state.runId) return;
     const threadId = state.threadId;
     const existing = await this.agentRuns.findLatestByThread(threadId);
-    const run = existing ?? await this.agentRuns.start({
-      threadId,
-      userId: state.userId,
-      mode: 'agentic',
-      maxSteps: state.maxSteps,
-    });
+    const run =
+      existing ??
+      (await this.agentRuns.start({
+        threadId,
+        userId: state.userId,
+        mode: 'agentic',
+        maxSteps: state.maxSteps,
+      }));
     state.runId = run.id;
     if (run.route !== 'production_workflow') {
       await this.agentRuns.finish(run.id, {
         route: 'production_workflow',
         status: run.status,
-        resultSummary: run.resultSummary ?? `${state.projectId}：产研运工作流已创建。`,
+        resultSummary:
+          run.resultSummary ?? `${state.projectId}：产研运工作流已创建。`,
       });
     }
     if (!existing) {
@@ -571,7 +772,8 @@ export class ProductionWorkflowService {
   ): Promise<void> {
     if (!this.agentRuns) return;
     const threadId = String(item.threadId ?? '');
-    if (!threadId || await this.agentRuns.findLatestByThread(threadId)) return;
+    if (!threadId || (await this.agentRuns.findLatestByThread(threadId)))
+      return;
     const selectedRoles = Array.isArray(item.selectedRoles)
       ? item.selectedRoles
       : [];
@@ -599,12 +801,24 @@ export class ProductionWorkflowService {
       objective: String(item.brief ?? projectId),
       maxRounds: maxSteps,
     });
-    if (status === 'completed' || status === 'failed' || status === 'pending_approval' || status === 'revision_required') {
+    if (
+      status === 'completed' ||
+      status === 'failed' ||
+      status === 'pending_approval' ||
+      status === 'revision_required'
+    ) {
       await this.agentRuns.finish(run.id, {
         route: 'production_workflow',
-        status: status === 'pending_approval' || status === 'revision_required' ? 'waiting_approval' : status,
-        requiresApproval: status === 'pending_approval' || status === 'revision_required',
-        errorMessage: status === 'failed' ? String(item.error ?? '历史工作流失败') : undefined,
+        status:
+          status === 'pending_approval' || status === 'revision_required'
+            ? 'waiting_approval'
+            : status,
+        requiresApproval:
+          status === 'pending_approval' || status === 'revision_required',
+        errorMessage:
+          status === 'failed'
+            ? String(item.error ?? '历史工作流失败')
+            : undefined,
         resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
       });
     }
@@ -625,7 +839,9 @@ export class ProductionWorkflowService {
       })
       .then((acquired) => {
         if (!acquired) {
-          this.logger.warn(`production workflow ${threadId} is being advanced by another instance`);
+          this.logger.warn(
+            `production workflow ${threadId} is being advanced by another instance`,
+          );
           return undefined;
         }
         return task();
@@ -767,7 +983,8 @@ export class ProductionWorkflowService {
       Record<ProductionRole, ProductionStageResult>
     >;
     const mergedResults = { ...state.results, ...results };
-    const isRevisionRun = (state.revisionNumber ?? 1) > 1 && state.rerunRoles.length > 0;
+    const isRevisionRun =
+      (state.revisionNumber ?? 1) > 1 && state.rerunRoles.length > 0;
     const pendingApprovalRoles = state.currentBatch.filter((role) => {
       const result = mergedResults[role];
       if (isRevisionRun) return rolesToRun.includes(role) && Boolean(result);
@@ -805,7 +1022,9 @@ export class ProductionWorkflowService {
       role,
       dependencies: dependenciesForProductionRole(role, state.selectedRoles),
     });
-    await this.tasks?.updateForRole(state.threadId, role, { status: 'running' });
+    await this.tasks?.updateForRole(state.threadId, role, {
+      status: 'running',
+    });
     const dependencies = dependenciesForProductionRole(
       role,
       state.selectedRoles,
@@ -855,6 +1074,8 @@ export class ProductionWorkflowService {
       approvalMode: state.approvalMode,
     });
     const model = this.llmProvider.getModel();
+    const playwayRules = formatPlaywayRulesForPrompt(state.brief);
+    const playwayTemplates = formatPlaywayTemplatesForPrompt(state.brief);
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const modelStartedAt = Date.now();
@@ -867,6 +1088,14 @@ export class ProductionWorkflowService {
               {
                 role: 'system',
                 content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称；同时输出当前岗位能交接给低代码/AI Coding 的 lowCodeSchemas。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
+              },
+              {
+                role: 'system',
+                content: `Playway 组件规则（pageSchema 的 components.type 只能从以下候选选择，且必须满足需字段与事件）：\n${playwayRules}`,
+              },
+              {
+                role: 'system',
+                content: `Playway 活动模板（优先复用模板的必选组件、接口、埋点和验收项；可选组件只能按需求增加）：\n${playwayTemplates}`,
               },
               {
                 role: 'user',
@@ -883,23 +1112,27 @@ export class ProductionWorkflowService {
         });
         const claims = this.validateClaims(output.claims, toolResult.evidence);
         const evidenceCoverage = this.evidenceCoverage(claims);
+        const lowCodeSchemas = this.normalizeLowCodeSchemas(
+          role,
+          state,
+          output.lowCodeSchemas,
+        );
+        const schemaIssues = this.validateLowCodeSchemaSet(lowCodeSchemas);
         const result: ProductionStageResult = {
           role,
           revision: state.revisionNumber ?? 1,
           reviewStatus: 'pending',
           ...output,
           claims,
-          lowCodeSchemas: this.normalizeLowCodeSchemas(
-            role,
-            state,
-            output.lowCodeSchemas,
-          ),
+          lowCodeSchemas,
           evidence: toolResult.evidence,
           evidenceCoverage,
           toolExecutions: toolResult.executions,
+          issues: [...output.issues, ...schemaIssues],
           readyForApproval:
             output.readyForApproval &&
             output.deliverables.length > 0 &&
+            schemaIssues.length === 0 &&
             claims.every((claim) => claim.status === 'supported'),
           completedAt: new Date().toISOString(),
         };
@@ -977,17 +1210,30 @@ export class ProductionWorkflowService {
   ): Promise<void> {
     if (!this.collaboration) return;
     const downstreamRoles = PRODUCTION_ROLES.filter((candidate) =>
-      dependenciesForProductionRole(candidate, state.selectedRoles).includes(result.role),
+      dependenciesForProductionRole(candidate, state.selectedRoles).includes(
+        result.role,
+      ),
     );
-    await Promise.all(downstreamRoles.map((toRole) => this.collaboration!.publishMessage({
-      threadId: state.threadId,
-      fromRole: result.role,
-      toRole,
-      messageType: 'artifact_handoff',
-      subject: `${result.role} → ${toRole} 交接`,
-      payload: { summary: result.summary, riskLevel: result.riskLevel, evidenceCoverage: result.evidenceCoverage, readyForApproval: result.readyForApproval },
-      artifactIds: result.generatedArtifact?.id ? [result.generatedArtifact.id] : [],
-    })));
+    await Promise.all(
+      downstreamRoles.map((toRole) =>
+        this.collaboration!.publishMessage({
+          threadId: state.threadId,
+          fromRole: result.role,
+          toRole,
+          messageType: 'artifact_handoff',
+          subject: `${result.role} → ${toRole} 交接`,
+          payload: {
+            summary: result.summary,
+            riskLevel: result.riskLevel,
+            evidenceCoverage: result.evidenceCoverage,
+            readyForApproval: result.readyForApproval,
+          },
+          artifactIds: result.generatedArtifact?.id
+            ? [result.generatedArtifact.id]
+            : [],
+        }),
+      ),
+    );
   }
 
   private degradedRoleResult(
@@ -1115,18 +1361,49 @@ export class ProductionWorkflowService {
     try {
       const execution = this.toolExecution
         ? await this.toolExecution.execute({
-            toolName: 'artifact_generate', threadId: state.threadId, runId: state.runId || undefined, ownerUserId: state.userId,
-            mode: 'production', role: result.role, actor: result.role,
-            pluginKeys: state.pluginKeys, allowedToolNames: state.pluginTools,
-            input: { title: `${state.projectId}-${result.role}-交付物`, size: sourceText.length },
+            toolName: 'artifact_generate',
+            threadId: state.threadId,
+            runId: state.runId || undefined,
+            ownerUserId: state.userId,
+            mode: 'production',
+            role: result.role,
+            actor: result.role,
+            pluginKeys: state.pluginKeys,
+            allowedToolNames: state.pluginTools,
+            input: {
+              title: `${state.projectId}-${result.role}-交付物`,
+              size: sourceText.length,
+            },
             // 岗位交付物只写入受权限保护的内部 Artifact；它是否继续流转由后续岗位审批门禁决定。
-            approvalPolicy: 'auto', approvalGranted: true,
+            approvalPolicy: 'auto',
+            approvalGranted: true,
             sideEffect: true,
             idempotencyKey: `workflow-artifact:${state.threadId}:${result.role}:${this.contentHash(sourceText)}`,
-            execute: () => this.artifacts.create({ ownerUserId: state.userId, threadId: state.threadId, title: `${state.projectId}-${result.role}-交付物`, kind: 'markdown', sourceText }),
+            execute: () =>
+              this.artifacts.create({
+                ownerUserId: state.userId,
+                threadId: state.threadId,
+                title: `${state.projectId}-${result.role}-交付物`,
+                kind: 'markdown',
+                sourceText,
+              }),
           })
-        : { status: 'success' as const, output: await this.artifacts.create({ ownerUserId: state.userId, threadId: state.threadId, title: `${state.projectId}-${result.role}-交付物`, kind: 'markdown', sourceText }), durationMs: Date.now() - startedAt };
-      if (!execution.output) throw new Error(('error' in execution ? execution.error : undefined) ?? '交付物等待审批或执行结果未知。');
+        : {
+            status: 'success' as const,
+            output: await this.artifacts.create({
+              ownerUserId: state.userId,
+              threadId: state.threadId,
+              title: `${state.projectId}-${result.role}-交付物`,
+              kind: 'markdown',
+              sourceText,
+            }),
+            durationMs: Date.now() - startedAt,
+          };
+      if (!execution.output)
+        throw new Error(
+          ('error' in execution ? execution.error : undefined) ??
+            '交付物等待审批或执行结果未知。',
+        );
       const artifact = execution.output;
       result.toolExecutions.push({
         tool: 'artifact_generate',
@@ -1200,6 +1477,67 @@ export class ProductionWorkflowService {
       : this.defaultLowCodeSchemas(role, state);
   }
 
+  private validateLowCodeSchemaSet(
+    schemas: ProductionLowCodeSchema[],
+  ): string[] {
+    const issues: string[] = [];
+    const apiNames = new Set(
+      schemas
+        .filter((schema) => schema.kind === 'apiSchema')
+        .flatMap((schema) => schema.apis ?? [])
+        .map((api) => (typeof api.name === 'string' ? api.name : ''))
+        .filter(Boolean),
+    );
+    const eventNames = new Set(
+      schemas
+        .filter((schema) => schema.kind === 'trackingSchema')
+        .flatMap((schema) => schema.events ?? [])
+        .map((event) =>
+          typeof event.eventId === 'string'
+            ? event.eventId
+            : typeof event.name === 'string'
+              ? event.name
+              : '',
+        )
+        .filter(Boolean),
+    );
+    for (const schema of schemas.filter((item) => item.kind === 'pageSchema')) {
+      for (const component of schema.components ?? []) {
+        const type = typeof component.type === 'string' ? component.type : '';
+        const rule = getPlaywayComponentRule(type);
+        if (!rule) {
+          issues.push(`组件 ${type || '未命名'} 不在 Playway 注册表中。`);
+          continue;
+        }
+        const referencedApis = [component.api, component.apiName]
+          .filter(Boolean)
+          .map(String);
+        for (const api of referencedApis) {
+          if (apiNames.size > 0 && !apiNames.has(api)) {
+            issues.push(`组件 ${type} 引用了不存在的 API：${api}。`);
+          }
+        }
+        const referencedEvents = Array.isArray(component.events)
+          ? component.events.map((event) =>
+              typeof event === 'string'
+                ? event
+                : typeof (event as Record<string, unknown>).eventId === 'string'
+                  ? ((event as Record<string, unknown>).eventId as string)
+                  : typeof (event as Record<string, unknown>).name === 'string'
+                    ? ((event as Record<string, unknown>).name as string)
+                    : '',
+            )
+          : [];
+        for (const event of referencedEvents.filter(Boolean)) {
+          if (eventNames.size > 0 && !eventNames.has(event)) {
+            issues.push(`组件 ${type} 引用了不存在的埋点事件：${event}。`);
+          }
+        }
+      }
+    }
+    return issues.slice(0, 12);
+  }
+
   private normalizeLowCodeSchemaItem(
     role: ProductionRole,
     item: unknown,
@@ -1221,20 +1559,31 @@ export class ProductionWorkflowService {
     const ownerRole = PRODUCTION_ROLES.includes(record.role as ProductionRole)
       ? (record.role as ProductionRole)
       : role;
+    const rawComponents = this.recordArray(record.components);
+    const components = rawComponents.filter((component) =>
+      PLAYWAY_COMPONENT_TYPES.includes(String(component.type)),
+    );
     return {
       schemaVersion: 1,
       role: ownerRole,
       kind,
       title: String(record.title ?? `${ownerRole}-${kind}`),
       source: record.source === 'fallback' ? 'fallback' : 'llm',
-      components: this.recordArray(record.components),
+      components,
       apis: this.recordArray(record.apis),
       events: this.recordArray(record.events),
       rules: this.recordArray(record.rules),
       checks: this.recordArray(record.checks),
-      notes: Array.isArray(record.notes)
-        ? record.notes.map((note) => String(note)).slice(0, 12)
-        : [],
+      notes: [
+        ...(Array.isArray(record.notes)
+          ? record.notes.map((note) => String(note)).slice(0, 10)
+          : []),
+        ...(rawComponents.length > components.length
+          ? [
+              `已过滤 ${rawComponents.length - components.length} 个未注册 Playway 组件。`,
+            ]
+          : []),
+      ],
     };
   }
 
@@ -1242,8 +1591,7 @@ export class ProductionWorkflowService {
     return Array.isArray(value)
       ? value
           .filter(
-            (item) =>
-              item && typeof item === 'object' && !Array.isArray(item),
+            (item) => item && typeof item === 'object' && !Array.isArray(item),
           )
           .map((item) => item as Record<string, unknown>)
       : [];
@@ -1274,7 +1622,9 @@ export class ProductionWorkflowService {
               response: { code: 'number', data: 'ActivityInfo' },
             },
           ],
-          notes: ['模型未返回接口 Schema 时由系统兜底生成，供 AI Coding 起步。'],
+          notes: [
+            '模型未返回接口 Schema 时由系统兜底生成，供 AI Coding 起步。',
+          ],
         },
       ];
     }
@@ -1292,7 +1642,9 @@ export class ProductionWorkflowService {
               status: 'pending_confirmation',
             },
           ],
-          notes: ['模型未返回验收 Schema 时由系统兜底生成，后续人工补齐真实用例。'],
+          notes: [
+            '模型未返回验收 Schema 时由系统兜底生成，后续人工补齐真实用例。',
+          ],
         },
       ];
     }
@@ -1309,7 +1661,9 @@ export class ProductionWorkflowService {
               params: ['activityId', 'channel', 'region'],
             },
           ],
-          notes: ['模型未返回埋点 Schema 时由系统兜底生成，后续对齐埋点平台字段。'],
+          notes: [
+            '模型未返回埋点 Schema 时由系统兜底生成，后续对齐埋点平台字段。',
+          ],
         },
       ];
     }
@@ -1321,15 +1675,17 @@ export class ProductionWorkflowService {
         components: [
           {
             id: 'activity-root',
-            type: 'page',
+            type: 'banner',
             name: '活动主页面',
             children: ['hero', 'rule', 'cta'],
           },
-          { id: 'hero', type: 'section', name: '首屏视觉与活动入口' },
-          { id: 'rule', type: 'section', name: '活动规则说明' },
-          { id: 'cta', type: 'button', name: '核心行动按钮' },
+          { id: 'hero', type: 'banner', name: '首屏视觉与活动入口' },
+          { id: 'rule', type: 'activity-rules', name: '活动规则说明' },
+          { id: 'cta', type: 'reserve-now', name: '核心行动按钮' },
         ],
-        notes: ['模型未返回页面 Schema 时由系统兜底生成，保证下游代码生成有结构输入。'],
+        notes: [
+          '模型未返回页面 Schema 时由系统兜底生成，保证下游代码生成有结构输入。',
+        ],
       },
       {
         ...base,
@@ -1350,20 +1706,119 @@ export class ProductionWorkflowService {
     return createHash('sha256').update(content).digest('hex').slice(0, 32);
   }
 
-  private validateGeneratedProject<T extends { files: Array<{ path: string; content: string }>; runCommand: string }>(project: T): T {
+  private validateGeneratedProject<
+    T extends {
+      files: Array<{ path: string; content: string }>;
+      runCommand: string;
+    },
+  >(project: T): T {
     const paths = new Set(project.files.map((file) => file.path));
-    const packageFile = project.files.find((file) => file.path === 'package.json');
-    const entryFile = project.files.find((file) => /^src\/main\.(tsx|jsx)$/.test(file.path));
-    if (!packageFile || !entryFile || !paths.has('index.html')) throw new Error('生成代码缺少 package.json、index.html 或 src/main.tsx／src/main.jsx。');
+    const packageFile = project.files.find(
+      (file) => file.path === 'package.json',
+    );
+    const entryFile = project.files.find((file) =>
+      /^src\/main\.(tsx|jsx)$/.test(file.path),
+    );
+    if (!packageFile || !entryFile || !paths.has('index.html'))
+      throw new Error(
+        '生成代码缺少 package.json、index.html 或 src/main.tsx／src/main.jsx。',
+      );
     let packageJson: { scripts?: Record<string, string> };
-    try { packageJson = JSON.parse(packageFile.content) as { scripts?: Record<string, string> }; } catch { throw new Error('生成的 package.json 不是合法 JSON。'); }
-    if (!packageJson.scripts?.dev || !packageJson.scripts?.build) throw new Error('生成的 package.json 缺少 dev 或 build 脚本。');
-    if (!/createRoot|ReactDOM\.render/.test(entryFile.content)) throw new Error('项目入口没有挂载 React 页面。');
-    if (project.files.some((file) => file.path.includes('..') || file.path.startsWith('/'))) throw new Error('项目文件路径不安全。');
+    try {
+      packageJson = JSON.parse(packageFile.content) as {
+        scripts?: Record<string, string>;
+      };
+    } catch {
+      throw new Error('生成的 package.json 不是合法 JSON。');
+    }
+    if (!packageJson.scripts?.dev || !packageJson.scripts?.build)
+      throw new Error('生成的 package.json 缺少 dev 或 build 脚本。');
+    if (!/createRoot|ReactDOM\.render/.test(entryFile.content))
+      throw new Error('项目入口没有挂载 React 页面。');
+    if (
+      project.files.some(
+        (file) => file.path.includes('..') || file.path.startsWith('/'),
+      )
+    )
+      throw new Error('项目文件路径不安全。');
     return project;
   }
 
-  private deliveryVerification(project: { projectName: string; framework: string; files: Array<{ path: string; content: string }>; runCommand: string; sourceThreadId: string }) {
+  private fallbackGeneratedProject(
+    context: Awaited<ReturnType<ProductionWorkflowService['codingContext']>>,
+    cause: unknown,
+  ) {
+    const components = context.stages
+      .flatMap((stage) => stage.lowCodeSchemas ?? [])
+      .filter((schema) => schema.kind === 'pageSchema')
+      .flatMap((schema) => schema.components ?? [])
+      .map((component) => ({
+        type: typeof component.type === 'string' ? component.type : 'unknown',
+        name: typeof component.name === 'string' ? component.name : '活动组件',
+      }));
+    const componentJson = JSON.stringify(components);
+    const errorMessage =
+      cause instanceof Error ? cause.message : '模型未返回可运行代码';
+    return this.validateGeneratedProject({
+      projectName: `${context.projectId}-playway-fallback`,
+      framework: 'React + Vite + TypeScript',
+      runCommand: 'pnpm install && pnpm dev',
+      notes: [
+        '模型代码生成失败，已根据已审批 pageSchema 生成最小可运行兜底项目。',
+        `模型失败原因：${errorMessage.slice(0, 500)}`,
+      ],
+      files: [
+        {
+          path: 'package.json',
+          purpose: '项目依赖和启动脚本',
+          content: JSON.stringify(
+            {
+              private: true,
+              type: 'module',
+              scripts: { dev: 'vite', build: 'tsc -b && vite build' },
+              dependencies: {
+                '@vitejs/plugin-react': '^4.3.4',
+                vite: '^5.4.10',
+                typescript: '^5.6.3',
+                react: '^18.3.1',
+                'react-dom': '^18.3.1',
+              },
+              devDependencies: {},
+            },
+            null,
+            2,
+          ),
+        },
+        {
+          path: 'index.html',
+          purpose: 'Vite HTML 入口',
+          content:
+            '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
+        },
+        {
+          path: 'src/main.tsx',
+          purpose: 'React 页面入口和 Playway 组件清单预览',
+          content: `import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\n\nconst components = ${componentJson};\n\nfunction App() {\n  return <main><h1>${context.projectId} 活动预览</h1><p>Playway 兜底页面：组件规则已生成，具体交互请按 Schema 接入真实 API。</p><section>{components.map((item, index) => <article key={item.type + index}><b>{item.name}</b><code>{item.type}</code></article>)}</section></main>;\n}\n\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
+        },
+        {
+          path: 'src/styles.css',
+          purpose: '兜底页面样式',
+          content:
+            'body{margin:0;font-family:system-ui;background:#f5f7fb;color:#182230}main{max-width:960px;margin:0 auto;padding:48px 24px}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}article{background:#fff;border:1px solid #e6eaf0;border-radius:12px;padding:16px}code{display:block;color:#667085;margin-top:8px}',
+        },
+      ],
+      activityName: context.projectId,
+      sourceThreadId: context.threadId,
+    });
+  }
+
+  private deliveryVerification(project: {
+    projectName: string;
+    framework: string;
+    files: Array<{ path: string; content: string }>;
+    runCommand: string;
+    sourceThreadId: string;
+  }) {
     const paths = project.files.map((file) => file.path);
     return {
       schemaVersion: 1,
@@ -1373,8 +1828,19 @@ export class ProductionWorkflowService {
       sourceThreadId: project.sourceThreadId,
       checkedAt: new Date().toISOString(),
       checks: [
-        { name: 'required_files', passed: paths.includes('package.json') && paths.includes('index.html') && paths.some((path) => /^src\/main\.(tsx|jsx)$/.test(path)) },
-        { name: 'safe_relative_paths', passed: paths.every((path) => !path.includes('..') && !path.startsWith('/')) },
+        {
+          name: 'required_files',
+          passed:
+            paths.includes('package.json') &&
+            paths.includes('index.html') &&
+            paths.some((path) => /^src\/main\.(tsx|jsx)$/.test(path)),
+        },
+        {
+          name: 'safe_relative_paths',
+          passed: paths.every(
+            (path) => !path.includes('..') && !path.startsWith('/'),
+          ),
+        },
         { name: 'package_scripts', passed: true },
         { name: 'react_mount', passed: true },
       ],
@@ -1407,8 +1873,11 @@ export class ProductionWorkflowService {
   private async getOwnedState(threadId: string, userId: string) {
     const snapshot = await this.app.getState(this.config(threadId));
     const state = snapshot?.values as ProductionWorkflowStateType | undefined;
-    if (!state?.projectId) throw new Error('workflow not found');
-    if (state.userId !== userId) throw new Error('workflow not found');
+    if (!state?.projectId || state.userId !== userId) {
+      throw new NotFoundException(
+        'workflow not found or checkpoint expired; please start the workflow again',
+      );
+    }
     return state;
   }
 
@@ -1431,26 +1900,37 @@ export class ProductionWorkflowService {
     return `production:workflow:${userId}:${threadId}`;
   }
 
-  private async saveWorkflowIndex(view: ReturnType<ProductionWorkflowService['view']>) {
+  private async saveWorkflowIndex(
+    view: ReturnType<ProductionWorkflowService['view']>,
+  ) {
     const index = {
       ...view,
       brief: undefined,
       updatedAt: new Date().toISOString(),
       results: Object.fromEntries(
-        Object.entries(view.results).map(([role, result]) => [role, result ? {
-          role: result.role,
-          summary: result.summary,
-          riskLevel: result.riskLevel,
-          evidenceCoverage: result.evidenceCoverage,
-          readyForApproval: result.readyForApproval,
-          completedAt: result.completedAt,
-          deliverables: result.deliverables.map((item) => ({ type: item.type, title: item.title })),
-          lowCodeSchemas: result.lowCodeSchemas.map((item) => ({
-            kind: item.kind,
-            title: item.title,
-            source: item.source,
-          })),
-        } : result]),
+        Object.entries(view.results).map(([role, result]) => [
+          role,
+          result
+            ? {
+                role: result.role,
+                summary: result.summary,
+                riskLevel: result.riskLevel,
+                evidenceCoverage: result.evidenceCoverage,
+                readyForApproval: result.readyForApproval,
+                completedAt: result.completedAt,
+                deliverables: result.deliverables.map((item) => ({
+                  type: item.type,
+                  title: item.title,
+                })),
+                // 历史工作流的岗位结果可能没有 lowCodeSchemas 字段（该字段为后期新增），按空数组兼容。
+                lowCodeSchemas: (result.lowCodeSchemas ?? []).map((item) => ({
+                  kind: item.kind,
+                  title: item.title,
+                  source: item.source,
+                })),
+              }
+            : result,
+        ]),
       ),
     };
     this.workflowIndexMemory.set(`${view.userId}:${view.threadId}`, index);
@@ -1466,7 +1946,9 @@ export class ProductionWorkflowService {
     );
   }
 
-  private async traceLangfuse(state: ProductionWorkflowStateType): Promise<void> {
+  private async traceLangfuse(
+    state: ProductionWorkflowStateType,
+  ): Promise<void> {
     if (!this.langfuseProvider) return;
     await this.langfuseProvider.traceProductionWorkflow({
       userId: state.userId,
@@ -1498,16 +1980,26 @@ export class ProductionWorkflowService {
     });
   }
 
-  private async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
+  private async emitWorkflowState(
+    state: ProductionWorkflowStateType,
+  ): Promise<void> {
     const runId = state.runId;
     if (state.status === 'revision_required') {
-      await this.emitDomainEvent('workflow.revision_required', state, { roles: state.rerunRoles, revision: state.revisionNumber ?? 1 });
-      await this.emitRuntimeEvent(state, 'workflow.revision_required', 'production_workflow', {
-        revision: state.revisionNumber ?? 1,
+      await this.emitDomainEvent('workflow.revision_required', state, {
         roles: state.rerunRoles,
-        staleRoles: state.staleRoles,
-        feedback: state.feedback,
+        revision: state.revisionNumber ?? 1,
       });
+      await this.emitRuntimeEvent(
+        state,
+        'workflow.revision_required',
+        'production_workflow',
+        {
+          revision: state.revisionNumber ?? 1,
+          roles: state.rerunRoles,
+          staleRoles: state.staleRoles,
+          feedback: state.feedback,
+        },
+      );
       await this.emitRuntimeEvent(state, 'goal.paused', 'production_workflow', {
         objective: state.brief,
         status: 'paused',
@@ -1526,10 +2018,17 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'pending_approval') {
-      await this.emitDomainEvent('workflow.approval_required', state, { roles: state.pendingApprovalRoles });
-      await this.emitRuntimeEvent(state, 'approval.required', 'production_workflow', {
+      await this.emitDomainEvent('workflow.approval_required', state, {
         roles: state.pendingApprovalRoles,
       });
+      await this.emitRuntimeEvent(
+        state,
+        'approval.required',
+        'production_workflow',
+        {
+          roles: state.pendingApprovalRoles,
+        },
+      );
       await this.emitRuntimeEvent(state, 'goal.paused', 'production_workflow', {
         objective: state.brief,
         status: 'paused',
@@ -1548,16 +2047,28 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'completed') {
-      await this.emitDomainEvent('workflow.completed', state, { completedRoles: state.completedRoles });
-      await this.emitRuntimeEvent(state, 'workflow.completed', 'production_workflow', {
+      await this.emitDomainEvent('workflow.completed', state, {
         completedRoles: state.completedRoles,
       });
-      await this.emitRuntimeEvent(state, 'goal.completed', 'production_workflow', {
-        objective: state.brief,
-        status: 'completed',
-        round: state.stepCount,
-        maxRounds: state.maxSteps,
-      });
+      await this.emitRuntimeEvent(
+        state,
+        'workflow.completed',
+        'production_workflow',
+        {
+          completedRoles: state.completedRoles,
+        },
+      );
+      await this.emitRuntimeEvent(
+        state,
+        'goal.completed',
+        'production_workflow',
+        {
+          objective: state.brief,
+          status: 'completed',
+          round: state.stepCount,
+          maxRounds: state.maxSteps,
+        },
+      );
       if (runId) {
         await this.agentRuns?.finish(runId, {
           route: 'production_workflow',
@@ -1568,17 +2079,29 @@ export class ProductionWorkflowService {
       return;
     }
     if (state.status === 'failed') {
-      await this.emitDomainEvent('workflow.failed', state, { error: state.error ?? null });
-      await this.emitRuntimeEvent(state, 'workflow.failed', 'production_workflow', {
-        error: state.error,
+      await this.emitDomainEvent('workflow.failed', state, {
+        error: state.error ?? null,
       });
-      await this.emitRuntimeEvent(state, 'goal.blocked', 'production_workflow', {
-        objective: state.brief,
-        status: 'blocked',
-        round: state.stepCount,
-        maxRounds: state.maxSteps,
-        reason: state.error || '工作流失败。',
-      });
+      await this.emitRuntimeEvent(
+        state,
+        'workflow.failed',
+        'production_workflow',
+        {
+          error: state.error,
+        },
+      );
+      await this.emitRuntimeEvent(
+        state,
+        'goal.blocked',
+        'production_workflow',
+        {
+          objective: state.brief,
+          status: 'blocked',
+          round: state.stepCount,
+          maxRounds: state.maxSteps,
+          reason: state.error || '工作流失败。',
+        },
+      );
       if (runId) {
         await this.agentRuns?.finish(runId, {
           route: 'production_workflow',
@@ -1613,11 +2136,26 @@ export class ProductionWorkflowService {
     }
   }
 
-  private async emitDomainEvent(eventType: string, state: ProductionWorkflowStateType, payload: Record<string, unknown>): Promise<void> {
+  private async emitDomainEvent(
+    eventType: string,
+    state: ProductionWorkflowStateType,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     try {
-      await this.domainEvents?.emit({ eventType, aggregateType: 'production_workflow', aggregateId: state.threadId, payload: { projectId: state.projectId, runId: state.runId ?? null, ...payload } });
+      await this.domainEvents?.emit({
+        eventType,
+        aggregateType: 'production_workflow',
+        aggregateId: state.threadId,
+        payload: {
+          projectId: state.projectId,
+          runId: state.runId ?? null,
+          ...payload,
+        },
+      });
     } catch (error) {
-      this.logger.warn(`Domain event skipped: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(
+        `Domain event skipped: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -1654,6 +2192,11 @@ export class ProductionWorkflowService {
       feedback: state.feedback,
       supplementalMaterials: state.supplementalMaterials ?? '',
       results: state.results,
+      schemaIssues: this.validateLowCodeSchemaSet(
+        Object.values(state.results).flatMap(
+          (result) => result?.lowCodeSchemas ?? [],
+        ),
+      ),
       error: state.error,
       requiresApproval: state.status === 'pending_approval',
       requiresRevision: state.status === 'revision_required',
@@ -1694,12 +2237,24 @@ export class ProductionWorkflowService {
       ? dto.rerunRoles.filter((role) => current.currentBatch.includes(role))
       : current.pendingApprovalRoles;
     const rejectedRoles = requested.length ? requested : current.currentBatch;
-    const staleRoles = this.downstreamRoles(rejectedRoles, current.selectedRoles);
+    const staleRoles = this.downstreamRoles(
+      rejectedRoles,
+      current.selectedRoles,
+    );
     const rejectedResults = Object.fromEntries(
       Object.entries(current.results).map(([role, result]) => [
         role,
         result
-          ? { ...result, reviewStatus: rejectedRoles.includes(role as ProductionRole) ? 'rejected' : current.currentBatch.includes(role as ProductionRole) ? 'approved' : staleRoles.includes(role as ProductionRole) ? 'stale' : result.reviewStatus }
+          ? {
+              ...result,
+              reviewStatus: rejectedRoles.includes(role as ProductionRole)
+                ? 'rejected'
+                : current.currentBatch.includes(role as ProductionRole)
+                  ? 'approved'
+                  : staleRoles.includes(role as ProductionRole)
+                    ? 'stale'
+                    : result.reviewStatus,
+            }
           : result,
       ]),
     ) as ProductionWorkflowStateType['results'];
@@ -1728,8 +2283,20 @@ export class ProductionWorkflowService {
     });
     const state = await this.getOwnedState(threadId, userId);
     await Promise.all([
-      ...rejectedRoles.map((role) => this.tasks?.updateForRole(threadId, role, { status: 'revision_required', summary: feedback, approvalRequired: true })),
-      ...staleRoles.map((role) => this.tasks?.updateForRole(threadId, role, { status: 'stale', summary: `上游产物被驳回：${feedback}`, approvalRequired: false })),
+      ...rejectedRoles.map((role) =>
+        this.tasks?.updateForRole(threadId, role, {
+          status: 'revision_required',
+          summary: feedback,
+          approvalRequired: true,
+        }),
+      ),
+      ...staleRoles.map((role) =>
+        this.tasks?.updateForRole(threadId, role, {
+          status: 'stale',
+          summary: `上游产物被驳回：${feedback}`,
+          approvalRequired: false,
+        }),
+      ),
     ]);
     await Promise.all(
       Object.entries(rejectedResults).map(([role, result]) => {
@@ -1774,7 +2341,12 @@ export class ProductionWorkflowService {
       for (const role of selectedRoles) {
         if (roots.includes(role) || affected.has(role)) continue;
         const dependencies = dependenciesForProductionRole(role, selectedRoles);
-        if (dependencies.some((dependency) => roots.includes(dependency) || affected.has(dependency))) {
+        if (
+          dependencies.some(
+            (dependency) =>
+              roots.includes(dependency) || affected.has(dependency),
+          )
+        ) {
           affected.add(role);
           changed = true;
         }

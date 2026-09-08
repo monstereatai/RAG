@@ -10,7 +10,7 @@ import { resolveRagServiceToken } from "./rag-service-token";
 export interface RagAguiStreamQuery {
   query: string;
   mode?: "simple" | "agentic" | "auto";
-  model?: "qwen" | "deepseek";
+  model?: "qwen" | "deepseek" | "zhipu";
   userId?: string;
   threadId?: string;
   rolePresetId?: string;
@@ -111,6 +111,31 @@ export class RagClientService {
     );
   }
 
+  listProductionComponentRules(query = '', limit = 18) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/component-rules${this.toQueryString({ q: query, limit })}`
+    );
+  }
+
+  listProductionActivityTemplates(query = '', limit = 4) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/activity-templates${this.toQueryString({ q: query, limit })}`
+    );
+  }
+
+  getProductionActivityGraph(query = '') {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/activity-graph${this.toQueryString({ q: query })}`
+    );
+  }
+
+  importProductionPlaywayGraph(ownerUserId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/production/playway-graph/import${this.toQueryString({ ownerUserId })}`,
+      body,
+    );
+  }
+
   resumeProductionWorkflow(
     threadId: string,
     ownerUserId: string,
@@ -138,6 +163,12 @@ export class RagClientService {
   getProductionWorkflowCodingContext(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context${this.toQueryString({ ownerUserId })}`
+    );
+  }
+
+  getProductionPlaywayPreview(threadId: string, ownerUserId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/playway-preview${this.toQueryString({ ownerUserId })}`
     );
   }
 

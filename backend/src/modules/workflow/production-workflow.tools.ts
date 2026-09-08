@@ -107,14 +107,16 @@ export class ProductionWorkflowTools {
     if (!authorization.allowed) {
       return {
         evidence: [],
-        executions: [{
-          tool,
-          status: 'blocked',
-          durationMs: Date.now() - startedAt,
-          evidenceCount: 0,
-          fallback: policy.fallback,
-          error: authorization.reason,
-        }],
+        executions: [
+          {
+            tool,
+            status: 'blocked',
+            durationMs: Date.now() - startedAt,
+            evidenceCount: 0,
+            fallback: policy.fallback,
+            error: authorization.reason,
+          },
+        ],
       };
     }
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
@@ -130,39 +132,56 @@ export class ProductionWorkflowTools {
         maxSteps: 2,
         maxToolCalls: policy.maxCalls,
         timeoutMs: policy.timeoutMs + 1_000,
-        decide: (state) => state.retrieval
-          ? { type: 'complete', output: state, reason: `${role} 岗位证据检索完成` }
-          : {
-              type: 'tool',
-              name: tool,
-              mode: 'production',
-              role,
-              ownerUserId: context.userId,
-              pluginKeys: context.pluginKeys,
-              allowedToolNames: context.pluginTools,
-              input: { query, focus: ROLE_SEARCH_FOCUS[role] },
-              execute: () => this.withTimeout(
-                this.rag.retrieveDetailed(query, { scope: { role } }, context.userId),
-                policy.timeoutMs,
-              ),
-              reduce: (current: GatherLoopState, retrieval: Awaited<ReturnType<KarpathyRagService['retrieveDetailed']>>) => ({
-                ...current,
-                retrieval,
-              }),
-            },
+        decide: (state) =>
+          state.retrieval
+            ? {
+                type: 'complete',
+                output: state,
+                reason: `${role} 岗位证据检索完成`,
+              }
+            : {
+                type: 'tool',
+                name: tool,
+                mode: 'production',
+                role,
+                ownerUserId: context.userId,
+                pluginKeys: context.pluginKeys,
+                allowedToolNames: context.pluginTools,
+                input: { query, focus: ROLE_SEARCH_FOCUS[role] },
+                execute: () =>
+                  this.withTimeout(
+                    this.rag.retrieveDetailed(
+                      query,
+                      { scope: { role } },
+                      context.userId,
+                    ),
+                    policy.timeoutMs,
+                  ),
+                reduce: (
+                  current: GatherLoopState,
+                  retrieval: Awaited<
+                    ReturnType<KarpathyRagService['retrieveDetailed']>
+                  >,
+                ) => ({
+                  ...current,
+                  retrieval,
+                }),
+              },
       });
       const result = loop.output?.retrieval;
       if (!result) {
         return {
           evidence: [],
-          executions: [{
-            tool,
-            status: loop.status === 'blocked' ? 'blocked' : 'failed',
-            durationMs: Date.now() - startedAt,
-            evidenceCount: 0,
-            fallback: policy.fallback,
-            error: loop.terminationReason,
-          }],
+          executions: [
+            {
+              tool,
+              status: loop.status === 'blocked' ? 'blocked' : 'failed',
+              durationMs: Date.now() - startedAt,
+              evidenceCount: 0,
+              fallback: policy.fallback,
+              error: loop.terminationReason,
+            },
+          ],
         };
       }
       const evidence = result.chunks

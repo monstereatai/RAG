@@ -18,8 +18,14 @@ describe('ProductionWorkflowTools', () => {
     });
     const service = new ProductionWorkflowTools(
       { retrieveDetailed } as never,
-      { decide: jest.fn().mockReturnValue({ allowed: true }) } as never,
-      { execute: jest.fn().mockImplementation(async (input) => ({ status: 'success', output: await input.execute(), durationMs: 1 })) } as never,
+      { decide: jest.fn().mockReturnValue({ allowed: true }) },
+      {
+        execute: jest.fn().mockImplementation(async (input) => ({
+          status: 'success',
+          output: await input.execute(),
+          durationMs: 1,
+        })),
+      } as never,
     );
 
     const result = await service.gather('frontend', {
@@ -36,9 +42,17 @@ describe('ProductionWorkflowTools', () => {
 
   it('degrades without inventing evidence when retrieval fails', async () => {
     const service = new ProductionWorkflowTools(
-      { retrieveDetailed: () => Promise.reject(new Error('milvus timeout')) } as never,
-      { decide: jest.fn().mockReturnValue({ allowed: true }) } as never,
-      { execute: jest.fn().mockImplementation(async (input) => ({ status: 'success', output: await input.execute(), durationMs: 1 })) } as never,
+      {
+        retrieveDetailed: () => Promise.reject(new Error('milvus timeout')),
+      } as never,
+      { decide: jest.fn().mockReturnValue({ allowed: true }) },
+      {
+        execute: jest.fn().mockImplementation(async (input) => ({
+          status: 'success',
+          output: await input.execute(),
+          durationMs: 1,
+        })),
+      } as never,
     );
 
     const result = await service.gather('backend', {

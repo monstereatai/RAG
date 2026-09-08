@@ -11,7 +11,10 @@ export const PRODUCTION_ROLES = [
 
 export type ProductionRole = (typeof PRODUCTION_ROLES)[number];
 export type ProductionWorkflowApprovalMode = 'auto' | 'required' | 'risk_based';
-export type ProductionProcessType = 'sequential' | 'hierarchical' | 'conditional';
+export type ProductionProcessType =
+  | 'sequential'
+  | 'hierarchical'
+  | 'conditional';
 export type ProductionRiskLevel = 'low' | 'medium' | 'high';
 export type WorkflowApproval = 'approved' | 'rejected' | null;
 export type ProductionWorkflowStatus =

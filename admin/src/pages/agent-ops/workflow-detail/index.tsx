@@ -27,8 +27,14 @@ import { agentOpsNav, ModulePage } from '@/components/AdminShell';
 import '@ant-design/x-markdown/es/XMarkdown/index.css';
 import {
   downloadProductionWorkflowProjectZip,
+  getProductionActivityTemplates,
+  getProductionComponentRules,
+  getProductionPlaywayPreview,
   getProductionWorkflow,
   getProductionWorkflowCodingContext,
+  importProductionPlaywayGraph,
+  type PlaywayActivityTemplate,
+  type PlaywayComponentRule,
   type ProductionRole,
   type ProductionWorkflow,
   resumeProductionWorkflow,
@@ -68,6 +74,13 @@ export default function ProductionWorkflowDetailPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
   const [generatingProject, setGeneratingProject] = React.useState(false);
+  const [componentRules, setComponentRules] = React.useState<
+    PlaywayComponentRule[]
+  >([]);
+  const [componentQuery, setComponentQuery] = React.useState('');
+  const [activityTemplates, setActivityTemplates] = React.useState<
+    PlaywayActivityTemplate[]
+  >([]);
 
   const loadDetail = React.useCallback(async () => {
     if (!threadId) return;
@@ -77,6 +90,12 @@ export default function ProductionWorkflowDetailPage() {
       const detail = unwrapData<ProductionWorkflow>(result);
       if (!detail?.threadId) throw new Error('工作流不存在');
       setWorkflow(detail);
+      // 项目 ID（例如 act9）不是 Playway 规则检索词。详情页首次进入应
+      // 先展示默认组件规则和全部活动模板，用户再通过搜索框筛选玩法。
+      const rules = await getProductionComponentRules('', 18);
+      setComponentRules(rules.items ?? []);
+      const templates = await getProductionActivityTemplates('', 4);
+      setActivityTemplates(templates.items ?? []);
       form.setFieldsValue({
         rerunRoles: detail.requiresRevision
           ? detail.rerunRoles
@@ -90,6 +109,12 @@ export default function ProductionWorkflowDetailPage() {
       setLoading(false);
     }
   }, [form, threadId]);
+
+  const searchComponentRules = React.useCallback(async (query: string) => {
+    setComponentQuery(query);
+    const result = await getProductionComponentRules(query, 18);
+    setComponentRules(result.items ?? []);
+  }, []);
 
   React.useEffect(() => {
     void loadDetail();
@@ -170,19 +195,54 @@ export default function ProductionWorkflowDetailPage() {
   };
 
   const buildHandoffFiles = (context: Record<string, unknown>) => {
+    const stages = Array.isArray(context.stages)
+      ? (context.stages as Array<Record<string, unknown>>)
+      : [];
+    const evidence = stages.flatMap((stage) =>
+      (Array.isArray(stage.evidence) ? stage.evidence : []).map((item) => ({
+        role: stage.role,
+        ...(item as Record<string, unknown>),
+      })),
+    );
     const files: Array<{ name: string; content: string }> = [
       {
         name: 'RAG_WORKFLOW_CONTEXT.json',
         content: `${JSON.stringify(context, null, 2)}\n`,
       },
       {
+        name: 'LOW_CODE_SCHEMAS.json',
+        content: `${JSON.stringify(
+          stages.flatMap((stage) =>
+            Array.isArray(stage.lowCodeSchemas) ? stage.lowCodeSchemas : [],
+          ),
+          null,
+          2,
+        )}\n`,
+      },
+      {
+        name: 'RAG_EVIDENCE.json',
+        content: `${JSON.stringify(evidence, null, 2)}\n`,
+      },
+      {
         name: 'README.md',
-        content: `# ${workflow?.projectId ?? '产研运项目'} 产研运交接物\n\n本目录由已完成的产研运工作流导出，编码前请先阅读各阶段交付物。\n`,
+        content: `# ${workflow?.projectId ?? '产研运项目'} 产研运交接物\n\n本目录由已完成的产研运工作流导出，供 Codex、Claude、Cursor 等 AI Coding 工具使用。先阅读 \`HANDOFF.md\`，结构化 Schema 在 \`LOW_CODE_SCHEMAS.json\` 与 \`schemas/\`，RAG 引用证据在 \`RAG_EVIDENCE.md\`。\n`,
+      },
+      {
+        name: 'RAG_EVIDENCE.md',
+        content: [
+          '# RAG 引用证据',
+          evidence.length > 0
+            ? evidence
+                .map(
+                  (item) =>
+                    `- [${String(item.role ?? 'unknown')}] ${String(item.id ?? 'unknown')}：文档 ${String(item.docId ?? 'unknown')}／片段 ${String(item.chunkIndex ?? 'unknown')}／评分 ${String(item.totalScore ?? 'unknown')}\n  - ${String(item.excerpt ?? '')}`,
+                )
+                .join('\n')
+            : '本次工作流未检索到可引用的 RAG 证据。',
+        ].join('\n\n'),
       },
     ];
-    const stages = Array.isArray(context.stages)
-      ? (context.stages as Array<Record<string, unknown>>)
-      : [];
+    const handoffSections: string[] = [];
     stages.forEach((stage) => {
       const role = String(stage.role ?? 'stage');
       const deliverables = Array.isArray(stage.deliverables)
@@ -205,7 +265,18 @@ export default function ProductionWorkflowDetailPage() {
           name: `handoff/${role}/${String(index + 1).padStart(2, '0')}-${title}.md`,
           content: String(deliverable.markdown ?? ''),
         });
+        handoffSections.push(
+          `## ${role}／${title}\n\n${String(deliverable.markdown ?? '')}`,
+        );
       });
+    });
+    files.push({
+      name: 'HANDOFF.md',
+      content: [
+        `# ${workflow?.projectId ?? '产研运项目'} 产研运交接包`,
+        '本文件供 AI Coding 工具阅读；结构化 Schema 见 `LOW_CODE_SCHEMAS.json`，RAG 引用证据见 `RAG_EVIDENCE.md`。',
+        ...handoffSections,
+      ].join('\n\n'),
     });
     return files;
   };
@@ -234,7 +305,7 @@ export default function ProductionWorkflowDetailPage() {
       const context = await loadCodingContext();
       const directory = await getDirectory();
       await writeFiles(directory, buildHandoffFiles(context));
-      message.success('已将工作流交接物导出到所选代码目录');
+      message.success('已导出 Markdown、Schema 与 RAG 引用证据到所选代码目录');
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       message.error(
@@ -289,6 +360,44 @@ export default function ProductionWorkflowDetailPage() {
     }
   };
 
+  const previewPlaywayPage = async () => {
+    if (!workflow) return;
+    try {
+      const response = await getProductionPlaywayPreview(workflow.threadId);
+      const preview = unwrapData<{
+        title: string;
+        html: string;
+        componentTypes: string[];
+      }>(response);
+      if (!preview?.html) {
+        throw new Error('预览接口未返回 HTML 内容');
+      }
+      const blob = new Blob([preview.html], {
+        type: 'text/html;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : '活动预览生成失败',
+      );
+    }
+  };
+
+  const syncPlaywayGraph = async () => {
+    if (!workflow) return;
+    try {
+      await importProductionPlaywayGraph(
+        workflow.brief || workflow.projectId,
+        `playway:workflow:${workflow.threadId}`,
+      );
+      message.success('Playway 活动关系已同步到 Neo4j');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Neo4j 同步失败');
+    }
+  };
+
   const detailContent = loading ? (
     <Spin tip="正在加载工作流详情" />
   ) : !workflow ? (
@@ -321,7 +430,19 @@ export default function ProductionWorkflowDetailPage() {
                   onClick={() => void exportMarkdownDirectory()}
                   style={{ marginLeft: 8 }}
                 >
-                  导出 Markdown 交接物
+                  导出交接包（Markdown＋Schema）
+                </Button>
+                <Button
+                  onClick={() => void previewPlaywayPage()}
+                  style={{ marginLeft: 8 }}
+                >
+                  预览 Playway 活动页
+                </Button>
+                <Button
+                  onClick={() => void syncPlaywayGraph()}
+                  style={{ marginLeft: 8 }}
+                >
+                  同步活动图谱
                 </Button>
                 <Button
                   type="primary"
@@ -402,6 +523,16 @@ export default function ProductionWorkflowDetailPage() {
           ]}
         />
       </Card>
+
+      {(workflow.schemaIssues?.length ?? 0) > 0 && (
+        <Card title="Schema 闭合校验" style={{ marginTop: 16 }}>
+          {workflow.schemaIssues?.map((issue) => (
+            <p key={issue} style={{ color: '#d4380d', marginBottom: 6 }}>
+              {issue}
+            </p>
+          ))}
+        </Card>
+      )}
 
       <Card title="阶段产物" style={{ marginTop: 16 }}>
         <Collapse
@@ -487,6 +618,74 @@ export default function ProductionWorkflowDetailPage() {
               };
             })
             .filter((item): item is NonNullable<typeof item> => item !== null)}
+        />
+      </Card>
+
+      <Card title="Playway 组件规则" style={{ marginTop: 16 }}>
+        <Input.Search
+          placeholder="搜索活动或玩法，例如：新服预约 抽卡"
+          allowClear
+          value={componentQuery}
+          onChange={(event) => setComponentQuery(event.target.value)}
+          onSearch={(value) => void searchComponentRules(value)}
+          style={{ maxWidth: 520, marginBottom: 12 }}
+        />
+        <Collapse
+          items={componentRules.map((rule) => ({
+            key: rule.type,
+            label: `${rule.displayName}（${rule.type}）`,
+            children: (
+              <div>
+                <p>{rule.description}</p>
+                <p>依赖：{rule.requires.join('、') || '无'}</p>
+                <p>配置字段：{rule.configFields.join('、') || '无'}</p>
+                <p>产出事件：{rule.emits.join('、') || '无'}</p>
+                <Tag
+                  color={
+                    rule.risk === 'high'
+                      ? 'red'
+                      : rule.risk === 'medium'
+                        ? 'orange'
+                        : 'green'
+                  }
+                >
+                  风险：{rule.risk}
+                </Tag>
+                {rule.compliance.map((item) => (
+                  <Tag key={item}>{item}</Tag>
+                ))}
+              </div>
+            ),
+          }))}
+        />
+      </Card>
+
+      <Card title="Playway 活动模板" style={{ marginTop: 16 }}>
+        <Collapse
+          items={activityTemplates.map((template) => ({
+            key: template.id,
+            label: template.name,
+            children: (
+              <div>
+                <p>{template.goal}</p>
+                <p>必选组件：{template.requiredComponents.join('、')}</p>
+                <p>可选组件：{template.optionalComponents.join('、')}</p>
+                <p>接口：{template.requiredApis.join('、')}</p>
+                <p>埋点：{template.requiredEvents.join('、')}</p>
+                <p>验收：</p>
+                {template.acceptanceChecks.map((check) => (
+                  <p key={check} style={{ marginBottom: 4 }}>
+                    ・{check}
+                  </p>
+                ))}
+                {template.riskNotes.map((risk) => (
+                  <Tag key={risk} color="orange">
+                    {risk}
+                  </Tag>
+                ))}
+              </div>
+            ),
+          }))}
         />
       </Card>
 

@@ -48,7 +48,33 @@
 
 ## 当前结论
 
-- **已融合图片参考中的三项核心能力（2026-09-08）**：产研运工作流岗位结果新增 `lowCodeSchemas`，覆盖 `pageSchema`、`apiSchema`、`trackingSchema`、`validationSchema`、`acceptanceSchema`；工作流详情页可查看 Schema，导出 Markdown 交接物和可运行项目 zip 时同步输出 `LOW_CODE_SCHEMAS.json` 与 `schemas/{role}.json`。文档图片、PDF/PPTX 内嵌图和视频关键帧改为写入 `documents/{userId}/...` 隔离路径，Markdown 引用统一走 `/api/v1/documents/assets/image` 鉴权代理，单独图片入库的图片向量检索结果也使用受控代理地址。索引同步闭环已复核并补文档：上传、版本生效、废弃、删除时同步 PostgreSQL、Milvus、Elasticsearch/BM25、Karpathy、Obsidian、Neo4j 来源和图片向量。验证：`pnpm --filter backend build` ✅；`pnpm --dir admin exec biome check src/pages/agent-ops/service.ts src/pages/agent-ops/workflow-detail/index.tsx` ✅；`admin pnpm tsc` 仍被既有 React 18/19 类型冲突阻断，未发现本次新增页面类型报错。
+- **已修正 ZIP 生成接口对失效工作流的错误码（2026-09-08）**：定位工作流 `afe53a26-c54b-46f1-be97-5b769574aa3b` 返回 500 的根因是 Redis/LangGraph Checkpoint 不存在，服务原先把 `workflow not found` 作为普通 Error 返回 500。`ProductionWorkflowService.getOwnedState` 现改为 `NotFoundException`，失效或归属不匹配的工作流返回 404，并提示重新启动；`pnpm --dir backend build` 通过，使用内部服务 token 实测该 UUID 返回 404 及明确消息。该历史 UUID 的完整工作流状态无法从仅含摘要的索引恢复，需要重新执行工作流后再下载 ZIP。
+
+- **已修复详情页 Playway 规则／模板为空（2026-09-08）**：修复初次加载时误用项目 ID（如 `act9`）作为规则检索词的问题，改为默认加载 18 条组件规则和 4 个活动模板；保留搜索框用于按玩法筛选。期间发现 Backend 进程退出，已重新启动并验证两个接口分别返回 18 条规则、4 个模板；Admin Biome、Admin build 通过。
+
+- **已修复 Playway 转盘预览交互（2026-09-08）**：结果提示不再初始展示；点击「立即抽奖」后转盘执行 1.6 秒旋转动画，期间按钮禁用，动画结束显示模拟中奖结果并恢复按钮。预览 HTML 已实测包含隐藏结果、旋转 class 和防重复点击逻辑；Backend build、定向测试 7/7 通过。
+
+- **已升级 Playway 活动页预览（2026-09-08）**：预览不再只是组件卡片列表；会根据 pageSchema 和岗位交付上下文识别抽奖类活动，渲染转盘、五档奖品、规则说明、结果反馈和可点击的模拟抽奖按钮，同时保留组件结构卡片。act9 实测返回 `wheel`、`prize-list`、`countdown`、`result-modal` 等推断组件，接口 200，定向测试 7/7、Backend build 通过。
+
+- **已修复 Playway 预览显示空页面（2026-09-08）**：历史工作流可能同时包含空的 product pageSchema 和有效的 design/frontend pageSchema，预览器此前总是选第一份导致显示 0 个组件。现改为优先选择组件非空的 pageSchema；act9 实测返回 `banner`、`activity-rules`、`reserve-now` 等 4 个组件。定向测试 7/7 通过，Backend build 通过。
+
+- **已修复 Playway 预览 401（2026-09-08）**：管理端预览代理补齐内部服务路由前缀，并在 RAG Backend 增加对应 ServiceToken 代理入口，避免请求误落到 JWT 保护的用户工作流接口。Backend、Admin Backend 已重新构建并重启；使用服务令牌直连预览接口返回 200 和有效 HTML。
+
+- **已清零 Playway 融合遗留项（2026-09-08）**：修复 `structured-delivery-artifacts.ts` 的结构化来源类型错误；补齐生产工作流测试 Artifact mock，相关 14 个定向测试全绿；新增确定性 Playway pageSchema HTML 预览接口和后台「预览 Playway 活动页」入口；新增 Playway 活动图谱 Neo4j 结构化写入接口和后台「同步活动图谱」入口，使用现有 GraphService 幂等 sourceId 写入，不依赖第三方低代码协议。Backend build、Admin build、Admin Backend TypeScript 均通过。
+
+- **已补齐 Playway 活动模板、关系图与后台审查入口（2026-09-08）**：新增新服预约、私域拉新、游戏促活、游戏回流 4 个活动模板，包含必选／可选组件、接口、埋点、验收规则和风险提示；生产岗位 Prompt 会按 Brief 注入候选模板；RAG Backend、Admin Backend 和管理后台详情页新增模板查询与展开查看；新增活动→组件→接口→埋点关系图接口，供 GraphRAG／MCP 复用。注册表、模板闭合与关系图测试 5/5、Admin Biome 检查通过；完整 backend build 仍被既有 `structured-delivery-artifacts.ts` 类型错误阻断。
+
+- **已补齐 Playway 规则检索与素材校正（2026-09-08）**：修复中文查询先移除空格导致多词活动 Brief 无法命中的问题，并加入“新服预约／私域拉新／游戏促活／游戏回流”等中文活动别名检索；注册表单测 3/3 通过。同步校正附录 OCR 文本：任务类 16 项、抽奖类包含“中奖轮播”、充值类 6 项、新服预约第 10 项为“组队”。backend 定向构建仍被既有 `structured-delivery-artifacts.ts` 类型错误阻断，与本次 Playway 文件无行号交集。
+
+- **已建立 Playway 组件规则运行时闭环（2026-09-08）**：新增 `backend/src/modules/workflow/playway-component-registry.ts`，覆盖截图识别出的 96 个组件；每个组件定义分类、适用活动、前置依赖、配置字段、产出事件、风险等级和合规要求，并提供按 brief 检索、Prompt 紧凑格式化、RAG 后端与管理后台代理检索接口。生产工作流岗位 Prompt 已注入按需求检索的候选规则，Schema 归一化会过滤未注册组件，并校验页面组件引用的 API／埋点是否存在；工作流详情返回全局 Schema 闭合问题，后台已提供规则搜索、依赖／配置／事件／风险展示和校验告警；兜底页面改用注册表内组件。同步校正 `playway/README.md` 与 `docs/reference/playway-component-inventory.md` 的任务／抽奖／充值／新服预约计数和 OCR 误识别。验证：注册表 96 项且 type 唯一；新增规则、后台规则查询和页面格式检查通过；backend TypeScript 检查仍仅受既有测试类型错误阻断，未出现本次文件错误；定向 Jest 被 workspace 既有 Jest 29／30 runtime 冲突阻断（`clearMocksOnScope`）。
+
+- **已落盘结构化组件清单（2026-09-08）**：`docs/reference/playway-component-inventory.md`——playway 截图词汇表的结构化版本，96 个组件全部配英文 ID（kebab-case，`task-*`/`lottery-*`/`team-*` 等按分类前缀）+ 中文说明；含活动类型→组件组合建议（新服预约/私域拉新/促活/回流四组，标注推断）、pageSchema 使用示例（对齐 production-workflow roleSchema 的 `components[].type`）、prompt 注入用紧凑格式。组件 ID 仍是本项目标准化命名，运行时规则以注册表为准；挂链：playway/README.md 第四节 + course-agent/06-sop-workflow 延伸素材。
+
+- **已整理游戏营销中台组件库素材文档（2026-09-08）**：`playway/README.md` 落盘——9 张低代码平台组件面板截图经 macOS Vision OCR 提取后整理为结构化功能总结：活动类型×场景矩阵（新服预约/私域拉新/促活/回流）、96 个组件、平台特征（多语言多地区、微信生态集成、智齿客服、强运营玩法）、与 `lowCodeSchemas` pageSchema 组件枚举的衔接说明，附录保留各截图 OCR 原文可溯源；计数和原先两处 OCR 疑点已按原图修正。
+
+- **已修复历史工作流详情导致后端进程崩溃（2026-09-08）**：`production-workflow.service.ts` `saveWorkflowIndex` 对岗位结果 `lowCodeSchemas` 直接 `.map`，历史数据该字段为 `undefined`（后期新增字段），点击旧工作流详情 → `status()` 刷新索引 → TypeError 成为 unhandled rejection → Node 进程退出（3000 后端死亡）。修复为 `(result.lowCodeSchemas ?? []).map`（与同文件 codingContext/导出链路 L422/473/483 的既有 `?? []` 防御对齐，此前唯独索引写入漏防）。新增回归测试 `indexes historical stage results without lowCodeSchemas instead of crashing`：用 `app.updateState` 注入删除 lowCodeSchemas 的历史岗位结果（results reducer 浅合并可准确模拟旧数据），断言 `status()` 不崩且 `list()` 索引中 `lowCodeSchemas: []`。**红绿已实证**：未修复代码上该测试以线上同形态崩溃（`TypeError: Cannot read properties of undefined (reading 'map')` → Node 进程退出），修复后全绿（12 测试 10 过，2 个失败为预先存在的 `markReviewState` mock 缺失，HEAD 铁证与本次无关）。我改动的两个文件 lint/TS 零新增错误（全仓 125 个 lint errors 与 build 1 error 均为预先存在债务，行号零交集）。**注意：主人此前重启的后端仍运行未修复代码，需重新构建重启后点旧工作流详情才安全**。测试运行绕过 jest 29/30 共存坑（临时 config 显式锁定 jest-environment-node@30.4.1）。
+
+- **已融合图片参考中的三项核心能力（2026-09-08）**：产研运工作流岗位结果新增 `lowCodeSchemas`，覆盖 `pageSchema`、`apiSchema`、`trackingSchema`、`validationSchema`、`acceptanceSchema`；工作流详情页可查看 Schema，并提供「导出交接包（Markdown＋Schema）」按钮，输出 `HANDOFF.md`、岗位 Markdown、`LOW_CODE_SCHEMAS.json`、`schemas/{role}.json`、`RAG_EVIDENCE.md/json` 和完整上下文。可运行项目 ZIP 同步携带这套交接包、源码和交付校验；MCP `rag_production_workflow_handoff` 可按活动名称向 Codex、Claude、Cursor 返回相同的 Markdown、Schema 与 RAG 引用证据。文档图片、PDF/PPTX 内嵌图和视频关键帧改为写入 `documents/{userId}/...` 隔离路径，Markdown 引用统一走 `/api/v1/documents/assets/image` 鉴权代理，单独图片入库的图片向量检索结果也使用受控代理地址。索引同步闭环已复核并补文档：上传、版本生效、废弃、删除时同步 PostgreSQL、Milvus、Elasticsearch/BM25、Karpathy、Obsidian、Neo4j 来源和图片向量。验证：`pnpm --filter backend build` ✅；`pnpm --filter rag-mcp-server test` ✅（10/10）；`pnpm --dir admin exec biome check src/pages/agent-ops/workflow-detail/index.tsx` ✅；`admin pnpm tsc` 仍被既有 React 18/19 类型冲突阻断，未发现本次新增页面类型报错。
 
 - **已补充面试能力总览与多 Agent 工作流边界（2026-09-08）**：`docs/interview/resume/resume-rag-project.md` 新增全栈、可信 RAG、受控 Agent、生产治理四类能力的面试表达；明确生产工作流已实现多岗位依赖编排、BullMQ 异步提交、审批／驳回、局部重跑和 Artifact 审核状态。课程记录中的两项审批测试失败源于测试替身缺少 `markReviewState`，不等同于真实服务缺能力；Chat 问答图暂停与通用循环快照自动恢复仍作为独立边界保留。
 
@@ -496,6 +522,11 @@
 ## 最近验证
 
 ### 2026-08-11
+
+- **项目 ZIP 生成接口修复**：`generate-project-zip` 调用 `artifact_generate` 时补充 `frontend` 岗位上下文，避免 Tool Registry 因“未声明岗位”拒绝执行；管理接口失败响应改为透出具体错误信息；LLM 项目代码生成增加 15 秒单次超时，连续失败后自动生成可运行 React/Vite/TypeScript 兜底项目。`backend pnpm build` ✅；已用目标工作流复测权限门禁解除，模型调用超时场景将进入兜底路径。
+- **项目 ZIP 目录整理**：应用源码保留在根目录；工作流上下文、低代码 Schema、证据、岗位交接和交付校验统一归档到 `docs/rag`、`docs/schemas`、`docs/evidence`、`docs/handoff`，并在根目录 README 增加目录说明；`backend pnpm build` ✅。
+- **项目 ZIP 代码目录统一**：生成项目的全部代码文件统一放入 `project/`，根目录仅保留 README 与资料索引，README 启动说明同步更新为先进入 `project/`；`backend pnpm build` ✅。
+- **Playway 预览与 ZIP 入口统一**：ZIP 的 `project/index.html` 改为直接复用 `renderPlaywayPreview()` 同源渲染结果，导出后打开入口页与 Playway 预览保持一致；AI Coding React 源码仍保留在 `project/src/`；`backend pnpm build` ✅。
 
 - **定时任务版本治理与复制**：定时分析任务增加版本组、版本号、当前版本和复制来源；后台支持复制新版本、查看版本历史和启用指定版本。新版本默认停用，启用时自动停用同组旧版本，旧版本及执行历史保留。
 

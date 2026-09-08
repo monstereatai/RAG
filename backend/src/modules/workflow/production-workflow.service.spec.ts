@@ -48,17 +48,27 @@ describe('ProductionWorkflowService', () => {
       kind: 'markdown',
       status: 'queued',
     });
+    const markReviewState = jest.fn().mockResolvedValue(undefined);
     const service = new ProductionWorkflowService(
       {
         getModel: () => ({
           withStructuredOutput: () => ({ invoke }),
         }),
       } as never,
-      { isEnabled: () => false, set: jest.fn(), get: jest.fn(), zadd: jest.fn(), zrange: jest.fn().mockResolvedValue([]), expire: jest.fn(), setIfAbsent: jest.fn(), releaseLock: jest.fn() } as never,
+      {
+        isEnabled: () => false,
+        set: jest.fn(),
+        get: jest.fn(),
+        zadd: jest.fn(),
+        zrange: jest.fn().mockResolvedValue([]),
+        expire: jest.fn(),
+        setIfAbsent: jest.fn(),
+        releaseLock: jest.fn(),
+      } as never,
       { gather } as never,
-      { create: createArtifact } as never,
+      { create: createArtifact, markReviewState } as never,
     );
-    return { service, invoke, gather, createArtifact };
+    return { service, invoke, gather, createArtifact, markReviewState };
   };
 
   it('completes a normal task without manual approval', async () => {
@@ -138,13 +148,27 @@ describe('ProductionWorkflowService', () => {
   it('rejects generated project code without runnable entry requirements', async () => {
     const { service, invoke } = createService();
     jest.spyOn(service, 'codingContext').mockResolvedValue({
-      threadId: 'thread-1', projectId: 'demo', brief: '生成活动页', stages: [],
+      threadId: 'thread-1',
+      projectId: 'demo',
+      brief: '生成活动页',
+      stages: [],
     } as never);
     invoke.mockResolvedValue({
-      projectName: 'demo', framework: 'React + Vite', runCommand: 'npm run dev', notes: [],
-      files: [{ path: 'package.json', content: '{"scripts":{"dev":"vite","build":"vite build"}}', purpose: '配置' }],
+      projectName: 'demo',
+      framework: 'React + Vite',
+      runCommand: 'npm run dev',
+      notes: [],
+      files: [
+        {
+          path: 'package.json',
+          content: '{"scripts":{"dev":"vite","build":"vite build"}}',
+          purpose: '配置',
+        },
+      ],
     });
-    await expect(service.generateProject('thread-1', 'user-1')).rejects.toThrow('缺少 package.json、index.html');
+    await expect(service.generateProject('thread-1', 'user-1')).rejects.toThrow(
+      '缺少 package.json、index.html',
+    );
   });
 
   it('finishes with an evidence-preserving deliverable when the model fails', async () => {
@@ -163,8 +187,12 @@ describe('ProductionWorkflowService', () => {
     expect(state.status).toBe('completed');
     expect(state.results.backend?.readyForApproval).toBe(false);
     expect(state.results.backend?.evidenceCoverage).toBe(0);
-    expect(state.results.backend?.deliverables[0]?.type).toBe('degraded-review');
-    expect(state.results.backend?.claims[0]?.status).toBe('pending_confirmation');
+    expect(state.results.backend?.deliverables[0]?.type).toBe(
+      'degraded-review',
+    );
+    expect(state.results.backend?.claims[0]?.status).toBe(
+      'pending_confirmation',
+    );
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(createArtifact).toHaveBeenCalledTimes(1);
   });
@@ -262,7 +290,8 @@ describe('ProductionWorkflowService', () => {
       state.threadId,
       {
         rerunRoles: ['backend'],
-        supplementalMaterials: '已核验：发奖失败必须进入 compensation_queue，且保留幂等键。',
+        supplementalMaterials:
+          '已核验：发奖失败必须进入 compensation_queue，且保留幂等键。',
       },
       'user-1',
     );
@@ -270,7 +299,9 @@ describe('ProductionWorkflowService', () => {
     expect(state.results.backend?.revision).toBe(2);
     expect(state.supplementalMaterials).toContain('compensation_queue');
     expect(state.revisionHistory.at(-1)?.rerunRoles).toEqual(['backend']);
-    expect(state.revisionHistory.at(-1)?.supplementalMaterials).toContain('compensation_queue');
+    expect(state.revisionHistory.at(-1)?.supplementalMaterials).toContain(
+      'compensation_queue',
+    );
     expect(gather.mock.calls.at(-1)?.[1].brief).toContain('compensation_queue');
     expect(invoke).toHaveBeenCalledTimes(4);
   });
@@ -363,5 +394,46 @@ describe('ProductionWorkflowService', () => {
     await expect(service.status(state.threadId, 'user-2')).rejects.toThrow(
       'workflow not found',
     );
+  });
+
+  it('indexes historical stage results without lowCodeSchemas instead of crashing', async () => {
+    const { service } = createService();
+    const state = await service.start(
+      {
+        projectId: 'legacy-review',
+        brief:
+          '验证历史工作流岗位结果缺少 lowCodeSchemas 字段时，详情刷新工作流索引不会崩溃。',
+        roles: ['product'],
+      },
+      'user-1',
+    );
+
+    // 模拟旧版本写入的岗位结果：缺少后期新增的 lowCodeSchemas 字段。
+    const completed = state.results.product;
+    expect(completed).toBeTruthy();
+    const legacyResult: Record<string, unknown> = { ...completed };
+    delete legacyResult.lowCodeSchemas;
+    const app = (
+      service as unknown as {
+        app: {
+          updateState: (config: unknown, values: unknown) => Promise<unknown>;
+        };
+      }
+    ).app;
+    await app.updateState(
+      { configurable: { thread_id: `production:${state.threadId}` } },
+      { results: { product: legacyResult } },
+    );
+
+    const detail = await service.status(state.threadId, 'user-1');
+    expect(detail.status).toBe('completed');
+    expect(detail.results.product?.lowCodeSchemas).toBeUndefined();
+
+    const workflows = await service.list('user-1');
+    const indexed = workflows.find((item) => item.threadId === state.threadId);
+    expect(
+      (indexed?.results as Record<string, { lowCodeSchemas: unknown[] }>)
+        .product.lowCodeSchemas,
+    ).toEqual([]);
   });
 });

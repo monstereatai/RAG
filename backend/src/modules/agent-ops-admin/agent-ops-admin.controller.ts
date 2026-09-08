@@ -29,10 +29,13 @@ import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { JobsService } from '../jobs/jobs.service';
-import type {
-  CreateJobInput,
-  ScheduledJobSourceType,
-} from '../jobs/job.types';
+import type { CreateJobInput, ScheduledJobSourceType } from '../jobs/job.types';
+import { GraphService } from '../graph/graph.service';
+import {
+  buildPlaywayActivityGraph,
+  searchPlaywayActivityTemplates,
+  searchPlaywayComponents,
+} from '../workflow/playway-component-registry';
 
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
@@ -50,11 +53,66 @@ export class AgentOpsAdminController {
     private readonly runtimeEvents: AgentRuntimeEventsService,
     private readonly artifacts: ArtifactsService,
     private readonly jobs: JobsService,
+    private readonly graphService: GraphService,
   ) {}
 
   @Get('schedules')
   scheduledJobs() {
     return this.jobs.listAnalysis();
+  }
+
+  @Get('component-rules')
+  componentRules(@Query('q') query = '', @Query('limit') limit?: string) {
+    const parsedLimit = Number.parseInt(limit ?? '18', 10);
+    const safeLimit = Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 50)
+      : 18;
+    return {
+      items: searchPlaywayComponents(query, safeLimit),
+      total: searchPlaywayComponents(query, 96).length,
+    };
+  }
+
+  @Get('activity-templates')
+  activityTemplates(@Query('q') query = '', @Query('limit') limit?: string) {
+    const parsedLimit = Number.parseInt(limit ?? '4', 10);
+    const safeLimit = Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 8)
+      : 4;
+    return {
+      items: searchPlaywayActivityTemplates(query, safeLimit),
+      total: searchPlaywayActivityTemplates(query, 8).length,
+    };
+  }
+
+  @Get('activity-graph')
+  activityGraph(@Query('q') query = '') {
+    return buildPlaywayActivityGraph(query);
+  }
+
+  @Post('activity-graph/import')
+  async importActivityGraph(
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: { query?: string; sourceId?: string },
+  ) {
+    const graph = buildPlaywayActivityGraph(body.query ?? '');
+    return this.graphService.importStructuredGraph(
+      {
+        nodes: graph.nodes.map((node) => ({
+          id: node.id,
+          label: node.type,
+          properties: { displayName: node.label, domain: 'playway' },
+        })),
+        relationships: graph.edges.map((edge) => ({
+          source: edge.source,
+          target: edge.target,
+          type: edge.relation.toUpperCase(),
+          properties: { domain: 'playway' },
+        })),
+      },
+      ownerUserId,
+      body.sourceId?.trim() || `playway:${body.query?.trim() || 'all'}`,
+    );
   }
 
   @Post('schedules/parse')
@@ -97,10 +155,14 @@ export class AgentOpsAdminController {
   }
 
   @Post('schedules/:id/copy')
-  copyScheduledJob(@Param('id') id: string) { return this.jobs.copy(id); }
+  copyScheduledJob(@Param('id') id: string) {
+    return this.jobs.copy(id);
+  }
 
   @Get('schedules/:id/versions')
-  scheduledJobVersions(@Param('id') id: string) { return this.jobs.listVersions(id); }
+  scheduledJobVersions(@Param('id') id: string) {
+    return this.jobs.listVersions(id);
+  }
 
   @Post('workflows')
   startWorkflow(
@@ -141,6 +203,14 @@ export class AgentOpsAdminController {
     return this.workflows.codingContext(threadId, ownerUserId);
   }
 
+  @Get('workflows/:threadId/playway-preview')
+  playwayPreview(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.workflows.playwayPreview(threadId, ownerUserId);
+  }
+
   @Post('workflows/:threadId/generate-project')
   generateProject(
     @Param('threadId') threadId: string,
@@ -155,12 +225,26 @@ export class AgentOpsAdminController {
     @Query('ownerUserId') ownerUserId: string,
     @Res() response: Response,
   ) {
-    const zip = await this.workflows.generateProjectZip(threadId, ownerUserId);
-    response
-      .status(200)
-      .type('application/zip')
-      .setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(threadId)}-project.zip"`)
-      .send(zip);
+    try {
+      const zip = await this.workflows.generateProjectZip(
+        threadId,
+        ownerUserId,
+      );
+      response
+        .status(200)
+        .type('application/zip')
+        .setHeader(
+          'Content-Disposition',
+          `attachment; filename="${encodeURIComponent(threadId)}-project.zip"`,
+        )
+        .send(zip);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'project zip generation failed';
+      response.status(500).json({ code: 500, data: null, message });
+    }
   }
 
   @Get('workflows/:threadId')
@@ -274,37 +358,62 @@ export class AgentOpsAdminController {
   }
 
   @Get('collaboration/sops')
-  collaborationSops() { return this.collaboration.listSops(); }
+  collaborationSops() {
+    return this.collaboration.listSops();
+  }
 
   @Post('collaboration/sops')
-  saveCollaborationSop(@Body() body: any) { return this.collaboration.upsertSop(body); }
+  saveCollaborationSop(@Body() body: any) {
+    return this.collaboration.upsertSop(body);
+  }
 
   @Get('collaboration/messages')
-  collaborationMessages(@Query('threadId') threadId?: string) { return this.collaboration.listMessages(threadId); }
+  collaborationMessages(@Query('threadId') threadId?: string) {
+    return this.collaboration.listMessages(threadId);
+  }
 
   @Post('collaboration/messages')
-  publishCollaborationMessage(@Body() body: any) { return this.collaboration.publishMessage(body); }
+  publishCollaborationMessage(@Body() body: any) {
+    return this.collaboration.publishMessage(body);
+  }
 
   @Get('collaboration/dependencies')
-  collaborationDependencies(@Query('threadId') threadId?: string) { return this.collaboration.listDependencies(threadId); }
+  collaborationDependencies(@Query('threadId') threadId?: string) {
+    return this.collaboration.listDependencies(threadId);
+  }
 
   @Post('collaboration/decisions')
-  createCollaborationDecision(@Body() body: any) { return this.collaboration.createDecision({ ...body, createdBy: body.createdBy ?? 'admin-backend' }); }
+  createCollaborationDecision(@Body() body: any) {
+    return this.collaboration.createDecision({
+      ...body,
+      createdBy: body.createdBy ?? 'admin-backend',
+    });
+  }
 
   @Get('collaboration/decisions')
-  collaborationDecisions(@Query('threadId') threadId?: string) { return this.collaboration.listDecisions(threadId); }
+  collaborationDecisions(@Query('threadId') threadId?: string) {
+    return this.collaboration.listDecisions(threadId);
+  }
 
   @Get('collaboration/conflicts/:threadId')
-  collaborationConflicts(@Param('threadId') threadId: string) { return this.collaboration.detectConflicts(threadId); }
+  collaborationConflicts(@Param('threadId') threadId: string) {
+    return this.collaboration.detectConflicts(threadId);
+  }
 
   @Get('collaboration/replay/:threadId')
-  collaborationReplay(@Param('threadId') threadId: string) { return this.collaboration.collaborationSnapshot(threadId); }
+  collaborationReplay(@Param('threadId') threadId: string) {
+    return this.collaboration.collaborationSnapshot(threadId);
+  }
 
   @Get('tasks')
-  listAgentTasks(@Query('threadId') threadId?: string) { return this.tasks.list(threadId); }
+  listAgentTasks(@Query('threadId') threadId?: string) {
+    return this.tasks.list(threadId);
+  }
 
   @Post('tasks/:id/retry')
-  retryAgentTask(@Param('id') id: string) { return this.tasks.retry(id); }
+  retryAgentTask(@Param('id') id: string) {
+    return this.tasks.retry(id);
+  }
 
   @Post('tasks/delegate')
   async delegateAgentTask(@Body() body: any) {
@@ -313,12 +422,18 @@ export class AgentOpsAdminController {
   }
 
   @Get('runtime-events')
-  runtimeEventsList(@Query('threadId') threadId?: string, @Query('runId') runId?: string) {
+  runtimeEventsList(
+    @Query('threadId') threadId?: string,
+    @Query('runId') runId?: string,
+  ) {
     return this.runtimeEvents.list(threadId, runId);
   }
 
   @Get('runtime-events/metrics')
-  runtimeEventMetrics(@Query('threadId') threadId?: string, @Query('runId') runId?: string) {
+  runtimeEventMetrics(
+    @Query('threadId') threadId?: string,
+    @Query('runId') runId?: string,
+  ) {
     return this.runtimeEvents.metrics(threadId, runId);
   }
 }

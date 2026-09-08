@@ -83,6 +83,30 @@ export class AgentOpsController {
     return this.ragClient.listProductionWorkflows(this.userId(req));
   }
 
+  @Get('component-rules')
+  @RequirePermission('admin:qa-ops:read')
+  listComponentRules(@Query('q') query?: string, @Query('limit') limit?: string) {
+    return this.ragClient.listProductionComponentRules(query ?? '', Number(limit) || 18);
+  }
+
+  @Get('activity-templates')
+  @RequirePermission('admin:qa-ops:read')
+  listActivityTemplates(@Query('q') query?: string, @Query('limit') limit?: string) {
+    return this.ragClient.listProductionActivityTemplates(query ?? '', Number(limit) || 4);
+  }
+
+  @Get('activity-graph')
+  @RequirePermission('admin:qa-ops:read')
+  getActivityGraph(@Query('q') query?: string) {
+    return this.ragClient.getProductionActivityGraph(query ?? '');
+  }
+
+  @Post('activity-graph/import')
+  @RequirePermission('admin:qa-ops:write')
+  importActivityGraph(@Body() body: unknown, @Req() req: Request) {
+    return this.ragClient.importProductionPlaywayGraph(this.userId(req), body);
+  }
+
   @Post('workflows/:threadId/resume')
   @ApiOperation({ summary: '审批并恢复产研运工作流' })
   @RequirePermission('admin:qa-ops:write')
@@ -113,6 +137,12 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:read')
   getWorkflowCodingContext(@Param('threadId') threadId: string, @Req() req: Request) {
     return this.ragClient.getProductionWorkflowCodingContext(threadId, this.userId(req));
+  }
+
+  @Get('workflows/:threadId/playway-preview')
+  @RequirePermission('admin:qa-ops:read')
+  getWorkflowPlaywayPreview(@Param('threadId') threadId: string, @Req() req: Request) {
+    return this.ragClient.getProductionPlaywayPreview(threadId, this.userId(req));
   }
 
   @Post('workflows/:threadId/generate-project')
