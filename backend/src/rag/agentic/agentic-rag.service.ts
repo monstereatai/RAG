@@ -36,7 +36,7 @@ import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { ToolExecutionService } from '../../tools/tool-execution.service';
-import { StateGraph, START, END } from '@langchain/langgraph';
+import { Command, interrupt, StateGraph, START, END } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
 import { ConfigService } from '@nestjs/config';
 import { RedisProvider } from '../../providers/redis/redis.provider';
@@ -1235,28 +1235,13 @@ export class AgenticRagService {
       | boolean
       | undefined;
 
-    // 如果已经有审批结果（从 resume 恢复），直接返回
-    if (
-      state.humanApproval === 'approved' ||
-      state.humanApproval === 'rejected'
-    ) {
-      this.logger.log(`Human approval already set: ${state.humanApproval}`);
-      onEvent?.({
-        type: 'resume',
-        data: {
-          approval: state.humanApproval,
-          answer: state.answer,
-        },
-      });
-      return {};
-    }
-
     // 不启用中断时直接跳过
     if (!enableInterrupt) {
       return { humanApproval: 'approved' };
     }
 
-    // 触发中断：推送 interrupt 事件让前端展示审批 UI
+    // LangGraph 原生中断会持久化当前图状态；恢复时该节点从开头重跑，
+    // 因此中断前只发送只读事件，绝不执行外部副作用。
     const reason = `答案生成完成，等待人工审批（confidence 将在后续 reflection 评估）`;
     this.logger.log(`Human approval interrupt: ${reason}`);
     onEvent?.({
@@ -1268,10 +1253,20 @@ export class AgenticRagService {
         threadId: (config?.configurable?.thread_id as string) ?? '',
       },
     });
-
+    const review = interrupt<{
+      reason: string;
+      answer: string;
+      references: RetrievedChunk[];
+      threadId: string;
+    }, { approval: 'approved' | 'rejected'; feedback?: string }>({
+      reason,
+      answer: state.answer,
+      references: state.retrievedChunks,
+      threadId: (config?.configurable?.thread_id as string) ?? '',
+    });
     return {
-      humanApproval: 'pending',
-      interruptReason: reason,
+      humanApproval: review.approval,
+      interruptReason: review.feedback ?? '',
     };
   }
 
@@ -1298,17 +1293,15 @@ export class AgenticRagService {
       `Resuming graph for thread=${threadId}, approval=${approval}`,
     );
 
-    // 用审批结果更新状态并继续执行
+    // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
-      {
-        humanApproval: approval,
-        interruptReason: feedback ?? '',
-      },
+      new Command({ resume: { approval, feedback } }),
       {
         configurable: {
           thread_id: threadId,
           onEvent,
+          enableInterrupt: true,
         },
       },
     )) as AgenticRagStateType;
@@ -1652,8 +1645,15 @@ export class AgenticRagService {
       },
     )) as AgenticRagStateType;
 
-    // 如果人工审批处于 pending 状态，返回中间结果（前端需调用 resume）
-    if (finalState.humanApproval === 'pending') {
+    // 原生 interrupt 不以业务字段伪造暂停状态；从保存的图任务读取中断标记。
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const graphSnapshot = await this.app.getState({
+      configurable: { thread_id: threadId },
+    });
+    const interrupted = Array.isArray(graphSnapshot?.tasks) && graphSnapshot.tasks.some(
+      (task: { interrupts?: unknown[] }) => Array.isArray(task.interrupts) && task.interrupts.length > 0,
+    );
+    if (interrupted) {
       return {
         answer: finalState.answer,
         references: finalState.retrievedChunks,

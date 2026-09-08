@@ -5,6 +5,7 @@ import { RedisProvider } from '../../providers/redis/redis.provider';
 import { ToolExecutionService } from '../../tools/tool-execution.service';
 import type {
   AgentLoopDecision,
+  AgentLoopCheckpoint,
   AgentLoopInput,
   AgentLoopResult,
   AgentLoopToolAction,
@@ -35,11 +36,46 @@ export class AgentLoopService {
   async run<TState, TOutput>(
     input: AgentLoopInput<TState, TOutput>,
   ): Promise<AgentLoopResult<TState, TOutput>> {
+    return this.execute(input, input.initialState, 0, 0);
+  }
+
+  /** 从最后一个成功检查点继续；身份或运行标识不符时拒绝盲目重放。 */
+  async resume<TState, TOutput>(
+    input: AgentLoopInput<TState, TOutput>,
+  ): Promise<AgentLoopResult<TState, TOutput>> {
+    if (!this.redis.isEnabled()) throw new Error('Agent Loop 恢复需要 Redis 检查点');
+    const raw = await this.redis.get(this.checkpointKey(input.threadId, input.actor));
+    if (!raw) throw new Error('未找到可恢复的 Agent Loop 检查点');
+    let checkpoint: AgentLoopCheckpoint<TState>;
+    try {
+      checkpoint = JSON.parse(raw) as AgentLoopCheckpoint<TState>;
+    } catch {
+      throw new Error('Agent Loop 检查点损坏，拒绝恢复');
+    }
+    if (
+      checkpoint.version !== 1 ||
+      checkpoint.threadId !== input.threadId ||
+      checkpoint.actor !== input.actor ||
+      checkpoint.runId !== input.runId ||
+      checkpoint.step < 0 ||
+      checkpoint.toolCalls < 0
+    ) {
+      throw new Error('Agent Loop 检查点身份或运行标识不匹配，拒绝恢复');
+    }
+    return this.execute(input, checkpoint.state, checkpoint.step, checkpoint.toolCalls);
+  }
+
+  private async execute<TState, TOutput>(
+    input: AgentLoopInput<TState, TOutput>,
+    initialState: TState,
+    completedSteps: number,
+    initialToolCalls: number,
+  ): Promise<AgentLoopResult<TState, TOutput>> {
     const startedAt = Date.now();
     const maxSteps = Math.max(1, input.maxSteps);
     const maxToolCalls = Math.max(0, input.maxToolCalls);
-    let state = input.initialState;
-    let toolCalls = 0;
+    let state = initialState;
+    let toolCalls = initialToolCalls;
 
     await this.emit(input, 'agent.loop.started', {
       maxSteps,
@@ -47,7 +83,7 @@ export class AgentLoopService {
       timeoutMs: input.timeoutMs,
     });
 
-    for (let step = 1; step <= maxSteps; step += 1) {
+    for (let step = completedSteps + 1; step <= maxSteps; step += 1) {
       const remainingMs = input.timeoutMs - (Date.now() - startedAt);
       if (remainingMs <= 0) {
         return this.finish(input, state, step - 1, toolCalls, 'failed', 'Agent Loop 总超时');
@@ -149,12 +185,21 @@ export class AgentLoopService {
     step: number,
     toolCalls: number,
   ) {
-    const snapshot = JSON.stringify({ step, toolCalls, state, updatedAt: new Date().toISOString() });
+    const snapshot = JSON.stringify({
+      version: 1,
+      threadId: input.threadId,
+      actor: input.actor,
+      runId: input.runId,
+      step,
+      toolCalls,
+      state,
+      updatedAt: new Date().toISOString(),
+    } satisfies AgentLoopCheckpoint<TState>);
     const redisEnabled = this.redis.isEnabled();
     if (redisEnabled) {
       await this.redis.set(
         this.checkpointKey(input.threadId, input.actor),
-        snapshot.slice(0, 100_000),
+        snapshot,
         input.checkpointTtlSeconds ?? 86_400,
       );
     }

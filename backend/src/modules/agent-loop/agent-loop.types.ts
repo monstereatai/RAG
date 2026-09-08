@@ -49,6 +49,17 @@ export interface AgentLoopInput<TState, TOutput> {
   ) => Promise<AgentLoopDecision<TState, TOutput>> | AgentLoopDecision<TState, TOutput>;
 }
 
+export interface AgentLoopCheckpoint<TState> {
+  version: 1;
+  threadId: string;
+  actor: string;
+  runId?: string;
+  step: number;
+  toolCalls: number;
+  state: TState;
+  updatedAt: string;
+}
+
 export interface AgentLoopResult<TState, TOutput> {
   status: AgentLoopStatus;
   state: TState;
