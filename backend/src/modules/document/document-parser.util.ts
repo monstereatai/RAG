@@ -101,6 +101,10 @@ export interface DocumentImageExtractionOptions {
   vision?: DocumentImageAltDelegate;
   /** 对象存储路径中的文档标识；缺省用时间戳占位 */
   docId?: string;
+  /** 对象存储路径中的用户/租户标识；用于生成受控代理可校验的 key 前缀 */
+  ownerUserId?: string;
+  /** 把对象存储返回的真实地址改写为后端受控代理地址 */
+  urlResolver?: (stored: { key: string; url: string }) => string;
 }
 
 /**
@@ -129,6 +133,10 @@ export interface DocumentVideoExtractionOptions {
   vision?: DocumentImageAltDelegate;
   /** 对象存储路径中的文档标识；缺省用时间戳占位 */
   docId?: string;
+  /** 对象存储路径中的用户/租户标识；用于生成受控代理可校验的 key 前缀 */
+  ownerUserId?: string;
+  /** 把对象存储返回的真实地址改写为后端受控代理地址 */
+  urlResolver?: (stored: { key: string; url: string }) => string;
   /** 视频文件名（写入 Markdown 标题与概览）；缺省用 Document 占位 */
   filename?: string;
 }
@@ -973,6 +981,9 @@ async function uploadEmbeddedImages(
   images: DocumentImageExtractionOptions,
 ): Promise<UploadedEmbeddedImage[]> {
   const folder = images.docId?.trim() || `doc-${Date.now()}`;
+  const ownerPrefix = images.ownerUserId
+    ? `${sanitizeObjectKeyPart(images.ownerUserId)}/`
+    : '';
   const counters = new Map<string, number>();
   const uploaded: UploadedEmbeddedImage[] = [];
   for (const asset of assets) {
@@ -980,11 +991,15 @@ async function uploadEmbeddedImages(
     counters.set(asset.placement, seq);
     const extension = IMAGE_EXTENSION_BY_MIME[asset.mimeType] ?? 'bin';
     const stored = await images.storage.putObject({
-      key: `documents/${folder}/images/${asset.placement}-${seq}.${extension}`,
+      key: `documents/${ownerPrefix}${folder}/images/${asset.placement}-${seq}.${extension}`,
       body: asset.buffer,
       contentType: asset.mimeType,
     });
-    uploaded.push({ position: asset.position, url: stored.url, alt: '' });
+    uploaded.push({
+      position: asset.position,
+      url: images.urlResolver ? images.urlResolver(stored) : stored.url,
+      alt: '',
+    });
   }
 
   // alt 批量生成：并发 ≤2、总数有上限，失败或未配置 vision 时回退为文件名，绝不阻塞入库
@@ -1004,6 +1019,10 @@ async function uploadEmbeddedImages(
         ? alts[index]
         : toMarkdownAltText('', assets[index].filename),
   }));
+}
+
+function sanitizeObjectKeyPart(value: string): string {
+  return value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
 }
 
 /** 单张图片的 alt：vision 描述失败时回退文件名 */
@@ -1443,18 +1462,21 @@ async function uploadVideoFrames(
   video: DocumentVideoExtractionOptions,
 ): Promise<UploadedVideoFrame[]> {
   const folder = video.docId?.trim() || `doc-${Date.now()}`;
+  const ownerPrefix = video.ownerUserId
+    ? `${sanitizeObjectKeyPart(video.ownerUserId)}/`
+    : '';
   const uploaded: UploadedVideoFrame[] = [];
   try {
     for (const asset of assets) {
       const stored = await video.storage.putObject({
-        key: `documents/${folder}/frames/${videoFrameFilename(asset)}`,
+        key: `documents/${ownerPrefix}${folder}/frames/${videoFrameFilename(asset)}`,
         body: asset.buffer,
         contentType: 'image/jpeg',
       });
       uploaded.push({
         index: asset.index,
         timestampSeconds: asset.timestampSeconds,
-        url: stored.url,
+        url: video.urlResolver ? video.urlResolver(stored) : stored.url,
         description: null,
       });
     }

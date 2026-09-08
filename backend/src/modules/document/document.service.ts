@@ -688,6 +688,7 @@ export class DocumentService {
     contentType?: string;
   }): Promise<string> {
     const key = [
+      'documents',
       params.userId,
       params.docId,
       'original',
@@ -707,12 +708,21 @@ export class DocumentService {
         kind: 'original',
         filename: params.filename,
         objectKey: stored.key,
-        url: stored.url,
+        url: this.proxyResourceUrlIfImage(stored.key, stored.url, params.contentType),
         contentType: params.contentType ?? null,
         size: params.buffer.length,
       }),
     );
-    return stored.url;
+    return this.proxyResourceUrlIfImage(stored.key, stored.url, params.contentType);
+  }
+
+  private proxyResourceUrlIfImage(
+    key: string,
+    fallbackUrl: string,
+    contentType?: string,
+  ): string {
+    if (!contentType?.startsWith('image/')) return fallbackUrl;
+    return `/api/v1/documents/assets/image?key=${encodeURIComponent(key)}`;
   }
 
   private async resolveChunkStrategy(

@@ -48,6 +48,12 @@
 
 ## 当前结论
 
+- **已融合图片参考中的三项核心能力（2026-09-08）**：产研运工作流岗位结果新增 `lowCodeSchemas`，覆盖 `pageSchema`、`apiSchema`、`trackingSchema`、`validationSchema`、`acceptanceSchema`；工作流详情页可查看 Schema，导出 Markdown 交接物和可运行项目 zip 时同步输出 `LOW_CODE_SCHEMAS.json` 与 `schemas/{role}.json`。文档图片、PDF/PPTX 内嵌图和视频关键帧改为写入 `documents/{userId}/...` 隔离路径，Markdown 引用统一走 `/api/v1/documents/assets/image` 鉴权代理，单独图片入库的图片向量检索结果也使用受控代理地址。索引同步闭环已复核并补文档：上传、版本生效、废弃、删除时同步 PostgreSQL、Milvus、Elasticsearch/BM25、Karpathy、Obsidian、Neo4j 来源和图片向量。验证：`pnpm --filter backend build` ✅；`pnpm --dir admin exec biome check src/pages/agent-ops/service.ts src/pages/agent-ops/workflow-detail/index.tsx` ✅；`admin pnpm tsc` 仍被既有 React 18/19 类型冲突阻断，未发现本次新增页面类型报错。
+
+- **已补充面试能力总览与多 Agent 工作流边界（2026-09-08）**：`docs/interview/resume/resume-rag-project.md` 新增全栈、可信 RAG、受控 Agent、生产治理四类能力的面试表达；明确生产工作流已实现多岗位依赖编排、BullMQ 异步提交、审批／驳回、局部重跑和 Artifact 审核状态。课程记录中的两项审批测试失败源于测试替身缺少 `markReviewState`，不等同于真实服务缺能力；Chat 问答图暂停与通用循环快照自动恢复仍作为独立边界保留。
+
+- **已改写 1～2 天面试冲刺宝典（2026-09-04）**：在原 `docs/interview/一周高级AI应用开发冲刺计划.md` 内替换七天课程复习安排，加入一分钟项目介绍、12 个可口述的核心问答、联网误拒答与审批测试两个项目案例、最后一小时自检和关键源码入口；术语随文解释，明确个人贡献、实际验证范围和已知恢复／审批边界。原文件名保留以兼容已有链接，课程本身仍不限天数。
+
 - **已调整高级 AI 应用／Agent 课程体系（2026-09-04）**：两门课程按能力验收，不限学习天数，沿用当前 RAG 项目结业；重组各八模块导航，新增模型应用、规划状态、任务评测、运行治理、工程实验与独立变更验收，七天文档降为个人可选复习。校正 BM25 公式／去重、三模式路由、Chat 审批与循环快照恢复边界并同步自测。课程 50 份 Markdown 的 221 个相对链接与空白检查通过；三个参考答案各 3／3 通过，六个工程测试文件 21／23 通过，两个指标脚本使用模拟数据计算通过。**待处理**：生产工作流的审批推进和驳回修订两项测试，产物服务替身缺少 `markReviewState`；Chat 的 pending 仍进反思、循环快照未自动恢复预算等实现边界已记录在 `course/IMPLEMENTATION-NOTES.md`。本轮未修改业务运行代码或执行真实服务故障演练，详见 `course/VERIFICATION.md`。
 
 - **GUIDE 学习指南已扩充节奏与毕业标准（2026-09-04）**：course/GUIDE.md 新增两节——「按起点选择节奏」（后端老手 50–80h 主力砸 RAG 3/4 与 Agent 4/5、新手 80–120h 顺序学、全职 2–3 周参考排期、在职 2–3 个月，含"当天学隔天 quiz"遗忘对冲与双课并行建议）与「怎么判定学会了」（单节双条件 quiz ≥10/12 + Lab 完成，未达标重读出处隔天重做；全课毕业 = 16 节全过 + 两 Capstone 交付）；目录结构更新为双课全景（course/ + course-agent/），Lab 约定从五件套更正为六件套（补 jest.inplace.config.json）并链接三个代码 Lab，环境准备标注 Lab 02/04 纯单测免 Docker。链接校验通过。纯文档更新。

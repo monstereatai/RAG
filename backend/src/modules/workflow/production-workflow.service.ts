@@ -11,6 +11,8 @@ import {
   PRODUCTION_ROLES,
   ProductionClaim,
   ProductionDeliverable,
+  ProductionLowCodeSchema,
+  ProductionLowCodeSchemaKind,
   ProductionRole,
   ProductionRiskLevel,
   ProductionStageResult,
@@ -64,6 +66,30 @@ const roleSchema = z.object({
   downstreamRisks: z.array(z.string().min(1)).max(12),
   riskLevel: z.enum(['low', 'medium', 'high']),
   readyForApproval: z.boolean(),
+  lowCodeSchemas: z
+    .array(
+      z.object({
+        schemaVersion: z.literal(1),
+        role: z.enum(PRODUCTION_ROLES),
+        kind: z.enum([
+          'pageSchema',
+          'apiSchema',
+          'trackingSchema',
+          'validationSchema',
+          'acceptanceSchema',
+        ]),
+        title: z.string().min(1).max(256),
+        source: z.enum(['llm', 'fallback']).optional(),
+        components: z.array(z.record(z.string(), z.unknown())).optional(),
+        apis: z.array(z.record(z.string(), z.unknown())).optional(),
+        events: z.array(z.record(z.string(), z.unknown())).optional(),
+        rules: z.array(z.record(z.string(), z.unknown())).optional(),
+        checks: z.array(z.record(z.string(), z.unknown())).optional(),
+        notes: z.array(z.string().max(500)).optional(),
+      }),
+    )
+    .max(8)
+    .optional(),
 });
 
 const projectFileSchema = z.object({
@@ -382,6 +408,7 @@ export class ProductionWorkflowService {
           downstreamRisks: result.downstreamRisks,
           deliverables: result.deliverables,
           generatedArtifact: result.generatedArtifact,
+          lowCodeSchemas: result.lowCodeSchemas,
         })),
     };
   }
@@ -390,7 +417,7 @@ export class ProductionWorkflowService {
     const context = await this.codingContext(threadId, userId);
     const run = await this.agentRuns?.findLatestByThread(threadId);
     const handoff = context.stages
-      .map((stage) => `${stage.role}\n${stage.summary}\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`)
+      .map((stage) => `${stage.role}\n${stage.summary}\n\n结构化 Schema：\n${JSON.stringify(stage.lowCodeSchemas ?? []).slice(0, 12_000)}\n\n${stage.deliverables.map((item) => `## ${item.title}\n${item.markdown.slice(0, 12_000)}`).join('\n\n')}`)
       .join('\n\n');
     const messages = [
         {
@@ -400,7 +427,7 @@ export class ProductionWorkflowService {
         },
         {
           role: 'user',
-          content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
+          content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物和低代码 Schema：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须优先参考 pageSchema、apiSchema、trackingSchema、validationSchema 和 acceptanceSchema 生成代码；必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
         },
       ];
     const generate = async () => {
@@ -441,9 +468,13 @@ export class ProductionWorkflowService {
     const zip = new JSZip();
     generated.files.forEach((file) => zip.file(file.path, file.content));
     zip.file('RAG_WORKFLOW_CONTEXT.json', JSON.stringify({ ...context, generatedProject: generated }, null, 2));
+    zip.file('LOW_CODE_SCHEMAS.json', JSON.stringify(context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []), null, 2));
     zip.file('README.md', `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`);
     zip.file('DELIVERY_VERIFICATION.json', JSON.stringify(this.deliveryVerification(generated), null, 2));
     context.stages.forEach((stage) => {
+      if ((stage.lowCodeSchemas ?? []).length > 0) {
+        zip.file(`schemas/${stage.role}.json`, JSON.stringify(stage.lowCodeSchemas, null, 2));
+      }
       stage.deliverables.forEach((deliverable, index) => {
         const safeTitle = deliverable.title.replace(/[\\/:*?"<>|]/g, '-');
         zip.file(`handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`, deliverable.markdown);
@@ -835,11 +866,11 @@ export class ProductionWorkflowService {
             [
               {
                 role: 'system',
-                content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
+                content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称；同时输出当前岗位能交接给低代码/AI Coding 的 lowCodeSchemas。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
               },
               {
                 role: 'user',
-                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n人工补充资料（待核验，不能单独作为 supported 声明依据）：${state.supplementalMaterials || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
+                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n人工补充资料（待核验，不能单独作为 supported 声明依据）：${state.supplementalMaterials || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。lowCodeSchemas 用于后续生成可运行项目代码：产品/设计/前端优先输出 pageSchema，后端输出 apiSchema，前端/运营输出 trackingSchema，产品/前端输出 validationSchema，测试输出 acceptanceSchema。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false,"lowCodeSchemas":[{"schemaVersion":1,"role":"${role}","kind":"pageSchema","title":"页面结构 Schema","source":"llm","components":[{"id":"main","type":"section","name":"主内容区"}],"apis":[],"events":[],"rules":[],"checks":[],"notes":[]}]}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
               },
             ],
             { signal: AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS) },
@@ -858,6 +889,11 @@ export class ProductionWorkflowService {
           reviewStatus: 'pending',
           ...output,
           claims,
+          lowCodeSchemas: this.normalizeLowCodeSchemas(
+            role,
+            state,
+            output.lowCodeSchemas,
+          ),
           evidence: toolResult.evidence,
           evidenceCoverage,
           toolExecutions: toolResult.executions,
@@ -1009,6 +1045,7 @@ export class ProductionWorkflowService {
       downstreamRisks: ['下游不得把本岗位降级交付物视为已确认结论。'],
       riskLevel: 'high',
       toolExecutions: toolResult.executions,
+      lowCodeSchemas: this.normalizeLowCodeSchemas(role, state, []),
       readyForApproval: false,
       completedAt: new Date().toISOString(),
     };
@@ -1073,6 +1110,7 @@ export class ProductionWorkflowService {
     const sourceText = this.renderDeliverables(
       result.deliverables,
       result.claims,
+      result.lowCodeSchemas,
     );
     try {
       const execution = this.toolExecution
@@ -1118,6 +1156,7 @@ export class ProductionWorkflowService {
   private renderDeliverables(
     deliverables: ProductionDeliverable[],
     claims: ProductionClaim[],
+    lowCodeSchemas: ProductionLowCodeSchema[] = [],
   ): string {
     const sections = deliverables.map(
       (item) => `# ${item.title}\n\n${item.markdown}`,
@@ -1130,7 +1169,181 @@ export class ProductionWorkflowService {
             : ''
         }`,
     );
-    return [...sections, '# 事实声明与证据', ...claimLines].join('\n\n');
+    const schemaSection =
+      lowCodeSchemas.length > 0
+        ? [
+            '# 低代码 / AI Coding 结构化 Schema',
+            '```json',
+            JSON.stringify(lowCodeSchemas, null, 2),
+            '```',
+          ]
+        : [];
+    return [
+      ...sections,
+      ...schemaSection,
+      '# 事实声明与证据',
+      ...claimLines,
+    ].join('\n\n');
+  }
+
+  private normalizeLowCodeSchemas(
+    role: ProductionRole,
+    state: ProductionWorkflowStateType,
+    input: unknown,
+  ): ProductionLowCodeSchema[] {
+    const rawSchemas = Array.isArray(input) ? input : [];
+    const normalized = rawSchemas
+      .map((item) => this.normalizeLowCodeSchemaItem(role, item))
+      .filter((item): item is ProductionLowCodeSchema => Boolean(item));
+    return normalized.length > 0
+      ? normalized
+      : this.defaultLowCodeSchemas(role, state);
+  }
+
+  private normalizeLowCodeSchemaItem(
+    role: ProductionRole,
+    item: unknown,
+  ): ProductionLowCodeSchema | null {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const record = item as Record<string, unknown>;
+    const kind = String(record.kind ?? '') as ProductionLowCodeSchemaKind;
+    if (
+      ![
+        'pageSchema',
+        'apiSchema',
+        'trackingSchema',
+        'validationSchema',
+        'acceptanceSchema',
+      ].includes(kind)
+    ) {
+      return null;
+    }
+    const ownerRole = PRODUCTION_ROLES.includes(record.role as ProductionRole)
+      ? (record.role as ProductionRole)
+      : role;
+    return {
+      schemaVersion: 1,
+      role: ownerRole,
+      kind,
+      title: String(record.title ?? `${ownerRole}-${kind}`),
+      source: record.source === 'fallback' ? 'fallback' : 'llm',
+      components: this.recordArray(record.components),
+      apis: this.recordArray(record.apis),
+      events: this.recordArray(record.events),
+      rules: this.recordArray(record.rules),
+      checks: this.recordArray(record.checks),
+      notes: Array.isArray(record.notes)
+        ? record.notes.map((note) => String(note)).slice(0, 12)
+        : [],
+    };
+  }
+
+  private recordArray(value: unknown): Array<Record<string, unknown>> {
+    return Array.isArray(value)
+      ? value
+          .filter(
+            (item) =>
+              item && typeof item === 'object' && !Array.isArray(item),
+          )
+          .map((item) => item as Record<string, unknown>)
+      : [];
+  }
+
+  private defaultLowCodeSchemas(
+    role: ProductionRole,
+    state: ProductionWorkflowStateType,
+  ): ProductionLowCodeSchema[] {
+    const base = {
+      schemaVersion: 1 as const,
+      role,
+      source: 'fallback' as const,
+    };
+    if (role === 'backend') {
+      return [
+        {
+          ...base,
+          kind: 'apiSchema',
+          title: `${state.projectId} 接口契约 Schema`,
+          apis: [
+            {
+              name: 'activityInfo',
+              method: 'GET',
+              path: `/api/${state.projectId}/info`,
+              purpose: '读取活动基础信息、时间、状态和页面配置。',
+              request: { query: ['activityId'] },
+              response: { code: 'number', data: 'ActivityInfo' },
+            },
+          ],
+          notes: ['模型未返回接口 Schema 时由系统兜底生成，供 AI Coding 起步。'],
+        },
+      ];
+    }
+    if (role === 'qa') {
+      return [
+        {
+          ...base,
+          kind: 'acceptanceSchema',
+          title: `${state.projectId} 测试验收 Schema`,
+          checks: [
+            {
+              id: 'happy-path',
+              name: '主流程可完成',
+              expected: '用户能从活动入口进入、完成核心交互并看到结果反馈。',
+              status: 'pending_confirmation',
+            },
+          ],
+          notes: ['模型未返回验收 Schema 时由系统兜底生成，后续人工补齐真实用例。'],
+        },
+      ];
+    }
+    if (role === 'operations') {
+      return [
+        {
+          ...base,
+          kind: 'trackingSchema',
+          title: `${state.projectId} 运营埋点 Schema`,
+          events: [
+            {
+              eventId: 'activity_page_view',
+              trigger: '活动页面曝光',
+              params: ['activityId', 'channel', 'region'],
+            },
+          ],
+          notes: ['模型未返回埋点 Schema 时由系统兜底生成，后续对齐埋点平台字段。'],
+        },
+      ];
+    }
+    return [
+      {
+        ...base,
+        kind: 'pageSchema',
+        title: `${state.projectId} 页面结构 Schema`,
+        components: [
+          {
+            id: 'activity-root',
+            type: 'page',
+            name: '活动主页面',
+            children: ['hero', 'rule', 'cta'],
+          },
+          { id: 'hero', type: 'section', name: '首屏视觉与活动入口' },
+          { id: 'rule', type: 'section', name: '活动规则说明' },
+          { id: 'cta', type: 'button', name: '核心行动按钮' },
+        ],
+        notes: ['模型未返回页面 Schema 时由系统兜底生成，保证下游代码生成有结构输入。'],
+      },
+      {
+        ...base,
+        kind: 'validationSchema',
+        title: `${state.projectId} 前置校验 Schema`,
+        rules: [
+          {
+            field: 'activityId',
+            rule: 'required',
+            message: '必须带活动 ID，避免多活动共用页面时串配置。',
+          },
+        ],
+      },
+    ];
   }
 
   private contentHash(content: string): string {
@@ -1232,6 +1445,11 @@ export class ProductionWorkflowService {
           readyForApproval: result.readyForApproval,
           completedAt: result.completedAt,
           deliverables: result.deliverables.map((item) => ({ type: item.type, title: item.title })),
+          lowCodeSchemas: result.lowCodeSchemas.map((item) => ({
+            kind: item.kind,
+            title: item.title,
+            source: item.source,
+          })),
         } : result]),
       ),
     };

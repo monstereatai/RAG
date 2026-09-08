@@ -27,6 +27,7 @@ export interface ProductionStageResult {
   reviewStatus: 'pending' | 'approved' | 'rejected' | 'stale';
   summary: string;
   deliverables: ProductionDeliverable[];
+  lowCodeSchemas: ProductionLowCodeSchema[];
   claims: ProductionClaim[];
   evidence: ProductionEvidence[];
   evidenceCoverage: number;
@@ -55,6 +56,27 @@ export interface ProductionDeliverable {
   type: string;
   title: string;
   markdown: string;
+}
+
+export type ProductionLowCodeSchemaKind =
+  | 'pageSchema'
+  | 'apiSchema'
+  | 'trackingSchema'
+  | 'validationSchema'
+  | 'acceptanceSchema';
+
+export interface ProductionLowCodeSchema {
+  schemaVersion: 1;
+  role: ProductionRole;
+  kind: ProductionLowCodeSchemaKind;
+  title: string;
+  source: 'llm' | 'fallback';
+  components?: Array<Record<string, unknown>>;
+  apis?: Array<Record<string, unknown>>;
+  events?: Array<Record<string, unknown>>;
+  rules?: Array<Record<string, unknown>>;
+  checks?: Array<Record<string, unknown>>;
+  notes?: string[];
 }
 
 export interface ProductionClaim {

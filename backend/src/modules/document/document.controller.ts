@@ -12,8 +12,12 @@ import {
   Logger,
   UseGuards,
   Body,
+  Query,
+  Res,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { DocumentService } from './document.service';
 import { DocumentQueueService } from './document-queue.service';
 import {
@@ -94,7 +98,9 @@ export class DocumentController {
       throw new BadRequestException('file is required');
     }
     const kind = detectDocumentKind(file.originalname);
-    const content = (await this.extractUploadContent(file, kind)).trim();
+    const content = (
+      await this.extractUploadContent(file, kind, user.userId)
+    ).trim();
     if (!content) {
       throw new BadRequestException('document text is empty');
     }
@@ -240,7 +246,7 @@ export class DocumentController {
     businessMetadata?: DocumentBusinessMetadata,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
-    const content = (await this.extractUploadContent(file, kind)).trim();
+    const content = (await this.extractUploadContent(file, kind, userId)).trim();
     if (!content) {
       await this.documentService.markTaskFailed(
         taskId,
@@ -274,6 +280,23 @@ export class DocumentController {
     };
   }
 
+  @Get('assets/image')
+  async proxyDocumentImage(
+    @Query('key') key: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const safeKey = this.normalizeObjectKey(key);
+    const ownerPrefix = `documents/${this.sanitizeObjectKeyPart(user.userId)}/`;
+    if (!safeKey.startsWith(ownerPrefix)) {
+      throw new ForbiddenException('image asset is not accessible');
+    }
+    const buffer = await this.objectStorageProvider.getObject(safeKey);
+    res.setHeader('Content-Type', this.resolveImageContentType(safeKey));
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
+  }
+
   @Get()
   list(@CurrentUser() user: JwtPayload) {
     return this.documentService.listDocs(user.userId);
@@ -291,6 +314,7 @@ export class DocumentController {
   private async extractUploadContent(
     file: Express.Multer.File,
     kind: SupportedDocumentKind,
+    userId?: string,
   ): Promise<string> {
     if (kind === 'audio') {
       try {
@@ -319,6 +343,17 @@ export class DocumentController {
       try {
         const caps = this.visionProvider.getCapabilities();
         const blocks: string[] = ['# Image Document', ''];
+        const stored = await this.objectStorageProvider.putObject({
+          key: `documents/${this.sanitizeObjectKeyPart(userId ?? 'anonymous')}/image-upload-${Date.now()}/original.${this.imageExtension(file.mimetype)}`,
+          body: file.buffer,
+          contentType: file.mimetype,
+        });
+        blocks.push(
+          '## 原始图片',
+          '',
+          `![${file.originalname.replace(/[[\]\r\n]/g, ' ')}](${this.proxyObjectUrl(stored.key)})`,
+          '',
+        );
 
         if (caps.ocr) {
           const ocrResult = await this.visionProvider.ocr(
@@ -360,8 +395,8 @@ export class DocumentController {
       file.buffer,
       kind,
       this.visionProvider,
-      this.buildImageExtractionOptions(),
-      this.buildVideoExtractionOptions(file.originalname),
+      this.buildImageExtractionOptions(userId),
+      this.buildVideoExtractionOptions(file.originalname, userId),
     );
   }
 
@@ -373,7 +408,9 @@ export class DocumentController {
    *   未配置时解析器直接用文件名作 alt，不发起任何 vision 调用；
    * - 对象存储异常由解析器静默降级为纯文本，不影响主入库链路。
    */
-  private buildImageExtractionOptions():
+  private buildImageExtractionOptions(
+    userId?: string,
+  ):
     | DocumentImageExtractionOptions
     | undefined {
     if (process.env.DOCUMENT_EXTRACT_IMAGES === 'false') {
@@ -382,6 +419,8 @@ export class DocumentController {
     return {
       storage: this.objectStorageProvider,
       vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+      ownerUserId: userId,
+      urlResolver: (stored) => this.proxyObjectUrl(stored.key),
     };
   }
 
@@ -396,13 +435,49 @@ export class DocumentController {
    */
   private buildVideoExtractionOptions(
     filename: string,
+    userId?: string,
   ): DocumentVideoExtractionOptions {
     return {
       storage: this.objectStorageProvider,
       asr: process.env.TENCENT_SECRET_ID ? this.speechProvider : undefined,
       vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+      ownerUserId: userId,
+      urlResolver: (stored) => this.proxyObjectUrl(stored.key),
       filename,
     };
+  }
+
+  private proxyObjectUrl(key: string): string {
+    return `/api/v1/documents/assets/image?key=${encodeURIComponent(key)}`;
+  }
+
+  private normalizeObjectKey(key: string | undefined): string {
+    const safeKey = (key ?? '').replace(/^\/+/, '');
+    if (!safeKey || safeKey.split('/').includes('..')) {
+      throw new BadRequestException('invalid image asset key');
+    }
+    return safeKey;
+  }
+
+  private sanitizeObjectKeyPart(value: string): string {
+    return value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
+  }
+
+  private imageExtension(contentType: string): string {
+    if (contentType === 'image/png') return 'png';
+    if (contentType === 'image/gif') return 'gif';
+    if (contentType === 'image/webp') return 'webp';
+    if (contentType === 'image/bmp') return 'bmp';
+    return 'jpg';
+  }
+
+  private resolveImageContentType(key: string): string {
+    const lower = key.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.bmp')) return 'image/bmp';
+    return 'image/jpeg';
   }
 
   private parseBusinessMetadata(
