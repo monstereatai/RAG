@@ -28,16 +28,27 @@ export class AdminDocumentsController {
   @ApiOperation({ summary: '后台查看文档元数据' })
   @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
   @RequirePermission('admin:documents:read')
-  detail(@Param('docId') docId: string) {
-    return this.ragClient.getDocument(docId);
+  async detail(@Param('docId') docId: string) {
+    const result = await this.ragClient.getDocument(docId);
+    this.requireAvailable(result);
+    return this.unwrap(result.data);
   }
 
   @Get(':docId/chunks')
   @ApiOperation({ summary: '后台查看文档 chunk 列表' })
   @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
   @RequirePermission('admin:documents:read')
-  chunks(@Param('docId') docId: string) {
-    return this.ragClient.getDocumentChunks(docId);
+  async chunks(@Param('docId') docId: string) {
+    const result = await this.ragClient.getDocumentChunks(docId);
+    this.requireAvailable(result);
+    return this.unwrap(result.data);
+  }
+
+  private unwrap(value: unknown) {
+    if (value && typeof value === 'object' && 'data' in value) {
+      return (value as { data: unknown }).data;
+    }
+    return value;
   }
 
   @Get(':docId/versions')

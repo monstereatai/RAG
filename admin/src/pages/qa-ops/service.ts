@@ -13,7 +13,7 @@ export interface QaRecord {
 }
 
 export type ChatMode = 'simple' | 'agentic' | 'auto';
-export type ChatModel = 'qwen' | 'deepseek';
+export type ChatModel = 'qwen' | 'deepseek' | 'zhipu';
 
 export interface RolePreset {
   id: string;
@@ -101,11 +101,21 @@ export const qaModelOptions: QaModelOption[] = [
     timeoutEnv: 'DEEPSEEK_TIMEOUT_MS',
     description: '可选问答模型，适合在后台按需切换对比回答效果。',
   },
+  {
+    key: 'zhipu',
+    label: '智谱 GLM',
+    provider: '智谱 OpenAI Compatible',
+    defaultModel: 'glm-5.2',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
+    apiKeyEnv: 'ZHIPU_API_KEY 或 ZAI_API_KEY',
+    timeoutEnv: 'ZHIPU_TIMEOUT_MS',
+    description: '可选智谱 GLM 模型，支持在后台按需切换对比。',
+  },
 ];
 
 export const defaultQaModelConfig: QaModelConfig = {
   defaultModel: 'qwen',
-  enabledModels: ['qwen', 'deepseek'],
+  enabledModels: ['qwen', 'deepseek', 'zhipu'],
 };
 
 export function getQaModelConfig(): QaModelConfig {
@@ -155,7 +165,7 @@ export function getEnabledQaModelOptions(config = getQaModelConfig()) {
 }
 
 function isChatModel(value: unknown): value is ChatModel {
-  return value === 'qwen' || value === 'deepseek';
+  return value === 'qwen' || value === 'deepseek' || value === 'zhipu';
 }
 
 export interface ReferenceChunk {
@@ -203,6 +213,7 @@ export interface ConversationMessage {
   role: 'human' | 'ai';
   content: string;
   createdAt: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ConversationDetail {

@@ -485,13 +485,15 @@ export class RagClientService {
 
   getDocument(docId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/documents/${encodeURIComponent(docId)}`
+      `/rag/admin/documents/${encodeURIComponent(docId)}`,
+      LIST_READ_TIMEOUT_MS,
     );
   }
 
   getDocumentChunks(docId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/documents/${encodeURIComponent(docId)}/chunks`
+      `/rag/admin/documents/${encodeURIComponent(docId)}/chunks`,
+      LIST_READ_TIMEOUT_MS,
     );
   }
 

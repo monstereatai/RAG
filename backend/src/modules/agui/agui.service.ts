@@ -58,9 +58,10 @@ export class AguiService {
         try {
           const selectedModel = options.model ?? 'qwen';
           const roleContext = resolveRoleContext(options.rolePresetId);
-          const pluginComposition = options.pluginKeys?.length && this.plugins
-            ? await this.plugins.resolve(options.pluginKeys, options.mode)
-            : undefined;
+          const pluginComposition =
+            options.pluginKeys?.length && this.plugins
+              ? await this.plugins.resolve(options.pluginKeys, options.mode)
+              : undefined;
           const artifactIntent = parseArtifactIntent(query);
           const activeThreadId =
             options.threadId ??
@@ -96,11 +97,12 @@ export class AguiService {
               5,
               options.userId,
             ),
-            this.shortTermMemory?.getContext(activeThreadId) ?? Promise.resolve({
-              systemMessage: null,
-              recentTurns: [],
-              truncatedHistory: false,
-            }),
+            this.shortTermMemory?.getContext(activeThreadId) ??
+              Promise.resolve({
+                systemMessage: null,
+                recentTurns: [],
+                truncatedHistory: false,
+              }),
             this.withTimeout(
               this.memoryService.searchMemory(
                 query,
@@ -135,12 +137,16 @@ export class AguiService {
             });
           }
 
-          const boundedHistory = shortTermContext.recentTurns.length > 0
-            ? shortTermContext.recentTurns.map((turn) => ({
-                role: turn.role === 'assistant' ? ('ai' as const) : ('human' as const),
-                content: turn.content,
-              }))
-            : history;
+          const boundedHistory =
+            shortTermContext.recentTurns.length > 0
+              ? shortTermContext.recentTurns.map((turn) => ({
+                  role:
+                    turn.role === 'assistant'
+                      ? ('ai' as const)
+                      : ('human' as const),
+                  content: turn.content,
+                }))
+              : history;
 
           const result = await this.llmProvider.runWithModel(
             selectedModel,
@@ -159,7 +165,12 @@ export class AguiService {
                 false,
                 {
                   scope: { role: roleContext.role },
-                  ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
+                  ...(pluginComposition
+                    ? {
+                        pluginKeys: pluginComposition.pluginKeys,
+                        pluginTools: pluginComposition.toolNames,
+                      }
+                    : {}),
                 },
               ),
           );
@@ -175,9 +186,24 @@ export class AguiService {
             'ai',
             result.answer,
             options.userId,
+            {
+              mode: options.mode,
+              route: result.route,
+              model: selectedModel,
+              confidence: result.confidence,
+              retryCount: result.retryCount,
+              retrievalSufficient: result.retrievalSufficient,
+              retrievalReason: result.retrievalReason,
+              references: result.references ?? [],
+              events: traceEvents.map((event) => event.type),
+            },
           );
           void this.shortTermMemory?.addTurn(activeThreadId, 'user', query);
-          void this.shortTermMemory?.addTurn(activeThreadId, 'assistant', result.answer);
+          void this.shortTermMemory?.addTurn(
+            activeThreadId,
+            'assistant',
+            result.answer,
+          );
           void this.memoryService.classifyAndPersist(
             options.userId,
             activeThreadId,

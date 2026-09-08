@@ -136,6 +136,16 @@ export const configuration = () => ({
       model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
       timeoutMs: parseInt(process.env.DEEPSEEK_TIMEOUT_MS ?? '30000', 10),
     },
+    zhipu: {
+      apiKey: process.env.ZHIPU_API_KEY || process.env.ZAI_API_KEY || '',
+      baseUrl:
+        process.env.ZHIPU_BASE_URL ?? 'https://open.bigmodel.cn/api/paas/v4/',
+      model: process.env.ZHIPU_MODEL ?? 'glm-5.2',
+      timeoutMs: parseInt(process.env.ZHIPU_TIMEOUT_MS ?? '60000', 10),
+      maxTokens: parseInt(process.env.ZHIPU_MAX_TOKENS ?? '4096', 10),
+      maxRetries: parseInt(process.env.ZHIPU_MAX_RETRIES ?? '2', 10),
+      temperature: parseFloat(process.env.ZHIPU_TEMPERATURE ?? '0.2'),
+    },
     openai: {
       apiKey: process.env.OPENAI_API_KEY ?? '',
       baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',

@@ -207,6 +207,18 @@ const formatEventTrace = (events: EventTraceItem[]) =>
     )
     .join(' → ');
 
+const isExternalReference = (item: ReferenceChunk) =>
+  item.retrievalSource === 'web' || item.id.startsWith('web:');
+
+const referenceLabel = (item: ReferenceChunk) => {
+  if (!/^https?:\/\//i.test(item.docId)) return item.docId || item.id;
+  try {
+    return new URL(item.docId).hostname.replace(/^www\./, '');
+  } catch {
+    return item.docId || item.id;
+  }
+};
+
 const routeLabel: Record<string, string> = {
   simple: '极速回答',
   agentic: '深度分析',
@@ -553,18 +565,44 @@ const QaOps: React.FC = () => {
       setActiveTitle(detail.title);
 
       // 将后端的消息列表转为前端 ChatMessage 格式
-      const chatMessages: ChatMessage[] = detail.messages.map((m, i) => ({
-        id: `${m.role}-${i}`,
-        role: m.role === 'human' ? 'user' : 'assistant',
-        content: m.content,
-        createdAt: m.createdAt
-          ? new Date(m.createdAt).toLocaleTimeString('zh-CN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
-          : '',
-        status: 'done' as const,
-      }));
+      const chatMessages: ChatMessage[] = detail.messages.map((m, i) => {
+        const metadata = isRecord(m.metadata) ? m.metadata : {};
+        const storedEvents = Array.isArray(metadata.events)
+          ? metadata.events.filter((event): event is string => typeof event === 'string')
+          : [];
+        const events = storedEvents.reduce<EventTraceItem[]>(
+          (items, event) => appendEventTrace(items, event),
+          [],
+        );
+        return {
+          id: `${m.role}-${i}`,
+          role: m.role === 'human' ? 'user' : 'assistant',
+          content: m.content,
+          createdAt: m.createdAt
+            ? new Date(m.createdAt).toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '',
+          status: 'done' as const,
+          route: typeof metadata.route === 'string' ? metadata.route : undefined,
+          model: isChatModel(metadata.model) ? metadata.model : undefined,
+          confidence: typeof metadata.confidence === 'number' ? metadata.confidence : undefined,
+          retryCount: typeof metadata.retryCount === 'number' ? metadata.retryCount : undefined,
+          retrievalSufficient:
+            typeof metadata.retrievalSufficient === 'boolean'
+              ? metadata.retrievalSufficient
+              : undefined,
+          retrievalReason:
+            typeof metadata.retrievalReason === 'string'
+              ? metadata.retrievalReason
+              : undefined,
+          references: Array.isArray(metadata.references)
+            ? (metadata.references as ReferenceChunk[])
+            : undefined,
+          events,
+        };
+      });
       setMessages(chatMessages);
     } catch {
       // 加载失败
@@ -883,7 +921,7 @@ const QaOps: React.FC = () => {
     typeof value === 'object' && value !== null;
 
   const isChatModel = (value: unknown): value is ChatModel =>
-    value === 'qwen' || value === 'deepseek';
+    value === 'qwen' || value === 'deepseek' || value === 'zhipu';
 
   const formatTime = (iso: string) => {
     try {
@@ -1229,7 +1267,11 @@ const QaOps: React.FC = () => {
                         {message.model && (
                           <span>
                             模型：
-                            {message.model === 'qwen' ? '通义千问' : 'DeepSeek'}
+                            {message.model === 'qwen'
+                              ? '通义千问'
+                              : message.model === 'zhipu'
+                                ? '智谱 GLM'
+                                : 'DeepSeek'}
                           </span>
                         )}
                       </div>
@@ -1278,27 +1320,23 @@ const QaOps: React.FC = () => {
                         <strong>引用文档（{message.references.length}）</strong>
                         <div>
                           {message.references.map((item) => (
-                            <article key={item.id}>
+                            <article key={`${item.id}-${item.chunkIndex}`}>
                               <FileWordOutlined className="file-icon word" />
                               <div>
                                 <a
-                                  href={
-                                    item.retrievalSource === 'web'
-                                      ? item.docId
-                                      : undefined
-                                  }
+                                  href={isExternalReference(item) ? item.docId : undefined}
                                   target={
-                                    item.retrievalSource === 'web'
+                                    isExternalReference(item)
                                       ? '_blank'
                                       : undefined
                                   }
                                   rel={
-                                    item.retrievalSource === 'web'
+                                    isExternalReference(item)
                                       ? 'noreferrer'
                                       : undefined
                                   }
                                   onClick={(event) => {
-                                    if (item.retrievalSource !== 'web') {
+                                    if (!isExternalReference(item)) {
                                       event.preventDefault();
                                       history.push(
                                         `/documents/${encodeURIComponent(item.docId)}`,
@@ -1306,9 +1344,10 @@ const QaOps: React.FC = () => {
                                     }
                                   }}
                                 >
-                                  {item.docId || item.id}
+                                  {referenceLabel(item)}
                                 </a>
                                 <span>
+                                  {isExternalReference(item) ? '外部网页' : '本地知识库'} ·{' '}
                                   chunk #{item.chunkIndex} · score{' '}
                                   {(item.totalScore ?? 0).toFixed(2)}
                                 </span>

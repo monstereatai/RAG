@@ -10,6 +10,42 @@ export interface ConversationMessage {
   role: 'human' | 'ai';
   content: string;
   createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+const MESSAGE_META_PREFIX = '<!-- rag-message-meta:';
+const MESSAGE_META_SUFFIX = ' -->';
+
+function decodeMessage(raw: MessageEntity): ConversationMessage {
+  const markerStart = raw.content.lastIndexOf(MESSAGE_META_PREFIX);
+  if (markerStart < 0 || !raw.content.endsWith(MESSAGE_META_SUFFIX)) {
+    return {
+      role: raw.role as 'human' | 'ai',
+      content: raw.content,
+      createdAt: raw.createdAt.toISOString(),
+    };
+  }
+  const encoded = raw.content.slice(
+    markerStart + MESSAGE_META_PREFIX.length,
+    -MESSAGE_META_SUFFIX.length,
+  );
+  try {
+    const metadata = JSON.parse(
+      Buffer.from(encoded, 'base64').toString('utf8'),
+    ) as Record<string, unknown>;
+    return {
+      role: raw.role as 'human' | 'ai',
+      content: raw.content.slice(0, markerStart).trimEnd(),
+      createdAt: raw.createdAt.toISOString(),
+      metadata,
+    };
+  } catch {
+    return {
+      role: raw.role as 'human' | 'ai',
+      content: raw.content,
+      createdAt: raw.createdAt.toISOString(),
+    };
+  }
 }
 
 export interface Conversation {
@@ -95,11 +131,7 @@ export class ConversationService {
     const conversation: Conversation = {
       threadId: conv.id,
       title: conv.title,
-      messages: messages.map((m) => ({
-        role: m.role as 'human' | 'ai',
-        content: m.content,
-        createdAt: m.createdAt.toISOString(),
-      })),
+      messages: messages.map(decodeMessage),
       createdAt: conv.createdAt.toISOString(),
       updatedAt: (
         messages[messages.length - 1]?.createdAt ?? conv.createdAt
@@ -125,12 +157,16 @@ export class ConversationService {
     role: 'human' | 'ai',
     content: string,
     userId?: string,
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
+    const storedContent = metadata
+      ? `${content}\n\n${MESSAGE_META_PREFIX}${Buffer.from(JSON.stringify(metadata), 'utf8').toString('base64')}${MESSAGE_META_SUFFIX}`
+      : content;
     const msg = this.messageRepo.create({
       id: randomUUID(),
       conversationId: threadId,
       role,
-      content,
+      content: storedContent,
     });
     await this.messageRepo.save(msg);
     this.logger.log(`Message saved to DB: threadId=${threadId}, role=${role}`);
@@ -190,12 +226,18 @@ export class ConversationService {
       .addSelect('conversation.mode', 'mode')
       .addSelect('COUNT(message.id)', 'messageCount')
       .addSelect('conversation.createdAt', 'createdAt')
-      .addSelect('COALESCE(MAX(message.createdAt), conversation.createdAt)', 'updatedAt')
+      .addSelect(
+        'COALESCE(MAX(message.createdAt), conversation.createdAt)',
+        'updatedAt',
+      )
       .groupBy('conversation.id')
       .addGroupBy('conversation.title')
       .addGroupBy('conversation.mode')
       .addGroupBy('conversation.createdAt')
-      .orderBy('COALESCE(MAX(message.createdAt), conversation.createdAt)', 'DESC');
+      .orderBy(
+        'COALESCE(MAX(message.createdAt), conversation.createdAt)',
+        'DESC',
+      );
 
     if (userId) {
       query.where('conversation.userId = :userId', { userId });

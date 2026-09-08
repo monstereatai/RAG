@@ -527,6 +527,14 @@
 - **项目 ZIP 目录整理**：应用源码保留在根目录；工作流上下文、低代码 Schema、证据、岗位交接和交付校验统一归档到 `docs/rag`、`docs/schemas`、`docs/evidence`、`docs/handoff`，并在根目录 README 增加目录说明；`backend pnpm build` ✅。
 - **项目 ZIP 代码目录统一**：生成项目的全部代码文件统一放入 `project/`，根目录仅保留 README 与资料索引，README 启动说明同步更新为先进入 `project/`；`backend pnpm build` ✅。
 - **Playway 预览与 ZIP 入口统一**：ZIP 的 `project/index.html` 改为直接复用 `renderPlaywayPreview()` 同源渲染结果，导出后打开入口页与 Playway 预览保持一致；AI Coding React 源码仍保留在 `project/src/`；`backend pnpm build` ✅。
+- **QA 模型标签修正**：问答卡片对 `zhipu` 单独显示“智谱 GLM”，不再把除千问以外的模型误标为 DeepSeek；智谱配置直连验证返回 200。
+- **智谱 401 修复**：修正 `ZHIPU_API_KEY` 为空字符串时错误阻断 `ZAI_API_KEY` 回退的问题，改用非空优先级读取；重启 backend 后 Agentic `model=zhipu` 实测不再返回 401，返回正常 `RUN_FINISHED`。
+- **QA 历史消息元数据持久化**：对话消息保存引用片段、模型、路由、置信度、检索原因和思考事件；刷新后从历史会话恢复这些信息，旧消息纯文本格式继续兼容；不新增数据库字段，backend build 与 admin TypeScript 检查通过。
+- **QA 引用文档点击修复**：引用卡片同时按 `retrievalSource` 和 `http(s)` URL 识别外链，避免把网页 URL 错误跳转为内部文档详情；外链显示域名并新窗口打开，卡片增加溢出截断和窄屏布局保护；admin TypeScript 检查通过。
+- **QA 本地网页文档来源修正**：本地知识库中以原网页 URL 作为 `docId` 的资料不再被误判为外链；仅 `retrievalSource=web` 或 `web:` 引用 ID 走外部链接，并在卡片标注“本地知识库／外部网页”。
+- **文档详情页接口字段兼容**：详情页归一化 backend 返回的 `docId`、顶层元数据和 `chunkIndex/sourceStart/sourceEnd` 字段，补齐前端缺失默认值，修复点击引用后因 `fileType` 等字段为空导致的页面报错；admin TypeScript 检查通过。
+- **引用文档详情超时修复**：admin-backend 文档详情与 chunk 请求改用 10 秒读取超时，避免默认 2 秒超时导致点击引用后空白或统一失败；admin-backend build 与 admin TypeScript 检查通过。
+- **引用文档详情响应解包修复**：admin-backend 详情与 chunk 接口统一解开 RAG backend 的 `{ code, data, message }` 外层响应，避免前端拿到嵌套数据后全部显示默认值；admin-backend build 与 admin TypeScript 检查通过。
 
 - **定时任务版本治理与复制**：定时分析任务增加版本组、版本号、当前版本和复制来源；后台支持复制新版本、查看版本历史和启用指定版本。新版本默认停用，启用时自动停用同组旧版本，旧版本及执行历史保留。
 

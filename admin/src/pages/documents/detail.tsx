@@ -48,12 +48,38 @@ const DocumentDetail: React.FC = () => {
     setLoading(true);
     Promise.all([getDocumentDetail(id), getDocumentChunks(id)])
       .then(([docRes, chunkRes]) => {
-        const docData = (docRes as any)?.data ?? docRes;
+        const rawDoc = (docRes as any)?.data ?? docRes;
+        const docData = {
+          ...rawDoc,
+          id: rawDoc.id ?? rawDoc.docId ?? id,
+          fileType: rawDoc.fileType ?? 'text',
+          fileSize: rawDoc.fileSize ?? 0,
+          uploadedBy: rawDoc.uploadedBy ?? rawDoc.userId ?? '未知',
+          updatedAt: rawDoc.updatedAt ?? rawDoc.createdAt,
+          metadata: rawDoc.metadata ?? {
+            title: rawDoc.title,
+            author: rawDoc.author,
+            summary: rawDoc.summary,
+            keywords: rawDoc.keywords,
+            language: rawDoc.language,
+            category: rawDoc.category,
+          },
+        };
         setDoc(docData);
-        const chunkData = (chunkRes as any)?.data ?? chunkRes;
-        setChunks(
-          Array.isArray(chunkData) ? chunkData : (chunkData?.list ?? []),
+        const rawChunks = (chunkRes as any)?.data ?? chunkRes;
+        const chunkData = (Array.isArray(rawChunks) ? rawChunks : rawChunks?.list ?? []).map(
+          (chunk: any) => ({
+            ...chunk,
+            index: chunk.index ?? chunk.chunkIndex ?? 0,
+            headingPath: Array.isArray(chunk.headingPath)
+              ? chunk.headingPath.join(' / ')
+              : chunk.headingPath ?? '',
+            tokenCount: chunk.tokenCount ?? Math.ceil((chunk.content?.length ?? 0) / 4),
+            startOffset: chunk.startOffset ?? chunk.sourceStart ?? 0,
+            endOffset: chunk.endOffset ?? chunk.sourceEnd ?? chunk.content?.length ?? 0,
+          }),
         );
+        setChunks(chunkData);
       })
       .catch(() => message.error('加载文档详情失败'))
       .finally(() => setLoading(false));
