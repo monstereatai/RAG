@@ -43,8 +43,11 @@ export class AgentLoopService {
   async resume<TState, TOutput>(
     input: AgentLoopInput<TState, TOutput>,
   ): Promise<AgentLoopResult<TState, TOutput>> {
-    if (!this.redis.isEnabled()) throw new Error('Agent Loop 恢复需要 Redis 检查点');
-    const raw = await this.redis.get(this.checkpointKey(input.threadId, input.actor));
+    if (!this.redis.isEnabled())
+      throw new Error('Agent Loop 恢复需要 Redis 检查点');
+    const raw = await this.redis.get(
+      this.checkpointKey(input.threadId, input.actor),
+    );
     if (!raw) throw new Error('未找到可恢复的 Agent Loop 检查点');
     let checkpoint: AgentLoopCheckpoint<TState>;
     try {
@@ -62,7 +65,12 @@ export class AgentLoopService {
     ) {
       throw new Error('Agent Loop 检查点身份或运行标识不匹配，拒绝恢复');
     }
-    return this.execute(input, checkpoint.state, checkpoint.step, checkpoint.toolCalls);
+    return this.execute(
+      input,
+      checkpoint.state,
+      checkpoint.step,
+      checkpoint.toolCalls,
+    );
   }
 
   private async execute<TState, TOutput>(
@@ -86,10 +94,21 @@ export class AgentLoopService {
     for (let step = completedSteps + 1; step <= maxSteps; step += 1) {
       const remainingMs = input.timeoutMs - (Date.now() - startedAt);
       if (remainingMs <= 0) {
-        return this.finish(input, state, step - 1, toolCalls, 'failed', 'Agent Loop 总超时');
+        return this.finish(
+          input,
+          state,
+          step - 1,
+          toolCalls,
+          'failed',
+          'Agent Loop 总超时',
+        );
       }
 
-      await this.emit(input, 'agent.loop.round.started', { step, toolCalls, remainingMs });
+      await this.emit(input, 'agent.loop.round.started', {
+        step,
+        toolCalls,
+        remainingMs,
+      });
       let decision: AgentLoopDecision<TState, TOutput>;
       try {
         decision = await input.decide(state, { step, toolCalls, remainingMs });
@@ -105,31 +124,74 @@ export class AgentLoopService {
       }
 
       if (decision.type === 'complete') {
-        return this.finish(input, state, step, toolCalls, 'completed', decision.reason, decision.output);
+        return this.finish(
+          input,
+          state,
+          step,
+          toolCalls,
+          'completed',
+          decision.reason,
+          decision.output,
+        );
       }
       if (decision.type === 'blocked') {
-        return this.finish(input, state, step, toolCalls, 'blocked', decision.reason);
+        return this.finish(
+          input,
+          state,
+          step,
+          toolCalls,
+          'blocked',
+          decision.reason,
+        );
       }
 
       // 工具动作经过 ToolExecutionService 的权限、审批和幂等保护；模型动作则受同一剩余时限约束。
       if (decision.type === 'tool') {
         if (toolCalls >= maxToolCalls) {
-          return this.finish(input, state, step, toolCalls, 'budget_exceeded', `工具调用达到上限 ${maxToolCalls}`);
+          return this.finish(
+            input,
+            state,
+            step,
+            toolCalls,
+            'budget_exceeded',
+            `工具调用达到上限 ${maxToolCalls}`,
+          );
         }
         toolCalls += 1;
         const execution = await this.executeTool(input, decision, remainingMs);
         if (execution.status === 'blocked') {
-          return this.finish(input, state, step, toolCalls, 'blocked', execution.error ?? `${decision.name} 被阻断`);
+          return this.finish(
+            input,
+            state,
+            step,
+            toolCalls,
+            'blocked',
+            execution.error ?? `${decision.name} 被阻断`,
+          );
         }
         if (execution.status === 'failed' || execution.output === undefined) {
-          return this.finish(input, state, step, toolCalls, 'failed', execution.error ?? `${decision.name} 执行失败`);
+          return this.finish(
+            input,
+            state,
+            step,
+            toolCalls,
+            'failed',
+            execution.error ?? `${decision.name} 执行失败`,
+          );
         }
         state = decision.reduce(state, execution.output);
       } else {
         const actionStartedAt = Date.now();
-        await this.emit(input, 'agent.loop.model.started', { step, action: decision.name });
+        await this.emit(input, 'agent.loop.model.started', {
+          step,
+          action: decision.name,
+        });
         try {
-          const result = await this.withTimeout(decision.execute(), remainingMs, decision.name);
+          const result = await this.withTimeout(
+            decision.execute(),
+            remainingMs,
+            decision.name,
+          );
           state = decision.reduce(state, result);
           await this.emit(input, 'agent.loop.model.completed', {
             step,
@@ -152,7 +214,14 @@ export class AgentLoopService {
       await this.emit(input, 'agent.loop.round.completed', { step, toolCalls });
     }
 
-    return this.finish(input, state, maxSteps, toolCalls, 'budget_exceeded', `执行步数达到上限 ${maxSteps}`);
+    return this.finish(
+      input,
+      state,
+      maxSteps,
+      toolCalls,
+      'budget_exceeded',
+      `执行步数达到上限 ${maxSteps}`,
+    );
   }
 
   private executeTool<TState, TOutput>(
@@ -175,7 +244,8 @@ export class AgentLoopService {
       approvalGranted: action.approvalGranted,
       idempotencyKey: action.idempotencyKey,
       sideEffect: action.sideEffect,
-      execute: () => this.withTimeout(action.execute(), remainingMs, action.name),
+      execute: () =>
+        this.withTimeout(action.execute(), remainingMs, action.name),
     });
   }
 
@@ -203,12 +273,21 @@ export class AgentLoopService {
         input.checkpointTtlSeconds ?? 86_400,
       );
     }
-    await this.emit(input, redisEnabled ? 'agent.loop.checkpoint.saved' : 'agent.loop.checkpoint.skipped', {
-      step,
-      toolCalls,
-      redisEnabled,
-      stateHash: createHash('sha256').update(snapshot).digest('hex').slice(0, 16),
-    });
+    await this.emit(
+      input,
+      redisEnabled
+        ? 'agent.loop.checkpoint.saved'
+        : 'agent.loop.checkpoint.skipped',
+      {
+        step,
+        toolCalls,
+        redisEnabled,
+        stateHash: createHash('sha256')
+          .update(snapshot)
+          .digest('hex')
+          .slice(0, 16),
+      },
+    );
   }
 
   private async finish<TState, TOutput>(
@@ -220,8 +299,19 @@ export class AgentLoopService {
     terminationReason: string,
     output?: TOutput,
   ): Promise<AgentLoopResult<TState, TOutput>> {
-    const result = { status, state, output, steps, toolCalls, terminationReason };
-    await this.emit(input, `agent.loop.${status}`, { steps, toolCalls, terminationReason });
+    const result = {
+      status,
+      state,
+      output,
+      steps,
+      toolCalls,
+      terminationReason,
+    };
+    await this.emit(input, `agent.loop.${status}`, {
+      steps,
+      toolCalls,
+      terminationReason,
+    });
     return result;
   }
 
@@ -239,22 +329,33 @@ export class AgentLoopService {
         payload,
       });
     } catch (error) {
-      this.logger.warn(`Agent Loop event skipped: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(
+        `Agent Loop event skipped: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   private checkpointKey(threadId: string, actor: string) {
-    const scope = createHash('sha256').update(`${threadId}:${actor}`).digest('hex');
+    const scope = createHash('sha256')
+      .update(`${threadId}:${actor}`)
+      .digest('hex');
     return `agent-loop:checkpoint:${scope}`;
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string,
+  ): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
         promise,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+          timer = setTimeout(
+            () => reject(new Error(`${label} timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
         }),
       ]);
     } finally {

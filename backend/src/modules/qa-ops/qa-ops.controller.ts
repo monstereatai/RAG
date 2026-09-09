@@ -92,7 +92,8 @@ export class QaOpsController {
 
   private parseModel(model?: string): LlmModelProvider {
     if (!model) return 'qwen';
-    if (model === 'qwen' || model === 'deepseek') return model;
-    throw new NotFoundException('model must be one of: qwen, deepseek');
+    if (model === 'qwen' || model === 'deepseek' || model === 'zhipu')
+      return model;
+    throw new NotFoundException('model must be one of: qwen, deepseek, zhipu');
   }
 }

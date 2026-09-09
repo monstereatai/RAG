@@ -1,0 +1,89 @@
+{
+  "schema_version": 2,
+  "change_id": "003-agent-interrupt-resume",
+  "mode": "standard",
+  "status": "spec_draft",
+  "current_task": null,
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/003-agent-interrupt-resume/spec.md",
+    "plan": "specs/003-agent-interrupt-resume/plan.md",
+    "tasks": "specs/003-agent-interrupt-resume/tasks.md",
+    "verify": "specs/003-agent-interrupt-resume/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "off"
+  },
+  "approvals": {
+    "spec": null,
+    "plan": null,
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "显式开启审批的 Agentic 问答在审批节点真实暂停，后续节点不执行。"
+    },
+    "AC-02": {
+      "description": "审批通过或拒绝以 LangGraph Command 从同一中断检查点恢复，且不重跑已完成节点。"
+    },
+    "AC-03": {
+      "description": "Agent Loop 从成功快照恢复时保留已消耗步骤和工具预算，不重复已完成动作。"
+    },
+    "AC-04": {
+      "description": "无效快照、身份不符或未知副作用无法触发盲目重跑。"
+    },
+    "AC-05": {
+      "description": "默认 Chat 行为、既有调用方和生产工作流保持兼容且恢复过程可观测。"
+    }
+  },
+  "tasks": {},
+  "checks": [],
+  "events": [
+    {
+      "at": "2026-09-08T04:44:30Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-09-08T04:44:30Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "已完成 Agentic 问答真暂停恢复与通用循环断点恢复的 Spec 初稿。"
+    },
+    {
+      "at": "2026-09-08T04:44:30Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-09-08T04:44:30Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-09-08T04:44:31Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-09-08T04:44:31Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-09-08T04:44:31Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-05."
+    }
+  ],
+  "created_at": "2026-09-08T04:44:30Z",
+  "updated_at": "2026-09-08T04:44:31Z"
+}

@@ -1,6 +1,4 @@
-import {
-  buildStructuredDeliveryArtifacts,
-} from './structured-delivery-artifacts';
+import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
 
 describe('structured delivery artifacts', () => {
   it('creates the game marketing delivery chain without inventing business facts', () => {
@@ -34,9 +32,13 @@ describe('structured delivery artifacts', () => {
         'code_context_pack',
       ]),
     );
-    const assumptions = artifacts.find((item) => item.type === 'assumption_register');
+    const assumptions = artifacts.find(
+      (item) => item.type === 'assumption_register',
+    );
     expect(JSON.stringify(assumptions?.payload)).toContain('待产品确认');
-    const tracking = artifacts.find((item) => item.type === 'event_tracking_plan');
+    const tracking = artifacts.find(
+      (item) => item.type === 'event_tracking_plan',
+    );
     expect(JSON.stringify(tracking?.payload)).toContain('draw_button_click');
   });
 

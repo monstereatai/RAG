@@ -3,9 +3,9 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 /**
  * LLM Provider 抽象接口
- * 可插拔：qwen / deepseek / openai
+ * 可插拔：qwen / deepseek / zhipu
  */
-export type LlmModelProvider = 'qwen' | 'deepseek';
+export type LlmModelProvider = 'qwen' | 'deepseek' | 'zhipu';
 
 export interface ILLMProvider {
   /**

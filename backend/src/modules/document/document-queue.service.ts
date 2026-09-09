@@ -220,12 +220,17 @@ export class DocumentQueueService implements OnModuleDestroy {
     }));
   }
 
-  async retryFailed(taskId: string): Promise<{ taskId: string; retried: boolean; reason?: string }> {
-    if (!this.enabled) return { taskId, retried: false, reason: 'queue is disabled' };
+  async retryFailed(
+    taskId: string,
+  ): Promise<{ taskId: string; retried: boolean; reason?: string }> {
+    if (!this.enabled)
+      return { taskId, retried: false, reason: 'queue is disabled' };
     const job = await this.queue.getJob(taskId);
-    if (!job) return { taskId, retried: false, reason: 'job was expired or not found' };
+    if (!job)
+      return { taskId, retried: false, reason: 'job was expired or not found' };
     const state = await job.getState();
-    if (state !== 'failed') return { taskId, retried: false, reason: `job state is ${state}` };
+    if (state !== 'failed')
+      return { taskId, retried: false, reason: `job state is ${state}` };
     await job.retry();
     return { taskId, retried: true };
   }

@@ -12,7 +12,6 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -507,6 +506,9 @@ async function extractPdfText(
   ocr?: DocumentOcrDelegate,
   images?: DocumentImageExtractionOptions,
 ): Promise<string> {
+  // pdf-parse 会在模块加载时初始化 @napi-rs/canvas 的 native GC 句柄。
+  // 延迟到真正解析 PDF 时再加载，避免普通文本/Office 入库和 Jest 启动阶段泄漏句柄。
+  const { PDFParse } = await import('pdf-parse');
   const parser = new PDFParse({ data: buffer });
   let textResult;
   try {

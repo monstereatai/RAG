@@ -124,6 +124,23 @@ export class GraphService {
     };
   }
 
+  /** 将已经结构化的领域图直接幂等写入 Neo4j，跳过 LLM 抽取，适合 Playway 等注册表数据。 */
+  async importStructuredGraph(
+    graph: GraphData,
+    userId: string,
+    sourceId: string,
+  ): Promise<GraphImportResult> {
+    this.assertEnabled();
+    await this.removeSource(sourceId, userId);
+    await this.writeGraph(graph, userId, sourceId);
+    return {
+      sourceId,
+      nodeCount: graph.nodes.length,
+      relationshipCount: graph.relationships.length,
+      graph,
+    };
+  }
+
   /** 移除一个来源的归属；共享实体和关系继续保留其余来源。 */
   async removeSource(sourceId: string, userId: string): Promise<void> {
     if (!this.isEnabled()) return;
@@ -297,18 +314,25 @@ export class GraphService {
     userId: string,
     id: string,
     input: GraphAdminNodeUpdate,
-  ): Promise<(GraphAdminNode & { relations: GraphAdminRelationship[] }) | null> {
+  ): Promise<
+    (GraphAdminNode & { relations: GraphAdminRelationship[] }) | null
+  > {
     if (!this.isEnabled()) {
       return null;
     }
 
     const type = input.type?.trim();
     const aliases = Array.isArray(input.aliases)
-      ? input.aliases.map(String).map((item) => item.trim()).filter(Boolean)
+      ? input.aliases
+          .map(String)
+          .map((item) => item.trim())
+          .filter(Boolean)
       : [];
     const sourceId = input.sourceId?.trim() ?? '';
     const properties =
-      input.properties && typeof input.properties === 'object' && !Array.isArray(input.properties)
+      input.properties &&
+      typeof input.properties === 'object' &&
+      !Array.isArray(input.properties)
         ? input.properties
         : {};
 

@@ -14,6 +14,7 @@ import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { AgentLoopModule } from '../agent-loop/agent-loop.module';
+import { GraphModule } from '../graph/graph.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AgentLoopModule } from '../agent-loop/agent-loop.module';
     PluginRuntimeModule,
     DomainEventsModule,
     AgentLoopModule,
+    GraphModule,
   ],
   controllers: [WorkflowController],
   providers: [ProductionWorkflowService, ProductionWorkflowTools],

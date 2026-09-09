@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner, Table, TableIndex } from 'typeorm';
 
-export class AddAgenticStructuredArtifacts1786200000000
-  implements MigrationInterface
-{
+export class AddAgenticStructuredArtifacts1786200000000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     if (await queryRunner.hasTable('agentic_structured_artifacts')) return;
 
@@ -25,7 +23,11 @@ export class AddAgenticStructuredArtifacts1786200000000
           },
           { name: 'payload', type: 'text' },
           { name: 'sourceDocIds', type: 'text', isNullable: true },
-          { name: 'createdAt', type: 'timestamp', default: 'CURRENT_TIMESTAMP' },
+          {
+            name: 'createdAt',
+            type: 'timestamp',
+            default: 'CURRENT_TIMESTAMP',
+          },
         ],
       }),
     );

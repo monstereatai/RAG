@@ -493,6 +493,50 @@ export const getAgentRunDetailArtifacts = (id: string) =>
     `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/artifacts`,
   );
 
+export interface AgentRunSummary {
+  scanned: number;
+  statusCounts: Record<string, number>;
+  successRate: number;
+  failureRate: number;
+  totalCostUsd: number;
+  totalToolCalls: number;
+  totalRetries: number;
+  budgetExceededRuns: number;
+  stepAccuracy?: number;
+  recoveryRate?: number;
+  qualityLayers?: {
+    runSuccessRate: number;
+    toolSuccessRate: number;
+    taskAccuracy: number;
+    deliveryReadyRate: number;
+  };
+}
+
+export const getAgentRunSummary = (limit = 500) =>
+  authRequest<AgentRunSummary>(`/api/admin/agent-ops/runs/summary?limit=${limit}`);
+
+export const getSecurityPolicies = () =>
+  authRequest<{ policies?: Array<{ id?: string; name?: string; severity?: string }> }>(
+    "/api/admin/agent-ops/security/policies",
+  );
+
+export const getSecurityAudit = (limit = 100) =>
+  authRequest<{ events?: Array<{ id?: string; eventType?: string; payload?: unknown; createdAt?: string }> }>(
+    `/api/admin/agent-ops/security/audit?limit=${limit}`,
+  );
+
+export interface RagQualitySummary {
+  scanned: number;
+  answerRate: number;
+  citationRate: number;
+  refusalRate: number;
+  averageLatencyMs: number;
+  gate?: { passed: boolean; reasons: string[]; thresholds: Record<string, number> };
+}
+
+export const getRagQualitySummary = (limit = 500) =>
+  authRequest<RagQualitySummary>(`/api/admin/agent-ops/rag-quality?limit=${limit}`);
+
 export const getAgentRuntimeCapabilities = () =>
   authRequest<unknown>('/api/admin/agent-ops/runtime/capabilities');
 

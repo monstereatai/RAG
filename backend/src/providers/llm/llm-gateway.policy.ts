@@ -19,28 +19,49 @@ export interface LlmRoutePolicy {
 export class LlmGatewayPolicy {
   constructor(private readonly config: ConfigService) {}
 
-  resolve(task: LlmTask = 'fast', requested?: LlmModelProvider): LlmRoutePolicy {
+  resolve(
+    task: LlmTask = 'fast',
+    requested?: LlmModelProvider,
+  ): LlmRoutePolicy {
     const primary = requested ?? this.defaultProvider();
     const fallback = this.fallbackProvider(primary);
-    const prefix = task === 'reasoning' || task === 'structured' ? 'LLM_REASONING' : 'LLM_FAST';
+    const prefix =
+      task === 'reasoning' || task === 'structured'
+        ? 'LLM_REASONING'
+        : 'LLM_FAST';
     return {
       task,
       primary,
       fallback,
-      timeoutMs: this.number(`${prefix}_TIMEOUT_MS`, primary === 'qwen' ? 60000 : 30000),
-      maxTokens: this.number(`${prefix}_MAX_TOKENS`, task === 'fast' ? 2048 : 4096),
+      timeoutMs: this.number(
+        `${prefix}_TIMEOUT_MS`,
+        primary === 'qwen' ? 60000 : 30000,
+      ),
+      maxTokens: this.number(
+        `${prefix}_MAX_TOKENS`,
+        task === 'fast' ? 2048 : 4096,
+      ),
       maxCostUsd: this.number(`${prefix}_MAX_COST_USD`, 0.05),
     };
   }
 
   private defaultProvider(): LlmModelProvider {
-    return this.config.get<string>('llm.provider') === 'deepseek' ? 'deepseek' : 'qwen';
+    const provider = this.config.get<string>('llm.provider');
+    return provider === 'deepseek' || provider === 'zhipu' ? provider : 'qwen';
   }
 
   private fallbackProvider(primary: LlmModelProvider): LlmModelProvider | null {
-    if (this.config.get<boolean>('llm.gateway.fallbackEnabled') === false) return null;
+    if (this.config.get<boolean>('llm.gateway.fallbackEnabled') === false)
+      return null;
     const configured = this.config.get<string>('llm.gateway.fallbackProvider');
-    const fallback = configured === 'deepseek' || configured === 'qwen' ? configured : primary === 'qwen' ? 'deepseek' : 'qwen';
+    const fallback =
+      configured === 'deepseek' ||
+      configured === 'qwen' ||
+      configured === 'zhipu'
+        ? configured
+        : primary === 'qwen'
+          ? 'deepseek'
+          : 'qwen';
     return fallback === primary ? null : fallback;
   }
 

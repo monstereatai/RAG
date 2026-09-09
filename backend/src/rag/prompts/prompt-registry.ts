@@ -13,7 +13,8 @@ export const promptRegistry: PromptRegistryEntry[] = [
     name: 'rag.generate_answer',
     version: '2026-07-07',
     owner: 'rag-backend',
-    purpose: '基于可信检索片段生成带引用的回答，并隔离检索内容中的潜在提示注入。',
+    purpose:
+      '基于可信检索片段生成带引用的回答，并隔离检索内容中的潜在提示注入。',
     file: 'src/rag/prompts/rag.prompts.ts',
     evals: [
       'npm run eval:rag',
@@ -48,6 +49,5 @@ export const promptRegistry: PromptRegistryEntry[] = [
     file: 'src/rag/prompts/agentic.prompts.ts',
     evals: ['npm run eval:rag:quality', 'npm run eval:agent-tasks'],
     rollback: '恢复上一版 reflectionPrompt 并复跑质量门禁。',
-  }
+  },
 ];
-

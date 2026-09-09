@@ -1,6 +1,10 @@
 import type { ToolApprovalPolicy } from '../../tools/tool-execution.service';
 
-export type AgentLoopStatus = 'completed' | 'blocked' | 'failed' | 'budget_exceeded';
+export type AgentLoopStatus =
+  | 'completed'
+  | 'blocked'
+  | 'failed'
+  | 'budget_exceeded';
 
 interface AgentLoopActionBase<TState, TResult> {
   name: string;
@@ -9,13 +13,17 @@ interface AgentLoopActionBase<TState, TResult> {
   reduce: (state: TState, result: TResult) => TState;
 }
 
-export interface AgentLoopModelAction<TState, TResult>
-  extends AgentLoopActionBase<TState, TResult> {
+export interface AgentLoopModelAction<
+  TState,
+  TResult,
+> extends AgentLoopActionBase<TState, TResult> {
   type: 'model';
 }
 
-export interface AgentLoopToolAction<TState, TResult>
-  extends AgentLoopActionBase<TState, TResult> {
+export interface AgentLoopToolAction<
+  TState,
+  TResult,
+> extends AgentLoopActionBase<TState, TResult> {
   type: 'tool';
   ownerUserId?: string;
   approvalPolicy?: ToolApprovalPolicy;
@@ -46,7 +54,9 @@ export interface AgentLoopInput<TState, TOutput> {
   decide: (
     state: TState,
     context: { step: number; toolCalls: number; remainingMs: number },
-  ) => Promise<AgentLoopDecision<TState, TOutput>> | AgentLoopDecision<TState, TOutput>;
+  ) =>
+    | Promise<AgentLoopDecision<TState, TOutput>>
+    | AgentLoopDecision<TState, TOutput>;
 }
 
 export interface AgentLoopCheckpoint<TState> {

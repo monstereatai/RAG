@@ -105,7 +105,9 @@ export interface IVisionProvider {
   /**
    * 图片生成：根据文本描述生成图片
    */
-  generateImage?(request: ImageGenerationRequest): Promise<ImageGenerationResult>;
+  generateImage?(
+    request: ImageGenerationRequest,
+  ): Promise<ImageGenerationResult>;
 
   /**
    * 获取 provider 能力声明

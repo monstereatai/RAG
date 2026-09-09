@@ -26,6 +26,18 @@ export class AgentOpsController {
     return this.ragClient.listScheduledAnalysisJobs();
   }
 
+  @Get('security/policies')
+  @RequirePermission('admin:qa-ops:read')
+  securityPolicies() {
+    return this.ragClient.listSecurityPolicies();
+  }
+
+  @Get('security/audit')
+  @RequirePermission('admin:qa-ops:read')
+  securityAudit(@Query('limit') limit?: string) {
+    return this.ragClient.listSecurityAudit(Number(limit) || 100);
+  }
+
   @Post('schedules/parse')
   @RequirePermission('admin:qa-ops:write')
   parseSchedule(@Body() body: unknown) {
@@ -303,6 +315,15 @@ export class AgentOpsController {
   @Get('runtime-events/metrics')
   @RequirePermission('admin:qa-ops:read')
   runtimeEventMetrics(@Query('threadId') threadId?: string, @Query('runId') runId?: string) { return this.ragClient.getRuntimeEventMetrics(threadId, runId); }
+
+  @Get('runs/summary')
+  @RequirePermission('admin:qa-ops:read')
+  agentRunSummary(@Query('limit') limit?: string) { return this.ragClient.getAgentRunSummary(Number(limit) || 500); }
+
+  @Get('rag-quality')
+  @ApiOperation({ summary: 'RAG 质量趋势与发布门禁' })
+  @RequirePermission('admin:qa-ops:read')
+  ragQuality(@Query('limit') limit?: string) { return this.ragClient.getRagQualitySummary(Number(limit) || 500); }
 
   @Get('governance/plugins')
   @RequirePermission('admin:qa-ops:read')

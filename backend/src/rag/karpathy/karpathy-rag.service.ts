@@ -24,7 +24,10 @@ import {
   BadCaseFlywheelService,
   type BadCaseMatch,
 } from '../prompts/bad-case-flywheel.service';
-import { BochaSearchService, BochaSearchResult } from '../../tools/bocha-search.service';
+import {
+  BochaSearchService,
+  BochaSearchResult,
+} from '../../tools/bocha-search.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
@@ -60,7 +63,13 @@ export interface RetrievedChunk {
   documentType?: string;
   lifecycleStatus?: string;
   supersedesDocId?: string | null;
-  retrievalSource?: 'bm25' | 'vector' | 'hybrid' | 'expansion' | 'obsidian' | 'web';
+  retrievalSource?:
+    | 'bm25'
+    | 'vector'
+    | 'hybrid'
+    | 'expansion'
+    | 'obsidian'
+    | 'web';
   contextRole?: 'hit' | 'neighbor' | 'section' | 'obsidian';
 }
 
@@ -535,7 +544,9 @@ export class KarpathyRagService implements OnModuleInit {
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(userId)
       : null;
-    const candidateDepth = allowedDocIds ? profile.candidateDepth * 3 : profile.candidateDepth;
+    const candidateDepth = allowedDocIds
+      ? profile.candidateDepth * 3
+      : profile.candidateDepth;
     const localBm25Hits = this.searchLocalBm25(
       normalizedQuery,
       userId,
@@ -549,11 +560,7 @@ export class KarpathyRagService implements OnModuleInit {
         userId,
         options.scope,
       );
-      bm25Hits = this.mergeRankedHits(
-        esHits,
-        localBm25Hits,
-        candidateDepth,
-      );
+      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
     }
     this.metricsService.observeRetrievalHits(
       this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
@@ -563,7 +570,8 @@ export class KarpathyRagService implements OnModuleInit {
 
     // 2. 向量检索：Milvus 为主通道；RAG_ES_KNN_MODE 控制 ES kNN 降级（fallback）/并行（always）通道
     const esKnnMode = this.resolveEsKnnMode();
-    const esKnnReady = esKnnMode !== 'off' && this.elasticsearchProvider.isEnabled();
+    const esKnnReady =
+      esKnnMode !== 'off' && this.elasticsearchProvider.isEnabled();
     let cosineHits: Awaited<
       ReturnType<VectorStoreProvider['similaritySearch']>
     > = [];
@@ -599,7 +607,11 @@ export class KarpathyRagService implements OnModuleInit {
         );
       }
       // fallback：Milvus 失败/不可用时补 ES kNN；always：Milvus 正常也并行拉 ES kNN
-      if (queryVector && esKnnReady && (!milvusUsed || esKnnMode === 'always')) {
+      if (
+        queryVector &&
+        esKnnReady &&
+        (!milvusUsed || esKnnMode === 'always')
+      ) {
         try {
           const knnHits = await this.esKnnVectorHits(
             queryVector,
@@ -712,7 +724,9 @@ export class KarpathyRagService implements OnModuleInit {
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(userId)
       : null;
-    const candidateDepth = allowedDocIds ? profile.candidateDepth * 3 : profile.candidateDepth;
+    const candidateDepth = allowedDocIds
+      ? profile.candidateDepth * 3
+      : profile.candidateDepth;
     const localBm25Hits = this.searchLocalBm25(
       normalizedQuery,
       userId,
@@ -726,11 +740,7 @@ export class KarpathyRagService implements OnModuleInit {
         userId,
         scope,
       );
-      bm25Hits = this.mergeRankedHits(
-        esHits,
-        localBm25Hits,
-        candidateDepth,
-      );
+      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
     }
 
     this.metricsService.observeRetrievalHits(
@@ -843,9 +853,7 @@ export class KarpathyRagService implements OnModuleInit {
         retrieveObsidianKnowledge(),
       ]);
     }
-    const exactBadCase = badCaseMatches.find(
-      (match) => match.mode === 'exact',
-    );
+    const exactBadCase = badCaseMatches.find((match) => match.mode === 'exact');
     if (exactBadCase) {
       const correctedAnswer = this.extractCorrectedAnswer(exactBadCase.text);
       if (correctedAnswer) {
@@ -888,7 +896,11 @@ export class KarpathyRagService implements OnModuleInit {
     const correctionBaseCase = badCaseMatches.find(
       (match) => match.mode === 'correction',
     );
-    if (baseCaseGate.sufficient && !formalRetrievalGate.sufficient && correctionBaseCase) {
+    if (
+      baseCaseGate.sufficient &&
+      !formalRetrievalGate.sufficient &&
+      correctionBaseCase
+    ) {
       const correctedAnswer = this.extractCorrectedAnswer(
         correctionBaseCase.text,
       );
@@ -1120,7 +1132,9 @@ export class KarpathyRagService implements OnModuleInit {
   ): Promise<string> {
     const historyText = history
       .slice(-6)
-      .map((item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`)
+      .map(
+        (item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+      )
       .join('\n');
     const memoryText = memoryMessages
       .slice(-6)
@@ -1397,18 +1411,16 @@ ${memoryText || '无'}
     if (profile.intent !== 'lookup') return null;
 
     try {
-      const chunks = await this.retrieveBm25Only(
-        query,
-        userId,
-        scope,
-        false,
-      );
+      const chunks = await this.retrieveBm25Only(query, userId, scope, false);
       const primary = chunks[0];
       if (!primary || !this.isGovernedDirectAnswerCandidate(query, primary)) {
         return null;
       }
       const answer = this.buildExtractiveAnswer(query, [primary]);
-      if (!answer || !this.assessCitationSupport(answer, [primary]).sufficient) {
+      if (
+        !answer ||
+        !this.assessCitationSupport(answer, [primary]).sufficient
+      ) {
         return null;
       }
       return {
@@ -1448,7 +1460,8 @@ ${memoryText || '无'}
     const coverage =
       this.countTokenOverlap(queryTokens, chunk.content) / queryTokens.size;
     const minCoverage =
-      this.configService.get<number>('ragQuality.karpathyDirectCoverage') ?? 0.7;
+      this.configService.get<number>('ragQuality.karpathyDirectCoverage') ??
+      0.7;
     return coverage >= minCoverage;
   }
 
@@ -1471,10 +1484,13 @@ ${memoryText || '无'}
     if (!policy.allowed || !this.bochaSearchService.isEnabled()) return null;
 
     try {
-      const maxResults = this.configService.get<number>('agentic.maxWebSearchResults') ?? 5;
+      const maxResults =
+        this.configService.get<number>('agentic.maxWebSearchResults') ?? 5;
       const results = await this.bochaSearchService.search(query, maxResults);
       if (!results.length) return null;
-      const references = results.map((result, index) => this.toWebChunk(result, index));
+      const references = results.map((result, index) =>
+        this.toWebChunk(result, index),
+      );
       const context = references
         .map(
           (item, index) =>
@@ -1498,7 +1514,9 @@ ${memoryText || '无'}
         })),
       };
     } catch (error) {
-      this.logger.warn(`Simple web fallback failed: ${(error as Error).message}`);
+      this.logger.warn(
+        `Simple web fallback failed: ${(error as Error).message}`,
+      );
       return null;
     }
   }
@@ -1511,7 +1529,9 @@ ${memoryText || '无'}
       result.summary ? `摘要：${result.summary}` : '',
       result.snippet ? `片段：${result.snippet}` : '',
       `URL：${result.url}`,
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
     return {
       id: `web:${result.url}`,
       content,
@@ -1533,8 +1553,16 @@ ${memoryText || '无'}
     memoryMessages: Array<{ role: string; content: string }>,
     onToken?: (token: string) => void,
   ): Promise<string> {
-    const historyText = history.slice(-6).map((item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`).join('\n');
-    const memoryText = memoryMessages.slice(-6).map((item) => `${item.role}：${item.content}`).join('\n');
+    const historyText = history
+      .slice(-6)
+      .map(
+        (item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+      )
+      .join('\n');
+    const memoryText = memoryMessages
+      .slice(-6)
+      .map((item) => `${item.role}：${item.content}`)
+      .join('\n');
     const prompt = `你是可靠的中文联网检索助手。
 
 本地知识库证据不足，原因：${reason}
@@ -1560,7 +1588,10 @@ ${memoryText || '无'}
     const stream = await this.llmProvider.getModel().stream(prompt);
     let answer = '';
     for await (const chunk of stream) {
-      const token = typeof chunk.content === 'string' ? chunk.content : JSON.stringify(chunk.content);
+      const token =
+        typeof chunk.content === 'string'
+          ? chunk.content
+          : JSON.stringify(chunk.content);
       if (!token) continue;
       answer += token;
       onToken?.(token);
@@ -2010,27 +2041,29 @@ ${context}
     limit = 10,
   ): RankedRetrievalHit[] {
     const userBm25 = this.getBm25Instance(userId);
-    return userBm25
-      .search(normalizedQuery, limit)
-      .map((hit) => {
-        const meta = this.chunkMeta.get(hit.id);
-        if (!meta || meta.userId !== userId) return null;
-        return {
-          id: hit.id,
-          score: hit.score,
-          content: meta.content,
-          docId: meta.docId,
-          chunkIndex: meta.chunkIndex,
-          ...this.pickChunkMetadata(meta),
-        };
-      })
-      .filter((hit): hit is RankedRetrievalHit => hit !== null)
-      // 审批/归档门禁：draft 未经审批、archived 已归档，本地 BM25 检索不可见
-      .filter(
-        (hit) =>
-          hit.lifecycleStatus !== 'draft' &&
-          hit.lifecycleStatus !== 'archived',
-      );
+    return (
+      userBm25
+        .search(normalizedQuery, limit)
+        .map((hit) => {
+          const meta = this.chunkMeta.get(hit.id);
+          if (!meta || meta.userId !== userId) return null;
+          return {
+            id: hit.id,
+            score: hit.score,
+            content: meta.content,
+            docId: meta.docId,
+            chunkIndex: meta.chunkIndex,
+            ...this.pickChunkMetadata(meta),
+          };
+        })
+        .filter((hit): hit is RankedRetrievalHit => hit !== null)
+        // 审批/归档门禁：draft 未经审批、archived 已归档，本地 BM25 检索不可见
+        .filter(
+          (hit) =>
+            hit.lifecycleStatus !== 'draft' &&
+            hit.lifecycleStatus !== 'archived',
+        )
+    );
   }
 
   private mergeRankedHits(
@@ -2062,9 +2095,7 @@ ${context}
       score: c.totalScore,
       bm25Score: c.bm25Score,
       cosineScore: c.cosineScore,
-      ...(c.rerankScore === undefined
-        ? {}
-        : { rerankScore: c.rerankScore }),
+      ...(c.rerankScore === undefined ? {} : { rerankScore: c.rerankScore }),
       sourceAuthorityWeight: c.sourceAuthorityWeight,
       parentChunkId: c.parentChunkId,
       headingPath: c.headingPath,
@@ -2374,7 +2405,9 @@ ${context}
       const rerankScoreById = new Map(
         reranked.map((chunk) => [chunk.id, chunk.totalScore]),
       );
-      const orderById = new Map(reranked.map((chunk, index) => [chunk.id, index]));
+      const orderById = new Map(
+        reranked.map((chunk, index) => [chunk.id, index]),
+      );
       const rerankedHead = candidates
         .map((chunk) => {
           const rerankScore = rerankScoreById.get(chunk.id);

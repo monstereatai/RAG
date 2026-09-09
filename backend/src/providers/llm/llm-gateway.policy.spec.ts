@@ -16,18 +16,26 @@ describe('LlmGatewayPolicy', () => {
       }),
     };
 
-    expect(new LlmGatewayPolicy(config as never).resolve('structured')).toEqual({
-      task: 'structured',
-      primary: 'qwen',
-      fallback: 'deepseek',
-      timeoutMs: 45000,
-      maxTokens: 3000,
-      maxCostUsd: 0.03,
-    });
+    expect(new LlmGatewayPolicy(config as never).resolve('structured')).toEqual(
+      {
+        task: 'structured',
+        primary: 'qwen',
+        fallback: 'deepseek',
+        timeoutMs: 45000,
+        maxTokens: 3000,
+        maxCostUsd: 0.03,
+      },
+    );
   });
 
   it('disables fallback explicitly', () => {
-    const config = { get: jest.fn((key: string) => (key === 'llm.gateway.fallbackEnabled' ? false : 'qwen')) };
-    expect(new LlmGatewayPolicy(config as never).resolve('fast').fallback).toBeNull();
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'llm.gateway.fallbackEnabled' ? false : 'qwen',
+      ),
+    };
+    expect(
+      new LlmGatewayPolicy(config as never).resolve('fast').fallback,
+    ).toBeNull();
   });
 });

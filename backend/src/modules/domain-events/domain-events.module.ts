@@ -4,5 +4,14 @@ import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-even
 import { DomainEventSubscriptionEntity } from '../../providers/db/entities/domain-event-subscription.entity';
 import { DomainEventsService } from './domain-events.service';
 
-@Module({ imports: [TypeOrmModule.forFeature([DomainEventOutboxEntity, DomainEventSubscriptionEntity])], providers: [DomainEventsService], exports: [DomainEventsService] })
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([
+      DomainEventOutboxEntity,
+      DomainEventSubscriptionEntity,
+    ]),
+  ],
+  providers: [DomainEventsService],
+  exports: [DomainEventsService],
+})
 export class DomainEventsModule {}

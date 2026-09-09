@@ -12,7 +12,18 @@ import { PlatformGovernanceService } from './platform-governance.service';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WorkflowTemplateEntity, WorkflowTemplateVersionEntity, PlatformPluginEntity, ModelRegistryEntity, EvaluationCaseEntity, KnowledgeBaseProfileEntity]), KarpathyRagModule, PluginRuntimeModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      WorkflowTemplateEntity,
+      WorkflowTemplateVersionEntity,
+      PlatformPluginEntity,
+      ModelRegistryEntity,
+      EvaluationCaseEntity,
+      KnowledgeBaseProfileEntity,
+    ]),
+    KarpathyRagModule,
+    PluginRuntimeModule,
+  ],
   controllers: [PlatformGovernanceController],
   providers: [PlatformGovernanceService],
   exports: [PlatformGovernanceService],

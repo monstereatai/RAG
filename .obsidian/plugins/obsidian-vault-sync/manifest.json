@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-vault-sync",
+  "name": "Obsidian Vault Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Trigger and inspect local plugin synchronization across Obsidian vaults.",
+  "author": "monstereat",
+  "isDesktopOnly": true
+}

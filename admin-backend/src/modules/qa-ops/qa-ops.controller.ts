@@ -166,11 +166,12 @@ export class QaOpsController {
   @ApiOperation({ summary: "AI 问答运营概览" })
   @RequirePermission("admin:qa-ops:read")
   async overview() {
-    const [negativeFeedback, citationFailures, costSummary] = await Promise.all(
+    const [negativeFeedback, citationFailures, costSummary, qualitySummary] = await Promise.all(
       [
         this.ragClient.getQaNegativeFeedback(),
         this.ragClient.getQaCitationFailures(),
         this.ragClient.getQaCostSummary(),
+        this.ragClient.getRagQualitySummary(),
       ]
     );
 
@@ -179,18 +180,21 @@ export class QaOpsController {
         negativeFeedback.available &&
         citationFailures.available &&
         costSummary.available
+        && qualitySummary.available
           ? "available"
           : negativeFeedback.available ||
             citationFailures.available ||
-            costSummary.available
+            costSummary.available ||
+            qualitySummary.available
           ? "partial"
           : "unavailable",
       data: {
         negativeFeedback: negativeFeedback.data ?? [],
         citationFailures: citationFailures.data ?? [],
         costSummary: costSummary.data ?? null,
+        qualitySummary: qualitySummary.data ?? null,
       },
-      upstream: { negativeFeedback, citationFailures, costSummary },
+      upstream: { negativeFeedback, citationFailures, costSummary, qualitySummary },
     };
   }
 
@@ -257,7 +261,7 @@ export class QaOpsController {
   async streamAgui(
     @Query("query") query: string,
     @Query("mode") mode: "simple" | "agentic" | "auto" = "agentic",
-    @Query("model") model: "qwen" | "deepseek" = "qwen",
+    @Query("model") model: "qwen" | "deepseek" | "zhipu" = "qwen",
     @Query("threadId") threadId: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
@@ -381,9 +385,9 @@ export class QaOpsController {
     res.send(Buffer.from(await upstream.arrayBuffer()));
   }
 
-  private parseModel(model?: string): "qwen" | "deepseek" {
+  private parseModel(model?: string): "qwen" | "deepseek" | "zhipu" {
     if (!model) return "qwen";
-    if (model === "qwen" || model === "deepseek") return model;
+    if (model === "qwen" || model === "deepseek" || model === "zhipu") return model;
     return "qwen";
   }
 

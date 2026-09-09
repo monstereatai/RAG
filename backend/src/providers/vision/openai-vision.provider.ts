@@ -41,14 +41,12 @@ export class OpenAiVisionProvider implements IVisionProvider {
     this.enabled = Boolean(this.apiKey);
 
     if (this.enabled) {
-      this.logger.log(
-        `OpenAiVisionProvider ready: model=${this.model}`,
-      );
+      this.logger.log(`OpenAiVisionProvider ready: model=${this.model}`);
     } else {
       this.logger.warn(
         'OpenAiVisionProvider created WITHOUT api key — ' +
-        'all vision calls will fail until VISION_API_KEY or QWEN_VL_API_KEY is configured. ' +
-        'Use VISION_PROVIDER=mock for development without a key.',
+          'all vision calls will fail until VISION_API_KEY or QWEN_VL_API_KEY is configured. ' +
+          'Use VISION_PROVIDER=mock for development without a key.',
       );
     }
   }
@@ -56,8 +54,14 @@ export class OpenAiVisionProvider implements IVisionProvider {
   async ocr(imageBuffer: Buffer, mimeType: string): Promise<OcrResult> {
     this.assertEnabled();
     const body = this.buildChatBody([
-      { type: 'text', text: '请识别这张图片中的所有文字，按原文顺序输出。只输出文字内容，不要额外说明。' },
-      { type: 'image_url', image_url: { url: this.imageToDataUrl(imageBuffer, mimeType) } },
+      {
+        type: 'text',
+        text: '请识别这张图片中的所有文字，按原文顺序输出。只输出文字内容，不要额外说明。',
+      },
+      {
+        type: 'image_url',
+        image_url: { url: this.imageToDataUrl(imageBuffer, mimeType) },
+      },
     ]);
     const text = await this.postChat(body);
     return { text, confidence: 0.9 };
@@ -69,10 +73,15 @@ export class OpenAiVisionProvider implements IVisionProvider {
     prompt?: string,
   ): Promise<ImageDescription> {
     this.assertEnabled();
-    const userPrompt = prompt || '请描述这张图片的内容，包括主要对象、场景、文字信息和关键细节。';
+    const userPrompt =
+      prompt ||
+      '请描述这张图片的内容，包括主要对象、场景、文字信息和关键细节。';
     const body = this.buildChatBody([
       { type: 'text', text: userPrompt },
-      { type: 'image_url', image_url: { url: this.imageToDataUrl(imageBuffer, mimeType) } },
+      {
+        type: 'image_url',
+        image_url: { url: this.imageToDataUrl(imageBuffer, mimeType) },
+      },
     ]);
     const description = await this.postChat(body);
     return { description, tags: [], confidence: 0.88 };
@@ -84,11 +93,13 @@ export class OpenAiVisionProvider implements IVisionProvider {
   ): Promise<VideoDescription> {
     throw new Error(
       'Direct video understanding not supported by this provider. ' +
-      'Use ffmpeg to extract keyframes and audio first, then call describeImage/ocr individually.',
+        'Use ffmpeg to extract keyframes and audio first, then call describeImage/ocr individually.',
     );
   }
 
-  async generateImage(_request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  async generateImage(
+    _request: ImageGenerationRequest,
+  ): Promise<ImageGenerationResult> {
     throw new Error('Image generation not supported by this provider.');
   }
 
@@ -108,7 +119,7 @@ export class OpenAiVisionProvider implements IVisionProvider {
     if (!this.enabled) {
       throw new Error(
         'Vision provider not configured. Set VISION_API_KEY or QWEN_VL_API_KEY, ' +
-        'or use VISION_PROVIDER=mock for development.',
+          'or use VISION_PROVIDER=mock for development.',
       );
     }
   }
@@ -143,7 +154,7 @@ export class OpenAiVisionProvider implements IVisionProvider {
       );
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       choices: Array<{ message: { content: string } }>;
     };
     return data.choices?.[0]?.message?.content ?? '';

@@ -11,7 +11,11 @@ describe('RagAdminService document versions', () => {
     updateLifecycle: jest.fn(),
   };
   const ingest = { ingestText: jest.fn() };
-  const documentReviewRepo = { save: jest.fn(), create: jest.fn(), find: jest.fn() };
+  const documentReviewRepo = {
+    save: jest.fn(),
+    create: jest.fn(),
+    find: jest.fn(),
+  };
   const permissionRepo = { find: jest.fn() };
 
   const service = new RagAdminService(
@@ -50,7 +54,10 @@ describe('RagAdminService document versions', () => {
       roleScope: null,
       documentType: 'general',
     });
-    ingest.ingestText.mockResolvedValue({ rag: { docId: 'new' }, obsidian: {} });
+    ingest.ingestText.mockResolvedValue({
+      rag: { docId: 'new' },
+      obsidian: {},
+    });
 
     await service.createDocumentVersion('old', {
       content: '# 新规则\n\n正文内容足够长。',
@@ -68,7 +75,11 @@ describe('RagAdminService document versions', () => {
   });
 
   it('promotes one complete version and passes the full version chain', async () => {
-    docMetaRepo.findOne.mockResolvedValue({ docId: 'new', userId: 'user-1', reviewStatus: 'approved' });
+    docMetaRepo.findOne.mockResolvedValue({
+      docId: 'new',
+      userId: 'user-1',
+      reviewStatus: 'approved',
+    });
     docMetaRepo.find.mockResolvedValue([
       { docId: 'old', userId: 'user-1', createdAt: new Date('2026-01-01') },
       {
@@ -93,7 +104,9 @@ describe('RagAdminService document versions', () => {
 
   it('does not promote a version before it is approved', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'draft', userId: 'user-1', reviewStatus: 'pending_review',
+      docId: 'draft',
+      userId: 'user-1',
+      reviewStatus: 'pending_review',
     });
 
     await expect(service.promoteDocumentVersion('draft')).rejects.toThrow(
@@ -120,7 +133,10 @@ describe('RagAdminService document listing and archive', () => {
   const docMetaRepo = { findOne: jest.fn(), find: jest.fn() };
   const permissionRepo = { find: jest.fn() };
   const obsidianKnowledge = { findNoteByRagDocId: jest.fn() };
-  const documentService = { updateLifecycle: jest.fn(), activateVersion: jest.fn() };
+  const documentService = {
+    updateLifecycle: jest.fn(),
+    activateVersion: jest.fn(),
+  };
   const domainEvents = { emit: jest.fn() };
 
   const service = new RagAdminService(
@@ -152,8 +168,18 @@ describe('RagAdminService document listing and archive', () => {
 
   it('filters documents by lifecycleStatus', async () => {
     docMetaRepo.find.mockResolvedValue([
-      { docId: 'a', filename: 'a.md', createdAt: new Date(), lifecycleStatus: 'effective' },
-      { docId: 'b', filename: 'b.md', createdAt: new Date(), lifecycleStatus: 'archived' },
+      {
+        docId: 'a',
+        filename: 'a.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'effective',
+      },
+      {
+        docId: 'b',
+        filename: 'b.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'archived',
+      },
     ]);
 
     const result = await service.listDocuments({ lifecycleStatus: 'archived' });
@@ -164,11 +190,26 @@ describe('RagAdminService document listing and archive', () => {
 
   it('filters public documents by permission scope and returns permission summary', async () => {
     docMetaRepo.find.mockResolvedValue([
-      { docId: 'pub-1', filename: 'p1.md', createdAt: new Date(), lifecycleStatus: 'effective' },
-      { docId: 'own-1', filename: 'p2.md', createdAt: new Date(), lifecycleStatus: 'effective' },
+      {
+        docId: 'pub-1',
+        filename: 'p1.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'effective',
+      },
+      {
+        docId: 'own-1',
+        filename: 'p2.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'effective',
+      },
     ]);
     permissionRepo.find.mockResolvedValue([
-      { docId: 'pub-1', subjectType: 'public', subjectId: 'public', action: 'read' },
+      {
+        docId: 'pub-1',
+        subjectType: 'public',
+        subjectId: 'public',
+        action: 'read',
+      },
     ]);
 
     const result = await service.listDocuments({ scope: 'public' });
@@ -185,10 +226,20 @@ describe('RagAdminService document listing and archive', () => {
 
   it('filters department documents by departmentId', async () => {
     docMetaRepo.find.mockResolvedValue([
-      { docId: 'dept-1', filename: 'd1.md', createdAt: new Date(), lifecycleStatus: 'effective' },
+      {
+        docId: 'dept-1',
+        filename: 'd1.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'effective',
+      },
     ]);
     permissionRepo.find.mockResolvedValue([
-      { docId: 'dept-1', subjectType: 'department', subjectId: 'dept-001', action: 'read' },
+      {
+        docId: 'dept-1',
+        subjectType: 'department',
+        subjectId: 'dept-001',
+        action: 'read',
+      },
     ]);
 
     const result = await service.listDocuments({
@@ -197,7 +248,11 @@ describe('RagAdminService document listing and archive', () => {
     });
 
     expect(permissionRepo.find).toHaveBeenCalledWith({
-      where: { subjectType: 'department', action: 'read', subjectId: 'dept-001' },
+      where: {
+        subjectType: 'department',
+        action: 'read',
+        subjectId: 'dept-001',
+      },
     });
     expect(result.total).toBe(1);
     expect(result.items[0].docId).toBe('dept-1');
@@ -205,7 +260,12 @@ describe('RagAdminService document listing and archive', () => {
 
   it('returns an empty page when the scope permission set is empty', async () => {
     docMetaRepo.find.mockResolvedValue([
-      { docId: 'a', filename: 'a.md', createdAt: new Date(), lifecycleStatus: 'effective' },
+      {
+        docId: 'a',
+        filename: 'a.md',
+        createdAt: new Date(),
+        lifecycleStatus: 'effective',
+      },
     ]);
 
     await expect(service.listDocuments({ scope: 'public' })).resolves.toEqual({
@@ -218,7 +278,9 @@ describe('RagAdminService document listing and archive', () => {
 
   it('archives only effective/confirmed documents', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'd', userId: 'user-1', lifecycleStatus: 'draft',
+      docId: 'd',
+      userId: 'user-1',
+      lifecycleStatus: 'draft',
     });
 
     await expect(service.archiveDocument('d')).rejects.toThrow(
@@ -231,7 +293,9 @@ describe('RagAdminService document listing and archive', () => {
 
   it('archives an effective document through the lifecycle sync path', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'd', userId: 'user-1', lifecycleStatus: 'effective',
+      docId: 'd',
+      userId: 'user-1',
+      lifecycleStatus: 'effective',
     });
     documentService.updateLifecycle.mockResolvedValue(true);
 
@@ -252,7 +316,9 @@ describe('RagAdminService document listing and archive', () => {
 
   it('rejects unarchive for a document that is not archived', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'd', userId: 'user-1', lifecycleStatus: 'effective',
+      docId: 'd',
+      userId: 'user-1',
+      lifecycleStatus: 'effective',
     });
 
     await expect(service.unarchiveDocument('d')).rejects.toThrow(
@@ -262,7 +328,10 @@ describe('RagAdminService document listing and archive', () => {
 
   it('rejects unarchive before the document is approved', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'd', userId: 'user-1', lifecycleStatus: 'archived', reviewStatus: 'pending_review',
+      docId: 'd',
+      userId: 'user-1',
+      lifecycleStatus: 'archived',
+      reviewStatus: 'pending_review',
     });
 
     await expect(service.unarchiveDocument('d')).rejects.toThrow(
@@ -272,7 +341,10 @@ describe('RagAdminService document listing and archive', () => {
 
   it('unarchives an approved archived document back to effective', async () => {
     docMetaRepo.findOne.mockResolvedValue({
-      docId: 'd', userId: 'user-1', lifecycleStatus: 'archived', reviewStatus: 'approved',
+      docId: 'd',
+      userId: 'user-1',
+      lifecycleStatus: 'archived',
+      reviewStatus: 'approved',
     });
     docMetaRepo.find.mockResolvedValue([
       { docId: 'd', userId: 'user-1', createdAt: new Date() },
@@ -285,6 +357,10 @@ describe('RagAdminService document listing and archive', () => {
       lifecycleStatus: 'effective',
     });
     // effective 走版本激活路径（promote）
-    expect(documentService.activateVersion).toHaveBeenCalledWith('d', 'user-1', ['d']);
+    expect(documentService.activateVersion).toHaveBeenCalledWith(
+      'd',
+      'user-1',
+      ['d'],
+    );
   });
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RagApiClient } from '../src/rag-api-client.js';
+import { buildProductionWorkflowHandoff, RagApiClient } from '../src/rag-api-client.js';
 
 test('RagApiClient unwraps standard response envelope', async () => {
   const client = new RagApiClient({
@@ -182,4 +182,24 @@ test('RagApiClient calls governance, workflow and scheduled-job read endpoints',
     '/api/v1/jobs',
     '/api/v1/jobs/job%201/executions',
   ]);
+});
+
+test('buildProductionWorkflowHandoff keeps Markdown, Schemas and RAG citations together', () => {
+  const handoff = buildProductionWorkflowHandoff({
+    threadId: 'thread-1',
+    projectId: 'act10',
+    stages: [{
+      role: 'product',
+      summary: '活动需求已经梳理。',
+      deliverables: [{ title: 'PRD', markdown: '# 活动规则' }],
+      lowCodeSchemas: [{ schemaVersion: 1, kind: 'pageSchema', title: '活动页' }],
+      evidence: [{ id: 'e-1', docId: 'rule-doc', chunkIndex: 3, excerpt: '奖池规则。', totalScore: 0.91 }],
+    }],
+  });
+
+  assert.equal(handoff.threadId, 'thread-1');
+  assert.equal((handoff.schemas as unknown[]).length, 1);
+  assert.equal((handoff.citations as unknown[]).length, 1);
+  assert.match(String(handoff.markdown), /# 活动规则/);
+  assert.match(String(handoff.markdown), /奖池规则/);
 });

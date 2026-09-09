@@ -18,7 +18,9 @@ describe('RagFeedbackService', () => {
     } as unknown as Repository<QueryLogEntity>;
     const badCaseFlywheel = {
       indexApproved: jest.fn().mockResolvedValue({ indexed: true }),
-      removeApproved: jest.fn().mockResolvedValue({ indexed: false, removed: true }),
+      removeApproved: jest
+        .fn()
+        .mockResolvedValue({ indexed: false, removed: true }),
     };
     const conversationService = {
       get: jest.fn().mockResolvedValue(null),
@@ -157,7 +159,9 @@ describe('RagFeedbackService', () => {
       answer: '错误回答',
     } as QueryLogEntity;
     const documentService = {
-      upload: jest.fn().mockResolvedValue({ docId: 'formal-doc-1', docVersion: '2026-08-v2' }),
+      upload: jest
+        .fn()
+        .mockResolvedValue({ docId: 'formal-doc-1', docVersion: '2026-08-v2' }),
     };
     const { service, feedbackRepo, badCaseFlywheel } = createService(
       queryLog,
@@ -189,7 +193,9 @@ describe('RagFeedbackService', () => {
       expect.stringContaining('bad-case-feedback'),
       expect.stringContaining('https://example.com/official-spec'),
       'user-1',
-      expect.objectContaining({ businessMetadata: expect.objectContaining({ docVersion: '2026-08-v2' }) }),
+      expect.objectContaining({
+        businessMetadata: expect.objectContaining({ docVersion: '2026-08-v2' }),
+      }),
     );
     expect(result.knowledgeLayer).toBe('formal');
     expect(result.promotedDocument?.docId).toBe('formal-doc-1');

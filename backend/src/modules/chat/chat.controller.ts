@@ -27,6 +27,9 @@ import { ChatFeedbackDto } from './chat-feedback.dto';
 import { RagFeedbackService } from './rag-feedback.service';
 import { listRolePresets, resolveRoleContext } from './role-presets';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import { detectDangerousQuery } from '../../rag/prompts/prompt-injection.guard';
+import { MetricsService } from '../metrics/metrics.service';
+import { SecurityAuditService } from '../metrics/security-audit.service';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -38,6 +41,8 @@ export class ChatController {
     private readonly memoryService: MemoryService,
     private readonly ragFeedbackService: RagFeedbackService,
     @Optional() private readonly plugins?: PluginRuntimeService,
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly securityAudit?: SecurityAuditService,
   ) {}
 
   @Get('role-presets')
@@ -84,14 +89,30 @@ export class ChatController {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('query is required');
     }
+    const dangerousFindings = detectDangerousQuery(query);
+    if (dangerousFindings.length > 0) {
+      for (const finding of dangerousFindings) {
+        this.metrics?.observeDangerousQuery(finding.pattern, 'chat_stream');
+        this.securityAudit?.record({ pattern: finding.pattern, route: 'chat_stream', userId: user.userId, query });
+      }
+      throw new BadRequestException({
+        code: 'DANGEROUS_QUERY_BLOCKED',
+        message: '检测到高风险破坏性操作请求，已阻止进入问答和工具链。',
+        patterns: dangerousFindings.map((finding) => finding.pattern),
+      });
+    }
     const chatMode: ChatMode = mode ?? 'agentic';
     const userId = user.userId;
     return new Observable<SseEvent>((subscriber) => {
       void (async () => {
         try {
-          const pluginComposition = pluginKeys?.trim() && this.plugins
-            ? await this.plugins.resolve(pluginKeys.split(',').map((item) => item.trim()), chatMode)
-            : undefined;
+          const pluginComposition =
+            pluginKeys?.trim() && this.plugins
+              ? await this.plugins.resolve(
+                  pluginKeys.split(',').map((item) => item.trim()),
+                  chatMode,
+                )
+              : undefined;
           const startTime = Date.now();
           // 对话历史注入（SSE 流式模式）
           const activeThreadId =
@@ -140,7 +161,12 @@ export class ChatController {
               false,
               {
                 scope: { role: roleContext.role },
-                ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
+                ...(pluginComposition
+                  ? {
+                      pluginKeys: pluginComposition.pluginKeys,
+                      pluginTools: pluginComposition.toolNames,
+                    }
+                  : {}),
               },
             )
             .then(async (result) => {

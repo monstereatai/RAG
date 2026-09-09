@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -19,12 +24,18 @@ import {
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { resolveRoleContext } from './role-presets';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import { detectRetrievalProfile, type RetrievalProfile } from '../../rag/karpathy/context-builder';
+import {
+  detectRetrievalProfile,
+  type RetrievalProfile,
+} from '../../rag/karpathy/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { createHash } from 'node:crypto';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
+import { detectDangerousQuery } from '../../rag/prompts/prompt-injection.guard';
+import { MetricsService } from '../metrics/metrics.service';
+import { SecurityAuditService } from '../metrics/security-audit.service';
 
 @Injectable()
 export class ChatService {
@@ -52,6 +63,8 @@ export class ChatService {
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly plugins?: PluginRuntimeService,
     @Optional() private readonly runtime?: AgentRuntimeService,
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly securityAudit?: SecurityAuditService,
   ) {}
 
   /**
@@ -64,6 +77,18 @@ export class ChatService {
   async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
     if (!req.query || req.query.trim().length === 0) {
       throw new BadRequestException('query is required');
+    }
+    const dangerousFindings = detectDangerousQuery(req.query);
+    if (dangerousFindings.length > 0) {
+      for (const finding of dangerousFindings) {
+        this.metrics?.observeDangerousQuery(finding.pattern, 'chat');
+        this.securityAudit?.record({ pattern: finding.pattern, route: 'chat', userId, query: req.query });
+      }
+      throw new BadRequestException({
+        code: 'DANGEROUS_QUERY_BLOCKED',
+        message: '检测到高风险破坏性操作请求，已阻止进入问答和工具链。',
+        patterns: dangerousFindings.map((finding) => finding.pattern),
+      });
     }
 
     const mode: ChatMode = req.mode ?? 'simple';
@@ -91,11 +116,7 @@ export class ChatService {
       this.memoryService.searchMemory(req.query, userId, threadId),
       // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
       shouldSearchHistory
-        ? this.conversationEmbeddingService.searchHistory(
-            req.query,
-            2,
-            userId,
-        )
+        ? this.conversationEmbeddingService.searchHistory(req.query, 2, userId)
         : Promise.resolve([]),
       this.runtime
         ? this.runtime.createPlan({ objective: req.query, mode })
@@ -107,12 +128,20 @@ export class ChatService {
     ]);
     let history = req.history ?? [];
     if (!req.history) {
-      history = shortTermContext.recentTurns.length > 0
-        ? shortTermContext.recentTurns.map((turn) => ({
-            role: turn.role === 'assistant' ? ('ai' as const) : ('human' as const),
-            content: turn.content,
-          }))
-        : await this.conversationService.getRecentHistory(threadId, 5, userId);
+      history =
+        shortTermContext.recentTurns.length > 0
+          ? shortTermContext.recentTurns.map((turn) => ({
+              role:
+                turn.role === 'assistant'
+                  ? ('ai' as const)
+                  : ('human' as const),
+              content: turn.content,
+            }))
+          : await this.conversationService.getRecentHistory(
+              threadId,
+              5,
+              userId,
+            );
     }
     const memoryMessages: Array<{ role: string; content: string }> = [];
     const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
@@ -127,7 +156,12 @@ export class ChatService {
     const retrievalOptions = {
       scope: retrievalScope,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
-      ...(pluginComposition ? { pluginKeys: pluginComposition.pluginKeys, pluginTools: pluginComposition.toolNames } : {}),
+      ...(pluginComposition
+        ? {
+            pluginKeys: pluginComposition.pluginKeys,
+            pluginTools: pluginComposition.toolNames,
+          }
+        : {}),
     };
     // 运行审计先于模型调用创建，确保失败、降级和中断也能在运行中心回放。
     const run = await this.agentRuns?.start({
@@ -317,14 +351,17 @@ export class ChatService {
         this.langfuseProvider.estimateTextTokens(req.query),
         this.langfuseProvider.estimateTextTokens(result.answer),
       );
-      if (run) await this.agentRuns?.finish(run.id, {
-        queryLogId,
-        route: 'simple',
-        status: 'completed',
-        costUsd: estimatedCostUsd,
-        requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
-        resultSummary: result.answer.slice(0, 2000),
-      });
+      if (run)
+        await this.agentRuns?.finish(run.id, {
+          queryLogId,
+          route: 'simple',
+          status: 'completed',
+          costUsd: estimatedCostUsd,
+          requiresApproval:
+            estimatedCostUsd >
+            (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
+          resultSummary: result.answer.slice(0, 2000),
+        });
       if (run) {
         await this.agentGoals?.update({
           threadId,
@@ -332,8 +369,16 @@ export class ChatService {
           actor: mode,
           objective: req.query,
           maxRounds: run.maxSteps,
-          status: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? 'blocked' : 'completed',
-          reason: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? result.retrievalReason : undefined,
+          status:
+            result.answer ===
+            this.karpathyRagService.unsupportedReliableAnswer()
+              ? 'blocked'
+              : 'completed',
+          reason:
+            result.answer ===
+            this.karpathyRagService.unsupportedReliableAnswer()
+              ? result.retrievalReason
+              : undefined,
         });
       }
       this.traceAnswer({
@@ -439,19 +484,27 @@ export class ChatService {
       references: result.references ?? [],
     });
     for (const event of traceEvents) {
-      if (event.type === 'tool_call' || event.type === 'node_start' || event.type === 'node_end') {
+      if (
+        event.type === 'tool_call' ||
+        event.type === 'node_start' ||
+        event.type === 'node_end'
+      ) {
         const data = event.data as Record<string, unknown> | undefined;
-        const actionName = typeof data?.name === 'string' ? data.name : event.type;
-        const riskLevel = /write|delete|send|publish|deploy/i.test(actionName) ? 'high' : 'low';
-        if (run) await this.agentRuns?.recordAction(run.id, {
-          name: actionName,
-          actionType: event.type,
-          status: data?.error ? 'failed' : 'success',
-          riskLevel,
-          requiresApproval: riskLevel === 'high',
-          input: data,
-          output: data,
-        });
+        const actionName =
+          typeof data?.name === 'string' ? data.name : event.type;
+        const riskLevel = /write|delete|send|publish|deploy/i.test(actionName)
+          ? 'high'
+          : 'low';
+        if (run)
+          await this.agentRuns?.recordAction(run.id, {
+            name: actionName,
+            actionType: event.type,
+            status: data?.error ? 'failed' : 'success',
+            riskLevel,
+            requiresApproval: riskLevel === 'high',
+            input: data,
+            output: data,
+          });
       }
     }
     if (run) {
@@ -471,15 +524,18 @@ export class ChatService {
       this.langfuseProvider.estimateTextTokens(req.query),
       this.langfuseProvider.estimateTextTokens(result.answer),
     );
-    if (run) await this.agentRuns?.finish(run.id, {
-      queryLogId,
-      route: result.route,
-      status: 'completed',
-      retryCount: result.retryCount,
-      costUsd: estimatedCostUsd,
-      requiresApproval: estimatedCostUsd > (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
-      resultSummary: result.answer.slice(0, 2000),
-    });
+    if (run)
+      await this.agentRuns?.finish(run.id, {
+        queryLogId,
+        route: result.route,
+        status: 'completed',
+        retryCount: result.retryCount,
+        costUsd: estimatedCostUsd,
+        requiresApproval:
+          estimatedCostUsd >
+          (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
+        resultSummary: result.answer.slice(0, 2000),
+      });
     if (run) {
       await this.agentGoals?.update({
         threadId,
@@ -487,8 +543,14 @@ export class ChatService {
         actor: mode,
         objective: req.query,
         maxRounds: run.maxSteps,
-        status: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? 'blocked' : 'completed',
-        reason: result.answer === this.karpathyRagService.unsupportedReliableAnswer() ? result.retrievalReason : undefined,
+        status:
+          result.answer === this.karpathyRagService.unsupportedReliableAnswer()
+            ? 'blocked'
+            : 'completed',
+        reason:
+          result.answer === this.karpathyRagService.unsupportedReliableAnswer()
+            ? result.retrievalReason
+            : undefined,
       });
     }
     this.traceAnswer({
@@ -570,7 +632,9 @@ export class ChatService {
     });
     if (!config?.retrievalConfig) return detected;
     try {
-      const overrides = JSON.parse(config.retrievalConfig) as Partial<RetrievalProfile>;
+      const overrides = JSON.parse(
+        config.retrievalConfig,
+      ) as Partial<RetrievalProfile>;
       return { ...detected, ...overrides, intent: detected.intent };
     } catch {
       this.logger.warn(`Invalid retrievalConfig for knowledge base ${key}`);
@@ -636,7 +700,8 @@ export class ChatService {
     pluginTools?: string[];
     runtimePlan?: unknown;
   }) {
-    const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
+    const hash = (value: string) =>
+      createHash('sha256').update(value).digest('hex').slice(0, 16);
     return {
       schemaVersion: 1,
       mode: input.mode,
@@ -645,20 +710,30 @@ export class ChatService {
       queryLength: input.query.length,
       role: input.role,
       rolePresetId: input.rolePresetId ?? null,
-      retrievalProfile: input.retrievalProfile ? {
-        intent: input.retrievalProfile.intent,
-        candidateDepth: input.retrievalProfile.candidateDepth,
-        finalTopK: input.retrievalProfile.finalTopK,
-        neighborWindow: input.retrievalProfile.neighborWindow,
-        contextCharacterBudget: input.retrievalProfile.contextCharacterBudget,
-      } : null,
-      promptVersions: { roleContext: 'role-presets/v1', memory: 'short-term-memory/v1', answer: input.mode === 'simple' ? 'karpathy/v1' : 'agentic/v1' },
+      retrievalProfile: input.retrievalProfile
+        ? {
+            intent: input.retrievalProfile.intent,
+            candidateDepth: input.retrievalProfile.candidateDepth,
+            finalTopK: input.retrievalProfile.finalTopK,
+            neighborWindow: input.retrievalProfile.neighborWindow,
+            contextCharacterBudget:
+              input.retrievalProfile.contextCharacterBudget,
+          }
+        : null,
+      promptVersions: {
+        roleContext: 'role-presets/v1',
+        memory: 'short-term-memory/v1',
+        answer: input.mode === 'simple' ? 'karpathy/v1' : 'agentic/v1',
+      },
       historyCount: input.historyCount,
       memoryEnabled: input.memoryEnabled,
       pluginKeys: input.pluginKeys ?? [],
       pluginTools: input.pluginTools ?? [],
       runtimePlan: input.runtimePlan ?? null,
-      toolPolicy: input.mode === 'agentic' || input.mode === 'auto' ? 'tool-registry/v1' : null,
+      toolPolicy:
+        input.mode === 'agentic' || input.mode === 'auto'
+          ? 'tool-registry/v1'
+          : null,
     };
   }
 
@@ -695,7 +770,15 @@ export class ChatService {
         });
         continue;
       }
-      if (['retrieval', 'sufficiency', 'web_search', 'rerank', 'reflection'].includes(event.type)) {
+      if (
+        [
+          'retrieval',
+          'sufficiency',
+          'web_search',
+          'rerank',
+          'reflection',
+        ].includes(event.type)
+      ) {
         await this.agentRuns?.recordRuntimeEvent(runId, {
           eventType: `${event.type}.completed`,
           target: event.type,

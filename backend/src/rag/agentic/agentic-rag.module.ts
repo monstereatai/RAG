@@ -21,7 +21,10 @@ import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
     MetricsModule,
     TracingModule,
     GraphModule,
-    TypeOrmModule.forFeature([AgenticStructuredArtifactEntity, ArtifactDependencyEntity]),
+    TypeOrmModule.forFeature([
+      AgenticStructuredArtifactEntity,
+      ArtifactDependencyEntity,
+    ]),
     AgentLoopModule,
   ],
   providers: [AgenticRagService],

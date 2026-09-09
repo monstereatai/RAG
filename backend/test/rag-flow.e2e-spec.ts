@@ -27,7 +27,7 @@ function hasData<T>(body: ApiEnvelope<T> | T): body is ApiEnvelope<T> {
     body !== null &&
     typeof body === 'object' &&
     'data' in body &&
-    (body as ApiEnvelope<T>).data !== undefined
+    body.data !== undefined
   );
 }
 
@@ -39,7 +39,7 @@ function unwrap<T>(body: unknown): T {
 }
 
 function responseData<T>(body: unknown): T {
-  return unwrap<T>(body as ApiEnvelope<T> | T);
+  return unwrap<T>(body);
 }
 
 describe('RAG user flow (external e2e)', () => {

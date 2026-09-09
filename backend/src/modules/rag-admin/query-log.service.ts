@@ -109,15 +109,25 @@ export class QueryLogService {
 
       const buckets = new Map<
         string,
-        { total: number; simple: number; agentic: number; auto: number; latencySum: number }
+        {
+          total: number;
+          simple: number;
+          agentic: number;
+          auto: number;
+          latencySum: number;
+        }
       >();
       for (const row of rows) {
         const createdAt = new Date(row.createdAt);
         if (Number.isNaN(createdAt.getTime())) continue;
         const key = dayKey(createdAt);
-        const bucket =
-          buckets.get(key) ??
-          { total: 0, simple: 0, agentic: 0, auto: 0, latencySum: 0 };
+        const bucket = buckets.get(key) ?? {
+          total: 0,
+          simple: 0,
+          agentic: 0,
+          auto: 0,
+          latencySum: 0,
+        };
         bucket.total += 1;
         if (row.mode === 'simple') bucket.simple += 1;
         else if (row.mode === 'agentic') bucket.agentic += 1;

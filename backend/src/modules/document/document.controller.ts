@@ -246,7 +246,9 @@ export class DocumentController {
     businessMetadata?: DocumentBusinessMetadata,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
-    const content = (await this.extractUploadContent(file, kind, userId)).trim();
+    const content = (
+      await this.extractUploadContent(file, kind, userId)
+    ).trim();
     if (!content) {
       await this.documentService.markTaskFailed(
         taskId,
@@ -410,9 +412,7 @@ export class DocumentController {
    */
   private buildImageExtractionOptions(
     userId?: string,
-  ):
-    | DocumentImageExtractionOptions
-    | undefined {
+  ): DocumentImageExtractionOptions | undefined {
     if (process.env.DOCUMENT_EXTRACT_IMAGES === 'false') {
       return undefined;
     }

@@ -8,7 +8,9 @@ describe('ScheduledAnalysisService', () => {
       {} as never,
       {} as never,
       {} as never,
-      { traceScheduledAnalysis: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        traceScheduledAnalysis: jest.fn().mockResolvedValue(undefined),
+      } as never,
     );
 
   it('parses a daily natural-language rule analysis task', () => {
@@ -40,16 +42,61 @@ describe('ScheduledAnalysisService', () => {
     );
   });
 
+  it('converts Chinese meridiem and half-hour expressions', () => {
+    const result = createService().parseDefinition(
+      '每天晚上 8 点半统计问答质量',
+      'natural_language',
+    );
+
+    expect(result.cron).toBe('30 20 * * *');
+  });
+
+  it('supports interval and workday schedules', () => {
+    const service = createService();
+
+    expect(
+      service.parseDefinition('每隔 2 小时统计问答质量', 'natural_language'),
+    ).toMatchObject({ type: 'every', everyMs: 7_200_000 });
+    expect(
+      service.parseDefinition('每个工作日早上 9 点统计规则', 'natural_language'),
+    ).toMatchObject({ type: 'cron', cron: '0 9 * * 1-5' });
+  });
+
+  it('rejects ambiguous schedules instead of silently creating a daily job', () => {
+    expect(() =>
+      createService().parseDefinition('分析一下问答数据', 'natural_language'),
+    ).toThrow('未识别到明确的执行时间');
+  });
+
   it('rejects generated claims that are not present in the snapshot', () => {
     const service = createService() as unknown as {
       isGroundedGenerated: (text: string, snapshot: unknown) => boolean;
     };
     const snapshot = {
-      period: { start: '2026-09-01T00:00:00.000Z', end: '2026-09-01T01:00:00.000Z', window: 'today' },
-      qa: { totalQueries: 8, refused: 2, zeroCitation: 4, averageLatencyMs: 4133 },
+      period: {
+        start: '2026-09-01T00:00:00.000Z',
+        end: '2026-09-01T01:00:00.000Z',
+        window: 'today',
+      },
+      qa: {
+        totalQueries: 8,
+        refused: 2,
+        zeroCitation: 4,
+        averageLatencyMs: 4133,
+      },
     };
 
-    expect(service.isGroundedGenerated('问答共 8 次，建议抽查零引用回答。', snapshot)).toBe(true);
-    expect(service.isGroundedGenerated('系统版本 v3.2.1，要求 2 小时内处理。', snapshot)).toBe(false);
+    expect(
+      service.isGroundedGenerated(
+        '问答共 8 次，建议抽查零引用回答。',
+        snapshot,
+      ),
+    ).toBe(true);
+    expect(
+      service.isGroundedGenerated(
+        '系统版本 v3.2.1，要求 2 小时内处理。',
+        snapshot,
+      ),
+    ).toBe(false);
   });
 });

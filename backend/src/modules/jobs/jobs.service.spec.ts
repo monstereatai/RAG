@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 
@@ -15,6 +14,7 @@ describe('JobsService', () => {
   let mockJobsMap: Map<string, any>;
   let mockSupervisorService: any;
   let mockScheduledAnalysis: any;
+  let mockRedisProvider: any;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -66,6 +66,11 @@ describe('JobsService', () => {
         snapshot: {},
       }),
     };
+    mockRedisProvider = {
+      isEnabled: jest.fn().mockReturnValue(false),
+      setIfAbsent: jest.fn().mockResolvedValue(true),
+      releaseLock: jest.fn().mockResolvedValue(undefined),
+    };
     service = new JobsService(
       scheduler,
       mockJobRepo,
@@ -74,6 +79,7 @@ describe('JobsService', () => {
       mockScheduledAnalysis,
       { observeScheduledJob: jest.fn() } as any,
       { emit: jest.fn() } as any,
+      mockRedisProvider,
     );
   });
 
@@ -101,6 +107,49 @@ describe('JobsService', () => {
     expect(stopped.enabled).toBe(false);
     expect(stopped.running).toBe(false);
     expect(scheduler.getIntervals()).not.toContain(job.id);
+  });
+
+  it('rejects invalid cron before persisting the job', async () => {
+    await expect(
+      service.create({
+        type: 'cron',
+        cron: 'not a cron expression',
+        instruction: 'invalid',
+      }),
+    ).rejects.toThrow('invalid cron expression');
+    expect(mockJobRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects one-time jobs scheduled in the past', async () => {
+    await expect(
+      service.create({
+        type: 'at',
+        at: new Date(Date.now() - 60_000).toISOString(),
+        instruction: 'past',
+      }),
+    ).rejects.toThrow('type=at must be later than now');
+    expect(mockJobRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('uses a Redis lease when running in a multi-instance deployment', async () => {
+    mockRedisProvider.isEnabled.mockReturnValue(true);
+    const job = await service.create({
+      type: 'every',
+      everyMs: 60_000,
+      instruction: 'distributed',
+    });
+
+    await service.runNow(job.id);
+
+    expect(mockRedisProvider.setIfAbsent).toHaveBeenCalledWith(
+      `rag:scheduled-job:${job.id}:lock`,
+      expect.any(String),
+      180,
+    );
+    expect(mockRedisProvider.releaseLock).toHaveBeenCalledWith(
+      `rag:scheduled-job:${job.id}:lock`,
+      expect.any(String),
+    );
   });
 
   it('creates an at job and disables it after running once', async () => {
@@ -160,7 +209,14 @@ describe('JobsService', () => {
   });
 
   it('copies a task as a disabled next version and switches versions on start', async () => {
-    const first = await service.create({ name: '规则报告', taskKind: 'analysis', type: 'cron', cron: '0 9 * * *', instruction: '每天统计规则', enabled: false });
+    const first = await service.create({
+      name: '规则报告',
+      taskKind: 'analysis',
+      type: 'cron',
+      cron: '0 9 * * *',
+      instruction: '每天统计规则',
+      enabled: false,
+    });
     const copied = await service.copy(first.id);
     expect(copied.version).toBe(2);
     expect(copied.versionGroupId).toBe(first.versionGroupId);

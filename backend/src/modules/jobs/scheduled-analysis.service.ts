@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { LlmProvider } from '../../providers/llm/llm.provider';
@@ -74,24 +74,26 @@ export class ScheduledAnalysisService {
       '市场部',
     ]);
     const schedule = this.detectSchedule(text);
+    const effectiveDataScopes: AnalysisDataScope[] = dataScopes.length
+      ? dataScopes
+      : ['rules', 'complaints', 'qa', 'workflow'];
     return {
       name: this.detectName(text, sourceType),
       ...schedule,
       sourceType,
       instruction: text,
       analysisConfig: {
-        window: text.includes('本月') || text.includes('这个月')
-          ? 'month'
-          : text.includes('本周') || text.includes('这周')
-            ? 'week'
-            : 'today',
-        dataScopes: dataScopes.length
-          ? dataScopes
-          : ['rules', 'complaints', 'qa', 'workflow'],
+        window:
+          text.includes('本月') || text.includes('这个月')
+            ? 'month'
+            : text.includes('本周') || text.includes('这周')
+              ? 'week'
+              : 'today',
+        dataScopes: effectiveDataScopes,
         roles,
         departments: departments.length
           ? departments
-          : this.defaultDepartments(dataScopes),
+          : this.defaultDepartments(effectiveDataScopes),
       },
     };
   }
@@ -129,9 +131,10 @@ export class ScheduledAnalysisService {
           ].join('\n\n'),
         },
       ]);
-      const generated = typeof response.content === 'string'
-        ? response.content.trim()
-        : JSON.stringify(response.content);
+      const generated =
+        typeof response.content === 'string'
+          ? response.content.trim()
+          : JSON.stringify(response.content);
       if (generated && this.isGroundedGenerated(generated, snapshot)) {
         const markdown = `${deterministic}\n\n## Agent 分析与建议\n\n${generated}`;
         await this.trace(job, config, snapshot, markdown);
@@ -191,8 +194,14 @@ export class ScheduledAnalysisService {
       scopes.has('rules')
         ? this.documentRepo
             .createQueryBuilder('document')
-            .where('document."createdAt" BETWEEN :start AND :end', { start, end })
-            .orWhere('document."effectiveAt" BETWEEN :start AND :end', { start, end })
+            .where('document."createdAt" BETWEEN :start AND :end', {
+              start,
+              end,
+            })
+            .orWhere('document."effectiveAt" BETWEEN :start AND :end', {
+              start,
+              end,
+            })
             .orderBy('document."createdAt"', 'DESC')
             .take(100)
             .getMany()
@@ -244,7 +253,9 @@ export class ScheduledAnalysisService {
         byType: this.countBy(feedback, (item) => item.errorType ?? '未分类'),
         samples: feedback.slice(0, 30).map((item) => ({
           errorType: item.errorType ?? '未分类',
-          query: item.queryLogId ? queryById.get(item.queryLogId) ?? '原问题不可用' : '原问题不可用',
+          query: item.queryLogId
+            ? (queryById.get(item.queryLogId) ?? '原问题不可用')
+            : '原问题不可用',
           comment: item.comment?.slice(0, 300) ?? '',
           status: item.status,
         })),
@@ -258,7 +269,10 @@ export class ScheduledAnalysisService {
         refused: queries.filter((item) => item.refused).length,
         zeroCitation: queries.filter((item) => item.citationCount === 0).length,
         averageLatencyMs: queries.length
-          ? Math.round(queries.reduce((sum, item) => sum + item.latencyMs, 0) / queries.length)
+          ? Math.round(
+              queries.reduce((sum, item) => sum + item.latencyMs, 0) /
+                queries.length,
+            )
           : 0,
       };
     }
@@ -287,12 +301,17 @@ export class ScheduledAnalysisService {
       '## 可复核统计',
       '',
     ];
-    if (snapshot.rules) lines.push(`- 新增／生效规则文档：${snapshot.rules.length} 条`);
-    if (snapshot.complaints) lines.push(`- 投诉代理指标（负反馈）：${snapshot.complaints.total} 条`);
+    if (snapshot.rules)
+      lines.push(`- 新增／生效规则文档：${snapshot.rules.length} 条`);
+    if (snapshot.complaints)
+      lines.push(`- 投诉代理指标（负反馈）：${snapshot.complaints.total} 条`);
     if (snapshot.qa) {
-      lines.push(`- 问答：${snapshot.qa.totalQueries} 次；拒答：${snapshot.qa.refused} 次；零引用：${snapshot.qa.zeroCitation} 次；平均延迟：${snapshot.qa.averageLatencyMs} ms`);
+      lines.push(
+        `- 问答：${snapshot.qa.totalQueries} 次；拒答：${snapshot.qa.refused} 次；零引用：${snapshot.qa.zeroCitation} 次；平均延迟：${snapshot.qa.averageLatencyMs} ms`,
+      );
     }
-    if (snapshot.workflow) lines.push(`- 产研运子任务：${snapshot.workflow.total} 个`);
+    if (snapshot.workflow)
+      lines.push(`- 产研运子任务：${snapshot.workflow.total} 个`);
     return lines.join('\n');
   }
 
@@ -319,16 +338,21 @@ export class ScheduledAnalysisService {
 
   private parseConfig(raw: string | null | undefined): ScheduledAnalysisConfig {
     try {
-      const parsed = JSON.parse(raw || '{}') as Partial<ScheduledAnalysisConfig>;
+      const parsed = JSON.parse(
+        raw || '{}',
+      ) as Partial<ScheduledAnalysisConfig>;
       return {
         window: ['today', 'week', 'month'].includes(String(parsed.window))
           ? (parsed.window as ScheduledAnalysisConfig['window'])
           : 'today',
-        dataScopes: Array.isArray(parsed.dataScopes) && parsed.dataScopes.length
-          ? parsed.dataScopes
-          : ['rules', 'complaints', 'qa', 'workflow'],
+        dataScopes:
+          Array.isArray(parsed.dataScopes) && parsed.dataScopes.length
+            ? parsed.dataScopes
+            : ['rules', 'complaints', 'qa', 'workflow'],
         roles: Array.isArray(parsed.roles) ? parsed.roles : [],
-        departments: Array.isArray(parsed.departments) ? parsed.departments : [],
+        departments: Array.isArray(parsed.departments)
+          ? parsed.departments
+          : [],
       };
     } catch {
       return {
@@ -369,7 +393,11 @@ export class ScheduledAnalysisService {
     generated: string,
     snapshot: AnalysisSnapshot,
   ): boolean {
-    if (/真实用户|行业|基准|SLA|截止|小时内|分钟内|系统版本|版本号|下次执行|必须暂停/i.test(generated)) {
+    if (
+      /真实用户|行业|基准|SLA|截止|小时内|分钟内|系统版本|版本号|下次执行|必须暂停/i.test(
+        generated,
+      )
+    ) {
       return false;
     }
     const allowedNumbers = new Set(
@@ -393,27 +421,98 @@ export class ScheduledAnalysisService {
     }).format(value);
   }
 
-  private detectSchedule(text: string): Pick<ParsedScheduledAnalysis, 'type' | 'cron'> {
-    const timeMatches = [...text.matchAll(/(\d{1,2})(?:[:：点时](\d{1,2}))?/g)];
+  private detectSchedule(
+    text: string,
+  ): Pick<ParsedScheduledAnalysis, 'type' | 'cron' | 'everyMs'> {
+    const intervalMatch = text.match(
+      /每隔\s*(\d+(?:\.\d+)?)\s*(分钟|分|小时|小时钟|时|天)/,
+    );
+    if (intervalMatch) {
+      const amount = Number(intervalMatch[1]);
+      const unit = intervalMatch[2];
+      const multiplier = unit === '天' ? 86_400_000 : unit.includes('时') ? 3_600_000 : 60_000;
+      const everyMs = Math.round(amount * multiplier);
+      if (!Number.isFinite(everyMs) || everyMs < 1_000) {
+        throw new BadRequestException('无法解析有效的间隔时间，最小间隔为 1 秒');
+      }
+      return { type: 'every', everyMs };
+    }
+
+    const timeMatches = [
+      ...text.matchAll(
+        /(上午|早上|下午|晚上|夜间|凌晨|中午)?\s*(\d{1,2})(?:\s*[:：]\s*(\d{1,2})|\s*(?:点|时)(?:\s*(半|\d{1,2})\s*分?)?)/g,
+      ),
+    ];
     const timeMatch = timeMatches.at(-1);
-    const hour = Math.min(Math.max(Number(timeMatch?.[1] ?? 9), 0), 23);
-    const minute = Math.min(Math.max(Number(timeMatch?.[2] ?? 0), 0), 59);
+    if (!timeMatch) {
+      throw new BadRequestException(
+        '未识别到明确的执行时间，请补充例如“每天上午 9 点”或“每隔 2 小时”',
+      );
+    }
+    const period = timeMatch[1];
+    let hour = Number(timeMatch[2]);
+    const minuteText = timeMatch[3] ?? timeMatch[4];
+    const minute = minuteText === '半' ? 30 : Number(minuteText ?? 0);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      throw new BadRequestException('执行小时必须在 0 到 23 之间');
+    }
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+      throw new BadRequestException('执行分钟必须在 0 到 59 之间');
+    }
+    if (period === '下午' || period === '晚上' || period === '夜间') {
+      if (hour < 12) hour += 12;
+    } else if (period === '凌晨' && hour === 12) {
+      hour = 0;
+    } else if (period === '中午' && hour < 11) {
+      hour += 12;
+    }
     if (/每月/.test(text)) {
-      const day = Math.min(Math.max(Number(text.match(/每月\s*(\d{1,2})[号日]?/)?.[1] ?? 1), 1), 28);
+      const day = Math.min(
+        Math.max(Number(text.match(/每月\s*(\d{1,2})[号日]?/)?.[1] ?? 1), 1),
+        31,
+      );
       return { type: 'cron', cron: `${minute} ${hour} ${day} * *` };
+    }
+    if (/每个?工作日|工作日/.test(text)) {
+      return { type: 'cron', cron: `${minute} ${hour} * * 1-5` };
+    }
+    if (/每个?周末|周末/.test(text)) {
+      return { type: 'cron', cron: `${minute} ${hour} * * 0,6` };
     }
     const weekMatch = text.match(/每周([一二三四五六日天])/);
     if (weekMatch) {
-      const weekMap: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 };
-      return { type: 'cron', cron: `${minute} ${hour} * * ${weekMap[weekMatch[1]]}` };
+      const weekMap: Record<string, number> = {
+        一: 1,
+        二: 2,
+        三: 3,
+        四: 4,
+        五: 5,
+        六: 6,
+        日: 0,
+        天: 0,
+      };
+      return {
+        type: 'cron',
+        cron: `${minute} ${hour} * * ${weekMap[weekMatch[1]]}`,
+      };
     }
-    return { type: 'cron', cron: `${minute} ${hour} * * *` };
+    if (/每天|每日|天天/.test(text)) {
+      return { type: 'cron', cron: `${minute} ${hour} * * *` };
+    }
+    throw new BadRequestException(
+      '未识别到明确的执行周期，请补充“每天、每周、每月、工作日”或“每隔”',
+    );
   }
 
   private detectName(text: string, sourceType: ScheduledJobSourceType): string {
-    const heading = sourceType === 'markdown' ? text.match(/^#\s+(.+)$/m)?.[1] : undefined;
-    const firstLine = heading ?? text.split('\n').find((line) => line.trim()) ?? '运营分析任务';
-    return firstLine.replace(/^[-#*\s]+/, '').trim().slice(0, 80);
+    const heading =
+      sourceType === 'markdown' ? text.match(/^#\s+(.+)$/m)?.[1] : undefined;
+    const firstLine =
+      heading ?? text.split('\n').find((line) => line.trim()) ?? '运营分析任务';
+    return firstLine
+      .replace(/^[-#*\s]+/, '')
+      .trim()
+      .slice(0, 80);
   }
 
   private detectValues(text: string, candidates: string[]): string[] {
@@ -422,13 +521,21 @@ export class ScheduledAnalysisService {
 
   private defaultDepartments(scopes: AnalysisDataScope[]): string[] {
     const values = new Set<string>();
-    if (scopes.includes('rules')) ['产品部', '研发部', '测试部', '运营部'].forEach((item) => values.add(item));
-    if (scopes.includes('complaints')) ['客服部', '产品部', '运营部'].forEach((item) => values.add(item));
-    if (scopes.includes('qa')) ['研发部', '运营部'].forEach((item) => values.add(item));
+    if (scopes.includes('rules'))
+      ['产品部', '研发部', '测试部', '运营部'].forEach((item) =>
+        values.add(item),
+      );
+    if (scopes.includes('complaints'))
+      ['客服部', '产品部', '运营部'].forEach((item) => values.add(item));
+    if (scopes.includes('qa'))
+      ['研发部', '运营部'].forEach((item) => values.add(item));
     return [...values];
   }
 
-  private countBy<T>(items: T[], selector: (item: T) => string): Record<string, number> {
+  private countBy<T>(
+    items: T[],
+    selector: (item: T) => string,
+  ): Record<string, number> {
     return items.reduce<Record<string, number>>((result, item) => {
       const key = selector(item) || '未分类';
       result[key] = (result[key] ?? 0) + 1;

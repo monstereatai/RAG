@@ -69,14 +69,16 @@ describe('MemoryService', () => {
     });
 
     it('should search user and session memories and build system message', async () => {
-      mockMem0Provider.search.mockImplementation(({ runId }: { runId?: string }) => {
-        if (runId) {
-          return Promise.resolve([
-            { id: 's1', memory: 'Session memory snippet' },
-          ]);
-        }
-        return Promise.resolve([{ id: 'u1', memory: 'User memory snippet' }]);
-      });
+      mockMem0Provider.search.mockImplementation(
+        ({ runId }: { runId?: string }) => {
+          if (runId) {
+            return Promise.resolve([
+              { id: 's1', memory: 'Session memory snippet' },
+            ]);
+          }
+          return Promise.resolve([{ id: 'u1', memory: 'User memory snippet' }]);
+        },
+      );
 
       const res = await service.searchMemory('query', 'user-1', 'conv-1');
       expect(res.userMemories).toEqual([

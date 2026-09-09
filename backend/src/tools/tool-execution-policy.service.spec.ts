@@ -25,17 +25,21 @@ describe('ToolExecutionPolicyService', () => {
   });
 
   it('allows network search in Simple mode only as an evidence-shortage fallback', () => {
-    expect(service.decide('bocha_web_search', { mode: 'simple' })).toMatchObject({
+    expect(
+      service.decide('bocha_web_search', { mode: 'simple' }),
+    ).toMatchObject({
       allowed: true,
     });
   });
 
   it('enforces the resolved plugin tool allowlist when one is supplied', () => {
-    expect(service.decide('artifact_generate', {
-      mode: 'production',
-      role: 'product',
-      pluginKeys: ['workflow.readonly-review'],
-      allowedToolNames: ['product_knowledge_search'],
-    })).toMatchObject({ allowed: false });
+    expect(
+      service.decide('artifact_generate', {
+        mode: 'production',
+        role: 'product',
+        pluginKeys: ['workflow.readonly-review'],
+        allowedToolNames: ['product_knowledge_search'],
+      }),
+    ).toMatchObject({ allowed: false });
   });
 });

@@ -28,7 +28,8 @@ export class VisionProvider implements IVisionProvider, OnModuleInit {
 
   onModuleInit() {
     const providerName: VisionModelProvider =
-      (this.config.get<string>('vision.provider') as VisionModelProvider) ?? 'mock';
+      (this.config.get<string>('vision.provider') as VisionModelProvider) ??
+      'mock';
 
     switch (providerName) {
       case 'openai-compatible':
@@ -70,7 +71,8 @@ export class VisionProvider implements IVisionProvider, OnModuleInit {
   /** 获取当前激活的 provider 名称 */
   getActiveProviderName(): VisionModelProvider {
     return (
-      (this.config.get<string>('vision.provider') as VisionModelProvider) ?? 'mock'
+      (this.config.get<string>('vision.provider') as VisionModelProvider) ??
+      'mock'
     );
   }
 }

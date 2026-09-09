@@ -21,6 +21,7 @@ import { PromptModule } from '../../rag/prompts/prompt.module';
 import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 import { DocumentModule } from '../document/document.module';
+import { MetricsModule } from '../metrics/metrics.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DocumentModule } from '../document/document.module';
     PluginRuntimeModule,
     AgentRuntimeModule,
     DocumentModule,
+    MetricsModule,
   ],
   controllers: [ChatController],
   providers: [

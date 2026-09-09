@@ -44,7 +44,10 @@ export class AguiController {
       userId: user.userId,
       model: chatModel,
       rolePresetId,
-      pluginKeys: pluginKeys?.split(',').map((item) => item.trim()).filter(Boolean),
+      pluginKeys: pluginKeys
+        ?.split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
     });
   }
 
@@ -73,13 +76,19 @@ export class AguiController {
       userId: userId?.trim() || 'admin-backend',
       model: chatModel,
       rolePresetId,
-      pluginKeys: pluginKeys?.split(',').map((item) => item.trim()).filter(Boolean),
+      pluginKeys: pluginKeys
+        ?.split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
     });
   }
 
   private parseModel(model?: string): LlmModelProvider {
     if (!model) return 'qwen';
-    if (model === 'qwen' || model === 'deepseek') return model;
-    throw new BadRequestException('model must be one of: qwen, deepseek');
+    if (model === 'qwen' || model === 'deepseek' || model === 'zhipu')
+      return model;
+    throw new BadRequestException(
+      'model must be one of: qwen, deepseek, zhipu',
+    );
   }
 }

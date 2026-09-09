@@ -204,9 +204,7 @@ export class KarpathyObsidianIngestService {
     return { rag, obsidian };
   }
 
-  private hasBusinessMetadata(
-    metadata?: DocumentBusinessMetadata,
-  ): boolean {
+  private hasBusinessMetadata(metadata?: DocumentBusinessMetadata): boolean {
     return Boolean(
       metadata &&
       Object.values(metadata).some((value) =>

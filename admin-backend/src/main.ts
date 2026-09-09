@@ -8,6 +8,47 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 import { Logger } from 'nestjs-pino';
 
+const SWAGGER_PATH_LABELS: Record<string, string> = {
+  api: 'API',
+  admin: '管理后台',
+  'agent-ops': 'Agent 运营',
+  users: '用户',
+  auth: '认证',
+  documents: '文档',
+  search: '搜索',
+  graph: '知识图谱',
+  system: '系统',
+  qa: '问答',
+};
+
+const hasChinese = (value: unknown) =>
+  typeof value === 'string' && /[\u3400-\u9fff]/.test(value);
+
+function addChineseSwaggerDescriptions(document: {
+  paths?: Record<string, unknown>;
+}) {
+  for (const [path, rawPathItem] of Object.entries(document.paths ?? {})) {
+    const pathItem = rawPathItem as Record<string, unknown>;
+    const pathLabel = path
+      .split('/')
+      .filter(Boolean)
+      .filter((segment) => !segment.startsWith(':'))
+      .map((segment) => SWAGGER_PATH_LABELS[segment] ?? segment)
+      .join('／') || '接口';
+    for (const [method, rawOperation] of Object.entries(pathItem)) {
+      if (!['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(method)) continue;
+      const operation = rawOperation as Record<string, unknown>;
+      const methodLabel = { get: '查询', post: '创建或提交', put: '更新', patch: '部分更新', delete: '删除', options: '获取选项', head: '检查' }[method] ?? '调用';
+      const summary = operation.summary;
+      const description = operation.description;
+      operation.summary = hasChinese(summary) ? summary : `${methodLabel}${pathLabel}接口`;
+      operation.description = hasChinese(description)
+        ? description
+        : `用于${pathLabel}的${methodLabel}接口。请求方式：${method.toUpperCase()}，路径：${path}。`;
+    }
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
@@ -28,10 +69,13 @@ async function bootstrap() {
 
   // 配置Swagger
   const config = new DocumentBuilder()
-    .setTitle('NestJS Enterprise API')
-    .setDescription('企业级NestJS服务端API文档')
+    .setTitle('RAG Admin Backend API')
+    .setDescription('RAG 管理后台、权限、运营与 Agent 管理接口文档')
     .setVersion('1.0')
-    .addBearerAuth()
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'bearer',
+    )
     .addTag('auth', '认证相关接口')
     .addTag('users', '用户管理接口')
     .addTag('orders', '订单管理接口')
@@ -41,7 +85,11 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  addChineseSwaggerDescriptions(document);
+  SwaggerModule.setup('docs', app, document, {
+    jsonDocumentUrl: 'docs-json',
+    swaggerOptions: { persistAuthorization: true },
+  });
 
   // 全局 API 前缀，与前端 proxy 对齐
   app.setGlobalPrefix('api', {

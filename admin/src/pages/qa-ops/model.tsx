@@ -14,6 +14,7 @@ import {
 const modelLabels: Record<ChatModel, string> = {
   qwen: '通义千问',
   deepseek: 'DeepSeek',
+  zhipu: '智谱 GLM',
 };
 
 const ModelConfigPage: React.FC = () => {

@@ -294,9 +294,32 @@ export class RagClientService {
   delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', body); }
   listRuntimeEvents(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events${this.toQueryString({ threadId, runId })}`); }
   getRuntimeEventMetrics(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events/metrics${this.toQueryString({ threadId, runId })}`); }
+  getAgentRunSummary(limit = 500) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runs/summary${this.toQueryString({ limit })}`); }
 
   listScheduledAnalysisJobs() {
     return this.getJson<Record<string, unknown>[]>('/rag/admin/agent-ops/schedules');
+  }
+
+  listSecurityPolicies() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/security/policies');
+  }
+
+  listSecurityAudit(limit = 100) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/security/audit${this.toQueryString({ limit })}`);
+  }
+
+  getRagQualitySummary(limit = 500) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/quality/summary${this.toQueryString({ limit })}`);
+  }
+
+  auditDocumentIndexes(limit = 200) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents/index-audit?limit=${encodeURIComponent(String(limit))}`,
+    );
+  }
+
+  repairDocumentIndexes(body: { docIds?: string[]; limit?: number }) {
+    return this.postJson<Record<string, unknown>>('/rag/admin/documents/index-audit/repair', body);
   }
 
   parseScheduledAnalysisJob(body: unknown) {

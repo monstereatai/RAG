@@ -3,11 +3,12 @@ import {
   Injectable,
   Logger,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CronJob } from 'cron';
+import { CronJob, CronTime } from 'cron';
 import { randomUUID } from 'node:crypto';
 import { ScheduledJobEntity } from '../../providers/db/entities/job.entity';
 import { JobExecutionEntity } from '../../providers/db/entities/job-execution.entity';
@@ -16,6 +17,10 @@ import { SupervisorService } from '../supervisor/supervisor.service';
 import { ScheduledAnalysisService } from './scheduled-analysis.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { RedisProvider } from '../../providers/redis/redis.provider';
+import { ScheduledJobQueueService } from './scheduled-job-queue.service';
+
+const SCHEDULE_TIMEZONE = 'Asia/Shanghai';
 
 @Injectable()
 export class JobsService implements OnModuleInit {
@@ -32,9 +37,21 @@ export class JobsService implements OnModuleInit {
     private readonly scheduledAnalysis: ScheduledAnalysisService,
     private readonly metricsService: MetricsService,
     private readonly domainEvents: DomainEventsService,
+    private readonly redisProvider: RedisProvider,
+    @Optional() private readonly scheduledQueue?: ScheduledJobQueueService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    this.scheduledQueue?.setProcessor(async (jobId) => {
+      const execution = await this.run(jobId);
+      const current = await this.jobRepo.findOneBy({ id: jobId });
+      if (current?.type === 'at' && execution.status === 'completed') {
+        current.enabled = false;
+        current.running = false;
+        current.nextRunAt = null;
+        await this.jobRepo.save(current);
+      }
+    });
     try {
       const activeJobs = await this.jobRepo.find({ where: { enabled: true } });
       this.logger.log(
@@ -145,7 +162,9 @@ export class JobsService implements OnModuleInit {
   async listVersions(id: string): Promise<ScheduledJobEntity[]> {
     const job = await this.get(id);
     const groupId = job.versionGroupId ?? job.id;
-    const versions = await this.jobRepo.find({ where: { versionGroupId: groupId } });
+    const versions = await this.jobRepo.find({
+      where: { versionGroupId: groupId },
+    });
     return versions
       .filter((item) => (item.versionGroupId ?? item.id) === groupId)
       .sort((a, b) => (b.version ?? 1) - (a.version ?? 1));
@@ -155,7 +174,8 @@ export class JobsService implements OnModuleInit {
     const source = await this.get(id);
     const groupId = source.versionGroupId ?? source.id;
     const versions = await this.listVersions(id);
-    const nextVersion = Math.max(...versions.map((item) => item.version ?? 1), 1) + 1;
+    const nextVersion =
+      Math.max(...versions.map((item) => item.version ?? 1), 1) + 1;
     const copied = this.jobRepo.create({
       ...source,
       id: randomUUID(),
@@ -206,8 +226,16 @@ export class JobsService implements OnModuleInit {
   }
 
   private validateInput(input: CreateJobInput): void {
-    if (input.type === 'cron' && !input.cron) {
-      throw new BadRequestException('type=cron requires cron');
+    if (input.type === 'cron') {
+      if (!input.cron) {
+        throw new BadRequestException('type=cron requires cron');
+      }
+      const validation = CronTime.validateCronExpression(input.cron);
+      if (!validation.valid) {
+        throw new BadRequestException(
+          `invalid cron expression: ${validation.error?.message ?? '无法解析'}`,
+        );
+      }
     }
     if (input.type === 'every' && (!input.everyMs || input.everyMs < 1000)) {
       throw new BadRequestException('type=every requires everyMs >= 1000');
@@ -220,10 +248,19 @@ export class JobsService implements OnModuleInit {
       if (Number.isNaN(date.getTime())) {
         throw new BadRequestException('type=at requires valid ISO at');
       }
+      if (date.getTime() <= Date.now()) {
+        throw new BadRequestException('type=at must be later than now');
+      }
     }
   }
 
   private startRuntime(job: ScheduledJobEntity): void {
+    if (this.scheduledQueue?.enabled) {
+      void this.scheduledQueue.schedule(job).catch((error) =>
+        this.logger.warn(`BullMQ scheduler registration failed for ${job.id}: ${(error as Error).message}`),
+      );
+      return;
+    }
     if (job.type === 'cron') {
       this.startCron(job);
     } else if (job.type === 'every') {
@@ -233,12 +270,18 @@ export class JobsService implements OnModuleInit {
     }
   }
 
-  private async deactivateOtherVersions(job: ScheduledJobEntity): Promise<void> {
+  private async deactivateOtherVersions(
+    job: ScheduledJobEntity,
+  ): Promise<void> {
     const groupId = job.versionGroupId ?? job.id;
-    const versions = await this.jobRepo.find({ where: { versionGroupId: groupId } });
+    const versions = await this.jobRepo.find({
+      where: { versionGroupId: groupId },
+    });
     for (const other of versions) {
-      if (other.id === job.id || (other.versionGroupId ?? other.id) !== groupId) continue;
-      if (other.running || other.enabled || other.isCurrent) this.stopRuntime(other);
+      if (other.id === job.id || (other.versionGroupId ?? other.id) !== groupId)
+        continue;
+      if (other.running || other.enabled || other.isCurrent)
+        this.stopRuntime(other);
       other.enabled = false;
       other.running = false;
       other.isCurrent = false;
@@ -249,10 +292,12 @@ export class JobsService implements OnModuleInit {
   private startCron(job: ScheduledJobEntity): void {
     const cronExpr = job.cron ?? '';
     const runtime = new CronJob(cronExpr, () => {
-      void this.run(job.id).catch((error) =>
-        this.logger.warn(`scheduled job ${job.id} callback failed: ${(error as Error).message}`),
+      void this.dispatch(job.id, `cron:${new Date().toISOString()}`).catch((error) =>
+        this.logger.warn(
+          `scheduled job ${job.id} callback failed: ${(error as Error).message}`,
+        ),
       );
-    });
+    }, null, false, SCHEDULE_TIMEZONE);
     this.schedulerRegistry.addCronJob(job.id, runtime);
     runtime.start();
 
@@ -264,8 +309,10 @@ export class JobsService implements OnModuleInit {
   private startInterval(job: ScheduledJobEntity): void {
     const everyMs = job.everyMs ?? 0;
     const ref = setInterval(() => {
-      void this.run(job.id).catch((error) =>
-        this.logger.warn(`scheduled job ${job.id} callback failed: ${(error as Error).message}`),
+      void this.dispatch(job.id, `every:${Date.now()}`).catch((error) =>
+        this.logger.warn(
+          `scheduled job ${job.id} callback failed: ${(error as Error).message}`,
+        ),
       );
     }, everyMs);
     this.schedulerRegistry.addInterval(job.id, ref);
@@ -278,17 +325,18 @@ export class JobsService implements OnModuleInit {
     const at = new Date(job.at ?? '');
     const delay = Math.max(0, at.getTime() - Date.now());
     const ref = setTimeout(() => {
-      void (async () => {
-        await this.run(job.id);
-        const current = await this.jobRepo.findOneBy({ id: job.id });
-        if (current) {
-          current.enabled = false;
-          current.running = false;
-          current.nextRunAt = null;
-          await this.jobRepo.save(current);
+      void this.dispatch(job.id, `at:${job.at}`).then(async (execution) => {
+        if (execution && execution.status === 'completed') {
+          const current = await this.jobRepo.findOneBy({ id: job.id });
+          if (current) {
+            current.enabled = false;
+            current.running = false;
+            current.nextRunAt = null;
+            await this.jobRepo.save(current);
+          }
         }
         this.safeDeleteTimeout(job.id);
-      })();
+      }).catch(() => undefined);
     }, delay);
     this.schedulerRegistry.addTimeout(job.id, ref);
 
@@ -296,11 +344,24 @@ export class JobsService implements OnModuleInit {
     this.jobRepo.save(job).catch(() => {});
   }
 
+  private async dispatch(id: string, triggerKey: string, delayMs = 0): Promise<JobExecutionEntity | null> {
+    if (await this.scheduledQueue?.enqueue(id, triggerKey, delayMs)) return null;
+    return this.run(id);
+  }
+
   private async run(id: string): Promise<JobExecutionEntity> {
     const job = await this.jobRepo.findOneBy({ id });
     if (!job) throw new BadRequestException(`job ${id} not found`);
     if (this.executingJobs.has(id)) {
       throw new BadRequestException(`job ${id} is already running`);
+    }
+    const lockKey = `rag:scheduled-job:${id}:lock`;
+    const lockToken = randomUUID();
+    const distributedLock = this.redisProvider.isEnabled()
+      ? await this.redisProvider.setIfAbsent(lockKey, lockToken, 180)
+      : true;
+    if (!distributedLock) {
+      throw new BadRequestException(`job ${id} is already running on another instance`);
     }
     this.executingJobs.add(id);
 
@@ -320,17 +381,25 @@ export class JobsService implements OnModuleInit {
     try {
       let resultSummary: string;
       if (job.taskKind === 'analysis') {
-        const result = await this.withTimeout(
-          this.scheduledAnalysis.execute(job),
-          120_000,
-          `scheduled analysis job ${job.id}`,
+        const result = await this.withRetry(
+          () =>
+            this.withTimeout(
+              this.scheduledAnalysis.execute(job),
+              120_000,
+              `scheduled analysis job ${job.id}`,
+            ),
+          2,
         );
         resultSummary = result.markdown;
       } else {
-        const result = await this.withTimeout(
-          this.supervisorService.query(job.instruction),
-          30_000,
-          `scheduled job ${job.id}`,
+        const result = await this.withRetry(
+          () =>
+            this.withTimeout(
+              this.supervisorService.query(job.instruction),
+              30_000,
+              `scheduled job ${job.id}`,
+            ),
+          2,
         );
         resultSummary = `domain=${result.domain}, confidence=${result.confidence.toFixed(2)}\n\n${result.answer}`;
       }
@@ -359,7 +428,12 @@ export class JobsService implements OnModuleInit {
         durationMs / 1000,
       );
       this.refreshNextRun(job);
-      await this.domainEvents.emit({ eventType: 'job.completed', aggregateType: 'scheduled_job', aggregateId: job.id, payload: { executionId, taskKind: job.taskKind, durationMs } });
+      await this.domainEvents.emit({
+        eventType: 'job.completed',
+        aggregateType: 'scheduled_job',
+        aggregateId: job.id,
+        payload: { executionId, taskKind: job.taskKind, durationMs },
+      });
       return execution;
     } catch (err) {
       const durationMs = Date.now() - startedAt;
@@ -385,16 +459,38 @@ export class JobsService implements OnModuleInit {
         'failed',
         durationMs / 1000,
       );
-      await this.domainEvents.emit({ eventType: 'job.failed', aggregateType: 'scheduled_job', aggregateId: job.id, payload: { executionId, taskKind: job.taskKind, durationMs, reason: errorMsg } });
+      await this.domainEvents.emit({
+        eventType: 'job.failed',
+        aggregateType: 'scheduled_job',
+        aggregateId: job.id,
+        payload: {
+          executionId,
+          taskKind: job.taskKind,
+          durationMs,
+          reason: errorMsg,
+        },
+      });
       return execution;
     } finally {
       this.executingJobs.delete(id);
+      if (this.redisProvider.isEnabled()) {
+        await this.redisProvider.releaseLock(lockKey, lockToken);
+      }
     }
   }
 
   private refreshNextRun(job: ScheduledJobEntity): void {
+    if (this.scheduledQueue?.enabled) {
+      void this.scheduledQueue.schedule(job).catch(() => undefined);
+      return;
+    }
     if (job.type === 'cron') {
-      job.nextRunAt = this.schedulerRegistry.getCronJobs().get(job.id)?.nextDate()?.toJSDate() ?? null;
+      job.nextRunAt =
+        this.schedulerRegistry
+          .getCronJobs()
+          .get(job.id)
+          ?.nextDate()
+          ?.toJSDate() ?? null;
     } else if (job.type === 'every') {
       job.nextRunAt = new Date(Date.now() + (job.everyMs ?? 0));
     }
@@ -402,6 +498,10 @@ export class JobsService implements OnModuleInit {
   }
 
   private stopRuntime(job: ScheduledJobEntity): void {
+    if (this.scheduledQueue?.enabled) {
+      void this.scheduledQueue.unschedule(job.id).catch(() => undefined);
+      return;
+    }
     if (job.type === 'cron') {
       const runtime = this.schedulerRegistry.getCronJobs().get(job.id);
       void runtime?.stop();
@@ -454,5 +554,20 @@ export class JobsService implements OnModuleInit {
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  private async withRetry<T>(operation: () => Promise<T>, attempts: number): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        }
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 }

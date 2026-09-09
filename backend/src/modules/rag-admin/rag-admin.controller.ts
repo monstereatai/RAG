@@ -18,10 +18,8 @@ import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { RagFeedbackService } from '../chat/rag-feedback.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { MemoryService } from '../memory/memory.service';
-import {
-  DEFAULT_ROLE_PRESET_ID,
-  listRolePresets,
-} from '../chat/role-presets';
+import { DEFAULT_ROLE_PRESET_ID, listRolePresets } from '../chat/role-presets';
+import { listSafetyPolicies } from '../../rag/prompts/prompt-injection.guard';
 
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
@@ -54,33 +52,69 @@ export class RagAdminController {
     };
   }
 
+  @Get('security/policies')
+  listSecurityPolicies() {
+    return {
+      available: true,
+      version: '2026-09-09',
+      policies: listSafetyPolicies(),
+      note: '策略在问答、流式问答和 Agent 执行前统一生效；安全讨论类问题会保留。',
+    };
+  }
+
+  @Get('security/audit')
+  listSecurityAudit(@Query('limit') limit?: string) {
+    return this.ragAdminService.listSecurityAudit(Number(limit) || 100);
+  }
+
   @Get('domain-events/subscriptions')
-  listDomainEventSubscriptions() { return this.domainEvents.listSubscriptions(); }
+  listDomainEventSubscriptions() {
+    return this.domainEvents.listSubscriptions();
+  }
 
   @Post('domain-events/subscriptions')
-  saveDomainEventSubscription(@Body() body: { id?: string; name: string; eventTypes: string[]; channel: 'enterprise_wechat' | 'webhook'; endpointKey: string; enabled?: boolean }) {
+  saveDomainEventSubscription(
+    @Body()
+    body: {
+      id?: string;
+      name: string;
+      eventTypes: string[];
+      channel: 'enterprise_wechat' | 'webhook';
+      endpointKey: string;
+      enabled?: boolean;
+    },
+  ) {
     return this.domainEvents.upsertSubscription(body);
   }
 
   @Get('domain-events/outbox')
-  listDomainEventOutbox(@Query('limit') limit?: string) { return this.domainEvents.listOutbox(Number(limit) || 100); }
+  listDomainEventOutbox(@Query('limit') limit?: string) {
+    return this.domainEvents.listOutbox(Number(limit) || 100);
+  }
 
   @Post('domain-events/outbox/:id/retry')
-  retryDomainEvent(@Param('id') id: string) { return this.domainEvents.retry(id); }
+  retryDomainEvent(@Param('id') id: string) {
+    return this.domainEvents.retry(id);
+  }
 
   /** 长期记忆的内部读取入口，供 Admin Backend 代用户访问，避免两套 JWT 直接互认。 */
   @Get('memories')
   async listMemories(@Query('ownerUserId') ownerUserId?: string) {
     const userId = this.requireOwnerUserId(ownerUserId);
-    if (!this.memoryService.isEnabled()) return { enabled: false, memories: [] };
-    return { enabled: true, memories: await this.memoryService.listMemories(userId) };
+    if (!this.memoryService.isEnabled())
+      return { enabled: false, memories: [] };
+    return {
+      enabled: true,
+      memories: await this.memoryService.listMemories(userId),
+    };
   }
 
   /** 清空是跨服务的不可逆操作；先校验 ownerUserId，再交给 MemoryService 执行。 */
   @Delete('memories')
   async clearMemories(@Query('ownerUserId') ownerUserId?: string) {
     const userId = this.requireOwnerUserId(ownerUserId);
-    if (!this.memoryService.isEnabled()) return { enabled: false, memories: [] };
+    if (!this.memoryService.isEnabled())
+      return { enabled: false, memories: [] };
     await this.memoryService.clearMemories(userId);
     return { enabled: true, memories: [] };
   }
@@ -101,15 +135,21 @@ export class RagAdminController {
     @Query('documentType') documentType?: string,
     @Query('role') role?: string,
   ) {
-    return this.ragAdminService.searchDocuments(query ?? '', Number(limit) || 20, {
-      fileType: fileType || undefined,
-      updatedRange:
-        updatedRange === 'day' || updatedRange === 'week' || updatedRange === 'month'
-          ? updatedRange
-          : undefined,
-      documentType: documentType || undefined,
-      role: role || undefined,
-    });
+    return this.ragAdminService.searchDocuments(
+      query ?? '',
+      Number(limit) || 20,
+      {
+        fileType: fileType || undefined,
+        updatedRange:
+          updatedRange === 'day' ||
+          updatedRange === 'week' ||
+          updatedRange === 'month'
+            ? updatedRange
+            : undefined,
+        documentType: documentType || undefined,
+        role: role || undefined,
+      },
+    );
   }
 
   @Get('documents/search/facets')
@@ -177,7 +217,12 @@ export class RagAdminController {
       docVersion?: string;
       effectiveAt?: string;
       expiredAt?: string;
-      lifecycleStatus?: 'draft' | 'confirmed' | 'effective' | 'deprecated' | 'archived';
+      lifecycleStatus?:
+        | 'draft'
+        | 'confirmed'
+        | 'effective'
+        | 'deprecated'
+        | 'archived';
       documentType?: string;
     },
   ) {
@@ -192,7 +237,8 @@ export class RagAdminController {
   @Post('documents/:docId/lifecycle')
   async updateDocumentLifecycle(
     @Param('docId') docId: string,
-    @Body('lifecycleStatus') lifecycleStatus:
+    @Body('lifecycleStatus')
+    lifecycleStatus:
       | 'draft'
       | 'confirmed'
       | 'effective'
@@ -210,23 +256,45 @@ export class RagAdminController {
   @Post('documents/:docId/promote')
   async promoteDocumentVersion(@Param('docId') docId: string) {
     const result = await this.ragAdminService.promoteDocumentVersion(docId);
-    if (!result) throw new NotFoundException(`doc ${docId} not found or is not ready`);
+    if (!result)
+      throw new NotFoundException(`doc ${docId} not found or is not ready`);
     return result;
   }
 
   @Post('documents/:docId/review/submit')
-  submitDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
-    return this.ragAdminService.submitDocumentReview(docId, body.operatorId, body.comment);
+  submitDocumentReview(
+    @Param('docId') docId: string,
+    @Body() body: { operatorId?: string; comment?: string },
+  ) {
+    return this.ragAdminService.submitDocumentReview(
+      docId,
+      body.operatorId,
+      body.comment,
+    );
   }
 
   @Post('documents/:docId/review/approve')
-  approveDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
-    return this.ragAdminService.approveDocumentReview(docId, body.operatorId, body.comment);
+  approveDocumentReview(
+    @Param('docId') docId: string,
+    @Body() body: { operatorId?: string; comment?: string },
+  ) {
+    return this.ragAdminService.approveDocumentReview(
+      docId,
+      body.operatorId,
+      body.comment,
+    );
   }
 
   @Post('documents/:docId/review/reject')
-  rejectDocumentReview(@Param('docId') docId: string, @Body() body: { operatorId?: string; comment?: string }) {
-    return this.ragAdminService.rejectDocumentReview(docId, body.operatorId, body.comment);
+  rejectDocumentReview(
+    @Param('docId') docId: string,
+    @Body() body: { operatorId?: string; comment?: string },
+  ) {
+    return this.ragAdminService.rejectDocumentReview(
+      docId,
+      body.operatorId,
+      body.comment,
+    );
   }
 
   @Get('documents/:docId/reviews')
@@ -272,6 +340,21 @@ export class RagAdminController {
   @Get('documents/tasks/failed')
   getFailedDocumentTasks(@Query('limit') limit?: string) {
     return this.ragAdminService.getFailedDocumentTasks(Number(limit) || 50);
+  }
+
+  @Get('documents/index-audit')
+  auditDocumentIndexes(@Query('limit') limit?: string) {
+    return this.ragAdminService.auditDocumentIndexes(Number(limit) || 200);
+  }
+
+  @Post('documents/index-audit/repair')
+  repairDocumentIndexes(@Body() body: { docIds?: string[]; limit?: number }) {
+    return this.ragAdminService.repairDocumentIndexes(body ?? {});
+  }
+
+  @Get('quality/summary')
+  getQualitySummary(@Query('limit') limit?: string) {
+    return this.ragAdminService.getQualitySummary(Number(limit) || 500);
   }
 
   @Post('documents/tasks/:taskId/retry')
@@ -327,21 +410,20 @@ export class RagAdminController {
    * 非法主体类型、user/role/department 缺 subjectId 的项直接过滤；
    * public 的 subjectId 统一为 'public'（与前端发送的数据一致）。
    */
-  private normalizePermissionSubjects(
-    body: {
-      subjects?: Array<{ type?: string; id?: string }>;
-      permissions?: Array<{ subjectType?: string; subjectId?: string }>;
-    },
-  ): Array<{ type: 'user' | 'role' | 'department' | 'public'; id: string }> {
+  private normalizePermissionSubjects(body: {
+    subjects?: Array<{ type?: string; id?: string }>;
+    permissions?: Array<{ subjectType?: string; subjectId?: string }>;
+  }): Array<{ type: 'user' | 'role' | 'department' | 'public'; id: string }> {
     if (body.subjects === undefined && body.permissions === undefined) {
       throw new BadRequestException('permissions or subjects required');
     }
-    const rawItems = body.subjects !== undefined
-      ? body.subjects.map((item) => ({ type: item.type, id: item.id }))
-      : body.permissions!.map((item) => ({
-          type: item.subjectType,
-          id: item.subjectId,
-        }));
+    const rawItems =
+      body.subjects !== undefined
+        ? body.subjects.map((item) => ({ type: item.type, id: item.id }))
+        : body.permissions!.map((item) => ({
+            type: item.subjectType,
+            id: item.subjectId,
+          }));
     const validTypes = new Set(['user', 'role', 'department', 'public']);
     const normalized: Array<{
       type: 'user' | 'role' | 'department' | 'public';
@@ -361,7 +443,8 @@ export class RagAdminController {
   }
 
   private requireOwnerUserId(ownerUserId?: string): string {
-    if (!ownerUserId?.trim()) throw new BadRequestException('ownerUserId required');
+    if (!ownerUserId?.trim())
+      throw new BadRequestException('ownerUserId required');
     return ownerUserId;
   }
 

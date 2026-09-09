@@ -1,13 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
-import {
-  mkdir,
-  readFile,
-  readdir,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 
@@ -190,7 +184,8 @@ export class ObsidianKnowledgeService {
     const readConcurrency = 8;
     const batches = Array.from(
       { length: Math.ceil(files.length / readConcurrency) },
-      (_, index) => files.slice(index * readConcurrency, (index + 1) * readConcurrency),
+      (_, index) =>
+        files.slice(index * readConcurrency, (index + 1) * readConcurrency),
     );
     const hits: ObsidianSearchHit[] = [];
     for (const batch of batches) {
@@ -199,21 +194,35 @@ export class ObsidianKnowledgeService {
           const content = await readFile(file.path, 'utf8');
           const frontmatter = this.parseFrontmatter(content);
           const body = content.replace(/^---[\s\S]*?---\s*/m, '').trim();
-          const score = this.scoreText(tokens, `${frontmatter.title ?? ''}\n${body}`);
+          const score = this.scoreText(
+            tokens,
+            `${frontmatter.title ?? ''}\n${body}`,
+          );
           if (score <= 0) return null;
           return {
             path: file.path,
             type: file.type,
-            title: String(frontmatter.title || this.titleFromMarkdown(body) || basename(file.path, '.md')),
+            title: String(
+              frontmatter.title ||
+                this.titleFromMarkdown(body) ||
+                basename(file.path, '.md'),
+            ),
             content: this.snippet(body, tokens),
-            score: file.type === 'compiled' ? score + 3 : file.type === 'index' ? score + 1 : score,
+            score:
+              file.type === 'compiled'
+                ? score + 3
+                : file.type === 'index'
+                  ? score + 1
+                  : score,
             ragDocId: this.frontmatterString(frontmatter.rag_doc_id),
             sourceUrl: this.frontmatterString(frontmatter.source_url),
             tags: this.frontmatterTags(frontmatter.tags),
           };
         }),
       );
-      hits.push(...batchHits.filter((hit): hit is ObsidianSearchHit => Boolean(hit)));
+      hits.push(
+        ...batchHits.filter((hit): hit is ObsidianSearchHit => Boolean(hit)),
+      );
     }
 
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -237,10 +246,9 @@ export class ObsidianKnowledgeService {
   async findSourceByContentHash(
     contentOrHash: string,
   ): Promise<ObsidianSourceLookup | null> {
-    const contentHash =
-      /^[a-f0-9]{64}$/i.test(contentOrHash.trim())
-        ? contentOrHash.trim()
-        : this.hash(contentOrHash.trim());
+    const contentHash = /^[a-f0-9]{64}$/i.test(contentOrHash.trim())
+      ? contentOrHash.trim()
+      : this.hash(contentOrHash.trim());
     const notePath = await this.findNoteByHash(contentHash);
     if (!notePath) return null;
     const content = await readFile(notePath, 'utf8');
@@ -249,7 +257,9 @@ export class ObsidianKnowledgeService {
       notePath,
       ragDocId: this.frontmatterString(frontmatter.rag_doc_id),
       title: String(
-        frontmatter.title || this.titleFromMarkdown(content) || basename(notePath, '.md'),
+        frontmatter.title ||
+          this.titleFromMarkdown(content) ||
+          basename(notePath, '.md'),
       ),
       tags: this.frontmatterTags(frontmatter.tags),
       contentHash,
@@ -334,7 +344,11 @@ export class ObsidianKnowledgeService {
   ): Promise<ProjectWorkflowResult> {
     await this.ensureVault();
     const title = this.normalizeTitle(input.title || input.question);
-    const query = [input.question, input.context ?? '', ...(input.options ?? [])]
+    const query = [
+      input.question,
+      input.context ?? '',
+      ...(input.options ?? []),
+    ]
       .join('\n')
       .trim();
     const hits = await this.search(query, 8);
@@ -413,7 +427,10 @@ export class ObsidianKnowledgeService {
       .join('\n\n---\n\n');
   }
 
-  assessHits(query: string, hits: ObsidianSearchHit[]): {
+  assessHits(
+    query: string,
+    hits: ObsidianSearchHit[],
+  ): {
     sufficient: boolean;
     reason: string;
   } {
@@ -421,14 +438,19 @@ export class ObsidianKnowledgeService {
       return { sufficient: false, reason: 'Obsidian 未命中长期知识' };
     }
     const tokens = this.extractTokens(query);
-    const best = Math.max(...hits.map((hit) => this.scoreText(tokens, hit.content)));
+    const best = Math.max(
+      ...hits.map((hit) => this.scoreText(tokens, hit.content)),
+    );
     if (best < 2 && tokens.size >= 2) {
       return {
         sufficient: false,
         reason: `Obsidian 命中弱，最高关键词覆盖 ${best}`,
       };
     }
-    return { sufficient: true, reason: 'Obsidian compiled/index 或 source note 命中' };
+    return {
+      sufficient: true,
+      reason: 'Obsidian compiled/index 或 source note 命中',
+    };
   }
 
   private async buildDraft(
@@ -488,12 +510,14 @@ export class ObsidianKnowledgeService {
     return filePath;
   }
 
-  private async writeNote(params: ObsidianSourceInput & {
-    date: string;
-    contentHash: string;
-    draft: ObsidianNoteDraft;
-    rawPath: string;
-  }): Promise<string> {
+  private async writeNote(
+    params: ObsidianSourceInput & {
+      date: string;
+      contentHash: string;
+      draft: ObsidianNoteDraft;
+      rawPath: string;
+    },
+  ): Promise<string> {
     const notesDir = this.notesDir();
     await mkdir(notesDir, { recursive: true });
 
@@ -506,15 +530,21 @@ export class ObsidianKnowledgeService {
     const markdown = [
       '---',
       `title: ${this.yamlString(params.title)}`,
-      params.sourceUrl ? `source_url: ${this.yamlString(params.sourceUrl)}` : null,
+      params.sourceUrl
+        ? `source_url: ${this.yamlString(params.sourceUrl)}`
+        : null,
       `tags: [${params.draft.tags.map((tag) => this.yamlString(tag)).join(', ')}]`,
       `topics: [${params.draft.topics.map((item) => this.yamlString(item)).join(', ')}]`,
       `entities: [${params.draft.entities.map((item) => this.yamlString(item)).join(', ')}]`,
       `date: ${this.yamlString(params.date)}`,
-      params.ragDocId ? `rag_doc_id: ${this.yamlString(params.ragDocId)}` : null,
+      params.ragDocId
+        ? `rag_doc_id: ${this.yamlString(params.ragDocId)}`
+        : null,
       `content_hash: ${this.yamlString(params.contentHash)}`,
       `source_type: ${this.yamlString(params.sourceType)}`,
-      params.contentType ? `content_type: ${this.yamlString(params.contentType)}` : null,
+      params.contentType
+        ? `content_type: ${this.yamlString(params.contentType)}`
+        : null,
       params.filename ? `filename: ${this.yamlString(params.filename)}` : null,
       `raw_path: ${this.yamlString(rawRel)}`,
       'type: source_note',
@@ -597,8 +627,14 @@ export class ObsidianKnowledgeService {
       mkdir(this.compiledDir(), { recursive: true }),
     ]);
 
-    const tags = new Map<string, Array<{ title: string; path: string; summary: string }>>();
-    const entities = new Map<string, Array<{ title: string; path: string; summary: string }>>();
+    const tags = new Map<
+      string,
+      Array<{ title: string; path: string; summary: string }>
+    >();
+    const entities = new Map<
+      string,
+      Array<{ title: string; path: string; summary: string }>
+    >();
     const conclusions: Array<{
       title: string;
       path: string;
@@ -619,8 +655,15 @@ export class ObsidianKnowledgeService {
 
     for (const note of notes) {
       const frontmatter = this.parseFrontmatter(note.content);
-      const title = String(frontmatter.title || this.titleFromMarkdown(note.content) || basename(note.path, '.md'));
-      const summary = this.extractSection(note.content, '摘要').split('\n').slice(0, 4).join('\n');
+      const title = String(
+        frontmatter.title ||
+          this.titleFromMarkdown(note.content) ||
+          basename(note.path, '.md'),
+      );
+      const summary = this.extractSection(note.content, '摘要')
+        .split('\n')
+        .slice(0, 4)
+        .join('\n');
       const noteTags = this.frontmatterTags(frontmatter.tags);
       const noteTopics = this.frontmatterTags(frontmatter.topics);
       const noteEntities = this.frontmatterTags(frontmatter.entities);
@@ -632,7 +675,9 @@ export class ObsidianKnowledgeService {
         entities: noteEntities,
         content: note.content,
       });
-      sources.push(`- [[${this.vaultRelative(note.path).replace(/\.md$/, '')}|${title}]]`);
+      sources.push(
+        `- [[${this.vaultRelative(note.path).replace(/\.md$/, '')}|${title}]]`,
+      );
       for (const tag of noteTags) {
         const list = tags.get(tag) ?? [];
         list.push({ title, path: note.path, summary });
@@ -673,7 +718,10 @@ export class ObsidianKnowledgeService {
           '',
           ...[...tags.entries()]
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([tag, list]) => `## ${tag}\n\n${list.map((item) => `- [[${this.vaultRelative(item.path).replace(/\.md$/, '')}|${item.title}]]`).join('\n')}`)
+            .map(
+              ([tag, list]) =>
+                `## ${tag}\n\n${list.map((item) => `- [[${this.vaultRelative(item.path).replace(/\.md$/, '')}|${item.title}]]`).join('\n')}`,
+            )
             .flatMap((block) => [block, '']),
         ].join('\n'),
         'utf8',
@@ -694,7 +742,10 @@ export class ObsidianKnowledgeService {
     tags: Map<string, Array<{ title: string; path: string; summary: string }>>,
   ): Promise<void> {
     await this.runInBatches([...tags.entries()], 8, async ([tag, list]) => {
-      const filePath = resolve(this.compiledDir(), `${this.safeFilename(tag)}.md`);
+      const filePath = resolve(
+        this.compiledDir(),
+        `${this.safeFilename(tag)}.md`,
+      );
       this.assertInsideVault(filePath);
       await writeFile(
         filePath,
@@ -743,7 +794,12 @@ export class ObsidianKnowledgeService {
       content: string;
     }>,
   ): Promise<void> {
-    const logLines = ['# Related Update Log', '', `updatedAt: ${new Date().toISOString()}`, ''];
+    const logLines = [
+      '# Related Update Log',
+      '',
+      `updatedAt: ${new Date().toISOString()}`,
+      '',
+    ];
 
     for (const note of notes) {
       const related = notes
@@ -763,7 +819,9 @@ export class ObsidianKnowledgeService {
             sharedTopics.length * 2 +
             sharedEntities.length * 3;
           const reasons = [
-            sharedEntities.length ? `共享实体：${sharedEntities.join('、')}` : '',
+            sharedEntities.length
+              ? `共享实体：${sharedEntities.join('、')}`
+              : '',
             sharedTopics.length ? `共享主题：${sharedTopics.join('、')}` : '',
             sharedTags.length ? `共享标签：${sharedTags.join('、')}` : '',
           ].filter(Boolean);
@@ -805,7 +863,12 @@ export class ObsidianKnowledgeService {
 
   private upsertRelatedSection(
     content: string,
-    related: Array<{ title: string; path: string; score: number; reason: string }>,
+    related: Array<{
+      title: string;
+      path: string;
+      score: number;
+      reason: string;
+    }>,
   ): string {
     const section = [
       '## 相关笔记',
@@ -830,7 +893,10 @@ export class ObsidianKnowledgeService {
   }
 
   private async writeEntityCompiledPages(
-    entities: Map<string, Array<{ title: string; path: string; summary: string }>>,
+    entities: Map<
+      string,
+      Array<{ title: string; path: string; summary: string }>
+    >,
   ): Promise<void> {
     const dir = resolve(this.compiledDir(), 'entities');
     await mkdir(dir, { recursive: true });
@@ -918,7 +984,8 @@ export class ObsidianKnowledgeService {
     const indexLines = ['# Conclusions Index', ''];
     const grouped = new Map<string, typeof conclusions>();
     for (const item of conclusions) {
-      const key = this.safeFilename(item.conclusion).slice(0, 60) || 'conclusion';
+      const key =
+        this.safeFilename(item.conclusion).slice(0, 60) || 'conclusion';
       const list = grouped.get(key) ?? [];
       list.push(item);
       grouped.set(key, list);
@@ -1233,7 +1300,8 @@ export class ObsidianKnowledgeService {
           this.titleFromMarkdown(content) ||
           basename(file.path, '.md'),
       );
-      const type = this.frontmatterString(frontmatter.workflow_type) ?? 'unknown';
+      const type =
+        this.frontmatterString(frontmatter.workflow_type) ?? 'unknown';
       lines.push(
         `- [[${this.vaultRelative(file.path).replace(/\.md$/, '')}|${title}]]（${type}）`,
       );
@@ -1246,11 +1314,16 @@ export class ObsidianKnowledgeService {
     );
   }
 
-  private async readAllNotes(): Promise<Array<{ path: string; content: string }>> {
+  private async readAllNotes(): Promise<
+    Array<{ path: string; content: string }>
+  > {
     const files = await this.listMarkdownFiles(this.notesDir(), 'note');
     const notes: Array<{ path: string; content: string }> = [];
     for (const file of files) {
-      notes.push({ path: file.path, content: await readFile(file.path, 'utf8') });
+      notes.push({
+        path: file.path,
+        content: await readFile(file.path, 'utf8'),
+      });
     }
     return notes;
   }
@@ -1344,7 +1417,8 @@ export class ObsidianKnowledgeService {
 
     return {
       summary: summary.length > 0 ? summary : ['资料已存入个人知识库。'],
-      keyPoints: keyPoints.length > 0 ? keyPoints : ['正文已保留，可回到原文继续分析。'],
+      keyPoints:
+        keyPoints.length > 0 ? keyPoints : ['正文已保留，可回到原文继续分析。'],
       tags,
       topics,
       entities,
@@ -1376,7 +1450,8 @@ export class ObsidianKnowledgeService {
       .slice(0, 5);
     return {
       summary: sentences.length > 0 ? sentences : ['资料已存入个人知识库。'],
-      keyPoints: headings.length > 0 ? headings : ['正文已保留，可回到原文继续分析。'],
+      keyPoints:
+        headings.length > 0 ? headings : ['正文已保留，可回到原文继续分析。'],
       tags: this.inferTags(`${title}\n${content}`),
       topics: this.inferTopics(`${title}\n${content}`),
       entities: this.inferEntities(`${title}\n${content}`),
@@ -1435,8 +1510,9 @@ export class ObsidianKnowledgeService {
     const english =
       text.match(/\b[A-Z][A-Za-z0-9]*(?:[.-]?[A-Z][A-Za-z0-9]*)*\b/g) ?? [];
     const chinese =
-      text.match(/(?:React|Vue|NestJS|TypeScript|JavaScript|Milvus|Neo4j|Redis|PostgreSQL|Elasticsearch|Obsidian|Karpathy|RAG|GraphRAG|Agentic|LangChain|OpenAI|DeepSeek|Qwen|Docker|Node\.js)/gi) ??
-      [];
+      text.match(
+        /(?:React|Vue|NestJS|TypeScript|JavaScript|Milvus|Neo4j|Redis|PostgreSQL|Elasticsearch|Obsidian|Karpathy|RAG|GraphRAG|Agentic|LangChain|OpenAI|DeepSeek|Qwen|Docker|Node\.js)/gi,
+      ) ?? [];
     return [...new Set([...english, ...chinese])]
       .map((item) => item.trim())
       .filter((item) => item.length >= 2)
@@ -1462,7 +1538,9 @@ export class ObsidianKnowledgeService {
         ),
       ),
     ];
-    return items.length > 0 ? items.map((item) => `- ${item}`) : ['- 暂无明确内容'];
+    return items.length > 0
+      ? items.map((item) => `- ${item}`)
+      : ['- 暂无明确内容'];
   }
 
   private detectVersionConflicts(lines: string[]): string[] {
@@ -1475,9 +1553,21 @@ export class ObsidianKnowledgeService {
     );
     const conflictSignals: string[] = [];
     const pairs: Array<[RegExp, RegExp, string]> = [
-      [/推荐|建议|应该|必须|采用|允许|可以/, /不推荐|不建议|不应该|禁止|避免|不可|不能/, '同一结论附近同时出现正反决策词'],
-      [/生效|最新|优先|当前/, /历史|废弃|过期|失效|旧版/, '同一结论附近同时出现新旧版本词'],
-      [/必须|强制|required/i, /可选|非必须|optional/i, '同一结论附近同时出现强制和可选词'],
+      [
+        /推荐|建议|应该|必须|采用|允许|可以/,
+        /不推荐|不建议|不应该|禁止|避免|不可|不能/,
+        '同一结论附近同时出现正反决策词',
+      ],
+      [
+        /生效|最新|优先|当前/,
+        /历史|废弃|过期|失效|旧版/,
+        '同一结论附近同时出现新旧版本词',
+      ],
+      [
+        /必须|强制|required/i,
+        /可选|非必须|optional/i,
+        '同一结论附近同时出现强制和可选词',
+      ],
     ];
     for (const [positive, negative, reason] of pairs) {
       if (
@@ -1524,7 +1614,10 @@ export class ObsidianKnowledgeService {
     }
   }
 
-  private extractLinesByKeywords(content: string, keywords: string[]): string[] {
+  private extractLinesByKeywords(
+    content: string,
+    keywords: string[],
+  ): string[] {
     return content
       .split(/\n+|(?<=[。！？!?；;])/u)
       .map((line) => line.replace(/^[-#*\s]+/, '').trim())
@@ -1565,19 +1658,38 @@ export class ObsidianKnowledgeService {
       .map((line) => line.trim())
       .filter(Boolean);
     const matched = lines.filter((line) => this.scoreText(tokens, line) > 0);
-    return (matched.length > 0 ? matched : lines).slice(0, 8).join('\n').slice(0, 1600);
+    return (matched.length > 0 ? matched : lines)
+      .slice(0, 8)
+      .join('\n')
+      .slice(0, 1600);
   }
 
   private extractTokens(text: string): Set<string> {
     const normalized = text.normalize('NFKC').toLowerCase();
-    const words = normalized.match(/[a-z0-9][a-z0-9._-]{1,}|[\u4e00-\u9fa5]{2,}/gi) ?? [];
-    const stop = new Set(['什么', '怎么', '如何', '一下', '这个', '那个', '哪些', '是否']);
-    return new Set(words.map((word) => word.trim()).filter((word) => word.length >= 2 && !stop.has(word)));
+    const words =
+      normalized.match(/[a-z0-9][a-z0-9._-]{1,}|[\u4e00-\u9fa5]{2,}/gi) ?? [];
+    const stop = new Set([
+      '什么',
+      '怎么',
+      '如何',
+      '一下',
+      '这个',
+      '那个',
+      '哪些',
+      '是否',
+    ]);
+    return new Set(
+      words
+        .map((word) => word.trim())
+        .filter((word) => word.length >= 2 && !stop.has(word)),
+    );
   }
 
   private cleanStringArray(value: unknown): string[] {
     return Array.isArray(value)
-      ? value.map((item) => String(item).trim()).filter((item) => item.length > 0)
+      ? value
+          .map((item) => String(item).trim())
+          .filter((item) => item.length > 0)
       : [];
   }
 

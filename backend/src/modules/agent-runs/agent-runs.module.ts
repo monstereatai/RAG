@@ -8,7 +8,11 @@ import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-
 import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AgentRunEntity, AgentActionEntity]), AgentRuntimeEventsModule, AgentRuntimeModule],
+  imports: [
+    TypeOrmModule.forFeature([AgentRunEntity, AgentActionEntity]),
+    AgentRuntimeEventsModule,
+    AgentRuntimeModule,
+  ],
   providers: [AgentRunsService, AgentGoalService],
   exports: [AgentRunsService, AgentGoalService],
 })

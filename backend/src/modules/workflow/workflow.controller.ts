@@ -15,16 +15,25 @@ import {
   parseSseEventTypes,
 } from './agentic-workflow.mermaid';
 import { ProductionWorkflowService } from './production-workflow.service';
+import { GraphService } from '../graph/graph.service';
 import {
   ResumeProductionWorkflowDto,
   ReviseProductionWorkflowDto,
   StartProductionWorkflowDto,
 } from './production-workflow.dto';
+import {
+  buildPlaywayActivityGraph,
+  searchPlaywayActivityTemplates,
+  searchPlaywayComponents,
+} from './playway-component-registry';
 
 @Controller('workflows')
 @UseGuards(JwtAuthGuard)
 export class WorkflowController {
-  constructor(private readonly productionWorkflow: ProductionWorkflowService) {}
+  constructor(
+    private readonly productionWorkflow: ProductionWorkflowService,
+    private readonly graphService: GraphService,
+  ) {}
 
   @Get('agentic/mermaid')
   getAgenticMermaid(@Query('events') events?: string) {
@@ -42,6 +51,70 @@ export class WorkflowController {
   @Get('production')
   listProduction(@CurrentUser() user: JwtPayload) {
     return this.productionWorkflow.list(user.userId);
+  }
+
+  @Get('production/component-rules')
+  getProductionComponentRules(
+    @Query('q') query = '',
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = Number.parseInt(limit ?? '18', 10);
+    return {
+      items: searchPlaywayComponents(
+        query,
+        Number.isFinite(parsedLimit)
+          ? Math.min(Math.max(parsedLimit, 1), 50)
+          : 18,
+      ),
+      total: searchPlaywayComponents(query, 96).length,
+    };
+  }
+
+  @Get('production/activity-templates')
+  getProductionActivityTemplates(
+    @Query('q') query = '',
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = Number.parseInt(limit ?? '4', 10);
+    return {
+      items: searchPlaywayActivityTemplates(
+        query,
+        Number.isFinite(parsedLimit)
+          ? Math.min(Math.max(parsedLimit, 1), 8)
+          : 4,
+      ),
+      total: searchPlaywayActivityTemplates(query, 8).length,
+    };
+  }
+
+  @Get('production/activity-graph')
+  getProductionActivityGraph(@Query('q') query = '') {
+    return buildPlaywayActivityGraph(query);
+  }
+
+  @Post('production/playway-graph/import')
+  importProductionPlaywayGraph(
+    @Body() body: { query?: string; sourceId?: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const graph = buildPlaywayActivityGraph(body.query ?? '');
+    return this.graphService.importStructuredGraph(
+      {
+        nodes: graph.nodes.map((node) => ({
+          id: node.id,
+          label: node.type,
+          properties: { displayName: node.label, domain: 'playway' },
+        })),
+        relationships: graph.edges.map((edge) => ({
+          source: edge.source,
+          target: edge.target,
+          type: edge.relation.toUpperCase(),
+          properties: { domain: 'playway' },
+        })),
+      },
+      user.userId,
+      body.sourceId?.trim() || `playway:${body.query?.trim() || 'all'}`,
+    );
   }
 
   @Post('production/:threadId/resume')
@@ -68,6 +141,14 @@ export class WorkflowController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.productionWorkflow.codingContext(threadId, user.userId);
+  }
+
+  @Get('production/:threadId/playway-preview')
+  productionPlaywayPreview(
+    @Param('threadId') threadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.productionWorkflow.playwayPreview(threadId, user.userId);
   }
 
   @Get('production/:threadId')

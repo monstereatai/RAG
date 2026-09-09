@@ -15,6 +15,8 @@ import { AgentTaskEntity } from '../../providers/db/entities/agent-task.entity';
 import { MetricsModule } from '../metrics/metrics.module';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { RedisModule } from '../../providers/redis/redis.module';
+import { ScheduledJobQueueService } from './scheduled-job-queue.service';
 
 @Module({
   imports: [
@@ -31,9 +33,10 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     MetricsModule,
     LlmModule,
     DomainEventsModule,
+    RedisModule,
   ],
   controllers: [JobsController],
-  providers: [JobsService, ScheduledAnalysisService, RolesGuard],
+  providers: [JobsService, ScheduledAnalysisService, RolesGuard, ScheduledJobQueueService],
   exports: [JobsService],
 })
 export class JobsModule {}

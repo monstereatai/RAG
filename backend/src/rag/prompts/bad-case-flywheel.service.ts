@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -138,7 +133,10 @@ export class BadCaseFlywheelService implements OnModuleInit {
   }
 
   /** 只查询已审核纠正层的精确问题，用于 Karpathy 直答前的低成本覆盖检查。 */
-  async retrieveExactMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
+  async retrieveExactMatches(
+    query: string,
+    limit = 2,
+  ): Promise<BadCaseMatch[]> {
     return this.findExactReviewedMatches(query, limit);
   }
 
@@ -241,11 +239,18 @@ export class BadCaseFlywheelService implements OnModuleInit {
     return [
       '【经人工审核的相似历史 Bad Case】',
       '以下内容只用于纠正历史错误，不得覆盖当前知识库证据；若两者冲突，以当前有效证据为准。',
-      ...matches.map((item) => `[命中级别：${item.mode}｜相似度：${item.score.toFixed(3)}]\n${item.text}`),
+      ...matches.map(
+        (item) =>
+          `[命中级别：${item.mode}｜相似度：${item.score.toFixed(3)}]\n${item.text}`,
+      ),
     ].join('\n\n');
   }
 
-  private modeOf(score: number, query: string, storedQuery: string): BadCaseMatchMode {
+  private modeOf(
+    score: number,
+    query: string,
+    storedQuery: string,
+  ): BadCaseMatchMode {
     // 只有 PostgreSQL 精确比对或向量记录本身的同一问题才允许走“精确覆盖”。
     // 高向量分、包含关系都只是相似候选，不能绕过正式知识的版本和引用门禁。
     if (query.trim().toLowerCase() === storedQuery.trim().toLowerCase()) {
@@ -260,7 +265,11 @@ export class BadCaseFlywheelService implements OnModuleInit {
   private hasLexicalEntityMatch(query: string, storedQuery: string): boolean {
     const left = query.trim().toLowerCase();
     const right = storedQuery.trim().toLowerCase();
-    return left.length >= 2 && right.length >= 2 && (left.includes(right) || right.includes(left));
+    return (
+      left.length >= 2 &&
+      right.length >= 2 &&
+      (left.includes(right) || right.includes(left))
+    );
   }
 
   /**

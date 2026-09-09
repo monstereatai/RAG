@@ -120,7 +120,10 @@ export class DocumentPermissionService {
     return allowed.has(docId);
   }
 
-  private async resolveRoles(userId: string, roles: string[]): Promise<string[]> {
+  private async resolveRoles(
+    userId: string,
+    roles: string[],
+  ): Promise<string[]> {
     if (roles.length > 0) return [...new Set(roles)].sort();
     const user = await this.userRepo.findOne({
       select: ['role'],

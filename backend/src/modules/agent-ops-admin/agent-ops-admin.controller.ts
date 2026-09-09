@@ -436,4 +436,9 @@ export class AgentOpsAdminController {
   ) {
     return this.runtimeEvents.metrics(threadId, runId);
   }
+
+  @Get('runs/summary')
+  agentRunSummary(@Query('limit') limit?: string) {
+    return this.runs.summary(Number(limit) || 500);
+  }
 }

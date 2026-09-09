@@ -111,6 +111,12 @@ export class MetricsService implements OnModuleInit {
     buckets: [0.1, 0.5, 1, 3, 5, 10, 30, 60, 120],
   });
 
+  private readonly dangerousQueriesTotal = new Counter({
+    name: 'rag_dangerous_queries_blocked_total',
+    help: 'Blocked high-risk user queries by matched policy',
+    labelNames: ['pattern', 'route'] as const,
+  });
+
   onModuleInit(): void {
     collectDefaultMetrics({ register, prefix: 'rag_' });
   }
@@ -203,6 +209,13 @@ export class MetricsService implements OnModuleInit {
     const labels = { task_kind: taskKind || 'unknown', status };
     this.scheduledJobRunsTotal.inc(labels);
     this.scheduledJobDuration.observe(labels, durationSeconds);
+  }
+
+  observeDangerousQuery(pattern: string, route: string): void {
+    this.dangerousQueriesTotal.inc({
+      pattern: pattern || 'unknown',
+      route: route || 'unknown',
+    });
   }
 
   contentType(): string {

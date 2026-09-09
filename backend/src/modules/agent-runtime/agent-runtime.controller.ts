@@ -9,10 +9,23 @@ export class AgentRuntimeController {
   constructor(private readonly runtime: AgentRuntimeService) {}
 
   @Get('capabilities')
-  capabilities() { return this.runtime.capabilities(); }
+  capabilities() {
+    return this.runtime.capabilities();
+  }
 
   @Post('plans')
-  plan(@Body() body: { objective: string; mode?: AgentRuntimeMode; skillLimit?: number }) {
-    return this.runtime.createPlan({ objective: body.objective, mode: body.mode ?? 'agentic', skillLimit: body.skillLimit });
+  plan(
+    @Body()
+    body: {
+      objective: string;
+      mode?: AgentRuntimeMode;
+      skillLimit?: number;
+    },
+  ) {
+    return this.runtime.createPlan({
+      objective: body.objective,
+      mode: body.mode ?? 'agentic',
+      skillLimit: body.skillLimit,
+    });
   }
 }

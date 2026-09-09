@@ -69,7 +69,8 @@ describe('KarpathyRagService exception scenarios', () => {
       decide: jest.fn().mockReturnValue({ allowed: true }),
     };
     const documentPermissionService = {
-      getAllowedDocIds: jest.fn().mockResolvedValue(new Set()),
+      // null 表示权限服务未启用；空 Set 在真实运行中代表“没有任何授权文档”。
+      getAllowedDocIds: jest.fn().mockResolvedValue(null),
     };
     const dashscopeRerankService = {
       isEnabled: jest.fn().mockReturnValue(false),
@@ -86,7 +87,7 @@ describe('KarpathyRagService exception scenarios', () => {
       obsidianKnowledge,
       badCaseFlywheel,
       bochaSearchService as unknown as import('../../tools/bocha-search.service').BochaSearchService,
-      toolPolicy as unknown as import('../../tools/tool-execution-policy.service').ToolExecutionPolicyService,
+      toolPolicy,
       documentPermissionService as unknown as DocumentPermissionService,
       dashscopeRerankService as unknown as import('../../tools/dashscope-rerank.service').DashScopeRerankService,
     );
@@ -189,10 +190,15 @@ describe('KarpathyRagService exception scenarios', () => {
 
     await expect(service.answer('活动什么时候开放？')).resolves.toMatchObject({
       retrievalSufficient: true,
-      references: [{ docId: 'https://example.com/activity', retrievalSource: 'web' }],
+      references: [
+        { docId: 'https://example.com/activity', retrievalSource: 'web' },
+      ],
       retrievalReason: expect.stringContaining('Bocha 联网搜索'),
     });
-    expect(bochaSearchService.search).toHaveBeenCalledWith('活动什么时候开放？', 5);
+    expect(bochaSearchService.search).toHaveBeenCalledWith(
+      '活动什么时候开放？',
+      5,
+    );
   });
 
   it('refuses when no related document or web evidence is found', async () => {

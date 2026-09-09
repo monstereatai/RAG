@@ -23,9 +23,21 @@ export class MockVisionProvider implements IVisionProvider {
       text: 'Mock OCR: Dashboard 截图识别结果。包含模块：SLA、工单统计、响应时间。',
       confidence: 0.85,
       blocks: [
-        { text: '客户 SLA 概览', boundingBox: [10, 10, 200, 40], confidence: 0.9 },
-        { text: '一级工单响应时间: 1.2h', boundingBox: [10, 50, 250, 70], confidence: 0.88 },
-        { text: '待处理工单: 4', boundingBox: [10, 80, 180, 100], confidence: 0.82 },
+        {
+          text: '客户 SLA 概览',
+          boundingBox: [10, 10, 200, 40],
+          confidence: 0.9,
+        },
+        {
+          text: '一级工单响应时间: 1.2h',
+          boundingBox: [10, 50, 250, 70],
+          confidence: 0.88,
+        },
+        {
+          text: '待处理工单: 4',
+          boundingBox: [10, 80, 180, 100],
+          confidence: 0.82,
+        },
       ],
     };
   }
@@ -65,7 +77,9 @@ export class MockVisionProvider implements IVisionProvider {
     };
   }
 
-  async generateImage(_request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+  async generateImage(
+    _request: ImageGenerationRequest,
+  ): Promise<ImageGenerationResult> {
     return {
       base64: '',
       mimeType: 'image/png',

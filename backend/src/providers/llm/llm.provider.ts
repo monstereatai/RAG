@@ -5,7 +5,12 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider, LlmModelProvider } from './llm-provider.interface';
 import { DeepseekLlmProvider } from './deepseek-llm.provider';
 import { QwenLlmProvider } from './qwen-llm.provider';
-import { LlmGatewayPolicy, LlmTask, LlmRoutePolicy } from './llm-gateway.policy';
+import { ZhipuLlmProvider } from './zhipu-llm.provider';
+import {
+  LlmGatewayPolicy,
+  LlmTask,
+  LlmRoutePolicy,
+} from './llm-gateway.policy';
 
 /**
  * LLM Provider 工厂
@@ -21,6 +26,7 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     private readonly config: ConfigService,
     private readonly qwenProvider: QwenLlmProvider,
     private readonly deepseekProvider: DeepseekLlmProvider,
+    private readonly zhipuProvider: ZhipuLlmProvider,
   ) {
     this.gatewayPolicy = new LlmGatewayPolicy(this.config);
   }
@@ -33,6 +39,9 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
         break;
       case 'deepseek':
         this.provider = this.deepseekProvider;
+        break;
+      case 'zhipu':
+        this.provider = this.zhipuProvider;
         break;
       default:
         throw new Error(`Unsupported LLM provider: ${providerName}`);
@@ -54,7 +63,10 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     return this.requestModel.getStore() ?? this.getDefaultProviderName();
   }
 
-  getRoutePolicy(task: LlmTask = 'fast', requested?: LlmModelProvider): LlmRoutePolicy {
+  getRoutePolicy(
+    task: LlmTask = 'fast',
+    requested?: LlmModelProvider,
+  ): LlmRoutePolicy {
     return this.gatewayPolicy.resolve(task, requested);
   }
 
@@ -73,6 +85,8 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
         return this.qwenProvider;
       case 'deepseek':
         return this.deepseekProvider;
+      case 'zhipu':
+        return this.zhipuProvider;
       case undefined:
         return this.provider;
       default:
@@ -82,6 +96,8 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
 
   private getDefaultProviderName(): LlmModelProvider {
     const providerName = this.config.get<string>('llm.provider') ?? 'qwen';
-    return providerName === 'deepseek' ? 'deepseek' : 'qwen';
+    return providerName === 'deepseek' || providerName === 'zhipu'
+      ? providerName
+      : 'qwen';
   }
 }

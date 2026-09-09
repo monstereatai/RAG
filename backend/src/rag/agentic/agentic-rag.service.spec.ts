@@ -45,9 +45,7 @@ describe('AgenticRagService budget boundaries', () => {
       hasIndexedChunks: jest.fn().mockReturnValue(true),
       unsupportedReliableAnswer: jest
         .fn()
-        .mockReturnValue(
-          '知识库片段不足以支撑可靠回答，暂不生成确定结论。',
-        ),
+        .mockReturnValue('知识库片段不足以支撑可靠回答，暂不生成确定结论。'),
     } as unknown as jest.Mocked<KarpathyRagService>;
     const bochaSearchService = {
       isEnabled: jest.fn().mockReturnValue(false),
@@ -78,7 +76,7 @@ describe('AgenticRagService budget boundaries', () => {
       karpathyRagService,
       bochaSearchService,
       dashScopeRerankService,
-      toolPolicy as never,
+      toolPolicy,
       semanticExampleSelector,
       badCaseFlywheel as never,
       metricsService as never,
@@ -121,7 +119,10 @@ describe('AgenticRagService budget boundaries', () => {
 
     const route = (
       service as unknown as {
-        resolveAutoRoute(query: string, fastPathSufficient: boolean): 'simple' | 'agentic';
+        resolveAutoRoute(
+          query: string,
+          fastPathSufficient: boolean,
+        ): 'simple' | 'agentic';
       }
     ).resolveAutoRoute('请对比周年庆活动在不同地区的玩法差异和上线风险', true);
 
@@ -133,7 +134,10 @@ describe('AgenticRagService budget boundaries', () => {
 
     const route = (
       service as unknown as {
-        resolveAutoRoute(query: string, fastPathSufficient: boolean): 'simple' | 'agentic';
+        resolveAutoRoute(
+          query: string,
+          fastPathSufficient: boolean,
+        ): 'simple' | 'agentic';
       }
     ).resolveAutoRoute('ACT100 的状态是什么？', true);
 
@@ -149,7 +153,9 @@ describe('AgenticRagService budget boundaries', () => {
       retrievalReason: '命中受治理本地直答',
     });
 
-    await expect(service.run('ACT100 的状态是什么？', 'auto')).resolves.toMatchObject({
+    await expect(
+      service.run('ACT100 的状态是什么？', 'auto'),
+    ).resolves.toMatchObject({
       answer: 'ACT100 已上线。',
       route: 'simple',
       retrievalSufficient: true,

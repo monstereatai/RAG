@@ -42,7 +42,10 @@ describe('RagGatewayService', () => {
       '候选片段与问题缺少有效语义关联',
     );
 
-    const result = await service.search({ query: '韦水春是谁', limit: 5 }, 'user-1');
+    const result = await service.search(
+      { query: '韦水春是谁', limit: 5 },
+      'user-1',
+    );
 
     expect(karpathyRagService.assessRetrievedChunks).toHaveBeenCalledWith(
       '韦水春是谁',
@@ -57,7 +60,10 @@ describe('RagGatewayService', () => {
   it('marks relevant candidates as successful retrieval', async () => {
     const { service } = createService(true, '候选片段通过检索质量门禁');
 
-    const result = await service.search({ query: 'NestJS 模块是什么', limit: 5 }, 'user-1');
+    const result = await service.search(
+      { query: 'NestJS 模块是什么', limit: 5 },
+      'user-1',
+    );
 
     expect(result.status).toBe('ok');
     expect(result.retrievalSufficient).toBe(true);
@@ -68,7 +74,8 @@ describe('RagGatewayService', () => {
       ...chunk,
       id: 'reviewed-bad-case:case-1',
       docId: 'reviewed-bad-case:case-1',
-      content: '已审核问题：韦水春是谁\n正确处理标准：韦水春是临床病理工作人员。',
+      content:
+        '已审核问题：韦水春是谁\n正确处理标准：韦水春是临床病理工作人员。',
       totalScore: 1,
       sourceAuthority: 'reviewed_bad_case',
     };
@@ -76,9 +83,14 @@ describe('RagGatewayService', () => {
       true,
       '命中已审核纠错证据',
     );
-    karpathyRagService.retrieveReviewedEvidence.mockResolvedValue([reviewedChunk]);
+    karpathyRagService.retrieveReviewedEvidence.mockResolvedValue([
+      reviewedChunk,
+    ]);
 
-    const result = await service.search({ query: '韦水春是谁', limit: 5 }, 'user-1');
+    const result = await service.search(
+      { query: '韦水春是谁', limit: 5 },
+      'user-1',
+    );
 
     expect(result.status).toBe('ok');
     expect(result.results[0]?.sourceAuthority).toBe('reviewed_bad_case');

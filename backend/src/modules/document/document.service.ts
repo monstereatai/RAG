@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
@@ -67,6 +67,7 @@ export interface UploadResult {
 }
 
 export interface UploadOptions {
+  docId?: string;
   taskId?: string;
   originalBuffer?: Buffer;
   contentType?: string;
@@ -133,7 +134,7 @@ export class DocumentService {
     userId: string,
     options: UploadOptions = {},
   ): Promise<UploadResult> {
-    const docId = randomUUID();
+    const docId = options.docId ?? randomUUID();
     const taskId = options.taskId ?? randomUUID();
     this.logger.log(`Uploading ${filename}, docId=${docId}, userId=${userId}`);
     await this.upsertTask(taskId, {
@@ -203,6 +204,18 @@ export class DocumentService {
         content,
         structuredChunks,
       );
+      const contentSha256 = createHash('sha256').update(content).digest('hex');
+      const existingDocs = await this.docMetaRepo.find({ where: { userId } });
+      const duplicate = existingDocs.find((item) => {
+        try {
+          return JSON.parse(item.ingestionQuality ?? '{}').contentSha256 === contentSha256;
+        } catch {
+          return false;
+        }
+      });
+      if (duplicate && duplicate.docId !== docId) {
+        ingestionQuality.warnings.push(`检测到与文档 ${duplicate.docId} 内容相同的版本`);
+      }
       const mediumRiskPromptInjection = promptInjectionFindings.filter(
         (finding) => finding.severity === 'medium',
       );
@@ -302,7 +315,10 @@ export class DocumentService {
         documentType: indexingGovernance.documentType,
         lifecycleStatus: indexingGovernance.lifecycleStatus,
         supersedesDocId: indexingGovernance.supersedesDocId,
-        ingestionQuality: JSON.stringify(ingestionQuality),
+        ingestionQuality: JSON.stringify({
+          ...ingestionQuality,
+          contentSha256,
+        }),
         chunkStrategy: JSON.stringify(strategy),
         graphIndexStatus: this.graphService.isEnabled() ? 'pending' : 'skipped',
       });
@@ -375,7 +391,8 @@ export class DocumentService {
         options.onQualityAccepted?.(docId) ?? Promise.resolve(),
       ]);
       const failedIndex = indexResults.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected',
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
       );
       if (failedIndex) {
         await this.cleanupFailedExternalIndexes(docId, userId);
@@ -550,7 +567,10 @@ export class DocumentService {
     this.pendingGraphIndexes.set(params.docId, job);
   }
 
-  private async removeGraphSource(docId: string, userId: string): Promise<void> {
+  private async removeGraphSource(
+    docId: string,
+    userId: string,
+  ): Promise<void> {
     this.cancelledGraphIndexes.add(docId);
     try {
       await this.pendingGraphIndexes.get(docId);
@@ -593,11 +613,16 @@ export class DocumentService {
 
   async retryFailedTask(taskId: string) {
     const task = await this.taskRepo.findOne({ where: { id: taskId } });
-    if (!task || task.status !== 'failed') return { taskId, retried: false, reason: 'failed task not found' };
+    if (!task || task.status !== 'failed')
+      return { taskId, retried: false, reason: 'failed task not found' };
     const result = await this.documentQueueService.retryFailed(taskId);
     if (result.retried) {
       await this.updateTask(taskId, {
-        status: 'queued', stage: 'retry_queued', progress: 0, errorMessage: null, finishedAt: null,
+        status: 'queued',
+        stage: 'retry_queued',
+        progress: 0,
+        errorMessage: null,
+        finishedAt: null,
       });
     }
     return result;
@@ -708,12 +733,20 @@ export class DocumentService {
         kind: 'original',
         filename: params.filename,
         objectKey: stored.key,
-        url: this.proxyResourceUrlIfImage(stored.key, stored.url, params.contentType),
+        url: this.proxyResourceUrlIfImage(
+          stored.key,
+          stored.url,
+          params.contentType,
+        ),
         contentType: params.contentType ?? null,
         size: params.buffer.length,
       }),
     );
-    return this.proxyResourceUrlIfImage(stored.key, stored.url, params.contentType);
+    return this.proxyResourceUrlIfImage(
+      stored.key,
+      stored.url,
+      params.contentType,
+    );
   }
 
   private proxyResourceUrlIfImage(
@@ -728,12 +761,18 @@ export class DocumentService {
   private async resolveChunkStrategy(
     business: GameDocumentMetadata,
   ): Promise<{ chunkSize: number; chunkOverlap: number }> {
-    const keys = [business.projectId, business.documentType].filter(Boolean) as string[];
+    const keys = [business.projectId, business.documentType].filter(
+      Boolean,
+    ) as string[];
     for (const key of keys) {
       const profile = await this.knowledgeBaseProfileRepo.findOne({
         where: { key, status: 'enabled', workspaceId: 'default' },
       });
-      if (profile) return { chunkSize: profile.chunkSize, chunkOverlap: profile.chunkOverlap };
+      if (profile)
+        return {
+          chunkSize: profile.chunkSize,
+          chunkOverlap: profile.chunkOverlap,
+        };
     }
     return getChunkStrategy(business.documentType);
   }
@@ -836,7 +875,10 @@ export class DocumentService {
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
         : undefined,
       chunkStrategy: meta.chunkStrategy
-        ? (JSON.parse(meta.chunkStrategy) as { chunkSize: number; chunkOverlap: number })
+        ? (JSON.parse(meta.chunkStrategy) as {
+            chunkSize: number;
+            chunkOverlap: number;
+          })
         : undefined,
     };
   }
@@ -874,7 +916,10 @@ export class DocumentService {
         ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
         : undefined,
       chunkStrategy: meta.chunkStrategy
-        ? (JSON.parse(meta.chunkStrategy) as { chunkSize: number; chunkOverlap: number })
+        ? (JSON.parse(meta.chunkStrategy) as {
+            chunkSize: number;
+            chunkOverlap: number;
+          })
         : undefined,
       metadata: meta.title
         ? {
@@ -1162,7 +1207,11 @@ export class DocumentService {
       where: { docId: In(docIds), userId },
     });
     const target = documents.find((document) => document.docId === docId);
-    if (!target || target.chunkCount < 1 || documents.length !== docIds.length) {
+    if (
+      !target ||
+      target.chunkCount < 1 ||
+      documents.length !== docIds.length
+    ) {
       return false;
     }
 
@@ -1183,10 +1232,7 @@ export class DocumentService {
         ]);
       }
       await Promise.all([
-        docMetaRepo.update(
-          { docId, userId },
-          { lifecycleStatus: 'effective' },
-        ),
+        docMetaRepo.update({ docId, userId }, { lifecycleStatus: 'effective' }),
         docChunkRepo.update(
           { docId, userId },
           { lifecycleStatus: 'effective' },

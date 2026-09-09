@@ -19,11 +19,13 @@ import {
   Modal,
   Progress,
   Select,
+  Space,
   Steps,
   Switch,
   Table,
   Tabs,
   Tag,
+  Typography,
   message,
 } from "antd";
 import React from "react";
@@ -38,9 +40,15 @@ import {
   type ProductionRole,
   type ProductionWorkflow,
   type TraceSnapshot,
+  type AgentRunSummary,
+  type RagQualitySummary,
   evaluateAgent,
   getAgentBadCases,
   getAgentRuns,
+  getAgentRunSummary,
+  getSecurityPolicies,
+  getSecurityAudit,
+  getRagQualitySummary,
   getAgentRunArtifacts,
   getAgentRunCenter,
   retryAgentRunRecord,
@@ -152,6 +160,10 @@ export default function AgentOpsPage() {
     React.useState<AgenticRunSnapshot | null>(null);
   const [runOptions, setRunOptions] = React.useState<AgenticRunOption[]>([]);
   const [runCenter, setRunCenter] = React.useState<any[]>([]);
+  const [runSummary, setRunSummary] = React.useState<AgentRunSummary | null>(null);
+  const [ragQuality, setRagQuality] = React.useState<RagQualitySummary | null>(null);
+  const [securityPolicies, setSecurityPolicies] = React.useState<Array<{ id?: string; name?: string; severity?: string }>>([]);
+  const [securityAudit, setSecurityAudit] = React.useState<Array<{ id?: string; eventType?: string; payload?: any; createdAt?: string }>>([]);
   const [artifactThreadId, setArtifactThreadId] = React.useState("");
   const [artifactLoading, setArtifactLoading] = React.useState(false);
   const [runOptionsLoading, setRunOptionsLoading] = React.useState(false);
@@ -210,6 +222,36 @@ export default function AgentOpsPage() {
       setRunOptionsLoading(false);
     }
   }, [artifactThreadId]);
+  const loadRunSummary = React.useCallback(async () => {
+    try {
+      setRunSummary(unwrapData<AgentRunSummary>(await getAgentRunSummary()));
+    } catch {
+      message.error("Agent 运行汇总加载失败");
+    }
+  }, []);
+  const loadRagQuality = React.useCallback(async () => {
+    try {
+      setRagQuality(unwrapData<RagQualitySummary>(await getRagQualitySummary()));
+    } catch {
+      message.error("RAG 质量汇总加载失败");
+    }
+  }, []);
+  const loadSecurityPolicies = React.useCallback(async () => {
+    try {
+      const result = unwrapData<{ policies?: Array<{ id?: string; name?: string; severity?: string }> }>(await getSecurityPolicies());
+      setSecurityPolicies(result?.policies ?? []);
+    } catch {
+      message.error("安全策略加载失败");
+    }
+  }, []);
+  const loadSecurityAudit = React.useCallback(async () => {
+    try {
+      const result = unwrapData<{ events?: Array<{ id?: string; eventType?: string; payload?: any; createdAt?: string }> }>(await getSecurityAudit());
+      setSecurityAudit(result?.events ?? []);
+    } catch {
+      message.error("安全审计事件加载失败");
+    }
+  }, []);
   const loadRunArtifacts = async () => {
     const threadId = artifactThreadId.trim();
     if (!threadId) {
@@ -260,10 +302,10 @@ export default function AgentOpsPage() {
   };
 
   React.useEffect(() => {
-    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunCenter(), loadProductionWorkflows()]).catch(
+    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunSummary(), loadRagQuality(), loadSecurityPolicies(), loadSecurityAudit(), loadRunCenter(), loadProductionWorkflows()]).catch(
       () => undefined,
     );
-  }, [loadBadCases, loadRunCenter, loadRunOptions, loadTraces, loadProductionWorkflows]);
+  }, [loadBadCases, loadRunCenter, loadRunOptions, loadRunSummary, loadRagQuality, loadSecurityAudit, loadSecurityPolicies, loadTraces, loadProductionWorkflows]);
 
   React.useEffect(() => {
     const threadId = window.localStorage.getItem(
@@ -557,6 +599,56 @@ export default function AgentOpsPage() {
 
   const workflowPanel = (
     <section className="agent-ops-panel">
+      <Card title="Agent 运行质量汇总" size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRunSummary()}>刷新</Button>}>
+        {runSummary ? (
+          <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }}>
+            <Descriptions.Item label="成功率">{(runSummary.successRate * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="失败率">{(runSummary.failureRate * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="成本">${runSummary.totalCostUsd.toFixed(4)}</Descriptions.Item>
+            <Descriptions.Item label="工具调用">{runSummary.totalToolCalls}</Descriptions.Item>
+            <Descriptions.Item label="扫描运行">{runSummary.scanned}</Descriptions.Item>
+            <Descriptions.Item label="重试次数">{runSummary.totalRetries}</Descriptions.Item>
+            <Descriptions.Item label="需审批／预算超限">{runSummary.budgetExceededRuns}</Descriptions.Item>
+            <Descriptions.Item label="步骤准确率">{((runSummary.stepAccuracy ?? 0) * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="恢复成功率">{((runSummary.recoveryRate ?? 0) * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="运行成功率">{((runSummary.qualityLayers?.runSuccessRate ?? runSummary.successRate) * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="工具成功率">{((runSummary.qualityLayers?.toolSuccessRate ?? 0) * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="任务正确率">{((runSummary.qualityLayers?.taskAccuracy ?? runSummary.stepAccuracy ?? 0) * 100).toFixed(1)}%</Descriptions.Item>
+            <Descriptions.Item label="交付可用率">{((runSummary.qualityLayers?.deliveryReadyRate ?? 0) * 100).toFixed(1)}%</Descriptions.Item>
+          </Descriptions>
+        ) : <Alert type="info" showIcon message="暂无运行汇总数据" />}
+      </Card>
+      <Card title="RAG 质量门禁" size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRagQuality()}>刷新</Button>}>
+        {ragQuality ? <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }}>
+          <Descriptions.Item label="回答率">{(ragQuality.answerRate * 100).toFixed(1)}%</Descriptions.Item>
+          <Descriptions.Item label="引用率">{(ragQuality.citationRate * 100).toFixed(1)}%</Descriptions.Item>
+          <Descriptions.Item label="拒答率">{(ragQuality.refusalRate * 100).toFixed(1)}%</Descriptions.Item>
+          <Descriptions.Item label="平均延迟">{Math.round(ragQuality.averageLatencyMs)} ms</Descriptions.Item>
+          <Descriptions.Item label="发布判定"><Tag color={ragQuality.gate?.passed ? "green" : "red"}>{ragQuality.gate?.passed ? "通过" : "不通过"}</Tag></Descriptions.Item>
+          {!ragQuality.gate?.passed && <Descriptions.Item label="失败原因" span={3}>{ragQuality.gate?.reasons?.join("；") || "暂无"}</Descriptions.Item>}
+        </Descriptions> : <Alert type="info" showIcon message="暂无 RAG 质量汇总数据" />}
+      </Card>
+      <Card title={`RAG 安全策略（审计事件 ${securityAudit.length}）`} size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void Promise.all([loadSecurityPolicies(), loadSecurityAudit()])}>刷新</Button>}>
+        <Space wrap>
+          {securityPolicies.map((policy) => <Tag key={policy.id ?? policy.name} color={policy.severity === "high" ? "red" : "orange"}>{policy.name ?? policy.id}</Tag>)}
+          {!securityPolicies.length && <Typography.Text type="secondary">暂无策略或服务未连接</Typography.Text>}
+        </Space>
+        <Table
+          size="small"
+          style={{ marginTop: 12 }}
+          rowKey={(row) => row.id ?? `${row.createdAt}-${row.eventType}`}
+          dataSource={securityAudit}
+          pagination={{ pageSize: 5 }}
+          locale={{ emptyText: "暂无拦截事件" }}
+          columns={[
+            { title: "时间", dataIndex: "createdAt", render: (value: string) => value ? new Date(value).toLocaleString() : "-" },
+            { title: "策略", render: (_: unknown, row: any) => row.payload?.pattern ?? "-" },
+            { title: "路由", render: (_: unknown, row: any) => row.payload?.route ?? "-" },
+            { title: "用户", render: (_: unknown, row: any) => row.payload?.userId ?? "-" },
+            { title: "查询摘要", render: (_: unknown, row: any) => row.payload?.queryHash ? `${String(row.payload.queryHash).slice(0, 12)}…` : "已脱敏" },
+          ]}
+        />
+      </Card>
       <Card
         title="产研运工作流列表"
         size="small"

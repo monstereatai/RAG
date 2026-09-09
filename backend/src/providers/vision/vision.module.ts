@@ -7,11 +7,7 @@ import { OpenAiVisionProvider } from './openai-vision.provider';
 @Global()
 @Module({
   imports: [ConfigModule],
-  providers: [
-    MockVisionProvider,
-    OpenAiVisionProvider,
-    VisionProvider,
-  ],
+  providers: [MockVisionProvider, OpenAiVisionProvider, VisionProvider],
   exports: [VisionProvider],
 })
 export class VisionModule {}

@@ -187,6 +187,19 @@ export class RagApiClient {
   }
 
   async productionWorkflowCodingContext(activityName: string): Promise<Record<string, unknown>> {
+    const completed = await this.completedProductionWorkflow(activityName);
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(completed.threadId)}/coding-context`,
+    );
+  }
+
+  async productionWorkflowHandoff(activityName: string): Promise<Record<string, unknown>> {
+    return buildProductionWorkflowHandoff(
+      await this.productionWorkflowCodingContext(activityName),
+    );
+  }
+
+  private async completedProductionWorkflow(activityName: string): Promise<ProductionWorkflowSummary> {
     const workflows = await this.productionWorkflowActivities();
     const normalized = activityName.trim().toLowerCase();
     const matches = workflows
@@ -202,9 +215,7 @@ export class RagApiClient {
         { recoverable: true },
       );
     }
-    return this.request<Record<string, unknown>>(
-      `/workflows/production/${encodeURIComponent(completed.threadId)}/coding-context`,
-    );
+    return completed;
   }
 
   async productionWorkflowActivities(): Promise<ProductionWorkflowSummary[]> {
@@ -342,6 +353,54 @@ export class RagApiClient {
     });
     this.token = result.accessToken ?? result.token;
   }
+}
+
+export function buildProductionWorkflowHandoff(
+  context: Record<string, unknown>,
+): Record<string, unknown> {
+  const stages = Array.isArray(context.stages)
+    ? (context.stages as Array<Record<string, unknown>>)
+    : [];
+  const schemas: Array<Record<string, unknown>> = stages.flatMap((stage) =>
+    (Array.isArray(stage.lowCodeSchemas) ? stage.lowCodeSchemas : []).map(
+      (schema) => ({ role: stage.role, ...(schema as Record<string, unknown>) }),
+    ),
+  );
+  const citations: Array<Record<string, unknown>> = stages.flatMap((stage) =>
+    (Array.isArray(stage.evidence) ? stage.evidence : []).map((evidence) => ({
+      role: stage.role,
+      ...(evidence as Record<string, unknown>),
+    })),
+  );
+  const markdown = [
+    `# ${String(context.projectId ?? '产研运项目')} AI Coding 交接包`,
+    '适用于 Codex、Claude、Cursor 等 AI Coding 工具。先依据下方岗位交接物实施，再以 Schema 与 RAG 引用证据核对实现。',
+    ...stages.map((stage) => {
+      const deliverables = Array.isArray(stage.deliverables)
+        ? (stage.deliverables as Array<Record<string, unknown>>)
+        : [];
+      return [
+        `## ${String(stage.role ?? 'stage')}`,
+        String(stage.summary ?? ''),
+        ...deliverables.map(
+          (item) => `### ${String(item.title ?? '交付物')}\n\n${String(item.markdown ?? '')}`,
+        ),
+      ].join('\n\n');
+    }),
+    '## RAG 引用证据',
+    citations.length > 0
+      ? citations.map((item) => `- [${String(item.role ?? 'unknown')}] ${String(item.id ?? 'unknown')}：文档 ${String(item.docId ?? 'unknown')}／片段 ${String(item.chunkIndex ?? 'unknown')}／评分 ${String(item.totalScore ?? 'unknown')}\n  - ${String(item.excerpt ?? '')}`).join('\n')
+      : '本次工作流未检索到可引用的 RAG 证据。',
+  ].join('\n\n');
+  return {
+    formatVersion: 1,
+    artifactName: `${String(context.projectId ?? 'production-workflow')}-handoff`,
+    threadId: context.threadId,
+    projectId: context.projectId,
+    markdown,
+    schemas,
+    citations,
+  };
 }
 
 async function readPayload(response: Response): Promise<unknown> {

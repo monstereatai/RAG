@@ -92,6 +92,8 @@ Redis Checkpointer 会保存暂停状态 30 天，`threadId` 用于继续同一�
 7. 启动接口会立即返回 `running` 和 `threadId`，页面每 2 秒查询一次状态，不会因真实模型耗时阻塞浏览器请求。
 8. 页面会显示 DAG 批次、证据覆盖率、待确认声明、工具降级、真实 Markdown 和产物任务。
 9. 驳回后进入“待修订”：补充缺失资料／来源／约束，选择被驳回岗位中的局部重试范围，再提交修订包。页面会在版本历史中记录补充资料和本次重试范围。
+10. 工作流完成后，点击「导出交接包（Markdown＋Schema）」并选择本地目录。导出物包含 `HANDOFF.md`、`handoff/{岗位}/*.md`、`LOW_CODE_SCHEMAS.json`、`schemas/{岗位}.json`、`RAG_EVIDENCE.md`、`RAG_EVIDENCE.json` 与 `RAG_WORKFLOW_CONTEXT.json`；其中 `RAG_EVIDENCE.*` 保留每个岗位结论所引用的文档、片段和评分，不能把它当作可绕过权限的原始文档访问入口。
+11. 点击「生成可运行项目代码」下载的 ZIP 会携带上述全部交接物，另含生成源码和 `DELIVERY_VERIFICATION.json`。也可以通过 MCP `rag_production_workflow_handoff` 导出相同三部分内容（Markdown、Schema、RAG 引用证据）交给 Codex、Claude 或 Cursor。
 
 推荐的需求背景写法：
 

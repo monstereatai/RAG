@@ -105,7 +105,10 @@ export class ApiTokenService {
       if (record.revokedAt) {
         throw new UnauthorizedException('api token revoked');
       }
-      if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) {
+      if (
+        record.expiresAt &&
+        new Date(record.expiresAt).getTime() <= Date.now()
+      ) {
         throw new UnauthorizedException('api token expired');
       }
       record.lastUsedAt = new Date().toISOString();

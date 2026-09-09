@@ -68,9 +68,16 @@ export class QueryLogService {
         .createQueryBuilder('q')
         .select('COUNT(*)', 'totalQueries')
         .addSelect('COUNT(DISTINCT q.userId)', 'activeUsers')
-        .addSelect('SUM(CASE WHEN q.hasAnswer = true THEN 1 ELSE 0 END)', 'answeredQueries')
+        .addSelect(
+          'SUM(CASE WHEN q.hasAnswer = true THEN 1 ELSE 0 END)',
+          'answeredQueries',
+        )
         .where('q.createdAt >= :since', { since })
-        .getRawOne<{ totalQueries: string; activeUsers: string; answeredQueries: string }>();
+        .getRawOne<{
+          totalQueries: string;
+          activeUsers: string;
+          answeredQueries: string;
+        }>();
       const userQueryCounts = await this.queryLogRepo
         .createQueryBuilder('q')
         .select('q.userId', 'userId')
@@ -81,7 +88,10 @@ export class QueryLogService {
       const feedbackStats = await this.feedbackRepo
         .createQueryBuilder('f')
         .select('COUNT(*)', 'feedbackCount')
-        .addSelect("SUM(CASE WHEN f.feedback = 'positive' THEN 1 ELSE 0 END)", 'positiveFeedbackCount')
+        .addSelect(
+          "SUM(CASE WHEN f.feedback = 'positive' THEN 1 ELSE 0 END)",
+          'positiveFeedbackCount',
+        )
         .where('f.createdAt >= :since', { since })
         .getRawOne<{ feedbackCount: string; positiveFeedbackCount: string }>();
 
@@ -89,22 +99,29 @@ export class QueryLogService {
       const activeUsers = Number(queryStats?.activeUsers ?? 0);
       const answeredQueries = Number(queryStats?.answeredQueries ?? 0);
       const feedbackCount = Number(feedbackStats?.feedbackCount ?? 0);
-      const positiveFeedbackCount = Number(feedbackStats?.positiveFeedbackCount ?? 0);
+      const positiveFeedbackCount = Number(
+        feedbackStats?.positiveFeedbackCount ?? 0,
+      );
       return {
         windowDays: days,
         status: activeUsers > 0 ? 'measured' : 'insufficient_real_traffic',
         activeUsers,
-        repeatUsers: userQueryCounts.filter((item) => Number(item.count) > 1).length,
+        repeatUsers: userQueryCounts.filter((item) => Number(item.count) > 1)
+          .length,
         totalQueries,
         answeredQueries,
         answerRate: totalQueries ? answeredQueries / totalQueries : 0,
         feedbackCount,
         positiveFeedbackCount,
         feedbackCoverage: totalQueries ? feedbackCount / totalQueries : 0,
-        positiveFeedbackRate: feedbackCount ? positiveFeedbackCount / feedbackCount : 0,
+        positiveFeedbackRate: feedbackCount
+          ? positiveFeedbackCount / feedbackCount
+          : 0,
       };
     } catch (err) {
-      this.logger.warn(`Failed to calculate adoption summary: ${(err as Error).message}`);
+      this.logger.warn(
+        `Failed to calculate adoption summary: ${(err as Error).message}`,
+      );
       return {
         windowDays: days,
         status: 'insufficient_real_traffic',

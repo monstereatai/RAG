@@ -88,3 +88,4 @@ AgentSop（SOP 定义）/ CollaborationMessage（岗位间消息）/ **ArtifactD
 
 - Lab（见[课程大纲第 6 节](../README.md)）：三岗位流水线 + artifact 落库检查 + blocked 传播实测
 - 自测：[quiz.md](./quiz.md)（9 题，≥10 分 + Lab 完成即通过）
+- 延伸素材：生产工作流的岗位结果含 `lowCodeSchemas`（pageSchema 等五类结构化 Schema），其组件词汇表来自真实游戏营销中台，见 [playway 组件清单](../../docs/reference/playway-component-inventory.md)——SOP 产出的 artifact 不只是 Markdown，还可以是下游低代码平台可直接消费的结构化契约

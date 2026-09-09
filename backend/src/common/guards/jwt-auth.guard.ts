@@ -45,7 +45,9 @@ export class JwtAuthGuard implements CanActivate {
     // refresh token 仅可用于 /auth/refresh 换发，禁止访问业务接口；
     // 双 token 机制上线前的旧 token 无 type 字段，视为 access 放行
     if (payload.type === 'refresh') {
-      throw new UnauthorizedException('refresh token cannot access business APIs');
+      throw new UnauthorizedException(
+        'refresh token cannot access business APIs',
+      );
     }
 
     request.user = payload;

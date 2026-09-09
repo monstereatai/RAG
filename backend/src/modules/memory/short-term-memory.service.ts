@@ -120,7 +120,11 @@ export class ShortTermMemoryService {
     if (!summary) {
       summary = await this.resolvePersistentSummary(conversationId);
       if (summary) {
-        await this.redis.set(this.summaryKey(conversationId), summary, TTL_SECONDS);
+        await this.redis.set(
+          this.summaryKey(conversationId),
+          summary,
+          TTL_SECONDS,
+        );
       }
     }
 
@@ -213,7 +217,11 @@ export class ShortTermMemoryService {
       createdAt: new Date().toISOString(),
     };
     await this.saveAudit(conversationId, audit);
-    await this.emitAuditEvent(conversationId, 'memory.compaction.started', audit);
+    await this.emitAuditEvent(
+      conversationId,
+      'memory.compaction.started',
+      audit,
+    );
 
     const existingSummary = await this.redis.get(
       this.summaryKey(conversationId),
@@ -258,7 +266,11 @@ export class ShortTermMemoryService {
         completedAt: new Date().toISOString(),
       };
       await this.saveAudit(conversationId, failed);
-      await this.emitAuditEvent(conversationId, 'memory.compaction.failed', failed);
+      await this.emitAuditEvent(
+        conversationId,
+        'memory.compaction.failed',
+        failed,
+      );
       throw error;
     }
 
@@ -269,7 +281,11 @@ export class ShortTermMemoryService {
       completedAt: new Date().toISOString(),
     };
     await this.saveAudit(conversationId, completed);
-    await this.emitAuditEvent(conversationId, 'memory.compaction.completed', completed);
+    await this.emitAuditEvent(
+      conversationId,
+      'memory.compaction.completed',
+      completed,
+    );
 
     this.logger.debug(
       `Short-term memory compressed: removed ${keepStart} turns, kept ${all.length - keepStart}`,
@@ -292,7 +308,11 @@ export class ShortTermMemoryService {
     limit = 20,
   ): Promise<ContextCompactionAudit[]> {
     if (!this.redis.isEnabled()) return [];
-    const raw = await this.redis.zrange(this.auditKey(conversationId), -Math.max(limit, 1), -1);
+    const raw = await this.redis.zrange(
+      this.auditKey(conversationId),
+      -Math.max(limit, 1),
+      -1,
+    );
     return raw
       .map((item) => this.tryParseAudit(item))
       .filter((item): item is ContextCompactionAudit => Boolean(item));
@@ -312,7 +332,9 @@ export class ShortTermMemoryService {
     return `stm:${conversationId}:compactions`;
   }
 
-  private async getPersistentSummary(conversationId: string): Promise<string | null> {
+  private async getPersistentSummary(
+    conversationId: string,
+  ): Promise<string | null> {
     const conversation = await this.conversationRepo.findOne({
       where: { id: conversationId },
       select: {
@@ -339,7 +361,10 @@ export class ShortTermMemoryService {
 
     const earlierMessages = messages.slice(0, -recentMessageCount);
     const source = earlierMessages
-      .map((message) => `${message.role === 'ai' ? 'assistant' : 'user'}: ${message.content}`)
+      .map(
+        (message) =>
+          `${message.role === 'ai' ? 'assistant' : 'user'}: ${message.content}`,
+      )
       .join('\n');
     let summary: StructuredMemorySummary;
     try {
@@ -362,7 +387,11 @@ export class ShortTermMemoryService {
     const rawSummary = JSON.stringify(summary);
     await this.persistSummary(conversationId, summary);
     if (this.redis.isEnabled()) {
-      await this.redis.set(this.summaryKey(conversationId), rawSummary, TTL_SECONDS);
+      await this.redis.set(
+        this.summaryKey(conversationId),
+        rawSummary,
+        TTL_SECONDS,
+      );
     }
     return rawSummary;
   }

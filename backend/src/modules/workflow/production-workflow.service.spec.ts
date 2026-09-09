@@ -145,7 +145,7 @@ describe('ProductionWorkflowService', () => {
     expect(state.results.frontend?.evidenceCoverage).toBe(1);
   });
 
-  it('rejects generated project code without runnable entry requirements', async () => {
+  it('falls back to a runnable project when generated code lacks entry requirements', async () => {
     const { service, invoke } = createService();
     jest.spyOn(service, 'codingContext').mockResolvedValue({
       threadId: 'thread-1',
@@ -166,9 +166,13 @@ describe('ProductionWorkflowService', () => {
         },
       ],
     });
-    await expect(service.generateProject('thread-1', 'user-1')).rejects.toThrow(
-      '缺少 package.json、index.html',
-    );
+    const result = await service.generateProject('thread-1', 'user-1');
+    expect(result.files.map((file) => file.path)).toEqual(expect.arrayContaining([
+      'package.json',
+      'index.html',
+      'src/main.tsx',
+    ]));
+    expect(result.notes.join('\n')).toContain('兜底');
   });
 
   it('finishes with an evidence-preserving deliverable when the model fails', async () => {

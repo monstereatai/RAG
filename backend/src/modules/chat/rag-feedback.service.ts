@@ -71,12 +71,12 @@ export class RagFeedbackService {
             .lastIndexOf('ai') ?? -1;
         const answer =
           lastAnswerIndex >= 0
-            ? conversation?.messages[lastAnswerIndex]?.content ?? ''
+            ? (conversation?.messages[lastAnswerIndex]?.content ?? '')
             : '';
         const query =
           lastAnswerIndex > 0
-            ? conversation?.messages[lastAnswerIndex - 1]?.content ?? ''
-            : conversation?.title ?? '';
+            ? (conversation?.messages[lastAnswerIndex - 1]?.content ?? '')
+            : (conversation?.title ?? '');
         if (conversation && query && answer) {
           queryLog = await this.queryLogRepo.save(
             this.queryLogRepo.create({
@@ -147,11 +147,13 @@ export class RagFeedbackService {
   async review(
     id: string,
     patch: ReviewRagFeedback,
-  ): Promise<RagFeedbackEntity & {
-    indexing?: Record<string, unknown>;
-    evaluationCaseId?: string;
-    promotedDocument?: { docId: string; docVersion: string | null };
-  }> {
+  ): Promise<
+    RagFeedbackEntity & {
+      indexing?: Record<string, unknown>;
+      evaluationCaseId?: string;
+      promotedDocument?: { docId: string; docVersion: string | null };
+    }
+  > {
     const entity = await this.feedbackRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException(`feedback ${id} not found`);
     entity.status = patch.status ?? entity.status;
@@ -183,17 +185,26 @@ export class RagFeedbackService {
         ...saved,
         indexing: { indexed: false, reason: 'formal_document_governed' },
         ...(saved.promotedDocId
-          ? { promotedDocument: { docId: saved.promotedDocId, docVersion: null } }
+          ? {
+              promotedDocument: {
+                docId: saved.promotedDocId,
+                docVersion: null,
+              },
+            }
           : {}),
       };
     }
     if (shouldPromote) {
       if (!correctionEligible) {
-        throw new BadRequestException('只有审核通过且包含纠正答案的 Bad Case 才能晋升正式知识');
+        throw new BadRequestException(
+          '只有审核通过且包含纠正答案的 Bad Case 才能晋升正式知识',
+        );
       }
       const source = saved.promotionSource?.trim();
       if (!source) {
-        throw new BadRequestException('晋升正式知识必须填写已核验的来源或规范文档地址');
+        throw new BadRequestException(
+          '晋升正式知识必须填写已核验的来源或规范文档地址',
+        );
       }
       if (!this.documentService) {
         throw new BadRequestException('文档服务不可用，暂时无法晋升正式知识');
@@ -202,9 +213,12 @@ export class RagFeedbackService {
         ? await this.queryLogRepo.findOne({ where: { id: saved.queryLogId } })
         : null;
       if (!queryLog) {
-        throw new BadRequestException('原始 Query Log 缺失，无法建立正式知识来源链路');
+        throw new BadRequestException(
+          '原始 Query Log 缺失，无法建立正式知识来源链路',
+        );
       }
-      const version = patch.promotionVersion?.trim() || `badcase-${saved.id.slice(0, 8)}`;
+      const version =
+        patch.promotionVersion?.trim() || `badcase-${saved.id.slice(0, 8)}`;
       const formalContent = this.buildPromotedKnowledgeDocument({
         query: queryLog.query,
         correctedAnswer,
@@ -235,7 +249,10 @@ export class RagFeedbackService {
       return {
         ...promoted,
         indexing,
-        promotedDocument: { docId: uploaded.docId, docVersion: uploaded.docVersion ?? null },
+        promotedDocument: {
+          docId: uploaded.docId,
+          docVersion: uploaded.docVersion ?? null,
+        },
       };
     }
 
@@ -246,26 +263,32 @@ export class RagFeedbackService {
         ? await this.queryLogRepo.findOne({ where: { id: active.queryLogId } })
         : null;
       if (!queryLog) {
-        return { ...active, indexing: { indexed: false, reason: 'query_log_missing' } };
+        return {
+          ...active,
+          indexing: { indexed: false, reason: 'query_log_missing' },
+        };
       }
       let evaluationCaseId: string | undefined;
       if (active.includeInRegression && this.evaluationCaseRepo) {
         const existing = await this.evaluationCaseRepo.findOne({
           where: { sourceFeedbackId: active.id, status: 'active' },
         });
-        const evaluationCase = existing ?? this.evaluationCaseRepo.create({
-          id: randomUUID(),
-          sourceFeedbackId: active.id,
-          workspaceId: 'default',
-          query: queryLog.query,
-          expectedAnswer: correctedAnswer,
-          expectedReferences: queryLog.retrievalSnapshot || '[]',
-          status: 'active',
-          createdBy: active.reviewedBy ?? null,
-        });
+        const evaluationCase =
+          existing ??
+          this.evaluationCaseRepo.create({
+            id: randomUUID(),
+            sourceFeedbackId: active.id,
+            workspaceId: 'default',
+            query: queryLog.query,
+            expectedAnswer: correctedAnswer,
+            expectedReferences: queryLog.retrievalSnapshot || '[]',
+            status: 'active',
+            createdBy: active.reviewedBy ?? null,
+          });
         if (existing) {
           evaluationCase.expectedAnswer = correctedAnswer;
-          evaluationCase.expectedReferences = queryLog.retrievalSnapshot || '[]';
+          evaluationCase.expectedReferences =
+            queryLog.retrievalSnapshot || '[]';
           evaluationCase.createdBy = active.reviewedBy ?? existing.createdBy;
         }
         const savedCase = await this.evaluationCaseRepo.save(evaluationCase);
@@ -287,7 +310,11 @@ export class RagFeedbackService {
           error: error instanceof Error ? error.message : String(error),
         };
       }
-      return { ...active, indexing, ...(evaluationCaseId ? { evaluationCaseId } : {}) };
+      return {
+        ...active,
+        indexing,
+        ...(evaluationCaseId ? { evaluationCaseId } : {}),
+      };
     }
     saved.knowledgeLayer = 'inactive';
     const inactive = await this.feedbackRepo.save(saved);

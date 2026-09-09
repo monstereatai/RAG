@@ -98,6 +98,7 @@ API Key 不使用登录 JWT 的 7 天有效期；后端只保存 hash，明文�
 | `rag_agent_domains` | 查询 Supervisor 支持的领域 |
 | `rag_agent_pipeline` | 调用 Supervisor 多 Agent 管线，返回 researcher/analyst/writer/critic/editor 阶段 |
 | `rag_production_workflow_context` | 按活动名称查找最近一条已完成产研运工作流，并返回审批后代码交接物，供 Codex 在当前代码目录实施 |
+| `rag_production_workflow_handoff` | 导出一份供 Codex、Claude、Cursor 消费的完整交接包：Markdown 交付物、低代码 Schema 与对应 RAG 引用证据 |
 | `rag_production_workflow_activities` | 查询当前用户可见的产研运活动、状态、完成岗位和更新时间 |
 | `rag_production_workflow_status` | 按 Thread 查询当前用户可见的工作流阶段、审批和 Artifact 状态，只读 |
 | `rag_document_governance_list` | 查询当前 MCP 用户可见文档的版本、生命周期、审核和索引状态，只读 |
@@ -122,8 +123,8 @@ Agent 自动用系统：MCP
 ### 产研运工作流完成后交给 Codex 编码
 
 1. 在 Admin 的「Agent 运营→产研运工作流」启动工作流，等待状态变为「已完成」；如果处于「待审批」，先在详情页完成审批。
-2. 有浏览器目录选择能力时，进入工作流详情：点击「导出 Markdown 交接物」只生成 `RAG_WORKFLOW_CONTEXT.json`、`README.md` 和 `handoff/{岗位}/*.md`；点击「生成可运行项目代码」会把已审批 Markdown 交给后端 LLM 生成结构化文件，并直接下载 ZIP，解压后可在目录中执行 `npm install && npm run dev`。
-3. 使用 MCP 时，在 Codex 中配置本 MCP Server，先调用 `rag_production_workflow_activities` 查看活动列表，再调用 `rag_production_workflow_context`，参数传入活动名称，例如 `act10`，不需要手动复制 Thread ID。MCP 会自动匹配最近一条已完成工作流。
+2. 有浏览器目录选择能力时，进入工作流详情：点击「导出交接包（Markdown＋Schema）」会生成 `HANDOFF.md`、`handoff/{岗位}/*.md`、`LOW_CODE_SCHEMAS.json`、`schemas/{岗位}.json`、`RAG_EVIDENCE.md`、`RAG_EVIDENCE.json` 与完整上下文 JSON；点击「生成可运行项目代码」下载的 ZIP 也包含相同交接包，再额外附带可运行源码和 `DELIVERY_VERIFICATION.json`。
+3. 使用 MCP 时，先调用 `rag_production_workflow_activities` 查看活动列表，再调用 `rag_production_workflow_handoff`，参数传入活动名称，例如 `act10`。它会自动匹配最近一条已完成工作流，返回 `markdown`、`schemas` 和 `citations` 三部分，AI 工具可直接写入当前代码库；仍需要原始上下文时使用 `rag_production_workflow_context`。
 4. Codex 读取返回的产品、设计、前端、后端、测试和运营交接物，在当前代码目录中实现；写代码前仍应先检查本地代码和测试，不把 Markdown 交接物直接当成已验证代码。
 
 MCP 工具不会直接写入本机目录。目录写入由浏览器在用户明确选择目录后完成，避免服务端获得任意文件系统写权限。MCP 新增的文档治理、入库任务、定时任务和工作流状态工具均为只读：审核、发布、删除、恢复和定时任务启停仍必须从 Admin 或 CLI 调用后端受角色校验的接口完成。

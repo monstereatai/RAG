@@ -146,6 +146,20 @@ export async function createServer(): Promise<McpServer> {
   );
 
   server.registerTool(
+    'rag_production_workflow_handoff',
+    {
+      title: 'Export production workflow AI Coding handoff',
+      description:
+        'Export a completed production workflow as one AI Coding handoff package: Markdown deliverables, low-code Schemas and the RAG evidence citations that support them. The returned content is designed for Codex, Claude and Cursor to save directly into a repository.',
+      inputSchema: {
+        activityName: z.string().min(1).describe('Activity or project name, for example act10.'),
+      },
+    },
+    async ({ activityName }) =>
+      runTool(async () => client.productionWorkflowHandoff(activityName)),
+  );
+
+  server.registerTool(
     'rag_production_workflow_activities',
     {
       title: 'List production workflow activities',
@@ -425,6 +439,7 @@ function helpText(): string {
     '  rag_agent_domains',
     '  rag_agent_pipeline',
     '  rag_production_workflow_context',
+    '  rag_production_workflow_handoff',
     '  rag_production_workflow_activities',
     '  rag_production_workflow_status',
     '  rag_document_governance_list',

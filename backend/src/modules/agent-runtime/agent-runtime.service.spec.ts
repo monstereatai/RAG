@@ -1,9 +1,10 @@
 import { AgentRuntimeService } from './agent-runtime.service';
 
 describe('AgentRuntimeService', () => {
-  const createService = () => new AgentRuntimeService({
-    match: jest.fn().mockResolvedValue([{ name: 'rag-research' }]),
-  } as never);
+  const createService = () =>
+    new AgentRuntimeService({
+      match: jest.fn().mockResolvedValue([{ name: 'rag-research' }]),
+    } as never);
 
   it('creates a bounded agentic plan with selected skills and checkpoint stages', async () => {
     const plan = await createService().createPlan({
@@ -26,8 +27,19 @@ describe('AgentRuntimeService', () => {
   it('locates the first failed runtime event instead of only reporting the final error', () => {
     const onset = createService().analyzeFailureOnset([
       { sequence: 1, eventType: 'node.completed', actor: 'agentic' },
-      { sequence: 2, eventType: 'tool.failed', actor: 'agentic', target: 'bocha_web_search', payload: { error: 'timeout' } },
-      { sequence: 3, eventType: 'run.failed', actor: 'agentic', payload: { error: 'upstream failed' } },
+      {
+        sequence: 2,
+        eventType: 'tool.failed',
+        actor: 'agentic',
+        target: 'bocha_web_search',
+        payload: { error: 'timeout' },
+      },
+      {
+        sequence: 3,
+        eventType: 'run.failed',
+        actor: 'agentic',
+        payload: { error: 'upstream failed' },
+      },
     ]);
 
     expect(onset).toMatchObject({

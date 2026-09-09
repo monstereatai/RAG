@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
-export class AddDocumentGraphIndexStatus1787200000000
-  implements MigrationInterface
-{
+export class AddDocumentGraphIndexStatus1787200000000 implements MigrationInterface {
   name = 'AddDocumentGraphIndexStatus1787200000000';
 
   async up(queryRunner: QueryRunner): Promise<void> {

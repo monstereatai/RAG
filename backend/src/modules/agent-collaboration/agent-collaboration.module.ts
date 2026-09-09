@@ -11,7 +11,18 @@ import { AgentCollaborationService } from './agent-collaboration.service';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AgentSopEntity, AgentCollaborationMessageEntity, ArtifactDependencyEntity, DecisionRecordEntity, AgentRunEntity, AgentActionEntity, AgenticStructuredArtifactEntity]), AgentRuntimeEventsModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      AgentSopEntity,
+      AgentCollaborationMessageEntity,
+      ArtifactDependencyEntity,
+      DecisionRecordEntity,
+      AgentRunEntity,
+      AgentActionEntity,
+      AgenticStructuredArtifactEntity,
+    ]),
+    AgentRuntimeEventsModule,
+  ],
   providers: [AgentCollaborationService],
   exports: [AgentCollaborationService],
 })
