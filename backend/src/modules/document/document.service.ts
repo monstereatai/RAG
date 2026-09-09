@@ -199,6 +199,9 @@ export class DocumentService {
         strategy.chunkSize,
         strategy.chunkOverlap,
       ).splitStructured(content);
+      const hypotheticalQuestions = structuredChunks.map((chunk) =>
+        this.buildHypotheticalQuestions(chunk.content, chunk.headingPath),
+      );
       const chunks = structuredChunks.map((chunk) => chunk.content);
       const ingestionQuality = assessIngestionQuality(
         content,
@@ -284,6 +287,7 @@ export class DocumentService {
         reviewStatus:
           indexingGovernance.lifecycleStatus === 'draft' ? 'draft' : 'approved',
         supersedesDocId: indexingGovernance.supersedesDocId,
+        hypotheticalQuestions: hypotheticalQuestions[idx],
       }));
       const metadataPromise = this.metadataExtractor
         .extract(content)
@@ -380,6 +384,7 @@ export class DocumentService {
             records,
             structuredChunks,
             indexingGovernance,
+            hypotheticalQuestions,
           );
           await this.detectAndSaveFactConflicts(
             docId,
@@ -936,12 +941,27 @@ export class DocumentService {
     }));
   }
 
+  private buildHypotheticalQuestions(
+    content: string,
+    headingPath?: string[],
+  ): string[] {
+    const text = content.replace(/\s+/g, ' ').trim();
+    if (!text) return [];
+    const topic = headingPath?.filter(Boolean).slice(-1)[0] ?? text.slice(0, 48);
+    const questions = [
+      `${topic} 的核心内容是什么？`,
+      `如何理解或使用 ${topic}？`,
+    ];
+    return questions.filter((question, index) => index === 0 || text.length > 80);
+  }
+
   private async saveChunkMetadata(
     docId: string,
     userId: string,
     records: Array<{ id: string; content: string; chunkIndex: number }>,
     chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,
     governance: DocumentGovernanceMetadata,
+    hypotheticalQuestions: string[][],
   ): Promise<void> {
     const entities = records.map((record, index) => {
       const chunk = chunks[index];
@@ -978,6 +998,10 @@ export class DocumentService {
         documentType: governance.documentType,
         lifecycleStatus: governance.lifecycleStatus,
         supersedesDocId: governance.supersedesDocId,
+        hypotheticalQuestions:
+          hypotheticalQuestions[index]?.length > 0
+            ? JSON.stringify(hypotheticalQuestions[index])
+            : null,
       });
     });
     await this.docChunkRepo.save(entities);

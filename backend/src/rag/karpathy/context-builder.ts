@@ -86,6 +86,7 @@ export class ContextBuilder {
   build(
     chunks: RetrievedChunk[],
     profile: RetrievalProfile,
+    query?: string,
   ): ContextBuildResult {
     const seen = new Set<string>();
     const unique: RetrievedChunk[] = [];
@@ -114,10 +115,11 @@ export class ContextBuilder {
       diversified.push(chunk);
     }
 
+    const mmrOrdered = query ? applyLexicalMmr(diversified, query) : diversified;
     const selected: RetrievedChunk[] = [];
     let usedCharacters = 0;
     let budgetRemoved = 0;
-    for (const chunk of diversified) {
+    for (const chunk of mmrOrdered) {
       if (selected.length >= profile.finalTopK) {
         budgetRemoved += 1;
         continue;
@@ -134,7 +136,9 @@ export class ContextBuilder {
       usedCharacters += estimated;
     }
 
-    const arranged = arrangeForLongContext(selected);
+    const arranged = arrangeForLongContext(
+      query ? selected.map((chunk) => compressChunk(chunk, query)) : selected,
+    );
     const context = arranged
       .map(
         (chunk, index) =>
@@ -154,6 +158,81 @@ export class ContextBuilder {
       },
     };
   }
+}
+
+/**
+ * MMR 的轻量实现：候选没有保留原始 embedding，因此用分词集合估计冗余度。
+ * relevance 使用 RRF／Rerank 后的 totalScore，保留高相关片段并惩罚同质内容。
+ */
+function applyLexicalMmr(
+  chunks: RetrievedChunk[],
+  query: string,
+  lambda = 0.72,
+): RetrievedChunk[] {
+  if (chunks.length < 2) return chunks;
+  const queryTerms = tokenizeForMmr(query);
+  const remaining = [...chunks];
+  const selected: RetrievedChunk[] = [];
+  const maxScore = Math.max(...chunks.map((chunk) => chunk.totalScore), 0.0001);
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestValue = Number.NEGATIVE_INFINITY;
+    remaining.forEach((candidate, index) => {
+      const relevance =
+        0.5 * (candidate.totalScore / maxScore) +
+        0.5 * jaccard(tokenizeForMmr(candidate.content), queryTerms);
+      const redundancy = selected.length
+        ? Math.max(
+            ...selected.map((item) =>
+              jaccard(tokenizeForMmr(candidate.content), tokenizeForMmr(item.content)),
+            ),
+          )
+        : 0;
+      const value = lambda * relevance - (1 - lambda) * redundancy;
+      if (value > bestValue) {
+        bestValue = value;
+        bestIndex = index;
+      }
+    });
+    selected.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  return selected;
+}
+
+function tokenizeForMmr(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .flatMap((part) => (part.length > 1 ? [part] : [...part]))
+      .filter(Boolean),
+  );
+}
+
+function jaccard(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 || right.size === 0) return 0;
+  let intersection = 0;
+  left.forEach((item) => {
+    if (right.has(item)) intersection += 1;
+  });
+  return intersection / (left.size + right.size - intersection);
+}
+
+function compressChunk(chunk: RetrievedChunk, query: string): RetrievedChunk {
+  if (chunk.content.length < 900) return chunk;
+  const terms = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((term) => term.length > 1);
+  if (terms.length === 0) return chunk;
+  const sentences = chunk.content.split(/(?<=[。！？.!?])\s*/).filter(Boolean);
+  const matched = sentences.filter((sentence) => {
+    const text = sentence.toLowerCase();
+    return terms.some((term) => text.includes(term));
+  });
+  if (matched.length === 0 || matched.length === sentences.length) return chunk;
+  return { ...chunk, content: matched.join(' ') };
 }
 
 function arrangeForLongContext(chunks: RetrievedChunk[]): RetrievedChunk[] {

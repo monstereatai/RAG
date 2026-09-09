@@ -34,6 +34,9 @@ export class DocumentChunkEntity {
   @Column({ type: 'text' })
   content!: string;
 
+  @Column({ type: 'text', nullable: true, default: null })
+  hypotheticalQuestions!: string | null;
+
   @Column({ type: 'varchar', length: 512, nullable: true, default: null })
   headingPath!: string | null;
 

@@ -278,6 +278,7 @@ export class KarpathyRagService implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      hypotheticalQuestions?: string[];
     }
   >();
 
@@ -346,7 +347,7 @@ export class KarpathyRagService implements OnModuleInit {
    */
   private _loadEntries(entries: Bm25PersistedEntry[]): void {
     for (const entry of entries) {
-      const doc: BM25Doc = { id: entry.id, content: entry.content };
+      const doc: BM25Doc = { id: entry.id, content: entry.content, searchText: `${entry.content}\n${(entry.hypotheticalQuestions ?? []).join('\n')}` };
       this.getBm25Instance(entry.userId).addDocs([doc]);
       this.chunkMeta.set(entry.id, {
         content: entry.content,
@@ -373,6 +374,7 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: entry.documentType,
         lifecycleStatus: entry.lifecycleStatus,
         supersedesDocId: entry.supersedesDocId,
+        hypotheticalQuestions: entry.hypotheticalQuestions,
       });
       this.persistedEntries.push(entry);
     }
@@ -407,12 +409,14 @@ export class KarpathyRagService implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      hypotheticalQuestions?: string[];
     }>,
     userId?: string,
   ): void {
     const docs: BM25Doc[] = chunks.map((c) => ({
       id: c.id,
       content: c.content,
+      searchText: `${c.content}\n${(c.hypotheticalQuestions ?? []).join('\n')}`,
     }));
     this.getBm25Instance(userId).addDocs(docs);
     for (const c of chunks) {
@@ -441,6 +445,7 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: c.documentType,
         lifecycleStatus: c.lifecycleStatus,
         supersedesDocId: c.supersedesDocId,
+        hypotheticalQuestions: c.hypotheticalQuestions,
       });
       this.persistedEntries.push({
         id: c.id,
@@ -469,6 +474,7 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: c.documentType,
         lifecycleStatus: c.lifecycleStatus,
         supersedesDocId: c.supersedesDocId,
+        hypotheticalQuestions: c.hypotheticalQuestions,
       });
     }
 
@@ -1054,6 +1060,7 @@ export class KarpathyRagService implements OnModuleInit {
     const evidenceBuild = this.contextBuilder.build(
       [...chunks, ...obsidianChunks],
       retrieval.profile,
+      normalizedQuery,
     );
     const evidenceChunks = evidenceBuild.chunks;
 
@@ -2684,6 +2691,11 @@ ${context}
     const normalized = query
       .normalize('NFKC')
       .replace(/知识哭/g, '知识库')
+      .replace(/React\.js|ReactJS/gi, 'React')
+      .replace(/Vue\.js|VueJS/gi, 'Vue')
+      .replace(/Node\.js|NodeJS/gi, 'Node')
+      .replace(/大语言模型|大型语言模型/g, 'LLM')
+      .replace(/检索增强生成/g, 'RAG')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -2702,8 +2714,21 @@ ${context}
     chunks: RetrievedChunk[],
   ): { sufficient: boolean; reason: string } {
     const topScore = chunks[0]?.totalScore ?? 0;
-    const minTopScore =
+    const profile = detectRetrievalProfile(query);
+    const configuredMinTopScore =
       this.configService.get<number>('ragQuality.minTopScore') ?? 0.05;
+    const intentFloor =
+      profile.intent === 'lookup'
+        ? 0.05
+        : profile.intent === 'procedure'
+          ? 0.045
+          : profile.intent === 'comparison'
+            ? 0.04
+            : 0.035;
+    const minTopScore = Math.max(
+      0,
+      Math.min(configuredMinTopScore, intentFloor),
+    );
     if (topScore < minTopScore) {
       return {
         sufficient: false,

@@ -1579,7 +1579,25 @@ export class AgenticRagService {
     // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
     const queryIntent = this.queryIntentRouter
       ? await this.queryIntentRouter.classify(query)
-      : { intent: 'general' as const, confidence: 0 };
+      : {
+          intent: 'general' as const,
+          confidence: 0,
+          standaloneQuery: query,
+          ambiguity: { detected: false, confidence: 0, senses: [] },
+        };
+    const ambiguity = queryIntent.ambiguity;
+    if (ambiguity?.detected && ambiguity.confidence < 0.75) {
+      const answer =
+        ambiguity.clarificationQuestion ??
+        '这个问题存在多种可能含义。请补充具体对象、项目或业务场景。';
+      onEvent?.({ type: 'routing', data: { mode, route: 'clarify', reason: 'ambiguous_query' } });
+      onEvent?.({ type: 'sufficiency', data: { sufficient: false, reason: '多义词语境不足，先澄清词义' } });
+      onEvent?.({ type: 'token', data: answer });
+      const direct = { answer, references: [], retrievalSufficient: false, retrievalReason: '多义词语境不足，先澄清词义' };
+      onEvent?.({ type: 'citation', data: [] });
+      onEvent?.({ type: 'final', data: direct });
+      return { ...direct, route: 'simple' as const, confidence: ambiguity.confidence, retryCount: 0 };
+    }
     if (
       (queryIntent.intent === 'system_capability' ||
         queryIntent.intent === 'objective_fact') &&
@@ -1617,6 +1635,9 @@ export class AgenticRagService {
       onEvent?.({ type: 'citation', data: [] });
       onEvent?.({ type: 'final', data: direct });
       return { ...direct, route: 'simple' as const, confidence: 1, retryCount: 0 };
+    }
+    if (queryIntent.standaloneQuery && queryIntent.confidence >= 0.75) {
+      query = queryIntent.standaloneQuery;
     }
     // Auto 先尝试受治理的精确直答；命中时不进入状态机，以降低简单问题的时延和成本。
     if (mode === 'auto') {

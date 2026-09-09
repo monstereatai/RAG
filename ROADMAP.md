@@ -48,6 +48,14 @@
 
 ## 当前结论
 
+- **已补齐动态多义词消歧与主题隔离（2026-09-09）**：共享语义路由器由模型根据当前问题生成候选语义和澄清问题，不再维护固定关键词名单；Simple、Auto、Agentic 在检索前统一拦截低置信度多义查询，模型失败时保守放行，避免误判。Hypothetical Questions 仅参与召回，不决定词义；Backend build 与 `git diff --check` 通过。
+
+- **已改为主流语义优先的实体消歧（2026-09-09）**：仅含实体名的查询由结构化语义路由模型判断主流指代；有主流含义时直答，只有多个语义同等合理时才澄清，不因输入短而拒答。路由窗口调整为 20 秒，将语义结论作为正确性门槛，直答路径隔离历史与知识库，避免错误进入深度检索。
+
+- **已修复语义路由有效结果被 schema 拒绝（2026-09-09）**：路由模型会省略未使用的 `ambiguity.confidence`，旧 schema 因此误降级到 Agentic RAG；现改用统一 LLM Provider 的 JSON 输出并为非必要 ambiguity 字段提供默认值。使用 AG-UI SSE 实测「金铲铲」约 7 秒被判为客观事实并直接回答《金铲铲之战》，无知识库／网页检索、无“资料不足”。本地开发 HTTP 服务以 `GRPC_ENABLED=false` 运行，避免热重载重复占用 gRPC 端口。
+
+- **已接入 Hypothetical Questions 索引（2026-09-09）**：文档入库为每个 chunk 生成假设性问题，持久化到 `document_chunks.hypotheticalQuestions`，并写入 Elasticsearch 与本地 BM25 的召回文本；检索命中后仍返回原始 chunk，避免生成问题污染回答证据。已执行 TypeORM 迁移；Backend build 与 `git diff --check` 通过。
+
 - **已增加图谱旁路探测与按需证据合并（2026-09-09）**：混合检索主链路可并行执行受限 Neo4j shadow probe，仅返回最多 6 条图谱事实并设置 1.2 秒超时；普通问题保留 BM25／向量主结果，关系、多跳、依赖、影响分析类问题才把图谱事实合并进上下文。图谱旁路跳过答案生成，不额外调用 LLM；失败、超时、未启用或缺少用户身份均安全降级。Backend 类型检查与 `git diff --check` 通过；生产构建受既有 `dist` 清理冲突阻断，Jest 受既有 `clearMocksOnScope` runtime 兼容问题阻断。
 
 - **已增加文档三路发布看板与检索证据实验台（2026-09-09）**：文档详情新增 RAG 向量、ES 搜索、Neo4j 图谱三路状态、Chunk 数、失败原因、版本号与重试入口；索引耗时仅在后端有持久化值时展示，不用创建时间冒充耗时。检索运营新增「检索证据实验台」，可按 query 查看 BM25、向量、RRF、Rerank 输入／结果和最终上下文候选，并可跳转文档详情；新增 RAG Admin 与 Admin Backend 代理接口。Backend、Admin Backend 构建通过；Admin 全量 TypeScript 检查仍受仓库既有 React 类型冲突等错误阻断，本次新增文件无报错。

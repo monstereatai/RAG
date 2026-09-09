@@ -4,6 +4,7 @@ import { Client, estypes } from '@elastic/elasticsearch';
 
 type IndexedChunk = {
   content: string;
+  hypotheticalQuestions?: string[];
   docId: string;
   chunkIndex: number;
   parentChunkId?: string | null;
@@ -181,6 +182,12 @@ export class ElasticsearchProvider implements OnModuleInit {
           if (!properties?.embedding) {
             patch.embedding = this.embeddingMappingProperty();
           }
+          if (!properties?.hypotheticalQuestions) {
+            patch.hypotheticalQuestions = {
+              type: 'text',
+              analyzer: 'ik_smart_analyzer',
+            };
+          }
           if (Object.keys(patch).length > 0) {
             try {
               await this.client.indices.putMapping({
@@ -237,6 +244,10 @@ export class ElasticsearchProvider implements OnModuleInit {
           docId: { type: 'keyword' },
           chunkIndex: { type: 'integer' },
           content: {
+            type: 'text',
+            analyzer: 'ik_smart_analyzer',
+          },
+          hypotheticalQuestions: {
             type: 'text',
             analyzer: 'ik_smart_analyzer',
           },
@@ -411,6 +422,7 @@ export class ElasticsearchProvider implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      hypotheticalQuestions?: string[];
       highlightFragments?: string[];
     }>,
     userId?: string,
@@ -438,6 +450,7 @@ export class ElasticsearchProvider implements OnModuleInit {
             docId: c.docId,
             chunkIndex: c.chunkIndex,
             content: c.content,
+            hypotheticalQuestions: c.hypotheticalQuestions ?? [],
             userId: c.userId || userId,
             parentChunkId: c.parentChunkId,
             headingPath: c.headingPath,
@@ -625,7 +638,7 @@ export class ElasticsearchProvider implements OnModuleInit {
             {
               multi_match: {
                 query,
-                fields: ['content'],
+                fields: ['content^1', 'hypotheticalQuestions^2'],
                 type: 'best_fields',
               },
             },
@@ -673,6 +686,7 @@ export class ElasticsearchProvider implements OnModuleInit {
           documentType: src?.documentType,
           lifecycleStatus: src?.lifecycleStatus,
           supersedesDocId: src?.supersedesDocId,
+          hypotheticalQuestions: src?.hypotheticalQuestions,
           highlightFragments: (hit.highlight?.content ?? []).map((fragment) =>
             String(fragment),
           ),

@@ -3,6 +3,7 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { join } from 'path';
+import { existsSync } from 'node:fs';
 import { Logger } from 'nestjs-pino';
 import type { Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -101,11 +102,15 @@ async function bootstrap() {
   // gRPC 微服务（可选，通过 GRPC_ENABLED=true 开启）
   const grpcEnabled = process.env.GRPC_ENABLED !== 'false';
   if (grpcEnabled) {
+    const compiledProtoPath = join(__dirname, 'modules/grpc/rag.proto');
+    const protoPath = existsSync(compiledProtoPath)
+      ? compiledProtoPath
+      : join(process.cwd(), 'src/modules/grpc/rag.proto');
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.GRPC,
       options: {
         package: 'rag',
-        protoPath: join(__dirname, '../modules/grpc/rag.proto'),
+        protoPath,
         url: process.env.GRPC_URL ?? '0.0.0.0:50051',
         loader: {
           keepCase: true,

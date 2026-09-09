@@ -102,7 +102,12 @@ export class ChatService {
     const mode: ChatMode = req.mode ?? 'simple';
     const queryIntent = this.queryIntentRouter
       ? await this.queryIntentRouter.classify(req.query)
-      : { intent: 'general' as const, confidence: 0 };
+      : {
+          intent: 'general' as const,
+          confidence: 0,
+          standaloneQuery: req.query,
+          ambiguity: { detected: false, confidence: 0, senses: [] },
+        };
     const startTime = Date.now();
     // 插件策略与会话创建互不依赖，先并发完成请求准备。
     const [pluginComposition, threadId] = await Promise.all([
@@ -290,8 +295,12 @@ export class ChatService {
       try {
         result =
           (queryIntent.intent === 'system_capability' ||
-            queryIntent.intent === 'objective_fact') &&
-          queryIntent.confidence >= 0.85
+            queryIntent.intent === 'objective_fact' ||
+            (queryIntent.ambiguity?.detected &&
+              queryIntent.ambiguity.confidence < 0.75)) &&
+          (queryIntent.confidence >= 0.85 ||
+            (queryIntent.ambiguity?.detected &&
+              queryIntent.ambiguity.confidence < 0.75))
             ? await this.agenticRagService.run(
                 req.query,
                 'simple',

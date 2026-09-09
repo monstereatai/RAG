@@ -8,6 +8,7 @@ import { Jieba } from '@node-rs/jieba';
 export interface BM25Doc {
   id: string;
   content: string;
+  searchText?: string;
 }
 
 export interface BM25Hit {
@@ -67,7 +68,7 @@ export class BM25 {
 
   addDocs(docs: BM25Doc[]): void {
     for (const doc of docs) {
-      const tokens = this.tokenize(doc.content);
+      const tokens = this.tokenize(doc.searchText ?? doc.content);
       this.docs.push(doc);
       this.docTokens.push(tokens);
       const uniqueTokens = new Set(tokens);

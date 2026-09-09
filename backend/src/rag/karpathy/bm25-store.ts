@@ -9,6 +9,7 @@ import * as path from 'node:path';
 export interface Bm25PersistedEntry {
   id: string;
   content: string;
+  hypotheticalQuestions?: string[];
   docId: string;
   chunkIndex: number;
   tokens: string[];
