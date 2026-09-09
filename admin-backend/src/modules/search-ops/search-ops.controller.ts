@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Post, Query, Req, ServiceUnavailableException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
@@ -124,6 +124,14 @@ export class SearchOpsController {
   @RequirePermission('admin:search-ops:read')
   async searchGraph(@Query('query') query = '', @Query('limit') limit?: string) {
     const result = await this.ragClient.searchGraph(query, Number(limit) || 100);
+    return this.requireAvailable(result);
+  }
+
+  @Get('evidence')
+  @ApiOperation({ summary: '检索证据实验台' })
+  @RequirePermission('admin:search-ops:read')
+  async inspectRetrieval(@Query('q') query = '', @Req() req: any, @Query('limit') limit?: string) {
+    const result = await this.ragClient.inspectRetrieval(query, req?.user?.userId ?? req?.user?.sub, Number(limit) || 50);
     return this.requireAvailable(result);
   }
 

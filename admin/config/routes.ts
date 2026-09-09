@@ -67,7 +67,10 @@ export default [
     path: '/search-ops',
     name: 'search-ops',
     icon: 'search',
-    component: './search-ops',
+    routes: [
+      { path: '/search-ops', component: './search-ops' },
+      { path: '/search-ops/evidence', component: './search-ops/evidence', name: 'search-evidence' },
+    ],
   },
   {
     path: '/qa-ops',

@@ -443,6 +443,29 @@ export class RagAdminService {
           obsidianPath,
           obsidianStatus: obsidianPath ? 'linked' : 'missing',
           permissions: permissionsByDoc.get(doc.docId) ?? [],
+          indexPipeline: {
+            rag: {
+              status: doc.chunkCount > 0 ? 'indexed' : 'pending',
+              chunkCount: doc.chunkCount,
+              durationMs: null,
+              completedAt: null,
+              error: doc.chunkCount > 0 ? null : '尚未生成可检索 Chunk',
+            },
+            es: {
+              status: doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled() ? 'indexed' : this.elasticsearchProvider.isEnabled() ? 'pending' : 'skipped',
+              chunkCount: doc.chunkCount,
+              durationMs: null,
+              completedAt: null,
+              error: null,
+            },
+            graph: {
+              status: doc.graphIndexStatus,
+              chunkCount: null,
+              durationMs: null,
+              completedAt: doc.graphIndexedAt?.toISOString() ?? null,
+              error: doc.graphIndexError,
+            },
+          },
         };
       }),
     );
@@ -497,6 +520,46 @@ export class RagAdminService {
       effectiveAt: doc.effectiveAt?.toISOString() ?? null,
       expiredAt: doc.expiredAt?.toISOString() ?? null,
       createdAt: doc.createdAt.toISOString(),
+      indexPipeline: {
+        rag: {
+          status: doc.chunkCount > 0 ? 'indexed' : 'pending',
+          chunkCount: doc.chunkCount,
+          durationMs: null,
+          completedAt: null,
+          error: doc.chunkCount > 0 ? null : '尚未生成可检索 Chunk',
+        },
+        es: {
+          status: doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled() ? 'indexed' : this.elasticsearchProvider.isEnabled() ? 'pending' : 'skipped',
+          chunkCount: doc.chunkCount,
+          durationMs: null,
+          completedAt: null,
+          error: null,
+        },
+        graph: {
+          status: doc.graphIndexStatus,
+          chunkCount: null,
+          durationMs: null,
+          completedAt: doc.graphIndexedAt?.toISOString() ?? null,
+          error: doc.graphIndexError,
+        },
+      },
+    };
+  }
+
+  async inspectRetrieval(query: string, userId?: string, limit = 50) {
+    if (!query?.trim()) throw new BadRequestException('query is required');
+    const result = await this.karpathyRagService.retrieveDetailed(query.trim(), {}, userId);
+    const candidates = result.diagnostics.candidates;
+    const cap = Math.min(Math.max(limit, 1), 50);
+    return {
+      query: query.trim(),
+      profile: result.profile,
+      vectorSource: result.vectorSource,
+      rerankApplied: result.rerankApplied ?? false,
+      diagnostics: result.diagnostics,
+      candidates: candidates
+        ? Object.fromEntries(Object.entries(candidates).map(([key, value]) => [key, value.slice(0, cap)]))
+        : {},
     };
   }
 

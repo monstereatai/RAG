@@ -6,6 +6,7 @@ import {
   FileTextOutlined,
   TagOutlined,
   UserOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
 import { history, useParams } from '@umijs/max';
@@ -26,6 +27,7 @@ import {
   type DocumentItem,
   getDocumentChunks,
   getDocumentDetail,
+  reprocessDocument,
 } from './service';
 
 const { Paragraph, Text } = Typography;
@@ -42,6 +44,7 @@ const DocumentDetail: React.FC = () => {
   const [doc, setDoc] = useState<DocumentItem | null>(null);
   const [chunks, setChunks] = useState<ChunkItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -110,6 +113,24 @@ const DocumentDetail: React.FC = () => {
   const statusKey = doc.status ?? 'pending';
   const status = statusMap[statusKey] ?? { color: 'default', text: '未知' };
   const meta = doc.metadata;
+  const pipeline = doc.indexPipeline;
+  const pipelineStatus: Record<string, { text: string; color: string }> = {
+    indexed: { text: '已完成', color: 'green' },
+    pending: { text: '处理中', color: 'gold' },
+    failed: { text: '失败', color: 'red' },
+    skipped: { text: '未启用', color: 'default' },
+  };
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await reprocessDocument(doc.id);
+      message.success('已提交重新处理任务');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '重试失败');
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <ModulePage activeKey="mine" navItems={documentNav} title="文档详情">
@@ -178,6 +199,16 @@ const DocumentDetail: React.FC = () => {
                   <Paragraph style={{ marginTop: 4 }}>{meta.summary}</Paragraph>
                 </div>
               )}
+            </Card>
+          )}
+          {pipeline && (
+            <Card title="三路发布状态" size="small" style={{ marginTop: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} loading={retrying} onClick={retry}>重试发布</Button>}>
+              {Object.entries({ rag: 'RAG 向量', es: 'ES 搜索', graph: 'Neo4j 图谱' }).map(([key, label]) => {
+                const item = pipeline[key as keyof typeof pipeline];
+                const state = pipelineStatus[item.status] ?? pipelineStatus.pending;
+                return <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}><span>{label}</span><span><Tag color={state.color}>{state.text}</Tag>{item.chunkCount !== null && <Text type="secondary">{item.chunkCount} chunks</Text>}<Text type="secondary" style={{ display: 'block', fontSize: 12 }}>耗时：{item.durationMs === null ? '暂无记录' : `${item.durationMs} ms`}</Text>{item.error && <Typography.Text type="danger" style={{ display: 'block', fontSize: 12 }}>{item.error}</Typography.Text>}</span></div>;
+              })}
+              <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>版本：{doc.docVersion || '未标注'}；索引耗时由发布任务持久化后展示。</Text>
             </Card>
           )}
         </Col>

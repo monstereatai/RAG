@@ -146,6 +146,24 @@ export interface RetrievalDiagnostics {
     filteredByScope: number;
     filteredByBudget: number;
   };
+  /** 供检索实验台使用的各阶段候选快照，限制为前 50 条避免泄漏完整语料。 */
+  candidates?: {
+    keyword: RetrievalCandidateSnapshot[];
+    vector: RetrievalCandidateSnapshot[];
+    fused: RetrievalCandidateSnapshot[];
+    reranked: RetrievalCandidateSnapshot[];
+    rerankInput: RetrievalCandidateSnapshot[];
+    context: RetrievalCandidateSnapshot[];
+  };
+}
+
+export interface RetrievalCandidateSnapshot {
+  id: string;
+  docId: string;
+  chunkIndex: number;
+  score: number;
+  rerankScore?: number;
+  retrievalSource?: RetrievedChunk['retrievalSource'];
 }
 
 /** 向量候选来源：milvus=主向量通道；elasticsearch=ES kNN 降级/并行通道；none=无向量候选 */
@@ -693,6 +711,14 @@ export class KarpathyRagService implements OnModuleInit {
         filteredByScope: Math.max(0, fusedCandidateCount - scoped.length),
         filteredByBudget: built.stats.budgetRemoved,
       },
+      candidates: {
+        keyword: this.snapshotCandidates(bm25Hits),
+        vector: this.snapshotCandidates(cosineHits),
+        fused: this.snapshotCandidates(fused),
+        rerankInput: this.snapshotCandidates(scoped),
+        reranked: this.snapshotCandidates(ranked),
+        context: this.snapshotCandidates(built.chunks),
+      },
     };
     this.metricsService.observeRetrievalContext(
       profile.intent,
@@ -707,6 +733,27 @@ export class KarpathyRagService implements OnModuleInit {
       vectorSource,
       rerankApplied: rerankOutcome.applied,
     };
+  }
+
+  private snapshotCandidates(
+    chunks: Array<{
+      id: string;
+      docId: string;
+      chunkIndex: number;
+      totalScore?: number;
+      score?: number;
+      rerankScore?: number;
+      retrievalSource?: RetrievedChunk['retrievalSource'];
+    }>,
+  ): RetrievalCandidateSnapshot[] {
+    return chunks.slice(0, 50).map((chunk) => ({
+      id: chunk.id,
+      docId: chunk.docId,
+      chunkIndex: chunk.chunkIndex,
+      score: Number((chunk.totalScore ?? chunk.score ?? 0).toFixed(6)),
+      ...(chunk.rerankScore === undefined ? {} : { rerankScore: chunk.rerankScore }),
+      ...(chunk.retrievalSource ? { retrievalSource: chunk.retrievalSource } : {}),
+    }));
   }
 
   /**

@@ -108,3 +108,27 @@ export async function getSearchStats() {
     };
   }>('/api/admin/search-ops/stats');
 }
+
+export interface RetrievalCandidate {
+  id: string;
+  docId: string;
+  chunkIndex: number;
+  score: number;
+  rerankScore?: number;
+  retrievalSource?: string;
+}
+
+export interface RetrievalEvidenceResult {
+  query: string;
+  vectorSource?: string;
+  rerankApplied?: boolean;
+  profile?: { intent?: string; finalTopK?: number };
+  diagnostics?: { contextCharacters?: number; stages?: Record<string, number> };
+  candidates: Record<string, RetrievalCandidate[]>;
+}
+
+export async function inspectRetrieval(query: string, limit = 50) {
+  return authRequest<RetrievalEvidenceResult>('/api/admin/search-ops/evidence', {
+    params: { q: query, limit },
+  });
+}

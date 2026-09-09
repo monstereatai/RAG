@@ -796,6 +796,13 @@ export class RagClientService {
     );
   }
 
+  inspectRetrieval(query: string, userId?: string, limit = 50) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/search/evidence${this.toQueryString({ q: query, userId, limit })}`,
+      LIST_READ_TIMEOUT_MS,
+    );
+  }
+
   reindexDocumentSearch(limit = 1000) {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/documents/search/reindex${this.toQueryString({ limit })}`,

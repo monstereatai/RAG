@@ -157,6 +157,15 @@ export class RagAdminController {
     return this.ragAdminService.getDocumentSearchFacets();
   }
 
+  @Get('search/evidence')
+  inspectRetrieval(
+    @Query('q') query: string,
+    @Query('userId') userId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ragAdminService.inspectRetrieval(query, userId, Number(limit) || 50);
+  }
+
   @Post('documents/search/reindex')
   reindexDocumentSearch(@Query('limit') limit?: string) {
     return this.ragAdminService.reindexDocumentSearch(Number(limit) || 1000);

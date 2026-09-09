@@ -7,6 +7,7 @@
 - `pnpm --dir admin-backend build`：通过。
 - RAG 评测：新增 `context_recall` 指标、关键证据缺失断言和 Query Augment 0.8 相似度门禁；切分策略 overlap 已统一至 10%～20% 字符预算。
 - 动态语义切分实验：句子／段落边界装箱已启用，按文档类型保留不同 overlap；PRD 样例 overlap 15.38%、语义边界率 100%。
+- 文档三路发布看板与检索证据实验台：`pnpm --dir backend build`、`pnpm --dir admin-backend build` 通过；`git diff --check` 通过。Admin 全量 TypeScript 检查仍被既有 React 类型版本冲突、历史页面类型错误阻断，新增 `search-ops/evidence.tsx` 与文档详情改动未产生新增诊断。
 
 ## 待补验证
 

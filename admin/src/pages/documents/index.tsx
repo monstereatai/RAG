@@ -216,6 +216,7 @@ const Documents: React.FC<DocumentListPageProps> = ({
               obsidianPath: repairMojibake(item.obsidianPath),
               obsidianStatus: item.obsidianStatus,
               permissions: item.permissions,
+              indexPipeline: item.indexPipeline,
             })),
           );
           setTotal(Number(rawTotal) || items.length);
@@ -518,6 +519,19 @@ const Documents: React.FC<DocumentListPageProps> = ({
           <Tag color={graph.color}>{graph.text}</Tag>
         );
       },
+    },
+    {
+      title: '三路发布',
+      width: 220,
+      render: (_, record) => record.indexPipeline ? (
+        <Space size={2} wrap>
+          {(['rag', 'es', 'graph'] as const).map((key) => {
+            const item = record.indexPipeline?.[key];
+            const state = graphStatusMap[item?.status ?? 'skipped'];
+            return <Tag key={key} color={state.color}>{key === 'rag' ? 'RAG' : key === 'es' ? 'ES' : 'Neo4j'}：{state.text}</Tag>;
+          })}
+        </Space>
+      ) : <Tag>暂无</Tag>,
     },
     {
       title: '操作',

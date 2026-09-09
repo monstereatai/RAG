@@ -33,6 +33,19 @@ export interface DocumentItem {
     subjectType: 'user' | 'role' | 'department' | 'public';
     subjectId: string;
   }>;
+  indexPipeline?: {
+    rag: PipelineStatus;
+    es: PipelineStatus;
+    graph: PipelineStatus;
+  };
+}
+
+export interface PipelineStatus {
+  status: 'pending' | 'indexed' | 'failed' | 'skipped';
+  chunkCount: number | null;
+  durationMs: number | null;
+  completedAt: string | null;
+  error: string | null;
 }
 
 export interface DocumentVersionItem {

@@ -106,6 +106,7 @@ export const searchNav: SideNavItem[] = [
   },
   { key: 'hot', label: '热门搜索', icon: <GlobalOutlined /> },
   { key: 'filter', label: '搜索筛选', icon: <SearchOutlined /> },
+  { key: 'evidence', label: '检索证据实验台', icon: <ExperimentOutlined />, path: '/search-ops/evidence' },
 ];
 
 export const qaNav: SideNavItem[] = [
