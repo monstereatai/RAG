@@ -41,10 +41,12 @@ export class MarkdownChunker {
   private readonly splitter: RecursiveCharacterTextSplitter;
   private readonly chunkSize: number;
   private readonly chunkOverlap: number;
+  private readonly semanticBoundaries: boolean;
 
-  constructor(chunkSize = 500, chunkOverlap = 50) {
+  constructor(chunkSize = 500, chunkOverlap = 50, semanticBoundaries = true) {
     this.chunkSize = chunkSize;
     this.chunkOverlap = chunkOverlap;
+    this.semanticBoundaries = semanticBoundaries;
     this.splitter = new RecursiveCharacterTextSplitter({
       chunkSize,
       chunkOverlap,
@@ -215,7 +217,10 @@ export class MarkdownChunker {
                 '',
               ],
             });
-      const split = await splitter.splitText(regularBlocks.join('\n\n'));
+      const regularText = regularBlocks.join('\n\n');
+      const split = this.semanticBoundaries
+        ? this.splitBySemanticBoundary(regularText, contentBudget)
+        : await splitter.splitText(regularText);
       chunks.push(...split.map((content) => `${prefix}${content}`));
       regularBlocks = [];
     };
@@ -235,6 +240,42 @@ export class MarkdownChunker {
     }
 
     await flushRegularBlocks();
+    return chunks;
+  }
+
+  /** 在句子／段落边界动态装箱，重叠只从完整语义单元中选取，避免半句截断。 */
+  private splitBySemanticBoundary(text: string, budget: number): string[] {
+    const units = text
+      .split(/(?<=[。！？.!?])\s+|\n+/u)
+      .map((unit) => unit.trim())
+      .filter(Boolean);
+    if (units.length === 0) return [];
+    const chunks: string[] = [];
+    let current: string[] = [];
+    const flush = () => {
+      if (current.length === 0) return;
+      chunks.push(current.join(' '));
+      const overlap: string[] = [];
+      let length = 0;
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        const nextLength = length + current[index].length + (overlap.length ? 1 : 0);
+        if (nextLength > this.chunkOverlap && overlap.length > 0) break;
+        overlap.unshift(current[index]);
+        length = nextLength;
+      }
+      current = overlap;
+    };
+    for (const unit of units) {
+      if (unit.length > budget) {
+        flush();
+        chunks.push(unit);
+        continue;
+      }
+      const candidate = current.length ? `${current.join(' ')} ${unit}` : unit;
+      if (current.length > 0 && candidate.length > budget) flush();
+      current.push(unit);
+    }
+    flush();
     return chunks;
   }
 

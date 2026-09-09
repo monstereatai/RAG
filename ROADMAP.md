@@ -778,4 +778,5 @@
 - **验证**：`pnpm --dir backend build`、`pnpm --dir admin tsc --noEmit`、`pnpm --dir admin-backend build` 通过。
 - **RAG 准确率优化**：Query Augment 增加默认 0.8 相似度门禁并保留原问题；文档类型切分 overlap 调整为 10%～20% 字符预算，继续保护标题／表格／代码语义块；Agent Eval 增加 `context_recall`、缺失证据断言和 0.8 阈值。
 - **验证补充**：backend build 通过；相关 Jest 用例因仓库既有 Jest 30 运行时 `clearMocksOnScope` 兼容错误未能启动，未将其标记为通过。
+- **动态语义切分实验**：在结构化分段、表格／代码保护基础上增加句子／段落边界动态装箱；各文档类型保留独立 overlap（API／配置较低，PRD／复盘较高），新增 `evaluateChunkStrategy` 输出 overlapRatio、semanticBoundaryRate 和实验分数；ts-node 样例验证 PRD overlap 15.38%、边界率 100%。
 - **仓库内闭环收口**：定时任务在 Redis 可用时以 BullMQ Job Scheduler 为唯一调度源，并保留无 Redis 降级；文档重建保留原文档 ID、ACL、生命周期与审核元数据，写入 SHA-256 和重复内容告警；PDF 解析改为懒加载，`--detectOpenHandles` 全量测试无残留；Backend／Admin Backend OpenAPI 检查脚本均支持严格模式；Agent 工作台展示四层可信指标和 RAG 质量发布门禁；安全策略增加版本、生效时间、启用状态；新增 `docs/SECURITY_AND_DATA_LIFECYCLE.md`。验证：Backend 58 suites／274 tests（含 `--detectOpenHandles`）通过，三端生产构建通过，`git diff --check` 通过。契约脚本因本地服务未启动安全跳过，严格运行需启动 Backend 3000 与 Admin Backend 3001。

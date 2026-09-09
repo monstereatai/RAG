@@ -6,6 +6,7 @@
 - `pnpm --dir admin tsc --noEmit`：通过。
 - `pnpm --dir admin-backend build`：通过。
 - RAG 评测：新增 `context_recall` 指标、关键证据缺失断言和 Query Augment 0.8 相似度门禁；切分策略 overlap 已统一至 10%～20% 字符预算。
+- 动态语义切分实验：句子／段落边界装箱已启用，按文档类型保留不同 overlap；PRD 样例 overlap 15.38%、语义边界率 100%。
 
 ## 待补验证
 

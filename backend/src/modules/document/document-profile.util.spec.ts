@@ -1,6 +1,7 @@
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
+  evaluateChunkStrategy,
   getChunkStrategy,
 } from './document-profile.util';
 import { MarkdownChunker } from './chunking.util';
@@ -39,7 +40,18 @@ describe('game document profile', () => {
     expect(getChunkStrategy('config')).toEqual({
       chunkSize: 700,
       chunkOverlap: 105,
+      semanticBoundaries: true,
     });
+  });
+
+  it('evaluates semantic boundaries and profile overlap for experiments', async () => {
+    const strategy = getChunkStrategy('prd');
+    const source = '# PRD\n## 规则\n第一条说明活动资格和时间。\n第二条说明奖励和补偿。';
+    const chunks = await new MarkdownChunker(strategy.chunkSize, strategy.chunkOverlap).splitStructured(source);
+    const evaluation = evaluateChunkStrategy(source, chunks, strategy);
+    expect(evaluation.overlapRatio).toBeGreaterThanOrEqual(0.1);
+    expect(evaluation.overlapRatio).toBeLessThanOrEqual(0.2);
+    expect(evaluation.semanticBoundaryRate).toBeGreaterThan(0);
   });
 
   it('reports structure and suspicious parsing quality', async () => {

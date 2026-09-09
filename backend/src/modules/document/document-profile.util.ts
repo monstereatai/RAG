@@ -43,6 +43,7 @@ export type ResolvedDocumentBusinessMetadata = GameDocumentMetadata & {
 export interface ChunkStrategy {
   chunkSize: number;
   chunkOverlap: number;
+  semanticBoundaries: boolean;
 }
 
 export interface IngestionQualityReport {
@@ -62,19 +63,27 @@ export interface IngestionQualityReport {
   };
 }
 
+export interface ChunkStrategyEvaluation {
+  chunkCount: number;
+  averageChunkLength: number;
+  overlapRatio: number;
+  semanticBoundaryRate: number;
+  score: number;
+}
+
 /**
  * 文档类型与切块策略的唯一映射。不同类型的结构密度不同：API／配置更重视完整段落，
  * PRD／复盘需要更多相邻上下文；overlap 统一控制在 chunkSize 的 10%～20% 之间，
  * 以接近 token 重叠目标（当前切分器按字符预算）并避免相邻事实被截断。
  */
 const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
-  prd: { chunkSize: 650, chunkOverlap: 100 },
-  api: { chunkSize: 700, chunkOverlap: 105 },
-  design: { chunkSize: 600, chunkOverlap: 90 },
-  test: { chunkSize: 550, chunkOverlap: 83 },
-  config: { chunkSize: 700, chunkOverlap: 105 },
-  postmortem: { chunkSize: 700, chunkOverlap: 105 },
-  general: { chunkSize: 500, chunkOverlap: 75 },
+  prd: { chunkSize: 650, chunkOverlap: 100, semanticBoundaries: true },
+  api: { chunkSize: 700, chunkOverlap: 105, semanticBoundaries: true },
+  design: { chunkSize: 600, chunkOverlap: 90, semanticBoundaries: true },
+  test: { chunkSize: 550, chunkOverlap: 83, semanticBoundaries: true },
+  config: { chunkSize: 700, chunkOverlap: 105, semanticBoundaries: true },
+  postmortem: { chunkSize: 700, chunkOverlap: 105, semanticBoundaries: true },
+  general: { chunkSize: 500, chunkOverlap: 75, semanticBoundaries: true },
 };
 
 /** 从文件名和正文抽取可用于权限、版本和检索范围过滤的业务元数据；无法确认时返回安全默认值。 */
@@ -106,6 +115,33 @@ export function detectGameDocumentMetadata(
 
 export function getChunkStrategy(type: GameDocumentType): ChunkStrategy {
   return STRATEGIES[type];
+}
+
+/** 对切分实验给出可比较的离线分数，不代表线上准确率。 */
+export function evaluateChunkStrategy(
+  source: string,
+  chunks: StructuredChunk[],
+  strategy: ChunkStrategy,
+): ChunkStrategyEvaluation {
+  const lengths = chunks.map((chunk) => chunk.content.length);
+  const averageChunkLength = lengths.length
+    ? lengths.reduce((sum, value) => sum + value, 0) / lengths.length
+    : 0;
+  const targetOverlap = strategy.chunkOverlap / Math.max(strategy.chunkSize, 1);
+  const overlapRatio = Math.min(1, targetOverlap);
+  const boundaries = chunks.filter((chunk) =>
+    /[。！？.!?]$/.test(chunk.content.trim()),
+  ).length;
+  const semanticBoundaryRate = chunks.length ? boundaries / chunks.length : 0;
+  const sizeScore = averageChunkLength <= strategy.chunkSize ? 1 : 0;
+  const score = Number(
+    ((semanticBoundaryRate * 0.6 + (overlapRatio >= 0.1 && overlapRatio <= 0.2 ? 1 : 0) * 0.3 + sizeScore * 0.1) * 100).toFixed(2),
+  );
+  // 读取 source 参与评测契约，避免空文档被误判为高分。
+  if (!source.trim() || chunks.length === 0) {
+    return { chunkCount: chunks.length, averageChunkLength, overlapRatio, semanticBoundaryRate, score: 0 };
+  }
+  return { chunkCount: chunks.length, averageChunkLength, overlapRatio, semanticBoundaryRate, score };
 }
 
 /**
