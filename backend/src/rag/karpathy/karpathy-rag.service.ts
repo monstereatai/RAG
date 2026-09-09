@@ -3040,6 +3040,22 @@ ${evidence}`;
       };
     }
 
+    // Rerank 是针对“问题－片段”对的语义相关度判断。它存在且通过门槛时，
+    // 不再要求用户的表达方式（例如“请总结”“资料库中”）逐字出现在资料原文，
+    // 否则会把实际命中的内容错误降级为“资料不足”。未配置或未返回重排分时，
+    // 仍使用下方的词面门禁作为保守兜底。
+    const strongestRerankScore = Math.max(
+      ...chunks.map((chunk) => chunk.rerankScore ?? Number.NEGATIVE_INFINITY),
+    );
+    const minRerankScore =
+      this.configService.get<number>('ragQuality.minRerankScore') ?? 0.65;
+    if (strongestRerankScore >= minRerankScore) {
+      return {
+        sufficient: true,
+        reason: `重排语义相关度 ${strongestRerankScore.toFixed(3)} 通过阈值 ${minRerankScore}`,
+      };
+    }
+
     const queryTokens = this.extractQualityTokens(query);
     const minOverlap =
       this.configService.get<number>('ragQuality.minQueryTokenOverlap') ?? 1;

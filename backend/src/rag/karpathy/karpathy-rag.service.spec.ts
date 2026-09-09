@@ -967,4 +967,29 @@ describe('KarpathyRagService exception scenarios', () => {
       ),
     ).resolves.toHaveLength(1);
   });
+
+  it('accepts strongly reranked evidence when instruction wording is absent from the source', () => {
+    const { service } = createService();
+
+    const result = service.assessRetrievedChunks(
+      '请基于资料库概括这个人物的经历',
+      [
+        {
+          id: 'evidence-1',
+          docId: 'doc-1',
+          chunkIndex: 0,
+          content: '李逵在江州因抢鱼与渔人冲突，后加入梁山。',
+          totalScore: 0.55,
+          rerankScore: 0.78,
+        },
+      ],
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        sufficient: true,
+        reason: expect.stringContaining('重排语义相关度'),
+      }),
+    );
+  });
 });

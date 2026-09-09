@@ -198,6 +198,9 @@ export const configuration = () => ({
   // RAG 质量闸门
   ragQuality: {
     minTopScore: parseFloat(process.env.RAG_MIN_TOP_SCORE ?? '0.05'),
+    // 重排模型已判断 query 与片段的语义相关性时，优先使用该信号，
+    // 避免把“请总结／资料库中”等指令文字误当作必须出现在原文中的事实。
+    minRerankScore: parseFloat(process.env.RAG_MIN_RERANK_SCORE ?? '0.65'),
     minQueryTokenOverlap: parseInt(
       process.env.RAG_MIN_QUERY_TOKEN_OVERLAP ?? '1',
       10,

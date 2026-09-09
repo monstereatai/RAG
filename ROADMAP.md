@@ -48,6 +48,8 @@
 
 ## 当前结论
 
+- **已修复“独立搜索命中、Agentic 问答误报资料不足”（2026-09-10）**：检索充分性门禁改为优先使用 Rerank 的 query－片段语义相关度；仅在没有重排结果时才回退词面重合判断，避免把用户的操作性表达误当作原文必须包含的事实。新增 `RAG_MIN_RERANK_SCORE`（默认 `0.65`）和回归测试。真实回放「资料库当中，帮我总结下李逵」命中两段本地资料（重排分 `0.779`／`0.759`），生成带片段引用的总结且未触发联网；Backend build 通过。Karpathy 全量定向套件仍有 3 条既有引用降级测试失败，已明确记录为独立测试债务。
+
 - **已修复 QA Ops 会话与插件接口 502（2026-09-10）**：Admin Backend 的 `GET /api/admin/qa-ops/conversations` 和 `GET /api/admin/qa-ops/plugins` 改为稳定只读契约；RAG Backend 暂时不可达时返回 HTTP 200、空数据及 `available/status/error`，恢复后自动返回真实数据，不再把上游连接故障升级为页面 502。已重启 RAG/Admin Backend，直连上游会话与插件接口均返回 200；Admin Backend build 与 QA Ops 定向测试 13/13 通过。
 
 - **已将 RAG 来源路由改为结构化策略（2026-09-10）**：新增 `sourcePolicy`（`direct_answer`、`local_only`、`web_allowed`），由 LLM + Few-shot 语义路由决定证据来源；生产链路不再使用关键词判断是否联网，低置信度默认收紧到本地资料。Simple、Auto、Agentic 统一消费该策略，避免“资料库问题误走公网”。Backend build 通过；定向 Jest 受既有 `clearMocksOnScope` 运行时兼容问题阻断。
