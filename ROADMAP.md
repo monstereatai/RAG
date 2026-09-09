@@ -48,6 +48,10 @@
 
 ## 当前结论
 
+- **已加固历史上下文事实隔离（2026-09-09）**：新增统一上下文策略，客观事实问题禁用历史问答向量与短期历史注入；普通追问保留历史但明确标注为非事实依据；普通 Chat、AG-UI 和 Chat SSE 统一注入冲突裁决规则；新增 `docs/plans/历史上下文事实污染与模型切换优化方案.md`。Backend build 与 `git diff --check` 通过；上下文策略单测因仓库现有 Jest 30 运行时 `clearMocksOnScope` 兼容错误未能执行，待修复测试环境后复验。
+- **已修复 Auto 模型身份问题未前置分流（2026-09-09）**：扩展系统能力问题识别，覆盖「你是哪个模型」「当前使用的模型」等表达；命中后在检索、证据门禁和重试前直接依据当前运行时模型回答，避免历史片段污染。
+- **已统一三条链路的语义预路由（2026-09-09）**：新增共享 `QueryIntentRouter`，Simple、Auto、Agentic／SSE／AG-UI 均在检索前仅依据当前问题进行结构化意图分类；系统能力问题直接读取运行时模型信息，分类超时才使用保守回退，不再依赖单链路关键词命中。
+
 - **已增加文档索引一致性巡检接口（2026-09-09）**：RAG Admin 新增 `GET /rag/admin/documents/index-audit`，管理后台新增 `GET /api/admin/documents/index-audit`，检查空 chunk、图索引失败／待处理、生效未审批和过期仍生效文档，并返回可执行的重建／重试动作；Backend 与 Admin Backend build 通过。
 
 - **已增加仓库级质量门禁 CI（2026-09-09）**：新增 `.github/workflows/quality-gate.yml`，在 main／release 分支 push 和 PR 上自动执行依赖锁定安装、Backend／Admin Backend 构建、企业就绪检查和 RAG 质量门禁；真实模型评测仍由外部 key 和环境条件决定，不在 CI 中伪造通过。
@@ -772,4 +776,6 @@
 - **系统能力问答分流**：模型名称、多模态和能力询问直接走模型回答，不再被知识库证据门禁误判为“资料不足”；回答仍标记实际选用模型。
 - **管理端响应适配器**：新增 `unwrapRagResponse`，文档详情与 chunk 接口统一解包，避免 `{data:{code,data,message}}` 多层包装。
 - **验证**：`pnpm --dir backend build`、`pnpm --dir admin tsc --noEmit`、`pnpm --dir admin-backend build` 通过。
+- **RAG 准确率优化**：Query Augment 增加默认 0.8 相似度门禁并保留原问题；文档类型切分 overlap 调整为 10%～20% 字符预算，继续保护标题／表格／代码语义块；Agent Eval 增加 `context_recall`、缺失证据断言和 0.8 阈值。
+- **验证补充**：backend build 通过；相关 Jest 用例因仓库既有 Jest 30 运行时 `clearMocksOnScope` 兼容错误未能启动，未将其标记为通过。
 - **仓库内闭环收口**：定时任务在 Redis 可用时以 BullMQ Job Scheduler 为唯一调度源，并保留无 Redis 降级；文档重建保留原文档 ID、ACL、生命周期与审核元数据，写入 SHA-256 和重复内容告警；PDF 解析改为懒加载，`--detectOpenHandles` 全量测试无残留；Backend／Admin Backend OpenAPI 检查脚本均支持严格模式；Agent 工作台展示四层可信指标和 RAG 质量发布门禁；安全策略增加版本、生效时间、启用状态；新增 `docs/SECURITY_AND_DATA_LIFECYCLE.md`。验证：Backend 58 suites／274 tests（含 `--detectOpenHandles`）通过，三端生产构建通过，`git diff --check` 通过。契约脚本因本地服务未启动安全跳过，严格运行需启动 Backend 3000 与 Admin Backend 3001。

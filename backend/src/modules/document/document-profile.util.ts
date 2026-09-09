@@ -64,16 +64,17 @@ export interface IngestionQualityReport {
 
 /**
  * 文档类型与切块策略的唯一映射。不同类型的结构密度不同：API／配置更重视完整段落，
- * PRD／复盘需要更多相邻上下文；调用方不得在入库链路中临时覆盖这些默认值。
+ * PRD／复盘需要更多相邻上下文；overlap 统一控制在 chunkSize 的 10%～20% 之间，
+ * 以接近 token 重叠目标（当前切分器按字符预算）并避免相邻事实被截断。
  */
 const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
-  prd: { chunkSize: 650, chunkOverlap: 80 },
-  api: { chunkSize: 700, chunkOverlap: 40 },
-  design: { chunkSize: 600, chunkOverlap: 60 },
-  test: { chunkSize: 550, chunkOverlap: 50 },
-  config: { chunkSize: 700, chunkOverlap: 30 },
-  postmortem: { chunkSize: 700, chunkOverlap: 80 },
-  general: { chunkSize: 500, chunkOverlap: 50 },
+  prd: { chunkSize: 650, chunkOverlap: 100 },
+  api: { chunkSize: 700, chunkOverlap: 105 },
+  design: { chunkSize: 600, chunkOverlap: 90 },
+  test: { chunkSize: 550, chunkOverlap: 83 },
+  config: { chunkSize: 700, chunkOverlap: 105 },
+  postmortem: { chunkSize: 700, chunkOverlap: 105 },
+  general: { chunkSize: 500, chunkOverlap: 75 },
 };
 
 /** 从文件名和正文抽取可用于权限、版本和检索范围过滤的业务元数据；无法确认时返回安全默认值。 */

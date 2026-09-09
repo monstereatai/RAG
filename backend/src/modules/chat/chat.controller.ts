@@ -30,6 +30,10 @@ import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { detectDangerousQuery } from '../../rag/prompts/prompt-injection.guard';
 import { MetricsService } from '../metrics/metrics.service';
 import { SecurityAuditService } from '../metrics/security-audit.service';
+import {
+  buildContextPolicyMessage,
+  selectHistoryForQuery,
+} from '../../rag/prompts/context-policy';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -118,10 +122,13 @@ export class ChatController {
           const activeThreadId =
             threadId ??
             (await this.conversationService.create(query, 'auto', userId));
-          const history = await this.conversationService.getRecentHistory(
-            activeThreadId,
-            5,
-            userId,
+          const history = selectHistoryForQuery(
+            query,
+            await this.conversationService.getRecentHistory(
+              activeThreadId,
+              5,
+              userId,
+            ),
           );
 
           // 先推送 threadId 给前端，以便前端保存后续发请求用
@@ -137,6 +144,10 @@ export class ChatController {
             activeThreadId,
           );
           const memoryMessages: Array<{ role: string; content: string }> = [];
+          memoryMessages.push({
+            role: 'system',
+            content: buildContextPolicyMessage(),
+          });
           const roleContext = resolveRoleContext(rolePresetId);
           memoryMessages.push({
             role: 'system',

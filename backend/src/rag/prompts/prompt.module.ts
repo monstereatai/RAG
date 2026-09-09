@@ -6,6 +6,8 @@ import { BadCaseFlywheelService } from './bad-case-flywheel.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
+import { LlmModule } from '../../providers/llm/llm.module';
+import { QueryIntentRouter } from './query-intent-router';
 
 /**
  * Prompt 工程模块
@@ -16,10 +18,11 @@ import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.enti
 @Module({
   imports: [
     ConfigModule,
+    LlmModule,
     EmbeddingModule,
     TypeOrmModule.forFeature([RagFeedbackEntity, QueryLogEntity]),
   ],
-  providers: [SemanticExampleSelector, BadCaseFlywheelService],
-  exports: [SemanticExampleSelector, BadCaseFlywheelService],
+  providers: [SemanticExampleSelector, BadCaseFlywheelService, QueryIntentRouter],
+  exports: [SemanticExampleSelector, BadCaseFlywheelService, QueryIntentRouter],
 })
 export class PromptModule {}

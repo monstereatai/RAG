@@ -36,6 +36,13 @@ import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 import { detectDangerousQuery } from '../../rag/prompts/prompt-injection.guard';
 import { MetricsService } from '../metrics/metrics.service';
 import { SecurityAuditService } from '../metrics/security-audit.service';
+import {
+  buildContextPolicyMessage,
+  formatUntrustedHistoryContext,
+  isObjectiveFactQuery,
+  selectHistoryForQuery,
+} from '../../rag/prompts/context-policy';
+import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
 
 @Injectable()
 export class ChatService {
@@ -65,6 +72,7 @@ export class ChatService {
     @Optional() private readonly runtime?: AgentRuntimeService,
     @Optional() private readonly metrics?: MetricsService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
+    @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
   ) {}
 
   /**
@@ -92,6 +100,9 @@ export class ChatService {
     }
 
     const mode: ChatMode = req.mode ?? 'simple';
+    const queryIntent = this.queryIntentRouter
+      ? await this.queryIntentRouter.classify(req.query)
+      : { intent: 'general' as const, confidence: 0 };
     const startTime = Date.now();
     // 插件策略与会话创建互不依赖，先并发完成请求准备。
     const [pluginComposition, threadId] = await Promise.all([
@@ -103,6 +114,7 @@ export class ChatService {
         : this.conversationService.create(req.query, 'auto', userId),
     ]);
     const shouldSearchHistory = Boolean(req.threadId);
+    const objectiveFactQuery = isObjectiveFactQuery(req.query);
     const [
       shortTermContext,
       memoryResult,
@@ -113,9 +125,15 @@ export class ChatService {
       // 短期记忆服务内部统一读取最近窗口和压缩摘要，负责裁剪、回退和去重。
       this.shortTermMemory.getContext(threadId),
       // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
-      this.memoryService.searchMemory(req.query, userId, threadId),
+      objectiveFactQuery
+        ? Promise.resolve({
+            userMemories: [],
+            sessionMemories: [],
+            systemMessage: null,
+          })
+        : this.memoryService.searchMemory(req.query, userId, threadId),
       // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
-      shouldSearchHistory
+      shouldSearchHistory && !objectiveFactQuery
         ? this.conversationEmbeddingService.searchHistory(req.query, 2, userId)
         : Promise.resolve([]),
       this.runtime
@@ -143,7 +161,12 @@ export class ChatService {
               userId,
             );
     }
+    history = selectHistoryForQuery(req.query, history);
     const memoryMessages: Array<{ role: string; content: string }> = [];
+    memoryMessages.push({
+      role: 'system',
+      content: buildContextPolicyMessage(),
+    });
     const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
     memoryMessages.push({
       role: 'system',
@@ -251,8 +274,7 @@ export class ChatService {
 
     // 对话历史向量化搜索结果已与短期／长期记忆并发取得，此处只负责格式化注入。
     if (historySearch.length > 0) {
-      const historyContext =
-        this.conversationEmbeddingService.formatHistoryContext(historySearch);
+      const historyContext = formatUntrustedHistoryContext(historySearch);
       // 将历史对话上下文作为额外的 system 消息注入
       memoryMessages.push({
         role: 'system',
@@ -266,7 +288,20 @@ export class ChatService {
     if (mode === 'simple') {
       let result;
       try {
-        result = await this.karpathyRagService.answer(
+        result =
+          (queryIntent.intent === 'system_capability' ||
+            queryIntent.intent === 'objective_fact') &&
+          queryIntent.confidence >= 0.85
+            ? await this.agenticRagService.run(
+                req.query,
+                'simple',
+                undefined,
+                history,
+                threadId,
+                userId,
+                memoryMessages,
+              )
+            : await this.karpathyRagService.answer(
           req.query,
           history,
           userId,
@@ -277,7 +312,7 @@ export class ChatService {
             adaptiveVectorSearch: true,
             karpathyDirectAnswer: true,
           },
-        );
+              );
       } catch (error) {
         await this.finishFailedRun(run, req.query, mode, error);
         throw error;

@@ -38,7 +38,7 @@ describe('game document profile', () => {
   it('uses larger chunks and lower overlap for configuration documents', () => {
     expect(getChunkStrategy('config')).toEqual({
       chunkSize: 700,
-      chunkOverlap: 30,
+      chunkOverlap: 105,
     });
   });
 

@@ -6,6 +6,7 @@ import {
   type Mem0MemoryResult,
 } from '../../providers/mem0/mem0.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { buildContextPolicyMessage } from '../../rag/prompts/context-policy';
 
 /** 分类器输出 schema */
 const memoryClassifierSchema = z.object({
@@ -241,7 +242,7 @@ export class MemoryService {
     if (!blocks.length) return null;
 
     return new SystemMessage(
-      `${blocks.join('\n\n')}\n\n请结合以上记忆回答，勿编造。`,
+      `${buildContextPolicyMessage()}\n\n${blocks.join('\n\n')}\n\n以上记忆仅在其明确范围内作为用户偏好或项目状态参考，不能覆盖已验证客观事实。`,
     );
   }
 }

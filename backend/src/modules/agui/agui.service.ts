@@ -16,6 +16,11 @@ import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import {
+  buildContextPolicyMessage,
+  isObjectiveFactQuery,
+  selectHistoryForQuery,
+} from '../../rag/prompts/context-policy';
 
 @Injectable()
 export class AguiService {
@@ -60,6 +65,7 @@ export class AguiService {
 
         try {
           const selectedModel = options.model ?? 'qwen';
+          const objectiveFactQuery = isObjectiveFactQuery(query);
           runState.mode = options.mode;
           runState.model = selectedModel;
           const roleContext = resolveRoleContext(options.rolePresetId);
@@ -109,17 +115,23 @@ export class AguiService {
                 recentTurns: [],
                 truncatedHistory: false,
               }),
-            this.withTimeout(
-              this.memoryService.searchMemory(
-                query,
-                options.userId,
-                activeThreadId,
-              ),
-              600,
-              { userMemories: [], sessionMemories: [], systemMessage: null },
-            ),
+            objectiveFactQuery
+              ? Promise.resolve({ userMemories: [], sessionMemories: [], systemMessage: null })
+              : this.withTimeout(
+                  this.memoryService.searchMemory(
+                    query,
+                    options.userId,
+                    activeThreadId,
+                  ),
+                  600,
+                  { userMemories: [], sessionMemories: [], systemMessage: null },
+                ),
           ]);
           const memoryMessages: Array<{ role: string; content: string }> = [];
+          memoryMessages.push({
+            role: 'system',
+            content: buildContextPolicyMessage(),
+          });
           memoryMessages.push({
             role: 'system',
             content: roleContext.systemMessage,
@@ -153,6 +165,7 @@ export class AguiService {
                   content: turn.content,
                 }))
               : history;
+          const safeHistory = selectHistoryForQuery(query, boundedHistory);
 
           const result = await this.llmProvider.runWithModel(
             selectedModel,
@@ -165,7 +178,7 @@ export class AguiService {
                   traceEvents.push(this.toTraceEvent(event));
                   this.emitAguiEvent(event, emit, messageId);
                 },
-                boundedHistory,
+                safeHistory,
                 activeThreadId,
                 options.userId,
                 memoryMessages,

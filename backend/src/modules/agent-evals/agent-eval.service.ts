@@ -19,6 +19,10 @@ export class AgentEvalService {
 
   async evaluate(input: AgentEvalDto) {
     const faithfulness = this.faithfulness(input.output, input.contexts);
+    const contextRecall = this.contextRecall(
+      input.contexts,
+      input.expectedContextClaims ?? [],
+    );
     const coverage = this.coverage(
       input.output,
       input.requiredClaims ?? this.inferRequirements(input.query),
@@ -52,6 +56,7 @@ export class AgentEvalService {
       metrics: {
         task_success_rate: taskSuccess ? 1 : 0,
         faithfulness: faithfulness.score,
+        context_recall: contextRecall.score,
         prd_coverage: coverage.score,
         test_case_completeness: testCaseCompleteness.score,
         tool_success_rate: toolSuccessRate,
@@ -62,9 +67,11 @@ export class AgentEvalService {
         unsupportedClaims: faithfulness.unsupported,
         missingRequirements: coverage.missing,
         missingTestCaseSections: testCaseCompleteness.missing,
+        missingContextClaims: contextRecall.missing,
       },
       thresholds: {
         faithfulness: 0.88,
+        contextRecall: 0.8,
         prdCoverage: 0.8,
         testCaseCompleteness: 0.8,
         toolSuccessRate: 0.9,
@@ -103,6 +110,22 @@ export class AgentEvalService {
     return {
       score: this.round(
         (requirements.length - missing.length) / requirements.length,
+      ),
+      missing,
+    };
+  }
+
+  private contextRecall(contexts: string[], expectedClaims: string[]) {
+    if (expectedClaims.length === 0) {
+      return { score: 1, missing: [] as string[] };
+    }
+    const evidence = this.normalize(contexts.join('\n'));
+    const missing = expectedClaims.filter(
+      (claim) => !this.tokens(claim).some((token) => evidence.includes(token)),
+    );
+    return {
+      score: this.round(
+        (expectedClaims.length - missing.length) / expectedClaims.length,
       ),
       missing,
     };

@@ -29,6 +29,12 @@ export class AgentEvalDto {
   @IsString({ each: true })
   requiredClaims?: string[];
 
+  /** 标注集中的关键证据线索，用于计算最终上下文召回率。 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  expectedContextClaims?: string[];
+
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

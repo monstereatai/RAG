@@ -59,6 +59,8 @@ import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/age
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
 import { randomUUID } from 'node:crypto';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
+import { QueryIntentRouter } from '../prompts/query-intent-router';
+import { filterSemanticQueries } from '../prompts/query-similarity';
 
 /**
  * 深度问答的 LangGraph 状态机。
@@ -87,6 +89,7 @@ export class AgenticRagService {
   private readonly maxRerankTopN: number;
   private readonly webSearchFallbackEnabled: boolean;
   private readonly rerankEnabled: boolean;
+  private readonly querySimilarityThreshold: number;
   private readonly graphSearchEnabled: boolean;
 
   constructor(
@@ -102,6 +105,7 @@ export class AgenticRagService {
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
     private readonly agentLoop: AgentLoopService,
+    @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly graphService?: GraphService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
@@ -150,6 +154,12 @@ export class AgenticRagService {
       true;
     this.rerankEnabled =
       this.configService.get<boolean>('agentic.rerankEnabled') ?? true;
+    this.querySimilarityThreshold = this.numberConfig(
+      'agentic.querySimilarityThreshold',
+      0.8,
+      0.5,
+      1,
+    );
     this.graphSearchEnabled =
       this.configService.get<boolean>('agentic.graphSearchEnabled') ?? true;
     this.checkpointer = new RedisCheckpointer(this.redisProvider);
@@ -1567,16 +1577,43 @@ export class AgenticRagService {
       downstreamOnEvent?.(event);
     };
     // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
-    if (this.isSystemCapabilityQuery(query)) {
+    const queryIntent = this.queryIntentRouter
+      ? await this.queryIntentRouter.classify(query)
+      : { intent: 'general' as const, confidence: 0 };
+    if (
+      (queryIntent.intent === 'system_capability' ||
+        queryIntent.intent === 'objective_fact') &&
+      queryIntent.confidence >= 0.85
+    ) {
       const modelName = this.llmProvider.getActiveProviderName();
-      const prompt = `你正在回答系统能力问题。当前实际选用的模型是 ${modelName}。请用中文直接说明模型名称、文本能力，以及是否支持图片、音频、视频输入；不要声称具备当前模型未提供的能力，也不要要求用户补充资料。用户问题：${query}`;
+      const prompt =
+        queryIntent.intent === 'system_capability'
+          ? `你正在回答系统能力问题。当前实际选用的模型是 ${modelName}。请用中文直接说明模型名称、文本能力，以及是否支持图片、音频、视频输入；不要声称具备当前模型未提供的能力，也不要要求用户补充资料。用户问题：${query}`
+          : `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
       onEvent?.({ type: 'routing', data: { mode, route: 'simple', reason: 'system_capability_direct' } });
-      onEvent?.({ type: 'sufficiency', data: { sufficient: true, reason: '系统能力问答，直接回答' } });
+      onEvent?.({
+        type: 'sufficiency',
+        data: {
+          sufficient: true,
+          reason:
+            queryIntent.intent === 'system_capability'
+              ? '系统能力问答，直接回答'
+              : '客观事实问答，直接回答',
+        },
+      });
       const answer = await this.llmProvider.invoke(prompt);
       for (const token of this.splitAnswerTokens(answer)) {
         onEvent?.({ type: 'token', data: token });
       }
-      const direct = { answer, references: [], retrievalSufficient: true, retrievalReason: '系统能力问答，直接回答' };
+      const direct = {
+        answer,
+        references: [],
+        retrievalSufficient: true,
+        retrievalReason:
+          queryIntent.intent === 'system_capability'
+            ? '系统能力问答，直接回答'
+            : '客观事实问答，直接回答',
+      };
       onEvent?.({ type: 'citation', data: [] });
       onEvent?.({ type: 'final', data: direct });
       return { ...direct, route: 'simple' as const, confidence: 1, retryCount: 0 };
@@ -1778,10 +1815,6 @@ export class AgenticRagService {
     );
     onEvent?.({ type: 'final', data: result });
     return result;
-  }
-
-  private isSystemCapabilityQuery(query: string): boolean {
-    return /你是什么模型|什么模型|多模态|支持图片|支持音频|支持视频|支持哪些能力|你能做什么|模型能力/i.test(query);
   }
 
   private splitAnswerTokens(answer: string): string[] {
@@ -2059,9 +2092,11 @@ export class AgenticRagService {
    * 规范化扩展查询：确保恰好 3 条，不足用原问题补齐
    */
   private normalizeQueries(original: string, list: unknown): string[] {
-    const out = (Array.isArray(list) ? list : [])
-      .map((s) => (typeof s === 'string' ? s.trim() : ''))
-      .filter(Boolean);
+    const out = filterSemanticQueries(
+      original,
+      list,
+      this.querySimilarityThreshold,
+    );
     while (out.length < this.maxAugmentedQueries) out.push(original);
     return out.slice(0, this.maxAugmentedQueries);
   }

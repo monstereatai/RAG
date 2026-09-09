@@ -13,6 +13,7 @@ describe('AgentEvalService', () => {
         '前置条件：周年庆 V2 已启用。测试步骤：调用 /api/v2/draw。输入：未登录用户。预期结果：返回 401。边界／异常：泰国地区覆盖泰语长文本。',
       taskType: 'test_case',
       requiredClaims: ['泰国地区', '泰语长文本', '401'],
+      expectedContextClaims: ['周年庆 V2', '/api/v2/draw', '401'],
       expectedSteps: ['检索规则', '生成用例'],
       actualSteps: ['检索规则', '生成用例'],
       toolCalls: [
@@ -25,6 +26,7 @@ describe('AgentEvalService', () => {
     expect(result.passed).toBe(true);
     expect(result.metrics.tool_success_rate).toBe(1);
     expect(result.metrics.step_accuracy).toBe(1);
+    expect(result.metrics.context_recall).toBe(1);
     expect(result.assertions.missingTestCaseSections).toEqual([]);
   });
 
@@ -35,6 +37,7 @@ describe('AgentEvalService', () => {
       output: '欧美地区奖励翻倍，直接上线即可。',
       taskType: 'prd',
       requiredClaims: ['欧美地区', '回滚方案'],
+      expectedContextClaims: ['欧美地区', '回滚方案'],
       expectedSteps: ['检索', '校验', '回答'],
       actualSteps: ['回答'],
       toolCalls: [{ name: 'retrieval', success: false }],
