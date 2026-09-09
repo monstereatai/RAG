@@ -1038,7 +1038,11 @@ async function describeEmbeddedImage(
     return fallback;
   }
   try {
-    const result = await vision.describeImage(asset.buffer, asset.mimeType);
+    const result = await vision.describeImage(
+      asset.buffer,
+      asset.mimeType,
+      '请将这张图片作为知识库证据解析。先判断类型（截图、流程图、架构图、表格图或其他），再描述关键文字、节点、连线、表格字段和业务上下文；输出适合检索的中文语义摘要，避免臆测图片中未出现的信息。',
+    );
     return toMarkdownAltText(result?.description, fallback);
   } catch (err) {
     console.warn(

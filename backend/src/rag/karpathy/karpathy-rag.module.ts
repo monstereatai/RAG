@@ -9,6 +9,7 @@ import { ObsidianKnowledgeModule } from '../../modules/obsidian/obsidian-knowled
 import { PromptModule } from '../prompts/prompt.module';
 import { ToolsModule } from '../../tools/tools.module';
 import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
+import { ImageIndexModule } from '../../modules/image-index/image-index.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { DocumentPermissionModule } from '../../modules/document/document-permis
     PromptModule,
     ToolsModule,
     DocumentPermissionModule,
+    ImageIndexModule,
   ],
   providers: [KarpathyRagService],
   exports: [KarpathyRagService],

@@ -48,6 +48,12 @@
 
 ## 当前结论
 
+- **已补齐多模态知识检索闭环（2026-09-09）**：图片相关 query 通过现有 Milvus `rag_images` 文本向量检索与文本 RAG 并行探测，命中后把图片语义、受控地址和来源文档转换为上下文 Chunk；普通 query 不触发图片向量开销。PDF／PPTX 内嵌图片的 VLM 提示已明确覆盖截图、流程图、架构图和表格图，并要求输出可检索中文语义摘要；图像检索失败或超时安全降级。Backend 类型检查通过，未新增数据库迁移。
+
+- **已接通管理后台文档上传链路（2026-09-09）**：文档管理页的批量上传／空状态上传按钮现可选择多个文件，前端使用 multipart 提交；Admin Backend 通过 `FileInterceptor` 接收并透传至 RAG 内部上传路由，按当前登录用户归属文档，复用现有解析入库能力；列表服务端和前端均按最新创建时间倒序。支持后端已有的文本、PDF、Office、表格、演示文稿、图片、音频、视频等类型。Admin 与 Admin Backend build 通过；Backend build 受运行中 watch 进程占用 `dist/src` 的既有 ENOTEMPTY 冲突阻断，已由开发服务热重载加载新路由。
+
+- **已修复模型失败 Prompt 泄露与多问题误直答（2026-09-09）**：Qwen／DeepSeek Provider 调用失败时不再返回 Mock 文本或截断请求内容，改为抛出不含 Prompt 的受控错误；Agentic 直答路径向 SSE 发出 `LLM_UNAVAILABLE` 后返回友好失败说明。语义路由新增 `multiIntent`／`subQueries`，多条独立问题在 Simple、Auto、Agentic 均跳过单题直答和 Auto 快速路径，改走 Agentic 查询规划；模型遗漏字段时只按明确问号边界保留完整子问题，不用关键词猜测。AG-UI SSE 实测「React 是什么？1+1 等于多少？」路由为 `multi_intent_query`，拆分两条子问题并同时覆盖两项回答，无 Mock／Prompt 泄露。`pnpm --dir backend run build` 与 `git diff --check` 通过；`tsc --noEmit` 与定向 Jest 分别受既有 Spec 类型错误和 Jest 29／30 `clearMocksOnScope` 运行时冲突阻断，未伪造为通过。
+
 - **已补齐动态多义词消歧与主题隔离（2026-09-09）**：共享语义路由器由模型根据当前问题生成候选语义和澄清问题，不再维护固定关键词名单；Simple、Auto、Agentic 在检索前统一拦截低置信度多义查询，模型失败时保守放行，避免误判。Hypothetical Questions 仅参与召回，不决定词义；Backend build 与 `git diff --check` 通过。
 
 - **已改为主流语义优先的实体消歧（2026-09-09）**：仅含实体名的查询由结构化语义路由模型判断主流指代；有主流含义时直答，只有多个语义同等合理时才澄清，不因输入短而拒答。路由窗口调整为 20 秒，将语义结论作为正确性门槛，直答路径隔离历史与知识库，避免错误进入深度检索。

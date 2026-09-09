@@ -32,6 +32,7 @@ import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.se
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
 import { GraphService, type GraphFact } from '../../modules/graph/graph.service';
+import { ImageIndexService, type ImageSearchItem } from '../../modules/image-index/image-index.service';
 
 export interface RetrievedChunk {
   id: string;
@@ -143,6 +144,14 @@ export interface RetrievalDiagnostics {
     enabled: boolean;
     merged: boolean;
     factCount: number;
+    elapsedMs: number;
+    skippedReason?: string;
+  };
+  imageProbe?: {
+    attempted: boolean;
+    enabled: boolean;
+    merged: boolean;
+    hitCount: number;
     elapsedMs: number;
     skippedReason?: string;
   };
@@ -319,6 +328,7 @@ export class KarpathyRagService implements OnModuleInit {
     // DashScope 重排：ToolsModule 已导出；@Optional 保证缺失时仅跳过重排，不影响检索
     @Optional() private readonly rerankService?: DashScopeRerankService,
     @Optional() private readonly graphService?: GraphService,
+    @Optional() private readonly imageIndexService?: ImageIndexService,
   ) {}
 
   /**
@@ -575,6 +585,7 @@ export class KarpathyRagService implements OnModuleInit {
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
     const graphProbeStartedAt = Date.now();
     const graphProbePromise = this.probeGraph(normalizedQuery, userId);
+    const imageProbePromise = this.probeImages(normalizedQuery, userId);
 
     // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
     const allowedDocIds = userId
@@ -704,8 +715,11 @@ export class KarpathyRagService implements OnModuleInit {
         contextRole: 'hit' as const,
       }));
     const graphProbe = await graphProbePromise;
+    const imageProbe = await imageProbePromise;
     const graphChunks = graphProbe.facts.map((fact, index) => this.graphFactToChunk(fact, index));
+    const imageChunks = imageProbe.hits.map((hit, index) => this.imageHitToChunk(hit, index));
     const shouldMergeGraph = this.shouldMergeGraphEvidence(normalizedQuery);
+    const shouldMergeImages = this.shouldMergeImageEvidence(normalizedQuery);
     const expanded = this.expandContextChunks(
       ranked,
       profile,
@@ -713,7 +727,9 @@ export class KarpathyRagService implements OnModuleInit {
       options.scope,
     );
     const built = this.contextBuilder.build(
-      shouldMergeGraph ? [...graphChunks, ...expanded] : expanded,
+      shouldMergeGraph || shouldMergeImages
+        ? [...(shouldMergeGraph ? graphChunks : []), ...(shouldMergeImages ? imageChunks : []), ...expanded]
+        : expanded,
       profile,
       normalizedQuery,
     );
@@ -731,6 +747,10 @@ export class KarpathyRagService implements OnModuleInit {
         ...graphProbe,
         merged: shouldMergeGraph && graphChunks.length > 0,
         elapsedMs: Date.now() - graphProbeStartedAt,
+      },
+      imageProbe: {
+        ...imageProbe,
+        merged: shouldMergeImages && imageChunks.length > 0,
       },
       stages: {
         keywordCandidates: bm25Hits.length,
@@ -795,6 +815,54 @@ export class KarpathyRagService implements OnModuleInit {
 
   private shouldMergeGraphEvidence(query: string): boolean {
     return /关系|关联|上下游|依赖|多跳|影响|链路|分别/.test(query);
+  }
+
+  private shouldMergeImageEvidence(query: string): boolean {
+    return /图片|图像|截图|流程图|架构图|表格图|示意图|看板|页面视觉/.test(query);
+  }
+
+  private async probeImages(query: string, userId?: string): Promise<{
+    attempted: boolean;
+    enabled: boolean;
+    merged: boolean;
+    hitCount: number;
+    elapsedMs: number;
+    hits: ImageSearchItem[];
+    skippedReason?: string;
+  }> {
+    const startedAt = Date.now();
+    if (!this.imageIndexService?.isEnabled()) {
+      return { attempted: false, enabled: false, merged: false, hitCount: 0, elapsedMs: 0, hits: [], skippedReason: 'disabled' };
+    }
+    if (!userId || !this.shouldMergeImageEvidence(query)) {
+      return { attempted: false, enabled: true, merged: false, hitCount: 0, elapsedMs: 0, hits: [], skippedReason: userId ? 'not_image_query' : 'missing_user' };
+    }
+    try {
+      const hits = await Promise.race([
+        this.imageIndexService.searchText(query, { topK: 6, userId }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200)),
+      ]);
+      return { attempted: true, enabled: true, merged: false, hitCount: hits.length, elapsedMs: Date.now() - startedAt, hits };
+    } catch (error) {
+      return { attempted: true, enabled: true, merged: false, hitCount: 0, elapsedMs: Date.now() - startedAt, hits: [], skippedReason: (error as Error).message };
+    }
+  }
+
+  private imageHitToChunk(hit: ImageSearchItem, index: number): RetrievedChunk {
+    const meta = hit.meta ?? {};
+    const description = typeof meta.description === 'string' ? meta.description : '图片语义证据';
+    const placement = typeof meta.placement === 'string' ? `，位置：${meta.placement}` : '';
+    return {
+      id: `image:${hit.docId}:${index}`,
+      content: `${description}${placement}\n图片地址：${hit.url}\n来源文档：${hit.docId}`,
+      docId: hit.docId,
+      chunkIndex: typeof meta.chunkIndex === 'number' ? meta.chunkIndex : index,
+      bm25Score: 0,
+      cosineScore: hit.score,
+      totalScore: Math.max(0.1, hit.score),
+      retrievalSource: 'vector',
+      contextRole: 'hit',
+    };
   }
 
   private graphFactToChunk(fact: GraphFact, index: number): RetrievedChunk {
