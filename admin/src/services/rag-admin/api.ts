@@ -7,11 +7,12 @@ export const authRequest = <T = any>(
   options?: { method?: string; data?: any; params?: any; headers?: Record<string, string> },
 ): Promise<T> => {
   const token = getToken();
+  const isFormData = typeof FormData !== 'undefined' && options?.data instanceof FormData;
   return request<T>(url, {
     ...options,
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...options?.headers,
     },
   });

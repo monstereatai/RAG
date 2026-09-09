@@ -1,0 +1,14 @@
+[
+  {"id":"public-arithmetic","query":"1+1 等于多少","expectedAction":"direct_answer","mustRetrieve":false},
+  {"id":"public-definition","query":"React 是什么","expectedAction":"direct_answer","mustRetrieve":false},
+  {"id":"private-person","query":"李思是谁","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"typo-person","query":"公司有李思，李四是谁","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"private-project","query":"我们项目 X 当前负责人是谁","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"uploaded-document","query":"资料库里面的陈达出现在第几章节，他的花名叫什么","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"follow-up","query":"刚才那个项目的接口怎么改","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"company-policy","query":"公司的年假制度是什么","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"realtime","query":"今天上海天气怎么样","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"multi-intent","query":"React 是什么？1+1 等于多少？","expectedAction":"retrieve","mustRetrieve":true},
+  {"id":"public-comparison","query":"Redis 和 Memcached 有什么区别","expectedAction":"direct_answer","mustRetrieve":false},
+  {"id":"private-activity","query":"周年庆活动的奖品有哪些","expectedAction":"retrieve","mustRetrieve":true}
+]

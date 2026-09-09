@@ -21,6 +21,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:e2e:rag": "jest --config ./test/jest-rag-e2e.json --runInBand",
     "eval:rag": "node scripts/eval-rag.mjs",
+    "eval:query-routing": "node scripts/eval-query-routing.mjs",
     "eval:rag:e2e": "node scripts/eval-rag-e2e.mjs",
     "eval:rag:judge": "node scripts/eval-rag-judge.mjs",
     "eval:rag:maturity": "node scripts/eval-rag-maturity.mjs",

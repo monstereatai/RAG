@@ -106,6 +106,10 @@ export class ChatService {
           intent: 'general' as const,
           confidence: 0,
           standaloneQuery: req.query,
+          multiIntent: false,
+          subQueries: [],
+          needsSynthesis: false,
+          entities: [],
           ambiguity: { detected: false, confidence: 0, senses: [] },
         };
     const startTime = Date.now();
@@ -183,6 +187,8 @@ export class ChatService {
     };
     const retrievalOptions = {
       scope: retrievalScope,
+      needsSynthesis: queryIntent.needsSynthesis,
+      entities: queryIntent.entities,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
       ...(pluginComposition
         ? {
@@ -294,7 +300,8 @@ export class ChatService {
       let result;
       try {
         result =
-          (queryIntent.intent === 'system_capability' ||
+          (queryIntent.multiIntent ||
+            queryIntent.intent === 'system_capability' ||
             queryIntent.intent === 'objective_fact' ||
             (queryIntent.ambiguity?.detected &&
               queryIntent.ambiguity.confidence < 0.75)) &&

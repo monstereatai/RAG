@@ -133,6 +133,7 @@ describe('RagAdminService document listing and archive', () => {
   const docMetaRepo = { findOne: jest.fn(), find: jest.fn() };
   const permissionRepo = { find: jest.fn() };
   const obsidianKnowledge = { findNoteByRagDocId: jest.fn() };
+  const elasticsearchProvider = { isEnabled: jest.fn(() => false) };
   const documentService = {
     updateLifecycle: jest.fn(),
     activateVersion: jest.fn(),
@@ -146,7 +147,7 @@ describe('RagAdminService document listing and archive', () => {
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
+    elasticsearchProvider as never,
     {} as never,
     {} as never,
     obsidianKnowledge as never,
@@ -186,6 +187,16 @@ describe('RagAdminService document listing and archive', () => {
 
     expect(result.total).toBe(1);
     expect(result.items[0].docId).toBe('b');
+  });
+
+  it('queries documents by latest upload time first with a stable id tie-breaker', async () => {
+    docMetaRepo.find.mockResolvedValue([]);
+
+    await service.listDocuments({});
+
+    expect(docMetaRepo.find).toHaveBeenCalledWith({
+      order: { createdAt: 'DESC', docId: 'DESC' },
+    });
   });
 
   it('filters public documents by permission scope and returns permission summary', async () => {

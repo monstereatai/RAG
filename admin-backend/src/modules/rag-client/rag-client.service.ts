@@ -312,6 +312,10 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>(`/rag/admin/quality/summary${this.toQueryString({ limit })}`);
   }
 
+  getIntentRoutingSummary(limit = 200) {
+    return this.getJson<Record<string, unknown>>(`/rag/admin/quality/intent-routing${this.toQueryString({ limit })}`);
+  }
+
   auditDocumentIndexes(limit = 200) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/documents/index-audit?limit=${encodeURIComponent(String(limit))}`,
@@ -846,10 +850,17 @@ export class RagClientService {
     );
   }
 
-  uploadDocument() {
-    return this.postJson<Record<string, unknown>>(
-      "/rag/admin/documents/upload",
-      {}
+  uploadDocument(file: Express.Multer.File, fields: Record<string, unknown> = {}) {
+    const form = new FormData();
+    form.append('file', new Blob([file.buffer as unknown as BlobPart], { type: file.mimetype }), file.originalname);
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && value !== null) form.append(key, String(value));
+    }
+    return this.request<Record<string, unknown>>(
+      '/rag/admin/documents/upload',
+      { method: 'POST', body: form },
+      true,
+      10 * 60 * 1000,
     );
   }
 

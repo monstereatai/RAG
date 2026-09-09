@@ -11,7 +11,10 @@ import {
   BadRequestException,
   NotFoundException,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { RagAdminService } from './rag-admin.service';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
@@ -124,6 +127,17 @@ export class RagAdminController {
   @Get('documents')
   async listDocuments(@Query() query: RagDocumentQueryDto) {
     return this.ragAdminService.listDocuments(query);
+  }
+
+  @Post('documents/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadDocument(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    const ownerUserId = String(body?.ownerUserId ?? 'admin');
+    return this.ragAdminService.uploadDocument(file, ownerUserId, body);
   }
 
   @Get('documents/search')
@@ -364,6 +378,11 @@ export class RagAdminController {
   @Get('quality/summary')
   getQualitySummary(@Query('limit') limit?: string) {
     return this.ragAdminService.getQualitySummary(Number(limit) || 500);
+  }
+
+  @Get('quality/intent-routing')
+  getIntentRoutingSummary(@Query('limit') limit?: string) {
+    return this.ragAdminService.getIntentRoutingSummary(Number(limit) || 200);
   }
 
   @Post('documents/tasks/:taskId/retry')

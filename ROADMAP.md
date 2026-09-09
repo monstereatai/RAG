@@ -48,9 +48,18 @@
 
 ## 当前结论
 
+- **已修复 QA Ops 会话与插件接口 502（2026-09-10）**：Admin Backend 的 `GET /api/admin/qa-ops/conversations` 和 `GET /api/admin/qa-ops/plugins` 改为稳定只读契约；RAG Backend 暂时不可达时返回 HTTP 200、空数据及 `available/status/error`，恢复后自动返回真实数据，不再把上游连接故障升级为页面 502。已重启 RAG/Admin Backend，直连上游会话与插件接口均返回 200；Admin Backend build 与 QA Ops 定向测试 13/13 通过。
+
+- **已将 RAG 来源路由改为结构化策略（2026-09-10）**：新增 `sourcePolicy`（`direct_answer`、`local_only`、`web_allowed`），由 LLM + Few-shot 语义路由决定证据来源；生产链路不再使用关键词判断是否联网，低置信度默认收紧到本地资料。Simple、Auto、Agentic 统一消费该策略，避免“资料库问题误走公网”。Backend build 通过；定向 Jest 受既有 `clearMocksOnScope` 运行时兼容问题阻断。
+
+- **已修复“资料库问题误走联网”边界（2026-09-09）**：路由目标包含文档知识库时，将 `knowledgeOnly` 约束传入 Simple、Auto、Agentic 全链路；本地资料不足时跳过 Bocha 联网兜底，只返回资料不足提示。已用 Simple 模式回放「资料库中西门庆是谁」，回答引用本地片段且未触发 `web_search`；Backend build 与 `git diff --check` 通过。
+
+- **已收敛证据回答的通用降级策略（2026-09-09）**：私域问题由 LLM 意图路由输出检索动作、实体与受控改写，Agentic 主检索并行执行原问句与语义改写，不按人物、章回或任一业务关键词分支。首次生成未通过逐句引用门禁时，系统会基于同一批证据进行一次受约束的语义压缩；二次生成仍无法通过则明确资料不足，禁止把候选原文片段当作回答。引用区仅展示答案实际标记的片段。Backend build 与 `git diff --check` 通过；Jest 仍受仓库既有 Jest 30 `clearMocksOnScope` 运行时兼容问题阻断。
+
 - **已补齐多模态知识检索闭环（2026-09-09）**：图片相关 query 通过现有 Milvus `rag_images` 文本向量检索与文本 RAG 并行探测，命中后把图片语义、受控地址和来源文档转换为上下文 Chunk；普通 query 不触发图片向量开销。PDF／PPTX 内嵌图片的 VLM 提示已明确覆盖截图、流程图、架构图和表格图，并要求输出可检索中文语义摘要；图像检索失败或超时安全降级。Backend 类型检查通过，未新增数据库迁移。
 
 - **已接通管理后台文档上传链路（2026-09-09）**：文档管理页的批量上传／空状态上传按钮现可选择多个文件，前端使用 multipart 提交；Admin Backend 通过 `FileInterceptor` 接收并透传至 RAG 内部上传路由，按当前登录用户归属文档，复用现有解析入库能力；列表服务端和前端均按最新创建时间倒序。支持后端已有的文本、PDF、Office、表格、演示文稿、图片、音频、视频等类型。Admin 与 Admin Backend build 通过；Backend build 受运行中 watch 进程占用 `dist/src` 的既有 ENOTEMPTY 冲突阻断，已由开发服务热重载加载新路由。
+- **已补齐上传长耗时保护（2026-09-09）**：上传解析／向量索引改用 10 分钟专用超时，不再沿用普通管理 API 的 2 秒超时，避免大 PDF 被前端误判为上传失败。
 
 - **已修复模型失败 Prompt 泄露与多问题误直答（2026-09-09）**：Qwen／DeepSeek Provider 调用失败时不再返回 Mock 文本或截断请求内容，改为抛出不含 Prompt 的受控错误；Agentic 直答路径向 SSE 发出 `LLM_UNAVAILABLE` 后返回友好失败说明。语义路由新增 `multiIntent`／`subQueries`，多条独立问题在 Simple、Auto、Agentic 均跳过单题直答和 Auto 快速路径，改走 Agentic 查询规划；模型遗漏字段时只按明确问号边界保留完整子问题，不用关键词猜测。AG-UI SSE 实测「React 是什么？1+1 等于多少？」路由为 `multi_intent_query`，拆分两条子问题并同时覆盖两项回答，无 Mock／Prompt 泄露。`pnpm --dir backend run build` 与 `git diff --check` 通过；`tsc --noEmit` 与定向 Jest 分别受既有 Spec 类型错误和 Jest 29／30 `clearMocksOnScope` 运行时冲突阻断，未伪造为通过。
 
@@ -791,6 +800,15 @@
 
 ### 2026-09-09
 
+- **中文人物事实问句检索修复（已完成）**：修复“资料库里的陈达出现在第几章节，他的花名叫什么”被 Agentic 查询扩展拆成代词子问题、继而因单个子问题无证据整体拒答的问题。对章节／回目／花名／绰号等同一人物事实问句保留原始问题作为单一证据验收单元，仍保留显式多问题的独立拆分。新增 Agentic 回归测试；backend build ✅；真实本地 SSE 验证返回“第 2 回、跳涧虎”且 `retrievalSufficient=true`。Jest 当前受仓库既有 Jest 30 运行时 `clearMocksOnScope` 环境错误阻断，未将该项标为测试通过。
+- **RAG 意图路由与评测闭环补齐（已完成）**：QueryIntentRouter 增加结构化 action、queryType、targetKbs、entities、filters、rewriteQueries 和 reason 输出；保留规则硬门禁，私域实体／上下文／多问题默认进入检索。Few-shot 路由边界样本抽为共享示例池并注入 Router Prompt，新增 12 条路由评测集与 eval:query-routing，覆盖公共知识、私域人物、同音错字、上下文追问、实时问题和多意图；评测准确率 12／12、私域召回率 1.0、公共直答精确率 1.0。tsc --noEmit、格式检查和 git diff --check 通过；完整 Nest build 因本机残留多个 nest start --watch 进程并发占用 backend/dist，未将本项标为 build 通过。
+- **意图路由管理后台闭环（已完成）**：RAG Admin 新增 intent-routing 汇总接口，Admin Backend 增加代理路由，Agent 运营页新增“意图路由运营”卡片，展示扫描量、检索／直答分布、私域／上下文数量和最近问答路由明细。历史日志未持久化完整 Router JSON，页面明确标注当前统计为硬门禁规则回放估算；新运行的 AG-UI routing 事件已携带完整 action、queryType、知识库、实体、过滤条件和重写 Query。admin-backend build、backend watch 编译和 git diff --check 通过；admin 全量 tsc 仍有既有 React 类型与历史 workflow 类型错误，未将其标为全量通过。
+- **RAG 公共问题／私域实体分流收紧**：新增 `requiresKnowledgeRetrieval()` 硬门禁；公司、项目、部门、内部资料、人名身份、上下文追问等问题禁止仅凭 LLM 直答，必须先走检索，检索不到再澄清或安全降级；同步修正 QueryIntentRouter 提示词，并补充“1+1”直答、“李四是谁”与内部制度检索测试。
+
+- **DeepSeek 问答超时修复**：DeepSeek v4 默认输出上限从 4096 调整为 1024，并补齐最大重试、温度配置；避免推理预算耗尽导致 LangChain 调用超过 30 秒后显示“模型服务暂时不可用”。实测“水浒传里面的陈达做了什么”使用 DeepSeek 正常完成，返回正文和引用，`RUN_FINISHED` 正常。
+
+- **管理端文档列表排序**：`GET /api/admin/documents` 及其 RAG 查询统一按上传时间 `createdAt DESC` 返回，新增 `docId DESC` 稳定兜底，确保最新上传文档排在最前；补充 RagAdminService 回归测试（14/14 通过）。
+
 - **第二批缺口清零**：质量汇总接入 QA Ops 概览；危险请求通过 Domain Event Outbox 保存脱敏审计并提供后台查询；定时任务增加 BullMQ 延迟／重试／去重适配器，Redis 不可用时保留原调度降级；文档索引增加批量修复；Agent 汇总增加步骤准确率和恢复率；OpenAPI 契约检查覆盖安全、质量、索引、Agent 和 readiness 路径；新增并发／故障相关单测。Backend 全量 Jest 58 suites／274 tests、三端构建均通过。
 - **缺口清单补齐**：新增 Agent 运行成本／成功率／失败率／重试与审批汇总接口，并在 Agent 运营工作台展示；新增 RAG 安全策略卡片、文档索引巡检接口、后台代理路由、本地 OpenAPI 契约检查脚本与 CI 质量门禁。backend、admin-backend、admin 生产构建、定向测试、企业 readiness 12/12 及 `git diff --check` 均通过。真实 Grafana／告警、生产 BullMQ 集群、备份灾备、低代码平台、企业 IAM／DLP／工单和压测仍标记为线上或外部依赖，未伪造为已完成。
 - **统一运行协议第一版**：AG-UI 事件补充 `runState`，统一表达路由、检索、证据、生成、引用、完成／降级／错误阶段；会话元数据持久化该状态，刷新后可恢复详情轨迹。
@@ -802,3 +820,5 @@
 - **动态语义切分实验**：在结构化分段、表格／代码保护基础上增加句子／段落边界动态装箱；各文档类型保留独立 overlap（API／配置较低，PRD／复盘较高），新增 `evaluateChunkStrategy` 输出 overlapRatio、semanticBoundaryRate 和实验分数；ts-node 样例验证 PRD overlap 15.38%、边界率 100%。
 - **仓库内闭环收口**：定时任务在 Redis 可用时以 BullMQ Job Scheduler 为唯一调度源，并保留无 Redis 降级；文档重建保留原文档 ID、ACL、生命周期与审核元数据，写入 SHA-256 和重复内容告警；PDF 解析改为懒加载，`--detectOpenHandles` 全量测试无残留；Backend／Admin Backend OpenAPI 检查脚本均支持严格模式；Agent 工作台展示四层可信指标和 RAG 质量发布门禁；安全策略增加版本、生效时间、启用状态；新增 `docs/SECURITY_AND_DATA_LIFECYCLE.md`。验证：Backend 58 suites／274 tests（含 `--detectOpenHandles`）通过，三端生产构建通过，`git diff --check` 通过。契约脚本因本地服务未启动安全跳过，严格运行需启动 Backend 3000 与 Admin Backend 3001。
 - **RAG 检索优化记录补充**：在 `docs/plans/RAG检索优化记录.md` 增加本次实际优化点，明确 Auto 语义路由、历史事实隔离、多义词消歧、混合召回、结果质量控制和安全回退。
+- **大 PDF 知识库上传修复**：确认《西游记》PDF 本身可读、未加密、664 页约 83MB；修复 Admin 文档上传代理仅允许 10MB 的限制，知识库文档上传上限提高到 1GB，并在前端上传前给出明确的超限提示。`admin-backend build`、`admin build` 通过，Admin Backend 已重启生效。
+- **QA Ops RAG 流式问答恢复与章节事实兜底**：修复本地三段服务未启动导致管理后台收到 `terminated` 代理兜底的问题；启动并验证 Backend 3000、Admin Backend 3001、Admin 8000。针对“人物出现在第几章／做了什么”问题，新增基于命中片段章回标题和行为句的证据优先回答，避免检索已有明确章节证据时因覆盖不足整体拒答；Backend build ✅，真实 AG-UI SSE 验证返回章回与引用 ✅。

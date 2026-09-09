@@ -537,6 +537,28 @@ export interface RagQualitySummary {
 export const getRagQualitySummary = (limit = 500) =>
   authRequest<RagQualitySummary>(`/api/admin/agent-ops/rag-quality?limit=${limit}`);
 
+export interface IntentRoutingSummary {
+  scanned: number;
+  estimated: boolean;
+  note?: string;
+  byAction: Record<string, number>;
+  byQueryType: Record<string, number>;
+  recent: Array<{
+    id: string;
+    query: string;
+    action: string;
+    queryType: string;
+    confidence: number;
+    createdAt: string;
+    mode: string;
+    answered: boolean;
+    cited: boolean;
+  }>;
+}
+
+export const getIntentRoutingSummary = (limit = 200) =>
+  authRequest<IntentRoutingSummary>(`/api/admin/agent-ops/intent-routing?limit=${limit}`);
+
 export const getAgentRuntimeCapabilities = () =>
   authRequest<unknown>('/api/admin/agent-ops/runtime/capabilities');
 

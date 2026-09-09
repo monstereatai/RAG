@@ -20,6 +20,7 @@ import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
+import { requiresKnowledgeRetrieval } from '../../rag/prompts/query-intent-router';
 import { randomUUID } from 'node:crypto';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
@@ -31,6 +32,7 @@ import {
 } from '../document/document-profile.util';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ImageIndexService } from '../image-index/image-index.service';
+import { detectDocumentKind, extractDocumentText } from '../document/document-parser.util';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -139,6 +141,23 @@ export class RagAdminService {
     private readonly queryLogRepo?: Repository<QueryLogEntity>,
   ) {}
 
+  async uploadDocument(
+    file: Express.Multer.File,
+    userId: string,
+    fields: Record<string, unknown> = {},
+  ) {
+    const kind = detectDocumentKind(file.originalname);
+    const content = (await extractDocumentText(file.buffer, kind)).trim();
+    if (!content) throw new BadRequestException('document content is empty');
+    const businessMetadata = { ...fields };
+    delete businessMetadata.ownerUserId;
+    return this.documentService.upload(file.originalname, content, userId, {
+      originalBuffer: file.buffer,
+      contentType: file.mimetype,
+      businessMetadata: businessMetadata as any,
+    });
+  }
+
   // ─── Capabilities ───────────────────────────────────────────
 
   getCapabilities(): CapabilitiesResponse {
@@ -221,7 +240,7 @@ export class RagAdminService {
 
   async getDocumentStats() {
     const allDocs = await this.docMetaRepo.find({
-      order: { createdAt: 'DESC' },
+      order: { createdAt: 'DESC', docId: 'DESC' },
     });
 
     const dayKey = (d: Date) =>
@@ -346,9 +365,50 @@ export class RagAdminService {
     };
   }
 
+  async getIntentRoutingSummary(limit = 200) {
+    const logs = this.queryLogRepo
+      ? await this.queryLogRepo.find({
+          order: { createdAt: 'DESC' },
+          take: Math.min(Math.max(limit, 1), 1000),
+        })
+      : [];
+    const recent = logs.slice(0, 50).map((log) => {
+      const retrieve = requiresKnowledgeRetrieval(log.query);
+      return {
+        id: log.id,
+        query: log.query.slice(0, 160),
+        action: retrieve ? 'retrieve' : 'direct_answer',
+        queryType: retrieve ? 'private_or_context' : 'public_knowledge',
+        confidence: retrieve ? 1 : 0.8,
+        createdAt: log.createdAt.toISOString(),
+        mode: log.mode,
+        answered: log.hasAnswer,
+        cited: log.citationCount > 0,
+      };
+    });
+    const retrieveCount = recent.filter((item) => item.action === 'retrieve').length;
+    const directCount = recent.length - retrieveCount;
+    return {
+      available: true,
+      scanned: logs.length,
+      estimated: true,
+      note: '历史问答日志未持久化完整 Router JSON，本页按当前硬门禁规则回放估算；新运行的 routing 事件包含完整决策字段。',
+      byAction: {
+        retrieve: retrieveCount,
+        direct_answer: directCount,
+      },
+      byQueryType: {
+        private_or_context: retrieveCount,
+        public_knowledge: directCount,
+      },
+      recent,
+    };
+  }
+
   async listDocuments(query: RagDocumentQueryDto) {
     const allDocs = await this.docMetaRepo.find({
-      order: { createdAt: 'DESC' },
+      // 上传时间倒序，docId 作为稳定的并列排序，确保同一毫秒上传时结果仍可复现。
+      order: { createdAt: 'DESC', docId: 'DESC' },
     });
 
     let filtered = allDocs;

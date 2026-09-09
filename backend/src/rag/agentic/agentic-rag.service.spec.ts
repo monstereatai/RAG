@@ -144,6 +144,64 @@ describe('AgenticRagService budget boundaries', () => {
     expect(route).toBe('simple');
   });
 
+  it('keeps entity chapter and nickname lookups as one evidence question', () => {
+    const { service } = createService();
+
+    const questions = (
+      service as unknown as {
+        buildSubQuestions(
+          original: string,
+          queries: string[],
+          limit?: number,
+        ): Array<{ question: string }>;
+      }
+    ).buildSubQuestions(
+      '资料库里面的陈达出现在第几章节，他的花名叫什么',
+      ['陈达第几回出场', '陈达的花名是什么'],
+      2,
+    );
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question).toBe(
+      '资料库里面的陈达出现在第几章节，他的花名叫什么',
+    );
+  });
+
+  it('marks semantic multi-question input as ineligible for a single-question direct answer', () => {
+    const { service } = createService();
+
+    expect(
+      (
+        service as unknown as {
+          isMultiIntentQuery(intent: {
+            multiIntent: boolean;
+            subQueries: string[];
+          }): boolean;
+        }
+      ).isMultiIntentQuery({
+        multiIntent: true,
+        subQueries: ['React 是什么？', '1+1 等于多少？'],
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps explicit multi-question boundaries as independent retrieval units', () => {
+    const { service } = createService();
+
+    expect(
+      (
+        service as unknown as {
+          buildExplicitSubQuestions(
+            questions: string[],
+          ): Array<{ question: string }>;
+        }
+      ).buildExplicitSubQuestions(['React 是什么？', '1+1 等于多少？']),
+    ).toEqual([
+      expect.objectContaining({ question: 'React 是什么？' }),
+      expect.objectContaining({ question: '1+1 等于多少？' }),
+    ]);
+  });
+
   it('returns an Auto direct answer before running the Hybrid Fast Path', async () => {
     const { service, karpathyRagService } = createService();
     karpathyRagService.answerDirect.mockResolvedValue({

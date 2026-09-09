@@ -42,6 +42,7 @@ import {
   type TraceSnapshot,
   type AgentRunSummary,
   type RagQualitySummary,
+  type IntentRoutingSummary,
   evaluateAgent,
   getAgentBadCases,
   getAgentRuns,
@@ -49,6 +50,7 @@ import {
   getSecurityPolicies,
   getSecurityAudit,
   getRagQualitySummary,
+  getIntentRoutingSummary,
   getAgentRunArtifacts,
   getAgentRunCenter,
   retryAgentRunRecord,
@@ -162,6 +164,7 @@ export default function AgentOpsPage() {
   const [runCenter, setRunCenter] = React.useState<any[]>([]);
   const [runSummary, setRunSummary] = React.useState<AgentRunSummary | null>(null);
   const [ragQuality, setRagQuality] = React.useState<RagQualitySummary | null>(null);
+  const [intentRouting, setIntentRouting] = React.useState<IntentRoutingSummary | null>(null);
   const [securityPolicies, setSecurityPolicies] = React.useState<Array<{ id?: string; name?: string; severity?: string }>>([]);
   const [securityAudit, setSecurityAudit] = React.useState<Array<{ id?: string; eventType?: string; payload?: any; createdAt?: string }>>([]);
   const [artifactThreadId, setArtifactThreadId] = React.useState("");
@@ -236,6 +239,13 @@ export default function AgentOpsPage() {
       message.error("RAG 质量汇总加载失败");
     }
   }, []);
+  const loadIntentRouting = React.useCallback(async () => {
+    try {
+      setIntentRouting(unwrapData<IntentRoutingSummary>(await getIntentRoutingSummary()));
+    } catch {
+      message.error("意图路由数据加载失败");
+    }
+  }, []);
   const loadSecurityPolicies = React.useCallback(async () => {
     try {
       const result = unwrapData<{ policies?: Array<{ id?: string; name?: string; severity?: string }> }>(await getSecurityPolicies());
@@ -302,10 +312,10 @@ export default function AgentOpsPage() {
   };
 
   React.useEffect(() => {
-    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunSummary(), loadRagQuality(), loadSecurityPolicies(), loadSecurityAudit(), loadRunCenter(), loadProductionWorkflows()]).catch(
+    void Promise.all([loadBadCases(), loadTraces(), loadRunOptions(), loadRunSummary(), loadRagQuality(), loadIntentRouting(), loadSecurityPolicies(), loadSecurityAudit(), loadRunCenter(), loadProductionWorkflows()]).catch(
       () => undefined,
     );
-  }, [loadBadCases, loadRunCenter, loadRunOptions, loadRunSummary, loadRagQuality, loadSecurityAudit, loadSecurityPolicies, loadTraces, loadProductionWorkflows]);
+  }, [loadBadCases, loadIntentRouting, loadRunCenter, loadRunOptions, loadRunSummary, loadRagQuality, loadSecurityAudit, loadSecurityPolicies, loadTraces, loadProductionWorkflows]);
 
   React.useEffect(() => {
     const threadId = window.localStorage.getItem(
@@ -627,6 +637,37 @@ export default function AgentOpsPage() {
           <Descriptions.Item label="发布判定"><Tag color={ragQuality.gate?.passed ? "green" : "red"}>{ragQuality.gate?.passed ? "通过" : "不通过"}</Tag></Descriptions.Item>
           {!ragQuality.gate?.passed && <Descriptions.Item label="失败原因" span={3}>{ragQuality.gate?.reasons?.join("；") || "暂无"}</Descriptions.Item>}
         </Descriptions> : <Alert type="info" showIcon message="暂无 RAG 质量汇总数据" />}
+      </Card>
+      <Card title="意图路由运营" size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadIntentRouting()}>刷新</Button>}>
+        {intentRouting ? <>
+          <Alert
+            type={intentRouting.estimated ? "warning" : "info"}
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={intentRouting.note ?? "路由统计已加载"}
+          />
+          <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }}>
+            <Descriptions.Item label="扫描问答">{intentRouting.scanned}</Descriptions.Item>
+            <Descriptions.Item label="进入检索">{intentRouting.byAction.retrieve ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="直接回答">{intentRouting.byAction.direct_answer ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="私域／上下文">{intentRouting.byQueryType.private_or_context ?? 0}</Descriptions.Item>
+          </Descriptions>
+          <Table
+            size="small"
+            style={{ marginTop: 12 }}
+            rowKey="id"
+            pagination={{ pageSize: 6 }}
+            dataSource={intentRouting.recent}
+            columns={[
+              { title: "问题", dataIndex: "query", ellipsis: true },
+              { title: "动作", dataIndex: "action", render: (value: string) => <Tag color={value === "retrieve" ? "blue" : "green"}>{value === "retrieve" ? "检索" : "直答"}</Tag> },
+              { title: "类型", dataIndex: "queryType" },
+              { title: "模式", dataIndex: "mode" },
+              { title: "证据", render: (_: unknown, row: IntentRoutingSummary["recent"][number]) => row.cited ? <Tag color="green">有引用</Tag> : <Tag>无引用</Tag> },
+              { title: "时间", dataIndex: "createdAt", render: (value: string) => value ? new Date(value).toLocaleString("zh-CN") : "-" },
+            ]}
+          />
+        </> : <Alert type="info" showIcon message="暂无意图路由数据" />}
       </Card>
       <Card title={`RAG 安全策略（审计事件 ${securityAudit.length}）`} size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void Promise.all([loadSecurityPolicies(), loadSecurityAudit()])}>刷新</Button>}>
         <Space wrap>

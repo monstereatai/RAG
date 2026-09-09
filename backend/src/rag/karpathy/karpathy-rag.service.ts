@@ -204,6 +204,8 @@ export interface PrefetchedFastPath {
 }
 
 export interface RetrieveOptions {
+  /** 当前问题只允许使用本地知识库，不调用联网兜底。 */
+  knowledgeOnly?: boolean;
   /** 运行中心关联 ID，仅用于把 Agent Loop 事件归入当前 Run。 */
   runtimeRunId?: string;
   vectorSearch?: boolean;
@@ -215,6 +217,10 @@ export interface RetrieveOptions {
   karpathyDirectAnswer?: boolean;
   /** Auto 通过充分性门禁后复用 Base Case、正式检索与 Obsidian 快照，避免重复检索。 */
   prefetchedFastPath?: PrefetchedFastPath;
+  /** 语义路由认为需要综合多个片段做整体总结/综述/介绍。 */
+  needsSynthesis?: boolean;
+  /** 语义路由识别出的实体，用于人物/实体类证据归纳。 */
+  entities?: string[];
   scope?: RetrievalScope;
   profile?: RetrievalProfile;
   /** 可选插件组合传入的运行时工具白名单。 */
@@ -1016,7 +1022,7 @@ export class KarpathyRagService implements OnModuleInit {
     let badCaseMatches: BadCaseMatch[];
     let initialRetrieval: Awaited<ReturnType<typeof this.retrieveDetailed>>;
     let obsidianHits: ObsidianSearchHit[];
-    if (retrieveOptions.karpathyDirectAnswer) {
+    if (retrieveOptions.karpathyDirectAnswer && !retrieveOptions.needsSynthesis) {
       // Karpathy 直答保留精确纠错覆盖检查：它只查 PostgreSQL 精确问题，
       // 与本地 BM25 直答并行，不触发 Milvus 语义检索。
       const direct = await this.answerDirect(
@@ -1026,6 +1032,7 @@ export class KarpathyRagService implements OnModuleInit {
         memoryMessages,
         onToken,
         retrieveOptions.scope,
+        retrieveOptions.entities,
       );
       if (direct) {
         return direct;
@@ -1174,12 +1181,14 @@ export class KarpathyRagService implements OnModuleInit {
       };
     }
 
-    const earlyDeterministicAnswer = this.buildDeterministicAnswer(
-      normalizedQuery,
-      evidenceChunks,
-      userId,
-      retrieveOptions.scope,
-    );
+    const earlyDeterministicAnswer = retrieveOptions.needsSynthesis
+      ? null
+      : this.buildDeterministicAnswer(
+          normalizedQuery,
+          evidenceChunks,
+          userId,
+          retrieveOptions.scope,
+        );
     if (earlyDeterministicAnswer) {
       return {
         answer: earlyDeterministicAnswer,
@@ -1225,12 +1234,14 @@ export class KarpathyRagService implements OnModuleInit {
     this.logger.log(
       `Generating answer with ${chunks.length} RAG chunks and ${obsidianChunks.length} Obsidian chunks`,
     );
-    const deterministicAnswer = this.buildDeterministicAnswer(
-      normalizedQuery,
-      evidenceChunks,
-      userId,
-      retrieveOptions.scope,
-    );
+    const deterministicAnswer = retrieveOptions.needsSynthesis
+      ? null
+      : this.buildDeterministicAnswer(
+          normalizedQuery,
+          evidenceChunks,
+          userId,
+          retrieveOptions.scope,
+        );
     if (deterministicAnswer) {
       return {
         answer: deterministicAnswer,
@@ -1263,21 +1274,37 @@ export class KarpathyRagService implements OnModuleInit {
     const answer = this.addVersionConflictNotice(rawAnswer, chunks);
     const citationGate = this.assessCitationSupport(answer, evidenceChunks);
     if (!citationGate.sufficient) {
-      const fallbackAnswer = this.buildExtractiveAnswer(
+      const synthesizedFallback = await this.synthesizeEvidenceAnswer(
         normalizedQuery,
         evidenceChunks,
       );
+      const fallbackAnswer =
+        synthesizedFallback ??
+        this.buildEvidenceFirstAnswer(
+          normalizedQuery,
+          evidenceChunks,
+          userId,
+          retrieveOptions.scope,
+          retrieveOptions.entities,
+        ) ??
+        this.buildExtractiveAnswer(normalizedQuery, evidenceChunks);
       if (fallbackAnswer) {
         const fallbackGate = this.assessCitationSupport(
           fallbackAnswer,
           evidenceChunks,
         );
         if (fallbackGate.sufficient) {
+          const citedChunks = this.selectCitedChunks(
+            fallbackAnswer,
+            evidenceChunks,
+          );
           return {
             answer: fallbackAnswer,
-            references: this.toReferences(evidenceChunks),
+            references: this.toReferences(citedChunks),
             retrievalSufficient: true,
-            retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+            retrievalReason: synthesizedFallback
+              ? 'LLM 答案引用不足，已用受约束语义总结重新生成'
+              : 'LLM 答案引用不足，已回退为片段抽取式回答',
             obsidianPaths: obsidianHits.map((hit) => hit.path),
             obsidianHits,
             retrievalDiagnostics: retrieval.diagnostics,
@@ -1545,6 +1572,25 @@ ${memoryText || '无'}
     return this.assessCitationSupport(answer, chunks);
   }
 
+  /** 只把答案中实际标记的证据返回给界面，候选召回片段不应伪装成已引用资料。 */
+  selectCitedChunks(
+    answer: string,
+    chunks: RetrievedChunk[],
+  ): RetrievedChunk[] {
+    const indexes = Array.from(answer.matchAll(/\[片段\s*(\d+)\]/g))
+      .map((match) => Number(match[1]) - 1)
+      .filter((index) => Number.isInteger(index) && index >= 0);
+    if (indexes.length === 0) return chunks;
+    return Array.from(
+      new Map(
+        indexes
+          .map((index) => chunks[index])
+          .filter((chunk): chunk is RetrievedChunk => Boolean(chunk))
+          .map((chunk) => [chunk.id, chunk]),
+      ).values(),
+    );
+  }
+
   unsupportedReliableAnswer(): string {
     return this.unsupportedAnswer;
   }
@@ -1560,12 +1606,13 @@ ${memoryText || '无'}
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
     scope?: RetrievalScope,
+    entities?: string[],
   ): Promise<KarpathyRagResult | null> {
     const normalizedQuery = this.normalizeQuery(query);
     const [exactMatches, direct] = await Promise.all([
       this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1) ??
         this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1),
-      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope),
+      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope, entities),
     ]);
     const exact = exactMatches.find((match) => match.mode === 'exact');
     if (exact) {
@@ -1598,9 +1645,12 @@ ${memoryText || '无'}
     query: string,
     userId?: string,
     scope?: RetrievalScope,
+    entities?: string[],
   ): Promise<KarpathyRagResult | null> {
     const profile = detectRetrievalProfile(query);
-    if (profile.intent !== 'lookup') return null;
+    if (profile.intent !== 'lookup') {
+      return null;
+    }
 
     try {
       const chunks = await this.retrieveBm25Only(query, userId, scope, false);
@@ -1608,7 +1658,14 @@ ${memoryText || '无'}
       if (!primary || !this.isGovernedDirectAnswerCandidate(query, primary)) {
         return null;
       }
-      const answer = this.buildExtractiveAnswer(query, [primary]);
+      const answer =
+        this.buildEvidenceFirstAnswer(
+          query,
+          [primary],
+          userId,
+          scope,
+          entities,
+        ) ?? this.buildExtractiveAnswer(query, [primary]);
       if (
         !answer ||
         !this.assessCitationSupport(answer, [primary]).sufficient
@@ -1668,6 +1725,7 @@ ${memoryText || '无'}
     answer: string;
     references: KarpathyRagResult['references'];
   } | null> {
+    if (retrieveOptions.knowledgeOnly) return null;
     const policy = this.toolPolicy.decide('bocha_web_search', {
       mode: 'simple',
       pluginKeys: retrieveOptions.pluginKeys,
@@ -1965,6 +2023,69 @@ ${context}
     return selected.slice(0, 4).join('\n');
   }
 
+  /**
+   * LLM 答案未通过引用门禁时，用同一批证据做一次受约束的语义压缩。
+   * 这是“不要直接输出检索片段”的最后一道自然语言兜底；
+   * 如果模型不可用或仍不能通过引用校验，再回退到确定性抽取式答案。
+   */
+  private async synthesizeEvidenceAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): Promise<string | null> {
+    if (chunks.length === 0) return null;
+    const evidence = chunks
+      .slice(0, 6)
+      .map(
+        (chunk, index) =>
+          `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
+      )
+      .join('\n\n');
+    const prompt = `你是企业知识库问答的答案编辑。请根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。
+回答要求：
+1. 先用 1～2 句自然语言直接回答用户问题。
+2. 再按需要简要概括关键依据，不要大段引用原文。
+3. 每个结论句末尾标注对应的 [片段N]。
+4. 没有可靠依据就只回答“当前资料不足以确认该结论。”
+5. 输出应适合直接展示在聊天界面。
+
+问题：${query}
+
+证据：
+${evidence}`;
+
+    try {
+      const answer = await Promise.race([
+        this.llmProvider.invoke(prompt),
+        new Promise<string>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Evidence synthesis timeout')),
+            12_000,
+          ),
+        ),
+      ]);
+      const trimmed = answer.trim();
+      return trimmed ? trimmed : null;
+    } catch (error) {
+      this.logger.warn(
+        `Evidence synthesis fallback failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  buildEvidenceFirstAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+    userId?: string,
+    scope?: RetrievalScope,
+    entities?: string[],
+  ): string | null {
+    return (
+      this.buildChapterCharacterAnswer(query, chunks, entities) ??
+      this.buildDeterministicAnswer(query, chunks, userId, scope)
+    );
+  }
+
   private buildDeterministicAnswer(
     query: string,
     chunks: RetrievedChunk[],
@@ -1990,6 +2111,121 @@ ${context}
       if (answer) return answer;
     }
     return null;
+  }
+
+  /**
+   * 对“人物出现在哪一章／做了什么”这类问题优先做证据抽取。
+   * 这类问题通常只需要返回命中的章回和片段中的行为，不应因为资料未覆盖全书而整体拒答。
+   */
+  private buildChapterCharacterAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+    entities?: string[],
+  ): string | null {
+    if (chunks.length === 0) {
+      return null;
+    }
+
+    const person =
+      entities?.find((entity) => entity.length >= 2 && entity.length <= 4) ??
+      query.match(
+        /([\u4e00-\u9fff]{2})(?=(?:在)?(?:第\s*几|[哪那]一|哪几|哪个)\s*(?:章|回)|(?:首次)?出现在|(?:首次)?出现|做了|是谁)/,
+      )?.[1] ??
+      query.match(/(?:里面的|关于|查询|查找)([\u4e00-\u9fff]{2,4})/)?.[1];
+    if (!person) return null;
+
+    // 人物附录／索引常直接给出“在第×回出场，……”的结构化句子。它同时覆盖
+    // 回目和初始事件，优先级必须高于正文中评分更高但只描述后续情节的 Chunk。
+    const appearanceEvidence = chunks
+      .map((chunk, chunkIndex) => ({ chunk, chunkIndex }))
+      .map(({ chunk, chunkIndex }) => {
+        const compact = chunk.content.replace(/\s+/g, ' ');
+        const personIndex = compact.indexOf(person);
+        const match = /在第\s*([一二三四五六七八九十百千万零〇\d]+)回\s*出场[，,。；;]?\s*([^。；;\n]{0,100})/.exec(
+          compact,
+        );
+        if (!match || personIndex < 0) return null;
+        return {
+          chunkIndex,
+          chapter: `第${match[1]}回`,
+          appearance: match[2].trim(),
+          compact,
+        };
+      })
+      .find(
+        (item): item is {
+          chunkIndex: number;
+          chapter: string;
+          appearance: string;
+          compact: string;
+        } => Boolean(item),
+      );
+
+    if (appearanceEvidence) {
+      const marker = `[片段${appearanceEvidence.chunkIndex + 1}]`;
+      const appearance = appearanceEvidence.appearance
+        ? `，${appearanceEvidence.appearance}`
+        : '';
+      // “出场时做了什么”只回答与出场同一句中的动作，不能把人物生平条目
+      // 后续跨回目的事件混为首次出场情节。
+      return `资料库人物条目显示，${person}在${appearanceEvidence.chapter}出场${appearance}。${marker}`;
+    }
+
+    const chapterLines: string[] = [];
+    const behaviorLines: string[] = [];
+    const seenChapters = new Set<string>();
+    const seenBehaviors = new Set<string>();
+
+    chunks.slice(0, 6).forEach((chunk, chunkIndex) => {
+      // 只有 Chunk 开头的回目才可作为后续内容的章节依据。PDF 切块末尾的
+      // “第×回”通常是下一页／下一回的标题，不能误绑给前面的情节。
+      const chapterMatches =
+        chunk.content
+          .slice(0, 180)
+          .match(/第[一二三四五六七八九十百千万零〇\d]+回[^\n。！？]{0,36}/g) ?? [];
+      for (const heading of chapterMatches) {
+        const normalizedHeading = heading.replace(/\s+/g, ' ').trim();
+        if (!seenChapters.has(normalizedHeading)) {
+          seenChapters.add(normalizedHeading);
+          chapterLines.push(`${normalizedHeading}[片段${chunkIndex + 1}]`);
+        }
+      }
+
+      const sentences = chunk.content
+        .split(/[。！？\n]/)
+        .map((sentence) => sentence.replace(/--\s*\d+\s+of\s+\d+\s+--/g, '').replace(/\s+/g, ' ').trim())
+        .filter(
+          (sentence) =>
+            (sentence.includes(person) ||
+              sentence.replace(/\s/g, '').includes(person)) &&
+            sentence.length >= 8,
+        );
+      for (const sentence of sentences.slice(0, 3)) {
+        const compact = sentence.replace(/\s/g, '');
+        const personIndex = compact.indexOf(person);
+        const excerpt =
+          personIndex >= 0 && compact.length > 96
+            ? `${compact.slice(Math.max(0, personIndex - 20), personIndex + 76)}…`
+            : compact;
+        if (!seenBehaviors.has(excerpt)) {
+          seenBehaviors.add(excerpt);
+          behaviorLines.push(`${excerpt}[片段${chunkIndex + 1}]`);
+        }
+      }
+    });
+
+    if (chapterLines.length === 0 && behaviorLines.length === 0) return null;
+
+    return [
+      chapterLines.length > 0
+        ? `资料库当前命中的相关章回：${chapterLines.slice(0, 4).join('；')}`
+        : '资料库片段命中了该人物，但没有保留明确的章回标题。',
+      behaviorLines.length > 0
+        ? `从命中片段可确认的相关情节：${behaviorLines.slice(0, 3).join('；')}`
+        : '当前片段没有足够的行为描述，建议继续缩小到具体章回检索。',
+    ]
+      .filter((line) => /\[片段\s*\d+\]/.test(line))
+      .join('\n');
   }
 
   private buildTravelPolicyVersionAnswer(

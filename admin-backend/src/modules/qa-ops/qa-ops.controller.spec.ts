@@ -16,6 +16,8 @@ describe('QaOpsController — SSE Streaming', () => {
       getQaCitationFailures: jest.fn(),
       getQaCostSummary: jest.fn(),
       getRolePresets: jest.fn(),
+      getConversations: jest.fn(),
+      listPlatformPlugins: jest.fn(),
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -119,6 +121,40 @@ describe('QaOpsController — SSE Streaming', () => {
         expect.objectContaining({ rolePresetId: 'product-manager' }),
         expect.any(AbortSignal),
       );
+    });
+  });
+
+  describe('read-only RAG availability', () => {
+    it('keeps the conversations contract available when RAG is temporarily unreachable', async () => {
+      ragClient.getConversations.mockResolvedValue({
+        available: false,
+        status: null,
+        data: null,
+        error: 'fetch failed: ECONNREFUSED',
+      } as any);
+
+      await expect(controller.listConversations()).resolves.toEqual({
+        data: [],
+        available: false,
+        status: null,
+        error: 'fetch failed: ECONNREFUSED',
+      });
+    });
+
+    it('keeps the plugin catalog contract available when RAG is temporarily unreachable', async () => {
+      ragClient.listPlatformPlugins.mockResolvedValue({
+        available: false,
+        status: null,
+        data: null,
+        error: 'fetch failed: ECONNREFUSED',
+      } as any);
+
+      await expect(controller.qaPlugins()).resolves.toEqual({
+        data: [],
+        available: false,
+        status: null,
+        error: 'fetch failed: ECONNREFUSED',
+      });
     });
   });
 

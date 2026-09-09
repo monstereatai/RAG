@@ -9,6 +9,79 @@ import { FewShotPromptTemplate, PromptTemplate } from '@langchain/core/prompts';
  * 参考实现：agent-course/prompt-template-test/src/example-selector2.mjs
  */
 
+/** 意图路由边界样本：用于 Router Prompt 与离线路由评测共用。 */
+export const queryRoutingExamples = [
+  {
+    query: '1+1 等于多少',
+    action: 'direct_answer',
+    sourcePolicy: 'direct_answer',
+    needsSynthesis: false,
+    queryType: 'public_knowledge',
+    targetKbs: ['general'],
+    entities: [],
+  },
+  {
+    query: '李思是谁',
+    action: 'retrieve',
+    sourcePolicy: 'local_only',
+    needsSynthesis: false,
+    queryType: 'private_entity',
+    targetKbs: ['company', 'documents'],
+    entities: ['李思'],
+  },
+  {
+    query: '公司有李思，李四是谁',
+    action: 'retrieve',
+    sourcePolicy: 'local_only',
+    needsSynthesis: false,
+    queryType: 'private_entity',
+    targetKbs: ['company', 'documents'],
+    entities: ['李思', '李四'],
+  },
+  {
+    query: '这个项目上次的接口怎么改',
+    action: 'retrieve',
+    sourcePolicy: 'local_only',
+    needsSynthesis: false,
+    queryType: 'follow_up',
+    targetKbs: ['project', 'documents'],
+    entities: [],
+  },
+  {
+    query: 'React 和 Vue 的区别是什么',
+    action: 'direct_answer',
+    sourcePolicy: 'direct_answer',
+    needsSynthesis: false,
+    queryType: 'public_knowledge',
+    targetKbs: ['general'],
+    entities: [],
+  },
+  {
+    query: '资料库当中，帮我总结下李逵',
+    action: 'retrieve',
+    sourcePolicy: 'local_only',
+    needsSynthesis: true,
+    queryType: 'private_entity',
+    targetKbs: ['documents', 'company'],
+    entities: ['李逵'],
+  },
+  {
+    query: '帮我概括一下这个项目的技术方案',
+    action: 'retrieve',
+    sourcePolicy: 'local_only',
+    needsSynthesis: true,
+    queryType: 'project_knowledge',
+    targetKbs: ['project', 'documents'],
+    entities: [],
+  },
+] as const;
+
+export function formatQueryRoutingFewShots(): string {
+  return queryRoutingExamples
+    .map((example, index) => `${index + 1}. ${JSON.stringify(example)}`)
+    .join('\\n');
+}
+
 // ============================================================
 // 1. 查询扩展（Query Augment）few-shot 示例
 // ============================================================

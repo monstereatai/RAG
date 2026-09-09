@@ -325,6 +325,11 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:read')
   ragQuality(@Query('limit') limit?: string) { return this.ragClient.getRagQualitySummary(Number(limit) || 500); }
 
+  @Get('intent-routing')
+  @ApiOperation({ summary: 'RAG 意图路由质量与最近决策' })
+  @RequirePermission('admin:qa-ops:read')
+  intentRouting(@Query('limit') limit?: string) { return this.ragClient.getIntentRoutingSummary(Number(limit) || 200); }
+
   @Get('governance/plugins')
   @RequirePermission('admin:qa-ops:read')
   governancePlugins() { return this.ragClient.listPlatformPlugins(); }

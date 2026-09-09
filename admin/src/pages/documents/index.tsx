@@ -17,7 +17,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
-import { Button, Checkbox, Form, Input, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Checkbox, Form, Input, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, Upload, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React, { useEffect, useState } from 'react';
 import {
@@ -36,6 +36,7 @@ import {
   rejectDocumentReview,
   getFailedDocumentTasks,
   retryFailedDocumentTask,
+  uploadDocument,
   archiveDocument,
   unarchiveDocument,
   type DocumentItem,
@@ -118,6 +119,22 @@ const Documents: React.FC<DocumentListPageProps> = ({
   const [departmentOptions, setDepartmentOptions] = useState<
     { label: string; value: string }[]
   >([]);
+  const [uploading, setUploading] = useState(false);
+
+  const handleBeforeUpload = async (file: File) => {
+    setUploading(true);
+    try {
+      await uploadDocument(file);
+      message.success(`${file.name} 上传成功`);
+      await fetchDocs({ ...pagination, current: 1 });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '';
+      message.error(detail || `${file.name} 上传失败，请稍后重试`);
+    } finally {
+      setUploading(false);
+    }
+    return Upload.LIST_IGNORE;
+  };
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [permissionForm] = Form.useForm<{ permissions: DocumentPermissionInput[] }>();
   const [versionForm] = Form.useForm<{
@@ -194,7 +211,13 @@ const Documents: React.FC<DocumentListPageProps> = ({
 
         if (Array.isArray(items) && items.length > 0) {
           setDocs(
-            items.map((item: any) => ({
+            [...items]
+              .sort((a: any, b: any) => {
+                const aTime = Date.parse(a.createdAt ?? '') || 0;
+                const bTime = Date.parse(b.createdAt ?? '') || 0;
+                return bTime - aTime;
+              })
+              .map((item: any) => ({
               id: item.docId,
               filename: repairMojibake(item.filename),
               fileType: (repairMojibake(item.filename) ?? '').split('.').pop() ?? '',
@@ -217,7 +240,7 @@ const Documents: React.FC<DocumentListPageProps> = ({
               obsidianStatus: item.obsidianStatus,
               permissions: item.permissions,
               indexPipeline: item.indexPipeline,
-            })),
+              })),
           );
           setTotal(Number(rawTotal) || items.length);
           setPageState('data');
@@ -594,7 +617,14 @@ const Documents: React.FC<DocumentListPageProps> = ({
         <Input prefix={<SearchOutlined />} placeholder="搜索文档名称、内容、上传人等" />
         {!isArchivePage && (
           <>
-            <Button icon={<UploadOutlined />} type="primary">批量上传</Button>
+            <Upload
+              accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi"
+              beforeUpload={handleBeforeUpload}
+              multiple
+              showUploadList={false}
+            >
+              <Button icon={<UploadOutlined />} loading={uploading} type="primary">批量上传</Button>
+            </Upload>
             <Button onClick={handleRetryFailedTasks}>重放失败任务</Button>
             <Button>新建文件夹</Button>
             <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
@@ -647,7 +677,13 @@ const Documents: React.FC<DocumentListPageProps> = ({
             <h3>{emptyTitle}</h3>
             <p style={{ color: '#999', margin: '12px 0' }}>{emptyDescription}</p>
             {!isArchivePage && (
-              <Button icon={<UploadOutlined />} type="primary">上传文档</Button>
+              <Upload
+                accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi"
+                beforeUpload={handleBeforeUpload}
+                showUploadList={false}
+              >
+                <Button icon={<UploadOutlined />} loading={uploading} type="primary">上传文档</Button>
+              </Upload>
             )}
           </div>
         )}

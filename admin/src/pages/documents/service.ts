@@ -83,6 +83,18 @@ export async function getDocuments(params?: {
   );
 }
 
+export async function uploadDocument(file: File) {
+  if (file.size > 1024 * 1024 * 1024) {
+    throw new Error('文档超过 1GB 上传上限');
+  }
+  const data = new FormData();
+  data.append('file', file);
+  return authRequest<Record<string, unknown>>('/api/admin/documents/upload', {
+    method: 'POST',
+    data,
+  });
+}
+
 export async function getUsers() {
   return authRequest<any>('/api/admin/users');
 }

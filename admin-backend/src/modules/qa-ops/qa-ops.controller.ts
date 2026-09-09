@@ -114,8 +114,14 @@ export class QaOpsController {
   async listConversations() {
     // admin QA Ops 展示所有会话，不按 userId 过滤
     const result = await this.ragClient.getConversations();
-    this.requireAvailable(result);
-    return { data: this.unwrapList(result.data) };
+    // 只读运营列表采用稳定契约：上游不可用时返回空列表和可用性信息，
+    // 不把 RAG 后端的瞬时不可达转换成页面级 502。
+    return {
+      data: this.unwrapList(result.data),
+      available: result.available,
+      status: result.status,
+      error: result.error,
+    };
   }
 
   @Get("role-presets")
@@ -333,10 +339,10 @@ export class QaOpsController {
   @RequirePermission("admin:qa-ops:read")
   async qaPlugins() {
     const result = await this.ragClient.listPlatformPlugins();
-    this.requireAvailable(result);
     return {
       data: this.unwrapList(result.data),
       available: result.available,
+      status: result.status,
       error: result.error,
     };
   }

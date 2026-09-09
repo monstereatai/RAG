@@ -135,6 +135,10 @@ export const configuration = () => ({
       baseUrl: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
       model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
       timeoutMs: parseInt(process.env.DEEPSEEK_TIMEOUT_MS ?? '30000', 10),
+      // DeepSeek v4 会把输出预算的一部分用于 reasoning；默认 1024 避免简单问答因推理耗尽而超时。
+      maxTokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS ?? '1024', 10),
+      maxRetries: parseInt(process.env.DEEPSEEK_MAX_RETRIES ?? '1', 10),
+      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE ?? '0.2'),
     },
     zhipu: {
       apiKey: process.env.ZHIPU_API_KEY || process.env.ZAI_API_KEY || '',

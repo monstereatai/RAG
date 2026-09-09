@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { z } from 'zod';
@@ -61,6 +66,7 @@ import { randomUUID } from 'node:crypto';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 import { QueryIntentRouter } from '../prompts/query-intent-router';
 import { filterSemanticQueries } from '../prompts/query-similarity';
+import type { QueryIntent } from '../prompts/query-intent-router';
 
 /**
  * 深度问答的 LangGraph 状态机。
@@ -297,10 +303,26 @@ export class AgenticRagService {
       2_000,
       'Bad case candidate retrieval',
     ).catch(() => [] as BadCaseMatch[]);
-    const deepAgentQueries = await this.planQueriesWithDeepAgent(state.query);
+    // 语义路由已确认一条消息含多个独立问题时，优先保留原始问题边界，
+    // 不再让查询扩展模型把多个问题收缩为首题的同义改写。
+    // 人物章节／绰号类问题虽然包含两个事实字段，但答案通常来自同一段
+    // 文本。这里优先合并路由器预拆出的子问题，避免“花名”或“第几回”
+    // 子问题失去原始人物实体后触发整体拒答。
+    const seededSubQuestions =
+      state.subQuestions?.length > 1 && !this.isAtomicFactQuestion(state.query)
+        ? state.subQuestions
+        : [];
+    const deepAgentQueries =
+      seededSubQuestions.length > 0 || state.augmentedQueries.length > 0
+        ? []
+        : await this.planQueriesWithDeepAgent(state.query);
     let queries: string[];
 
-    if (deepAgentQueries.length > 0) {
+    if (seededSubQuestions.length > 0) {
+      queries = seededSubQuestions.map((item) => item.question);
+    } else if (state.augmentedQueries.length > 0) {
+      queries = this.normalizeQueries(state.query, state.augmentedQueries);
+    } else if (deepAgentQueries.length > 0) {
       queries = this.normalizeQueries(state.query, deepAgentQueries);
       this.logger.log(`DeepAgent planned queries: ${JSON.stringify(queries)}`);
     } else {
@@ -361,11 +383,14 @@ export class AgenticRagService {
       }
     }
 
-    const subQuestions = this.buildSubQuestions(
-      state.query,
-      queries,
-      this.getSubQuestionLimit(config),
-    );
+    const subQuestions =
+      seededSubQuestions.length > 0
+        ? seededSubQuestions.slice(0, this.getSubQuestionLimit(config))
+        : this.buildSubQuestions(
+            state.query,
+            queries,
+            this.getSubQuestionLimit(config),
+          );
     onEvent?.({
       type: 'query_augment',
       data: { queries, subQuestions },
@@ -419,23 +444,40 @@ export class AgenticRagService {
       boundedSubQuestions.map(async (subQuestion, index) => {
         const q = subQuestion.question;
         try {
-          // Auto 升级时复用 Fast Path 原问题结果，避免再次访问 Milvus／ES。
-          let results =
-            index === 0 && q === state.query && fastPathChunks.length > 0
-              ? fastPathChunks
-              : await this.karpathyRagService.retrieve(
-                  q,
-                  retrieveOptions,
+          // 使用语义路由／查询规划生成的改写补召回，不依赖某一业务领域的关键词。
+          // 原问题始终保留为首项，改写仅用于覆盖资料与用户问法不一致的情况。
+          const retrievalQueries = this.buildRetrievalQueries(
+            q,
+            state.query,
+            state.augmentedQueries,
+            index,
+          );
+          const resultGroups = await Promise.all(
+            retrievalQueries.map(async (retrievalQuery, queryIndex) => {
+              // Auto 升级时只复用原问题的 Fast Path；补充改写必须实际检索。
+              let results =
+                index === 0 &&
+                queryIndex === 0 &&
+                retrievalQuery === state.query &&
+                fastPathChunks.length > 0
+                  ? fastPathChunks
+                  : await this.karpathyRagService.retrieve(
+                      retrievalQuery,
+                      retrieveOptions,
+                      userId,
+                    );
+              // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
+              if (results.length === 0) {
+                results = await this.karpathyRagService.retrieveBm25Only(
+                  retrievalQuery,
                   userId,
+                  retrieveOptions.scope,
                 );
-          // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
-          if (results.length === 0) {
-            results = await this.karpathyRagService.retrieveBm25Only(
-              q,
-              userId,
-              retrieveOptions.scope,
-            );
-          }
+              }
+              return results;
+            }),
+          );
+          let results = resultGroups.flat();
           const graphChunks = await this.retrieveGraphEvidence(
             q,
             userId,
@@ -702,6 +744,20 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType> & { webSearchCount: number }> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
+    if (retrieveOptions.knowledgeOnly) {
+      const reason = `${state.retrievalReason || '本地检索不足'}；当前问题限定使用资料库，已跳过联网搜索`;
+      onEvent?.({
+        type: 'web_search',
+        data: { count: 0, enabled: false, reason },
+      });
+      return {
+        retrievalReason: reason,
+        webSearchCount: 0,
+        webSearchAttempted: true,
+      };
+    }
     if (state.retrievalSufficient) {
       return { webSearchCount: 0 };
     }
@@ -1114,9 +1170,9 @@ export class AgenticRagService {
     const answer = loop.output.answer;
     const citationGate = loop.output.citationGate;
     if (!citationGate.sufficient) {
-      // 联网或复杂问答中，模型可能已引用片段但不满足逐句覆盖；只要抽取式答案能通过校验，
-      // 就应保留已验证证据，而不是把可回答问题直接降级为拒答。
-      const fallbackAnswer = this.karpathyRagService.buildExtractiveAnswer(
+      // 不能把候选原文片段伪装成回答。首次生成未通过引用门禁时，使用同一批
+      // 证据做一次更短、更受约束的语义压缩；仍失败则安全降级。
+      const fallbackAnswer = await this.synthesizeEvidenceAnswer(
         state.query,
         state.retrievedChunks,
       );
@@ -1125,10 +1181,14 @@ export class AgenticRagService {
           this.karpathyRagService.validateAnswerCitationSupport(
             fallbackAnswer,
             state.retrievedChunks,
-          );
+        );
         if (fallbackGate.sufficient) {
+          const citedChunks = this.karpathyRagService.selectCitedChunks(
+            fallbackAnswer,
+            state.retrievedChunks,
+          );
           onEvent?.({ type: 'token', data: fallbackAnswer });
-          onEvent?.({ type: 'citation', data: state.retrievedChunks });
+          onEvent?.({ type: 'citation', data: citedChunks });
           const artifacts = this.withAnswerArtifact(
             state,
             fallbackAnswer,
@@ -1180,6 +1240,35 @@ export class AgenticRagService {
     );
     onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
     return { answer, artifacts };
+  }
+
+  private async synthesizeEvidenceAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): Promise<string | null> {
+    if (chunks.length === 0) return null;
+    const evidence = chunks
+      .slice(0, 6)
+      .map(
+        (chunk, index) =>
+          `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
+      )
+      .join('\n\n');
+    try {
+      const answer = await this.withTimeout(
+        this.llmProvider.invoke(
+          `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`,
+        ),
+        12_000,
+        'Evidence synthesis fallback',
+      );
+      return answer.trim() || null;
+    } catch (error) {
+      this.logger.warn(
+        `Evidence synthesis fallback failed: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   /**
@@ -1547,7 +1636,11 @@ export class AgenticRagService {
     if (dangerousFindings.length > 0) {
       for (const finding of dangerousFindings) {
         this.metricsService.observeDangerousQuery(finding.pattern, 'agentic');
-        this.securityAudit?.record({ pattern: finding.pattern, route: 'agentic', query });
+        this.securityAudit?.record({
+          pattern: finding.pattern,
+          route: 'agentic',
+          query,
+        });
       }
       throw new BadRequestException({
         code: 'DANGEROUS_QUERY_BLOCKED',
@@ -1583,32 +1676,89 @@ export class AgenticRagService {
           intent: 'general' as const,
           confidence: 0,
           standaloneQuery: query,
-          ambiguity: { detected: false, confidence: 0, senses: [] },
+          multiIntent: false,
+          subQueries: [],
+          action: 'retrieve' as const,
+          sourcePolicy: 'local_only' as const,
+          needsSynthesis: false,
+          targetKbs: ['general'] as QueryIntent['targetKbs'],
+          queryType: 'public_knowledge' as const,
+          entities: [],
+          filters: {
+            department: null,
+            project: null,
+            timeRange: null,
+            documentType: null,
+          },
+          rewriteQueries: [],
+          reason: '',
+          ambiguity: {
+            detected: false,
+            confidence: 0,
+            senses: [],
+            clarificationQuestion: undefined,
+          },
         };
     const ambiguity = queryIntent.ambiguity;
+    const multiIntent = this.isMultiIntentQuery(queryIntent);
+    const routeMetadata = {
+      action: queryIntent.action,
+      sourcePolicy: queryIntent.sourcePolicy,
+      queryType: queryIntent.queryType,
+      targetKbs: queryIntent.targetKbs,
+      entities: queryIntent.entities,
+      filters: queryIntent.filters,
+      rewriteQueries: queryIntent.rewriteQueries,
+      reason: queryIntent.reason,
+    };
+    retrieveOptions.knowledgeOnly =
+      queryIntent.sourcePolicy === 'local_only';
+    retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
+    retrieveOptions.entities = queryIntent.entities;
     if (ambiguity?.detected && ambiguity.confidence < 0.75) {
       const answer =
         ambiguity.clarificationQuestion ??
         '这个问题存在多种可能含义。请补充具体对象、项目或业务场景。';
-      onEvent?.({ type: 'routing', data: { mode, route: 'clarify', reason: 'ambiguous_query' } });
-      onEvent?.({ type: 'sufficiency', data: { sufficient: false, reason: '多义词语境不足，先澄清词义' } });
+      onEvent?.({
+        type: 'routing',
+        data: { mode, route: 'clarify', reason: 'ambiguous_query' },
+      });
+      onEvent?.({
+        type: 'sufficiency',
+        data: { sufficient: false, reason: '多义词语境不足，先澄清词义' },
+      });
       onEvent?.({ type: 'token', data: answer });
-      const direct = { answer, references: [], retrievalSufficient: false, retrievalReason: '多义词语境不足，先澄清词义' };
+      const direct = {
+        answer,
+        references: [],
+        retrievalSufficient: false,
+        retrievalReason: '多义词语境不足，先澄清词义',
+      };
       onEvent?.({ type: 'citation', data: [] });
       onEvent?.({ type: 'final', data: direct });
-      return { ...direct, route: 'simple' as const, confidence: ambiguity.confidence, retryCount: 0 };
+      return {
+        ...direct,
+        route: 'simple' as const,
+        confidence: ambiguity.confidence,
+        retryCount: 0,
+      };
     }
     if (
+      !multiIntent &&
       (queryIntent.intent === 'system_capability' ||
         queryIntent.intent === 'objective_fact') &&
-      queryIntent.confidence >= 0.85
+      queryIntent.confidence >= 0.85 &&
+      queryIntent.sourcePolicy === 'direct_answer'
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
       const prompt =
         queryIntent.intent === 'system_capability'
           ? `你正在回答系统能力问题。当前实际选用的模型是 ${modelName}。请用中文直接说明模型名称、文本能力，以及是否支持图片、音频、视频输入；不要声称具备当前模型未提供的能力，也不要要求用户补充资料。用户问题：${query}`
           : `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
-      onEvent?.({ type: 'routing', data: { mode, route: 'simple', reason: 'system_capability_direct' } });
+      onEvent?.({
+        type: 'routing',
+        data: { mode, route: 'simple', reason: 'system_capability_direct' },
+      });
       onEvent?.({
         type: 'sufficiency',
         data: {
@@ -1619,7 +1769,34 @@ export class AgenticRagService {
               : '客观事实问答，直接回答',
         },
       });
-      const answer = await this.llmProvider.invoke(prompt);
+      let answer: string;
+      try {
+        answer = await this.llmProvider.invoke(prompt);
+      } catch {
+        const message = '模型服务暂时不可用，请稍后重试。';
+        this.logger.warn(
+          `Direct answer failed for provider=${modelName}; returning controlled error`,
+        );
+        onEvent?.({
+          type: 'error',
+          data: { code: 'LLM_UNAVAILABLE', message, provider: modelName },
+        });
+        onEvent?.({ type: 'token', data: message });
+        const failed = {
+          answer: message,
+          references: [],
+          retrievalSufficient: false,
+          retrievalReason: '模型服务调用失败',
+        };
+        onEvent?.({ type: 'citation', data: [] });
+        onEvent?.({ type: 'final', data: failed });
+        return {
+          ...failed,
+          route: 'simple' as const,
+          confidence: 0,
+          retryCount: 0,
+        };
+      }
       for (const token of this.splitAnswerTokens(answer)) {
         onEvent?.({ type: 'token', data: token });
       }
@@ -1634,13 +1811,23 @@ export class AgenticRagService {
       };
       onEvent?.({ type: 'citation', data: [] });
       onEvent?.({ type: 'final', data: direct });
-      return { ...direct, route: 'simple' as const, confidence: 1, retryCount: 0 };
+      return {
+        ...direct,
+        route: 'simple' as const,
+        confidence: 1,
+        retryCount: 0,
+      };
     }
-    if (queryIntent.standaloneQuery && queryIntent.confidence >= 0.75) {
+    if (
+      !multiIntent &&
+      queryIntent.standaloneQuery &&
+      queryIntent.confidence >= 0.75
+    ) {
       query = queryIntent.standaloneQuery;
     }
     // Auto 先尝试受治理的精确直答；命中时不进入状态机，以降低简单问题的时延和成本。
-    if (mode === 'auto') {
+    // needsSynthesis=true 表示语义上需要总结/综述，不适合用单片段直答，应进入完整 RAG 生成。
+    if (mode === 'auto' && !multiIntent && !queryIntent.needsSynthesis) {
       const direct = await this.karpathyRagService.answerDirect(
         query,
         history,
@@ -1648,6 +1835,7 @@ export class AgenticRagService {
         memoryMessages,
         (token) => onEvent?.({ type: 'token', data: token }),
         retrieveOptions.scope,
+        retrieveOptions.entities,
       );
       if (direct) {
         observedRoute = 'simple';
@@ -1671,21 +1859,32 @@ export class AgenticRagService {
     }
 
     let fastPathGate =
-      mode !== 'simple'
+      !multiIntent && mode !== 'simple'
         ? await this.karpathyRagService.assessFastPath(
             query,
             userId,
             retrieveOptions,
           )
         : null;
-    const route =
-      mode === 'simple'
+    const route = multiIntent
+      ? 'agentic'
+      : mode === 'simple'
         ? 'simple'
         : mode === 'auto'
           ? this.resolveAutoRoute(query, Boolean(fastPathGate?.sufficient))
           : this.classifyRoute(query, mode);
     observedRoute = route;
-    onEvent?.({ type: 'routing', data: { mode, route } });
+    onEvent?.({
+      type: 'routing',
+      data: {
+        mode,
+        route,
+        ...routeMetadata,
+        ...(multiIntent
+          ? { reason: 'multi_intent_query', subQueries: queryIntent.subQueries }
+          : {}),
+      },
+    });
     if (fastPathGate) {
       onEvent?.({
         type: 'sufficiency',
@@ -1760,8 +1959,19 @@ export class AgenticRagService {
       {
         query,
         route: 'agentic',
-        augmentedQueries: [],
-        subQuestions: [],
+        augmentedQueries:
+          queryIntent.action === 'retrieve'
+            ? Array.from(
+                new Set(
+                  queryIntent.rewriteQueries.filter(
+                    (rewrite) => rewrite !== query,
+                  ),
+                ),
+              )
+            : [],
+        subQuestions: multiIntent
+          ? this.buildExplicitSubQuestions(queryIntent.subQueries)
+          : [],
         retrievedChunks: [],
         retrievalSufficient: false,
         retrievalReason: '',
@@ -2068,6 +2278,10 @@ export class AgenticRagService {
     return Array.isArray(value);
   }
 
+  private isMultiIntentQuery(intent: QueryIntent): boolean {
+    return intent.multiIntent;
+  }
+
   private recordOf(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object'
       ? (value as Record<string, unknown>)
@@ -2101,6 +2315,7 @@ export class AgenticRagService {
       /对比|比较|区别|差异|优缺点/,
       /为什么|原因|影响|风险|评估|分析/,
       /多跳|关联|关系|上下游|依赖|链路/,
+      /(?:第\s*几|[哪那]一|哪几|哪个)\s*(?:章|回)|(?:章节|章回).*(?:出场|出现)|(?:出场|出现).*(?:做了|什么事情)/,
       /分别.*(什么|哪些|如何)|哪些.*分别/,
       /规划|步骤|方案|策略|拆解/,
       /联网|最新|实时|新闻|今天|当前/,
@@ -2150,8 +2365,49 @@ export class AgenticRagService {
     }));
   }
 
+  private buildRetrievalQueries(
+    subQuestion: string,
+    originalQuery: string,
+    augmentedQueries: string[] | undefined,
+    subQuestionIndex: number,
+  ): string[] {
+    if (subQuestionIndex !== 0 || subQuestion !== originalQuery) {
+      return [subQuestion];
+    }
+    return Array.from(
+      new Set([subQuestion, ...(augmentedQueries ?? [])].filter(Boolean)),
+    ).slice(0, this.maxAugmentedQueries);
+  }
+
+  private buildExplicitSubQuestions(questions: string[]): AgenticSubQuestion[] {
+    return questions.slice(0, this.maxSubQuestions).map((question, index) => ({
+      id: `subq-${index + 1}`,
+      question,
+      dependsOn: [],
+      status: 'planned',
+      evidenceIds: [],
+      retrievalAttempts: 0,
+      sufficient: false,
+      reason: '',
+    }));
+  }
+
   private isAtomicFactQuestion(query: string): boolean {
     const normalized = query.trim();
+    // 人物资料类的复合事实问句（例如“陈达第几回出场、花名叫什么”）
+    // 通常由同一段原文同时给出答案。拆成多个子问题会把“他的花名”
+    // 这类代词问句与实体分离，导致其中一个子问题无法通过证据门禁，
+    // 最终把本来可回答的问题误判为资料不足。
+    const entityFactPattern =
+      /(?:第\s*[几一二三四五六七八九十百千万\d]+\s*(?:章|回|章节)|[哪那]一回|哪个章节|花名|绰号|外号|出场)/;
+    if (
+      entityFactPattern.test(normalized) &&
+      /(?:是谁|是什么|叫什么|花名|绰号|外号|出场|人物|哪里|哪一回|第\s*[几一二三四五六七八九十百千万\d]+)/.test(
+        normalized,
+      )
+    ) {
+      return true;
+    }
     const isBareEntity =
       normalized.length >= 2 &&
       normalized.length <= 16 &&

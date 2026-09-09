@@ -6,6 +6,7 @@ import { BaseMessageLike } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider } from './llm-provider.interface';
 import { MetricsService } from '../../modules/metrics/metrics.service';
+import { LlmInvocationError } from './llm-invocation.error';
 
 /**
  * 通义千问 LLM Provider
@@ -61,20 +62,10 @@ export class QwenLlmProvider implements ILLMProvider {
       return answer;
     } catch (err) {
       this.logger.warn(
-        `[QwenLlmProvider] invoke failed, using mock response: ${(err as Error).message}`,
+        '[QwenLlmProvider] invoke failed; propagating controlled provider error',
       );
-      const promptText =
-        typeof messages === 'string' ? messages : JSON.stringify(messages);
-      if (promptText.includes('secret') || promptText.includes('password')) {
-        const answer =
-          'I cannot reveal or fabricate secrets. Please verify sensitive information from an authorized source.';
-        this.observeCall(start, 'fallback', inputTokensEstimated, answer);
-        return answer;
-      }
-      const answer =
-        'This is a mock RAG answer for query: ' + promptText.slice(0, 100);
-      this.observeCall(start, 'fallback', inputTokensEstimated, answer);
-      return answer;
+      this.observeCall(start, 'error', inputTokensEstimated, '');
+      throw new LlmInvocationError('qwen', err);
     }
   }
 
@@ -84,7 +75,7 @@ export class QwenLlmProvider implements ILLMProvider {
 
   private observeCall(
     start: bigint,
-    status: 'success' | 'fallback' | 'error',
+    status: 'success' | 'error',
     inputTokensEstimated: number,
     answer: string,
   ): void {

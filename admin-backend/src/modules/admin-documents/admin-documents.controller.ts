@@ -1,10 +1,13 @@
-import { Body, Controller, Delete, Get, HttpException, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
 import { RagDocumentQueryDto } from '../rag-client/dto/rag-admin.dto';
 import { RagClientService } from '../rag-client/rag-client.service';
 import { unwrapRagResponse } from '../rag-client/rag-response.adapter';
+
+const MAX_DOCUMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
 @ApiTags('admin-documents')
 @ApiBearerAuth()
@@ -185,8 +188,15 @@ export class AdminDocumentsController {
   @AuditLog('documents', 'upload')
   @ApiOperation({ summary: '后台文档上传（代理至 rag-backend）' })
   @RequirePermission('admin:documents:write')
-  upload() {
-    return this.ragClient.uploadDocument();
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_DOCUMENT_UPLOAD_BYTES },
+    }),
+  )
+  upload(@UploadedFile() file: Express.Multer.File, @Body() body: Record<string, unknown>, @Req() req: { user?: { userId?: string; sub?: string } }) {
+    if (!file) throw new BadRequestException('file is required');
+    const ownerUserId = req.user?.userId ?? req.user?.sub ?? 'admin';
+    return this.ragClient.uploadDocument(file, { ...body, ownerUserId });
   }
 
   @Post(':docId/archive')

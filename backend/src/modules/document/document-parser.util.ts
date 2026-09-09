@@ -89,6 +89,7 @@ export interface DocumentImageAltDelegate {
   describeImage(
     imageBuffer: Buffer,
     mimeType: string,
+    prompt?: string,
   ): Promise<{ description: string }>;
 }
 
