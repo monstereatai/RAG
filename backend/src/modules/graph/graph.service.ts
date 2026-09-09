@@ -186,7 +186,11 @@ export class GraphService {
     );
   }
 
-  async queryGraph(query: string, userId: string): Promise<GraphQueryResult> {
+  async queryGraph(
+    query: string,
+    userId: string,
+    options: { generateAnswer?: boolean } = {},
+  ): Promise<GraphQueryResult> {
     this.assertEnabled();
     const entities = await this.extractQueryEntities(query);
     if (!this.isGraphQueryCandidate(query, entities)) {
@@ -199,7 +203,9 @@ export class GraphService {
       };
     }
     const facts = await this.searchFacts(entities, userId);
-    const answer = await this.generateGraphAnswer(query, facts);
+    const answer = options.generateAnswer === false
+      ? ''
+      : await this.generateGraphAnswer(query, facts);
 
     return {
       answer,

@@ -31,6 +31,7 @@ import {
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
+import { GraphService, type GraphFact } from '../../modules/graph/graph.service';
 
 export interface RetrievedChunk {
   id: string;
@@ -137,6 +138,14 @@ export interface RetrievalDiagnostics {
   documentLimitRemoved: number;
   budgetRemoved: number;
   contextCharacters: number;
+  graphProbe?: {
+    attempted: boolean;
+    enabled: boolean;
+    merged: boolean;
+    factCount: number;
+    elapsedMs: number;
+    skippedReason?: string;
+  };
   stages?: {
     keywordCandidates: number;
     vectorCandidates: number;
@@ -308,6 +317,7 @@ export class KarpathyRagService implements OnModuleInit {
     private readonly documentPermissionService: DocumentPermissionService,
     // DashScope 重排：ToolsModule 已导出；@Optional 保证缺失时仅跳过重排，不影响检索
     @Optional() private readonly rerankService?: DashScopeRerankService,
+    @Optional() private readonly graphService?: GraphService,
   ) {}
 
   /**
@@ -557,6 +567,8 @@ export class KarpathyRagService implements OnModuleInit {
     const vectorSearch = options.vectorSearch ?? true;
     const normalizedQuery = this.normalizeQuery(query);
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
+    const graphProbeStartedAt = Date.now();
+    const graphProbePromise = this.probeGraph(normalizedQuery, userId);
 
     // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
     const allowedDocIds = userId
@@ -685,13 +697,20 @@ export class KarpathyRagService implements OnModuleInit {
               : ('bm25' as const),
         contextRole: 'hit' as const,
       }));
+    const graphProbe = await graphProbePromise;
+    const graphChunks = graphProbe.facts.map((fact, index) => this.graphFactToChunk(fact, index));
+    const shouldMergeGraph = this.shouldMergeGraphEvidence(normalizedQuery);
     const expanded = this.expandContextChunks(
       ranked,
       profile,
       userId,
       options.scope,
     );
-    const built = this.contextBuilder.build(expanded, profile);
+    const built = this.contextBuilder.build(
+      shouldMergeGraph ? [...graphChunks, ...expanded] : expanded,
+      profile,
+      normalizedQuery,
+    );
     const diagnostics: RetrievalDiagnostics = {
       intent: profile.intent,
       candidateDepth: profile.candidateDepth,
@@ -702,6 +721,11 @@ export class KarpathyRagService implements OnModuleInit {
       documentLimitRemoved: built.stats.documentLimitRemoved,
       budgetRemoved: built.stats.budgetRemoved,
       contextCharacters: built.stats.contextCharacters,
+      graphProbe: {
+        ...graphProbe,
+        merged: shouldMergeGraph && graphChunks.length > 0,
+        elapsedMs: Date.now() - graphProbeStartedAt,
+      },
       stages: {
         keywordCandidates: bm25Hits.length,
         vectorCandidates: cosineHits.length,
@@ -732,6 +756,52 @@ export class KarpathyRagService implements OnModuleInit {
       profile,
       vectorSource,
       rerankApplied: rerankOutcome.applied,
+    };
+  }
+
+  private async probeGraph(query: string, userId?: string): Promise<{
+    attempted: boolean;
+    enabled: boolean;
+    merged: boolean;
+    factCount: number;
+    elapsedMs: number;
+    facts: GraphFact[];
+    skippedReason?: string;
+  }> {
+    const startedAt = Date.now();
+    if (!this.graphService?.isEnabled()) {
+      return { attempted: false, enabled: false, merged: false, factCount: 0, elapsedMs: 0, facts: [], skippedReason: 'disabled' };
+    }
+    if (!userId) {
+      return { attempted: false, enabled: true, merged: false, factCount: 0, elapsedMs: 0, facts: [], skippedReason: 'missing_user' };
+    }
+    try {
+      const result = await Promise.race([
+        this.graphService.queryGraph(query, userId, { generateAnswer: false }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200)),
+      ]);
+      const facts = result.facts.slice(0, 6);
+      return { attempted: true, enabled: true, merged: false, factCount: facts.length, elapsedMs: Date.now() - startedAt, facts };
+    } catch (error) {
+      return { attempted: true, enabled: true, merged: false, factCount: 0, elapsedMs: Date.now() - startedAt, facts: [], skippedReason: (error as Error).message };
+    }
+  }
+
+  private shouldMergeGraphEvidence(query: string): boolean {
+    return /关系|关联|上下游|依赖|多跳|影响|链路|分别/.test(query);
+  }
+
+  private graphFactToChunk(fact: GraphFact, index: number): RetrievedChunk {
+    return {
+      id: `graph:${fact.sourceId}:${fact.source}:${fact.target}:${index}`,
+      content: `${fact.sourceLabel}（${fact.source}）—${fact.relationship}→${fact.targetLabel}（${fact.target}）\n来源：${fact.sourceId}`,
+      docId: fact.sourceId,
+      chunkIndex: index,
+      bm25Score: 0,
+      cosineScore: 0,
+      totalScore: Math.max(0.1, fact.confidence * 0.2),
+      retrievalSource: 'expansion',
+      contextRole: 'hit',
     };
   }
 
