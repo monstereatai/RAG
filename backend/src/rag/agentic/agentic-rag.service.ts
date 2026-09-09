@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { z } from 'zod';
@@ -18,7 +18,10 @@ import {
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
-import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
+import {
+  detectDangerousQuery,
+  sanitizeUntrustedContext,
+} from '../prompts/prompt-injection.guard';
 import {
   queryAugmentPrompt,
   reflectionPrompt,
@@ -36,12 +39,19 @@ import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { ToolExecutionService } from '../../tools/tool-execution.service';
-import { Command, interrupt, StateGraph, START, END } from '@langchain/langgraph';
+import {
+  Command,
+  interrupt,
+  StateGraph,
+  START,
+  END,
+} from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
 import { ConfigService } from '@nestjs/config';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-checkpointer';
 import { MetricsService } from '../../modules/metrics/metrics.service';
+import { SecurityAuditService } from '../../modules/metrics/security-audit.service';
 import { TracingService } from '../../modules/tracing/tracing.service';
 import { GraphService } from '../../modules/graph/graph.service';
 import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
@@ -94,6 +104,7 @@ export class AgenticRagService {
     private readonly agentLoop: AgentLoopService,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly graphService?: GraphService,
+    @Optional() private readonly securityAudit?: SecurityAuditService,
     @Optional()
     @InjectRepository(AgenticStructuredArtifactEntity)
     private readonly structuredArtifactRepository?: Repository<AgenticStructuredArtifactEntity>,
@@ -415,7 +426,11 @@ export class AgenticRagService {
               retrieveOptions.scope,
             );
           }
-          const graphChunks = await this.retrieveGraphEvidence(q, userId, config);
+          const graphChunks = await this.retrieveGraphEvidence(
+            q,
+            userId,
+            config,
+          );
           results = [...results, ...graphChunks];
           return {
             ...subQuestion,
@@ -684,7 +699,10 @@ export class AgenticRagService {
     if (
       !this.webSearchFallbackEnabled ||
       !this.bochaSearchService.isEnabled() ||
-      !this.toolPolicy.decide('bocha_web_search', this.pluginPolicy(config, 'agentic')).allowed
+      !this.toolPolicy.decide(
+        'bocha_web_search',
+        this.pluginPolicy(config, 'agentic'),
+      ).allowed
     ) {
       this.logger.warn(
         'Retrieval insufficient but Bocha web_search is disabled or budgeted off',
@@ -730,7 +748,11 @@ export class AgenticRagService {
                   threadId,
                   this.userIdFromConfig(config),
                   { question: item.question, count: this.maxWebSearchResults },
-                  () => this.bochaSearchService.search(item.question, this.maxWebSearchResults),
+                  () =>
+                    this.bochaSearchService.search(
+                      item.question,
+                      this.maxWebSearchResults,
+                    ),
                   config,
                 )
               : [],
@@ -743,7 +765,11 @@ export class AgenticRagService {
         0,
       );
       // 轮转合并：候选上限较小时，先保证每个子问题至少保留一条网页证据，再补充同题的更多结果。
-      for (let resultIndex = 0; resultIndex < maxResultsPerQuestion; resultIndex += 1) {
+      for (
+        let resultIndex = 0;
+        resultIndex < maxResultsPerQuestion;
+        resultIndex += 1
+      ) {
         for (const { results } of searchResults) {
           const result = results[resultIndex];
           if (!result) continue;
@@ -850,7 +876,10 @@ export class AgenticRagService {
     if (
       !this.rerankEnabled ||
       !this.dashScopeRerankService.isEnabled() ||
-      !this.toolPolicy.decide('dashscope_rerank', this.pluginPolicy(config, 'agentic')).allowed
+      !this.toolPolicy.decide(
+        'dashscope_rerank',
+        this.pluginPolicy(config, 'agentic'),
+      ).allowed
     ) {
       onEvent?.({
         type: 'rerank',
@@ -868,8 +897,17 @@ export class AgenticRagService {
         'dashscope_rerank',
         this.threadIdFromConfig(config),
         this.userIdFromConfig(config),
-        { query: state.query, candidateCount: state.retrievedChunks.length, topN: this.maxRerankTopN },
-        () => this.dashScopeRerankService.rerank(state.query, state.retrievedChunks, this.maxRerankTopN),
+        {
+          query: state.query,
+          candidateCount: state.retrievedChunks.length,
+          topN: this.maxRerankTopN,
+        },
+        () =>
+          this.dashScopeRerankService.rerank(
+            state.query,
+            state.retrievedChunks,
+            this.maxRerankTopN,
+          ),
         config,
       );
       onEvent?.({
@@ -985,7 +1023,10 @@ export class AgenticRagService {
       citationGate?: { sufficient: boolean; reason: string };
     };
     const model = this.llmProvider.getModel();
-    const loop = await this.agentLoop.run<GenerationLoopState, GenerationLoopState>({
+    const loop = await this.agentLoop.run<
+      GenerationLoopState,
+      GenerationLoopState
+    >({
       threadId: this.threadIdFromConfig(config) || 'agentic-rag',
       runId: this.runIdFromConfig(config),
       actor: 'agentic_answer',
@@ -1008,9 +1049,10 @@ export class AgenticRagService {
               const stream = await model.stream(messages);
               let draft = '';
               for await (const chunk of stream) {
-                const token = typeof chunk.content === 'string'
-                  ? chunk.content
-                  : JSON.stringify(chunk.content);
+                const token =
+                  typeof chunk.content === 'string'
+                    ? chunk.content
+                    : JSON.stringify(chunk.content);
                 if (!token) continue;
                 draft += token;
                 onEvent?.({ type: 'token', data: token });
@@ -1020,7 +1062,10 @@ export class AgenticRagService {
                 state.retrievedChunks,
               );
             },
-            reduce: (current: GenerationLoopState, answer: string) => ({ ...current, answer }),
+            reduce: (current: GenerationLoopState, answer: string) => ({
+              ...current,
+              answer,
+            }),
           };
         }
         if (!loopState.citationGate) {
@@ -1029,18 +1074,28 @@ export class AgenticRagService {
             name: 'citation_validate',
             mode: 'agentic' as const,
             ownerUserId: this.userIdFromConfig(config),
-            input: { answerLength: loopState.answer.length, evidenceCount: state.retrievedChunks.length },
-            execute: async () => this.karpathyRagService.validateAnswerCitationSupport(
-              loopState.answer,
-              state.retrievedChunks,
-            ),
+            input: {
+              answerLength: loopState.answer.length,
+              evidenceCount: state.retrievedChunks.length,
+            },
+            execute: async () =>
+              this.karpathyRagService.validateAnswerCitationSupport(
+                loopState.answer,
+                state.retrievedChunks,
+              ),
             reduce: (
               current: GenerationLoopState,
               citationGate: { sufficient: boolean; reason: string },
             ) => ({ ...current, citationGate }),
           };
         }
-        return { type: 'complete' as const, output: loopState, reason: loopState.citationGate.sufficient ? '引用门禁通过' : loopState.citationGate.reason };
+        return {
+          type: 'complete' as const,
+          output: loopState,
+          reason: loopState.citationGate.sufficient
+            ? '引用门禁通过'
+            : loopState.citationGate.reason,
+        };
       },
     });
     if (loop.status !== 'completed' || !loop.output?.citationGate) {
@@ -1056,10 +1111,11 @@ export class AgenticRagService {
         state.retrievedChunks,
       );
       if (fallbackAnswer) {
-        const fallbackGate = this.karpathyRagService.validateAnswerCitationSupport(
-          fallbackAnswer,
-          state.retrievedChunks,
-        );
+        const fallbackGate =
+          this.karpathyRagService.validateAnswerCitationSupport(
+            fallbackAnswer,
+            state.retrievedChunks,
+          );
         if (fallbackGate.sufficient) {
           onEvent?.({ type: 'token', data: fallbackAnswer });
           onEvent?.({ type: 'citation', data: state.retrievedChunks });
@@ -1253,12 +1309,15 @@ export class AgenticRagService {
         threadId: (config?.configurable?.thread_id as string) ?? '',
       },
     });
-    const review = interrupt<{
-      reason: string;
-      answer: string;
-      references: RetrievedChunk[];
-      threadId: string;
-    }, { approval: 'approved' | 'rejected'; feedback?: string }>({
+    const review = interrupt<
+      {
+        reason: string;
+        answer: string;
+        references: RetrievedChunk[];
+        threadId: string;
+      },
+      { approval: 'approved' | 'rejected'; feedback?: string }
+    >({
       reason,
       answer: state.answer,
       references: state.retrievedChunks,
@@ -1357,14 +1416,15 @@ export class AgenticRagService {
       };
     }
 
-    const values = tuple.checkpoint.channel_values as Record<string, unknown>;
+    const values = tuple.checkpoint.channel_values;
     const checkpointArtifacts = this.isArtifacts(values.artifacts)
       ? values.artifacts
       : [];
     const persistedArtifacts = await this.loadPersistedArtifacts(threadId);
     const artifacts = [...checkpointArtifacts];
     for (const artifact of persistedArtifacts) {
-      if (!artifacts.some((item) => item.id === artifact.id)) artifacts.push(artifact);
+      if (!artifacts.some((item) => item.id === artifact.id))
+        artifacts.push(artifact);
     }
     return {
       available: true,
@@ -1393,7 +1453,9 @@ export class AgenticRagService {
     };
   }
 
-  private async loadPersistedArtifacts(threadId: string): Promise<AgenticArtifact[]> {
+  private async loadPersistedArtifacts(
+    threadId: string,
+  ): Promise<AgenticArtifact[]> {
     if (!this.structuredArtifactRepository) return [];
     const rows = await this.structuredArtifactRepository.find({
       where: { threadId },
@@ -1401,14 +1463,16 @@ export class AgenticRagService {
     });
     return rows.flatMap((row) => {
       try {
-        return [{
-          id: row.artifactId,
-          type: row.type as AgenticArtifact['type'],
-          version: row.version as 1,
-          producer: row.producer,
-          createdAt: row.createdAt.toISOString(),
-          payload: JSON.parse(row.payload) as unknown,
-        }];
+        return [
+          {
+            id: row.artifactId,
+            type: row.type as AgenticArtifact['type'],
+            version: row.version as 1,
+            producer: row.producer,
+            createdAt: row.createdAt.toISOString(),
+            payload: JSON.parse(row.payload) as unknown,
+          },
+        ];
       } catch {
         return [];
       }
@@ -1469,6 +1533,18 @@ export class AgenticRagService {
     obsidianPaths?: string[];
     interrupted?: boolean;
   }> {
+    const dangerousFindings = detectDangerousQuery(query);
+    if (dangerousFindings.length > 0) {
+      for (const finding of dangerousFindings) {
+        this.metricsService.observeDangerousQuery(finding.pattern, 'agentic');
+        this.securityAudit?.record({ pattern: finding.pattern, route: 'agentic', query });
+      }
+      throw new BadRequestException({
+        code: 'DANGEROUS_QUERY_BLOCKED',
+        message: '检测到高风险破坏性操作请求，已阻止进入 Agent、检索和工具链。',
+        patterns: dangerousFindings.map((finding) => finding.pattern),
+      });
+    }
     const requestStartedAt = Date.now();
     const downstreamOnEvent = onEvent;
     let firstTokenRecorded = false;
@@ -1490,6 +1566,21 @@ export class AgenticRagService {
       }
       downstreamOnEvent?.(event);
     };
+    // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
+    if (this.isSystemCapabilityQuery(query)) {
+      const modelName = this.llmProvider.getActiveProviderName();
+      const prompt = `你正在回答系统能力问题。当前实际选用的模型是 ${modelName}。请用中文直接说明模型名称、文本能力，以及是否支持图片、音频、视频输入；不要声称具备当前模型未提供的能力，也不要要求用户补充资料。用户问题：${query}`;
+      onEvent?.({ type: 'routing', data: { mode, route: 'simple', reason: 'system_capability_direct' } });
+      onEvent?.({ type: 'sufficiency', data: { sufficient: true, reason: '系统能力问答，直接回答' } });
+      const answer = await this.llmProvider.invoke(prompt);
+      for (const token of this.splitAnswerTokens(answer)) {
+        onEvent?.({ type: 'token', data: token });
+      }
+      const direct = { answer, references: [], retrievalSufficient: true, retrievalReason: '系统能力问答，直接回答' };
+      onEvent?.({ type: 'citation', data: [] });
+      onEvent?.({ type: 'final', data: direct });
+      return { ...direct, route: 'simple' as const, confidence: 1, retryCount: 0 };
+    }
     // Auto 先尝试受治理的精确直答；命中时不进入状态机，以降低简单问题的时延和成本。
     if (mode === 'auto') {
       const direct = await this.karpathyRagService.answerDirect(
@@ -1650,9 +1741,12 @@ export class AgenticRagService {
     const graphSnapshot = await this.app.getState({
       configurable: { thread_id: threadId },
     });
-    const interrupted = Array.isArray(graphSnapshot?.tasks) && graphSnapshot.tasks.some(
-      (task: { interrupts?: unknown[] }) => Array.isArray(task.interrupts) && task.interrupts.length > 0,
-    );
+    const interrupted =
+      Array.isArray(graphSnapshot?.tasks) &&
+      graphSnapshot.tasks.some(
+        (task: { interrupts?: unknown[] }) =>
+          Array.isArray(task.interrupts) && task.interrupts.length > 0,
+      );
     if (interrupted) {
       return {
         answer: finalState.answer,
@@ -1677,9 +1771,21 @@ export class AgenticRagService {
       retrievalReason: finalState.retrievalReason,
       obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
     };
-    await this.persistStructuredArtifacts(threadId, userId, finalState.artifacts);
+    await this.persistStructuredArtifacts(
+      threadId,
+      userId,
+      finalState.artifacts,
+    );
     onEvent?.({ type: 'final', data: result });
     return result;
+  }
+
+  private isSystemCapabilityQuery(query: string): boolean {
+    return /你是什么模型|什么模型|多模态|支持图片|支持音频|支持视频|支持哪些能力|你能做什么|模型能力/i.test(query);
+  }
+
+  private splitAnswerTokens(answer: string): string[] {
+    return answer.match(/.{1,24}/gs) ?? [answer];
   }
 
   private async persistStructuredArtifacts(
@@ -1689,11 +1795,15 @@ export class AgenticRagService {
   ): Promise<void> {
     if (!this.structuredArtifactRepository || artifacts.length === 0) return;
     const rows = artifacts
-      .filter((artifact) => artifact.type !== 'subquestion_plan' || artifact.payload)
+      .filter(
+        (artifact) => artifact.type !== 'subquestion_plan' || artifact.payload,
+      )
       .map((artifact) => {
         const payload = this.recordOf(artifact.payload);
         const sourceDocIds = Array.isArray(payload.sourceDocIds)
-          ? payload.sourceDocIds.filter((item): item is string => typeof item === 'string')
+          ? payload.sourceDocIds.filter(
+              (item): item is string => typeof item === 'string',
+            )
           : [];
         return this.structuredArtifactRepository!.create({
           id: `${threadId}:${artifact.type}:${artifact.id}`.slice(0, 128),
@@ -1708,7 +1818,8 @@ export class AgenticRagService {
               ? payload.status
               : 'ready_for_review',
           payload: JSON.stringify(artifact.payload),
-          sourceDocIds: sourceDocIds.length > 0 ? JSON.stringify(sourceDocIds) : null,
+          sourceDocIds:
+            sourceDocIds.length > 0 ? JSON.stringify(sourceDocIds) : null,
         });
       });
     if (rows.length > 0) {
@@ -1718,20 +1829,42 @@ export class AgenticRagService {
         const dependencyTypes: Record<string, string[]> = {
           assumption_register: ['requirement_brief'],
           claim_evidence_matrix: ['requirement_brief'],
-          solution_brief: ['requirement_brief', 'assumption_register', 'claim_evidence_matrix'],
+          solution_brief: [
+            'requirement_brief',
+            'assumption_register',
+            'claim_evidence_matrix',
+          ],
           api_contract: ['solution_brief'],
           event_tracking_plan: ['solution_brief'],
           test_plan: ['api_contract', 'event_tracking_plan', 'solution_brief'],
           acceptance_checklist: ['test_plan', 'risk_register'],
           risk_register: ['solution_brief'],
           rollout_plan: ['acceptance_checklist', 'risk_register'],
-          code_context_pack: ['solution_brief', 'api_contract', 'event_tracking_plan', 'test_plan'],
+          code_context_pack: [
+            'solution_brief',
+            'api_contract',
+            'event_tracking_plan',
+            'test_plan',
+          ],
         };
-        const links = rows.flatMap((row) => (dependencyTypes[row.type] ?? []).flatMap((type) => {
-          const dependsOnArtifactId = byType.get(type);
-          return dependsOnArtifactId ? [{ id: randomUUID(), threadId, artifactId: row.artifactId, dependsOnArtifactId, relation: 'input' }] : [];
-        }));
-        if (links.length > 0) await this.artifactDependencyRepository.save(links);
+        const links = rows.flatMap((row) =>
+          (dependencyTypes[row.type] ?? []).flatMap((type) => {
+            const dependsOnArtifactId = byType.get(type);
+            return dependsOnArtifactId
+              ? [
+                  {
+                    id: randomUUID(),
+                    threadId,
+                    artifactId: row.artifactId,
+                    dependsOnArtifactId,
+                    relation: 'input',
+                  },
+                ]
+              : [];
+          }),
+        );
+        if (links.length > 0)
+          await this.artifactDependencyRepository.save(links);
       }
     }
   }
@@ -1999,7 +2132,10 @@ export class AgenticRagService {
     if (
       !this.graphSearchEnabled ||
       !this.graphService?.isEnabled() ||
-      !this.toolPolicy.decide('graph_search_tool', this.pluginPolicy(config, 'agentic')).allowed ||
+      !this.toolPolicy.decide(
+        'graph_search_tool',
+        this.pluginPolicy(config, 'agentic'),
+      ).allowed ||
       !userId ||
       !/[关系关联上下游依赖多跳分别]/.test(query)
     ) {
@@ -2011,7 +2147,12 @@ export class AgenticRagService {
         this.threadIdFromConfig(config),
         userId,
         { query },
-        () => this.withTimeout(this.graphService!.queryGraph(query, userId), 4_000, 'GraphRAG sub-question search'),
+        () =>
+          this.withTimeout(
+            this.graphService!.queryGraph(query, userId),
+            4_000,
+            'GraphRAG sub-question search',
+          ),
         config,
       );
       return result.facts.map((fact, index) => ({
@@ -2062,12 +2203,18 @@ export class AgenticRagService {
       input,
       execute,
     });
-    if (!result.output) throw new Error(result.error ?? `${toolName} 被阻断或未返回结果`);
+    if (!result.output)
+      throw new Error(result.error ?? `${toolName} 被阻断或未返回结果`);
     return result.output;
   }
 
-  private pluginPolicy(config: RunnableConfig | undefined, mode: 'simple' | 'auto' | 'agentic' | 'production') {
-    const retrieveOptions = config?.configurable?.retrieveOptions as RetrieveOptions | undefined;
+  private pluginPolicy(
+    config: RunnableConfig | undefined,
+    mode: 'simple' | 'auto' | 'agentic' | 'production',
+  ) {
+    const retrieveOptions = config?.configurable?.retrieveOptions as
+      | RetrieveOptions
+      | undefined;
     return {
       mode,
       pluginKeys: retrieveOptions?.pluginKeys,
@@ -2086,7 +2233,9 @@ export class AgenticRagService {
   }
 
   private runIdFromConfig(config?: RunnableConfig): string | undefined {
-    const retrieveOptions = config?.configurable?.retrieveOptions as RetrieveOptions | undefined;
+    const retrieveOptions = config?.configurable?.retrieveOptions as
+      | RetrieveOptions
+      | undefined;
     return retrieveOptions?.runtimeRunId;
   }
 

@@ -11,7 +11,7 @@ import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
 import { MemoryService } from '../memory/memory.service';
 import { ShortTermMemoryService } from '../memory/short-term-memory.service';
-import type { AguiEvent, AguiStreamOptions } from './agui.types';
+import type { AguiEvent, AguiRunState, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
@@ -42,11 +42,14 @@ export class AguiService {
         const messageId = randomUUID();
         const startTime = Date.now();
         const traceEvents: RagTraceEvent[] = [];
+        const runState: AguiRunState = { phase: 'routing' };
 
         const emit = (
           type: AguiEvent['type'],
           data?: Record<string, unknown>,
         ) => {
+          if (type === 'RUN_ERROR') runState.phase = 'error';
+          if (type === 'RUN_FINISHED') runState.phase = 'completed';
           subscriber.next({
             type,
             runId,
@@ -57,6 +60,8 @@ export class AguiService {
 
         try {
           const selectedModel = options.model ?? 'qwen';
+          runState.mode = options.mode;
+          runState.model = selectedModel;
           const roleContext = resolveRoleContext(options.rolePresetId);
           const pluginComposition =
             options.pluginKeys?.length && this.plugins
@@ -80,6 +85,7 @@ export class AguiService {
               pluginKeys: pluginComposition?.pluginKeys ?? [],
               pluginTools: pluginComposition?.toolNames ?? [],
             },
+            runState: { ...runState },
           });
           traceEvents.push({
             type: 'run_started',
@@ -155,6 +161,7 @@ export class AguiService {
                 query,
                 options.mode,
                 (event) => {
+                  this.updateRunState(runState, event);
                   traceEvents.push(this.toTraceEvent(event));
                   this.emitAguiEvent(event, emit, messageId);
                 },
@@ -196,6 +203,11 @@ export class AguiService {
               retrievalReason: result.retrievalReason,
               references: result.references ?? [],
               events: traceEvents.map((event) => event.type),
+              runState: {
+                ...runState,
+                phase: result.retrievalSufficient === false ? 'degraded' : 'completed',
+                citation: { count: result.references?.length ?? 0 },
+              },
             },
           );
           void this.shortTermMemory?.addTurn(activeThreadId, 'user', query);
@@ -267,6 +279,7 @@ export class AguiService {
               ...result,
               model: selectedModel,
               artifacts: generatedArtifacts,
+              runState: { ...runState },
             },
           });
           subscriber.complete();
@@ -342,6 +355,34 @@ export class AguiService {
       value: event.data,
       rawEvent: event,
     });
+  }
+
+  private updateRunState(state: AguiRunState, event: SseEvent): void {
+    const data = this.isRecord(event.data) ? event.data : undefined;
+    if (event.type === 'routing') {
+      state.phase = 'routing';
+      if (typeof data?.route === 'string') state.route = data.route;
+    } else if (event.type === 'retrieval' || event.type === 'meta') {
+      state.phase = 'retrieval';
+      state.retrieval = { status: 'completed' };
+    } else if (event.type === 'sufficiency') {
+      state.phase = data?.sufficient === false ? 'degraded' : 'evidence';
+      state.evidence = {
+        sufficient: typeof data?.sufficient === 'boolean' ? data.sufficient : undefined,
+        reason: typeof data?.reason === 'string' ? data.reason : undefined,
+      };
+      if (data?.sufficient === false && typeof data.reason === 'string') {
+        state.degradationReason = 'evidence_insufficient';
+      }
+    } else if (event.type === 'token') {
+      state.phase = 'generation';
+    } else if (event.type === 'citation') {
+      state.phase = 'citation';
+      state.citation = { count: Array.isArray(event.data) ? event.data.length : undefined };
+    } else if (event.type === 'error') {
+      state.phase = 'error';
+      state.degradationReason = 'runtime_error';
+    }
   }
 
   private getToolCallId(data: unknown): string {

@@ -88,6 +88,16 @@ interface ChatMessage {
   media?: AnswerMedia[];
   artifacts?: GeneratedArtifact[];
   events?: EventTraceItem[];
+  runState?: RunStateView;
+}
+
+interface RunStateView {
+  phase?: string;
+  route?: string;
+  model?: string;
+  degradationReason?: string;
+  evidence?: { sufficient?: boolean; reason?: string };
+  citation?: { count?: number };
 }
 
 interface AnswerMedia {
@@ -600,6 +610,9 @@ const QaOps: React.FC = () => {
           references: Array.isArray(metadata.references)
             ? (metadata.references as ReferenceChunk[])
             : undefined,
+          runState: isRecord(metadata.runState)
+            ? (metadata.runState as RunStateView)
+            : undefined,
           events,
         };
       });
@@ -776,6 +789,12 @@ const QaOps: React.FC = () => {
           model: inputModel,
         }));
       }
+      if (isRecord(event.data?.runState)) {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          runState: event.data?.runState as RunStateView,
+        }));
+      }
       return;
     }
 
@@ -838,6 +857,9 @@ const QaOps: React.FC = () => {
             typeof output.retrievalReason === 'string'
               ? output.retrievalReason
               : message.retrievalReason,
+          runState: isRecord(output.runState)
+            ? (output.runState as RunStateView)
+            : message.runState,
           status: 'done',
         }));
       }
@@ -1303,6 +1325,15 @@ const QaOps: React.FC = () => {
                       (message.events && message.events.length > 0)) && (
                       <details className="answer-debug-details">
                         <summary>查看检索与运行详情</summary>
+                        {message.runState && (
+                          <div className="run-state-timeline">
+                            {['routing', 'retrieval', 'evidence', 'generation', 'citation', 'completed'].map((phase) => (
+                              <span key={phase} className={message.runState?.phase === phase ? 'active' : ''}>
+                                {phase === 'routing' ? '路由' : phase === 'retrieval' ? '检索' : phase === 'evidence' ? '证据' : phase === 'generation' ? '生成' : phase === 'citation' ? '引用' : '完成'}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {message.retrievalReason && (
                           <p className="retrieval-reason">
                             {message.retrievalReason}

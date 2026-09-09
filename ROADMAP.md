@@ -48,6 +48,28 @@
 
 ## 当前结论
 
+- **已增加文档索引一致性巡检接口（2026-09-09）**：RAG Admin 新增 `GET /rag/admin/documents/index-audit`，管理后台新增 `GET /api/admin/documents/index-audit`，检查空 chunk、图索引失败／待处理、生效未审批和过期仍生效文档，并返回可执行的重建／重试动作；Backend 与 Admin Backend build 通过。
+
+- **已增加仓库级质量门禁 CI（2026-09-09）**：新增 `.github/workflows/quality-gate.yml`，在 main／release 分支 push 和 PR 上自动执行依赖锁定安装、Backend／Admin Backend 构建、企业就绪检查和 RAG 质量门禁；真实模型评测仍由外部 key 和环境条件决定，不在 CI 中伪造通过。
+
+- **已补齐企业就绪部署清单（2026-09-09）**：新增根目录 `DEPLOYMENT_CHECKLIST.md`，覆盖代码构建、依赖服务、RAG 安全与质量、Agent／定时任务、运行回滚和外部依赖；`pnpm --dir backend run enterprise:readiness` 本地检查由 11/12 提升为 12/12 通过，线上资源、真实凭据和外部平台仍按清单明确标记。
+
+- **已增加安全策略目录接口（2026-09-09）**：RAG Admin 新增 `GET /rag/admin/security/policies`，管理后台同步提供 `GET /api/admin/agent-ops/security/policies`，公开当前数据库破坏、危险 Shell、敏感凭据导出和 Prompt 注入四类阻断策略，供管理后台、告警和后续审批中心复用；不新增数据库迁移。定向测试 21/21、Backend 与 Admin Backend build、`git diff --check` 通过。
+
+- **已补充 Backend 存活／就绪探针（2026-09-09）**：保留 `/health` 作为进程存活检查，新增 `/health/ready` 检查数据库初始化状态和 Redis 状态；数据库未就绪返回 503，Redis 不可用时明确返回 `degraded`，便于容器编排和监控区分“进程活着”与“服务可接流量”。定向测试 20/20、Backend build、`git diff --check` 通过。
+
+- **已补齐定时任务与高风险问答的运行治理（2026-09-09）**：定时任务执行增加 Redis 分布式租约锁和一次有限重试，启用 Redis 时多实例不会重复执行同一任务；Redis 不可用时保留本进程互斥降级。新增 `rag_dangerous_queries_blocked_total` Prometheus 指标，按拦截策略和入口统计危险问答请求，覆盖普通 Chat、SSE 和 Agentic RAG。定向测试 20/20、Backend build、`git diff --check` 通过。
+
+- **已加固自然语言定时任务解析与调度边界（2026-09-09）**：支持上午／下午／晚上／半小时、每隔 N 分钟／小时／天、工作日和周末；无法识别执行时间或周期时不再静默降级为每天 9 点；每月日期不再强制截断到 28 号；Cron 创建前校验表达式，单次任务拒绝过去时间；Cron 运行显式固定 `Asia/Shanghai` 时区；无数据范围时正确补齐默认部门。定时任务单测 13/13、Backend build、`git diff --check` 通过。
+
+- **已增加 RAG 问答高风险破坏性请求拦截（2026-09-09）**：在普通 Chat、Agentic RAG、流式 Chat 和 AGUI 共用的执行前路径增加危险请求检测；对「帮我删除数据库」、`DROP DATABASE`、`TRUNCATE TABLE`、`rm -rf`、敏感凭据导出等请求，在会话创建、检索、模型调用和工具执行前直接阻断，并返回 `DANGEROUS_QUERY_BLOCKED`。保留安全讨论场景，例如「什么是 DROP TABLE，如何防止误删数据库？」和「如何检测和审计删库风险？」。定向单测 4/4 通过，Backend build 与 `git diff --check` 通过。
+
+- **已补齐 Swagger 全接口中文描述（2026-09-09）**：在 RAG Backend 与 Admin Backend 的 OpenAPI 文档生成阶段统一处理所有 HTTP 操作；已有中文 `summary`／`description` 保留，缺失或非中文的接口根据方法和路径自动生成中文摘要与说明。实测 RAG 250/250、Admin 249/249 接口均有中文摘要和描述；两端构建与 TypeScript 检查通过。
+
+- **已为 RAG Backend 与 Admin Backend 接入 Swagger（2026-09-09）**：RAG Backend 新增 `@nestjs/swagger` 与 OpenAPI 配置；两套服务均提供 Swagger UI 和 JSON 文档，启用 Bearer Token 鉴权输入与持久化授权。验证：`http://localhost:3000/docs`、`http://localhost:3000/docs-json`、`http://localhost:3001/docs`、`http://localhost:3001/docs-json` 均返回 200；RAG 文档含 226 个路径，Admin 文档含 206 个路径；两端构建与 TypeScript 检查通过。
+
+- **已修复模型配置页面黑色卡片主题（2026-09-09）**：将 `model-config-layout` 下的 Ant Design 卡片、卡片标题、正文和边框从深色背景调整为与管理后台一致的浅色视觉，增加轻量阴影和可读性更高的文本颜色。Admin build、`git diff --check` 通过。
+
 - **已修正 ZIP 生成接口对失效工作流的错误码（2026-09-08）**：定位工作流 `afe53a26-c54b-46f1-be97-5b769574aa3b` 返回 500 的根因是 Redis/LangGraph Checkpoint 不存在，服务原先把 `workflow not found` 作为普通 Error 返回 500。`ProductionWorkflowService.getOwnedState` 现改为 `NotFoundException`，失效或归属不匹配的工作流返回 404，并提示重新启动；`pnpm --dir backend build` 通过，使用内部服务 token 实测该 UUID 返回 404 及明确消息。该历史 UUID 的完整工作流状态无法从仅含摘要的索引恢复，需要重新执行工作流后再下载 ZIP。
 
 - **已修复详情页 Playway 规则／模板为空（2026-09-08）**：修复初次加载时误用项目 ID（如 `act9`）作为规则检索词的问题，改为默认加载 18 条组件规则和 4 个活动模板；保留搜索框用于按玩法筛选。期间发现 Backend 进程退出，已重新启动并验证两个接口分别返回 18 条规则、4 个模板；Admin Biome、Admin build 通过。
@@ -741,3 +763,13 @@
 - **全量功能流程与实现对照复核**：逐项核对《功能步骤流程.md》的 Simple／Auto／Agentic、RAG、Bad Case、Redis Checkpointer、LangFuse／Prometheus、Agent Ops／Artifact、Prompt Injection／Tool Registry、异步文档任务、Adoption、LLM Gateway、身份权限、记忆、答案质量、Tool／MCP、Prompt Registry、评测发布、SSE、GraphRAG、Web Search、缓存限流、DLP、成本和事故处理流程；新增“功能流程与代码入口对照”表，修正 Bad Case 的 `reviewedBy`／`reviewedAt`、审核分支和无需重启生效口径，补齐 RAG 的跨链路 Bad Case Preflight，并将 DocumentTask 阶段改为代码实际使用的 `parsing`／`embedding`／`vector_index`／`metadata`。文档 Mermaid、旧字段残留和格式检查通过。
 
 - **中国 PC 端与页游公开运营营销资料采集**：新增 `backend/eval/game-marketing-top100.catalog.json`，建立 PC 端候选 Top50 与页游候选 Top50 公开资料目录；新增 `collect-game-marketing-top100.mjs`，按榜单来源记录候选名次，抓取公开官网／活动／运营／营销／社区入口，保存 Markdown 快照、来源、抓取时间、content hash 和失败原因；新增 `docs/plans/游戏运营营销公开资料与Karpathy方案.md`，补充用户操作、数据状态流和 Simple Karpathy Fast Path；最新批次实际抓取 127 个公开页面，目录和 Karpathy 方案入库，108 份唯一目标文档全部完成索引；《失落的方舟》重复登录页面以同源去重摘要卡入库，完整快照保留本地。
+
+### 2026-09-09
+
+- **第二批缺口清零**：质量汇总接入 QA Ops 概览；危险请求通过 Domain Event Outbox 保存脱敏审计并提供后台查询；定时任务增加 BullMQ 延迟／重试／去重适配器，Redis 不可用时保留原调度降级；文档索引增加批量修复；Agent 汇总增加步骤准确率和恢复率；OpenAPI 契约检查覆盖安全、质量、索引、Agent 和 readiness 路径；新增并发／故障相关单测。Backend 全量 Jest 58 suites／274 tests、三端构建均通过。
+- **缺口清单补齐**：新增 Agent 运行成本／成功率／失败率／重试与审批汇总接口，并在 Agent 运营工作台展示；新增 RAG 安全策略卡片、文档索引巡检接口、后台代理路由、本地 OpenAPI 契约检查脚本与 CI 质量门禁。backend、admin-backend、admin 生产构建、定向测试、企业 readiness 12/12 及 `git diff --check` 均通过。真实 Grafana／告警、生产 BullMQ 集群、备份灾备、低代码平台、企业 IAM／DLP／工单和压测仍标记为线上或外部依赖，未伪造为已完成。
+- **统一运行协议第一版**：AG-UI 事件补充 `runState`，统一表达路由、检索、证据、生成、引用、完成／降级／错误阶段；会话元数据持久化该状态，刷新后可恢复详情轨迹。
+- **系统能力问答分流**：模型名称、多模态和能力询问直接走模型回答，不再被知识库证据门禁误判为“资料不足”；回答仍标记实际选用模型。
+- **管理端响应适配器**：新增 `unwrapRagResponse`，文档详情与 chunk 接口统一解包，避免 `{data:{code,data,message}}` 多层包装。
+- **验证**：`pnpm --dir backend build`、`pnpm --dir admin tsc --noEmit`、`pnpm --dir admin-backend build` 通过。
+- **仓库内闭环收口**：定时任务在 Redis 可用时以 BullMQ Job Scheduler 为唯一调度源，并保留无 Redis 降级；文档重建保留原文档 ID、ACL、生命周期与审核元数据，写入 SHA-256 和重复内容告警；PDF 解析改为懒加载，`--detectOpenHandles` 全量测试无残留；Backend／Admin Backend OpenAPI 检查脚本均支持严格模式；Agent 工作台展示四层可信指标和 RAG 质量发布门禁；安全策略增加版本、生效时间、启用状态；新增 `docs/SECURITY_AND_DATA_LIFECYCLE.md`。验证：Backend 58 suites／274 tests（含 `--detectOpenHandles`）通过，三端生产构建通过，`git diff --check` 通过。契约脚本因本地服务未启动安全跳过，严格运行需启动 Backend 3000 与 Admin Backend 3001。

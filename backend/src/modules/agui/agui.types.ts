@@ -21,6 +21,28 @@ export interface AguiEvent {
   data?: Record<string, unknown>;
 }
 
+export type AguiRunPhase =
+  | 'routing'
+  | 'retrieval'
+  | 'evidence'
+  | 'generation'
+  | 'citation'
+  | 'completed'
+  | 'degraded'
+  | 'error';
+
+/** 跨模型、检索、证据门禁与 Agent Loop 的统一运行状态。 */
+export interface AguiRunState {
+  phase: AguiRunPhase;
+  mode?: ChatMode;
+  model?: string;
+  route?: string;
+  retrieval?: { status: 'pending' | 'completed' | 'unavailable'; count?: number };
+  evidence?: { sufficient?: boolean; reason?: string };
+  citation?: { count?: number };
+  degradationReason?: string;
+}
+
 export interface AguiStreamOptions {
   query: string;
   mode: ChatMode;

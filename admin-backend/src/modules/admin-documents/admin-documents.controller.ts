@@ -4,6 +4,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
 import { RagDocumentQueryDto } from '../rag-client/dto/rag-admin.dto';
 import { RagClientService } from '../rag-client/rag-client.service';
+import { unwrapRagResponse } from '../rag-client/rag-response.adapter';
 
 @ApiTags('admin-documents')
 @ApiBearerAuth()
@@ -24,6 +25,19 @@ export class AdminDocumentsController {
     return result.data;
   }
 
+  @Get('index-audit')
+  @ApiOperation({ summary: '文档索引一致性巡检' })
+  @RequirePermission('admin:documents:read')
+  auditIndexes(@Query('limit') limit?: string) {
+    return this.ragClient.auditDocumentIndexes(Number(limit) || 200);
+  }
+
+  @Post('index-audit/repair')
+  @RequirePermission('admin:documents:write')
+  repairIndexes(@Body() body: { docIds?: string[]; limit?: number }) {
+    return this.ragClient.repairDocumentIndexes(body ?? {});
+  }
+
   @Get(':docId')
   @ApiOperation({ summary: '后台查看文档元数据' })
   @ApiParam({ name: 'docId', description: 'RAG 文档 ID' })
@@ -31,7 +45,7 @@ export class AdminDocumentsController {
   async detail(@Param('docId') docId: string) {
     const result = await this.ragClient.getDocument(docId);
     this.requireAvailable(result);
-    return this.unwrap(result.data);
+    return unwrapRagResponse(result.data);
   }
 
   @Get(':docId/chunks')
@@ -41,14 +55,7 @@ export class AdminDocumentsController {
   async chunks(@Param('docId') docId: string) {
     const result = await this.ragClient.getDocumentChunks(docId);
     this.requireAvailable(result);
-    return this.unwrap(result.data);
-  }
-
-  private unwrap(value: unknown) {
-    if (value && typeof value === 'object' && 'data' in value) {
-      return (value as { data: unknown }).data;
-    }
-    return value;
+    return unwrapRagResponse(result.data);
   }
 
   @Get(':docId/versions')

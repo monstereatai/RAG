@@ -926,6 +926,25 @@ canvas {
   margin: 8px 0 0;
 }
 
+.run-state-timeline {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.run-state-timeline span {
+  border: 1px solid #434b58;
+  border-radius: 10px;
+  padding: 2px 8px;
+  color: #8d96a5;
+  font-size: 12px;
+}
+.run-state-timeline span.active {
+  border-color: #3b9cff;
+  color: #7fc2ff;
+  background: rgba(59, 156, 255, 0.12);
+}
+
 .reference-box {
   margin-top: 12px;
   padding: 12px;
@@ -1032,12 +1051,19 @@ canvas {
 }
 
 .model-config-layout .ant-card {
-  border-color: #2f3b4d;
-  background: #222323;
+  border-color: #e5eaf2;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(31 41 55 / 5%);
 }
 
 .model-config-layout .ant-card-head {
-  border-color: #2f3b4d;
+  border-color: #edf0f5;
+  background: #fff;
+  color: #111827;
+}
+
+.model-config-layout .ant-card-body {
+  color: #1f2937;
 }
 
 .model-card-grid {
@@ -1048,7 +1074,7 @@ canvas {
 
 .model-config-card p {
   margin: 0 0 14px;
-  color: #b9c0ca;
+  color: #667085;
 }
 
 @media (max-width: 1100px) {
