@@ -6,6 +6,7 @@ export interface SystemConfig {
   description?: string;
   group: string;
   updatedAt: string;
+  persisted?: boolean;
 }
 
 export async function getConfigs(params?: { group?: string }) {

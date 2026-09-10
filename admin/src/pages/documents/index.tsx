@@ -37,6 +37,7 @@ import {
   getFailedDocumentTasks,
   retryFailedDocumentTask,
   uploadDocument,
+  getDocumentTask,
   archiveDocument,
   unarchiveDocument,
   type DocumentItem,
@@ -124,8 +125,25 @@ const Documents: React.FC<DocumentListPageProps> = ({
   const handleBeforeUpload = async (file: File) => {
     setUploading(true);
     try {
-      await uploadDocument(file);
-      message.success(`${file.name} 上传成功`);
+      const result = await uploadDocument(file);
+      const payload = (result as any)?.data ?? result;
+      if (payload?.taskId) {
+        message.info(`${file.name} 已进入解析队列`);
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const taskResult = await getDocumentTask(String(payload.taskId));
+          const task = (taskResult as any)?.data ?? taskResult;
+          if (task?.status === 'completed') {
+            message.success(`${file.name} 解析入库完成`);
+            break;
+          }
+          if (task?.status === 'failed') {
+            throw new Error(task.errorMessage || 'document processing failed');
+          }
+        }
+      } else {
+        message.success(`${file.name} 上传成功`);
+      }
       await fetchDocs({ ...pagination, current: 1 });
     } catch (error) {
       const detail = error instanceof Error ? error.message : '';

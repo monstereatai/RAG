@@ -71,32 +71,18 @@ export const queryIntentSchema = z.object({
 
 export type QueryIntent = z.infer<typeof queryIntentSchema>;
 
-/** 兼容旧调用方的遗留 API。生产路由不再使用关键词作决策。 */
+/** 兼容旧调用方的遗留 API。生产路由只接受结构化语义决策。 */
 export function requiresKnowledgeRetrieval(query: string): boolean {
-  const text = query.trim();
-  if (!text) return true;
-  if (
-    /(?:公司|项目|部门|团队|内部|知识库|文档|制度|员工|同事|客户|用户|业务|活动|接口|系统|当前|我们|上传|资料|数据库|配置|线上|版本|数据)/i.test(
-      text,
-    )
-  ) {
-    return true;
-  }
-  if (
-    /(?:是谁|什么人|哪个人|叫什么|做了什么|属于哪个|在哪个部门)/i.test(text)
-  ) {
-    return true;
-  }
-  return /(?:上次|刚才|前面|这个|那个|上述|继续|再说)/i.test(text);
+  void query;
+  return false;
 }
 
 const ROUTER_PROMPT = `你是问答系统的意图路由器，只分析当前用户问题，不读取历史对话、知识库或记忆。
 路由边界示例：
 ${formatQueryRoutingFewShots()}
-只要包含公司／项目／员工／活动／文档中的实体，即使句子很短，也必须 retrieve；错别字和同音字不能当作公共问题直答。
 返回 JSON：{"intent":"...","confidence":0到1之间的小数,"action":"direct_answer|retrieve","sourcePolicy":"direct_answer|local_only|web_allowed","needsSynthesis":true或false,"targetKbs":[],"queryType":"...","entities":[],"filters":{"department":null,"project":null,"timeRange":null,"documentType":null},"rewriteQueries":[],"standaloneQuery":"可独立检索的问题","multiIntent":false,"subQueries":[],"reason":"中文理由"}。
 needsSynthesis=true 表示用户要求对实体、人物、项目、文档或事件做整体性总结、综述、介绍、梳理，需要综合多个片段生成自然语言回答；false 表示单点事实查询、精确 lookup、可直接从单个片段提取。该判断必须基于语义理解，不能仅凭“总结/概括/介绍”等词出现与否，也不能因为没有这些词就忽略其整体性语义。
-同时返回 ambiguity：是否存在多义词、候选语义和必要时的澄清问题。人名、员工、客户、部门、产品、活动、项目和内部术语属于待查实体；即使问题很短（如“李四是谁”），也必须判为 project_knowledge 或 general 并先检索，不得判为 objective_fact 直答。只有多个语义同等合理、无法判断主流指代时才 detected=true。
+同时返回 ambiguity：是否存在多义词、候选语义和必要时的澄清问题。涉及未知身份、组织内部对象、用户已提供资料或上下文指代的事实都属于待查实体；即使问题很短也应先检索，不能当作稳定公共事实直答。只有多个语义同等合理、无法判断主流指代时才 detected=true。
 若一条输入包含两个或以上可独立回答的问题、编号事项或测试项，multiIntent=true，并按原意拆出最多五个 subQueries；此时 intent 选择整体最需要的处理方式。单个问题要求多个解释角度时不是 multiIntent。
 意图定义：
 - system_capability：询问你是什么模型、当前使用的模型、模型系列、支持哪些输入或能力、上下文限制
@@ -199,9 +185,52 @@ export class QueryIntentRouter {
         : sourcePolicy;
     const mustRetrieve =
       resolvedSourcePolicy === 'local_only' || intent.action === 'retrieve';
-    const entities = [
-      ...new Set([...intent.entities, ...this.extractEntityCandidates(query)]),
-    ].slice(0, 10);
+    const entities = [...new Set(intent.entities)].slice(0, 10);
+    // 语义模型偶尔会把“某对象是什么”误标成 private_entity，但没有抽取出
+    // 任何私域实体。对这种稳定的定义句做结构性收敛，避免公共常识被错误送进
+    // RAG；带 project_knowledge、follow_up 或明确实体时仍保持本地检索。
+    const isDefinitionQuestion =
+      /(?:是什么|是什麼|啥意思|什么意思|如何理解)[？?。！!]?$/.test(
+        query.trim(),
+      );
+    const isBareTopic =
+      /^[\p{Script=Han}\p{L}\p{N}_-]{1,40}$/u.test(query.trim());
+    // 公司／研发／项目流程属于本地业务事实，即使模型漏抽实体，也不能按公共
+    // 概念直答。这里是来源策略的安全边界，不参与答案内容生成。
+    const hasInternalBusinessContext =
+      /公司|本公司|内部|研发流程|研发过程|开发流程|项目流程|发布流程|上线流程|技术方案|开发规范|工程规范/u.test(
+        query,
+      );
+    if (hasInternalBusinessContext) {
+      return {
+        ...intent,
+        action: 'retrieve',
+        sourcePolicy: 'local_only',
+        needsSynthesis: true,
+        queryType: 'project_knowledge',
+        targetKbs: ['company', 'project', 'documents'],
+        rewriteQueries: [
+          ...new Set([query.trim(), ...intent.rewriteQueries]),
+        ].slice(0, 5),
+        reason: '涉及公司、项目或研发流程，必须使用本地知识库证据',
+      };
+    }
+    const canAnswerAsPublicDefinition =
+      (isDefinitionQuestion || isBareTopic) &&
+      entities.length === 0 &&
+      !intent.multiIntent &&
+      (intent.intent === 'general' || intent.intent === 'objective_fact');
+    if (canAnswerAsPublicDefinition) {
+      return {
+        ...intent,
+        action: 'direct_answer',
+        sourcePolicy: 'direct_answer',
+        queryType: 'public_knowledge',
+        targetKbs: ['general'],
+        rewriteQueries: intent.rewriteQueries,
+        reason: '无私域实体的稳定定义问题，可直接回答',
+      };
+    }
     const queryType = intent.multiIntent
       ? 'multi_intent'
       : intent.ambiguity.detected
@@ -254,20 +283,6 @@ export class QueryIntentRouter {
           ? '命中私域实体、上下文或业务资料信号，必须先检索'
           : '稳定公共知识，可直接回答'),
     };
-  }
-
-  private extractEntityCandidates(query: string): string[] {
-    const candidates: string[] = [];
-    const suffix =
-      /(?:是谁|叫什么|花名|绰号|外号|负责什么|在哪个部门|的资料|的介绍)/g;
-    let match: RegExpExecArray | null;
-    while ((match = suffix.exec(query)) !== null) {
-      const prefix = query
-        .slice(0, match.index)
-        .match(/[\u4e00-\u9fffA-Za-z0-9]{2,12}$/)?.[0];
-      if (prefix) candidates.push(prefix);
-    }
-    return candidates.slice(0, 10);
   }
 
   private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

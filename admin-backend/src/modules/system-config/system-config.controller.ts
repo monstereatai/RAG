@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Patch, Body, Post } from '@nestjs/common';
+import { ConflictException, Controller, Delete, Get, Param, Patch, Body, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { SystemConfigService } from './system-config.service';
@@ -38,7 +38,8 @@ export class AdminConfigController {
   @ApiOperation({ summary: '更新配置项' })
   @RequirePermission('admin:system:read')
   update(@Param('key') key: string, @Body() body: { value: string }) {
-    return this.systemConfigService.updateConfig(key, body.value);
+    const result = this.systemConfigService.updateConfig(key, body.value);
+    throw new ConflictException(result);
   }
 
   @Get('api-tokens')

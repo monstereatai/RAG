@@ -8,12 +8,15 @@ describe('QueryIntentRouter', () => {
     expect(requiresKnowledgeRetrieval('1+1 等于多少')).toBe(false);
   });
 
-  it('normalizes router output into a structured private-entity retrieval decision', async () => {
+  it('normalizes a semantic private-entity decision without keyword extraction', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'objective_fact',
+          intent: 'project_knowledge',
           confidence: 0.99,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          entities: ['李四'],
           standaloneQuery: '李四是谁',
           ambiguity: { detected: false },
         }),
@@ -29,10 +32,79 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('forces entity and private-knowledge questions through retrieval', () => {
-    expect(requiresKnowledgeRetrieval('李四是谁')).toBe(true);
-    expect(requiresKnowledgeRetrieval('公司绩效制度是什么')).toBe(true);
-    expect(requiresKnowledgeRetrieval('上次提到的接口怎么改')).toBe(true);
+  it('converges an entity-free definition question to public direct answer', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'general',
+          confidence: 0.88,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          queryType: 'private_entity',
+          entities: [],
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('小红书是什么')).resolves.toMatchObject({
+      action: 'direct_answer',
+      sourcePolicy: 'direct_answer',
+      queryType: 'public_knowledge',
+      targetKbs: ['general'],
+    });
+  });
+
+  it('converges an entity-free bare topic to public direct answer', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'general',
+          confidence: 0.88,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          queryType: 'private_entity',
+          entities: [],
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('小红书')).resolves.toMatchObject({
+      action: 'direct_answer',
+      sourcePolicy: 'direct_answer',
+      queryType: 'public_knowledge',
+      targetKbs: ['general'],
+    });
+  });
+
+  it('forces company and engineering process questions to local retrieval', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'general',
+          confidence: 0.95,
+          action: 'direct_answer',
+          sourcePolicy: 'direct_answer',
+          queryType: 'public_knowledge',
+          entities: [],
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('公司的研发流程是什么')).resolves.toMatchObject({
+      action: 'retrieve',
+      sourcePolicy: 'local_only',
+      needsSynthesis: true,
+      queryType: 'project_knowledge',
+      targetKbs: ['company', 'project', 'documents'],
+    });
+  });
+
+  it('does not retain a hidden keyword router in the legacy helper', () => {
+    expect(requiresKnowledgeRetrieval('李四是谁')).toBe(false);
+    expect(requiresKnowledgeRetrieval('公司绩效制度是什么')).toBe(false);
   });
 
   it('preserves semantic multi-question classification', async () => {
@@ -65,6 +137,8 @@ describe('QueryIntentRouter', () => {
     await expect(router.classify('1+1 等于多少？')).resolves.toMatchObject({
       intent: 'general',
       confidence: 0,
+      sourcePolicy: 'local_only',
+      action: 'retrieve',
       multiIntent: false,
       subQueries: [],
     });

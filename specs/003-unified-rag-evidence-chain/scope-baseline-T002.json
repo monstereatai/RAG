@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "base_commit": "9046847a85bc52ee14fb59e85f9b477089f38d59",
+  "initial_snapshots": {
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "6dc4b4a93b44985cd2e5d128c0069a6969869c206fbb013da6374aaa99dd1023"
+    },
+    "backend/src/rag/evidence/evidence-bundle.spec.ts": {
+      "kind": "file",
+      "sha256": "c9423dd6444893890718a1a3e0be3986c57cd225058414a45f4d14e317682a4e"
+    },
+    "backend/src/rag/evidence/evidence-bundle.ts": {
+      "kind": "file",
+      "sha256": "bfc41a58685d38b408149d04e0c726be91198ef4c5471c2a03f5a90ae9117d7d"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "142c06ff5a6c27256519a5daee2f3dc5d50bb824aae142a308bd684bf47399d2"
+    }
+  },
+  "internal_patterns": [
+    "specs/003-unified-rag-evidence-chain/**",
+    "specs/003-unified-rag-evidence-chain/scope-baseline-T002.json"
+  ]
+}

@@ -137,7 +137,17 @@ export class RagAdminController {
   ) {
     if (!file) throw new BadRequestException('file is required');
     const ownerUserId = String(body?.ownerUserId ?? 'admin');
-    return this.ragAdminService.uploadDocument(file, ownerUserId, body);
+    return this.ragAdminService.uploadDocumentAsync(file, ownerUserId, body);
+  }
+
+  @Get('documents/tasks/:taskId')
+  async getDocumentTask(
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId?: string,
+  ) {
+    const task = await this.ragAdminService.getDocumentTask(taskId, ownerUserId ?? 'admin');
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
+    return task;
   }
 
   @Get('documents/search')

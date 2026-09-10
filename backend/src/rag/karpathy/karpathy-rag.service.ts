@@ -33,6 +33,12 @@ import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
 import { GraphService, type GraphFact } from '../../modules/graph/graph.service';
 import { ImageIndexService, type ImageSearchItem } from '../../modules/image-index/image-index.service';
+import {
+  appliesToQuery,
+  createEvidenceBundle,
+  type EvidenceBundle,
+  type EvidenceSourcePolicy,
+} from '../evidence/evidence-bundle';
 
 export interface RetrievedChunk {
   id: string;
@@ -201,11 +207,15 @@ export interface PrefetchedFastPath {
   retrieval: DetailedRetrievalResult;
   obsidianHits: ObsidianSearchHit[];
   badCaseMatches?: BadCaseMatch[];
+  /** 同一原始问题的权威证据结论，禁止下游按改写问题重复否决。 */
+  evidenceBundle?: EvidenceBundle;
 }
 
 export interface RetrieveOptions {
   /** 当前问题只允许使用本地知识库，不调用联网兜底。 */
   knowledgeOnly?: boolean;
+  /** 由语义路由决定的唯一联网授权；未传入时保持旧调用兼容。 */
+  sourcePolicy?: EvidenceSourcePolicy;
   /** 运行中心关联 ID，仅用于把 Agent Loop 事件归入当前 Run。 */
   runtimeRunId?: string;
   vectorSearch?: boolean;
@@ -308,6 +318,8 @@ export class KarpathyRagService implements OnModuleInit {
   private readonly contextBuilder = new ContextBuilder();
   private readonly unsupportedAnswer =
     '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。';
+  private readonly generationUnavailableWithEvidenceAnswer =
+    '已检索到相关资料，但回答生成服务未返回符合引用约束的完整答案。为避免把原始片段误当作结论展示，请稍后重试。';
 
   private getBm25Instance(userId?: string): BM25 {
     const key = userId || 'default';
@@ -1078,10 +1090,15 @@ export class KarpathyRagService implements OnModuleInit {
       badCaseMatches,
       reviewedBaseCaseChunks,
     );
+    const prefetchedBundle = prefetchedFastPath?.evidenceBundle;
+    // Fast Path 与正式回答对同一原问题只能有一份充分性结论。此前这里再次
+    // 用改写后的文本判定，导致搜索命中后仍可能在问答链路被误报资料不足。
     const formalRetrievalGate =
-      retrieval.chunks.length === 0
-        ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-        : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
+      prefetchedBundle && appliesToQuery(prefetchedBundle, query)
+        ? prefetchedBundle.assessment
+        : retrieval.chunks.length === 0
+          ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
+          : this.assessRetrievalQuality(query, retrieval.chunks);
     const chunks = formalRetrievalGate.sufficient
       ? [...retrieval.chunks, ...reviewedBaseCaseChunks]
       : [...reviewedBaseCaseChunks, ...retrieval.chunks];
@@ -1271,52 +1288,85 @@ export class KarpathyRagService implements OnModuleInit {
       rawAnswer += token;
       onToken?.(token);
     }
-    const answer = this.addVersionConflictNotice(rawAnswer, chunks);
+    const answer = this.attachMissingClaimCitations(
+      this.addVersionConflictNotice(rawAnswer, chunks),
+      evidenceChunks,
+    );
     const citationGate = this.assessCitationSupport(answer, evidenceChunks);
     if (!citationGate.sufficient) {
       const synthesizedFallback = await this.synthesizeEvidenceAnswer(
         normalizedQuery,
         evidenceChunks,
       );
-      const fallbackAnswer =
-        synthesizedFallback ??
-        this.buildEvidenceFirstAnswer(
-          normalizedQuery,
-          evidenceChunks,
-          userId,
-          retrieveOptions.scope,
-          retrieveOptions.entities,
-        ) ??
-        this.buildExtractiveAnswer(normalizedQuery, evidenceChunks);
-      if (fallbackAnswer) {
-        const fallbackGate = this.assessCitationSupport(
-          fallbackAnswer,
+      let repairedSynthesis = synthesizedFallback
+        ? this.attachMissingClaimCitations(synthesizedFallback, evidenceChunks)
+        : null;
+      let synthesisGate = repairedSynthesis
+        ? this.assessCitationSupport(repairedSynthesis, evidenceChunks)
+        : null;
+      if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
+        // 首选模型已经在引用门禁失败后进入兜底，不能再接受它刚生成的
+        // “看似有引用但混入证据外事实”的结果；统一交给备用模型重新压缩。
+        try {
+          const qwenSynthesis = await this.llmProvider.runWithModel(
+            'qwen',
+            () => this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
+          );
+          repairedSynthesis = qwenSynthesis
+            ? this.attachMissingClaimCitations(qwenSynthesis, evidenceChunks)
+            : null;
+          synthesisGate = repairedSynthesis
+            ? this.assessCitationSupport(repairedSynthesis, evidenceChunks)
+            : null;
+        } catch (error) {
+          this.logger.warn(
+            `Qwen semantic fallback failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (repairedSynthesis && synthesisGate?.sufficient) {
+        const citedChunks = this.selectCitedChunks(
+          repairedSynthesis,
           evidenceChunks,
         );
-        if (fallbackGate.sufficient) {
-          const citedChunks = this.selectCitedChunks(
-            fallbackAnswer,
-            evidenceChunks,
-          );
-          return {
-            answer: fallbackAnswer,
-            references: this.toReferences(citedChunks),
-            retrievalSufficient: true,
-            retrievalReason: synthesizedFallback
-              ? 'LLM 答案引用不足，已用受约束语义总结重新生成'
-              : 'LLM 答案引用不足，已回退为片段抽取式回答',
-            obsidianPaths: obsidianHits.map((hit) => hit.path),
-            obsidianHits,
-            retrievalDiagnostics: retrieval.diagnostics,
-          };
-        }
+        return {
+          answer: repairedSynthesis,
+          references: this.toReferences(citedChunks),
+          retrievalSufficient: true,
+          retrievalReason: 'LLM 答案引用不足，已用受约束语义总结重新生成',
+          obsidianPaths: obsidianHits.map((hit) => hit.path),
+          obsidianHits,
+          retrievalDiagnostics: retrieval.diagnostics,
+        };
+      }
+      const deterministicFallback = this.buildEvidenceFirstAnswer(
+        normalizedQuery,
+        evidenceChunks,
+        userId,
+        retrieveOptions.scope,
+        retrieveOptions.entities,
+      );
+      if (deterministicFallback) {
+        const citedChunks = this.selectCitedChunks(
+          deterministicFallback,
+          evidenceChunks,
+        );
+        return {
+          answer: deterministicFallback,
+          references: this.toReferences(citedChunks),
+          retrievalSufficient: true,
+          retrievalReason: 'LLM 答案引用不足，已回退为结构化事实回答',
+          obsidianPaths: obsidianHits.map((hit) => hit.path),
+          obsidianHits,
+          retrievalDiagnostics: retrieval.diagnostics,
+        };
       }
 
       return {
-        answer: this.unsupportedAnswer,
+        answer: this.generationUnavailableWithEvidenceAnswer,
         references: [],
         retrievalSufficient: false,
-        retrievalReason: citationGate.reason,
+        retrievalReason: `${citationGate.reason}；受约束语义总结未通过引用门禁，已禁止输出原始片段`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
         retrievalDiagnostics: retrieval.diagnostics,
@@ -1477,21 +1527,39 @@ ${memoryText || '无'}
     const ragGate =
       retrieval.chunks.length === 0
         ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-        : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
+        : this.assessRetrievalQuality(query, retrieval.chunks);
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
       obsidianHits,
     );
 
-    return {
+    const assessment = {
       sufficient:
         baseCaseGate.sufficient ||
         ragGate.sufficient ||
         obsidianGate.sufficient,
       reason: `Base Case: ${baseCaseGate.reason}; RAG: ${ragGate.reason}; Obsidian: ${obsidianGate.reason}`,
+      evaluatedQuery: query,
+    };
+    const evidenceBundle = createEvidenceBundle({
+      query,
       chunks,
+      assessment,
+      sourcePolicy: options.sourcePolicy ?? 'web_allowed',
+      diagnostics: retrieval.diagnostics,
+    });
+
+    return {
+      sufficient: evidenceBundle.assessment.sufficient,
+      reason: evidenceBundle.assessment.reason,
+      chunks: evidenceBundle.chunks,
       obsidianHits,
-      prefetchedFastPath: { retrieval, obsidianHits, badCaseMatches },
+      prefetchedFastPath: {
+        retrieval,
+        obsidianHits,
+        badCaseMatches,
+        evidenceBundle,
+      },
     };
   }
 
@@ -1512,7 +1580,7 @@ ${memoryText || '无'}
     query: string,
     chunks: RetrievedChunk[],
   ): { sufficient: boolean; reason: string } {
-    return this.assessRetrievalQuality(this.normalizeQuery(query), chunks);
+    return this.assessRetrievalQuality(query, chunks);
   }
 
   async retrieveReviewedEvidence(
@@ -1570,6 +1638,11 @@ ${memoryText || '无'}
     chunks: RetrievedChunk[],
   ): { sufficient: boolean; reason: string } {
     return this.assessCitationSupport(answer, chunks);
+  }
+
+  /** 供 Agentic 生成链路复用的统一引用格式修复。 */
+  repairAnswerCitations(answer: string, chunks: RetrievedChunk[]): string {
+    return this.attachMissingClaimCitations(answer, chunks);
   }
 
   /** 只把答案中实际标记的证据返回给界面，候选召回片段不应伪装成已引用资料。 */
@@ -1658,14 +1731,15 @@ ${memoryText || '无'}
       if (!primary || !this.isGovernedDirectAnswerCandidate(query, primary)) {
         return null;
       }
-      const answer =
-        this.buildEvidenceFirstAnswer(
-          query,
-          [primary],
-          userId,
-          scope,
-          entities,
-        ) ?? this.buildExtractiveAnswer(query, [primary]);
+      // 编译知识直答只接受领域结构化事实。不能用原始切片补位，否则一个被
+      // 路由误标为 lookup 的概括问题就会跳过生成链路并把残句展示给用户。
+      const answer = this.buildEvidenceFirstAnswer(
+        query,
+        [primary],
+        userId,
+        scope,
+        entities,
+      );
       if (
         !answer ||
         !this.assessCitationSupport(answer, [primary]).sufficient
@@ -1996,33 +2070,6 @@ ${context}
     return `${answer}\n\n片段中同时提到 ${years} 版本，请注意版本差异并以明确标注优先或生效的版本为准。[片段${index}]`;
   }
 
-  buildExtractiveAnswer(query: string, chunks: RetrievedChunk[]): string {
-    const queryTokens = this.extractQualityTokens(query);
-    const selected: string[] = [];
-
-    chunks.slice(0, 5).forEach((chunk, index) => {
-      const sentences = this.extractEvidenceSentences(chunk.content);
-      const best = sentences
-        .map((sentence) => ({
-          sentence,
-          overlap: this.countTokenOverlap(queryTokens, sentence),
-        }))
-        .filter((item) => item.overlap > 0)
-        .sort((a, b) => b.overlap - a.overlap)
-        .slice(0, 2);
-
-      for (const item of best) {
-        const sentence = item.sentence.replace(/\[片段\s*\d+\]/g, '').trim();
-        if (!sentence || selected.some((line) => line.includes(sentence))) {
-          continue;
-        }
-        selected.push(`${sentence}[片段${index + 1}]`);
-      }
-    });
-
-    return selected.slice(0, 4).join('\n');
-  }
-
   /**
    * LLM 答案未通过引用门禁时，用同一批证据做一次受约束的语义压缩。
    * 这是“不要直接输出检索片段”的最后一道自然语言兜底；
@@ -2059,7 +2106,7 @@ ${evidence}`;
         new Promise<string>((_, reject) =>
           setTimeout(
             () => reject(new Error('Evidence synthesis timeout')),
-            12_000,
+            20_000,
           ),
         ),
       ]);
@@ -2078,12 +2125,12 @@ ${evidence}`;
     chunks: RetrievedChunk[],
     userId?: string,
     scope?: RetrievalScope,
-    entities?: string[],
+    _entities?: string[],
   ): string | null {
-    return (
-      this.buildChapterCharacterAnswer(query, chunks, entities) ??
-      this.buildDeterministicAnswer(query, chunks, userId, scope)
-    );
+    // 直答只能来自可验证的结构化事实。此前针对人物／章回的规则式抽取会把
+    // PDF 切片拼成不完整句子，并在 Auto 链路绕过 LLM 语义总结；因此它不能再
+    // 作为用户可见答案。人物介绍、总结和分析统一进入带引用的生成链路。
+    return this.buildDeterministicAnswer(query, chunks, userId, scope);
   }
 
   private buildDeterministicAnswer(
@@ -2111,121 +2158,6 @@ ${evidence}`;
       if (answer) return answer;
     }
     return null;
-  }
-
-  /**
-   * 对“人物出现在哪一章／做了什么”这类问题优先做证据抽取。
-   * 这类问题通常只需要返回命中的章回和片段中的行为，不应因为资料未覆盖全书而整体拒答。
-   */
-  private buildChapterCharacterAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-    entities?: string[],
-  ): string | null {
-    if (chunks.length === 0) {
-      return null;
-    }
-
-    const person =
-      entities?.find((entity) => entity.length >= 2 && entity.length <= 4) ??
-      query.match(
-        /([\u4e00-\u9fff]{2})(?=(?:在)?(?:第\s*几|[哪那]一|哪几|哪个)\s*(?:章|回)|(?:首次)?出现在|(?:首次)?出现|做了|是谁)/,
-      )?.[1] ??
-      query.match(/(?:里面的|关于|查询|查找)([\u4e00-\u9fff]{2,4})/)?.[1];
-    if (!person) return null;
-
-    // 人物附录／索引常直接给出“在第×回出场，……”的结构化句子。它同时覆盖
-    // 回目和初始事件，优先级必须高于正文中评分更高但只描述后续情节的 Chunk。
-    const appearanceEvidence = chunks
-      .map((chunk, chunkIndex) => ({ chunk, chunkIndex }))
-      .map(({ chunk, chunkIndex }) => {
-        const compact = chunk.content.replace(/\s+/g, ' ');
-        const personIndex = compact.indexOf(person);
-        const match = /在第\s*([一二三四五六七八九十百千万零〇\d]+)回\s*出场[，,。；;]?\s*([^。；;\n]{0,100})/.exec(
-          compact,
-        );
-        if (!match || personIndex < 0) return null;
-        return {
-          chunkIndex,
-          chapter: `第${match[1]}回`,
-          appearance: match[2].trim(),
-          compact,
-        };
-      })
-      .find(
-        (item): item is {
-          chunkIndex: number;
-          chapter: string;
-          appearance: string;
-          compact: string;
-        } => Boolean(item),
-      );
-
-    if (appearanceEvidence) {
-      const marker = `[片段${appearanceEvidence.chunkIndex + 1}]`;
-      const appearance = appearanceEvidence.appearance
-        ? `，${appearanceEvidence.appearance}`
-        : '';
-      // “出场时做了什么”只回答与出场同一句中的动作，不能把人物生平条目
-      // 后续跨回目的事件混为首次出场情节。
-      return `资料库人物条目显示，${person}在${appearanceEvidence.chapter}出场${appearance}。${marker}`;
-    }
-
-    const chapterLines: string[] = [];
-    const behaviorLines: string[] = [];
-    const seenChapters = new Set<string>();
-    const seenBehaviors = new Set<string>();
-
-    chunks.slice(0, 6).forEach((chunk, chunkIndex) => {
-      // 只有 Chunk 开头的回目才可作为后续内容的章节依据。PDF 切块末尾的
-      // “第×回”通常是下一页／下一回的标题，不能误绑给前面的情节。
-      const chapterMatches =
-        chunk.content
-          .slice(0, 180)
-          .match(/第[一二三四五六七八九十百千万零〇\d]+回[^\n。！？]{0,36}/g) ?? [];
-      for (const heading of chapterMatches) {
-        const normalizedHeading = heading.replace(/\s+/g, ' ').trim();
-        if (!seenChapters.has(normalizedHeading)) {
-          seenChapters.add(normalizedHeading);
-          chapterLines.push(`${normalizedHeading}[片段${chunkIndex + 1}]`);
-        }
-      }
-
-      const sentences = chunk.content
-        .split(/[。！？\n]/)
-        .map((sentence) => sentence.replace(/--\s*\d+\s+of\s+\d+\s+--/g, '').replace(/\s+/g, ' ').trim())
-        .filter(
-          (sentence) =>
-            (sentence.includes(person) ||
-              sentence.replace(/\s/g, '').includes(person)) &&
-            sentence.length >= 8,
-        );
-      for (const sentence of sentences.slice(0, 3)) {
-        const compact = sentence.replace(/\s/g, '');
-        const personIndex = compact.indexOf(person);
-        const excerpt =
-          personIndex >= 0 && compact.length > 96
-            ? `${compact.slice(Math.max(0, personIndex - 20), personIndex + 76)}…`
-            : compact;
-        if (!seenBehaviors.has(excerpt)) {
-          seenBehaviors.add(excerpt);
-          behaviorLines.push(`${excerpt}[片段${chunkIndex + 1}]`);
-        }
-      }
-    });
-
-    if (chapterLines.length === 0 && behaviorLines.length === 0) return null;
-
-    return [
-      chapterLines.length > 0
-        ? `资料库当前命中的相关章回：${chapterLines.slice(0, 4).join('；')}`
-        : '资料库片段命中了该人物，但没有保留明确的章回标题。',
-      behaviorLines.length > 0
-        ? `从命中片段可确认的相关情节：${behaviorLines.slice(0, 3).join('；')}`
-        : '当前片段没有足够的行为描述，建议继续缩小到具体章回检索。',
-    ]
-      .filter((line) => /\[片段\s*\d+\]/.test(line))
-      .join('\n');
   }
 
   private buildTravelPolicyVersionAnswer(
@@ -3069,7 +3001,16 @@ ${evidence}`;
       ),
       0,
     );
-    if (maxOverlap < minOverlap) {
+    // 中文没有天然空格，单字／分词重合很容易把「问法」误当成「事实」。
+    // 使用连续 CJK 二元组补充词面诊断，要求至少三个不同二元组，既不依赖
+    // 业务关键词，也不会把只碰巧共享“住宿／报销”之类短语的弱命中放行。
+    const cjkBigramOverlap = Math.max(
+      ...chunks.map((chunk) => this.countCjkBigramOverlap(query, chunk.content)),
+      0,
+    );
+    const hasStrongCjkOverlap = cjkBigramOverlap >= 3;
+    const hasStrongWordOverlap = this.countWordOverlap(query, chunks) >= 2;
+    if (maxOverlap < minOverlap && !hasStrongCjkOverlap && !hasStrongWordOverlap) {
       return {
         sufficient: false,
         reason: `检索片段与问题关键词重合数 ${maxOverlap} 低于阈值 ${minOverlap}`,
@@ -3087,7 +3028,11 @@ ${evidence}`;
       const minPhraseOverlap =
         this.configService.get<number>('ragQuality.minChinesePhraseOverlap') ??
         2;
-      if (maxPhraseOverlap < minPhraseOverlap) {
+      if (
+        maxPhraseOverlap < minPhraseOverlap &&
+        !hasStrongCjkOverlap &&
+        !hasStrongWordOverlap
+      ) {
         return {
           sufficient: false,
           reason: `检索片段与问题中文短语重合数 ${maxPhraseOverlap} 低于阈值 ${minPhraseOverlap}`,
@@ -3148,6 +3093,12 @@ ${evidence}`;
   ): { sufficient: boolean; reason: string } {
     const claims = this.extractClaims(answer);
     for (const claim of claims) {
+      // 标题、列表前言等只承担组织文本的作用，不表达可核验结论。它们通常以
+      // 冒号收尾且没有引用；把它们当事实句会错误否决「前言 + 带引用要点」的
+      // 正常回答。此处只按句法结构豁免，不依赖任何业务词或实体名单。
+      if (this.isCitationFreeLeadIn(claim)) {
+        continue;
+      }
       const claimTokens = this.extractQualityTokens(
         claim.replace(/\[片段\s*\d+\]/g, ''),
       );
@@ -3183,6 +3134,53 @@ ${evidence}`;
     }
 
     return { sufficient: true, reason: '逐句关键结论引用通过' };
+  }
+
+  private isCitationFreeLeadIn(claim: string): boolean {
+    if (this.extractCitedIndexes(claim).size > 0) {
+      return false;
+    }
+    return /[：:]$/.test(claim.trim());
+  }
+
+  /**
+   * 模型偶尔会遗漏引用格式，但答案文本本身仍可能是可读且受证据支撑的总结。
+   * 仅当一条结论与唯一最佳片段有足够覆盖时才补写引用；证据不足不补，仍由
+   * 后续门禁拒绝。这是格式修复，不改变模型的事实表述，也不拼接原始片段。
+   */
+  private attachMissingClaimCitations(
+    answer: string,
+    chunks: RetrievedChunk[],
+  ): string {
+    if (!answer.trim() || chunks.length === 0) return answer;
+    const minCoverage =
+      this.configService.get<number>('ragQuality.minCitationCoverage') ?? 0.15;
+    return answer.replace(
+      /[^。！？!?；;\n]+[。！？!?；;]?(?:\s*\[片段\s*\d+\])*/gu,
+      (claim) => {
+        const trimmed = claim.trim();
+        if (
+          !trimmed ||
+          this.extractCitedIndexes(trimmed).size > 0 ||
+          this.isCitationFreeLeadIn(trimmed)
+        ) {
+          return claim;
+        }
+        const tokens = this.extractQualityTokens(trimmed);
+        if (tokens.size < 2) return claim;
+        const best = chunks
+          .map((chunk, index) => ({
+            index,
+            coverage:
+              this.countTokenOverlap(tokens, chunk.content) / tokens.size,
+          }))
+          .sort((left, right) => right.coverage - left.coverage)[0];
+        if (!best || best.coverage < minCoverage) return claim;
+
+        const suffix = claim.match(/\s*$/u)?.[0] ?? '';
+        return `${claim.slice(0, claim.length - suffix.length)}[片段${best.index + 1}]${suffix}`;
+      },
+    );
   }
 
   private extractClaims(answer: string): string[] {
@@ -3249,6 +3247,42 @@ ${evidence}`;
       if (targetTokens.has(token)) {
         overlap += 1;
       }
+    }
+    return overlap;
+  }
+
+  private countCjkBigramOverlap(query: string, content: string): number {
+    const bigrams = (value: string): Set<string> => {
+      const characters = value.match(/[\p{Script=Han}]/gu) ?? [];
+      const result = new Set<string>();
+      for (let index = 0; index < characters.length - 1; index += 1) {
+        result.add(`${characters[index]}${characters[index + 1]}`);
+      }
+      return result;
+    };
+    const queryBigrams = bigrams(query);
+    const contentBigrams = bigrams(content);
+    let overlap = 0;
+    for (const bigram of queryBigrams) {
+      if (contentBigrams.has(bigram)) overlap += 1;
+    }
+    return overlap;
+  }
+
+  private countWordOverlap(query: string, chunks: RetrievedChunk[]): number {
+    const words = (value: string) =>
+      new Set(
+        (value.toLowerCase().match(/[a-z0-9][a-z0-9_-]+/g) ?? []).filter(
+          (word) => word.length > 1,
+        ),
+      );
+    const queryWords = words(query);
+    const contentWords = new Set(
+      chunks.flatMap((chunk) => [...words(chunk.content)]),
+    );
+    let overlap = 0;
+    for (const word of queryWords) {
+      if (contentWords.has(word)) overlap += 1;
     }
     return overlap;
   }

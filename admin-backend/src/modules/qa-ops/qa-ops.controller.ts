@@ -367,7 +367,12 @@ export class QaOpsController {
   private getUserId(req: Request) {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;
-    return String(user?.userId ?? user?.sub ?? "admin-backend");
+    return String(
+      user?.userId ??
+        user?.sub ??
+        process.env.RAG_ADMIN_USER_ID ??
+        "1"
+    );
   }
 
   private requireAvailable(result: { available: boolean; status: number | null; error?: string }) {

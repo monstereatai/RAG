@@ -33,6 +33,8 @@ import {
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ImageIndexService } from '../image-index/image-index.service';
 import { detectDocumentKind, extractDocumentText } from '../document/document-parser.util';
+import { DocumentQueueService } from '../document/document-queue.service';
+import type { DocumentBusinessMetadata } from '../document/document-profile.util';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -115,6 +117,7 @@ export class RagAdminService {
   constructor(
     private readonly configService: ConfigService,
     private readonly documentService: DocumentService,
+    private readonly documentQueue: DocumentQueueService,
     private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
     private readonly graphService: GraphService,
     private readonly conversationService: ConversationService,
@@ -156,6 +159,38 @@ export class RagAdminService {
       contentType: file.mimetype,
       businessMetadata: businessMetadata as any,
     });
+  }
+
+  async uploadDocumentAsync(
+    file: Express.Multer.File,
+    userId: string,
+    fields: Record<string, unknown> = {},
+  ) {
+    if (!this.documentQueue.enabled) {
+      return this.uploadDocument(file, userId, fields);
+    }
+    const task = await this.documentService.createQueuedTask(file.originalname, userId);
+    const businessMetadata = { ...fields } as Record<string, unknown>;
+    delete businessMetadata.ownerUserId;
+    await this.documentQueue.enqueue({
+      taskId: task.id,
+      userId,
+      filename: file.originalname,
+      originalBufferBase64: file.buffer.toString('base64'),
+      contentType: file.mimetype,
+      businessMetadata: businessMetadata as DocumentBusinessMetadata,
+    });
+    return {
+      taskId: task.id,
+      status: task.status,
+      stage: task.stage,
+      progress: task.progress,
+      queueEnabled: true,
+    };
+  }
+
+  getDocumentTask(taskId: string, userId: string) {
+    return this.documentService.getTask(taskId, userId);
   }
 
   // ─── Capabilities ───────────────────────────────────────────

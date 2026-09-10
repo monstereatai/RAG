@@ -1,0 +1,23 @@
+{
+  "base_commit": "9046847a85bc52ee14fb59e85f9b477089f38d59",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-unified-rag-evidence-chain/scope-baseline-T001.json",
+  "new_files": [
+    "backend/src/rag/evidence/evidence-bundle.spec.ts",
+    "backend/src/rag/evidence/evidence-bundle.ts"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "backend/src/rag/evidence/evidence-bundle.spec.ts",
+    "backend/src/rag/evidence/evidence-bundle.ts"
+  ],
+  "allow_patterns": [
+    "backend/src/rag/evidence/evidence-bundle.ts",
+    "backend/src/rag/evidence/evidence-bundle.spec.ts"
+  ],
+  "internal_patterns": [
+    "specs/003-unified-rag-evidence-chain/**",
+    "specs/003-unified-rag-evidence-chain/scope-baseline-T001.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

@@ -126,6 +126,12 @@ export class AdminDocumentsController {
     return this.ragClient.getFailedDocumentTasks();
   }
 
+  @Get('tasks/:taskId')
+  @RequirePermission('admin:documents:read')
+  task(@Param('taskId') taskId: string, @Req() req: { user?: { userId?: string; sub?: string } }) {
+    return this.ragClient.getDocumentTask(taskId, req.user?.userId ?? req.user?.sub ?? 'admin');
+  }
+
   @Post('tasks/:taskId/retry')
   @AuditLog('documents', 'retry-failed-task')
   @RequirePermission('admin:documents:write')

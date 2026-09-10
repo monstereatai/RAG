@@ -864,6 +864,12 @@ export class RagClientService {
     );
   }
 
+  getDocumentTask(taskId: string, ownerUserId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents/tasks/${encodeURIComponent(taskId)}?ownerUserId=${encodeURIComponent(ownerUserId)}`,
+    );
+  }
+
   async getJson<T>(
     path: string,
     timeoutMs = this.timeoutMs,

@@ -96,7 +96,7 @@ describe('AgenticRagService budget boundaries', () => {
       }
     ).normalizeQueries('原始问题', ['问题 A', '问题 B', '问题 C']);
 
-    expect(result).toEqual(['问题 A', '问题 B']);
+    expect(result).toEqual(['原始问题', '原始问题']);
   });
 
   it('does not force overly long complex auto queries to simple mode', () => {
@@ -351,6 +351,46 @@ describe('AgenticRagService budget boundaries', () => {
       'c1',
       'c2',
     ]);
+  });
+
+  it('does not reject a sufficient original evidence bundle after planning one subquestion', async () => {
+    const { service, karpathyRagService } = createService();
+    const evidence = chunk('c1', 0.9);
+
+    const result = await service.sufficiencyNode(
+      {
+        query: '资料库当中，帮我总结李逵',
+        retrievedChunks: [evidence],
+        subQuestions: [
+          {
+            id: 'subq-1',
+            question: '李逵的资料总结',
+            dependsOn: [],
+            status: 'retrieved',
+            evidenceIds: ['c1'],
+            retrievalAttempts: 1,
+            sufficient: false,
+            reason: '',
+          },
+        ],
+      } as unknown as AgenticRagStateType,
+      {
+        configurable: {
+          fastPathBundle: {
+            query: '资料库当中，帮我总结李逵',
+            chunks: [evidence],
+            sourcePolicy: 'local_only',
+            assessment: {
+              sufficient: true,
+              reason: '重排语义相关度通过阈值',
+              evaluatedQuery: '资料库当中，帮我总结李逵',
+            },
+          },
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ retrievalSufficient: true });
   });
 
   it('blocks reflection when the answer contract is invalid', async () => {

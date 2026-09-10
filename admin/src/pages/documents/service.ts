@@ -95,6 +95,10 @@ export async function uploadDocument(file: File) {
   });
 }
 
+export async function getDocumentTask(taskId: string) {
+  return authRequest<Record<string, unknown>>(`/api/admin/documents/tasks/${encodeURIComponent(taskId)}`);
+}
+
 export async function getUsers() {
   return authRequest<any>('/api/admin/users');
 }

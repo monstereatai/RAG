@@ -48,7 +48,36 @@
 
 ## 当前结论
 
-- **已修复“独立搜索命中、Agentic 问答误报资料不足”（2026-09-10）**：检索充分性门禁改为优先使用 Rerank 的 query－片段语义相关度；仅在没有重排结果时才回退词面重合判断，避免把用户的操作性表达误当作原文必须包含的事实。新增 `RAG_MIN_RERANK_SCORE`（默认 `0.65`）和回归测试。真实回放「资料库当中，帮我总结下李逵」命中两段本地资料（重排分 `0.779`／`0.759`），生成带片段引用的总结且未触发联网；Backend build 通过。Karpathy 全量定向套件仍有 3 条既有引用降级测试失败，已明确记录为独立测试债务。
+- **已明确系统配置持久化边界并补齐证据链验证（2026-09-10）**：系统配置接口现在显式标记 `persisted: false`，管理后台以只读方式展示环境变量／启动默认值，更新接口返回 409，不再误报“保存成功”；真正持久化需后续单独设计数据库 schema。查询路由离线评测 12/12 通过（accuracy、localSafety、publicDirectPrecision 均为 1），`EvidenceBundle`、路由和核心 RAG 代码已纳入统一证据快照。Admin Backend、Admin build 与 `git diff --check` 通过；定向 Jest 受 workspace Jest 29／30 运行时兼容错误 `clearMocksOnScope` 阻断。当前 3001 管理后台仍在监听，RAG Backend 因本机 PostgreSQL 5432／Redis 6379 未启动无法完成真实端到端验证。
+
+- **已接入管理后台异步文档任务（2026-09-10）**：RAG Admin 上传路由在 Redis 队列启用时立即创建并返回 `taskId`，Admin Backend 新增任务状态代理，前端轮询完成／失败后刷新文档列表；队列未启用时保留同步降级。上传接口同时使用 10 分钟专用转发和熔断超时，避免大文件被普通 2／5 秒超时截断。Backend、Admin Backend、Admin build 与 `git diff --check` 通过；本机当前 PostgreSQL／Redis 未运行，无法完成真实队列端到端验证。
+- **已收紧 Admin JWT 生产密钥门禁（2026-09-10）**：`NODE_ENV=production` 且未配置 `JWT_SECRET` 时 Admin Backend 启动直接失败，不再静默使用开发默认密钥；开发环境行为保持不变。Admin Backend build 通过。
+
+- **已修正管理后台上传熔断超时（2026-09-10）**：文档上传请求不再套用普通 API 的 5 秒 Circuit Breaker 超时，改为 10 分钟专用上限，与 RAG Client 的长耗时转发保持一致，避免大 PDF 在解析／向量化期间被网关提前截断。
+
+- 已新增 BOSS 直聘 20K＋AI Agent／AI 应用开发岗位调研与面试指南（2026-09-10）：归纳岗位样本、能力要求、掌握程度、核心知识点与 10 个场景化面试回答；另新增来源标注版 42 题高频题库，覆盖 RAG、Agent、MCP、记忆、工程化、评测与生产边界，并明确当前项目可讲能力与生产边界。
+
+- **已归档 BOSS 通用全栈 20K＋岗位与面试材料（2026-09-10）**：新增 `docs/BOSS_FULLSTACK_20K_PLUS.md`，与 AI Agent 岗材料独立。基于 BOSS 公开职位集合页按月薪下限 ≥20K 筛出 12 个全栈样本，逐条保留岗位要求与链接；合并为前端体验、服务端接口、数据缓存、高并发异步、权限安全、工程交付和架构业务判断七类能力，并给出 20–30K／30K＋掌握标准、P0～P2 知识点与 60 道五段式问题答案。明确排除了仅薪资上限达到 20K 的职位。Markdown 内容和链接格式检查通过。
+
+- **已归档 BOSS AI Agent 全栈 20K＋岗位检索（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_20K_PLUS.md`，基于 BOSS 公开职位集合页整理 12 条薪资下限 ≥20K 的 Agent／AI 应用全栈样本，保留岗位、薪资、地点、经验学历、可核验 JD 要求与原始链接；归纳全栈产品交付、LLM／RAG、Agent 工程、平台治理四类能力，明确平台型与应用型岗位的差异，并排除仅薪资上限达到 20K 的职位。文档链接与内容检查通过。
+
+- **已生成 AI Agent 全栈岗位考察知识点（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_KNOWLEDGE.md`，将岗位要求合并为前端 AI 交互、后端与多租户、模型与结构化输出、RAG、Agent／MCP、任务恢复、评测观测、部署与业务交付 16 个能力模块；按 20–30K、30–40K、40K＋给出熟练／可主导的掌握标准、26 道高频面试题、三档验收任务和 P0／P1／P2 复习优先级。文档检查通过。
+
+- **已生成 AI Agent 全栈问题式面试指南（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_GUIDE.md`，按「一个知识点＝一个核心问题＋追问＋项目口述答案」组织 **60 道**高频题：前 16 题为知识域主问题，后 44 题覆盖实现细节、方案取舍、故障排查、治理与业务判断；每题均用背景、问题、主流方案、项目选择、效果与边界展开，避免框架名堆砌，并提供题目索引方便逐题练习。Markdown 检查通过。
+
+- **已更新功能步骤流程文档（2026-09-10）**：`docs/interview/功能步骤流程.md` 补充管理后台文件上传的 FormData、Admin Backend 鉴权与归属用户、RAG 内部解析入库、列表刷新和最新排序流程，并明确大文件 10 分钟专用超时与同步入库边界。
+
+- **已收紧公司与研发流程路由边界（2026-09-10）**：新增公司、项目、研发流程、开发／发布流程等本地业务 Few-shot，并在路由归一化层建立来源策略安全边界：命中内部业务语义时强制 `local_only + retrieve + needsSynthesis`，不会因问题短或模型误判而直答；公共概念仍走 direct answer。路由测试 9/9、Backend build、`git diff --check` 通过，已重启本地 Backend。
+
+- **已修复公共裸主题误进 RAG（2026-09-10）**：补充公共定义与裸主题 Few-shot 边界，并增加不依赖具体词汇的结构性收敛：无私域实体的定义句或单独主题名默认按公共知识直答；带公司、项目、资料上下文或明确实体时仍走本地检索。修正 Agentic 公共直答分支，使 `sourcePolicy=direct_answer` 的公共知识不再因置信度阈值二次落入 RAG。真实回放「小红书是什么」和「小红书」均返回无引用的公共知识回答，未读取知识库、未联网；路由测试 8/8、Backend build、`git diff --check` 通过。
+
+- **已修复 DeepSeek 生成空结果导致资料库问答无内容（2026-09-10）**：真实管理后台 AG-UI 回放「资料库当中，帮我总结下李逵是谁，干了什么」已确认本地检索命中 2 个片段，但 DeepSeek 首次生成未通过引用门禁。现由 Karpathy 与 Agentic 两条生成路径共享受约束语义总结，并在首选模型未通过门禁或超时后切换 Qwen 重试同一批证据，超时窗口统一提升至 20 秒；不再返回空白或原始残片。真实 DeepSeek 请求返回完整中文摘要、2 条本地引用、`retrievalSufficient=true`，未触发联网。Backend／Admin Backend build 通过，证据链、Karpathy、Agentic、路由定向测试 53/53 通过；Jest 仍有既有异步句柄未关闭提示，不影响测试结果。
+
+- **已修复 Auto 链路把检索残片当回答（2026-09-10）**：移除了人物／章回的规则式正文拼接和受治理直答中的原文片段补位。非明确结构化业务事实即使被路由误判为 lookup，也必须进入完整的 LLM 证据生成与逐句引用校验；生成或二次受约束摘要均不合格时，返回明确的可重试提示，不再把 PDF 原始句子伪装成结论。模型遗漏引用格式时，仅在结论与唯一最佳证据片段覆盖度达到门槛后自动补上引用，无法支撑则仍拒绝。新增回归覆盖：文学正文不能走 Karpathy 直答、无引用回答的安全引用修复、半引用回答禁止片段泄露、带冒号的结构性前言不误判为事实。Karpathy、Agentic、路由与 EvidenceBundle 定向测试 53/53 通过，Backend build 与 `git diff --check` 通过；重启本地 Backend 后真实 Auto 回放「资料库当中，帮我总结下李逵是谁，干了什么」返回完整摘要、2 条本地引用、`retrievalSufficient=true`、`route=simple`，未触发联网。
+
+- **已完成统一 RAG 证据链重构（2026-09-10）**：新增请求级 `EvidenceBundle`，将原始问题、去重后的本地证据、充分性结论、来源策略和检索诊断作为唯一权威快照。Karpathy Fast Path、Simple／Auto 与 Agentic 共享此快照；单问题的 Agent 规划不再以改写子问题推翻已通过的原问题证据。`local_only` 现在同时在 Karpathy 与 Agentic 联网入口强制拦截。回答生成未通过引用门禁时，先做受约束语义摘要；仅可验证的结构化业务事实允许确定性直答，其余场景宁可返回生成重试提示也不输出候选原文片段。路由生产路径及离线评测脚本均移除了正则关键词分流，改为 LLM Few-shot 结构化策略契约与低置信度本地收敛。Backend build；EvidenceBundle 3/3、Karpathy 29/29、Agentic 13/13、Router 6/6 定向测试及路由评测 12/12 通过。重启本地后端后，以真实鉴权请求验证 `/api/v1/rag/search` 查询「李逵」返回 2 条本地证据、Rerank `0.830`；以 `agentic` Chat 查询「资料库当中，帮我总结李逵」返回 `retrievalSufficient=true`、2 条本地引用和完整摘要。用户运行时索引文件未纳入本次修改。
+
+- **已修复“独立搜索命中、Agentic 问答误报资料不足”（2026-09-10）**：检索充分性门禁优先使用 Rerank 的 query－片段语义相关度；仅在没有重排结果时回退多语言词面诊断。新增 `RAG_MIN_RERANK_SCORE`（默认 `0.65`）和回归测试。真实回放「资料库当中，帮我总结下李逵」命中两段本地资料（重排分 `0.779`／`0.759`），生成带片段引用的总结且未触发联网；后续统一证据链已消除 Agent 二次否决，Karpathy 29/29 定向测试通过。
 
 - **已修复 QA Ops 会话与插件接口 502（2026-09-10）**：Admin Backend 的 `GET /api/admin/qa-ops/conversations` 和 `GET /api/admin/qa-ops/plugins` 改为稳定只读契约；RAG Backend 暂时不可达时返回 HTTP 200、空数据及 `available/status/error`，恢复后自动返回真实数据，不再把上游连接故障升级为页面 502。已重启 RAG/Admin Backend，直连上游会话与插件接口均返回 200；Admin Backend build 与 QA Ops 定向测试 13/13 通过。
 

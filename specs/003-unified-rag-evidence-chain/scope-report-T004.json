@@ -1,0 +1,29 @@
+{
+  "base_commit": "9046847a85bc52ee14fb59e85f9b477089f38d59",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-unified-rag-evidence-chain/scope-baseline-T004.json",
+  "new_files": [
+    "backend/eval/query-routing.dataset.json",
+    "backend/scripts/eval-query-routing.mjs",
+    "backend/src/rag/prompts/query-intent-router.spec.ts",
+    "backend/src/rag/prompts/query-intent-router.ts"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "backend/eval/query-routing.dataset.json",
+    "backend/scripts/eval-query-routing.mjs",
+    "backend/src/rag/prompts/query-intent-router.spec.ts",
+    "backend/src/rag/prompts/query-intent-router.ts"
+  ],
+  "allow_patterns": [
+    "backend/src/rag/prompts/query-intent-router.ts",
+    "backend/src/rag/prompts/query-intent-router.spec.ts",
+    "backend/eval/query-routing.dataset.json",
+    "backend/scripts/eval-query-routing.mjs"
+  ],
+  "internal_patterns": [
+    "specs/003-unified-rag-evidence-chain/**",
+    "specs/003-unified-rag-evidence-chain/scope-baseline-T004.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

@@ -158,6 +158,11 @@ describe('KarpathyRagService exception scenarios', () => {
       sourceAuthority: 'reviewed_bad_case',
     });
     expect(result.prefetchedFastPath.badCaseMatches).toHaveLength(1);
+    expect(result.prefetchedFastPath.evidenceBundle).toMatchObject({
+      query: '韦水春是谁',
+      sourcePolicy: 'web_allowed',
+      assessment: { sufficient: true, evaluatedQuery: '韦水春是谁' },
+    });
     expect(result.reason).toContain('Base Case:');
   });
 
@@ -355,8 +360,9 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.retrievalSufficient).toBe(true);
   });
 
-  it('受治理 Karpathy 精确命中时直接抽取回答，不调用向量库或 LLM', async () => {
+  it('非结构化片段命中不绕过完整生成链路', async () => {
     const { service, llmInvoke, vectorStoreProvider } = createService();
+    llmInvoke.mockResolvedValue('活动 ID ACT100 的状态是已上线。[片段1]');
     service.indexChunks(
       [
         {
@@ -383,9 +389,9 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.answer).toContain('活动 ID ACT100 的状态是已上线');
-    expect(result.retrievalReason).toContain('受治理 Karpathy 编译知识');
-    expect(vectorStoreProvider.similaritySearch).not.toHaveBeenCalled();
-    expect(llmInvoke).not.toHaveBeenCalled();
+    expect(result.retrievalReason).toContain('检索片段和答案引用通过');
+    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(llmInvoke).toHaveBeenCalled();
   });
 
   it('缺少版本元数据的 Karpathy 知识不能绕过检索与生成门禁', async () => {
@@ -437,14 +443,14 @@ describe('KarpathyRagService exception scenarios', () => {
       service.answer('LangChain RAG', [], 'user-1'),
     ).resolves.toMatchObject({
       answer:
-        '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
+        '已检索到相关资料，但回答生成服务未返回符合引用约束的完整答案。为避免把原始片段误当作结论展示，请稍后重试。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason: '答案缺少显式片段引用',
+      retrievalReason: expect.stringContaining('已禁止输出原始片段'),
     });
   });
 
-  it('falls back to extractive cited answer when the LLM answer has no citations', async () => {
+  it('repairs a missing citation when the generated claim is supported', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('引用来源可以降低幻觉风险。');
     service.indexChunks(
@@ -467,14 +473,14 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result).toMatchObject({
+      answer: '引用来源可以降低幻觉风险。[片段1]',
       retrievalSufficient: true,
-      retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+      retrievalReason: '检索片段和答案引用通过本地质量闸门',
     });
-    expect(result.answer).toContain('引用来源可以降低幻觉风险');
-    expect(result.answer).toContain('[片段1]');
+    expect(result.references).toHaveLength(1);
   });
 
-  it('falls back to extractive answer when a later claim is not cited', async () => {
+  it('does not expose raw evidence when a later claim is not cited', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       'LangChain 用于构建 RAG 应用。[片段1] 它还能自动处理所有权限审批。',
@@ -494,11 +500,46 @@ describe('KarpathyRagService exception scenarios', () => {
     const result = await service.answer('LangChain RAG', [], 'user-1');
 
     expect(result).toMatchObject({
-      retrievalSufficient: true,
-      retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
+      retrievalSufficient: false,
+      retrievalReason: expect.stringContaining('已禁止输出原始片段'),
     });
-    expect(result.answer).toContain('LangChain builds RAG applications');
-    expect(result.answer).not.toContain('权限审批');
+    expect(result.answer).toContain('回答生成服务未返回');
+    expect(result.answer).not.toContain('LangChain builds RAG applications');
+  });
+
+  it('never exposes a literary chunk as a Karpathy direct answer', async () => {
+    const { service } = createService();
+    const internal = service as unknown as {
+      retrieveBm25Only: jest.Mock;
+      tryKarpathyDirectAnswer: (
+        query: string,
+        userId?: string,
+        scope?: unknown,
+        entities?: string[],
+      ) => Promise<unknown>;
+    };
+    jest
+      .spyOn(internal, 'retrieveBm25Only')
+      .mockResolvedValue([
+        {
+          id: 'water-margin-1',
+          docId: 'water-margin',
+          chunkIndex: 1,
+          content: '行不得一日，正走之间，官道旁边只见走过一条大汉，李逵见那人看他。',
+          lifecycleStatus: 'effective',
+          sourceAuthority: 'uploaded_document',
+          docVersion: 'v1',
+        },
+      ]);
+
+    const direct = await internal.tryKarpathyDirectAnswer(
+      '李逵是谁',
+      'user-1',
+      undefined,
+      ['李逵'],
+    );
+
+    expect(direct).toBeNull();
   });
 
   it('accepts multi-claim answers when every claim has support citations', async () => {
@@ -522,6 +563,25 @@ describe('KarpathyRagService exception scenarios', () => {
 
     expect(result.retrievalSufficient).toBe(true);
     expect(result.references).toHaveLength(1);
+  });
+
+  it('accepts an uncited structural lead-in before cited conclusions', () => {
+    const { service } = createService();
+    const gate = service.validateAnswerCitationSupport(
+      '根据检索证据，可归纳为：\n模块 A 负责处理请求。[片段1]',
+      [
+        {
+          id: 'chunk-1',
+          docId: 'doc-1',
+          chunkIndex: 0,
+          content: '模块 A 负责处理请求。',
+        },
+      ],
+    );
+
+    expect(gate).toEqual(
+      expect.objectContaining({ sufficient: true }),
+    );
   });
 
   it('adds a cited version conflict notice when retrieved chunks contain multiple versions', async () => {

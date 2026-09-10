@@ -3,9 +3,9 @@ import {
   ProForm,
   ProFormText,
 } from '@ant-design/pro-components';
-import { Button, Card, Empty, message, Result } from 'antd';
+import { Alert, Button, Card, Empty, Result } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
-import { getConfigs, type SystemConfig, updateConfig } from './service';
+import { getConfigs, type SystemConfig } from './service';
 import { ModulePage, systemNav } from '@/components/AdminShell';
 
 type PageState = 'loading' | 'data' | 'error' | 'empty';
@@ -83,16 +83,7 @@ const SystemConfigPage: React.FC = () => {
             style={{ marginBottom: 24 }}
           >
             <ProForm
-              submitter={{ searchConfig: { submitText: '保存配置' } }}
-              onFinish={async (values) => {
-                for (const [key, value] of Object.entries(values)) {
-                  if (value !== undefined) {
-                    await updateConfig(key, value as string);
-                  }
-                }
-                message.success('配置已保存');
-                return true;
-              }}
+              submitter={false}
               initialValues={Object.fromEntries(
                 items.map((c) => [c.key, c.value]),
               )}
@@ -103,8 +94,10 @@ const SystemConfigPage: React.FC = () => {
                   name={c.key}
                   label={c.key}
                   tooltip={c.description}
+                  disabled
                 />
               ))}
+              <Alert type="info" showIcon message="当前配置为只读状态" description="配置来自环境变量或启动默认值，修改环境变量并重启对应服务后生效；后台暂不提供持久化保存。" />
             </ProForm>
           </Card>
         ));

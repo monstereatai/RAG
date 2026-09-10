@@ -67,6 +67,10 @@ import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 import { QueryIntentRouter } from '../prompts/query-intent-router';
 import { filterSemanticQueries } from '../prompts/query-similarity';
 import type { QueryIntent } from '../prompts/query-intent-router';
+import {
+  appliesToQuery,
+  type EvidenceBundle,
+} from '../evidence/evidence-bundle';
 
 /**
  * 深度问答的 LangGraph 状态机。
@@ -449,7 +453,7 @@ export class AgenticRagService {
           const retrievalQueries = this.buildRetrievalQueries(
             q,
             state.query,
-            state.augmentedQueries,
+            fastPathChunks.length > 0 ? [] : state.augmentedQueries,
             index,
           );
           const resultGroups = await Promise.all(
@@ -610,6 +614,41 @@ export class AgenticRagService {
           state.augmentedQueries,
           this.getSubQuestionLimit(config),
         );
+    const fastPathBundle = config?.configurable
+      ?.fastPathBundle as EvidenceBundle | undefined;
+    // 对单一原问题，Fast Path 已经完成了权限过滤、混合检索和语义充分性判断。
+    // Agentic 的“拆题”只是执行细节，不能使用不同问法把该结论推翻。
+    if (
+      fastPathBundle &&
+      appliesToQuery(fastPathBundle, state.query) &&
+      fastPathBundle.assessment.sufficient &&
+      subQuestions.length <= 1
+    ) {
+      const reason = `复用统一证据包：${fastPathBundle.assessment.reason}`;
+      const resolvedSubQuestions = subQuestions.map((subQuestion) => ({
+        ...subQuestion,
+        sufficient: true,
+        status: 'sufficient' as const,
+        reason,
+        evidenceIds:
+          subQuestion.evidenceIds.length > 0
+            ? subQuestion.evidenceIds
+            : fastPathBundle.chunks.map((chunk) => chunk.id),
+      }));
+      onEvent?.({
+        type: 'sufficiency',
+        data: { sufficient: true, reason, evidenceBundle: true },
+      });
+      return {
+        retrievedChunks:
+          state.retrievedChunks.length > 0
+            ? state.retrievedChunks
+            : fastPathBundle.chunks,
+        retrievalSufficient: true,
+        retrievalReason: reason,
+        subQuestions: resolvedSubQuestions,
+      };
+    }
     const chunksById = new Map(
       state.retrievedChunks.map((chunk) => [chunk.id, chunk]),
     );
@@ -746,7 +785,10 @@ export class AgenticRagService {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const retrieveOptions = (config?.configurable?.retrieveOptions ??
       {}) as RetrieveOptions;
-    if (retrieveOptions.knowledgeOnly) {
+    if (
+      retrieveOptions.knowledgeOnly ||
+      retrieveOptions.sourcePolicy !== 'web_allowed'
+    ) {
       const reason = `${state.retrievalReason || '本地检索不足'}；当前问题限定使用资料库，已跳过联网搜索`;
       onEvent?.({
         type: 'web_search',
@@ -1123,8 +1165,28 @@ export class AgenticRagService {
                 draft += token;
                 onEvent?.({ type: 'token', data: token });
               }
-              return this.karpathyRagService.addVersionConflictNotice(
-                draft,
+              // 某些模型配置可建立连接但返回空内容；不能把这种空结果直接
+              // 交给引用门禁，否则用户只会看到“生成失败”。用默认 Qwen
+              // 复用同一批证据重试一次，仍失败再进入安全降级。
+              if (!draft.trim() && this.llmProvider.getActiveProviderName() !== 'qwen') {
+                const fallbackModel = this.llmProvider.getModel('qwen');
+                for await (const chunk of await fallbackModel.stream(messages)) {
+                  const token =
+                    typeof chunk.content === 'string'
+                      ? chunk.content
+                      : JSON.stringify(chunk.content);
+                  if (!token) continue;
+                  draft += token;
+                  onEvent?.({ type: 'token', data: token });
+                }
+              }
+              const withVersionNotice =
+                this.karpathyRagService.addVersionConflictNotice(
+                  draft,
+                  state.retrievedChunks,
+                );
+              return this.karpathyRagService.repairAnswerCitations(
+                withVersionNotice,
                 state.retrievedChunks,
               );
             },
@@ -1176,37 +1238,75 @@ export class AgenticRagService {
         state.query,
         state.retrievedChunks,
       );
-      if (fallbackAnswer) {
-        const fallbackGate =
-          this.karpathyRagService.validateAnswerCitationSupport(
+      let repairedFallbackAnswer = fallbackAnswer
+        ? this.karpathyRagService.repairAnswerCitations(
             fallbackAnswer,
             state.retrievedChunks,
-        );
-        if (fallbackGate.sufficient) {
-          const citedChunks = this.karpathyRagService.selectCitedChunks(
-            fallbackAnswer,
+          )
+        : null;
+      let fallbackGate = repairedFallbackAnswer
+        ? this.karpathyRagService.validateAnswerCitationSupport(
+            repairedFallbackAnswer,
             state.retrievedChunks,
+          )
+        : null;
+
+      // DeepSeek 在部分本地配置下会返回非空但不可引用的短句；这不是证据不足，
+      // 而是生成器结果不可用。此时必须显式切换到 Qwen 重新做同一批证据的语义总结，
+      // 不能把“引用门禁失败”直接暴露给用户。
+      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
+        // 首选模型已经未通过引用门禁，不能继续接受其可能混入证据外事实的
+        // 语义总结；统一切换备用模型重新压缩同一批证据。
+        try {
+          const qwenAnswer = await this.llmProvider.runWithModel('qwen', () =>
+            this.synthesizeEvidenceAnswer(
+              state.query,
+              state.retrievedChunks,
+            ),
           );
-          onEvent?.({ type: 'token', data: fallbackAnswer });
-          onEvent?.({ type: 'citation', data: citedChunks });
-          const artifacts = this.withAnswerArtifact(
-            state,
-            fallbackAnswer,
-            true,
-            this.getSubQuestionCoverage(state),
-            '抽取式答案通过引用校验',
+          repairedFallbackAnswer = qwenAnswer
+            ? this.karpathyRagService.repairAnswerCitations(
+                qwenAnswer,
+                state.retrievedChunks,
+              )
+            : null;
+          fallbackGate = repairedFallbackAnswer
+            ? this.karpathyRagService.validateAnswerCitationSupport(
+                repairedFallbackAnswer,
+                state.retrievedChunks,
+              )
+            : null;
+        } catch (error) {
+          this.logger.warn(
+            `Qwen semantic fallback failed: ${(error as Error).message}`,
           );
-          onEvent?.({
-            type: 'artifact',
-            data: artifacts[artifacts.length - 1],
-          });
-          return {
-            answer: fallbackAnswer,
-            retrievalSufficient: true,
-            retrievalReason: 'LLM 答案引用不足，已回退为片段抽取式回答',
-            artifacts,
-          };
         }
+      }
+
+      if (repairedFallbackAnswer && fallbackGate?.sufficient) {
+        const citedChunks = this.karpathyRagService.selectCitedChunks(
+          repairedFallbackAnswer,
+          state.retrievedChunks,
+        );
+        onEvent?.({ type: 'token', data: repairedFallbackAnswer });
+        onEvent?.({ type: 'citation', data: citedChunks });
+        const artifacts = this.withAnswerArtifact(
+          state,
+          repairedFallbackAnswer,
+          true,
+          this.getSubQuestionCoverage(state),
+          '证据语义总结通过引用校验',
+        );
+        onEvent?.({
+          type: 'artifact',
+          data: artifacts[artifacts.length - 1],
+        });
+        return {
+          answer: repairedFallbackAnswer,
+          retrievalSufficient: true,
+          retrievalReason: '首选模型答案不可用，已切换备用模型完成证据总结',
+          artifacts,
+        };
       }
 
       const safeAnswer = this.karpathyRagService.unsupportedReliableAnswer();
@@ -1254,19 +1354,46 @@ export class AgenticRagService {
           `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
       )
       .join('\n\n');
+    const prompt =
+      `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
     try {
       const answer = await this.withTimeout(
-        this.llmProvider.invoke(
-          `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`,
-        ),
-        12_000,
+        this.llmProvider.invoke(prompt),
+        20_000,
         'Evidence synthesis fallback',
       );
-      return answer.trim() || null;
+      if (answer.trim()) return answer.trim();
+      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
+        const fallback = await this.withTimeout(
+          this.llmProvider.runWithModel('qwen', () =>
+            this.llmProvider.invoke(prompt),
+          ),
+          20_000,
+          'Qwen evidence synthesis fallback',
+        );
+        return fallback.trim() || null;
+      }
+      return null;
     } catch (error) {
       this.logger.warn(
         `Evidence synthesis fallback failed: ${(error as Error).message}`,
       );
+      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
+        try {
+          const fallback = await this.withTimeout(
+            this.llmProvider.runWithModel('qwen', () =>
+              this.llmProvider.invoke(prompt),
+            ),
+            20_000,
+            'Qwen evidence synthesis fallback',
+          );
+          return fallback.trim() || null;
+        } catch (fallbackError) {
+          this.logger.warn(
+            `Qwen evidence synthesis fallback failed: ${(fallbackError as Error).message}`,
+          );
+        }
+      }
       return null;
     }
   }
@@ -1713,6 +1840,7 @@ export class AgenticRagService {
     };
     retrieveOptions.knowledgeOnly =
       queryIntent.sourcePolicy === 'local_only';
+    retrieveOptions.sourcePolicy = queryIntent.sourcePolicy;
     retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
     retrieveOptions.entities = queryIntent.entities;
     if (ambiguity?.detected && ambiguity.confidence < 0.75) {
@@ -1746,8 +1874,10 @@ export class AgenticRagService {
     if (
       !multiIntent &&
       (queryIntent.intent === 'system_capability' ||
-        queryIntent.intent === 'objective_fact') &&
-      queryIntent.confidence >= 0.85 &&
+        queryIntent.intent === 'objective_fact' ||
+        queryIntent.queryType === 'public_knowledge') &&
+      (queryIntent.queryType === 'public_knowledge' ||
+        queryIntent.confidence >= 0.85) &&
       queryIntent.sourcePolicy === 'direct_answer'
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
@@ -1996,6 +2126,7 @@ export class AgenticRagService {
           retrieveOptions,
           runtimeRunId: retrieveOptions.runtimeRunId,
           fastPathChunks: fastPathGate.chunks,
+          fastPathBundle: fastPathGate.prefetchedFastPath.evidenceBundle,
           subQuestionLimit:
             mode === 'auto'
               ? Math.min(this.maxSubQuestions, 2)
@@ -2374,6 +2505,8 @@ export class AgenticRagService {
     if (subQuestionIndex !== 0 || subQuestion !== originalQuery) {
       return [subQuestion];
     }
+    // 原问题已有 Fast Path 证据时，扩展问题会作为独立子问题补检；不要在
+    // 原问题分支再次检索同一个扩展问句，避免重复检索与不一致排序。
     return Array.from(
       new Set([subQuestion, ...(augmentedQueries ?? [])].filter(Boolean)),
     ).slice(0, this.maxAugmentedQueries);

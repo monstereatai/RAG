@@ -12,7 +12,11 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
     const path = request.route?.path || 'unknown';
     const method = request.method;
     const key = `${method}:${path}`;
-    const timeoutMs = path.includes('/generate-project') ? 180_000 : 5_000;
+    const timeoutMs = path.includes('/generate-project')
+      ? 180_000
+      : this.isDocumentUpload(request)
+        ? 10 * 60 * 1000
+        : 5_000;
 
     if (this.isSseRequest(request)) {
       return next.handle();
@@ -42,5 +46,10 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
     const accept = String(request.headers?.accept ?? '');
     const path = request.path ?? request.originalUrl ?? '';
     return accept.includes('text/event-stream') || path.includes('/agui/stream');
+  }
+
+  private isDocumentUpload(request: { method?: string; path?: string; originalUrl?: string }): boolean {
+    const path = request.path ?? request.originalUrl ?? '';
+    return request.method === 'POST' && path.includes('/documents/upload');
   }
 }

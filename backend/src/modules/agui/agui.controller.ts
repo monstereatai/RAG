@@ -73,7 +73,9 @@ export class AguiController {
       query,
       mode: chatMode,
       threadId,
-      userId: userId?.trim() || 'admin-backend',
+      // 管理后台没有浏览器用户 JWT 时使用管理员知识库身份。历史上的
+      // `admin-backend` 是服务调用方标识，不是文档所有者，不能拿它做检索隔离。
+      userId: userId?.trim() || process.env.RAG_ADMIN_USER_ID || '1',
       model: chatModel,
       rolePresetId,
       pluginKeys: pluginKeys
