@@ -25,10 +25,9 @@ describe('QwenLlmProvider', () => {
     const config = {
       get: jest.fn((key: string) => values[key]),
     } as unknown as ConfigService;
-    return new QwenLlmProvider(
-      config,
-      { observeLlmCall: jest.fn() } as unknown as MetricsService,
-    );
+    return new QwenLlmProvider(config, {
+      observeLlmCall: jest.fn(),
+    } as unknown as MetricsService);
   }
 
   it('forwards the stability policy to ChatOpenAI', () => {

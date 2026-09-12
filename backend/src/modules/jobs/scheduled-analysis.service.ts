@@ -430,10 +430,13 @@ export class ScheduledAnalysisService {
     if (intervalMatch) {
       const amount = Number(intervalMatch[1]);
       const unit = intervalMatch[2];
-      const multiplier = unit === '天' ? 86_400_000 : unit.includes('时') ? 3_600_000 : 60_000;
+      const multiplier =
+        unit === '天' ? 86_400_000 : unit.includes('时') ? 3_600_000 : 60_000;
       const everyMs = Math.round(amount * multiplier);
       if (!Number.isFinite(everyMs) || everyMs < 1_000) {
-        throw new BadRequestException('无法解析有效的间隔时间，最小间隔为 1 秒');
+        throw new BadRequestException(
+          '无法解析有效的间隔时间，最小间隔为 1 秒',
+        );
       }
       return { type: 'every', everyMs };
     }

@@ -12,7 +12,11 @@ describe('query similarity gate', () => {
   });
 
   it('returns a normalized cosine score', () => {
-    expect(querySimilarity('Redis Checkpointer 是什么', 'Redis Checkpointer 是什么')).toBeCloseTo(1);
-    expect(querySimilarity('Redis Checkpointer 是什么', '天气怎么样')).toBeLessThan(0.8);
+    expect(
+      querySimilarity('Redis Checkpointer 是什么', 'Redis Checkpointer 是什么'),
+    ).toBeCloseTo(1);
+    expect(
+      querySimilarity('Redis Checkpointer 是什么', '天气怎么样'),
+    ).toBeLessThan(0.8);
   });
 });

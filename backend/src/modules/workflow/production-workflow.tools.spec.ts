@@ -22,7 +22,19 @@ describe('ProductionWorkflowTools', () => {
       {
         run: jest.fn().mockResolvedValue({
           status: 'completed',
-          output: { retrieval: { chunks: [{ id: 'chunk-1', docId: 'doc-1', chunkIndex: 2, content: '前端埋点必须包含 activity_id。', totalScore: 0.9 }] } },
+          output: {
+            retrieval: {
+              chunks: [
+                {
+                  id: 'chunk-1',
+                  docId: 'doc-1',
+                  chunkIndex: 2,
+                  content: '前端埋点必须包含 activity_id。',
+                  totalScore: 0.9,
+                },
+              ],
+            },
+          },
         }),
       } as never,
     );

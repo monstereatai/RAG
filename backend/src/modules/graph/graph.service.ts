@@ -203,9 +203,10 @@ export class GraphService {
       };
     }
     const facts = await this.searchFacts(entities, userId);
-    const answer = options.generateAnswer === false
-      ? ''
-      : await this.generateGraphAnswer(query, facts);
+    const answer =
+      options.generateAnswer === false
+        ? ''
+        : await this.generateGraphAnswer(query, facts);
 
     return {
       answer,

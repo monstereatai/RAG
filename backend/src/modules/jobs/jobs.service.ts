@@ -256,9 +256,13 @@ export class JobsService implements OnModuleInit {
 
   private startRuntime(job: ScheduledJobEntity): void {
     if (this.scheduledQueue?.enabled) {
-      void this.scheduledQueue.schedule(job).catch((error) =>
-        this.logger.warn(`BullMQ scheduler registration failed for ${job.id}: ${(error as Error).message}`),
-      );
+      void this.scheduledQueue
+        .schedule(job)
+        .catch((error) =>
+          this.logger.warn(
+            `BullMQ scheduler registration failed for ${job.id}: ${(error as Error).message}`,
+          ),
+        );
       return;
     }
     if (job.type === 'cron') {
@@ -291,13 +295,20 @@ export class JobsService implements OnModuleInit {
 
   private startCron(job: ScheduledJobEntity): void {
     const cronExpr = job.cron ?? '';
-    const runtime = new CronJob(cronExpr, () => {
-      void this.dispatch(job.id, `cron:${new Date().toISOString()}`).catch((error) =>
-        this.logger.warn(
-          `scheduled job ${job.id} callback failed: ${(error as Error).message}`,
-        ),
-      );
-    }, null, false, SCHEDULE_TIMEZONE);
+    const runtime = new CronJob(
+      cronExpr,
+      () => {
+        void this.dispatch(job.id, `cron:${new Date().toISOString()}`).catch(
+          (error) =>
+            this.logger.warn(
+              `scheduled job ${job.id} callback failed: ${(error as Error).message}`,
+            ),
+        );
+      },
+      null,
+      false,
+      SCHEDULE_TIMEZONE,
+    );
     this.schedulerRegistry.addCronJob(job.id, runtime);
     runtime.start();
 
@@ -325,18 +336,20 @@ export class JobsService implements OnModuleInit {
     const at = new Date(job.at ?? '');
     const delay = Math.max(0, at.getTime() - Date.now());
     const ref = setTimeout(() => {
-      void this.dispatch(job.id, `at:${job.at}`).then(async (execution) => {
-        if (execution && execution.status === 'completed') {
-          const current = await this.jobRepo.findOneBy({ id: job.id });
-          if (current) {
-            current.enabled = false;
-            current.running = false;
-            current.nextRunAt = null;
-            await this.jobRepo.save(current);
+      void this.dispatch(job.id, `at:${job.at}`)
+        .then(async (execution) => {
+          if (execution && execution.status === 'completed') {
+            const current = await this.jobRepo.findOneBy({ id: job.id });
+            if (current) {
+              current.enabled = false;
+              current.running = false;
+              current.nextRunAt = null;
+              await this.jobRepo.save(current);
+            }
           }
-        }
-        this.safeDeleteTimeout(job.id);
-      }).catch(() => undefined);
+          this.safeDeleteTimeout(job.id);
+        })
+        .catch(() => undefined);
     }, delay);
     this.schedulerRegistry.addTimeout(job.id, ref);
 
@@ -344,8 +357,13 @@ export class JobsService implements OnModuleInit {
     this.jobRepo.save(job).catch(() => {});
   }
 
-  private async dispatch(id: string, triggerKey: string, delayMs = 0): Promise<JobExecutionEntity | null> {
-    if (await this.scheduledQueue?.enqueue(id, triggerKey, delayMs)) return null;
+  private async dispatch(
+    id: string,
+    triggerKey: string,
+    delayMs = 0,
+  ): Promise<JobExecutionEntity | null> {
+    if (await this.scheduledQueue?.enqueue(id, triggerKey, delayMs))
+      return null;
     return this.run(id);
   }
 
@@ -361,7 +379,9 @@ export class JobsService implements OnModuleInit {
       ? await this.redisProvider.setIfAbsent(lockKey, lockToken, 180)
       : true;
     if (!distributedLock) {
-      throw new BadRequestException(`job ${id} is already running on another instance`);
+      throw new BadRequestException(
+        `job ${id} is already running on another instance`,
+      );
     }
     this.executingJobs.add(id);
 
@@ -556,7 +576,10 @@ export class JobsService implements OnModuleInit {
     }
   }
 
-  private async withRetry<T>(operation: () => Promise<T>, attempts: number): Promise<T> {
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    attempts: number,
+  ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {

@@ -31,8 +31,15 @@ import {
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
-import { GraphService, type GraphFact } from '../../modules/graph/graph.service';
-import { ImageIndexService, type ImageSearchItem } from '../../modules/image-index/image-index.service';
+import {
+  GraphService,
+  type GraphFact,
+} from '../../modules/graph/graph.service';
+import {
+  ImageIndexService,
+  type ImageSearchItem,
+} from '../../modules/image-index/image-index.service';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import {
   appliesToQuery,
   createEvidenceBundle,
@@ -347,6 +354,7 @@ export class KarpathyRagService implements OnModuleInit {
     @Optional() private readonly rerankService?: DashScopeRerankService,
     @Optional() private readonly graphService?: GraphService,
     @Optional() private readonly imageIndexService?: ImageIndexService,
+    @Optional() private readonly dingTalk?: DingTalkProvider,
   ) {}
 
   /**
@@ -375,7 +383,11 @@ export class KarpathyRagService implements OnModuleInit {
    */
   private _loadEntries(entries: Bm25PersistedEntry[]): void {
     for (const entry of entries) {
-      const doc: BM25Doc = { id: entry.id, content: entry.content, searchText: `${entry.content}\n${(entry.hypotheticalQuestions ?? []).join('\n')}` };
+      const doc: BM25Doc = {
+        id: entry.id,
+        content: entry.content,
+        searchText: `${entry.content}\n${(entry.hypotheticalQuestions ?? []).join('\n')}`,
+      };
       this.getBm25Instance(entry.userId).addDocs([doc]);
       this.chunkMeta.set(entry.id, {
         content: entry.content,
@@ -670,6 +682,11 @@ export class KarpathyRagService implements OnModuleInit {
             (err as Error).message
           }`,
         );
+        // 钉钉告警（fire-and-forget，节流窗口内同 key 只发一次）
+        void this.dingTalk?.notifyAlert(
+          'retrieval.bm25_fallback',
+          `**向量检索失败，已降级 BM25**\n\n错误：${(err as Error).message.slice(0, 300)}`,
+        );
       }
       // fallback：Milvus 失败/不可用时补 ES kNN；always：Milvus 正常也并行拉 ES kNN
       if (
@@ -734,8 +751,12 @@ export class KarpathyRagService implements OnModuleInit {
       }));
     const graphProbe = await graphProbePromise;
     const imageProbe = await imageProbePromise;
-    const graphChunks = graphProbe.facts.map((fact, index) => this.graphFactToChunk(fact, index));
-    const imageChunks = imageProbe.hits.map((hit, index) => this.imageHitToChunk(hit, index));
+    const graphChunks = graphProbe.facts.map((fact, index) =>
+      this.graphFactToChunk(fact, index),
+    );
+    const imageChunks = imageProbe.hits.map((hit, index) =>
+      this.imageHitToChunk(hit, index),
+    );
     const shouldMergeGraph = this.shouldMergeGraphEvidence(normalizedQuery);
     const shouldMergeImages = this.shouldMergeImageEvidence(normalizedQuery);
     const expanded = this.expandContextChunks(
@@ -746,7 +767,11 @@ export class KarpathyRagService implements OnModuleInit {
     );
     const built = this.contextBuilder.build(
       shouldMergeGraph || shouldMergeImages
-        ? [...(shouldMergeGraph ? graphChunks : []), ...(shouldMergeImages ? imageChunks : []), ...expanded]
+        ? [
+            ...(shouldMergeGraph ? graphChunks : []),
+            ...(shouldMergeImages ? imageChunks : []),
+            ...expanded,
+          ]
         : expanded,
       profile,
       normalizedQuery,
@@ -803,7 +828,10 @@ export class KarpathyRagService implements OnModuleInit {
     };
   }
 
-  private async probeGraph(query: string, userId?: string): Promise<{
+  private async probeGraph(
+    query: string,
+    userId?: string,
+  ): Promise<{
     attempted: boolean;
     enabled: boolean;
     merged: boolean;
@@ -814,20 +842,53 @@ export class KarpathyRagService implements OnModuleInit {
   }> {
     const startedAt = Date.now();
     if (!this.graphService?.isEnabled()) {
-      return { attempted: false, enabled: false, merged: false, factCount: 0, elapsedMs: 0, facts: [], skippedReason: 'disabled' };
+      return {
+        attempted: false,
+        enabled: false,
+        merged: false,
+        factCount: 0,
+        elapsedMs: 0,
+        facts: [],
+        skippedReason: 'disabled',
+      };
     }
     if (!userId) {
-      return { attempted: false, enabled: true, merged: false, factCount: 0, elapsedMs: 0, facts: [], skippedReason: 'missing_user' };
+      return {
+        attempted: false,
+        enabled: true,
+        merged: false,
+        factCount: 0,
+        elapsedMs: 0,
+        facts: [],
+        skippedReason: 'missing_user',
+      };
     }
     try {
       const result = await Promise.race([
         this.graphService.queryGraph(query, userId, { generateAnswer: false }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1200),
+        ),
       ]);
       const facts = result.facts.slice(0, 6);
-      return { attempted: true, enabled: true, merged: false, factCount: facts.length, elapsedMs: Date.now() - startedAt, facts };
+      return {
+        attempted: true,
+        enabled: true,
+        merged: false,
+        factCount: facts.length,
+        elapsedMs: Date.now() - startedAt,
+        facts,
+      };
     } catch (error) {
-      return { attempted: true, enabled: true, merged: false, factCount: 0, elapsedMs: Date.now() - startedAt, facts: [], skippedReason: (error as Error).message };
+      return {
+        attempted: true,
+        enabled: true,
+        merged: false,
+        factCount: 0,
+        elapsedMs: Date.now() - startedAt,
+        facts: [],
+        skippedReason: (error as Error).message,
+      };
     }
   }
 
@@ -836,10 +897,15 @@ export class KarpathyRagService implements OnModuleInit {
   }
 
   private shouldMergeImageEvidence(query: string): boolean {
-    return /图片|图像|截图|流程图|架构图|表格图|示意图|看板|页面视觉/.test(query);
+    return /图片|图像|截图|流程图|架构图|表格图|示意图|看板|页面视觉/.test(
+      query,
+    );
   }
 
-  private async probeImages(query: string, userId?: string): Promise<{
+  private async probeImages(
+    query: string,
+    userId?: string,
+  ): Promise<{
     attempted: boolean;
     enabled: boolean;
     merged: boolean;
@@ -850,26 +916,61 @@ export class KarpathyRagService implements OnModuleInit {
   }> {
     const startedAt = Date.now();
     if (!this.imageIndexService?.isEnabled()) {
-      return { attempted: false, enabled: false, merged: false, hitCount: 0, elapsedMs: 0, hits: [], skippedReason: 'disabled' };
+      return {
+        attempted: false,
+        enabled: false,
+        merged: false,
+        hitCount: 0,
+        elapsedMs: 0,
+        hits: [],
+        skippedReason: 'disabled',
+      };
     }
     if (!userId || !this.shouldMergeImageEvidence(query)) {
-      return { attempted: false, enabled: true, merged: false, hitCount: 0, elapsedMs: 0, hits: [], skippedReason: userId ? 'not_image_query' : 'missing_user' };
+      return {
+        attempted: false,
+        enabled: true,
+        merged: false,
+        hitCount: 0,
+        elapsedMs: 0,
+        hits: [],
+        skippedReason: userId ? 'not_image_query' : 'missing_user',
+      };
     }
     try {
       const hits = await Promise.race([
         this.imageIndexService.searchText(query, { topK: 6, userId }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1200),
+        ),
       ]);
-      return { attempted: true, enabled: true, merged: false, hitCount: hits.length, elapsedMs: Date.now() - startedAt, hits };
+      return {
+        attempted: true,
+        enabled: true,
+        merged: false,
+        hitCount: hits.length,
+        elapsedMs: Date.now() - startedAt,
+        hits,
+      };
     } catch (error) {
-      return { attempted: true, enabled: true, merged: false, hitCount: 0, elapsedMs: Date.now() - startedAt, hits: [], skippedReason: (error as Error).message };
+      return {
+        attempted: true,
+        enabled: true,
+        merged: false,
+        hitCount: 0,
+        elapsedMs: Date.now() - startedAt,
+        hits: [],
+        skippedReason: (error as Error).message,
+      };
     }
   }
 
   private imageHitToChunk(hit: ImageSearchItem, index: number): RetrievedChunk {
     const meta = hit.meta ?? {};
-    const description = typeof meta.description === 'string' ? meta.description : '图片语义证据';
-    const placement = typeof meta.placement === 'string' ? `，位置：${meta.placement}` : '';
+    const description =
+      typeof meta.description === 'string' ? meta.description : '图片语义证据';
+    const placement =
+      typeof meta.placement === 'string' ? `，位置：${meta.placement}` : '';
     return {
       id: `image:${hit.docId}:${index}`,
       content: `${description}${placement}\n图片地址：${hit.url}\n来源文档：${hit.docId}`,
@@ -913,8 +1014,12 @@ export class KarpathyRagService implements OnModuleInit {
       docId: chunk.docId,
       chunkIndex: chunk.chunkIndex,
       score: Number((chunk.totalScore ?? chunk.score ?? 0).toFixed(6)),
-      ...(chunk.rerankScore === undefined ? {} : { rerankScore: chunk.rerankScore }),
-      ...(chunk.retrievalSource ? { retrievalSource: chunk.retrievalSource } : {}),
+      ...(chunk.rerankScore === undefined
+        ? {}
+        : { rerankScore: chunk.rerankScore }),
+      ...(chunk.retrievalSource
+        ? { retrievalSource: chunk.retrievalSource }
+        : {}),
     }));
   }
 
@@ -1034,7 +1139,10 @@ export class KarpathyRagService implements OnModuleInit {
     let badCaseMatches: BadCaseMatch[];
     let initialRetrieval: Awaited<ReturnType<typeof this.retrieveDetailed>>;
     let obsidianHits: ObsidianSearchHit[];
-    if (retrieveOptions.karpathyDirectAnswer && !retrieveOptions.needsSynthesis) {
+    if (
+      retrieveOptions.karpathyDirectAnswer &&
+      !retrieveOptions.needsSynthesis
+    ) {
       // Karpathy 直答保留精确纠错覆盖检查：它只查 PostgreSQL 精确问题，
       // 与本地 BM25 直答并行，不触发 Milvus 语义检索。
       const direct = await this.answerDirect(
@@ -1310,7 +1418,8 @@ export class KarpathyRagService implements OnModuleInit {
         try {
           const qwenSynthesis = await this.llmProvider.runWithModel(
             'qwen',
-            () => this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
+            () =>
+              this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
           );
           repairedSynthesis = qwenSynthesis
             ? this.attachMissingClaimCitations(qwenSynthesis, evidenceChunks)
@@ -3005,12 +3114,18 @@ ${evidence}`;
     // 使用连续 CJK 二元组补充词面诊断，要求至少三个不同二元组，既不依赖
     // 业务关键词，也不会把只碰巧共享“住宿／报销”之类短语的弱命中放行。
     const cjkBigramOverlap = Math.max(
-      ...chunks.map((chunk) => this.countCjkBigramOverlap(query, chunk.content)),
+      ...chunks.map((chunk) =>
+        this.countCjkBigramOverlap(query, chunk.content),
+      ),
       0,
     );
     const hasStrongCjkOverlap = cjkBigramOverlap >= 3;
     const hasStrongWordOverlap = this.countWordOverlap(query, chunks) >= 2;
-    if (maxOverlap < minOverlap && !hasStrongCjkOverlap && !hasStrongWordOverlap) {
+    if (
+      maxOverlap < minOverlap &&
+      !hasStrongCjkOverlap &&
+      !hasStrongWordOverlap
+    ) {
       return {
         sufficient: false,
         reason: `检索片段与问题关键词重合数 ${maxOverlap} 低于阈值 ${minOverlap}`,

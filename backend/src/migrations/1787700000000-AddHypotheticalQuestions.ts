@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddHypotheticalQuestions1787700000000
-  implements MigrationInterface
-{
+export class AddHypotheticalQuestions1787700000000 implements MigrationInterface {
   name = 'AddHypotheticalQuestions1787700000000';
 
   async up(queryRunner: QueryRunner): Promise<void> {

@@ -46,8 +46,12 @@ describe('game document profile', () => {
 
   it('evaluates semantic boundaries and profile overlap for experiments', async () => {
     const strategy = getChunkStrategy('prd');
-    const source = '# PRD\n## 规则\n第一条说明活动资格和时间。\n第二条说明奖励和补偿。';
-    const chunks = await new MarkdownChunker(strategy.chunkSize, strategy.chunkOverlap).splitStructured(source);
+    const source =
+      '# PRD\n## 规则\n第一条说明活动资格和时间。\n第二条说明奖励和补偿。';
+    const chunks = await new MarkdownChunker(
+      strategy.chunkSize,
+      strategy.chunkOverlap,
+    ).splitStructured(source);
     const evaluation = evaluateChunkStrategy(source, chunks, strategy);
     expect(evaluation.overlapRatio).toBeGreaterThanOrEqual(0.1);
     expect(evaluation.overlapRatio).toBeLessThanOrEqual(0.2);

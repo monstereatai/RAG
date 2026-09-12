@@ -47,14 +47,19 @@ describe('prompt injection guard', () => {
   });
 
   it('allows safety explanations without execution intent', () => {
-    expect(detectDangerousQuery('什么是 DROP TABLE，如何防止误删数据库？')).toEqual([]);
+    expect(
+      detectDangerousQuery('什么是 DROP TABLE，如何防止误删数据库？'),
+    ).toEqual([]);
     expect(detectDangerousQuery('如何检测和审计删库风险？')).toEqual([]);
   });
 
   it('exposes the active safety policy catalog for administration', () => {
     expect(listSafetyPolicies()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'database_destructive_operation', action: 'block' }),
+        expect.objectContaining({
+          id: 'database_destructive_operation',
+          action: 'block',
+        }),
         expect.objectContaining({ id: 'secret_exfiltration', action: 'block' }),
       ]),
     );

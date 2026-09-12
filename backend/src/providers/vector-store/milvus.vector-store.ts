@@ -1,5 +1,6 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DingTalkProvider } from '../notify/dingtalk.provider';
 import {
   MilvusClient,
   DataType,
@@ -48,7 +49,10 @@ export class MilvusVectorStoreProvider
   private lastFailureAt: Date | null = null;
   private lastFailureMessage: string | null = null;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly dingTalk?: DingTalkProvider,
+  ) {
     this.host =
       this.config.get<string>('vectorStore.milvus.host') ?? 'localhost';
     this.port = this.config.get<number>('vectorStore.milvus.port') ?? 19530;
@@ -650,6 +654,11 @@ export class MilvusVectorStoreProvider
 
   private openCircuit(): void {
     this.circuitOpenUntil = Date.now() + this.circuitOpenMs;
+    // 钉钉告警（fire-and-forget，节流窗口内同 key 只发一次）
+    void this.dingTalk?.notifyAlert(
+      'milvus.circuit',
+      `**Milvus 熔断打开**（连续失败 ${this.consecutiveFailures} 次，暂停 ${this.circuitOpenMs}ms）\n\n最近错误：${this.lastFailureMessage ?? 'unknown'}`,
+    );
   }
 
   private async withTimeout<T>(

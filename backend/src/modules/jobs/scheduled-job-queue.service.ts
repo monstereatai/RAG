@@ -26,40 +26,75 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
         removeOnFail: { age: 604800 },
       },
     });
-    this.worker = new Worker(SCHEDULED_JOB_QUEUE, async (job) => {
-      if (!this.processor) throw new Error('scheduled job processor is not registered');
-      await this.processor(job.data.jobId, job.data.triggerKey);
-    }, { connection, concurrency: Math.max(1, Number(process.env.SCHEDULED_QUEUE_CONCURRENCY ?? 2)) });
-    this.worker.on('failed', (job, error) => this.logger.warn(`scheduled queue failed ${job?.data.jobId}: ${error.message}`));
+    this.worker = new Worker(
+      SCHEDULED_JOB_QUEUE,
+      async (job) => {
+        if (!this.processor)
+          throw new Error('scheduled job processor is not registered');
+        await this.processor(job.data.jobId, job.data.triggerKey);
+      },
+      {
+        connection,
+        concurrency: Math.max(
+          1,
+          Number(process.env.SCHEDULED_QUEUE_CONCURRENCY ?? 2),
+        ),
+      },
+    );
+    this.worker.on('failed', (job, error) =>
+      this.logger.warn(
+        `scheduled queue failed ${job?.data.jobId}: ${error.message}`,
+      ),
+    );
   }
 
-  setProcessor(processor: (jobId: string, triggerKey: string) => Promise<void>): void {
+  setProcessor(
+    processor: (jobId: string, triggerKey: string) => Promise<void>,
+  ): void {
     this.processor = processor;
   }
 
-  async enqueue(jobId: string, triggerKey: string, delayMs = 0): Promise<boolean> {
+  async enqueue(
+    jobId: string,
+    triggerKey: string,
+    delayMs = 0,
+  ): Promise<boolean> {
     if (!this.enabled || !this.queue) return false;
-    await this.queue.add('scheduled-job', { jobId, triggerKey }, {
-      jobId: `scheduled:${jobId}:${triggerKey}`,
-      delay: Math.max(0, delayMs),
-    });
+    await this.queue.add(
+      'scheduled-job',
+      { jobId, triggerKey },
+      {
+        jobId: `scheduled:${jobId}:${triggerKey}`,
+        delay: Math.max(0, delayMs),
+      },
+    );
     return true;
   }
 
-  async schedule(input: { id: string; type: string; cron?: string | null; everyMs?: number | null; at?: string | null }): Promise<boolean> {
+  async schedule(input: {
+    id: string;
+    type: string;
+    cron?: string | null;
+    everyMs?: number | null;
+    at?: string | null;
+  }): Promise<boolean> {
     if (!this.enabled || !this.queue) return false;
     const queue = this.queue as Queue & { upsertJobScheduler?: Function };
     if (input.type === 'at') {
-      const delay = Math.max(0, new Date(input.at ?? '').getTime() - Date.now());
+      const delay = Math.max(
+        0,
+        new Date(input.at ?? '').getTime() - Date.now(),
+      );
       await this.enqueue(input.id, `at:${input.at}`, delay);
       return true;
     }
     if (typeof queue.upsertJobScheduler !== 'function') {
       throw new Error('BullMQ Job Scheduler API is unavailable');
     }
-    const repeat = input.type === 'cron'
-      ? { pattern: input.cron ?? '', tz: 'Asia/Shanghai' }
-      : { every: Math.max(1000, input.everyMs ?? 1000) };
+    const repeat =
+      input.type === 'cron'
+        ? { pattern: input.cron ?? '', tz: 'Asia/Shanghai' }
+        : { every: Math.max(1000, input.everyMs ?? 1000) };
     await queue.upsertJobScheduler(`scheduled:${input.id}`, repeat, {
       name: 'scheduled-job',
       data: { jobId: input.id, triggerKey: `scheduler:${input.id}` },

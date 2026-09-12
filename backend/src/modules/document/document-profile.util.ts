@@ -135,13 +135,30 @@ export function evaluateChunkStrategy(
   const semanticBoundaryRate = chunks.length ? boundaries / chunks.length : 0;
   const sizeScore = averageChunkLength <= strategy.chunkSize ? 1 : 0;
   const score = Number(
-    ((semanticBoundaryRate * 0.6 + (overlapRatio >= 0.1 && overlapRatio <= 0.2 ? 1 : 0) * 0.3 + sizeScore * 0.1) * 100).toFixed(2),
+    (
+      (semanticBoundaryRate * 0.6 +
+        (overlapRatio >= 0.1 && overlapRatio <= 0.2 ? 1 : 0) * 0.3 +
+        sizeScore * 0.1) *
+      100
+    ).toFixed(2),
   );
   // 读取 source 参与评测契约，避免空文档被误判为高分。
   if (!source.trim() || chunks.length === 0) {
-    return { chunkCount: chunks.length, averageChunkLength, overlapRatio, semanticBoundaryRate, score: 0 };
+    return {
+      chunkCount: chunks.length,
+      averageChunkLength,
+      overlapRatio,
+      semanticBoundaryRate,
+      score: 0,
+    };
   }
-  return { chunkCount: chunks.length, averageChunkLength, overlapRatio, semanticBoundaryRate, score };
+  return {
+    chunkCount: chunks.length,
+    averageChunkLength,
+    overlapRatio,
+    semanticBoundaryRate,
+    score,
+  };
 }
 
 /**

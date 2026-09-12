@@ -25,15 +25,23 @@ export function filterSemanticQueries(
   return candidates
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter(Boolean)
-    .filter((query) => query === original || querySimilarity(original, query) >= threshold)
+    .filter(
+      (query) =>
+        query === original || querySimilarity(original, query) >= threshold,
+    )
     .filter((query, index, all) => all.indexOf(query) === index);
 }
 
 function toFeatures(value: string): Map<string, number> {
-  const normalized = value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  const normalized = value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
   const features = new Map<string, number>();
   const tokens = normalized.match(/[a-z0-9_]+|[\u4e00-\u9fff]/g) ?? [];
-  for (const token of tokens) features.set(`t:${token}`, (features.get(`t:${token}`) ?? 0) + 1);
+  for (const token of tokens)
+    features.set(`t:${token}`, (features.get(`t:${token}`) ?? 0) + 1);
   for (let i = 0; i + 1 < tokens.length; i += 1) {
     const bigram = `b:${tokens[i]}${tokens[i + 1]}`;
     features.set(bigram, (features.get(bigram) ?? 0) + 1);

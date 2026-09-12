@@ -258,7 +258,8 @@ export class MarkdownChunker {
       const overlap: string[] = [];
       let length = 0;
       for (let index = current.length - 1; index >= 0; index -= 1) {
-        const nextLength = length + current[index].length + (overlap.length ? 1 : 0);
+        const nextLength =
+          length + current[index].length + (overlap.length ? 1 : 0);
         if (nextLength > this.chunkOverlap && overlap.length > 0) break;
         overlap.unshift(current[index]);
         length = nextLength;

@@ -25,9 +25,11 @@ export function renderPlaywayPreview(
 ): PlaywayPreview {
   // 多岗位可能各自产出 pageSchema。产品岗位的审查结果有时会保留一个
   // 空 schema，不能让它遮蔽设计／前端岗位已经生成的有效页面结构。
-  const page = schemas.find(
-    (schema) => schema.kind === 'pageSchema' && (schema.components?.length ?? 0) > 0,
-  ) ?? schemas.find((schema) => schema.kind === 'pageSchema');
+  const page =
+    schemas.find(
+      (schema) =>
+        schema.kind === 'pageSchema' && (schema.components?.length ?? 0) > 0,
+    ) ?? schemas.find((schema) => schema.kind === 'pageSchema');
   const components = page?.components ?? [];
   const context = `${title} ${activityContext}`;
   const isLottery = /抽奖|转盘|现金奖励|奖品/.test(context);
@@ -46,7 +48,8 @@ export function renderPlaywayPreview(
   ];
   const cards = components
     .map((component) => {
-      const type = typeof component.type === 'string' ? component.type : 'unknown';
+      const type =
+        typeof component.type === 'string' ? component.type : 'unknown';
       const name = typeof component.name === 'string' ? component.name : type;
       return `<article class="component component-${escapeHtml(type)}"><span class="type">${escapeHtml(type)}</span><h2>${escapeHtml(name)}</h2><p>由 Playway Schema 生成的可交互占位组件</p></article>`;
     })

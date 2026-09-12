@@ -518,19 +518,18 @@ describe('KarpathyRagService exception scenarios', () => {
         entities?: string[],
       ) => Promise<unknown>;
     };
-    jest
-      .spyOn(internal, 'retrieveBm25Only')
-      .mockResolvedValue([
-        {
-          id: 'water-margin-1',
-          docId: 'water-margin',
-          chunkIndex: 1,
-          content: '行不得一日，正走之间，官道旁边只见走过一条大汉，李逵见那人看他。',
-          lifecycleStatus: 'effective',
-          sourceAuthority: 'uploaded_document',
-          docVersion: 'v1',
-        },
-      ]);
+    jest.spyOn(internal, 'retrieveBm25Only').mockResolvedValue([
+      {
+        id: 'water-margin-1',
+        docId: 'water-margin',
+        chunkIndex: 1,
+        content:
+          '行不得一日，正走之间，官道旁边只见走过一条大汉，李逵见那人看他。',
+        lifecycleStatus: 'effective',
+        sourceAuthority: 'uploaded_document',
+        docVersion: 'v1',
+      },
+    ]);
 
     const direct = await internal.tryKarpathyDirectAnswer(
       '李逵是谁',
@@ -579,9 +578,7 @@ describe('KarpathyRagService exception scenarios', () => {
       ],
     );
 
-    expect(gate).toEqual(
-      expect.objectContaining({ sufficient: true }),
-    );
+    expect(gate).toEqual(expect.objectContaining({ sufficient: true }));
   });
 
   it('adds a cited version conflict notice when retrieved chunks contain multiple versions', async () => {

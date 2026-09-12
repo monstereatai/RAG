@@ -58,7 +58,10 @@ describe('ScheduledAnalysisService', () => {
       service.parseDefinition('每隔 2 小时统计问答质量', 'natural_language'),
     ).toMatchObject({ type: 'every', everyMs: 7_200_000 });
     expect(
-      service.parseDefinition('每个工作日早上 9 点统计规则', 'natural_language'),
+      service.parseDefinition(
+        '每个工作日早上 9 点统计规则',
+        'natural_language',
+      ),
     ).toMatchObject({ type: 'cron', cron: '0 9 * * 1-5' });
   });
 

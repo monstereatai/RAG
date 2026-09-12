@@ -97,7 +97,12 @@ export class ChatController {
     if (dangerousFindings.length > 0) {
       for (const finding of dangerousFindings) {
         this.metrics?.observeDangerousQuery(finding.pattern, 'chat_stream');
-        this.securityAudit?.record({ pattern: finding.pattern, route: 'chat_stream', userId: user.userId, query });
+        this.securityAudit?.record({
+          pattern: finding.pattern,
+          route: 'chat_stream',
+          userId: user.userId,
+          query,
+        });
       }
       throw new BadRequestException({
         code: 'DANGEROUS_QUERY_BLOCKED',

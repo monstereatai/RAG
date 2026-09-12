@@ -54,14 +54,18 @@ describe('playway component registry', () => {
   it('builds a deduplicated activity graph for downstream GraphRAG and MCP use', () => {
     const graph = buildPlaywayActivityGraph('新服预约');
     expect(graph.nodes.some((node) => node.type === 'activity')).toBe(true);
-    expect(graph.nodes.some((node) => node.id === 'component:reserve-now')).toBe(
-      true,
-    );
+    expect(
+      graph.nodes.some((node) => node.id === 'component:reserve-now'),
+    ).toBe(true);
     expect(graph.nodes.some((node) => node.type === 'api')).toBe(true);
     expect(graph.nodes.some((node) => node.type === 'event')).toBe(true);
-    expect(new Set(graph.edges.map((edge) => `${edge.source}|${edge.target}|${edge.relation}`)).size).toBe(
-      graph.edges.length,
-    );
+    expect(
+      new Set(
+        graph.edges.map(
+          (edge) => `${edge.source}|${edge.target}|${edge.relation}`,
+        ),
+      ).size,
+    ).toBe(graph.edges.length);
   });
 
   it('renders a safe deterministic page preview from pageSchema', () => {

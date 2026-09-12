@@ -93,7 +93,9 @@ describe('QueryIntentRouter', () => {
       ),
     } as never);
 
-    await expect(router.classify('公司的研发流程是什么')).resolves.toMatchObject({
+    await expect(
+      router.classify('公司的研发流程是什么'),
+    ).resolves.toMatchObject({
       action: 'retrieve',
       sourcePolicy: 'local_only',
       needsSynthesis: true,

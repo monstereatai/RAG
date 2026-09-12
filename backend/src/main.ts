@@ -39,19 +39,36 @@ function addChineseSwaggerDescriptions(document: {
 }) {
   for (const [path, rawPathItem] of Object.entries(document.paths ?? {})) {
     const pathItem = rawPathItem as Record<string, unknown>;
-    const pathLabel = path
-      .split('/')
-      .filter(Boolean)
-      .filter((segment) => !segment.startsWith(':'))
-      .map((segment) => SWAGGER_PATH_LABELS[segment] ?? segment)
-      .join('／') || '接口';
+    const pathLabel =
+      path
+        .split('/')
+        .filter(Boolean)
+        .filter((segment) => !segment.startsWith(':'))
+        .map((segment) => SWAGGER_PATH_LABELS[segment] ?? segment)
+        .join('／') || '接口';
     for (const [method, rawOperation] of Object.entries(pathItem)) {
-      if (!['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(method)) continue;
+      if (
+        !['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(
+          method,
+        )
+      )
+        continue;
       const operation = rawOperation as Record<string, unknown>;
-      const methodLabel = { get: '查询', post: '创建或提交', put: '更新', patch: '部分更新', delete: '删除', options: '获取选项', head: '检查' }[method] ?? '调用';
+      const methodLabel =
+        {
+          get: '查询',
+          post: '创建或提交',
+          put: '更新',
+          patch: '部分更新',
+          delete: '删除',
+          options: '获取选项',
+          head: '检查',
+        }[method] ?? '调用';
       const summary = operation.summary;
       const description = operation.description;
-      operation.summary = hasChinese(summary) ? summary : `${methodLabel}${pathLabel}接口`;
+      operation.summary = hasChinese(summary)
+        ? summary
+        : `${methodLabel}${pathLabel}接口`;
       operation.description = hasChinese(description)
         ? description
         : `用于${pathLabel}的${methodLabel}接口。请求方式：${method.toUpperCase()}，路径：${path}。`;

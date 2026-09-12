@@ -66,12 +66,7 @@ const rules = (
   options: Partial<
     Pick<
       PlaywayComponentRule,
-      | 'keywords'
-      | 'activities'
-      | 'requires'
-      | 'emits'
-      | 'risk'
-      | 'compliance'
+      'keywords' | 'activities' | 'requires' | 'emits' | 'risk' | 'compliance'
     >
   > = {},
 ): PlaywayComponentRule => ({
@@ -809,7 +804,12 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
     activity: 'new-server-reservation',
     name: '新服预约标准模板',
     goal: '在开服前完成预约、预创角和奖励转化。',
-    requiredComponents: ['banner', 'reserve-now', 'server-open-time', 'activity-rules'],
+    requiredComponents: [
+      'banner',
+      'reserve-now',
+      'server-open-time',
+      'activity-rules',
+    ],
     optionalComponents: [
       'reserve-milestone',
       'reserve-card-draw',
@@ -834,7 +834,12 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
     activity: 'private-domain-acquisition',
     name: '私域拉新标准模板',
     goal: '通过社群和邀请裂变获取可归因的新用户。',
-    requiredComponents: ['banner', 'community-link', 'task-invite', 'task-invite-poster'],
+    requiredComponents: [
+      'banner',
+      'community-link',
+      'task-invite',
+      'task-invite-poster',
+    ],
     optionalComponents: [
       'task-invite-progress',
       'invite-records',
@@ -858,7 +863,12 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
     activity: 'engagement',
     name: '游戏促活日常任务模板',
     goal: '用登录、分享、充值和积分兑换形成日常活跃循环。',
-    requiredComponents: ['banner', 'task-login-game', 'task-progress', 'task-daily-share'],
+    requiredComponents: [
+      'banner',
+      'task-login-game',
+      'task-progress',
+      'task-daily-share',
+    ],
     optionalComponents: [
       'task-daily-recharge',
       'points-exchange',
@@ -868,7 +878,11 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
       'leaderboard-task-completion',
     ],
     requiredApis: ['activityInfo', 'taskStatus', 'rewardConfig'],
-    requiredEvents: ['activity_page_view', 'game_login_complete', 'task_refresh'],
+    requiredEvents: [
+      'activity_page_view',
+      'game_login_complete',
+      'task_refresh',
+    ],
     acceptanceChecks: [
       '每日任务按自然日或活动时区正确重置。',
       '任务完成状态刷新后与服务端一致。',
@@ -881,7 +895,12 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
     activity: 'win-back',
     name: '游戏回流召回模板',
     goal: '识别流失用户并通过回归任务与奖励促成再次登录。',
-    requiredComponents: ['banner', 'login', 'task-login-game', 'completion-toast'],
+    requiredComponents: [
+      'banner',
+      'login',
+      'task-login-game',
+      'completion-toast',
+    ],
     optionalComponents: [
       'task-redpacket',
       'redpacket-random',
@@ -891,7 +910,11 @@ export const PLAYWAY_ACTIVITY_TEMPLATES: PlaywayActivityTemplate[] = [
       'customer-service',
     ],
     requiredApis: ['activityInfo', 'returnEligibility', 'taskStatus'],
-    requiredEvents: ['activity_page_view', 'login_success', 'game_login_complete'],
+    requiredEvents: [
+      'activity_page_view',
+      'login_success',
+      'game_login_complete',
+    ],
     acceptanceChecks: [
       '非回流用户不可领取回流专属奖励。',
       '回流资格、奖励领取和过期时间必须可查询。',
@@ -1001,7 +1024,11 @@ export function buildPlaywayActivityGraph(query = ''): PlaywayActivityGraph {
     for (const api of template.requiredApis) {
       const apiId = `api:${api}`;
       addNode(apiId, 'api', api);
-      edges.push({ source: activityId, target: apiId, relation: 'requires_api' });
+      edges.push({
+        source: activityId,
+        target: apiId,
+        relation: 'requires_api',
+      });
     }
     for (const event of template.requiredEvents) {
       const eventId = `event:${event}`;

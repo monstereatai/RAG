@@ -145,7 +145,10 @@ export class RagAdminController {
     @Param('taskId') taskId: string,
     @Query('ownerUserId') ownerUserId?: string,
   ) {
-    const task = await this.ragAdminService.getDocumentTask(taskId, ownerUserId ?? 'admin');
+    const task = await this.ragAdminService.getDocumentTask(
+      taskId,
+      ownerUserId ?? 'admin',
+    );
     if (!task) throw new NotFoundException(`task ${taskId} not found`);
     return task;
   }
@@ -187,7 +190,11 @@ export class RagAdminController {
     @Query('userId') userId?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.ragAdminService.inspectRetrieval(query, userId, Number(limit) || 50);
+    return this.ragAdminService.inspectRetrieval(
+      query,
+      userId,
+      Number(limit) || 50,
+    );
   }
 
   @Post('documents/search/reindex')

@@ -242,16 +242,40 @@ export class AgentRunsService {
     const completed = runs.filter((run) => run.status === 'completed').length;
     const failed = runs.filter((run) => run.status === 'failed').length;
     const cancelled = runs.filter((run) => run.status === 'cancelled').length;
-    const waitingApproval = runs.filter((run) => run.status === 'waiting_approval').length;
+    const waitingApproval = runs.filter(
+      (run) => run.status === 'waiting_approval',
+    ).length;
     const terminal = completed + failed + cancelled;
-    const runtimeMetrics = await Promise.all(runs.map((run) => this.events.metrics(run.threadId, run.id)));
-    const taskCompleted = runtimeMetrics.reduce((sum, item) => sum + item.tasksCompleted, 0);
-    const taskFailed = runtimeMetrics.reduce((sum, item) => sum + item.tasksFailed, 0);
-    const toolResults = runtimeMetrics.reduce((sum, item) => sum + item.toolResults, 0);
-    const recoveredToolCalls = runtimeMetrics.reduce((sum, item) => sum + item.recoveredToolCalls, 0);
-    const toolCalls = runtimeMetrics.reduce((sum, item) => sum + item.toolCalls, 0);
-    const toolFailures = runtimeMetrics.reduce((sum, item) => sum + item.toolFailures, 0);
-    const deliveryReady = runs.filter((run) => run.status === 'completed' && Boolean(run.resultSummary?.trim())).length;
+    const runtimeMetrics = await Promise.all(
+      runs.map((run) => this.events.metrics(run.threadId, run.id)),
+    );
+    const taskCompleted = runtimeMetrics.reduce(
+      (sum, item) => sum + item.tasksCompleted,
+      0,
+    );
+    const taskFailed = runtimeMetrics.reduce(
+      (sum, item) => sum + item.tasksFailed,
+      0,
+    );
+    const toolResults = runtimeMetrics.reduce(
+      (sum, item) => sum + item.toolResults,
+      0,
+    );
+    const recoveredToolCalls = runtimeMetrics.reduce(
+      (sum, item) => sum + item.recoveredToolCalls,
+      0,
+    );
+    const toolCalls = runtimeMetrics.reduce(
+      (sum, item) => sum + item.toolCalls,
+      0,
+    );
+    const toolFailures = runtimeMetrics.reduce(
+      (sum, item) => sum + item.toolFailures,
+      0,
+    );
+    const deliveryReady = runs.filter(
+      (run) => run.status === 'completed' && Boolean(run.resultSummary?.trim()),
+    ).length;
     return {
       available: true,
       scanned: runs.length,
@@ -264,17 +288,26 @@ export class AgentRunsService {
       },
       successRate: terminal ? completed / terminal : 0,
       failureRate: terminal ? failed / terminal : 0,
-      totalCostUsd: runs.reduce((sum, run) => sum + Number(run.costUsd || 0), 0),
+      totalCostUsd: runs.reduce(
+        (sum, run) => sum + Number(run.costUsd || 0),
+        0,
+      ),
       totalToolCalls: runs.reduce((sum, run) => sum + run.toolCallCount, 0),
       totalRetries: runs.reduce((sum, run) => sum + run.retryCount, 0),
       budgetExceededRuns: runs.filter((run) => run.requiresApproval).length,
-      stepAccuracy: taskCompleted + taskFailed ? taskCompleted / (taskCompleted + taskFailed) : 0,
+      stepAccuracy:
+        taskCompleted + taskFailed
+          ? taskCompleted / (taskCompleted + taskFailed)
+          : 0,
       recoveryRate: toolResults ? recoveredToolCalls / toolResults : 0,
       runtime: { taskCompleted, taskFailed, toolResults, recoveredToolCalls },
       qualityLayers: {
         runSuccessRate: terminal ? completed / terminal : 0,
         toolSuccessRate: toolCalls ? (toolCalls - toolFailures) / toolCalls : 0,
-        taskAccuracy: taskCompleted + taskFailed ? taskCompleted / (taskCompleted + taskFailed) : 0,
+        taskAccuracy:
+          taskCompleted + taskFailed
+            ? taskCompleted / (taskCompleted + taskFailed)
+            : 0,
         deliveryReadyRate: terminal ? deliveryReady / terminal : 0,
       },
     };

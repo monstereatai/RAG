@@ -43,6 +43,7 @@ import {
   selectHistoryForQuery,
 } from '../../rag/prompts/context-policy';
 import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 
 @Injectable()
 export class ChatService {
@@ -73,6 +74,7 @@ export class ChatService {
     @Optional() private readonly metrics?: MetricsService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
     @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
+    @Optional() private readonly dingTalk?: DingTalkProvider,
   ) {}
 
   /**
@@ -90,7 +92,12 @@ export class ChatService {
     if (dangerousFindings.length > 0) {
       for (const finding of dangerousFindings) {
         this.metrics?.observeDangerousQuery(finding.pattern, 'chat');
-        this.securityAudit?.record({ pattern: finding.pattern, route: 'chat', userId, query: req.query });
+        this.securityAudit?.record({
+          pattern: finding.pattern,
+          route: 'chat',
+          userId,
+          query: req.query,
+        });
       }
       throw new BadRequestException({
         code: 'DANGEROUS_QUERY_BLOCKED',
@@ -318,16 +325,16 @@ export class ChatService {
                 memoryMessages,
               )
             : await this.karpathyRagService.answer(
-          req.query,
-          history,
-          userId,
-          memoryMessages,
-          undefined,
-          {
-            ...retrievalOptions,
-            adaptiveVectorSearch: true,
-            karpathyDirectAnswer: true,
-          },
+                req.query,
+                history,
+                userId,
+                memoryMessages,
+                undefined,
+                {
+                  ...retrievalOptions,
+                  adaptiveVectorSearch: true,
+                  karpathyDirectAnswer: true,
+                },
               );
       } catch (error) {
         await this.finishFailedRun(run, req.query, mode, error);
@@ -735,6 +742,15 @@ export class ChatService {
         inputTokens,
         outputTokens,
       ),
+    });
+    // 钉钉问答推送（fire-and-forget，threadId 白名单过滤）
+    void this.dingTalk?.forwardRagAnswer({
+      threadId: params.threadId,
+      query: params.query,
+      answer: params.answer,
+      mode: params.mode,
+      latencyMs: Date.now() - params.startTime,
+      citationCount: params.references.length,
     });
   }
 

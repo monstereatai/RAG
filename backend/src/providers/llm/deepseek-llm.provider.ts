@@ -25,10 +25,8 @@ export class DeepseekLlmProvider implements ILLMProvider {
     const modelName = this.config.get<string>('llm.deepseek.model');
     const timeoutMs =
       this.config.get<number>('llm.deepseek.timeoutMs') ?? 30000;
-    const maxTokens =
-      this.config.get<number>('llm.deepseek.maxTokens') ?? 4096;
-    const maxRetries =
-      this.config.get<number>('llm.deepseek.maxRetries') ?? 1;
+    const maxTokens = this.config.get<number>('llm.deepseek.maxTokens') ?? 4096;
+    const maxRetries = this.config.get<number>('llm.deepseek.maxRetries') ?? 1;
     const temperature =
       this.config.get<number>('llm.deepseek.temperature') ?? 0.2;
 

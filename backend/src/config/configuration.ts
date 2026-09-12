@@ -278,6 +278,14 @@ export const configuration = () => ({
     ),
   },
 
+  // 钉钉群机器人通知（可选，加签模式）
+  dingtalk: {
+    webhookUrl: process.env.DINGTALK_WEBHOOK_URL ?? '',
+    secret: process.env.DINGTALK_SECRET ?? '',
+    alertCooldownMs: Number(process.env.DINGTALK_ALERT_COOLDOWN_MS ?? 300_000),
+    forwardThreadIds: process.env.DINGTALK_FORWARD_THREAD_IDS ?? '',
+  },
+
   // 知识图谱（Neo4j，可选）
   neo4j: {
     enabled: process.env.GRAPH_RAG_ENABLED === 'true',

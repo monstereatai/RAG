@@ -16,6 +16,7 @@ import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import {
   buildContextPolicyMessage,
   isObjectiveFactQuery,
@@ -33,6 +34,7 @@ export class AguiService {
     private readonly artifactsService: ArtifactsService,
     @Optional() private readonly shortTermMemory?: ShortTermMemoryService,
     @Optional() private readonly plugins?: PluginRuntimeService,
+    @Optional() private readonly dingTalk?: DingTalkProvider,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -116,7 +118,11 @@ export class AguiService {
                 truncatedHistory: false,
               }),
             objectiveFactQuery
-              ? Promise.resolve({ userMemories: [], sessionMemories: [], systemMessage: null })
+              ? Promise.resolve({
+                  userMemories: [],
+                  sessionMemories: [],
+                  systemMessage: null,
+                })
               : this.withTimeout(
                   this.memoryService.searchMemory(
                     query,
@@ -124,7 +130,11 @@ export class AguiService {
                     activeThreadId,
                   ),
                   600,
-                  { userMemories: [], sessionMemories: [], systemMessage: null },
+                  {
+                    userMemories: [],
+                    sessionMemories: [],
+                    systemMessage: null,
+                  },
                 ),
           ]);
           const memoryMessages: Array<{ role: string; content: string }> = [];
@@ -218,7 +228,10 @@ export class AguiService {
               events: traceEvents.map((event) => event.type),
               runState: {
                 ...runState,
-                phase: result.retrievalSufficient === false ? 'degraded' : 'completed',
+                phase:
+                  result.retrievalSufficient === false
+                    ? 'degraded'
+                    : 'completed',
                 citation: { count: result.references?.length ?? 0 },
               },
             },
@@ -381,7 +394,8 @@ export class AguiService {
     } else if (event.type === 'sufficiency') {
       state.phase = data?.sufficient === false ? 'degraded' : 'evidence';
       state.evidence = {
-        sufficient: typeof data?.sufficient === 'boolean' ? data.sufficient : undefined,
+        sufficient:
+          typeof data?.sufficient === 'boolean' ? data.sufficient : undefined,
         reason: typeof data?.reason === 'string' ? data.reason : undefined,
       };
       if (data?.sufficient === false && typeof data.reason === 'string') {
@@ -391,7 +405,9 @@ export class AguiService {
       state.phase = 'generation';
     } else if (event.type === 'citation') {
       state.phase = 'citation';
-      state.citation = { count: Array.isArray(event.data) ? event.data.length : undefined };
+      state.citation = {
+        count: Array.isArray(event.data) ? event.data.length : undefined,
+      };
     } else if (event.type === 'error') {
       state.phase = 'error';
       state.degradationReason = 'runtime_error';
@@ -491,6 +507,15 @@ export class AguiService {
         inputTokens,
         outputTokens,
       ),
+    });
+    // 钉钉问答推送（fire-and-forget，threadId 白名单过滤）
+    void this.dingTalk?.forwardRagAnswer({
+      threadId: params.threadId,
+      query: params.query,
+      answer: params.answer,
+      mode: params.mode,
+      latencyMs: Date.now() - params.startTime,
+      citationCount: params.references.length,
     });
   }
 

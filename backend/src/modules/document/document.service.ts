@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'node:crypto';
@@ -22,6 +27,7 @@ import { GraphService } from '../graph/graph.service';
 import { DocumentQueueService } from './document-queue.service';
 import { detectDocumentKind } from './document-parser.util';
 import { ImageIndexService } from '../image-index/image-index.service';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
@@ -122,6 +128,7 @@ export class DocumentService {
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly imageIndexService: ImageIndexService,
+    @Optional() private readonly dingTalk?: DingTalkProvider,
   ) {}
 
   /**
@@ -211,13 +218,18 @@ export class DocumentService {
       const existingDocs = await this.docMetaRepo.find({ where: { userId } });
       const duplicate = existingDocs.find((item) => {
         try {
-          return JSON.parse(item.ingestionQuality ?? '{}').contentSha256 === contentSha256;
+          return (
+            JSON.parse(item.ingestionQuality ?? '{}').contentSha256 ===
+            contentSha256
+          );
         } catch {
           return false;
         }
       });
       if (duplicate && duplicate.docId !== docId) {
-        ingestionQuality.warnings.push(`检测到与文档 ${duplicate.docId} 内容相同的版本`);
+        ingestionQuality.warnings.push(
+          `检测到与文档 ${duplicate.docId} 内容相同的版本`,
+        );
       }
       const mediumRiskPromptInjection = promptInjectionFindings.filter(
         (finding) => finding.severity === 'medium',
@@ -495,6 +507,11 @@ export class DocumentService {
         errorMessage: message,
         finishedAt: new Date(),
       });
+      // 钉钉告警（fire-and-forget）
+      void this.dingTalk?.notifyAlert(
+        `document.failed:${taskId}`,
+        `**文档入库任务失败**（taskId：\`${taskId}\`）\n\n错误：${message.slice(0, 300)}`,
+      );
       throw err;
     }
   }
@@ -646,6 +663,11 @@ export class DocumentService {
       errorMessage,
       finishedAt: new Date(),
     });
+    // 钉钉告警（fire-and-forget）
+    void this.dingTalk?.notifyAlert(
+      `document.failed:${taskId}`,
+      `**文档入库任务失败**（taskId：\`${taskId}\`）\n\n错误：${errorMessage.slice(0, 300)}`,
+    );
   }
 
   setPermissions(docId: string, subjects: PermissionSubject[]): Promise<void> {
@@ -947,12 +969,15 @@ export class DocumentService {
   ): string[] {
     const text = content.replace(/\s+/g, ' ').trim();
     if (!text) return [];
-    const topic = headingPath?.filter(Boolean).slice(-1)[0] ?? text.slice(0, 48);
+    const topic =
+      headingPath?.filter(Boolean).slice(-1)[0] ?? text.slice(0, 48);
     const questions = [
       `${topic} 的核心内容是什么？`,
       `如何理解或使用 ${topic}？`,
     ];
-    return questions.filter((question, index) => index === 0 || text.length > 80);
+    return questions.filter(
+      (question, index) => index === 0 || text.length > 80,
+    );
   }
 
   private async saveChunkMetadata(

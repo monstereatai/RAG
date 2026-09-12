@@ -32,7 +32,10 @@ import {
 } from '../document/document-profile.util';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ImageIndexService } from '../image-index/image-index.service';
-import { detectDocumentKind, extractDocumentText } from '../document/document-parser.util';
+import {
+  detectDocumentKind,
+  extractDocumentText,
+} from '../document/document-parser.util';
 import { DocumentQueueService } from '../document/document-queue.service';
 import type { DocumentBusinessMetadata } from '../document/document-profile.util';
 
@@ -157,7 +160,7 @@ export class RagAdminService {
     return this.documentService.upload(file.originalname, content, userId, {
       originalBuffer: file.buffer,
       contentType: file.mimetype,
-      businessMetadata: businessMetadata as any,
+      businessMetadata: businessMetadata,
     });
   }
 
@@ -169,7 +172,10 @@ export class RagAdminService {
     if (!this.documentQueue.enabled) {
       return this.uploadDocument(file, userId, fields);
     }
-    const task = await this.documentService.createQueuedTask(file.originalname, userId);
+    const task = await this.documentService.createQueuedTask(
+      file.originalname,
+      userId,
+    );
     const businessMetadata = { ...fields } as Record<string, unknown>;
     delete businessMetadata.ownerUserId;
     await this.documentQueue.enqueue({
@@ -178,7 +184,7 @@ export class RagAdminService {
       filename: file.originalname,
       originalBufferBase64: file.buffer.toString('base64'),
       contentType: file.mimetype,
-      businessMetadata: businessMetadata as DocumentBusinessMetadata,
+      businessMetadata: businessMetadata,
     });
     return {
       taskId: task.id,
@@ -353,27 +359,50 @@ export class RagAdminService {
   }
 
   async getQualitySummary(limit = 500) {
-    const logs = this.queryLogRepo ? await this.queryLogRepo.find({ order: { createdAt: 'DESC' }, take: Math.min(Math.max(limit, 1), 2000) }) : [];
+    const logs = this.queryLogRepo
+      ? await this.queryLogRepo.find({
+          order: { createdAt: 'DESC' },
+          take: Math.min(Math.max(limit, 1), 2000),
+        })
+      : [];
     const answered = logs.filter((log) => log.hasAnswer).length;
     const cited = logs.filter((log) => log.citationCount > 0).length;
     const refused = logs.filter((log) => log.refused).length;
-    const latency = logs.length ? logs.reduce((sum, log) => sum + log.latencyMs, 0) / logs.length : 0;
+    const latency = logs.length
+      ? logs.reduce((sum, log) => sum + log.latencyMs, 0) / logs.length
+      : 0;
     const trend = Array.from({ length: 14 }, (_, index) => {
       const day = new Date();
       day.setHours(0, 0, 0, 0);
       day.setDate(day.getDate() - (13 - index));
       const next = new Date(day);
       next.setDate(next.getDate() + 1);
-      const dayLogs = logs.filter((log) => log.createdAt >= day && log.createdAt < next);
+      const dayLogs = logs.filter(
+        (log) => log.createdAt >= day && log.createdAt < next,
+      );
       return {
         date: day.toISOString().slice(0, 10),
         requests: dayLogs.length,
-        answerRate: dayLogs.length ? dayLogs.filter((log) => log.hasAnswer).length / dayLogs.length : 0,
-        citationRate: dayLogs.length ? dayLogs.filter((log) => log.citationCount > 0).length / dayLogs.length : 0,
-        averageLatencyMs: dayLogs.length ? Math.round(dayLogs.reduce((sum, log) => sum + log.latencyMs, 0) / dayLogs.length) : 0,
+        answerRate: dayLogs.length
+          ? dayLogs.filter((log) => log.hasAnswer).length / dayLogs.length
+          : 0,
+        citationRate: dayLogs.length
+          ? dayLogs.filter((log) => log.citationCount > 0).length /
+            dayLogs.length
+          : 0,
+        averageLatencyMs: dayLogs.length
+          ? Math.round(
+              dayLogs.reduce((sum, log) => sum + log.latencyMs, 0) /
+                dayLogs.length,
+            )
+          : 0,
       };
     });
-    const thresholds = { minAnswerRate: 0.8, minCitationRate: 0.7, maxRefusalRate: 0.2 };
+    const thresholds = {
+      minAnswerRate: 0.8,
+      minCitationRate: 0.7,
+      maxRefusalRate: 0.2,
+    };
     return {
       available: true,
       scanned: logs.length,
@@ -383,18 +412,34 @@ export class RagAdminService {
       averageLatencyMs: Math.round(latency),
       byMode: ['simple', 'agentic', 'auto'].map((mode) => {
         const modeLogs = logs.filter((log) => log.mode === mode);
-        return { mode, count: modeLogs.length, answerRate: modeLogs.length ? modeLogs.filter((log) => log.hasAnswer).length / modeLogs.length : 0 };
+        return {
+          mode,
+          count: modeLogs.length,
+          answerRate: modeLogs.length
+            ? modeLogs.filter((log) => log.hasAnswer).length / modeLogs.length
+            : 0,
+        };
       }),
       trend,
       gate: {
-        passed: (logs.length ? answered / logs.length : 0) >= thresholds.minAnswerRate &&
-          (logs.length ? cited / logs.length : 0) >= thresholds.minCitationRate &&
-          (logs.length ? refused / logs.length : 0) <= thresholds.maxRefusalRate,
+        passed:
+          (logs.length ? answered / logs.length : 0) >=
+            thresholds.minAnswerRate &&
+          (logs.length ? cited / logs.length : 0) >=
+            thresholds.minCitationRate &&
+          (logs.length ? refused / logs.length : 0) <=
+            thresholds.maxRefusalRate,
         thresholds,
         reasons: [
-          ...(answered / Math.max(logs.length, 1) < thresholds.minAnswerRate ? ['回答率低于门槛'] : []),
-          ...(cited / Math.max(logs.length, 1) < thresholds.minCitationRate ? ['引用率低于门槛'] : []),
-          ...(refused / Math.max(logs.length, 1) > thresholds.maxRefusalRate ? ['拒答率高于门槛'] : []),
+          ...(answered / Math.max(logs.length, 1) < thresholds.minAnswerRate
+            ? ['回答率低于门槛']
+            : []),
+          ...(cited / Math.max(logs.length, 1) < thresholds.minCitationRate
+            ? ['引用率低于门槛']
+            : []),
+          ...(refused / Math.max(logs.length, 1) > thresholds.maxRefusalRate
+            ? ['拒答率高于门槛']
+            : []),
         ],
       },
     };
@@ -421,7 +466,9 @@ export class RagAdminService {
         cited: log.citationCount > 0,
       };
     });
-    const retrieveCount = recent.filter((item) => item.action === 'retrieve').length;
+    const retrieveCount = recent.filter(
+      (item) => item.action === 'retrieve',
+    ).length;
     const directCount = recent.length - retrieveCount;
     return {
       available: true,
@@ -547,7 +594,12 @@ export class RagAdminService {
               error: doc.chunkCount > 0 ? null : '尚未生成可检索 Chunk',
             },
             es: {
-              status: doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled() ? 'indexed' : this.elasticsearchProvider.isEnabled() ? 'pending' : 'skipped',
+              status:
+                doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled()
+                  ? 'indexed'
+                  : this.elasticsearchProvider.isEnabled()
+                    ? 'pending'
+                    : 'skipped',
               chunkCount: doc.chunkCount,
               durationMs: null,
               completedAt: null,
@@ -624,7 +676,12 @@ export class RagAdminService {
           error: doc.chunkCount > 0 ? null : '尚未生成可检索 Chunk',
         },
         es: {
-          status: doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled() ? 'indexed' : this.elasticsearchProvider.isEnabled() ? 'pending' : 'skipped',
+          status:
+            doc.chunkCount > 0 && this.elasticsearchProvider.isEnabled()
+              ? 'indexed'
+              : this.elasticsearchProvider.isEnabled()
+                ? 'pending'
+                : 'skipped',
           chunkCount: doc.chunkCount,
           durationMs: null,
           completedAt: null,
@@ -643,7 +700,11 @@ export class RagAdminService {
 
   async inspectRetrieval(query: string, userId?: string, limit = 50) {
     if (!query?.trim()) throw new BadRequestException('query is required');
-    const result = await this.karpathyRagService.retrieveDetailed(query.trim(), {}, userId);
+    const result = await this.karpathyRagService.retrieveDetailed(
+      query.trim(),
+      {},
+      userId,
+    );
     const candidates = result.diagnostics.candidates;
     const cap = Math.min(Math.max(limit, 1), 50);
     return {
@@ -653,7 +714,12 @@ export class RagAdminService {
       rerankApplied: result.rerankApplied ?? false,
       diagnostics: result.diagnostics,
       candidates: candidates
-        ? Object.fromEntries(Object.entries(candidates).map(([key, value]) => [key, value.slice(0, cap)]))
+        ? Object.fromEntries(
+            Object.entries(candidates).map(([key, value]) => [
+              key,
+              value.slice(0, cap),
+            ]),
+          )
         : {},
     };
   }
@@ -1068,37 +1134,79 @@ export class RagAdminService {
       const reasons: string[] = [];
       if (doc.chunkCount <= 0) reasons.push('missing_chunks');
       if (doc.graphIndexStatus === 'failed') reasons.push('graph_index_failed');
-      if (doc.graphIndexStatus === 'pending') reasons.push('graph_index_pending');
-      if (doc.lifecycleStatus === 'effective' && doc.reviewStatus !== 'approved') reasons.push('effective_without_approval');
-      if (doc.lifecycleStatus === 'effective' && doc.expiredAt && doc.expiredAt.getTime() <= now) reasons.push('expired_but_effective');
-      return reasons.length ? [{ docId: doc.docId, filename: doc.filename, chunkCount: doc.chunkCount, lifecycleStatus: doc.lifecycleStatus, reviewStatus: doc.reviewStatus, graphIndexStatus: doc.graphIndexStatus, reasons }] : [];
+      if (doc.graphIndexStatus === 'pending')
+        reasons.push('graph_index_pending');
+      if (
+        doc.lifecycleStatus === 'effective' &&
+        doc.reviewStatus !== 'approved'
+      )
+        reasons.push('effective_without_approval');
+      if (
+        doc.lifecycleStatus === 'effective' &&
+        doc.expiredAt &&
+        doc.expiredAt.getTime() <= now
+      )
+        reasons.push('expired_but_effective');
+      return reasons.length
+        ? [
+            {
+              docId: doc.docId,
+              filename: doc.filename,
+              chunkCount: doc.chunkCount,
+              lifecycleStatus: doc.lifecycleStatus,
+              reviewStatus: doc.reviewStatus,
+              graphIndexStatus: doc.graphIndexStatus,
+              reasons,
+            },
+          ]
+        : [];
     });
     return {
       available: true,
       scanned: docs.length,
       issueCount: issues.length,
       counts: {
-        missingChunks: issues.filter((item) => item.reasons.includes('missing_chunks')).length,
-        graphIndexFailed: issues.filter((item) => item.reasons.includes('graph_index_failed')).length,
-        graphIndexPending: issues.filter((item) => item.reasons.includes('graph_index_pending')).length,
-        effectiveWithoutApproval: issues.filter((item) => item.reasons.includes('effective_without_approval')).length,
-        expiredButEffective: issues.filter((item) => item.reasons.includes('expired_but_effective')).length,
+        missingChunks: issues.filter((item) =>
+          item.reasons.includes('missing_chunks'),
+        ).length,
+        graphIndexFailed: issues.filter((item) =>
+          item.reasons.includes('graph_index_failed'),
+        ).length,
+        graphIndexPending: issues.filter((item) =>
+          item.reasons.includes('graph_index_pending'),
+        ).length,
+        effectiveWithoutApproval: issues.filter((item) =>
+          item.reasons.includes('effective_without_approval'),
+        ).length,
+        expiredButEffective: issues.filter((item) =>
+          item.reasons.includes('expired_but_effective'),
+        ).length,
       },
       issues,
-      repairActions: ['POST /rag/admin/documents/:docId/reindex', 'POST /rag/admin/documents/tasks/:taskId/retry'],
+      repairActions: [
+        'POST /rag/admin/documents/:docId/reindex',
+        'POST /rag/admin/documents/tasks/:taskId/retry',
+      ],
     };
   }
 
   async repairDocumentIndexes(input: { docIds?: string[]; limit?: number }) {
     const audit = await this.auditDocumentIndexes(input.limit ?? 200);
     const requested = input.docIds?.length ? new Set(input.docIds) : null;
-    const targets = audit.issues.filter((issue) => !requested || requested.has(issue.docId));
-    const results = await Promise.all(targets.map((issue) => this.reindexDocument(issue.docId)));
+    const targets = audit.issues.filter(
+      (issue) => !requested || requested.has(issue.docId),
+    );
+    const results = await Promise.all(
+      targets.map((issue) => this.reindexDocument(issue.docId)),
+    );
     return { available: true, requested: targets.length, results };
   }
 
   async listSecurityAudit(limit = 100) {
-    const events = await this.domainEvents.listOutbox(Math.min(Math.max(limit, 1), 500), 'security.query_blocked');
+    const events = await this.domainEvents.listOutbox(
+      Math.min(Math.max(limit, 1), 500),
+      'security.query_blocked',
+    );
     return {
       available: true,
       events,
@@ -1249,11 +1357,13 @@ export class RagAdminService {
       );
       await this.permissionRepo.delete({ docId });
       if (permissions.length > 0) {
-        await this.permissionRepo.save(permissions.map((permission) => ({
-          ...permission,
-          id: randomUUID(),
-          docId,
-        })));
+        await this.permissionRepo.save(
+          permissions.map((permission) => ({
+            ...permission,
+            id: randomUUID(),
+            docId,
+          })),
+        );
       }
       return {
         docId,

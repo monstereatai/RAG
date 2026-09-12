@@ -22,7 +22,11 @@ import { QueryIntentRouter } from './query-intent-router';
     EmbeddingModule,
     TypeOrmModule.forFeature([RagFeedbackEntity, QueryLogEntity]),
   ],
-  providers: [SemanticExampleSelector, BadCaseFlywheelService, QueryIntentRouter],
+  providers: [
+    SemanticExampleSelector,
+    BadCaseFlywheelService,
+    QueryIntentRouter,
+  ],
   exports: [SemanticExampleSelector, BadCaseFlywheelService, QueryIntentRouter],
 })
 export class PromptModule {}

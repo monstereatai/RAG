@@ -37,7 +37,10 @@ export interface AguiRunState {
   mode?: ChatMode;
   model?: string;
   route?: string;
-  retrieval?: { status: 'pending' | 'completed' | 'unavailable'; count?: number };
+  retrieval?: {
+    status: 'pending' | 'completed' | 'unavailable';
+    count?: number;
+  };
   evidence?: { sufficient?: boolean; reason?: string };
   citation?: { count?: number };
   degradationReason?: string;

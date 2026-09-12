@@ -115,7 +115,9 @@ export class ContextBuilder {
       diversified.push(chunk);
     }
 
-    const mmrOrdered = query ? applyLexicalMmr(diversified, query) : diversified;
+    const mmrOrdered = query
+      ? applyLexicalMmr(diversified, query)
+      : diversified;
     const selected: RetrievedChunk[] = [];
     let usedCharacters = 0;
     let budgetRemoved = 0;
@@ -185,7 +187,10 @@ function applyLexicalMmr(
       const redundancy = selected.length
         ? Math.max(
             ...selected.map((item) =>
-              jaccard(tokenizeForMmr(candidate.content), tokenizeForMmr(item.content)),
+              jaccard(
+                tokenizeForMmr(candidate.content),
+                tokenizeForMmr(item.content),
+              ),
             ),
           )
         : 0;

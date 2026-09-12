@@ -16,7 +16,9 @@ describe('DeepseekLlmProvider', () => {
       'llm.deepseek.timeoutMs': 30_000,
     };
     const provider = new DeepseekLlmProvider(
-      { get: jest.fn((key: string) => values[key]) } as unknown as ConfigService,
+      {
+        get: jest.fn((key: string) => values[key]),
+      } as unknown as ConfigService,
       { observeLlmCall: jest.fn() } as unknown as MetricsService,
     );
     const model = jest.mocked(ChatOpenAI).mock.results.at(-1)?.value as {

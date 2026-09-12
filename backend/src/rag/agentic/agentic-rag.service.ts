@@ -614,8 +614,9 @@ export class AgenticRagService {
           state.augmentedQueries,
           this.getSubQuestionLimit(config),
         );
-    const fastPathBundle = config?.configurable
-      ?.fastPathBundle as EvidenceBundle | undefined;
+    const fastPathBundle = config?.configurable?.fastPathBundle as
+      | EvidenceBundle
+      | undefined;
     // 对单一原问题，Fast Path 已经完成了权限过滤、混合检索和语义充分性判断。
     // Agentic 的“拆题”只是执行细节，不能使用不同问法把该结论推翻。
     if (
@@ -1168,9 +1169,14 @@ export class AgenticRagService {
               // 某些模型配置可建立连接但返回空内容；不能把这种空结果直接
               // 交给引用门禁，否则用户只会看到“生成失败”。用默认 Qwen
               // 复用同一批证据重试一次，仍失败再进入安全降级。
-              if (!draft.trim() && this.llmProvider.getActiveProviderName() !== 'qwen') {
+              if (
+                !draft.trim() &&
+                this.llmProvider.getActiveProviderName() !== 'qwen'
+              ) {
                 const fallbackModel = this.llmProvider.getModel('qwen');
-                for await (const chunk of await fallbackModel.stream(messages)) {
+                for await (const chunk of await fallbackModel.stream(
+                  messages,
+                )) {
                   const token =
                     typeof chunk.content === 'string'
                       ? chunk.content
@@ -1259,10 +1265,7 @@ export class AgenticRagService {
         // 语义总结；统一切换备用模型重新压缩同一批证据。
         try {
           const qwenAnswer = await this.llmProvider.runWithModel('qwen', () =>
-            this.synthesizeEvidenceAnswer(
-              state.query,
-              state.retrievedChunks,
-            ),
+            this.synthesizeEvidenceAnswer(state.query, state.retrievedChunks),
           );
           repairedFallbackAnswer = qwenAnswer
             ? this.karpathyRagService.repairAnswerCitations(
@@ -1354,8 +1357,7 @@ export class AgenticRagService {
           `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
       )
       .join('\n\n');
-    const prompt =
-      `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
+    const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
     try {
       const answer = await this.withTimeout(
         this.llmProvider.invoke(prompt),
@@ -1838,8 +1840,7 @@ export class AgenticRagService {
       rewriteQueries: queryIntent.rewriteQueries,
       reason: queryIntent.reason,
     };
-    retrieveOptions.knowledgeOnly =
-      queryIntent.sourcePolicy === 'local_only';
+    retrieveOptions.knowledgeOnly = queryIntent.sourcePolicy === 'local_only';
     retrieveOptions.sourcePolicy = queryIntent.sourcePolicy;
     retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
     retrieveOptions.entities = queryIntent.entities;

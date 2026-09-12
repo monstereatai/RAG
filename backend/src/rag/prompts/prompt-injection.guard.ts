@@ -12,7 +12,10 @@ export interface DangerousQueryFinding {
 export interface SafetyPolicyDescriptor {
   id: string;
   version: number;
-  category: 'destructive_operation' | 'secret_exfiltration' | 'prompt_injection';
+  category:
+    | 'destructive_operation'
+    | 'secret_exfiltration'
+    | 'prompt_injection';
   action: 'block';
   enabled: boolean;
   effectiveAt: string;
@@ -63,25 +66,29 @@ export function listSafetyPolicies(): SafetyPolicyDescriptor[] {
       id: 'database_destructive_operation',
       category: 'destructive_operation',
       action: 'block',
-      description: '阻止 DROP、TRUNCATE、DELETE FROM、删库和删表等破坏性数据库请求。',
+      description:
+        '阻止 DROP、TRUNCATE、DELETE FROM、删库和删表等破坏性数据库请求。',
     }),
     policy({
       id: 'destructive_shell_operation',
       category: 'destructive_operation',
       action: 'block',
-      description: '阻止 rm -rf、mkfs、format、dd、关机和批量删除文件等危险命令。',
+      description:
+        '阻止 rm -rf、mkfs、format、dd、关机和批量删除文件等危险命令。',
     }),
     policy({
       id: 'secret_exfiltration',
       category: 'secret_exfiltration',
       action: 'block',
-      description: '阻止导出、打印、展示 API Key、Token、密码和凭据等敏感信息。',
+      description:
+        '阻止导出、打印、展示 API Key、Token、密码和凭据等敏感信息。',
     }),
     policy({
       id: 'prompt_injection_high_risk',
       category: 'prompt_injection',
       action: 'block',
-      description: '阻止覆盖系统规则、越权调用工具和索取系统提示词等高风险注入。',
+      description:
+        '阻止覆盖系统规则、越权调用工具和索取系统提示词等高风险注入。',
     }),
   ];
 }
@@ -101,7 +108,12 @@ export function detectDangerousQuery(query: string): DangerousQueryFinding[] {
   return dangerousQueryPatterns.flatMap((item) => {
     const match = item.pattern.exec(normalized);
     return match
-      ? [{ pattern: item.name, excerpt: compactExcerpt(normalized, match.index) }]
+      ? [
+          {
+            pattern: item.name,
+            excerpt: compactExcerpt(normalized, match.index),
+          },
+        ]
       : [];
   });
 }

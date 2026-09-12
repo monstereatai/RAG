@@ -36,7 +36,12 @@ import { ScheduledJobQueueService } from './scheduled-job-queue.service';
     RedisModule,
   ],
   controllers: [JobsController],
-  providers: [JobsService, ScheduledAnalysisService, RolesGuard, ScheduledJobQueueService],
+  providers: [
+    JobsService,
+    ScheduledAnalysisService,
+    RolesGuard,
+    ScheduledJobQueueService,
+  ],
   exports: [JobsService],
 })
 export class JobsModule {}

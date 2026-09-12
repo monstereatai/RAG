@@ -193,8 +193,9 @@ export class QueryIntentRouter {
       /(?:是什么|是什麼|啥意思|什么意思|如何理解)[？?。！!]?$/.test(
         query.trim(),
       );
-    const isBareTopic =
-      /^[\p{Script=Han}\p{L}\p{N}_-]{1,40}$/u.test(query.trim());
+    const isBareTopic = /^[\p{Script=Han}\p{L}\p{N}_-]{1,40}$/u.test(
+      query.trim(),
+    );
     // 公司／研发／项目流程属于本地业务事实，即使模型漏抽实体，也不能按公共
     // 概念直答。这里是来源策略的安全边界，不参与答案内容生成。
     const hasInternalBusinessContext =

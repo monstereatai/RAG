@@ -15,6 +15,7 @@ import { Mem0Module } from './providers/mem0/mem0.module';
 import { ObjectStorageModule } from './providers/object-storage/object-storage.module';
 import { VisionModule } from './providers/vision/vision.module';
 import { ObservabilityModule } from './providers/observability/observability.module';
+import { NotifyModule } from './providers/notify/notify.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { DocumentModule } from './modules/document/document.module';
@@ -78,6 +79,7 @@ import { DomainEventsModule } from './modules/domain-events/domain-events.module
     Mem0Module,
     ObjectStorageModule,
     ObservabilityModule,
+    NotifyModule,
     VisionModule,
     AuthModule,
     HealthModule,
