@@ -37,6 +37,7 @@ describe('AgenticRagService budget boundaries', () => {
       answerDirect: jest.fn().mockResolvedValue(null),
       assessFastPath: jest.fn(),
       answer: jest.fn(),
+      formatObsidianContext: jest.fn().mockReturnValue(''),
       retrieve: jest.fn(),
       retrieveBm25Only: jest.fn(),
       getObsidianContext: jest
@@ -202,13 +203,24 @@ describe('AgenticRagService budget boundaries', () => {
     ]);
   });
 
-  it('returns an Auto direct answer before running the Hybrid Fast Path', async () => {
+  it('uses the Hybrid Fast Path as Auto direct-answer evidence instead of a second direct lookup', async () => {
     const { service, karpathyRagService } = createService();
-    karpathyRagService.answerDirect.mockResolvedValue({
+    const prefetchedFastPath = {
+      retrieval: { chunks: [], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+    } as never;
+    karpathyRagService.assessFastPath.mockResolvedValue({
+      sufficient: true,
+      reason: '结构化状态证据充分',
+      chunks: [],
+      obsidianHits: [],
+      prefetchedFastPath,
+    });
+    karpathyRagService.answer.mockResolvedValue({
       answer: 'ACT100 已上线。',
       references: [],
       retrievalSufficient: true,
-      retrievalReason: '命中受治理本地直答',
+      retrievalReason: '结构化状态证据充分',
     });
 
     await expect(
@@ -218,7 +230,16 @@ describe('AgenticRagService budget boundaries', () => {
       route: 'simple',
       retrievalSufficient: true,
     });
-    expect(karpathyRagService.assessFastPath).not.toHaveBeenCalled();
+    expect(karpathyRagService.answerDirect).not.toHaveBeenCalled();
+    expect(karpathyRagService.assessFastPath).toHaveBeenCalledTimes(1);
+    expect(karpathyRagService.answer).toHaveBeenCalledWith(
+      'ACT100 的状态是什么？',
+      [],
+      undefined,
+      [],
+      expect.any(Function),
+      expect.objectContaining({ prefetchedFastPath }),
+    );
   });
 
   it('reuses a sufficient Base Case Fast Path result in Auto simple route', async () => {

@@ -48,116 +48,15 @@
 
 ## 当前结论
 
-- **已明确系统配置持久化边界并补齐证据链验证（2026-09-10）**：系统配置接口现在显式标记 `persisted: false`，管理后台以只读方式展示环境变量／启动默认值，更新接口返回 409，不再误报“保存成功”；真正持久化需后续单独设计数据库 schema。查询路由离线评测 12/12 通过（accuracy、localSafety、publicDirectPrecision 均为 1），`EvidenceBundle`、路由和核心 RAG 代码已纳入统一证据快照。Admin Backend、Admin build 与 `git diff --check` 通过；定向 Jest 受 workspace Jest 29／30 运行时兼容错误 `clearMocksOnScope` 阻断。当前 3001 管理后台仍在监听，RAG Backend 因本机 PostgreSQL 5432／Redis 6379 未启动无法完成真实端到端验证。
+- **统一问答剩余六项闭环已完成（2026-09-12）**：ChatService 事件回调已贯通 SSE／AG-UI，透传路由、检索、节点计时、工具、反思、引用、token、审批中断和恢复事件；新增 `RequestContext`、`ExecutionState`、`ChatResult` 类型契约，直连 Agentic 入口也会补建统一上下文。`EvidenceBundle` 记录来源状态和子问题覆盖率；Obsidian 支持 frontmatter 用户／角色 ACL；带用户身份时 Bad Case 只使用该用户已审核纠正，避免无租户向量跨用户泄露；Artifact 重新生成自动使旧审批变为 `stale`；LangGraph Checkpoint 保存已消耗步骤、剩余预算和暂停状态，resume 校验检查点、暂停态和预算后使用 `Command.resume` 恢复。定向测试 61／61 通过，`git diff --check` 通过；全仓 TypeScript 仍只有既有 playwayPreview、RAG Admin 测试构造和历史测试夹具错误。
 
-- **已接入管理后台异步文档任务（2026-09-10）**：RAG Admin 上传路由在 Redis 队列启用时立即创建并返回 `taskId`，Admin Backend 新增任务状态代理，前端轮询完成／失败后刷新文档列表；队列未启用时保留同步降级。上传接口同时使用 10 分钟专用转发和熔断超时，避免大文件被普通 2／5 秒超时截断。Backend、Admin Backend、Admin build 与 `git diff --check` 通过；本机当前 PostgreSQL／Redis 未运行，无法完成真实队列端到端验证。
-- **已收紧 Admin JWT 生产密钥门禁（2026-09-10）**：`NODE_ENV=production` 且未配置 `JWT_SECRET` 时 Admin Backend 启动直接失败，不再静默使用开发默认密钥；开发环境行为保持不变。Admin Backend build 通过。
+- **已收敛 Chat 问答为两执行引擎与 Auto 路由（2026-09-12）**：Chat 主入口默认 `auto`，并将已完成的 `QueryIntent`、来源策略、权限范围和图谱计划传入下游；Agentic 优先复用该请求上下文，不再对同一 HTTP 请求二次分类。SSE、AG-UI、QA Ops 的未指定模式也统一为 `auto`。显式 `simple` 保持线性边界，多问题、公共直答与歧义都不会再进入 Agentic 入口。Auto 取消独立 `answerDirect` 预探测，改为消费 `assessFastPath` 的 Base Case／Hybrid／Obsidian 快照；Karpathy 正式回答复用同一快照。Obsidian 不再在 Agentic 前二次读取；图谱由结构化 `requiresGraph` 计划按需进入共享 Hybrid 检索，移除 Agentic 子问题的第二条图谱工具查询。HTTP、SSE 与 AG-UI 统一调用 `ChatService`，入口层不再各自执行 Agentic 或重复保存会话／记忆；流式正文仅在统一最终结果生成后发布。`docs/interview/功能步骤流程.md` 已同步。验证：`pnpm install --frozen-lockfile` 未改 lockfile；`git diff --check` 通过；以 backend 的 Jest 30 环境显式运行 QueryIntent、Chat、AG-UI、Karpathy、Agentic 五组定向测试，58／58 通过。Backend build 仍被既有的两处 `ProductionWorkflowService.playwayPreview` 缺失类型定义阻断（`agent-ops-admin.controller.ts:211`、`workflow.controller.ts:151`），不属于本次改动。
 
-- **已修正管理后台上传熔断超时（2026-09-10）**：文档上传请求不再套用普通 API 的 5 秒 Circuit Breaker 超时，改为 10 分钟专用上限，与 RAG Client 的长耗时转发保持一致，避免大 PDF 在解析／向量化期间被网关提前截断。
+- **已重构并逐图校准功能步骤流程文档（2026-09-11）**：`docs/interview/功能步骤流程.md` 参考后端面试速查的表达方式，改为「结论 → 问题场景 → 处理方案 → 为什么有效 → 边界」的分层结构；保留 29 张流程／数据流图，并逐项对照当前代码修正问答公共直答例外、Auto 仍含复杂度正则、Simple／Auto 检索会探测图谱与图片、Task 仅支持审批／修订恢复、同步／异步上传分支、Obsidian 尽力而为与治理缺口、多模态图片索引边界、三类 Checkpoint／幂等机制、部署侧告警、MCP 配置身份与计算类工具、平台治理未自动联动灰度发布等口径。2.2 Simple 图已收敛为「历史隔离 → 直答门禁 → 单次 Hybrid → 证据／引用门禁 → 返回」主干。Markdown 围栏、29 个 Mermaid 块、连线索引和 `git diff --check` 已验证。
 
-- 已新增 BOSS 直聘 20K＋AI Agent／AI 应用开发岗位调研与面试指南（2026-09-10）：归纳岗位样本、能力要求、掌握程度、核心知识点与 10 个场景化面试回答；另新增来源标注版 42 题高频题库，覆盖 RAG、Agent、MCP、记忆、工程化、评测与生产边界，并明确当前项目可讲能力与生产边界。
+- **已落盘结构化组件清单（2026-09-08）**：`docs/reference/playway-component-inventory.md`——playway 截图词汇表的结构化版本，94 个组件全部配英文 ID（kebab-case，`task-*`/`lottery-*`/`team-*` 等按分类前缀）+ 中文说明；含活动类型→组件组合建议（新服预约/私域拉新/促活/回流四组，标注推断）、pageSchema 使用示例（对齐 production-workflow roleSchema 的 `components[].type`）、prompt 注入用紧凑格式（可直接粘进岗位 prompt 约束组件词汇）。诚实声明已置顶：组件 ID 为本项目拟定命名（原平台内部标识未知，可修正）、通用/页面框架为推断分组、两处 OCR 待确认项标 ⚠️。挂链：playway/README.md 第四节 + course-agent/06-sop-workflow 延伸素材；顺手修正 playway/README.md 分类计数（原"13 分类"实为 12 面板分类 + 2 推断分组）。三文件相对链接校验通过。纯文档新增，未改运行时代码（prompt 实际注入是后续可选代码改动）。
 
-- **已归档 BOSS 通用全栈 20K＋岗位与面试材料（2026-09-10）**：新增 `docs/BOSS_FULLSTACK_20K_PLUS.md`，与 AI Agent 岗材料独立。基于 BOSS 公开职位集合页按月薪下限 ≥20K 筛出 12 个全栈样本，逐条保留岗位要求与链接；合并为前端体验、服务端接口、数据缓存、高并发异步、权限安全、工程交付和架构业务判断七类能力，并给出 20–30K／30K＋掌握标准、P0～P2 知识点与 60 道五段式问题答案。明确排除了仅薪资上限达到 20K 的职位。Markdown 内容和链接格式检查通过。
-
-- **已归档 BOSS AI Agent 全栈 20K＋岗位检索（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_20K_PLUS.md`，基于 BOSS 公开职位集合页整理 12 条薪资下限 ≥20K 的 Agent／AI 应用全栈样本，保留岗位、薪资、地点、经验学历、可核验 JD 要求与原始链接；归纳全栈产品交付、LLM／RAG、Agent 工程、平台治理四类能力，明确平台型与应用型岗位的差异，并排除仅薪资上限达到 20K 的职位。文档链接与内容检查通过。
-
-- **已生成 AI Agent 全栈岗位考察知识点（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_KNOWLEDGE.md`，将岗位要求合并为前端 AI 交互、后端与多租户、模型与结构化输出、RAG、Agent／MCP、任务恢复、评测观测、部署与业务交付 16 个能力模块；按 20–30K、30–40K、40K＋给出熟练／可主导的掌握标准、26 道高频面试题、三档验收任务和 P0／P1／P2 复习优先级。文档检查通过。
-
-- **已生成 AI Agent 全栈问题式面试指南（2026-09-10）**：新增 `docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_GUIDE.md`，按「一个知识点＝一个核心问题＋追问＋项目口述答案」组织 **60 道**高频题：前 16 题为知识域主问题，后 44 题覆盖实现细节、方案取舍、故障排查、治理与业务判断；每题均用背景、问题、主流方案、项目选择、效果与边界展开，避免框架名堆砌，并提供题目索引方便逐题练习。Markdown 检查通过。
-
-- **已更新功能步骤流程文档（2026-09-10）**：`docs/interview/功能步骤流程.md` 补充管理后台文件上传的 FormData、Admin Backend 鉴权与归属用户、RAG 内部解析入库、列表刷新和最新排序流程，并明确大文件 10 分钟专用超时与同步入库边界。
-
-- **已收紧公司与研发流程路由边界（2026-09-10）**：新增公司、项目、研发流程、开发／发布流程等本地业务 Few-shot，并在路由归一化层建立来源策略安全边界：命中内部业务语义时强制 `local_only + retrieve + needsSynthesis`，不会因问题短或模型误判而直答；公共概念仍走 direct answer。路由测试 9/9、Backend build、`git diff --check` 通过，已重启本地 Backend。
-
-- **已修复公共裸主题误进 RAG（2026-09-10）**：补充公共定义与裸主题 Few-shot 边界，并增加不依赖具体词汇的结构性收敛：无私域实体的定义句或单独主题名默认按公共知识直答；带公司、项目、资料上下文或明确实体时仍走本地检索。修正 Agentic 公共直答分支，使 `sourcePolicy=direct_answer` 的公共知识不再因置信度阈值二次落入 RAG。真实回放「小红书是什么」和「小红书」均返回无引用的公共知识回答，未读取知识库、未联网；路由测试 8/8、Backend build、`git diff --check` 通过。
-
-- **已修复 DeepSeek 生成空结果导致资料库问答无内容（2026-09-10）**：真实管理后台 AG-UI 回放「资料库当中，帮我总结下李逵是谁，干了什么」已确认本地检索命中 2 个片段，但 DeepSeek 首次生成未通过引用门禁。现由 Karpathy 与 Agentic 两条生成路径共享受约束语义总结，并在首选模型未通过门禁或超时后切换 Qwen 重试同一批证据，超时窗口统一提升至 20 秒；不再返回空白或原始残片。真实 DeepSeek 请求返回完整中文摘要、2 条本地引用、`retrievalSufficient=true`，未触发联网。Backend／Admin Backend build 通过，证据链、Karpathy、Agentic、路由定向测试 53/53 通过；Jest 仍有既有异步句柄未关闭提示，不影响测试结果。
-
-- **已修复 Auto 链路把检索残片当回答（2026-09-10）**：移除了人物／章回的规则式正文拼接和受治理直答中的原文片段补位。非明确结构化业务事实即使被路由误判为 lookup，也必须进入完整的 LLM 证据生成与逐句引用校验；生成或二次受约束摘要均不合格时，返回明确的可重试提示，不再把 PDF 原始句子伪装成结论。模型遗漏引用格式时，仅在结论与唯一最佳证据片段覆盖度达到门槛后自动补上引用，无法支撑则仍拒绝。新增回归覆盖：文学正文不能走 Karpathy 直答、无引用回答的安全引用修复、半引用回答禁止片段泄露、带冒号的结构性前言不误判为事实。Karpathy、Agentic、路由与 EvidenceBundle 定向测试 53/53 通过，Backend build 与 `git diff --check` 通过；重启本地 Backend 后真实 Auto 回放「资料库当中，帮我总结下李逵是谁，干了什么」返回完整摘要、2 条本地引用、`retrievalSufficient=true`、`route=simple`，未触发联网。
-
-- **已完成统一 RAG 证据链重构（2026-09-10）**：新增请求级 `EvidenceBundle`，将原始问题、去重后的本地证据、充分性结论、来源策略和检索诊断作为唯一权威快照。Karpathy Fast Path、Simple／Auto 与 Agentic 共享此快照；单问题的 Agent 规划不再以改写子问题推翻已通过的原问题证据。`local_only` 现在同时在 Karpathy 与 Agentic 联网入口强制拦截。回答生成未通过引用门禁时，先做受约束语义摘要；仅可验证的结构化业务事实允许确定性直答，其余场景宁可返回生成重试提示也不输出候选原文片段。路由生产路径及离线评测脚本均移除了正则关键词分流，改为 LLM Few-shot 结构化策略契约与低置信度本地收敛。Backend build；EvidenceBundle 3/3、Karpathy 29/29、Agentic 13/13、Router 6/6 定向测试及路由评测 12/12 通过。重启本地后端后，以真实鉴权请求验证 `/api/v1/rag/search` 查询「李逵」返回 2 条本地证据、Rerank `0.830`；以 `agentic` Chat 查询「资料库当中，帮我总结李逵」返回 `retrievalSufficient=true`、2 条本地引用和完整摘要。用户运行时索引文件未纳入本次修改。
-
-- **已修复“独立搜索命中、Agentic 问答误报资料不足”（2026-09-10）**：检索充分性门禁优先使用 Rerank 的 query－片段语义相关度；仅在没有重排结果时回退多语言词面诊断。新增 `RAG_MIN_RERANK_SCORE`（默认 `0.65`）和回归测试。真实回放「资料库当中，帮我总结下李逵」命中两段本地资料（重排分 `0.779`／`0.759`），生成带片段引用的总结且未触发联网；后续统一证据链已消除 Agent 二次否决，Karpathy 29/29 定向测试通过。
-
-- **已修复 QA Ops 会话与插件接口 502（2026-09-10）**：Admin Backend 的 `GET /api/admin/qa-ops/conversations` 和 `GET /api/admin/qa-ops/plugins` 改为稳定只读契约；RAG Backend 暂时不可达时返回 HTTP 200、空数据及 `available/status/error`，恢复后自动返回真实数据，不再把上游连接故障升级为页面 502。已重启 RAG/Admin Backend，直连上游会话与插件接口均返回 200；Admin Backend build 与 QA Ops 定向测试 13/13 通过。
-
-- **已将 RAG 来源路由改为结构化策略（2026-09-10）**：新增 `sourcePolicy`（`direct_answer`、`local_only`、`web_allowed`），由 LLM + Few-shot 语义路由决定证据来源；生产链路不再使用关键词判断是否联网，低置信度默认收紧到本地资料。Simple、Auto、Agentic 统一消费该策略，避免“资料库问题误走公网”。Backend build 通过；定向 Jest 受既有 `clearMocksOnScope` 运行时兼容问题阻断。
-
-- **已修复“资料库问题误走联网”边界（2026-09-09）**：路由目标包含文档知识库时，将 `knowledgeOnly` 约束传入 Simple、Auto、Agentic 全链路；本地资料不足时跳过 Bocha 联网兜底，只返回资料不足提示。已用 Simple 模式回放「资料库中西门庆是谁」，回答引用本地片段且未触发 `web_search`；Backend build 与 `git diff --check` 通过。
-
-- **已收敛证据回答的通用降级策略（2026-09-09）**：私域问题由 LLM 意图路由输出检索动作、实体与受控改写，Agentic 主检索并行执行原问句与语义改写，不按人物、章回或任一业务关键词分支。首次生成未通过逐句引用门禁时，系统会基于同一批证据进行一次受约束的语义压缩；二次生成仍无法通过则明确资料不足，禁止把候选原文片段当作回答。引用区仅展示答案实际标记的片段。Backend build 与 `git diff --check` 通过；Jest 仍受仓库既有 Jest 30 `clearMocksOnScope` 运行时兼容问题阻断。
-
-- **已补齐多模态知识检索闭环（2026-09-09）**：图片相关 query 通过现有 Milvus `rag_images` 文本向量检索与文本 RAG 并行探测，命中后把图片语义、受控地址和来源文档转换为上下文 Chunk；普通 query 不触发图片向量开销。PDF／PPTX 内嵌图片的 VLM 提示已明确覆盖截图、流程图、架构图和表格图，并要求输出可检索中文语义摘要；图像检索失败或超时安全降级。Backend 类型检查通过，未新增数据库迁移。
-
-- **已接通管理后台文档上传链路（2026-09-09）**：文档管理页的批量上传／空状态上传按钮现可选择多个文件，前端使用 multipart 提交；Admin Backend 通过 `FileInterceptor` 接收并透传至 RAG 内部上传路由，按当前登录用户归属文档，复用现有解析入库能力；列表服务端和前端均按最新创建时间倒序。支持后端已有的文本、PDF、Office、表格、演示文稿、图片、音频、视频等类型。Admin 与 Admin Backend build 通过；Backend build 受运行中 watch 进程占用 `dist/src` 的既有 ENOTEMPTY 冲突阻断，已由开发服务热重载加载新路由。
-- **已补齐上传长耗时保护（2026-09-09）**：上传解析／向量索引改用 10 分钟专用超时，不再沿用普通管理 API 的 2 秒超时，避免大 PDF 被前端误判为上传失败。
-
-- **已修复模型失败 Prompt 泄露与多问题误直答（2026-09-09）**：Qwen／DeepSeek Provider 调用失败时不再返回 Mock 文本或截断请求内容，改为抛出不含 Prompt 的受控错误；Agentic 直答路径向 SSE 发出 `LLM_UNAVAILABLE` 后返回友好失败说明。语义路由新增 `multiIntent`／`subQueries`，多条独立问题在 Simple、Auto、Agentic 均跳过单题直答和 Auto 快速路径，改走 Agentic 查询规划；模型遗漏字段时只按明确问号边界保留完整子问题，不用关键词猜测。AG-UI SSE 实测「React 是什么？1+1 等于多少？」路由为 `multi_intent_query`，拆分两条子问题并同时覆盖两项回答，无 Mock／Prompt 泄露。`pnpm --dir backend run build` 与 `git diff --check` 通过；`tsc --noEmit` 与定向 Jest 分别受既有 Spec 类型错误和 Jest 29／30 `clearMocksOnScope` 运行时冲突阻断，未伪造为通过。
-
-- **已补齐动态多义词消歧与主题隔离（2026-09-09）**：共享语义路由器由模型根据当前问题生成候选语义和澄清问题，不再维护固定关键词名单；Simple、Auto、Agentic 在检索前统一拦截低置信度多义查询，模型失败时保守放行，避免误判。Hypothetical Questions 仅参与召回，不决定词义；Backend build 与 `git diff --check` 通过。
-
-- **已改为主流语义优先的实体消歧（2026-09-09）**：仅含实体名的查询由结构化语义路由模型判断主流指代；有主流含义时直答，只有多个语义同等合理时才澄清，不因输入短而拒答。路由窗口调整为 20 秒，将语义结论作为正确性门槛，直答路径隔离历史与知识库，避免错误进入深度检索。
-
-- **已修复语义路由有效结果被 schema 拒绝（2026-09-09）**：路由模型会省略未使用的 `ambiguity.confidence`，旧 schema 因此误降级到 Agentic RAG；现改用统一 LLM Provider 的 JSON 输出并为非必要 ambiguity 字段提供默认值。使用 AG-UI SSE 实测「金铲铲」约 7 秒被判为客观事实并直接回答《金铲铲之战》，无知识库／网页检索、无“资料不足”。本地开发 HTTP 服务以 `GRPC_ENABLED=false` 运行，避免热重载重复占用 gRPC 端口。
-
-- **已接入 Hypothetical Questions 索引（2026-09-09）**：文档入库为每个 chunk 生成假设性问题，持久化到 `document_chunks.hypotheticalQuestions`，并写入 Elasticsearch 与本地 BM25 的召回文本；检索命中后仍返回原始 chunk，避免生成问题污染回答证据。已执行 TypeORM 迁移；Backend build 与 `git diff --check` 通过。
-
-- **已增加图谱旁路探测与按需证据合并（2026-09-09）**：混合检索主链路可并行执行受限 Neo4j shadow probe，仅返回最多 6 条图谱事实并设置 1.2 秒超时；普通问题保留 BM25／向量主结果，关系、多跳、依赖、影响分析类问题才把图谱事实合并进上下文。图谱旁路跳过答案生成，不额外调用 LLM；失败、超时、未启用或缺少用户身份均安全降级。Backend 类型检查与 `git diff --check` 通过；生产构建受既有 `dist` 清理冲突阻断，Jest 受既有 `clearMocksOnScope` runtime 兼容问题阻断。
-
-- **已增加文档三路发布看板与检索证据实验台（2026-09-09）**：文档详情新增 RAG 向量、ES 搜索、Neo4j 图谱三路状态、Chunk 数、失败原因、版本号与重试入口；索引耗时仅在后端有持久化值时展示，不用创建时间冒充耗时。检索运营新增「检索证据实验台」，可按 query 查看 BM25、向量、RRF、Rerank 输入／结果和最终上下文候选，并可跳转文档详情；新增 RAG Admin 与 Admin Backend 代理接口。Backend、Admin Backend 构建通过；Admin 全量 TypeScript 检查仍受仓库既有 React 类型冲突等错误阻断，本次新增文件无报错。
-
-- **已加固历史上下文事实隔离（2026-09-09）**：新增统一上下文策略，客观事实问题禁用历史问答向量与短期历史注入；普通追问保留历史但明确标注为非事实依据；普通 Chat、AG-UI 和 Chat SSE 统一注入冲突裁决规则；新增 `docs/plans/历史上下文事实污染与模型切换优化方案.md`。Backend build 与 `git diff --check` 通过；上下文策略单测因仓库现有 Jest 30 运行时 `clearMocksOnScope` 兼容错误未能执行，待修复测试环境后复验。
-- **已修复 Auto 模型身份问题未前置分流（2026-09-09）**：扩展系统能力问题识别，覆盖「你是哪个模型」「当前使用的模型」等表达；命中后在检索、证据门禁和重试前直接依据当前运行时模型回答，避免历史片段污染。
-- **已统一三条链路的语义预路由（2026-09-09）**：新增共享 `QueryIntentRouter`，Simple、Auto、Agentic／SSE／AG-UI 均在检索前仅依据当前问题进行结构化意图分类；系统能力问题直接读取运行时模型信息，分类超时才使用保守回退，不再依赖单链路关键词命中。
-- **已完成首批检索质量增强（2026-09-09）**：稳定通用事实前置直答；项目／私有／实时问题保留检索；对长片段增加 Query 感知句级去噪压缩；新增简版记录 `docs/plans/RAG检索优化记录.md`。Backend build 与 `git diff --check` 通过。
-- **已补充 Query 重写、术语规范化与动态阈值（2026-09-09）**：Agentic 检索使用语义路由器生成独立 Query；常见技术别名统一；检索充分性阈值按查询意图自适应。Backend build 与 `git diff --check` 通过。
-- **已增加轻量 MMR 去重排序（2026-09-09）**：在上下文预算前按 Query 相关性与片段冗余度重排候选，降低同质内容占用上下文；由于现有候选未保留 embedding，当前采用分词集合近似。Backend build 与 `git diff --check` 通过。
-
-- **已增加文档索引一致性巡检接口（2026-09-09）**：RAG Admin 新增 `GET /rag/admin/documents/index-audit`，管理后台新增 `GET /api/admin/documents/index-audit`，检查空 chunk、图索引失败／待处理、生效未审批和过期仍生效文档，并返回可执行的重建／重试动作；Backend 与 Admin Backend build 通过。
-
-- **已增加仓库级质量门禁 CI（2026-09-09）**：新增 `.github/workflows/quality-gate.yml`，在 main／release 分支 push 和 PR 上自动执行依赖锁定安装、Backend／Admin Backend 构建、企业就绪检查和 RAG 质量门禁；真实模型评测仍由外部 key 和环境条件决定，不在 CI 中伪造通过。
-
-- **已补齐企业就绪部署清单（2026-09-09）**：新增根目录 `DEPLOYMENT_CHECKLIST.md`，覆盖代码构建、依赖服务、RAG 安全与质量、Agent／定时任务、运行回滚和外部依赖；`pnpm --dir backend run enterprise:readiness` 本地检查由 11/12 提升为 12/12 通过，线上资源、真实凭据和外部平台仍按清单明确标记。
-
-- **已增加安全策略目录接口（2026-09-09）**：RAG Admin 新增 `GET /rag/admin/security/policies`，管理后台同步提供 `GET /api/admin/agent-ops/security/policies`，公开当前数据库破坏、危险 Shell、敏感凭据导出和 Prompt 注入四类阻断策略，供管理后台、告警和后续审批中心复用；不新增数据库迁移。定向测试 21/21、Backend 与 Admin Backend build、`git diff --check` 通过。
-
-- **已补充 Backend 存活／就绪探针（2026-09-09）**：保留 `/health` 作为进程存活检查，新增 `/health/ready` 检查数据库初始化状态和 Redis 状态；数据库未就绪返回 503，Redis 不可用时明确返回 `degraded`，便于容器编排和监控区分“进程活着”与“服务可接流量”。定向测试 20/20、Backend build、`git diff --check` 通过。
-
-- **已补齐定时任务与高风险问答的运行治理（2026-09-09）**：定时任务执行增加 Redis 分布式租约锁和一次有限重试，启用 Redis 时多实例不会重复执行同一任务；Redis 不可用时保留本进程互斥降级。新增 `rag_dangerous_queries_blocked_total` Prometheus 指标，按拦截策略和入口统计危险问答请求，覆盖普通 Chat、SSE 和 Agentic RAG。定向测试 20/20、Backend build、`git diff --check` 通过。
-
-- **已加固自然语言定时任务解析与调度边界（2026-09-09）**：支持上午／下午／晚上／半小时、每隔 N 分钟／小时／天、工作日和周末；无法识别执行时间或周期时不再静默降级为每天 9 点；每月日期不再强制截断到 28 号；Cron 创建前校验表达式，单次任务拒绝过去时间；Cron 运行显式固定 `Asia/Shanghai` 时区；无数据范围时正确补齐默认部门。定时任务单测 13/13、Backend build、`git diff --check` 通过。
-
-- **已增加 RAG 问答高风险破坏性请求拦截（2026-09-09）**：在普通 Chat、Agentic RAG、流式 Chat 和 AGUI 共用的执行前路径增加危险请求检测；对「帮我删除数据库」、`DROP DATABASE`、`TRUNCATE TABLE`、`rm -rf`、敏感凭据导出等请求，在会话创建、检索、模型调用和工具执行前直接阻断，并返回 `DANGEROUS_QUERY_BLOCKED`。保留安全讨论场景，例如「什么是 DROP TABLE，如何防止误删数据库？」和「如何检测和审计删库风险？」。定向单测 4/4 通过，Backend build 与 `git diff --check` 通过。
-
-- **已补齐 Swagger 全接口中文描述（2026-09-09）**：在 RAG Backend 与 Admin Backend 的 OpenAPI 文档生成阶段统一处理所有 HTTP 操作；已有中文 `summary`／`description` 保留，缺失或非中文的接口根据方法和路径自动生成中文摘要与说明。实测 RAG 250/250、Admin 249/249 接口均有中文摘要和描述；两端构建与 TypeScript 检查通过。
-
-- **已为 RAG Backend 与 Admin Backend 接入 Swagger（2026-09-09）**：RAG Backend 新增 `@nestjs/swagger` 与 OpenAPI 配置；两套服务均提供 Swagger UI 和 JSON 文档，启用 Bearer Token 鉴权输入与持久化授权。验证：`http://localhost:3000/docs`、`http://localhost:3000/docs-json`、`http://localhost:3001/docs`、`http://localhost:3001/docs-json` 均返回 200；RAG 文档含 226 个路径，Admin 文档含 206 个路径；两端构建与 TypeScript 检查通过。
-
-- **已修复模型配置页面黑色卡片主题（2026-09-09）**：将 `model-config-layout` 下的 Ant Design 卡片、卡片标题、正文和边框从深色背景调整为与管理后台一致的浅色视觉，增加轻量阴影和可读性更高的文本颜色。Admin build、`git diff --check` 通过。
-
-- **已修正 ZIP 生成接口对失效工作流的错误码（2026-09-08）**：定位工作流 `afe53a26-c54b-46f1-be97-5b769574aa3b` 返回 500 的根因是 Redis/LangGraph Checkpoint 不存在，服务原先把 `workflow not found` 作为普通 Error 返回 500。`ProductionWorkflowService.getOwnedState` 现改为 `NotFoundException`，失效或归属不匹配的工作流返回 404，并提示重新启动；`pnpm --dir backend build` 通过，使用内部服务 token 实测该 UUID 返回 404 及明确消息。该历史 UUID 的完整工作流状态无法从仅含摘要的索引恢复，需要重新执行工作流后再下载 ZIP。
-
-- **已修复详情页 Playway 规则／模板为空（2026-09-08）**：修复初次加载时误用项目 ID（如 `act9`）作为规则检索词的问题，改为默认加载 18 条组件规则和 4 个活动模板；保留搜索框用于按玩法筛选。期间发现 Backend 进程退出，已重新启动并验证两个接口分别返回 18 条规则、4 个模板；Admin Biome、Admin build 通过。
-
-- **已修复 Playway 转盘预览交互（2026-09-08）**：结果提示不再初始展示；点击「立即抽奖」后转盘执行 1.6 秒旋转动画，期间按钮禁用，动画结束显示模拟中奖结果并恢复按钮。预览 HTML 已实测包含隐藏结果、旋转 class 和防重复点击逻辑；Backend build、定向测试 7/7 通过。
-
-- **已升级 Playway 活动页预览（2026-09-08）**：预览不再只是组件卡片列表；会根据 pageSchema 和岗位交付上下文识别抽奖类活动，渲染转盘、五档奖品、规则说明、结果反馈和可点击的模拟抽奖按钮，同时保留组件结构卡片。act9 实测返回 `wheel`、`prize-list`、`countdown`、`result-modal` 等推断组件，接口 200，定向测试 7/7、Backend build 通过。
-
-- **已修复 Playway 预览显示空页面（2026-09-08）**：历史工作流可能同时包含空的 product pageSchema 和有效的 design/frontend pageSchema，预览器此前总是选第一份导致显示 0 个组件。现改为优先选择组件非空的 pageSchema；act9 实测返回 `banner`、`activity-rules`、`reserve-now` 等 4 个组件。定向测试 7/7 通过，Backend build 通过。
-
-- **已修复 Playway 预览 401（2026-09-08）**：管理端预览代理补齐内部服务路由前缀，并在 RAG Backend 增加对应 ServiceToken 代理入口，避免请求误落到 JWT 保护的用户工作流接口。Backend、Admin Backend 已重新构建并重启；使用服务令牌直连预览接口返回 200 和有效 HTML。
-
-- **已清零 Playway 融合遗留项（2026-09-08）**：修复 `structured-delivery-artifacts.ts` 的结构化来源类型错误；补齐生产工作流测试 Artifact mock，相关 14 个定向测试全绿；新增确定性 Playway pageSchema HTML 预览接口和后台「预览 Playway 活动页」入口；新增 Playway 活动图谱 Neo4j 结构化写入接口和后台「同步活动图谱」入口，使用现有 GraphService 幂等 sourceId 写入，不依赖第三方低代码协议。Backend build、Admin build、Admin Backend TypeScript 均通过。
-
-- **已补齐 Playway 活动模板、关系图与后台审查入口（2026-09-08）**：新增新服预约、私域拉新、游戏促活、游戏回流 4 个活动模板，包含必选／可选组件、接口、埋点、验收规则和风险提示；生产岗位 Prompt 会按 Brief 注入候选模板；RAG Backend、Admin Backend 和管理后台详情页新增模板查询与展开查看；新增活动→组件→接口→埋点关系图接口，供 GraphRAG／MCP 复用。注册表、模板闭合与关系图测试 5/5、Admin Biome 检查通过；完整 backend build 仍被既有 `structured-delivery-artifacts.ts` 类型错误阻断。
-
-- **已补齐 Playway 规则检索与素材校正（2026-09-08）**：修复中文查询先移除空格导致多词活动 Brief 无法命中的问题，并加入“新服预约／私域拉新／游戏促活／游戏回流”等中文活动别名检索；注册表单测 3/3 通过。同步校正附录 OCR 文本：任务类 16 项、抽奖类包含“中奖轮播”、充值类 6 项、新服预约第 10 项为“组队”。backend 定向构建仍被既有 `structured-delivery-artifacts.ts` 类型错误阻断，与本次 Playway 文件无行号交集。
-
-- **已建立 Playway 组件规则运行时闭环（2026-09-08）**：新增 `backend/src/modules/workflow/playway-component-registry.ts`，覆盖截图识别出的 96 个组件；每个组件定义分类、适用活动、前置依赖、配置字段、产出事件、风险等级和合规要求，并提供按 brief 检索、Prompt 紧凑格式化、RAG 后端与管理后台代理检索接口。生产工作流岗位 Prompt 已注入按需求检索的候选规则，Schema 归一化会过滤未注册组件，并校验页面组件引用的 API／埋点是否存在；工作流详情返回全局 Schema 闭合问题，后台已提供规则搜索、依赖／配置／事件／风险展示和校验告警；兜底页面改用注册表内组件。同步校正 `playway/README.md` 与 `docs/reference/playway-component-inventory.md` 的任务／抽奖／充值／新服预约计数和 OCR 误识别。验证：注册表 96 项且 type 唯一；新增规则、后台规则查询和页面格式检查通过；backend TypeScript 检查仍仅受既有测试类型错误阻断，未出现本次文件错误；定向 Jest 被 workspace 既有 Jest 29／30 runtime 冲突阻断（`clearMocksOnScope`）。
-
-- **已落盘结构化组件清单（2026-09-08）**：`docs/reference/playway-component-inventory.md`——playway 截图词汇表的结构化版本，96 个组件全部配英文 ID（kebab-case，`task-*`/`lottery-*`/`team-*` 等按分类前缀）+ 中文说明；含活动类型→组件组合建议（新服预约/私域拉新/促活/回流四组，标注推断）、pageSchema 使用示例（对齐 production-workflow roleSchema 的 `components[].type`）、prompt 注入用紧凑格式。组件 ID 仍是本项目标准化命名，运行时规则以注册表为准；挂链：playway/README.md 第四节 + course-agent/06-sop-workflow 延伸素材。
-
-- **已整理游戏营销中台组件库素材文档（2026-09-08）**：`playway/README.md` 落盘——9 张低代码平台组件面板截图经 macOS Vision OCR 提取后整理为结构化功能总结：活动类型×场景矩阵（新服预约/私域拉新/促活/回流）、96 个组件、平台特征（多语言多地区、微信生态集成、智齿客服、强运营玩法）、与 `lowCodeSchemas` pageSchema 组件枚举的衔接说明，附录保留各截图 OCR 原文可溯源；计数和原先两处 OCR 疑点已按原图修正。
+- **已整理游戏营销中台组件库素材文档（2026-09-08）**：`playway/README.md` 落盘——9 张低代码平台组件面板截图经 macOS Vision OCR 提取后整理为结构化功能总结：活动类型×场景矩阵（新服预约/私域拉新/促活/回流）、组件库 13 分类约 90+ 组件（通用/页面框架/任务 15/抽奖/引流/组队/充值/红包/新服预约/排行榜/私域窄口径/集卡/代言人/AI 生成）、平台特征（多语言多地区、微信生态集成、智齿客服、强运营玩法）、与 `lowCodeSchemas` pageSchema 组件枚举的衔接说明，附录保留各截图 OCR 原文可溯源。两个待确认点已标注：面板 `(0/N)` 计数语义、新服预约类一个无法辨认的组件名。
 
 - **已修复历史工作流详情导致后端进程崩溃（2026-09-08）**：`production-workflow.service.ts` `saveWorkflowIndex` 对岗位结果 `lowCodeSchemas` 直接 `.map`，历史数据该字段为 `undefined`（后期新增字段），点击旧工作流详情 → `status()` 刷新索引 → TypeError 成为 unhandled rejection → Node 进程退出（3000 后端死亡）。修复为 `(result.lowCodeSchemas ?? []).map`（与同文件 codingContext/导出链路 L422/473/483 的既有 `?? []` 防御对齐，此前唯独索引写入漏防）。新增回归测试 `indexes historical stage results without lowCodeSchemas instead of crashing`：用 `app.updateState` 注入删除 lowCodeSchemas 的历史岗位结果（results reducer 浅合并可准确模拟旧数据），断言 `status()` 不崩且 `list()` 索引中 `lowCodeSchemas: []`。**红绿已实证**：未修复代码上该测试以线上同形态崩溃（`TypeError: Cannot read properties of undefined (reading 'map')` → Node 进程退出），修复后全绿（12 测试 10 过，2 个失败为预先存在的 `markReviewState` mock 缺失，HEAD 铁证与本次无关）。我改动的两个文件 lint/TS 零新增错误（全仓 125 个 lint errors 与 build 1 error 均为预先存在债务，行号零交集）。**注意：主人此前重启的后端仍运行未修复代码，需重新构建重启后点旧工作流详情才安全**。测试运行绕过 jest 29/30 共存坑（临时 config 显式锁定 jest-environment-node@30.4.1）。
 
@@ -610,19 +509,6 @@
 
 ### 2026-08-11
 
-- **项目 ZIP 生成接口修复**：`generate-project-zip` 调用 `artifact_generate` 时补充 `frontend` 岗位上下文，避免 Tool Registry 因“未声明岗位”拒绝执行；管理接口失败响应改为透出具体错误信息；LLM 项目代码生成增加 15 秒单次超时，连续失败后自动生成可运行 React/Vite/TypeScript 兜底项目。`backend pnpm build` ✅；已用目标工作流复测权限门禁解除，模型调用超时场景将进入兜底路径。
-- **项目 ZIP 目录整理**：应用源码保留在根目录；工作流上下文、低代码 Schema、证据、岗位交接和交付校验统一归档到 `docs/rag`、`docs/schemas`、`docs/evidence`、`docs/handoff`，并在根目录 README 增加目录说明；`backend pnpm build` ✅。
-- **项目 ZIP 代码目录统一**：生成项目的全部代码文件统一放入 `project/`，根目录仅保留 README 与资料索引，README 启动说明同步更新为先进入 `project/`；`backend pnpm build` ✅。
-- **Playway 预览与 ZIP 入口统一**：ZIP 的 `project/index.html` 改为直接复用 `renderPlaywayPreview()` 同源渲染结果，导出后打开入口页与 Playway 预览保持一致；AI Coding React 源码仍保留在 `project/src/`；`backend pnpm build` ✅。
-- **QA 模型标签修正**：问答卡片对 `zhipu` 单独显示“智谱 GLM”，不再把除千问以外的模型误标为 DeepSeek；智谱配置直连验证返回 200。
-- **智谱 401 修复**：修正 `ZHIPU_API_KEY` 为空字符串时错误阻断 `ZAI_API_KEY` 回退的问题，改用非空优先级读取；重启 backend 后 Agentic `model=zhipu` 实测不再返回 401，返回正常 `RUN_FINISHED`。
-- **QA 历史消息元数据持久化**：对话消息保存引用片段、模型、路由、置信度、检索原因和思考事件；刷新后从历史会话恢复这些信息，旧消息纯文本格式继续兼容；不新增数据库字段，backend build 与 admin TypeScript 检查通过。
-- **QA 引用文档点击修复**：引用卡片同时按 `retrievalSource` 和 `http(s)` URL 识别外链，避免把网页 URL 错误跳转为内部文档详情；外链显示域名并新窗口打开，卡片增加溢出截断和窄屏布局保护；admin TypeScript 检查通过。
-- **QA 本地网页文档来源修正**：本地知识库中以原网页 URL 作为 `docId` 的资料不再被误判为外链；仅 `retrievalSource=web` 或 `web:` 引用 ID 走外部链接，并在卡片标注“本地知识库／外部网页”。
-- **文档详情页接口字段兼容**：详情页归一化 backend 返回的 `docId`、顶层元数据和 `chunkIndex/sourceStart/sourceEnd` 字段，补齐前端缺失默认值，修复点击引用后因 `fileType` 等字段为空导致的页面报错；admin TypeScript 检查通过。
-- **引用文档详情超时修复**：admin-backend 文档详情与 chunk 请求改用 10 秒读取超时，避免默认 2 秒超时导致点击引用后空白或统一失败；admin-backend build 与 admin TypeScript 检查通过。
-- **引用文档详情响应解包修复**：admin-backend 详情与 chunk 接口统一解开 RAG backend 的 `{ code, data, message }` 外层响应，避免前端拿到嵌套数据后全部显示默认值；admin-backend build 与 admin TypeScript 检查通过。
-
 - **定时任务版本治理与复制**：定时分析任务增加版本组、版本号、当前版本和复制来源；后台支持复制新版本、查看版本历史和启用指定版本。新版本默认停用，启用时自动停用同组旧版本，旧版本及执行历史保留。
 
 - **产研运工作流列表与详情闭环**：新增按用户隔离的工作流列表接口和 Redis 索引，管理后台可按列表查看运行状态、完成岗位和当前批次，点击后加载 Thread 详情、阶段交付物及审批／驳回操作；Redis 不可用时保留进程内列表兜底。
@@ -828,28 +714,3 @@
 - **全量功能流程与实现对照复核**：逐项核对《功能步骤流程.md》的 Simple／Auto／Agentic、RAG、Bad Case、Redis Checkpointer、LangFuse／Prometheus、Agent Ops／Artifact、Prompt Injection／Tool Registry、异步文档任务、Adoption、LLM Gateway、身份权限、记忆、答案质量、Tool／MCP、Prompt Registry、评测发布、SSE、GraphRAG、Web Search、缓存限流、DLP、成本和事故处理流程；新增“功能流程与代码入口对照”表，修正 Bad Case 的 `reviewedBy`／`reviewedAt`、审核分支和无需重启生效口径，补齐 RAG 的跨链路 Bad Case Preflight，并将 DocumentTask 阶段改为代码实际使用的 `parsing`／`embedding`／`vector_index`／`metadata`。文档 Mermaid、旧字段残留和格式检查通过。
 
 - **中国 PC 端与页游公开运营营销资料采集**：新增 `backend/eval/game-marketing-top100.catalog.json`，建立 PC 端候选 Top50 与页游候选 Top50 公开资料目录；新增 `collect-game-marketing-top100.mjs`，按榜单来源记录候选名次，抓取公开官网／活动／运营／营销／社区入口，保存 Markdown 快照、来源、抓取时间、content hash 和失败原因；新增 `docs/plans/游戏运营营销公开资料与Karpathy方案.md`，补充用户操作、数据状态流和 Simple Karpathy Fast Path；最新批次实际抓取 127 个公开页面，目录和 Karpathy 方案入库，108 份唯一目标文档全部完成索引；《失落的方舟》重复登录页面以同源去重摘要卡入库，完整快照保留本地。
-
-### 2026-09-09
-
-- **中文人物事实问句检索修复（已完成）**：修复“资料库里的陈达出现在第几章节，他的花名叫什么”被 Agentic 查询扩展拆成代词子问题、继而因单个子问题无证据整体拒答的问题。对章节／回目／花名／绰号等同一人物事实问句保留原始问题作为单一证据验收单元，仍保留显式多问题的独立拆分。新增 Agentic 回归测试；backend build ✅；真实本地 SSE 验证返回“第 2 回、跳涧虎”且 `retrievalSufficient=true`。Jest 当前受仓库既有 Jest 30 运行时 `clearMocksOnScope` 环境错误阻断，未将该项标为测试通过。
-- **RAG 意图路由与评测闭环补齐（已完成）**：QueryIntentRouter 增加结构化 action、queryType、targetKbs、entities、filters、rewriteQueries 和 reason 输出；保留规则硬门禁，私域实体／上下文／多问题默认进入检索。Few-shot 路由边界样本抽为共享示例池并注入 Router Prompt，新增 12 条路由评测集与 eval:query-routing，覆盖公共知识、私域人物、同音错字、上下文追问、实时问题和多意图；评测准确率 12／12、私域召回率 1.0、公共直答精确率 1.0。tsc --noEmit、格式检查和 git diff --check 通过；完整 Nest build 因本机残留多个 nest start --watch 进程并发占用 backend/dist，未将本项标为 build 通过。
-- **意图路由管理后台闭环（已完成）**：RAG Admin 新增 intent-routing 汇总接口，Admin Backend 增加代理路由，Agent 运营页新增“意图路由运营”卡片，展示扫描量、检索／直答分布、私域／上下文数量和最近问答路由明细。历史日志未持久化完整 Router JSON，页面明确标注当前统计为硬门禁规则回放估算；新运行的 AG-UI routing 事件已携带完整 action、queryType、知识库、实体、过滤条件和重写 Query。admin-backend build、backend watch 编译和 git diff --check 通过；admin 全量 tsc 仍有既有 React 类型与历史 workflow 类型错误，未将其标为全量通过。
-- **RAG 公共问题／私域实体分流收紧**：新增 `requiresKnowledgeRetrieval()` 硬门禁；公司、项目、部门、内部资料、人名身份、上下文追问等问题禁止仅凭 LLM 直答，必须先走检索，检索不到再澄清或安全降级；同步修正 QueryIntentRouter 提示词，并补充“1+1”直答、“李四是谁”与内部制度检索测试。
-
-- **DeepSeek 问答超时修复**：DeepSeek v4 默认输出上限从 4096 调整为 1024，并补齐最大重试、温度配置；避免推理预算耗尽导致 LangChain 调用超过 30 秒后显示“模型服务暂时不可用”。实测“水浒传里面的陈达做了什么”使用 DeepSeek 正常完成，返回正文和引用，`RUN_FINISHED` 正常。
-
-- **管理端文档列表排序**：`GET /api/admin/documents` 及其 RAG 查询统一按上传时间 `createdAt DESC` 返回，新增 `docId DESC` 稳定兜底，确保最新上传文档排在最前；补充 RagAdminService 回归测试（14/14 通过）。
-
-- **第二批缺口清零**：质量汇总接入 QA Ops 概览；危险请求通过 Domain Event Outbox 保存脱敏审计并提供后台查询；定时任务增加 BullMQ 延迟／重试／去重适配器，Redis 不可用时保留原调度降级；文档索引增加批量修复；Agent 汇总增加步骤准确率和恢复率；OpenAPI 契约检查覆盖安全、质量、索引、Agent 和 readiness 路径；新增并发／故障相关单测。Backend 全量 Jest 58 suites／274 tests、三端构建均通过。
-- **缺口清单补齐**：新增 Agent 运行成本／成功率／失败率／重试与审批汇总接口，并在 Agent 运营工作台展示；新增 RAG 安全策略卡片、文档索引巡检接口、后台代理路由、本地 OpenAPI 契约检查脚本与 CI 质量门禁。backend、admin-backend、admin 生产构建、定向测试、企业 readiness 12/12 及 `git diff --check` 均通过。真实 Grafana／告警、生产 BullMQ 集群、备份灾备、低代码平台、企业 IAM／DLP／工单和压测仍标记为线上或外部依赖，未伪造为已完成。
-- **统一运行协议第一版**：AG-UI 事件补充 `runState`，统一表达路由、检索、证据、生成、引用、完成／降级／错误阶段；会话元数据持久化该状态，刷新后可恢复详情轨迹。
-- **系统能力问答分流**：模型名称、多模态和能力询问直接走模型回答，不再被知识库证据门禁误判为“资料不足”；回答仍标记实际选用模型。
-- **管理端响应适配器**：新增 `unwrapRagResponse`，文档详情与 chunk 接口统一解包，避免 `{data:{code,data,message}}` 多层包装。
-- **验证**：`pnpm --dir backend build`、`pnpm --dir admin tsc --noEmit`、`pnpm --dir admin-backend build` 通过。
-- **RAG 准确率优化**：Query Augment 增加默认 0.8 相似度门禁并保留原问题；文档类型切分 overlap 调整为 10%～20% 字符预算，继续保护标题／表格／代码语义块；Agent Eval 增加 `context_recall`、缺失证据断言和 0.8 阈值。
-- **验证补充**：backend build 通过；相关 Jest 用例因仓库既有 Jest 30 运行时 `clearMocksOnScope` 兼容错误未能启动，未将其标记为通过。
-- **动态语义切分实验**：在结构化分段、表格／代码保护基础上增加句子／段落边界动态装箱；各文档类型保留独立 overlap（API／配置较低，PRD／复盘较高），新增 `evaluateChunkStrategy` 输出 overlapRatio、semanticBoundaryRate 和实验分数；ts-node 样例验证 PRD overlap 15.38%、边界率 100%。
-- **仓库内闭环收口**：定时任务在 Redis 可用时以 BullMQ Job Scheduler 为唯一调度源，并保留无 Redis 降级；文档重建保留原文档 ID、ACL、生命周期与审核元数据，写入 SHA-256 和重复内容告警；PDF 解析改为懒加载，`--detectOpenHandles` 全量测试无残留；Backend／Admin Backend OpenAPI 检查脚本均支持严格模式；Agent 工作台展示四层可信指标和 RAG 质量发布门禁；安全策略增加版本、生效时间、启用状态；新增 `docs/SECURITY_AND_DATA_LIFECYCLE.md`。验证：Backend 58 suites／274 tests（含 `--detectOpenHandles`）通过，三端生产构建通过，`git diff --check` 通过。契约脚本因本地服务未启动安全跳过，严格运行需启动 Backend 3000 与 Admin Backend 3001。
-- **RAG 检索优化记录补充**：在 `docs/plans/RAG检索优化记录.md` 增加本次实际优化点，明确 Auto 语义路由、历史事实隔离、多义词消歧、混合召回、结果质量控制和安全回退。
-- **大 PDF 知识库上传修复**：确认《西游记》PDF 本身可读、未加密、664 页约 83MB；修复 Admin 文档上传代理仅允许 10MB 的限制，知识库文档上传上限提高到 1GB，并在前端上传前给出明确的超限提示。`admin-backend build`、`admin build` 通过，Admin Backend 已重启生效。
-- **QA Ops RAG 流式问答恢复与章节事实兜底**：修复本地三段服务未启动导致管理后台收到 `terminated` 代理兜底的问题；启动并验证 Backend 3000、Admin Backend 3001、Admin 8000。针对“人物出现在第几章／做了什么”问题，新增基于命中片段章回标题和行为句的证据优先回答，避免检索已有明确章节证据时因覆盖不足整体拒答；Backend build ✅，真实 AG-UI SSE 验证返回章回与引用 ✅。

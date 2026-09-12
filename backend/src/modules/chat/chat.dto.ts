@@ -134,4 +134,20 @@ export interface ChatResponse {
   threadId?: string;
   queryLogId?: string;
   runId?: string;
+  evidenceCoverage?: Array<{
+    id: string;
+    query: string;
+    covered: boolean;
+    evidenceIds: string[];
+  }>;
+  executionState?: {
+    phase?: string;
+    consumedSteps: number;
+    consumedToolCalls: number;
+    remainingSteps?: number;
+    remainingToolCalls?: number;
+    checkpointId?: string;
+    paused?: boolean;
+    lastNode?: string;
+  };
 }

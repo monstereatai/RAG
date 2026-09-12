@@ -6,32 +6,23 @@ import {
   LangfuseProvider,
   type RagTraceEvent,
 } from '../../providers/observability/langfuse.provider';
-import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
-import { MemoryService } from '../memory/memory.service';
-import { ShortTermMemoryService } from '../memory/short-term-memory.service';
+import { ChatService } from '../chat/chat.service';
 import type { AguiEvent, AguiRunState, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
-import {
-  buildContextPolicyMessage,
-  isObjectiveFactQuery,
-  selectHistoryForQuery,
-} from '../../rag/prompts/context-policy';
 
 @Injectable()
 export class AguiService {
   constructor(
-    private readonly agenticRagService: AgenticRagService,
+    private readonly chatService: ChatService,
     private readonly conversationService: ConversationService,
-    private readonly memoryService: MemoryService,
     private readonly llmProvider: LlmProvider,
     private readonly langfuseProvider: LangfuseProvider,
     private readonly artifactsService: ArtifactsService,
-    @Optional() private readonly shortTermMemory?: ShortTermMemoryService,
     @Optional() private readonly plugins?: PluginRuntimeService,
   ) {}
 
@@ -48,6 +39,7 @@ export class AguiService {
         const startTime = Date.now();
         const traceEvents: RagTraceEvent[] = [];
         const runState: AguiRunState = { phase: 'routing' };
+        let streamedContent = false;
 
         const emit = (
           type: AguiEvent['type'],
@@ -65,7 +57,6 @@ export class AguiService {
 
         try {
           const selectedModel = options.model ?? 'qwen';
-          const objectiveFactQuery = isObjectiveFactQuery(query);
           runState.mode = options.mode;
           runState.model = selectedModel;
           const roleContext = resolveRoleContext(options.rolePresetId);
@@ -103,138 +94,30 @@ export class AguiService {
             role: 'assistant',
           });
 
-          const [history, shortTermContext, memoryResult] = await Promise.all([
-            this.conversationService.getRecentHistory(
-              activeThreadId,
-              5,
-              options.userId,
-            ),
-            this.shortTermMemory?.getContext(activeThreadId) ??
-              Promise.resolve({
-                systemMessage: null,
-                recentTurns: [],
-                truncatedHistory: false,
-              }),
-            objectiveFactQuery
-              ? Promise.resolve({ userMemories: [], sessionMemories: [], systemMessage: null })
-              : this.withTimeout(
-                  this.memoryService.searchMemory(
-                    query,
-                    options.userId,
-                    activeThreadId,
-                  ),
-                  600,
-                  { userMemories: [], sessionMemories: [], systemMessage: null },
-                ),
-          ]);
-          const memoryMessages: Array<{ role: string; content: string }> = [];
-          memoryMessages.push({
-            role: 'system',
-            content: buildContextPolicyMessage(),
-          });
-          memoryMessages.push({
-            role: 'system',
-            content: roleContext.systemMessage,
-          });
-          if (artifactIntent) {
-            memoryMessages.push({
-              role: 'system',
-              content: `用户已明确要求生成${this.artifactKindLabel(artifactIntent.kind)}。请输出可直接写入文件的完整内容，不得声称无法创建或发送文件，也不要让用户复制粘贴；系统会在回答完成后自动创建附件。`,
-            });
-          }
-          if (memoryResult.systemMessage) {
-            memoryMessages.push({
-              role: 'system',
-              content: memoryResult.systemMessage.content as string,
-            });
-          }
-          if (shortTermContext.systemMessage) {
-            memoryMessages.push({
-              role: 'system',
-              content: shortTermContext.systemMessage.content as string,
-            });
-          }
-
-          const boundedHistory =
-            shortTermContext.recentTurns.length > 0
-              ? shortTermContext.recentTurns.map((turn) => ({
-                  role:
-                    turn.role === 'assistant'
-                      ? ('ai' as const)
-                      : ('human' as const),
-                  content: turn.content,
-                }))
-              : history;
-          const safeHistory = selectHistoryForQuery(query, boundedHistory);
-
-          const result = await this.llmProvider.runWithModel(
-            selectedModel,
-            () =>
-              this.agenticRagService.run(
+          const result = await this.llmProvider.runWithModel(selectedModel, () =>
+            this.chatService.chat(
+              {
                 query,
-                options.mode,
-                (event) => {
-                  this.updateRunState(runState, event);
-                  traceEvents.push(this.toTraceEvent(event));
-                  this.emitAguiEvent(event, emit, messageId);
-                },
-                safeHistory,
-                activeThreadId,
-                options.userId,
-                memoryMessages,
-                false,
-                {
-                  scope: { role: roleContext.role },
-                  ...(pluginComposition
-                    ? {
-                        pluginKeys: pluginComposition.pluginKeys,
-                        pluginTools: pluginComposition.toolNames,
-                      }
-                    : {}),
-                },
-              ),
-          );
-
-          await this.conversationService.addMessage(
-            activeThreadId,
-            'human',
-            query,
-            options.userId,
-          );
-          await this.conversationService.addMessage(
-            activeThreadId,
-            'ai',
-            result.answer,
-            options.userId,
-            {
-              mode: options.mode,
-              route: result.route,
-              model: selectedModel,
-              confidence: result.confidence,
-              retryCount: result.retryCount,
-              retrievalSufficient: result.retrievalSufficient,
-              retrievalReason: result.retrievalReason,
-              references: result.references ?? [],
-              events: traceEvents.map((event) => event.type),
-              runState: {
-                ...runState,
-                phase: result.retrievalSufficient === false ? 'degraded' : 'completed',
-                citation: { count: result.references?.length ?? 0 },
+                mode: options.mode,
+                threadId: activeThreadId,
+                rolePresetId: options.rolePresetId,
+                pluginKeys: options.pluginKeys,
               },
-            },
+              options.userId,
+              (event) => {
+                this.updateRunState(runState, event);
+                if (event.type === 'token') streamedContent = true;
+                this.emitAguiEvent(event, emit, messageId);
+              },
+            ),
           );
-          void this.shortTermMemory?.addTurn(activeThreadId, 'user', query);
-          void this.shortTermMemory?.addTurn(
-            activeThreadId,
-            'assistant',
-            result.answer,
-          );
-          void this.memoryService.classifyAndPersist(
-            options.userId,
-            activeThreadId,
-            query,
-            result.answer,
-          );
+          runState.route = result.route;
+          runState.phase = result.retrievalSufficient === false ? 'degraded' : 'citation';
+          runState.citation = { count: result.references?.length ?? 0 };
+          // ChatService 的 token 事件已经实时透传；这里不再重复发送完整正文。
+          if (!streamedContent) {
+            emit('TEXT_MESSAGE_CONTENT', { messageId, delta: result.answer });
+          }
 
           let generatedArtifacts: unknown[] = [];
           if (artifactIntent) {
@@ -279,7 +162,7 @@ export class AguiService {
             query,
             answer: result.answer,
             mode: options.mode,
-            route: result.route,
+            route: result.route ?? 'simple',
             model: selectedModel,
             startTime,
             references: result.references ?? [],

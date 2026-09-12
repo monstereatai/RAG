@@ -170,7 +170,11 @@ export class ObsidianKnowledgeService {
     }
   }
 
-  async search(query: string, limit = 5): Promise<ObsidianSearchHit[]> {
+  async search(
+    query: string,
+    limit = 5,
+    access?: { userId?: string; roles?: string[] },
+  ): Promise<ObsidianSearchHit[]> {
     await this.ensureVault();
     // 三个目录相互独立；并发枚举可缩短 Obsidian 检索的准备时间。
     const [compiledFiles, indexFiles, noteFiles] = await Promise.all([
@@ -193,6 +197,7 @@ export class ObsidianKnowledgeService {
         batch.map(async (file): Promise<ObsidianSearchHit | null> => {
           const content = await readFile(file.path, 'utf8');
           const frontmatter = this.parseFrontmatter(content);
+          if (!this.canReadFrontmatter(frontmatter, access)) return null;
           const body = content.replace(/^---[\s\S]*?---\s*/m, '').trim();
           const score = this.scoreText(
             tokens,
@@ -226,6 +231,23 @@ export class ObsidianKnowledgeService {
     }
 
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  /** Obsidian 是文件型知识源，未声明 ACL 的历史笔记视为公开；声明后必须命中用户或角色。 */
+  private canReadFrontmatter(
+    frontmatter: Record<string, unknown>,
+    access?: { userId?: string; roles?: string[] },
+  ): boolean {
+    if (!access?.userId && !(access?.roles ?? []).length) return true;
+    const userId = access?.userId;
+    const roles = access?.roles ?? [];
+    const users = this.frontmatterTags(frontmatter.allowed_users ?? frontmatter.allowedUsers);
+    const allowedRoles = this.frontmatterTags(frontmatter.allowed_roles ?? frontmatter.allowedRoles);
+    if (users.length === 0 && allowedRoles.length === 0) return true;
+    return Boolean(
+      (userId && users.includes(userId)) ||
+      roles.some((role) => allowedRoles.includes(role)),
+    );
   }
 
   async findNoteByRagDocId(docId: string): Promise<string | null> {

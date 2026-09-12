@@ -122,12 +122,18 @@ export class BadCaseFlywheelService implements OnModuleInit {
     return this.formatPrompt(matches);
   }
 
-  async retrieveMatches(query: string, limit = 2): Promise<BadCaseMatch[]> {
+  async retrieveMatches(
+    query: string,
+    limit = 2,
+    userId?: string,
+  ): Promise<BadCaseMatch[]> {
     // 纠正层与正式 RAG 同时构建候选；这里也把精确命中和语义命中并行，
     // 最终仍优先精确命中，避免把向量检索串行叠加到主问答延迟上。
     const [exactMatches, semanticMatches] = await Promise.all([
-      this.findExactReviewedMatches(query, limit),
-      this.findSemanticMatches(query, limit),
+      this.findExactReviewedMatches(query, limit, userId),
+      // 向量集合目前没有租户字段；带用户身份时只使用带 owner 的数据库精确层，
+      // 避免把另一个租户的语义 Bad Case 泄露到当前回答。
+      userId ? Promise.resolve([]) : this.findSemanticMatches(query, limit),
     ]);
     return exactMatches.length > 0 ? exactMatches : semanticMatches;
   }
@@ -136,8 +142,9 @@ export class BadCaseFlywheelService implements OnModuleInit {
   async retrieveExactMatches(
     query: string,
     limit = 2,
+    userId?: string,
   ): Promise<BadCaseMatch[]> {
-    return this.findExactReviewedMatches(query, limit);
+    return this.findExactReviewedMatches(query, limit, userId);
   }
 
   private async findSemanticMatches(
@@ -187,10 +194,11 @@ export class BadCaseFlywheelService implements OnModuleInit {
   private async findExactReviewedMatches(
     query: string,
     limit: number,
+    userId?: string,
   ): Promise<BadCaseMatch[]> {
     if (!this.feedbackRepo || !this.queryLogRepo) return [];
     try {
-      const rows = await this.feedbackRepo
+      const queryBuilder = this.feedbackRepo
         .createQueryBuilder('feedback')
         .innerJoin(
           QueryLogEntity,
@@ -204,7 +212,11 @@ export class BadCaseFlywheelService implements OnModuleInit {
         .andWhere('feedback."knowledgeLayer" = :knowledgeLayer', {
           knowledgeLayer: 'correction',
         })
-        .andWhere('feedback."correctedAnswer" IS NOT NULL')
+        .andWhere('feedback."correctedAnswer" IS NOT NULL');
+      if (userId) {
+        queryBuilder.andWhere('queryLog."userId" = :userId', { userId });
+      }
+      const rows = await queryBuilder
         .andWhere('LOWER(queryLog.query) = LOWER(:query)', {
           query: query.trim(),
         })

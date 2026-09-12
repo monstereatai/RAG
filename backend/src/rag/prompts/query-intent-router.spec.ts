@@ -102,6 +102,27 @@ describe('QueryIntentRouter', () => {
     });
   });
 
+  it('keeps graph probing opt-in to the structured retrieval plan', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'project_knowledge',
+          confidence: 0.96,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          requiresGraph: true,
+          entities: ['活动页', '奖品规则'],
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('活动页和奖品规则之间有什么依赖关系？')).resolves.toMatchObject({
+      requiresGraph: true,
+      sourcePolicy: 'local_only',
+    });
+  });
+
   it('does not retain a hidden keyword router in the legacy helper', () => {
     expect(requiresKnowledgeRetrieval('李四是谁')).toBe(false);
     expect(requiresKnowledgeRetrieval('公司绩效制度是什么')).toBe(false);

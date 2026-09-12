@@ -1,0 +1,24 @@
+{
+  "base_commit": "05e90196b27cd2624b08cba7dc989aaf5426bffe",
+  "baseline": "/Users/monster/.codex/worktrees/cd20/RAG/specs/043-unified-chat-orchestration/scope-baseline-T001.json",
+  "new_files": [],
+  "modified_preexisting_files": [
+    "backend/src/modules/chat/chat.service.spec.ts",
+    "backend/src/modules/chat/chat.service.ts"
+  ],
+  "touched_files": [
+    "backend/src/modules/chat/chat.service.spec.ts",
+    "backend/src/modules/chat/chat.service.ts"
+  ],
+  "allow_patterns": [
+    "backend/src/modules/chat/chat.service.ts",
+    "backend/src/modules/chat/chat.service.spec.ts",
+    "backend/src/rag/agentic/agentic-rag.service.spec.ts"
+  ],
+  "internal_patterns": [
+    "specs/043-unified-chat-orchestration/**",
+    "specs/043-unified-chat-orchestration/scope-baseline-T001.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

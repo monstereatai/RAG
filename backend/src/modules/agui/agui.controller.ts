@@ -30,7 +30,7 @@ export class AguiController {
     @Query('rolePresetId') rolePresetId?: string,
     @Query('pluginKeys') pluginKeys?: string,
   ): Observable<AguiEvent> {
-    const chatMode = mode ?? 'agentic';
+    const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
       throw new BadRequestException(
         'mode must be one of: simple, agentic, auto',
@@ -62,7 +62,7 @@ export class AguiController {
     @Query('rolePresetId') rolePresetId?: string,
     @Query('pluginKeys') pluginKeys?: string,
   ): Observable<AguiEvent> {
-    const chatMode = mode ?? 'agentic';
+    const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
       throw new BadRequestException(
         'mode must be one of: simple, agentic, auto',

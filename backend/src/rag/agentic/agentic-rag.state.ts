@@ -48,6 +48,16 @@ export interface AnswerContractArtifactPayload {
   reason: string;
 }
 
+export interface AgentExecutionState {
+  consumedSteps: number;
+  consumedToolCalls: number;
+  remainingSteps?: number;
+  remainingToolCalls?: number;
+  checkpointId?: string;
+  paused?: boolean;
+  lastNode?: string;
+}
+
 export function createAgenticArtifact<TPayload>(
   type: AgenticArtifactType,
   producer: string,
@@ -171,6 +181,12 @@ export const AgenticRagState = Annotation.Root({
   interruptReason: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
+  }),
+
+  /** 可序列化预算／恢复摘要，跟随 Redis Checkpoint 保存。 */
+  executionState: Annotation<AgentExecutionState>({
+    reducer: (_prev, next) => next,
+    default: () => ({ consumedSteps: 0, consumedToolCalls: 0 }),
   }),
 });
 

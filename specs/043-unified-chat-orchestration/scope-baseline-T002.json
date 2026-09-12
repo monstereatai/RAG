@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "base_commit": "05e90196b27cd2624b08cba7dc989aaf5426bffe",
+  "initial_snapshots": {
+    "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"": {
+      "kind": "missing"
+    },
+    "\"docs/interview/jd/BOSS_20K_AI_Agent\\345\\262\\227\\344\\275\\215\\350\\246\\201\\346\\261\\202\\344\\270\\216\\351\\235\\242\\350\\257\\225\\346\\214\\207\\345\\215\\227.md\"": {
+      "kind": "missing"
+    },
+    "\"docs/interview/jd/BOSS_20K_AI_Agent\\351\\253\\230\\351\\242\\221\\351\\235\\242\\350\\257\\225\\351\\242\\230\\345\\272\\223_\\346\\235\\245\\346\\272\\220\\347\\211\\210.md\"": {
+      "kind": "missing"
+    },
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "706dd607dcb5f8008165db17b4278404881594815fc51108fe3e2d20bcd88445"
+    },
+    ".workbuddy/memory/2026-09-10.md": {
+      "kind": "file",
+      "sha256": "740908c44864b47b3178b1af3e05cbf1c1eed98abefe095366a221810a48be47"
+    },
+    ".workbuddy/memory/MEMORY.md": {
+      "kind": "file",
+      "sha256": "8667c465beb013a1868f9321a8c741f7900efc33b4b10727c95ae0b2ed775d40"
+    },
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "d25cbeee46ddce0966f521b47c45bf88ff3ca0c6ed60f6c8888cad576f520b37"
+    },
+    "backend/src/modules/agui/agui.controller.ts": {
+      "kind": "file",
+      "sha256": "ef9955ee25dcbf581026d3e410edd17d1d4a4a18a869579fd610ce735af9d0a0"
+    },
+    "backend/src/modules/chat/chat.controller.ts": {
+      "kind": "file",
+      "sha256": "7b6f9b2968a421d76b3d7168277632ee1dce23cf268678b5caef523ccc1846b6"
+    },
+    "backend/src/modules/chat/chat.service.spec.ts": {
+      "kind": "file",
+      "sha256": "f8bc5376ff0a6cae30c170ced6479c97b97da747eeb0727a106894fde59f9b34"
+    },
+    "backend/src/modules/chat/chat.service.ts": {
+      "kind": "file",
+      "sha256": "21919cd9f3c33914b2b9ece751bcc0a146faca945c27c91915d1837f568b29fa"
+    },
+    "backend/src/modules/qa-ops/qa-ops.controller.ts": {
+      "kind": "file",
+      "sha256": "a36d5b306009c0ca0b7849d5c3c6704f111191615b99f3de409cc1cadf416f65"
+    },
+    "backend/src/modules/workflow/production-workflow.service.spec.ts": {
+      "kind": "file",
+      "sha256": "1e595f035e6d4b1f2c357c75d975ccefdc1927bec5626d94c2731396f57b0e84"
+    },
+    "backend/src/modules/workflow/production-workflow.service.ts": {
+      "kind": "file",
+      "sha256": "a4ac63fa41c6d4b0a8e4f4f9354580513170cb7c09ce75cb4d800343e4d702bd"
+    },
+    "backend/src/rag/agentic/agentic-rag.service.spec.ts": {
+      "kind": "file",
+      "sha256": "c86ab46982c4f029aee68575803e5b2a16ebf299bf90dbc1c901b05e2d2d4624"
+    },
+    "backend/src/rag/agentic/agentic-rag.service.ts": {
+      "kind": "file",
+      "sha256": "f390ea0e7bdc9115fa83a1e42b7ee4f654bda5c46ceb2185b781405512e07987"
+    },
+    "backend/src/rag/karpathy/karpathy-rag.service.ts": {
+      "kind": "file",
+      "sha256": "01a89f10ed38f46503e1a6d2f98399e6c5e24bd16c51d2c6aae80ebe8927b09a"
+    },
+    "backend/src/rag/prompts/query-intent-router.spec.ts": {
+      "kind": "file",
+      "sha256": "974d61fef9a630d2ca8d3d28887dfd312f4cda89ea7d98eb9707e6db824343fe"
+    },
+    "backend/src/rag/prompts/query-intent-router.ts": {
+      "kind": "file",
+      "sha256": "520cbca8d2202a100d8df2f7b8254e1dc4e369db3d03bbbad06554cfdc509e25"
+    },
+    "docs/BOSS_AI_AGENT_FULLSTACK_20K_PLUS.md": {
+      "kind": "file",
+      "sha256": "b12d69a6d892f9238f91db09dba95e05cf954d9781859cb79a9d5cfe74f08ecc"
+    },
+    "docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_GUIDE.md": {
+      "kind": "file",
+      "sha256": "60c3bcb670075c018cdfe9aa0cf057d614462568f20a4d208951f0ff09db1677"
+    },
+    "docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_KNOWLEDGE.md": {
+      "kind": "file",
+      "sha256": "c769960b6f1766be8c739b4e93a35541cc7cf9b02b27d2e848d085d641b18b01"
+    },
+    "docs/BOSS_FULLSTACK_20K_PLUS.md": {
+      "kind": "file",
+      "sha256": "63cc3e8f392bdb443b5b074d271bdd662183480e6971c7c45456f0c8ba74329c"
+    },
+    "ds/rag-retrieval-layers.md": {
+      "kind": "file",
+      "sha256": "4e6222fba9d3c08efc967e5ec5225dc69ecf39c1a08fe1a4f5e1bf1d92e485f6"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "142c06ff5a6c27256519a5daee2f3dc5d50bb824aae142a308bd684bf47399d2"
+    }
+  },
+  "internal_patterns": [
+    "specs/043-unified-chat-orchestration/**",
+    "specs/043-unified-chat-orchestration/scope-baseline-T002.json"
+  ]
+}

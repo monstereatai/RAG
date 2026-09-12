@@ -58,7 +58,6 @@ import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { SecurityAuditService } from '../../modules/metrics/security-audit.service';
 import { TracingService } from '../../modules/tracing/tracing.service';
-import { GraphService } from '../../modules/graph/graph.service';
 import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
@@ -67,6 +66,7 @@ import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 import { QueryIntentRouter } from '../prompts/query-intent-router';
 import { filterSemanticQueries } from '../prompts/query-similarity';
 import type { QueryIntent } from '../prompts/query-intent-router';
+import type { RequestContext } from '../../modules/chat/chat-runtime.types';
 import {
   appliesToQuery,
   type EvidenceBundle,
@@ -100,7 +100,6 @@ export class AgenticRagService {
   private readonly webSearchFallbackEnabled: boolean;
   private readonly rerankEnabled: boolean;
   private readonly querySimilarityThreshold: number;
-  private readonly graphSearchEnabled: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -117,7 +116,6 @@ export class AgenticRagService {
     private readonly agentLoop: AgentLoopService,
     @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
     @Optional() private readonly toolExecution?: ToolExecutionService,
-    @Optional() private readonly graphService?: GraphService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
     @Optional()
     @InjectRepository(AgenticStructuredArtifactEntity)
@@ -170,8 +168,6 @@ export class AgenticRagService {
       0.5,
       1,
     );
-    this.graphSearchEnabled =
-      this.configService.get<boolean>('agentic.graphSearchEnabled') ?? true;
     this.checkpointer = new RedisCheckpointer(this.redisProvider);
     this.initGraph();
   }
@@ -302,8 +298,9 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const userId = config?.configurable?.userId as string | undefined;
     const badCaseMatchesPromise = this.withTimeout(
-      this.badCaseFlywheel.retrieveMatches(state.query, 2),
+      this.badCaseFlywheel.retrieveMatches(state.query, 2, userId),
       2_000,
       'Bad case candidate retrieval',
     ).catch(() => [] as BadCaseMatch[]);
@@ -467,7 +464,18 @@ export class AgenticRagService {
                   ? fastPathChunks
                   : await this.karpathyRagService.retrieve(
                       retrievalQuery,
-                      retrieveOptions,
+                      {
+                        ...retrieveOptions,
+                        // 原问题的 Fast Path 已按结构化计划完成图谱探测。
+                        // 子问题只补文本证据；以后若规划器显式声明新的图谱缺口，
+                        // 再为该子问题追加独立计划，不能隐式重复探测。
+                        queryIntent: retrieveOptions.queryIntent
+                          ? {
+                              ...retrieveOptions.queryIntent,
+                              requiresGraph: false,
+                            }
+                          : undefined,
+                      },
                       userId,
                     );
               // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
@@ -481,13 +489,9 @@ export class AgenticRagService {
               return results;
             }),
           );
-          let results = resultGroups.flat();
-          const graphChunks = await this.retrieveGraphEvidence(
-            q,
-            userId,
-            config,
-          );
-          results = [...results, ...graphChunks];
+          // 图谱证据由共享 Hybrid 检索根据 RequestContext 的计划按需合并。
+          // Agentic 仅为新增子问题调用这条共享链路，避免额外的图谱工具调用。
+          const results = resultGroups.flat();
           return {
             ...subQuestion,
             status:
@@ -1578,6 +1582,21 @@ export class AgenticRagService {
       `Resuming graph for thread=${threadId}, approval=${approval}`,
     );
 
+    const before = await this.getRunSnapshot(threadId);
+    if (!before.available) throw new BadRequestException('未找到可恢复的检查点');
+    if (!before.paused) throw new BadRequestException('当前运行不在等待审批状态');
+    if ((before.executionState?.remainingSteps ?? (this.configService.get<number>('agentRun.maxSteps') ?? 18)) <= 0) {
+      throw new BadRequestException('检查点剩余步骤预算已耗尽，不能继续恢复');
+    }
+    onEvent?.({
+      type: 'resume',
+      data: {
+        threadId,
+        checkpointId: before.checkpointId,
+        executionState: before.executionState,
+      },
+    });
+
     // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
@@ -1620,6 +1639,8 @@ export class AgenticRagService {
     retrievalReason: string | null;
     retryCount: number | null;
     passed: boolean | null;
+    paused: boolean;
+    executionState: AgenticRagStateType['executionState'] | null;
   }> {
     const tuple = await this.checkpointer.getTuple({
       configurable: { thread_id: threadId },
@@ -1639,6 +1660,8 @@ export class AgenticRagService {
         retrievalReason: null,
         retryCount: null,
         passed: null,
+        paused: false,
+        executionState: null,
       };
     }
 
@@ -1676,6 +1699,8 @@ export class AgenticRagService {
       retryCount:
         typeof values.retryCount === 'number' ? values.retryCount : null,
       passed: typeof values.passed === 'boolean' ? values.passed : null,
+      paused: values.humanApproval === 'pending',
+      executionState: (values.executionState as AgenticRagStateType['executionState'] | undefined) ?? null,
     };
   }
 
@@ -1758,6 +1783,8 @@ export class AgenticRagService {
     retrievalReason?: string;
     obsidianPaths?: string[];
     interrupted?: boolean;
+    evidenceCoverage?: Array<{ id: string; query: string; covered: boolean; evidenceIds: string[] }>;
+    executionState?: AgenticRagStateType['executionState'];
   }> {
     const dangerousFindings = detectDangerousQuery(query);
     if (dangerousFindings.length > 0) {
@@ -1797,7 +1824,7 @@ export class AgenticRagService {
       downstreamOnEvent?.(event);
     };
     // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
-    const queryIntent = this.queryIntentRouter
+    const queryIntent = retrieveOptions.queryIntent ?? (this.queryIntentRouter
       ? await this.queryIntentRouter.classify(query)
       : {
           intent: 'general' as const,
@@ -1808,6 +1835,7 @@ export class AgenticRagService {
           action: 'retrieve' as const,
           sourcePolicy: 'local_only' as const,
           needsSynthesis: false,
+          requiresGraph: false,
           targetKbs: ['general'] as QueryIntent['targetKbs'],
           queryType: 'public_knowledge' as const,
           entities: [],
@@ -1825,7 +1853,7 @@ export class AgenticRagService {
             senses: [],
             clarificationQuestion: undefined,
           },
-        };
+        });
     const ambiguity = queryIntent.ambiguity;
     const multiIntent = this.isMultiIntentQuery(queryIntent);
     const routeMetadata = {
@@ -1834,15 +1862,44 @@ export class AgenticRagService {
       queryType: queryIntent.queryType,
       targetKbs: queryIntent.targetKbs,
       entities: queryIntent.entities,
+      requiresGraph: queryIntent.requiresGraph,
       filters: queryIntent.filters,
       rewriteQueries: queryIntent.rewriteQueries,
       reason: queryIntent.reason,
     };
-    retrieveOptions.knowledgeOnly =
-      queryIntent.sourcePolicy === 'local_only';
-    retrieveOptions.sourcePolicy = queryIntent.sourcePolicy;
+    // 上游 RequestContext 是不可放宽的授权上限：下游语义结果只能收紧来源。
+    const requestedSourcePolicy = retrieveOptions.sourcePolicy;
+    const effectiveSourcePolicy =
+      requestedSourcePolicy === 'local_only'
+        ? 'local_only'
+        : requestedSourcePolicy === 'direct_answer'
+          ? 'direct_answer'
+          : queryIntent.sourcePolicy;
+    retrieveOptions.knowledgeOnly = effectiveSourcePolicy === 'local_only';
+    retrieveOptions.sourcePolicy = effectiveSourcePolicy;
     retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
     retrieveOptions.entities = queryIntent.entities;
+    if (!retrieveOptions.requestContext) {
+      const maxSteps = this.configService.get<number>('agentRun.maxSteps') ?? 18;
+      const maxToolCalls = this.configService.get<number>('agentRun.maxToolCalls') ?? 24;
+      retrieveOptions.requestContext = {
+        requestId: randomUUID(),
+        userId: userId ?? 'anonymous',
+        threadId,
+        query,
+        mode,
+        queryIntent,
+        sourcePolicy: effectiveSourcePolicy,
+        scope: retrieveOptions.scope,
+        deadlineAt: Date.now() + (this.configService.get<number>('agentRun.timeoutMs') ?? 120_000),
+        budget: {
+          maxSteps,
+          maxToolCalls,
+          remainingSteps: maxSteps,
+          remainingToolCalls: maxToolCalls,
+        },
+      } satisfies RequestContext;
+    }
     if (ambiguity?.detected && ambiguity.confidence < 0.75) {
       const answer =
         ambiguity.clarificationQuestion ??
@@ -1869,6 +1926,7 @@ export class AgenticRagService {
         route: 'simple' as const,
         confidence: ambiguity.confidence,
         retryCount: 0,
+        evidenceCoverage: [],
       };
     }
     if (
@@ -1925,6 +1983,7 @@ export class AgenticRagService {
           route: 'simple' as const,
           confidence: 0,
           retryCount: 0,
+          evidenceCoverage: [],
         };
       }
       for (const token of this.splitAnswerTokens(answer)) {
@@ -1955,39 +2014,6 @@ export class AgenticRagService {
     ) {
       query = queryIntent.standaloneQuery;
     }
-    // Auto 先尝试受治理的精确直答；命中时不进入状态机，以降低简单问题的时延和成本。
-    // needsSynthesis=true 表示语义上需要总结/综述，不适合用单片段直答，应进入完整 RAG 生成。
-    if (mode === 'auto' && !multiIntent && !queryIntent.needsSynthesis) {
-      const direct = await this.karpathyRagService.answerDirect(
-        query,
-        history,
-        userId,
-        memoryMessages,
-        (token) => onEvent?.({ type: 'token', data: token }),
-        retrieveOptions.scope,
-        retrieveOptions.entities,
-      );
-      if (direct) {
-        observedRoute = 'simple';
-        onEvent?.({
-          type: 'routing',
-          data: { mode, route: 'simple', reason: 'direct_answer' },
-        });
-        onEvent?.({ type: 'citation', data: direct.references });
-        onEvent?.({ type: 'final', data: direct });
-        return {
-          answer: direct.answer,
-          references: direct.references,
-          route: 'simple',
-          confidence: 1,
-          retryCount: 0,
-          retrievalSufficient: direct.retrievalSufficient,
-          retrievalReason: direct.retrievalReason,
-          obsidianPaths: direct.obsidianPaths,
-        };
-      }
-    }
-
     let fastPathGate =
       !multiIntent && mode !== 'simple'
         ? await this.karpathyRagService.assessFastPath(
@@ -1996,10 +2022,10 @@ export class AgenticRagService {
             retrieveOptions,
           )
         : null;
-    const route = multiIntent
-      ? 'agentic'
-      : mode === 'simple'
+    const route = mode === 'simple'
         ? 'simple'
+        : multiIntent
+          ? 'agentic'
         : mode === 'auto'
           ? this.resolveAutoRoute(query, Boolean(fastPathGate?.sufficient))
           : this.classifyRoute(query, mode);
@@ -2039,6 +2065,7 @@ export class AgenticRagService {
           ? {
               ...retrieveOptions,
               prefetchedFastPath: fastPathGate.prefetchedFastPath,
+              karpathyDirectAnswer: true,
             }
           : retrieveOptions,
       );
@@ -2054,12 +2081,23 @@ export class AgenticRagService {
         retrievalSufficient: result.retrievalSufficient,
         retrievalReason: result.retrievalReason,
         obsidianPaths: result.obsidianPaths,
+        evidenceCoverage: [],
       };
     }
 
-    const obsidianContext = await this.karpathyRagService
-      .getObsidianContext(query)
-      .catch(() => ({ hits: [], context: '' }));
+    if (!fastPathGate) {
+      fastPathGate = await this.karpathyRagService.assessFastPath(
+        query,
+        userId,
+        retrieveOptions,
+      );
+    }
+    const obsidianContext = {
+      hits: fastPathGate.obsidianHits,
+      context: this.karpathyRagService.formatObsidianContext(
+        fastPathGate.obsidianHits,
+      ),
+    };
     if (obsidianContext.context) {
       memoryMessages = [
         ...memoryMessages,
@@ -2076,13 +2114,6 @@ export class AgenticRagService {
       });
     }
 
-    if (!fastPathGate) {
-      fastPathGate = await this.karpathyRagService.assessFastPath(
-        query,
-        userId,
-        retrieveOptions,
-      );
-    }
     // 通过 LangGraph StateGraph 执行 agentic 流程
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
@@ -2114,6 +2145,12 @@ export class AgenticRagService {
         humanApproval: null,
         interruptReason: '',
         artifacts: [],
+        executionState: {
+          consumedSteps: 0,
+          consumedToolCalls: 0,
+          remainingSteps: this.configService.get<number>('agentRun.maxSteps') ?? 18,
+          remainingToolCalls: this.configService.get<number>('agentRun.maxToolCalls') ?? 24,
+        },
       },
       {
         configurable: {
@@ -2169,6 +2206,13 @@ export class AgenticRagService {
       retrievalSufficient: finalState.retrievalSufficient,
       retrievalReason: finalState.retrievalReason,
       obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
+        evidenceCoverage: finalState.subQuestions.map((item) => ({
+        id: item.id,
+        query: item.question,
+        covered: item.sufficient && item.evidenceIds.length > 0,
+        evidenceIds: item.evidenceIds,
+      })),
+      executionState: finalState.executionState,
     };
     await this.persistStructuredArtifacts(
       threadId,
@@ -2294,7 +2338,21 @@ export class AgenticRagService {
           type: 'node_timing',
           data: { node: name, status: 'success', durationMs },
         });
-        return result;
+        const current = state.executionState ?? { consumedSteps: 0, consumedToolCalls: 0 };
+        const nextExecutionState = {
+          ...current,
+          consumedSteps: current.consumedSteps + 1,
+          remainingSteps:
+            typeof current.remainingSteps === 'number'
+              ? Math.max(0, current.remainingSteps - 1)
+              : undefined,
+          lastNode: name,
+        };
+        onEvent?.({
+          type: 'meta',
+          data: { executionState: nextExecutionState },
+        });
+        return { ...result, executionState: nextExecutionState };
       } catch (error) {
         const durationMs = Date.now() - startedAt;
         this.metricsService.observeAgentNode(name, 'error', durationMs / 1000);
@@ -2567,56 +2625,6 @@ export class AgenticRagService {
       );
     }
     return this.maxSubQuestions;
-  }
-
-  private async retrieveGraphEvidence(
-    query: string,
-    userId?: string,
-    config?: RunnableConfig,
-  ): Promise<RetrievedChunk[]> {
-    if (
-      !this.graphSearchEnabled ||
-      !this.graphService?.isEnabled() ||
-      !this.toolPolicy.decide(
-        'graph_search_tool',
-        this.pluginPolicy(config, 'agentic'),
-      ).allowed ||
-      !userId ||
-      !/[关系关联上下游依赖多跳分别]/.test(query)
-    ) {
-      return [];
-    }
-    try {
-      const result = await this.executeAgenticTool(
-        'graph_search_tool',
-        this.threadIdFromConfig(config),
-        userId,
-        { query },
-        () =>
-          this.withTimeout(
-            this.graphService!.queryGraph(query, userId),
-            4_000,
-            'GraphRAG sub-question search',
-          ),
-        config,
-      );
-      return result.facts.map((fact, index) => ({
-        id: `graph:${fact.sourceId}:${fact.source}:${fact.target}:${index}`,
-        content: `${fact.sourceLabel}（${fact.source}）—${fact.relationship}→${fact.targetLabel}（${fact.target}）\n来源：${fact.sourceId}`,
-        docId: fact.sourceId,
-        chunkIndex: index,
-        bm25Score: 0,
-        cosineScore: 0,
-        totalScore: Math.max(0.1, fact.confidence * 0.2),
-        retrievalSource: 'expansion',
-        contextRole: 'hit',
-      }));
-    } catch (err) {
-      this.logger.warn(
-        `GraphRAG sub-question search skipped: ${(err as Error).message}`,
-      );
-      return [];
-    }
   }
 
   private intConfig(

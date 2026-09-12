@@ -43,6 +43,8 @@ import {
   selectHistoryForQuery,
 } from '../../rag/prompts/context-policy';
 import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
+import type { QueryIntent } from '../../rag/prompts/query-intent-router';
+import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
 
 @Injectable()
 export class ChatService {
@@ -82,7 +84,11 @@ export class ChatService {
    * 没有相互依赖；全部就绪后才进入 Simple／Auto／Agentic 的单一执行主干，避免
    * 让不同模式得到不一致的会话上下文。
    */
-  async chat(req: ChatDto, userId: string): Promise<ChatResponse> {
+  async chat(
+    req: ChatDto,
+    userId: string,
+    onEvent?: ChatEventCallback,
+  ): Promise<ChatResponse> {
     if (!req.query || req.query.trim().length === 0) {
       throw new BadRequestException('query is required');
     }
@@ -99,20 +105,33 @@ export class ChatService {
       });
     }
 
-    const mode: ChatMode = req.mode ?? 'simple';
+    const startTime = Date.now();
+    const mode: ChatMode = req.mode ?? 'auto';
     const queryIntent = this.queryIntentRouter
       ? await this.queryIntentRouter.classify(req.query)
-      : {
+      : ({
           intent: 'general' as const,
           confidence: 0,
           standaloneQuery: req.query,
           multiIntent: false,
           subQueries: [],
+          action: 'retrieve' as const,
+          sourcePolicy: 'local_only' as const,
           needsSynthesis: false,
+          requiresGraph: false,
+          targetKbs: ['general'],
+          queryType: 'private_entity' as const,
           entities: [],
+          filters: {
+            department: null,
+            project: null,
+            timeRange: null,
+            documentType: null,
+          },
+          rewriteQueries: [],
+          reason: '语义路由不可用，保守使用本地检索',
           ambiguity: { detected: false, confidence: 0, senses: [] },
-        };
-    const startTime = Date.now();
+        } satisfies QueryIntent);
     // 插件策略与会话创建互不依赖，先并发完成请求准备。
     const [pluginComposition, threadId] = await Promise.all([
       req.pluginKeys?.length && this.plugins
@@ -122,6 +141,27 @@ export class ChatService {
         ? Promise.resolve(req.threadId)
         : this.conversationService.create(req.query, 'auto', userId),
     ]);
+    const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
+    const maxToolCalls = this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
+    const requestContext: RequestContext = {
+      requestId: randomUUID(),
+      userId,
+      threadId,
+      query: req.query,
+      mode,
+      queryIntent,
+      sourcePolicy: queryIntent.sourcePolicy,
+      scope: req.scope,
+      deadlineAt: Date.now() + (this.config?.get<number>('agentRun.timeoutMs') ?? 120_000),
+      budget: {
+        maxSteps,
+        maxToolCalls,
+        remainingSteps: maxSteps,
+        remainingToolCalls: maxToolCalls,
+      },
+    };
+    onEvent?.({ type: 'thread', data: { threadId, requestId: requestContext.requestId } });
+    onEvent?.({ type: 'routing', data: { mode, route: mode === 'simple' ? 'simple' : 'pending', requestId: requestContext.requestId } });
     const shouldSearchHistory = Boolean(req.threadId);
     const objectiveFactQuery = isObjectiveFactQuery(req.query);
     const [
@@ -187,6 +227,10 @@ export class ChatService {
     };
     const retrievalOptions = {
       scope: retrievalScope,
+      requestContext,
+      queryIntent,
+      sourcePolicy: queryIntent.sourcePolicy,
+      knowledgeOnly: queryIntent.sourcePolicy === 'local_only',
       needsSynthesis: queryIntent.needsSynthesis,
       entities: queryIntent.entities,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
@@ -299,36 +343,30 @@ export class ChatService {
     if (mode === 'simple') {
       let result;
       try {
-        result =
-          (queryIntent.multiIntent ||
-            queryIntent.intent === 'system_capability' ||
-            queryIntent.intent === 'objective_fact' ||
-            (queryIntent.ambiguity?.detected &&
-              queryIntent.ambiguity.confidence < 0.75)) &&
-          (queryIntent.confidence >= 0.85 ||
-            (queryIntent.ambiguity?.detected &&
-              queryIntent.ambiguity.confidence < 0.75))
-            ? await this.agenticRagService.run(
-                req.query,
-                'simple',
-                undefined,
-                history,
-                threadId,
-                userId,
-                memoryMessages,
-              )
-            : await this.karpathyRagService.answer(
-          req.query,
-          history,
-          userId,
-          memoryMessages,
-          undefined,
-          {
-            ...retrievalOptions,
-            adaptiveVectorSearch: true,
-            karpathyDirectAnswer: true,
-          },
-              );
+        // 显式 Simple 是用户选择的执行上限：公共直答、多问题或歧义都不能
+        // 借由 Agentic 入口绕回状态图。Karpathy 负责固定线性取证和最终校验。
+        const answerOptions = {
+          ...retrievalOptions,
+          adaptiveVectorSearch: true,
+          karpathyDirectAnswer: true,
+        };
+        result = onEvent
+          ? await this.karpathyRagService.answer(
+              req.query,
+              history,
+              userId,
+              memoryMessages,
+              (token: string) => onEvent({ type: 'token', data: token }),
+              answerOptions,
+            )
+          : await this.karpathyRagService.answer(
+              req.query,
+              history,
+              userId,
+              memoryMessages,
+              undefined,
+              answerOptions,
+            );
       } catch (error) {
         await this.finishFailedRun(run, req.query, mode, error);
         throw error;
@@ -350,40 +388,16 @@ export class ChatService {
           },
         });
       }
+      onEvent?.({ type: 'routing', data: { mode, route: 'simple', requestId: requestContext.requestId } });
+      onEvent?.({ type: 'retrieval', data: { references: result.references.length, sufficient: result.retrievalSufficient } });
+      onEvent?.({ type: 'citation', data: result.references });
 
-      // 持久化本轮对话
-      await this.conversationService.addMessage(
+      await this.persistConversationResult({
         threadId,
-        'human',
-        req.query,
         userId,
-      );
-      await this.conversationService.addMessage(
-        threadId,
-        'ai',
-        result.answer,
-        userId,
-      );
-
-      // Redis 短期记忆写入：异步记录本轮对话
-      void this.shortTermMemory.addTurn(threadId, 'user', req.query);
-      void this.shortTermMemory.addTurn(threadId, 'assistant', result.answer);
-
-      // Mem0 分类写入：chat 后异步持久化有价值的记忆
-      void this.memoryService.classifyAndPersist(
-        userId,
-        threadId,
-        req.query,
-        result.answer,
-      );
-
-      // 对话历史向量化：异步将本轮 QA 对存入 Milvus
-      void this.conversationEmbeddingService.indexConversation(
-        threadId,
-        req.query,
-        result.answer,
-        userId,
-      );
+        query: req.query,
+        answer: result.answer,
+      });
 
       const queryLogId = await this.logQuery({
         userId,
@@ -456,6 +470,10 @@ export class ChatService {
           },
         ],
       });
+      onEvent?.({
+        type: 'final',
+        data: { ...result, mode: 'simple', route: 'simple', threadId, queryLogId },
+      });
 
       return {
         ...result,
@@ -464,6 +482,13 @@ export class ChatService {
         threadId,
         queryLogId,
         runId: run?.id,
+        executionState: {
+          phase: 'completed',
+          consumedSteps: 1,
+          consumedToolCalls: 0,
+          remainingSteps: Math.max(0, requestContext.budget.maxSteps - 1),
+          remainingToolCalls: requestContext.budget.remainingToolCalls,
+        },
       };
     }
 
@@ -474,7 +499,10 @@ export class ChatService {
       result = await this.agenticRagService.run(
         req.query,
         mode,
-        (event) => traceEvents.push(this.toTraceEvent(event)),
+        (event) => {
+          traceEvents.push(this.toTraceEvent(event));
+          if (event.type !== 'final') onEvent?.(event);
+        },
         history,
         threadId,
         userId,
@@ -487,39 +515,12 @@ export class ChatService {
       throw error;
     }
 
-    // 持久化本轮对话
-    await this.conversationService.addMessage(
+    await this.persistConversationResult({
       threadId,
-      'human',
-      req.query,
       userId,
-    );
-    await this.conversationService.addMessage(
-      threadId,
-      'ai',
-      result.answer,
-      userId,
-    );
-
-    // Redis 短期记忆写入：异步记录本轮对话
-    void this.shortTermMemory.addTurn(threadId, 'user', req.query);
-    void this.shortTermMemory.addTurn(threadId, 'assistant', result.answer);
-
-    // Mem0 分类写入
-    void this.memoryService.classifyAndPersist(
-      userId,
-      threadId,
-      req.query,
-      result.answer,
-    );
-
-    // 对话历史向量化：异步将本轮 QA 对存入 Milvus
-    void this.conversationEmbeddingService.indexConversation(
-      threadId,
-      req.query,
-      result.answer,
-      userId,
-    );
+      query: req.query,
+      answer: result.answer,
+    });
 
     const queryLogId = await this.logQuery({
       userId,
@@ -618,6 +619,18 @@ export class ChatService {
       events: traceEvents,
     });
 
+    onEvent?.({
+      type: 'final',
+      data: {
+        answer: result.answer,
+        references: result.references,
+        mode,
+        route: result.route,
+        threadId,
+        queryLogId,
+      },
+    });
+
     return {
       answer: result.answer,
       references: result.references,
@@ -627,6 +640,10 @@ export class ChatService {
       retryCount: result.retryCount,
       retrievalSufficient: result.retrievalSufficient,
       retrievalReason: result.retrievalReason,
+      evidenceCoverage: result.evidenceCoverage,
+      executionState: result.executionState
+        ? { phase: 'completed', ...result.executionState }
+        : undefined,
       threadId,
       queryLogId,
       runId: run?.id,
@@ -670,6 +687,41 @@ export class ChatService {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
       return undefined;
     }
+  }
+
+  /** 两个执行引擎共用同一份会话、记忆与历史向量收口，避免分支漏写。 */
+  private async persistConversationResult(input: {
+    threadId: string;
+    userId: string;
+    query: string;
+    answer: string;
+  }): Promise<void> {
+    await this.conversationService.addMessage(
+      input.threadId,
+      'human',
+      input.query,
+      input.userId,
+    );
+    await this.conversationService.addMessage(
+      input.threadId,
+      'ai',
+      input.answer,
+      input.userId,
+    );
+    void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);
+    void this.shortTermMemory.addTurn(input.threadId, 'assistant', input.answer);
+    void this.memoryService.classifyAndPersist(
+      input.userId,
+      input.threadId,
+      input.query,
+      input.answer,
+    );
+    void this.conversationEmbeddingService.indexConversation(
+      input.threadId,
+      input.query,
+      input.answer,
+      input.userId,
+    );
   }
 
   private async resolveRetrievalProfile(

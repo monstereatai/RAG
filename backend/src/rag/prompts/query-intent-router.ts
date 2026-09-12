@@ -24,6 +24,8 @@ export const queryIntentSchema = z.object({
     .default('local_only'),
   /** 语义上是否要求综合多个证据生成整体性总结/综述/介绍。 */
   needsSynthesis: z.boolean().default(false),
+  /** 是否需要实体关系或多跳证据，供检索层按需探测图谱。 */
+  requiresGraph: z.boolean().default(false),
   targetKbs: z
     .array(z.enum(['company', 'documents', 'project', 'realtime', 'general']))
     .max(5)
@@ -80,8 +82,9 @@ export function requiresKnowledgeRetrieval(query: string): boolean {
 const ROUTER_PROMPT = `你是问答系统的意图路由器，只分析当前用户问题，不读取历史对话、知识库或记忆。
 路由边界示例：
 ${formatQueryRoutingFewShots()}
-返回 JSON：{"intent":"...","confidence":0到1之间的小数,"action":"direct_answer|retrieve","sourcePolicy":"direct_answer|local_only|web_allowed","needsSynthesis":true或false,"targetKbs":[],"queryType":"...","entities":[],"filters":{"department":null,"project":null,"timeRange":null,"documentType":null},"rewriteQueries":[],"standaloneQuery":"可独立检索的问题","multiIntent":false,"subQueries":[],"reason":"中文理由"}。
+返回 JSON：{"intent":"...","confidence":0到1之间的小数,"action":"direct_answer|retrieve","sourcePolicy":"direct_answer|local_only|web_allowed","needsSynthesis":true或false,"requiresGraph":true或false,"targetKbs":[],"queryType":"...","entities":[],"filters":{"department":null,"project":null,"timeRange":null,"documentType":null},"rewriteQueries":[],"standaloneQuery":"可独立检索的问题","multiIntent":false,"subQueries":[],"reason":"中文理由"}。
 needsSynthesis=true 表示用户要求对实体、人物、项目、文档或事件做整体性总结、综述、介绍、梳理，需要综合多个片段生成自然语言回答；false 表示单点事实查询、精确 lookup、可直接从单个片段提取。该判断必须基于语义理解，不能仅凭“总结/概括/介绍”等词出现与否，也不能因为没有这些词就忽略其整体性语义。
+requiresGraph=true 仅用于问题确实要求实体关系、依赖、上下游、影响路径或多跳关联，且图谱证据有助于回答；普通总结、比较或多个并列问题都应为 false。
 同时返回 ambiguity：是否存在多义词、候选语义和必要时的澄清问题。涉及未知身份、组织内部对象、用户已提供资料或上下文指代的事实都属于待查实体；即使问题很短也应先检索，不能当作稳定公共事实直答。只有多个语义同等合理、无法判断主流指代时才 detected=true。
 若一条输入包含两个或以上可独立回答的问题、编号事项或测试项，multiIntent=true，并按原意拆出最多五个 subQueries；此时 intent 选择整体最需要的处理方式。单个问题要求多个解释角度时不是 multiIntent。
 意图定义：

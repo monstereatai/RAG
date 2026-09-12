@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
@@ -35,12 +30,6 @@ import {
   dependenciesForProductionRole,
   normalizeProductionRoles,
 } from './production-workflow.plan';
-import {
-  formatPlaywayRulesForPrompt,
-  formatPlaywayTemplatesForPrompt,
-  getPlaywayComponentRule,
-  PLAYWAY_COMPONENT_TYPES,
-} from './playway-component-registry';
 import { ProductionWorkflowTools } from './production-workflow.tools';
 import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
 import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
@@ -52,7 +41,6 @@ import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
-import { renderPlaywayPreview } from './playway-preview';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -461,28 +449,6 @@ export class ProductionWorkflowService {
     };
   }
 
-  async playwayPreview(threadId: string, userId: string) {
-    const state = await this.getOwnedState(threadId, userId);
-    const activityContext = Object.values(state.results)
-      .flatMap((result) =>
-        result
-          ? [
-              result.summary,
-              ...result.deliverables.map((item) => item.markdown),
-            ]
-          : [],
-      )
-      .join('\n')
-      .slice(0, 40_000);
-    return renderPlaywayPreview(
-      Object.values(state.results).flatMap(
-        (result) => result?.lowCodeSchemas ?? [],
-      ),
-      `${state.projectId} 活动预览`,
-      activityContext,
-    );
-  }
-
   async generateProject(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
     const run = await this.agentRuns?.findLatestByThread(threadId);
@@ -507,19 +473,10 @@ export class ProductionWorkflowService {
       let lastError: unknown;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          const timeout = new Promise<never>((_, reject) => {
-            setTimeout(
-              () => reject(new Error('项目代码生成模型调用超时（15 秒）。')),
-              15_000,
-            );
-          });
-          const output = await Promise.race([
-            this.llmProvider
-              .getModel()
-              .withStructuredOutput(projectSchema, { method: 'jsonMode' })
-              .invoke(messages),
-            timeout,
-          ]);
+          const output = await this.llmProvider
+            .getModel()
+            .withStructuredOutput(projectSchema, { method: 'jsonMode' })
+            .invoke(messages);
           const normalized = {
             ...output,
             notes: Array.isArray(output.notes)
@@ -541,7 +498,9 @@ export class ProductionWorkflowService {
             });
         }
       }
-      return this.fallbackGeneratedProject(context, lastError);
+      throw new Error(
+        `项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`,
+      );
     };
     const execution = this.toolExecution
       ? await this.toolExecution.execute({
@@ -550,7 +509,6 @@ export class ProductionWorkflowService {
           runId: run?.id,
           ownerUserId: userId,
           mode: 'production',
-          role: 'frontend',
           actor: 'code_delivery',
           input: {
             projectId: context.projectId,
@@ -574,27 +532,13 @@ export class ProductionWorkflowService {
     const context = await this.codingContext(threadId, userId);
     const generated = await this.generateProject(threadId, userId);
     const zip = new JSZip();
-    generated.files.forEach((file) =>
-      zip.file(`project/${file.path}`, file.content),
-    );
-    const preview = renderPlaywayPreview(
-      context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []),
-      `${context.projectId} 活动预览`,
-      context.stages
-        .flatMap((stage) => [
-          stage.summary,
-          ...stage.deliverables.map((item) => item.markdown),
-        ])
-        .join('\n'),
-    );
-    // ZIP 入口与 Playway 预览使用同一份渲染结果，避免页面结构漂移。
-    zip.file('project/index.html', preview.html);
+    generated.files.forEach((file) => zip.file(file.path, file.content));
     zip.file(
-      'docs/rag/workflow-context.json',
+      'RAG_WORKFLOW_CONTEXT.json',
       JSON.stringify({ ...context, generatedProject: generated }, null, 2),
     );
     zip.file(
-      'docs/rag/low-code-schemas.json',
+      'LOW_CODE_SCHEMAS.json',
       JSON.stringify(
         context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []),
         null,
@@ -604,28 +548,28 @@ export class ProductionWorkflowService {
     const evidence = context.stages.flatMap((stage) =>
       (stage.evidence ?? []).map((item) => ({ role: stage.role, ...item })),
     );
-    zip.file('docs/evidence/evidence.json', JSON.stringify(evidence, null, 2));
-    zip.file('docs/evidence/evidence.md', this.buildEvidenceMarkdown(evidence));
-    zip.file('docs/handoff.md', this.buildHandoffMarkdown(context));
+    zip.file('RAG_EVIDENCE.json', JSON.stringify(evidence, null, 2));
+    zip.file('RAG_EVIDENCE.md', this.buildEvidenceMarkdown(evidence));
+    zip.file('HANDOFF.md', this.buildHandoffMarkdown(context));
     zip.file(
       'README.md',
-      `# ${generated.projectName}\n\n框架：${generated.framework}\n\n进入 project/ 后启动：\`${generated.runCommand}\`\n\n## 目录说明\n\n- Playway 一致性入口：project/index.html\n- AI Coding 源码：project/src/\n- 工作流上下文与 Schema：docs/rag/、docs/schemas/\n- 证据与岗位交接：docs/evidence/、docs/handoff/\n- 交付校验：docs/delivery-verification.json\n\nproject/index.html 与 Playway 预览使用同源渲染器生成。\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`,
+      `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`,
     );
     zip.file(
-      'docs/delivery-verification.json',
+      'DELIVERY_VERIFICATION.json',
       JSON.stringify(this.deliveryVerification(generated), null, 2),
     );
     context.stages.forEach((stage) => {
       if ((stage.lowCodeSchemas ?? []).length > 0) {
         zip.file(
-          `docs/schemas/${stage.role}.json`,
+          `schemas/${stage.role}.json`,
           JSON.stringify(stage.lowCodeSchemas, null, 2),
         );
       }
       stage.deliverables.forEach((deliverable, index) => {
         const safeTitle = deliverable.title.replace(/[\\/:*?"<>|]/g, '-');
         zip.file(
-          `docs/handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`,
+          `handoff/${stage.role}/${String(index + 1).padStart(2, '0')}-${safeTitle}.md`,
           deliverable.markdown,
         );
       });
@@ -1074,8 +1018,6 @@ export class ProductionWorkflowService {
       approvalMode: state.approvalMode,
     });
     const model = this.llmProvider.getModel();
-    const playwayRules = formatPlaywayRulesForPrompt(state.brief);
-    const playwayTemplates = formatPlaywayTemplatesForPrompt(state.brief);
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const modelStartedAt = Date.now();
@@ -1088,14 +1030,6 @@ export class ProductionWorkflowService {
               {
                 role: 'system',
                 content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称；同时输出当前岗位能交接给低代码/AI Coding 的 lowCodeSchemas。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
-              },
-              {
-                role: 'system',
-                content: `Playway 组件规则（pageSchema 的 components.type 只能从以下候选选择，且必须满足需字段与事件）：\n${playwayRules}`,
-              },
-              {
-                role: 'system',
-                content: `Playway 活动模板（优先复用模板的必选组件、接口、埋点和验收项；可选组件只能按需求增加）：\n${playwayTemplates}`,
               },
               {
                 role: 'user',
@@ -1112,27 +1046,23 @@ export class ProductionWorkflowService {
         });
         const claims = this.validateClaims(output.claims, toolResult.evidence);
         const evidenceCoverage = this.evidenceCoverage(claims);
-        const lowCodeSchemas = this.normalizeLowCodeSchemas(
-          role,
-          state,
-          output.lowCodeSchemas,
-        );
-        const schemaIssues = this.validateLowCodeSchemaSet(lowCodeSchemas);
         const result: ProductionStageResult = {
           role,
           revision: state.revisionNumber ?? 1,
           reviewStatus: 'pending',
           ...output,
           claims,
-          lowCodeSchemas,
+          lowCodeSchemas: this.normalizeLowCodeSchemas(
+            role,
+            state,
+            output.lowCodeSchemas,
+          ),
           evidence: toolResult.evidence,
           evidenceCoverage,
           toolExecutions: toolResult.executions,
-          issues: [...output.issues, ...schemaIssues],
           readyForApproval:
             output.readyForApproval &&
             output.deliverables.length > 0 &&
-            schemaIssues.length === 0 &&
             claims.every((claim) => claim.status === 'supported'),
           completedAt: new Date().toISOString(),
         };
@@ -1477,67 +1407,6 @@ export class ProductionWorkflowService {
       : this.defaultLowCodeSchemas(role, state);
   }
 
-  private validateLowCodeSchemaSet(
-    schemas: ProductionLowCodeSchema[],
-  ): string[] {
-    const issues: string[] = [];
-    const apiNames = new Set(
-      schemas
-        .filter((schema) => schema.kind === 'apiSchema')
-        .flatMap((schema) => schema.apis ?? [])
-        .map((api) => (typeof api.name === 'string' ? api.name : ''))
-        .filter(Boolean),
-    );
-    const eventNames = new Set(
-      schemas
-        .filter((schema) => schema.kind === 'trackingSchema')
-        .flatMap((schema) => schema.events ?? [])
-        .map((event) =>
-          typeof event.eventId === 'string'
-            ? event.eventId
-            : typeof event.name === 'string'
-              ? event.name
-              : '',
-        )
-        .filter(Boolean),
-    );
-    for (const schema of schemas.filter((item) => item.kind === 'pageSchema')) {
-      for (const component of schema.components ?? []) {
-        const type = typeof component.type === 'string' ? component.type : '';
-        const rule = getPlaywayComponentRule(type);
-        if (!rule) {
-          issues.push(`组件 ${type || '未命名'} 不在 Playway 注册表中。`);
-          continue;
-        }
-        const referencedApis = [component.api, component.apiName]
-          .filter(Boolean)
-          .map(String);
-        for (const api of referencedApis) {
-          if (apiNames.size > 0 && !apiNames.has(api)) {
-            issues.push(`组件 ${type} 引用了不存在的 API：${api}。`);
-          }
-        }
-        const referencedEvents = Array.isArray(component.events)
-          ? component.events.map((event) =>
-              typeof event === 'string'
-                ? event
-                : typeof (event as Record<string, unknown>).eventId === 'string'
-                  ? ((event as Record<string, unknown>).eventId as string)
-                  : typeof (event as Record<string, unknown>).name === 'string'
-                    ? ((event as Record<string, unknown>).name as string)
-                    : '',
-            )
-          : [];
-        for (const event of referencedEvents.filter(Boolean)) {
-          if (eventNames.size > 0 && !eventNames.has(event)) {
-            issues.push(`组件 ${type} 引用了不存在的埋点事件：${event}。`);
-          }
-        }
-      }
-    }
-    return issues.slice(0, 12);
-  }
-
   private normalizeLowCodeSchemaItem(
     role: ProductionRole,
     item: unknown,
@@ -1559,31 +1428,20 @@ export class ProductionWorkflowService {
     const ownerRole = PRODUCTION_ROLES.includes(record.role as ProductionRole)
       ? (record.role as ProductionRole)
       : role;
-    const rawComponents = this.recordArray(record.components);
-    const components = rawComponents.filter((component) =>
-      PLAYWAY_COMPONENT_TYPES.includes(String(component.type)),
-    );
     return {
       schemaVersion: 1,
       role: ownerRole,
       kind,
       title: String(record.title ?? `${ownerRole}-${kind}`),
       source: record.source === 'fallback' ? 'fallback' : 'llm',
-      components,
+      components: this.recordArray(record.components),
       apis: this.recordArray(record.apis),
       events: this.recordArray(record.events),
       rules: this.recordArray(record.rules),
       checks: this.recordArray(record.checks),
-      notes: [
-        ...(Array.isArray(record.notes)
-          ? record.notes.map((note) => String(note)).slice(0, 10)
-          : []),
-        ...(rawComponents.length > components.length
-          ? [
-              `已过滤 ${rawComponents.length - components.length} 个未注册 Playway 组件。`,
-            ]
-          : []),
-      ],
+      notes: Array.isArray(record.notes)
+        ? record.notes.map((note) => String(note)).slice(0, 12)
+        : [],
     };
   }
 
@@ -1675,13 +1533,13 @@ export class ProductionWorkflowService {
         components: [
           {
             id: 'activity-root',
-            type: 'banner',
+            type: 'page',
             name: '活动主页面',
             children: ['hero', 'rule', 'cta'],
           },
-          { id: 'hero', type: 'banner', name: '首屏视觉与活动入口' },
-          { id: 'rule', type: 'activity-rules', name: '活动规则说明' },
-          { id: 'cta', type: 'reserve-now', name: '核心行动按钮' },
+          { id: 'hero', type: 'section', name: '首屏视觉与活动入口' },
+          { id: 'rule', type: 'section', name: '活动规则说明' },
+          { id: 'cta', type: 'button', name: '核心行动按钮' },
         ],
         notes: [
           '模型未返回页面 Schema 时由系统兜底生成，保证下游代码生成有结构输入。',
@@ -1742,74 +1600,6 @@ export class ProductionWorkflowService {
     )
       throw new Error('项目文件路径不安全。');
     return project;
-  }
-
-  private fallbackGeneratedProject(
-    context: Awaited<ReturnType<ProductionWorkflowService['codingContext']>>,
-    cause: unknown,
-  ) {
-    const components = context.stages
-      .flatMap((stage) => stage.lowCodeSchemas ?? [])
-      .filter((schema) => schema.kind === 'pageSchema')
-      .flatMap((schema) => schema.components ?? [])
-      .map((component) => ({
-        type: typeof component.type === 'string' ? component.type : 'unknown',
-        name: typeof component.name === 'string' ? component.name : '活动组件',
-      }));
-    const componentJson = JSON.stringify(components);
-    const errorMessage =
-      cause instanceof Error ? cause.message : '模型未返回可运行代码';
-    return this.validateGeneratedProject({
-      projectName: `${context.projectId}-playway-fallback`,
-      framework: 'React + Vite + TypeScript',
-      runCommand: 'pnpm install && pnpm dev',
-      notes: [
-        '模型代码生成失败，已根据已审批 pageSchema 生成最小可运行兜底项目。',
-        `模型失败原因：${errorMessage.slice(0, 500)}`,
-      ],
-      files: [
-        {
-          path: 'package.json',
-          purpose: '项目依赖和启动脚本',
-          content: JSON.stringify(
-            {
-              private: true,
-              type: 'module',
-              scripts: { dev: 'vite', build: 'tsc -b && vite build' },
-              dependencies: {
-                '@vitejs/plugin-react': '^4.3.4',
-                vite: '^5.4.10',
-                typescript: '^5.6.3',
-                react: '^18.3.1',
-                'react-dom': '^18.3.1',
-              },
-              devDependencies: {},
-            },
-            null,
-            2,
-          ),
-        },
-        {
-          path: 'index.html',
-          purpose: 'Vite HTML 入口',
-          content:
-            '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
-        },
-        {
-          path: 'src/main.tsx',
-          purpose: 'React 页面入口和 Playway 组件清单预览',
-          content: `import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\n\nconst components = ${componentJson};\n\nfunction App() {\n  return <main><h1>${context.projectId} 活动预览</h1><p>Playway 兜底页面：组件规则已生成，具体交互请按 Schema 接入真实 API。</p><section>{components.map((item, index) => <article key={item.type + index}><b>{item.name}</b><code>{item.type}</code></article>)}</section></main>;\n}\n\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
-        },
-        {
-          path: 'src/styles.css',
-          purpose: '兜底页面样式',
-          content:
-            'body{margin:0;font-family:system-ui;background:#f5f7fb;color:#182230}main{max-width:960px;margin:0 auto;padding:48px 24px}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}article{background:#fff;border:1px solid #e6eaf0;border-radius:12px;padding:16px}code{display:block;color:#667085;margin-top:8px}',
-        },
-      ],
-      activityName: context.projectId,
-      sourceThreadId: context.threadId,
-    });
   }
 
   private deliveryVerification(project: {
@@ -1873,11 +1663,8 @@ export class ProductionWorkflowService {
   private async getOwnedState(threadId: string, userId: string) {
     const snapshot = await this.app.getState(this.config(threadId));
     const state = snapshot?.values as ProductionWorkflowStateType | undefined;
-    if (!state?.projectId || state.userId !== userId) {
-      throw new NotFoundException(
-        'workflow not found or checkpoint expired; please start the workflow again',
-      );
-    }
+    if (!state?.projectId) throw new Error('workflow not found');
+    if (state.userId !== userId) throw new Error('workflow not found');
     return state;
   }
 
@@ -2192,11 +1979,6 @@ export class ProductionWorkflowService {
       feedback: state.feedback,
       supplementalMaterials: state.supplementalMaterials ?? '',
       results: state.results,
-      schemaIssues: this.validateLowCodeSchemaSet(
-        Object.values(state.results).flatMap(
-          (result) => result?.lowCodeSchemas ?? [],
-        ),
-      ),
       error: state.error,
       requiresApproval: state.status === 'pending_approval',
       requiresRevision: state.status === 'revision_required',
