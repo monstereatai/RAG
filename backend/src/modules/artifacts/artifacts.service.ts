@@ -123,6 +123,21 @@ export class ArtifactsService implements OnModuleInit {
     await this.artifacts.save(artifact);
   }
 
+  /** 内容或交付物重新生成后，旧审批版本必须失效，避免审批凭证跨版本复用。 */
+  async invalidateApproval(id: string, reason = 'artifact regenerated'): Promise<void> {
+    const artifact = await this.artifacts.findOne({ where: { id } });
+    if (!artifact) return;
+    const metadata = this.parseMetadata(artifact.metadata) ?? {};
+    if (metadata.reviewStatus !== 'approved') return;
+    artifact.metadata = JSON.stringify({
+      ...metadata,
+      reviewStatus: 'stale',
+      staleReason: reason,
+      staleAt: new Date().toISOString(),
+    });
+    await this.artifacts.save(artifact);
+  }
+
   async getOwned(id: string, ownerUserId: string) {
     const artifact = await this.artifacts.findOne({
       where: { id, ownerUserId },
@@ -255,6 +270,15 @@ export class ArtifactsService implements OnModuleInit {
         ...this.parseMetadata(artifact.metadata),
         ...(file.metadata ?? {}),
       });
+      const metadata = this.parseMetadata(artifact.metadata) ?? {};
+      if (metadata.reviewStatus === 'approved') {
+        artifact.metadata = JSON.stringify({
+          ...metadata,
+          reviewStatus: 'stale',
+          staleReason: 'artifact regenerated',
+          staleAt: new Date().toISOString(),
+        });
+      }
       artifact.status = 'ready';
       await this.artifacts.save(artifact);
     } catch (error) {

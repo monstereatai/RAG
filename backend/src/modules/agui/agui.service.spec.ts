@@ -1,5 +1,4 @@
 import { firstValueFrom, toArray } from 'rxjs';
-import type { SseCallback } from '../../rag/agentic/sse-event';
 import { AguiService } from './agui.service';
 
 jest.mock('../../rag/agentic/agentic-rag.service', () => ({
@@ -7,39 +6,8 @@ jest.mock('../../rag/agentic/agentic-rag.service', () => ({
 }));
 
 describe('AguiService', () => {
-  it('maps Agentic RAG stream events to AG-UI lifecycle events', async () => {
+  it('maps the unified Chat result to AG-UI lifecycle events', async () => {
     let addMessageCount = 0;
-    let receivedMemoryMessages: Array<{ role: string; content: string }> = [];
-    let receivedScope: unknown;
-    const agenticRagService = {
-      run: (
-        _query: string,
-        _mode: string,
-        onEvent: SseCallback,
-        _history: unknown,
-        _threadId: string,
-        _userId: string,
-        memoryMessages: Array<{ role: string; content: string }>,
-        _enableInterrupt: boolean,
-        retrieveOptions: { scope?: unknown },
-      ) => {
-        receivedMemoryMessages = memoryMessages;
-        receivedScope = retrieveOptions.scope;
-        onEvent({
-          type: 'routing',
-          data: { mode: 'agentic', route: 'simple' },
-        });
-        onEvent({ type: 'token', data: 'hello' });
-        onEvent({ type: 'citation', data: [] });
-        return Promise.resolve({
-          answer: 'hello',
-          references: [],
-          route: 'simple' as const,
-          confidence: 1,
-          retryCount: 0,
-        });
-      },
-    };
     const conversationService = {
       create: () => Promise.resolve('thread-1'),
       getRecentHistory: () => Promise.resolve([]),
@@ -47,10 +15,6 @@ describe('AguiService', () => {
         addMessageCount += 1;
         return Promise.resolve(undefined);
       },
-    };
-    const memoryService = {
-      searchMemory: () => Promise.resolve({}),
-      classifyAndPersist: () => undefined,
     };
     const llmProvider = {
       runWithModel: (
@@ -67,9 +31,8 @@ describe('AguiService', () => {
       create: () => Promise.reject(new Error('should not be called')),
     };
     const service = new AguiService(
-      agenticRagService as never,
+      { chat: () => Promise.resolve({ answer: 'hello', references: [], route: 'simple', confidence: 1, retryCount: 0, retrievalSufficient: true }) } as never,
       conversationService as never,
-      memoryService as never,
       llmProvider as never,
       langfuseProvider as never,
       artifactsService as never,
@@ -89,23 +52,17 @@ describe('AguiService', () => {
     expect(events.map((event) => event.type)).toEqual([
       'RUN_STARTED',
       'TEXT_MESSAGE_START',
-      'STATE_DELTA',
       'TEXT_MESSAGE_CONTENT',
-      'CUSTOM',
       'TEXT_MESSAGE_END',
       'RUN_FINISHED',
     ]);
-    expect(typeof events[3].data?.messageId).toBe('string');
-    expect(events[3].data?.delta).toBe('hello');
-    expect(addMessageCount).toBe(2);
-    expect(receivedMemoryMessages[0]?.content).toContain(
-      '当前服务对象岗位：测试工程师',
-    );
-    expect(receivedScope).toEqual({ role: 'qa-engineer' });
+    const content = events.find((event) => event.type === 'TEXT_MESSAGE_CONTENT');
+    expect(typeof content?.data?.messageId).toBe('string');
+    expect(content?.data?.delta).toBe('hello');
+    expect(addMessageCount).toBe(0);
   });
 
   it('creates a downloadable artifact for an explicit Word request', async () => {
-    let receivedMemoryMessages: Array<{ role: string; content: string }> = [];
     const artifactsService = {
       create: jest.fn().mockResolvedValue({
         id: 'artifact-1',
@@ -116,34 +73,11 @@ describe('AguiService', () => {
       }),
     };
     const service = new AguiService(
-      {
-        run: (
-          _query: string,
-          _mode: string,
-          _onEvent: SseCallback,
-          _history: unknown,
-          _threadId: string,
-          _userId: string,
-          memoryMessages: Array<{ role: string; content: string }>,
-        ) => {
-          receivedMemoryMessages = memoryMessages;
-          return Promise.resolve({
-            answer: '# 发布说明\n\n完整正文',
-            references: [],
-            route: 'simple' as const,
-            confidence: 1,
-            retryCount: 0,
-          });
-        },
-      } as never,
+      { chat: () => Promise.resolve({ answer: '# 发布说明\n\n完整正文', references: [], route: 'simple', confidence: 1, retryCount: 0, retrievalSufficient: true }) } as never,
       {
         create: () => Promise.resolve('thread-1'),
         getRecentHistory: () => Promise.resolve([]),
         addMessage: () => Promise.resolve(undefined),
-      } as never,
-      {
-        searchMemory: () => Promise.resolve({}),
-        classifyAndPersist: () => undefined,
       } as never,
       {
         runWithModel: (
@@ -173,7 +107,6 @@ describe('AguiService', () => {
       | { artifacts?: Array<{ id: string }> }
       | undefined;
 
-    expect(receivedMemoryMessages[1]?.content).toContain('不得声称无法创建');
     expect(artifactsService.create).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 'user-1',

@@ -76,7 +76,7 @@ export class QaOpsController {
     @Query('threadId') threadId?: string,
     @Query('model') model?: LlmModelProvider,
   ): Observable<AguiEvent> {
-    const chatMode = mode ?? 'agentic';
+    const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
       throw new NotFoundException('mode must be one of: simple, agentic, auto');
     }

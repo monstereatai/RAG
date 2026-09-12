@@ -452,28 +452,6 @@ export class ProductionWorkflowService {
     };
   }
 
-  async playwayPreview(threadId: string, userId: string) {
-    const state = await this.getOwnedState(threadId, userId);
-    const activityContext = Object.values(state.results)
-      .flatMap((result) =>
-        result
-          ? [
-              result.summary,
-              ...result.deliverables.map((item) => item.markdown),
-            ]
-          : [],
-      )
-      .join('\n')
-      .slice(0, 40_000);
-    return renderPlaywayPreview(
-      Object.values(state.results).flatMap(
-        (result) => result?.lowCodeSchemas ?? [],
-      ),
-      `${state.projectId} 活动预览`,
-      activityContext,
-    );
-  }
-
   async generateProject(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
     const run = await this.agentRuns?.findLatestByThread(threadId);

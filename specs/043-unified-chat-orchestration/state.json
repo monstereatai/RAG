@@ -1,0 +1,403 @@
+{
+  "schema_version": 2,
+  "change_id": "043-unified-chat-orchestration",
+  "mode": "standard",
+  "status": "executing",
+  "current_task": "T002",
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/043-unified-chat-orchestration/spec.md",
+    "plan": "specs/043-unified-chat-orchestration/plan.md",
+    "tasks": "specs/043-unified-chat-orchestration/tasks.md",
+    "verify": "specs/043-unified-chat-orchestration/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "off"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-09-12T13:42:39Z",
+      "approver": "主人",
+      "evidence": "用户明确请求：按照这个来优化掉。全部优化完。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-09-12T13:43:00Z",
+      "approver": "主人",
+      "evidence": "用户附件给出最终方案，随后明确请求：按照这个来优化掉。全部优化完。",
+      "review_report": null
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "显式 Simple 不进入 Agentic。"
+    },
+    "AC-02": {
+      "description": "所有 Chat 入口复用一次请求语义。"
+    },
+    "AC-03": {
+      "description": "Auto 与 Agentic 复用 Fast Path，避免 Obsidian与图谱重复读取。"
+    },
+    "AC-04": {
+      "description": "流式正式正文与最终引用校验结果一致。"
+    },
+    "AC-05": {
+      "description": "会话、记忆、Query Log 与审计使用统一结果收口。"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03"
+      ],
+      "allowed_paths": [
+        "backend/src/modules/chat/chat.service.ts",
+        "backend/src/modules/chat/chat.service.spec.ts",
+        "backend/src/rag/agentic/agentic-rag.service.spec.ts"
+      ],
+      "commands": [
+        "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T001-unit-retry"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/.codex/worktrees/cd20/RAG/specs/043-unified-chat-orchestration/scope-baseline-T001.json",
+        "cwd": "/Users/monster/.codex/worktrees/cd20/RAG",
+        "internal_patterns": [
+          "specs/043-unified-chat-orchestration/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/.codex/worktrees/cd20/RAG/specs/043-unified-chat-orchestration/scope-report-T001.json",
+        "sha256": "e54b099b17e1dfc12452a6589de6972c409102a9e49a4d3f3d36fe83a9e8caea"
+      }
+    },
+    "T002": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-04",
+        "AC-05"
+      ],
+      "allowed_paths": [
+        "backend/src/modules/chat/chat.service.ts",
+        "backend/src/modules/chat/chat.service.spec.ts"
+      ],
+      "commands": [
+        "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node"
+      ],
+      "status": "in_progress",
+      "check_ids": [],
+      "scope": {
+        "baseline": "/Users/monster/.codex/worktrees/cd20/RAG/specs/043-unified-chat-orchestration/scope-baseline-T002.json",
+        "cwd": "/Users/monster/.codex/worktrees/cd20/RAG",
+        "internal_patterns": [
+          "specs/043-unified-chat-orchestration/**"
+        ]
+      }
+    },
+    "T003": {
+      "depends_on": [
+        "T002"
+      ],
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-04",
+        "AC-05"
+      ],
+      "allowed_paths": [
+        "backend/src/modules/chat/chat.controller.ts",
+        "backend/src/modules/agui/agui.service.ts",
+        "backend/src/modules/agui/agui.service.spec.ts"
+      ],
+      "commands": [
+        "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/modules/agui/agui.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node"
+      ],
+      "status": "pending",
+      "check_ids": []
+    },
+    "T004": {
+      "depends_on": [
+        "T003"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05"
+      ],
+      "allowed_paths": [
+        "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+        "docs/interview/功能步骤流程.md",
+        "ROADMAP.md"
+      ],
+      "commands": [
+        "pnpm --dir backend exec jest src/rag/prompts/query-intent-router.spec.ts src/modules/chat/chat.service.spec.ts src/modules/agui/agui.service.spec.ts src/rag/karpathy/karpathy-rag.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node"
+      ],
+      "status": "pending",
+      "check_ids": []
+    }
+  },
+  "checks": [
+    {
+      "id": "T001-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03"
+      ],
+      "command": "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node",
+      "cwd": "/Users/monster/.codex/worktrees/cd20/RAG",
+      "started_at": "2026-09-12T13:43:46Z",
+      "duration_ms": 3377,
+      "exit_code": 1,
+      "result": "fail",
+      "stdout_log": "specs/043-unified-chat-orchestration/evidence/T001-unit.stdout.log",
+      "stderr_log": "specs/043-unified-chat-orchestration/evidence/T001-unit.stderr.log",
+      "git": {
+        "head": "05e90196b27cd2624b08cba7dc989aaf5426bffe",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "backend/src/modules/agui/agui.controller.ts",
+          "backend/src/modules/chat/chat.controller.ts",
+          "backend/src/modules/chat/chat.service.spec.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/qa-ops/qa-ops.controller.ts",
+          "backend/src/modules/workflow/production-workflow.service.spec.ts",
+          "backend/src/modules/workflow/production-workflow.service.ts",
+          "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/query-intent-router.spec.ts",
+          "backend/src/rag/prompts/query-intent-router.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "b32c9a4d23b9fed86ef9b325c6b04c6cc296fd0d7c3835ef72f1286846c2c7be"
+      }
+    },
+    {
+      "id": "T001-unit-retry",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03"
+      ],
+      "command": "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node",
+      "cwd": "/Users/monster/.codex/worktrees/cd20/RAG",
+      "started_at": "2026-09-12T13:44:30Z",
+      "duration_ms": 2596,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/043-unified-chat-orchestration/evidence/T001-unit-retry.stdout.log",
+      "stderr_log": "specs/043-unified-chat-orchestration/evidence/T001-unit-retry.stderr.log",
+      "git": {
+        "head": "05e90196b27cd2624b08cba7dc989aaf5426bffe",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "backend/src/modules/agui/agui.controller.ts",
+          "backend/src/modules/chat/chat.controller.ts",
+          "backend/src/modules/chat/chat.service.spec.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/qa-ops/qa-ops.controller.ts",
+          "backend/src/modules/workflow/production-workflow.service.spec.ts",
+          "backend/src/modules/workflow/production-workflow.service.ts",
+          "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/query-intent-router.spec.ts",
+          "backend/src/rag/prompts/query-intent-router.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "3408ffbda710f482cfeb702f6dc2d496e584892e9fb7e6f8b57780414852b6d0"
+      }
+    },
+    {
+      "id": "T002-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-04",
+        "AC-05"
+      ],
+      "command": "pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node",
+      "cwd": "/Users/monster/.codex/worktrees/cd20/RAG",
+      "started_at": "2026-09-12T13:53:39Z",
+      "duration_ms": 2222,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/043-unified-chat-orchestration/evidence/T002-unit.stdout.log",
+      "stderr_log": "specs/043-unified-chat-orchestration/evidence/T002-unit.stderr.log",
+      "git": {
+        "head": "05e90196b27cd2624b08cba7dc989aaf5426bffe",
+        "changed_files": [
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "backend/src/modules/agui/agui.controller.ts",
+          "backend/src/modules/agui/agui.service.spec.ts",
+          "backend/src/modules/agui/agui.service.ts",
+          "backend/src/modules/chat/chat.controller.ts",
+          "backend/src/modules/chat/chat.service.spec.ts",
+          "backend/src/modules/chat/chat.service.ts",
+          "backend/src/modules/qa-ops/qa-ops.controller.ts",
+          "backend/src/modules/workflow/production-workflow.service.spec.ts",
+          "backend/src/modules/workflow/production-workflow.service.ts",
+          "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+          "backend/src/rag/agentic/agentic-rag.service.ts",
+          "backend/src/rag/karpathy/karpathy-rag.service.ts",
+          "backend/src/rag/prompts/query-intent-router.spec.ts",
+          "backend/src/rag/prompts/query-intent-router.ts",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "12d30eb188dfdda79b036defc29252cad09a04670c222f39f9f33544cf01fda6"
+      }
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "用户已提供并批准最终架构，登记验收标准。"
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-05."
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户明确请求：按照这个来优化掉。全部优化完。"
+    },
+    {
+      "at": "2026-09-12T13:42:39Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "方案已由用户附件确认，登记执行任务。"
+    },
+    {
+      "at": "2026-09-12T13:43:00Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-09-12T13:43:00Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T002."
+    },
+    {
+      "at": "2026-09-12T13:43:00Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T003."
+    },
+    {
+      "at": "2026-09-12T13:43:00Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T004."
+    },
+    {
+      "at": "2026-09-12T13:43:00Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by 主人: 用户附件给出最终方案，随后明确请求：按照这个来优化掉。全部优化完。"
+    },
+    {
+      "at": "2026-09-12T13:43:10Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    },
+    {
+      "at": "2026-09-12T13:43:49Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-unit: fail (pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node)"
+    },
+    {
+      "at": "2026-09-12T13:44:32Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-unit-retry: pass (pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts src/rag/agentic/agentic-rag.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node)"
+    },
+    {
+      "at": "2026-09-12T13:44:40Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T001 with T001-unit-retry."
+    },
+    {
+      "at": "2026-09-12T13:44:40Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T002."
+    },
+    {
+      "at": "2026-09-12T13:53:42Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-unit: pass (pnpm --dir backend exec jest src/modules/chat/chat.service.spec.ts --runInBand --testEnvironment /Users/monster/.codex/worktrees/cd20/RAG/node_modules/.pnpm/jest-environment-node@30.4.1/node_modules/jest-environment-node)"
+    }
+  ],
+  "created_at": "2026-09-12T13:42:39Z",
+  "updated_at": "2026-09-12T13:53:42Z"
+}

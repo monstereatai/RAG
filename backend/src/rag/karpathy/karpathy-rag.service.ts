@@ -45,7 +45,10 @@ import {
   createEvidenceBundle,
   type EvidenceBundle,
   type EvidenceSourcePolicy,
+  type EvidenceSourceSnapshot,
 } from '../evidence/evidence-bundle';
+import type { QueryIntent } from '../prompts/query-intent-router';
+import type { RequestContext } from '../../modules/chat/chat-runtime.types';
 
 export interface RetrievedChunk {
   id: string;
@@ -238,6 +241,10 @@ export interface RetrieveOptions {
   needsSynthesis?: boolean;
   /** 语义路由识别出的实体，用于人物/实体类证据归纳。 */
   entities?: string[];
+  /** 单次请求已经完成的语义决策；下游只能复用，不能重新分类。 */
+  queryIntent?: QueryIntent;
+  /** ChatService 构造的统一请求上下文；直连 Agentic 入口可省略并由其兼容层创建。 */
+  requestContext?: RequestContext;
   scope?: RetrievalScope;
   profile?: RetrievalProfile;
   /** 可选插件组合传入的运行时工具白名单。 */
@@ -614,7 +621,22 @@ export class KarpathyRagService implements OnModuleInit {
     const normalizedQuery = this.normalizeQuery(query);
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
     const graphProbeStartedAt = Date.now();
-    const graphProbePromise = this.probeGraph(normalizedQuery, userId);
+    // Chat 请求一律遵从一次结构化计划；没有 RequestContext 的历史内部调用
+    // 保持旧的保守兼容行为，避免无关运营接口的检索语义意外变化。
+    const graphRequested = options.queryIntent
+      ? options.queryIntent.requiresGraph
+      : this.shouldMergeGraphEvidence(normalizedQuery);
+    const graphProbePromise = graphRequested
+      ? this.probeGraph(normalizedQuery, userId)
+      : Promise.resolve({
+          attempted: false,
+          enabled: Boolean(this.graphService?.isEnabled()),
+          merged: false,
+          factCount: 0,
+          elapsedMs: 0,
+          facts: [],
+          skippedReason: 'not_requested_by_retrieval_plan',
+        });
     const imageProbePromise = this.probeImages(normalizedQuery, userId);
 
     // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
@@ -751,13 +773,9 @@ export class KarpathyRagService implements OnModuleInit {
       }));
     const graphProbe = await graphProbePromise;
     const imageProbe = await imageProbePromise;
-    const graphChunks = graphProbe.facts.map((fact, index) =>
-      this.graphFactToChunk(fact, index),
-    );
-    const imageChunks = imageProbe.hits.map((hit, index) =>
-      this.imageHitToChunk(hit, index),
-    );
-    const shouldMergeGraph = this.shouldMergeGraphEvidence(normalizedQuery);
+    const graphChunks = graphProbe.facts.map((fact, index) => this.graphFactToChunk(fact, index));
+    const imageChunks = imageProbe.hits.map((hit, index) => this.imageHitToChunk(hit, index));
+    const shouldMergeGraph = graphRequested;
     const shouldMergeImages = this.shouldMergeImageEvidence(normalizedQuery);
     const expanded = this.expandContextChunks(
       ranked,
@@ -1125,11 +1143,14 @@ export class KarpathyRagService implements OnModuleInit {
     const retrieveBaseCaseKnowledge = () =>
       prefetchedFastPath?.badCaseMatches
         ? Promise.resolve(prefetchedFastPath.badCaseMatches)
-        : this.badCaseFlywheel.retrieveMatches(normalizedQuery, 2);
+        : this.badCaseFlywheel.retrieveMatches(normalizedQuery, 2, userId);
     const retrieveObsidianKnowledge = () =>
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.obsidianHits)
-        : this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
+        : this.obsidianKnowledge.search(normalizedQuery, 5, {
+            userId,
+            roles: retrieveOptions.scope?.role ? [retrieveOptions.scope.role] : [],
+          }).catch((error) => {
             this.logger.warn(
               `Obsidian fast path failed: ${(error as Error).message}`,
             );
@@ -1141,7 +1162,8 @@ export class KarpathyRagService implements OnModuleInit {
     let obsidianHits: ObsidianSearchHit[];
     if (
       retrieveOptions.karpathyDirectAnswer &&
-      !retrieveOptions.needsSynthesis
+      !retrieveOptions.needsSynthesis &&
+      !prefetchedFastPath
     ) {
       // Karpathy 直答保留精确纠错覆盖检查：它只查 PostgreSQL 精确问题，
       // 与本地 BM25 直答并行，不触发 Milvus 语义检索。
@@ -1592,16 +1614,21 @@ ${memoryText || '无'}
     prefetchedFastPath: PrefetchedFastPath;
   }> {
     const normalizedQuery = this.normalizeQuery(query);
+    let badCaseFailure: string | undefined;
+    let retrievalFailure: string | undefined;
+    let obsidianFailure: string | undefined;
     const [badCaseMatches, retrieval, obsidianHits] = await Promise.all([
       this.badCaseFlywheel
-        .retrieveMatches(normalizedQuery, 2)
+        .retrieveMatches(normalizedQuery, 2, userId)
         .catch((error) => {
+          badCaseFailure = (error as Error).message;
           this.logger.warn(
             `Fast path Base Case retrieval failed: ${(error as Error).message}`,
           );
           return [] as BadCaseMatch[];
         }),
       this.retrieveDetailed(normalizedQuery, options, userId).catch((error) => {
+        retrievalFailure = (error as Error).message;
         this.logger.warn(
           `Fast path RAG retrieval failed: ${(error as Error).message}`,
         );
@@ -1619,7 +1646,11 @@ ${memoryText || '无'}
           profile: detectRetrievalProfile(normalizedQuery),
         } satisfies DetailedRetrievalResult;
       }),
-      this.obsidianKnowledge.search(normalizedQuery).catch((error) => {
+      this.obsidianKnowledge.search(normalizedQuery, 5, {
+        userId,
+        roles: options.scope?.role ? [options.scope.role] : [],
+      }).catch((error) => {
+        obsidianFailure = (error as Error).message;
         this.logger.warn(
           `Fast path Obsidian retrieval failed: ${(error as Error).message}`,
         );
@@ -1656,6 +1687,13 @@ ${memoryText || '无'}
       assessment,
       sourcePolicy: options.sourcePolicy ?? 'web_allowed',
       diagnostics: retrieval.diagnostics,
+      sourceStatuses: this.buildEvidenceSourceStatuses({
+        badCaseMatches,
+        retrieval,
+        obsidianHits,
+        sourcePolicy: options.sourcePolicy ?? 'web_allowed',
+        failures: { badCaseFailure, retrievalFailure, obsidianFailure },
+      }),
     });
 
     return {
@@ -1672,17 +1710,56 @@ ${memoryText || '无'}
     };
   }
 
-  async getObsidianContext(query: string): Promise<{
+  private buildEvidenceSourceStatuses(input: {
+    badCaseMatches: BadCaseMatch[];
+    retrieval: DetailedRetrievalResult;
+    obsidianHits: ObsidianSearchHit[];
+    sourcePolicy: EvidenceSourcePolicy;
+    failures?: {
+      badCaseFailure?: string;
+      retrievalFailure?: string;
+      obsidianFailure?: string;
+    };
+  }): EvidenceSourceSnapshot[] {
+    const graph = input.retrieval.diagnostics.graphProbe;
+    const image = input.retrieval.diagnostics.imageProbe;
+    return [
+      { source: 'bad_case', status: input.failures?.badCaseFailure ? this.statusForFailure(input.failures.badCaseFailure) : input.badCaseMatches.length ? 'hit' : 'no_result', hitCount: input.badCaseMatches.length, reason: input.failures?.badCaseFailure },
+      { source: 'bm25', status: input.failures?.retrievalFailure ? this.statusForFailure(input.failures.retrievalFailure) : input.retrieval.diagnostics.stages?.keywordCandidates ? 'hit' : 'no_result', hitCount: input.retrieval.diagnostics.stages?.keywordCandidates ?? 0, reason: input.failures?.retrievalFailure },
+      { source: 'vector', status: input.retrieval.vectorSource === 'none' ? 'no_result' : 'hit', hitCount: input.retrieval.diagnostics.stages?.vectorCandidates ?? 0 },
+      { source: 'elasticsearch', status: input.retrieval.vectorSource === 'elasticsearch' ? 'hit' : 'not_executed', hitCount: input.retrieval.vectorSource === 'elasticsearch' ? input.retrieval.diagnostics.stages?.vectorCandidates ?? 0 : 0 },
+      { source: 'obsidian', status: input.failures?.obsidianFailure ? this.statusForFailure(input.failures.obsidianFailure) : input.obsidianHits.length ? 'hit' : 'no_result', hitCount: input.obsidianHits.length, reason: input.failures?.obsidianFailure },
+      { source: 'graph', status: graph?.attempted ? (graph.factCount ? 'hit' : 'no_result') : 'not_executed', hitCount: graph?.factCount ?? 0, reason: graph?.skippedReason },
+      { source: 'image', status: image?.attempted ? (image.hitCount ? 'hit' : 'no_result') : 'not_executed', hitCount: image?.hitCount ?? 0, reason: image?.skippedReason },
+      { source: 'web', status: input.sourcePolicy === 'web_allowed' ? 'not_executed' : 'forbidden', hitCount: 0 },
+    ];
+  }
+
+  private statusForFailure(message: string): 'timeout' | 'failure' {
+    return /timeout|timed out|超时/i.test(message) ? 'timeout' : 'failure';
+  }
+
+  async getObsidianContext(
+    query: string,
+    userId?: string,
+    role?: string,
+  ): Promise<{
     hits: ObsidianSearchHit[];
     context: string;
   }> {
-    const hits = await this.obsidianKnowledge.search(
-      this.normalizeQuery(query),
-    );
+    const hits = await this.obsidianKnowledge.search(this.normalizeQuery(query), 5, {
+      userId,
+      roles: role ? [role] : [],
+    });
     return {
       hits,
       context: this.obsidianKnowledge.formatHitsForPrompt(hits),
     };
+  }
+
+  /** 已由 Fast Path 查询到的 Obsidian 命中只格式化，不得再次读取。 */
+  formatObsidianContext(hits: ObsidianSearchHit[]): string {
+    return this.obsidianKnowledge.formatHitsForPrompt(hits);
   }
 
   assessRetrievedChunks(
@@ -1695,8 +1772,9 @@ ${memoryText || '无'}
   async retrieveReviewedEvidence(
     query: string,
     limit = 2,
+    userId?: string,
   ): Promise<RetrievedChunk[]> {
-    const matches = await this.badCaseFlywheel.retrieveMatches(query, limit);
+    const matches = await this.badCaseFlywheel.retrieveMatches(query, limit, userId);
     return this.toReviewedEvidenceChunks(matches);
   }
 
@@ -1792,8 +1870,8 @@ ${memoryText || '无'}
   ): Promise<KarpathyRagResult | null> {
     const normalizedQuery = this.normalizeQuery(query);
     const [exactMatches, direct] = await Promise.all([
-      this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1) ??
-        this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1),
+      this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1, userId) ??
+        this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1, userId),
       this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope, entities),
     ]);
     const exact = exactMatches.find((match) => match.mode === 'exact');
@@ -3385,10 +3463,10 @@ ${evidence}`;
   }
 
   private countWordOverlap(query: string, chunks: RetrievedChunk[]): number {
-    const words = (value: string) =>
-      new Set(
-        (value.toLowerCase().match(/[a-z0-9][a-z0-9_-]+/g) ?? []).filter(
-          (word) => word.length > 1,
+    const words = (value: string): Set<string> =>
+      new Set<string>(
+        ((value.toLowerCase().match(/[a-z0-9][a-z0-9_-]+/g) ?? []) as string[]).filter(
+          (word: string) => word.length > 1,
         ),
       );
     const queryWords = words(query);

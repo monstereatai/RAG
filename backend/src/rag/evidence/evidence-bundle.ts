@@ -9,6 +9,23 @@ export type EvidenceSourcePolicy =
   | 'local_only'
   | 'web_allowed';
 
+export type EvidenceSourceStatus =
+  | 'not_executed'
+  | 'running'
+  | 'hit'
+  | 'no_result'
+  | 'timeout'
+  | 'failure'
+  | 'forbidden';
+
+export interface EvidenceSourceSnapshot {
+  source: 'bad_case' | 'bm25' | 'vector' | 'elasticsearch' | 'obsidian' | 'graph' | 'image' | 'web';
+  status: EvidenceSourceStatus;
+  hitCount: number;
+  elapsedMs?: number;
+  reason?: string;
+}
+
 export interface EvidenceAssessment {
   sufficient: boolean;
   reason: string;
@@ -28,6 +45,9 @@ export interface EvidenceBundle {
   assessment: EvidenceAssessment;
   sourcePolicy: EvidenceSourcePolicy;
   diagnostics?: RetrievalDiagnostics;
+  sourceStatuses?: EvidenceSourceSnapshot[];
+  /** 子问题覆盖率：每个子问题是否有可引用证据，供 Agent Loop 复用。 */
+  subquestionCoverage?: Array<{ id: string; query: string; covered: boolean; evidenceIds: string[] }>;
 }
 
 export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
@@ -39,6 +59,8 @@ export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
       ...input.assessment,
       evaluatedQuery: input.assessment.evaluatedQuery.trim(),
     },
+    sourceStatuses: input.sourceStatuses?.map((item) => ({ ...item })) ?? [],
+    subquestionCoverage: input.subquestionCoverage?.map((item) => ({ ...item, evidenceIds: [...item.evidenceIds] })) ?? [],
   };
 }
 
