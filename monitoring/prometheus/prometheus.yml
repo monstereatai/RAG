@@ -1,0 +1,74 @@
+# Prometheus 抓取配置（RAG 服务 + admin-backend + 自身 + 规则 + 告警）
+#
+# 关键点：
+# 1. metrics_path 必须显式写，默认是 /metrics，而这两个服务的真实路径都带前缀：
+#    - RAG 后端：/api/v1/metrics（全局前缀 api + URI 版本号 v1）
+#    - admin-backend：/api/metrics
+# 2. Linux 下没有 host.docker.internal，需要在容器上配 extra_hosts
+#    （见 monitoring/docker-compose.monitoring.yml，已写好）
+# 3. scrape_interval 与告警规则里的 for 要匹配：15s 抓取 + 2m for ≈ 8 个样本点，
+#    足够过滤单次抖动，又不至于把真实故障延迟太久
+# 4. 【重要】一个服务只允许有一个 scrape job。看板与告警的 PromQL 大多不带 job 过滤，
+#    若同一个进程被两个 job 同时抓取，sum(rate(...)) 会把 QPS、错误率、token 速率全部翻倍。
+#    过渡期需要用 9101 代理时，必须把对应的直连 job 一起注释掉（见文件末尾的说明）。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: local
+
+rule_files:
+  - /etc/prometheus/rules.yml
+  - /etc/prometheus/recording-rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  # 自身，用于确认 Prometheus 健康度与规则评估耗时
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Alertmanager：告警发不出去等于没有告警，所以它也要被监控
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # RAG 后端（3000）：RED + 检索 + LLM + 缓存指标
+  - job_name: 'rag-backend'
+    metrics_path: '/api/v1/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+        labels:
+          service: rag-backend
+
+  # admin-backend（3001）：admin_http_* RED 指标 + Node 运行时指标
+  - job_name: 'admin-backend'
+    metrics_path: '/api/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+        labels:
+          service: admin-backend
+
+  # ---------------------------------------------------------------
+  # 过渡期备用通道（默认关闭）
+  #
+  # 后端进程尚未重启时，指标响应仍被统一响应拦截器包成 {code,data,message}，
+  # 直连抓取会报 `expected equal, got ":"`。此时可以：
+  #   1) 起代理：cd backend && PORT=9101 UPSTREAM=http://localhost:3000/api/v1/metrics \
+  #                node scripts/metrics-unwrap-proxy.mjs
+  #   2) 打开下面的 job，并【同时注释掉上面的 rag-backend】——二选一，绝不并存
+  #   3) 重启后端后恢复：关掉本 job、取消上面 rag-backend 的注释
+  #
+  # - job_name: 'rag-backend-unwrapped'
+  #   metrics_path: '/metrics'
+  #   static_configs:
+  #     - targets: ['host.docker.internal:9101']
+  #       labels:
+  #         service: rag-backend
+  #         channel: unwrap-proxy
+  # ---------------------------------------------------------------

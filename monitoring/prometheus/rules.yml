@@ -1,0 +1,336 @@
+# 告警规则：RAG 服务 + admin-backend
+#
+# 窗口选择原则（每一条都对应下面 for 的取值）：
+# - `for` 至少覆盖 2~3 个抓取周期（scrape_interval=15s），避免单点抖动直接呼叫值班
+# - 错误率、失败率这类比例型指标用 5m 窗口：既能覆盖一次完整流量波动，又不会把故障拖到 15m 才报
+# - P99 用 5m 窗口算分位（样本量足够，分位才稳定），再用 10m 的 for 确认是持续劣化而不是一次长文生成
+# - 缓存命中率、召回质量这类慢变量用 30m 窗口，避免正常的内容更新导致误报
+
+groups:
+  - name: rag-slo
+    interval: 30s
+    rules:
+      # ---------- 1. 服务不可用 ----------
+      - alert: RagServiceDown
+        # up=0 表示 Prometheus 连续抓不到该实例；1m 的 for ≈ 4 个抓取周期，
+        # 足以排除容器重启、滚动发布这类秒级抖动，又能保证 1 分钟内叫醒值班
+        expr: up{job="rag-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: 'RAG 服务不可达（{{ $labels.instance }}）'
+          description: '连续 1m 抓取失败：检查进程是否存活、/api/v1/metrics 是否可访问、容器网络与 host.docker.internal 解析是否正常。'
+
+      - alert: RagMetricsEndpointBroken
+        # 进程活着但指标接口报错（例如被 500 或认证拦截），属于"监控自身失效"，
+        # 必须单独告警，否则后面所有业务告警都会静默失真
+        expr: up{job="rag-backend"} == 1 and absent(rag_http_requests_total)
+        for: 5m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'RAG 指标接口返回异常：抓取成功但拿不到 rag_http_requests_total'
+          description: '通常是指标路由被统一响应拦截器包成 JSON、或指标注册表被重建导致序列清空，Prometheus 无法解析。'
+
+      # ---------- 2. 错误率超阈值 ----------
+      - alert: RagHttpErrorRateHigh
+        # 5m 窗口：比例型指标在低 QPS 下需要更长窗口才有统计意义，
+        # 5m 是"能及时告警"和"样本量足够"的折中；分母为 0 时用 clamp_min 兜底避免 NaN
+        expr: |
+          (
+            sum(rate(rag_http_requests_total{job="rag-backend",status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(rag_http_requests_total{job="rag-backend"}[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: 'RAG 服务 5xx 错误率超过 5%（当前 {{ $value | humanizePercentage }}）'
+          description: '按 route 维度下钻：topk(5, sum by (route) (rate(rag_http_requests_total{status=~"5.."}[5m]))) 定位是检索、LLM 还是入库链路。'
+
+      - alert: RagHttpErrorRateElevated
+        # 分级告警：2% 只是预警，避免"刚好压线"时反复打断；4xx 单独统计，
+        # 因为 LLM 参数错误、权限拒绝属于客户端问题，不应算进服务可用性
+        expr: |
+          (
+            sum(rate(rag_http_requests_total{job="rag-backend",status=~"4.."}[5m]))
+            /
+            clamp_min(sum(rate(rag_http_requests_total{job="rag-backend"}[5m])), 0.001)
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'RAG 服务 4xx 占比超过 20%（当前 {{ $value | humanizePercentage }}）'
+          description: '常见来源：鉴权失效（401）、参数校验失败（400）、权限范围为空（403）。检查是否有客户端批量刷错。'
+
+      # ---------- 3. P99 延迟超阈值 ----------
+      - alert: RagHttpP99LatencyHigh
+        # 5m 窗口：分位计算依赖 _bucket 累加计数，窗口太短样本不足会让 P99 剧烈跳动；
+        # 10m 的 for 用来区分"持续劣化"与"偶发一次长文请求"
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, route) (rate(rag_http_request_duration_seconds_bucket{job="rag-backend"}[5m]))
+          ) > 5
+        for: 10m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: 'RAG 接口 P99 超过 5s（route={{ $labels.route }}，当前 {{ $value | humanizeDuration }}）'
+          description: '先确认是否命中长文生成/Agent 多轮；再查 LLM 与向量检索分阶段 P99。注意最大桶必须大于真实 P99，否则该值会失真。'
+
+      - alert: RagLlmP99LatencyHigh
+        # LLM 与通用 HTTP 分开设阈值：生成类接口天然慢，混在一起会把正常的长文生成误报成故障
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, provider, model) (rate(rag_llm_call_duration_seconds_bucket{job="rag-backend"}[5m]))
+          ) > 20
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'LLM P99 超过 20s（{{ $labels.provider }}/{{ $labels.model }}，当前 {{ $value | humanizeDuration }}）'
+          description: '对比各 provider/model 的 P99，判断是单一供应商抖动还是整体链路劣化；同时看 token 速率是否同步下降。'
+
+      - alert: RagVectorSearchP99LatencyHigh
+        # 向量检索是亚秒级操作，阈值用 1s；窗口同样是 5m，保证直方图样本足够
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, stage) (rate(rag_retrieval_duration_seconds_bucket{job="rag-backend",stage="vector_search"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: '向量检索 P99 超过 1s（当前 {{ $value | humanizeDuration }}）'
+          description: '检查 Milvus/ES kNN 负载与超时降级日志；若 status="error" 同时升高，说明已走 BM25 降级。'
+
+      # ---------- 4. LLM 调用失败率过高 ----------
+      - alert: RagLlmFailureRateHigh
+        # 5m 窗口 + 2m 以上的 for：LLM 供应商偶发 429/超时很常见，
+        # 只有持续失败才值得人工介入；分母 clamp_min 防止无流量时除零
+        expr: |
+          (
+            sum(rate(rag_llm_calls_total{job="rag-backend",status="error"}[5m]))
+            /
+            clamp_min(sum(rate(rag_llm_calls_total{job="rag-backend"}[5m])), 0.001)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: 'LLM 调用失败率超过 10%（{{ $labels.provider }}/{{ $labels.model }}）'
+          description: '核对 API Key 配额、限流与超时配置；若 status="fallback" 同时升高，说明已切备用供应商，需确认答案质量。'
+
+      - alert: RagLlmFallbackRateHigh
+        # fallback 不是错误但是质量风险：降级答案的引用覆盖度通常更差
+        expr: |
+          (
+            sum(rate(rag_llm_calls_total{job="rag-backend",status="fallback"}[10m]))
+            /
+            clamp_min(sum(rate(rag_llm_calls_total{job="rag-backend"}[10m])), 0.001)
+          ) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'LLM 降级（fallback）占比超过 30%'
+          description: '主供应商不稳定，建议检查主通道超时/限流，并抽检降级答案的引用覆盖率。'
+
+      # ---------- 5. 检索链路质量（补齐项） ----------
+      - alert: RagVectorSearchFailing
+        # 检索阶段自身报错会直接让回答退化成 BM25 或空召回，属于必须知道的降级
+        expr: |
+          sum(rate(rag_retrieval_duration_seconds_count{job="rag-backend",stage="vector_search",status="error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: '向量检索持续报错并已降级 BM25'
+          description: '检查 Milvus 连通性、集合是否存在、embedding 接口是否可用。'
+
+      - alert: RagEmptyRetrievalRateHigh
+        # 30m 窗口：召回质量是慢变量，短窗口会被个别生僻问题带偏
+        expr: |
+          (
+            sum(rate(rag_agent_empty_retrieval_total{job="rag-backend"}[30m]))
+            /
+            clamp_min(sum(rate(rag_http_requests_total{job="rag-backend",route=~".*chat.*"}[30m])), 0.001)
+          ) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: '空召回率超过 20%（route={{ $labels.route }}）'
+          description: '结合 rag_retrieval_recalled_chunks 分布确认是索引缺失、分片异常还是查询改写失效。'
+
+      # ---------- 6. 缓存（补齐项） ----------
+      - alert: RagCacheHitRateLow
+        # 30m 窗口：缓存命中率本身波动大，短窗口告警噪声高；低于 20% 通常意味着 key 设计或 TTL 出问题
+        expr: |
+          (
+            sum(rate(rag_cache_requests_total{job="rag-backend",result="hit"}[30m]))
+            /
+            clamp_min(sum(rate(rag_cache_requests_total{job="rag-backend"}[30m])), 0.001)
+          ) < 0.2
+        for: 30m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: '缓存命中率低于 20%（cache={{ $labels.cache }}）'
+          description: '检查 Redis 连通性、TTL 配置与 key 归一化逻辑；命中率骤降也常是流量模式突变导致。'
+
+      # ---------- 7. 任务与资源（补齐项） ----------
+      - alert: RagScheduledJobFailing
+        expr: |
+          sum by (task_kind) (increase(rag_scheduled_job_runs_total{job="rag-backend",status="failed"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: '定时任务连续失败（task_kind={{ $labels.task_kind }}）'
+          description: '查看任务执行历史与上一次成功时间，确认是数据源不可用还是代码缺陷。'
+
+      - alert: RagEventLoopLagHigh
+        # 15m 窗口：event loop 阻塞通常是累积型问题，瞬时尖刺意义不大
+        expr: rag_nodejs_eventloop_lag_p99_seconds{job="rag-backend"} > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'Node.js 事件循环 P99 阻塞超过 0.5s'
+          description: '常见原因：同步大 JSON 解析、向量结果集过大、GC 抖动。结合 heap 使用量判断是否需要扩容。'
+
+      - alert: RagMemoryUsageHigh
+        # 30m 持续高位才告警，避免一次性大批量入库导致的内存瞬时冲高
+        expr: rag_process_resident_memory_bytes{job="rag-backend"} > 2 * 1024 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'RAG 服务常驻内存超过 2GB'
+          description: '检查是否存在大对象泄漏（如缓存未设上限、流式响应未释放）；配合 heap 指标判断是堆内还是堆外。'
+
+      # ---------- 8. 安全（补齐项） ----------
+      - alert: RagDangerousQueryBurst
+        # 拦截量突增可能是攻击尝试，也可能是新上线的拦截规则误伤，两种都要人看
+        expr: sum(increase(rag_dangerous_queries_blocked_total{job="rag-backend"}[10m])) > 20
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: '危险查询拦截量 10m 内超过 20 次'
+          description: '按 pattern 下钻确认是攻击尝试还是误伤；误伤需要收紧正则。'
+
+  - name: admin-service
+    interval: 30s
+    rules:
+      - alert: AdminServiceDown
+        expr: up{job="admin-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: admin-backend
+        annotations:
+          summary: 'admin-backend 不可达（{{ $labels.instance }}）'
+          description: '检查 3001 端口进程与 /api/metrics 是否可访问。'
+
+      - alert: AdminHttpErrorRateHigh
+        # 与 RAG 侧同口径，便于在同一看板上对比两个服务
+        expr: |
+          (
+            sum(rate(admin_http_requests_total{job="admin-backend",status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(admin_http_requests_total{job="admin-backend"}[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: admin-backend
+        annotations:
+          summary: 'admin-backend 5xx 错误率超过 5%（当前 {{ $value | humanizePercentage }}）'
+
+      - alert: AdminHttpP99LatencyHigh
+        # 管理后台是交互型接口，1s 已属明显卡顿；分桶最大只到 30s，若真实请求更慢请先扩桶再调阈值
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, route) (rate(admin_http_request_duration_seconds_bucket{job="admin-backend"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: admin-backend
+        annotations:
+          summary: 'admin-backend P99 超过 1s（route={{ $labels.route }}，当前 {{ $value | humanizeDuration }}）'
+          description: '结合慢 SQL 与下游 RAG 代理耗时定位；注意最大桶 le="30" 会截断更慢的请求。'
+
+  - name: prometheus-self
+    interval: 30s
+    rules:
+      # 监控系统自身失效必须单独告警：否则"指标没数据"和"服务没问题"看起来是一样的
+      - alert: PrometheusScrapeSlow
+        # 抓取耗时超过 10s（约 2/3 抓取周期）会让样本出现空洞；15m 窗口排除启动期抖动
+        expr: scrape_duration_seconds{job!="prometheus"} > 10
+        for: 15m
+        labels:
+          severity: warning
+          service: prometheus
+        annotations:
+          summary: '抓取 {{ $labels.job }} 耗时超过 10s'
+          description: '通常是 /metrics 输出过大（历史指标未清理）或目标进程 CPU 饱和；检查该 job 的序列数增长。'
+
+      - alert: PrometheusRuleEvaluationFailing
+        # 规则评估失败会让告警静默失效，属于最高优先级问题
+        expr: rate(prometheus_rule_evaluation_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: prometheus
+        annotations:
+          summary: '存在规则评估失败的规则组（{{ $labels.rule_group }}）'
+          description: '多为 PromQL 语法或类型错误；执行 promtool check rules 并查看 Prometheus /rules 页面的 lastError。'
+
+      - alert: PrometheusTooManySeries
+        # 高基数 label 失控的最直接信号（呼应文档第 9 节）：
+        # 序列数暴涨会先吃内存，再让查询变慢，最后触发 OOM
+        expr: prometheus_tsdb_head_series > 100000
+        for: 15m
+        labels:
+          severity: warning
+          service: prometheus
+        annotations:
+          summary: '活跃时间序列数超过 10 万（当前 {{ $value }}）'
+          description: '用 topk(10, count by (__name__) ({__name__=~".+"})) 定位是哪个指标在膨胀，检查是否误加了高基数 label。'
+
+      - alert: AlertmanagerDown
+        # 告警发不出去等于没有告警，必须可观测
+        expr: up{job="alertmanager"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: alertmanager
+        annotations:
+          summary: 'Alertmanager 不可达，通知链路已断'
+          description: '检查 alertmanager 容器与 9093 端口；此时 Prometheus /alerts 仍会显示 firing，但不会有人收到消息。'

@@ -26,7 +26,7 @@ export class MetricsInterceptor implements NestInterceptor {
   }
 
   private record(req: Request, res: Response, start: bigint): void {
-    if (req.path === '/api/metrics') return;
+    if (req.path === '/api/metrics' || req.path === '/api/v1/metrics') return;
 
     const durationNs = process.hrtime.bigint() - start;
     const durationSeconds = Number(durationNs) / 1_000_000_000;

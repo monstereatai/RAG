@@ -15,6 +15,7 @@ import { LlmInvocationError } from './llm-invocation.error';
 export class DeepseekLlmProvider implements ILLMProvider {
   private readonly logger = new Logger(DeepseekLlmProvider.name);
   private readonly model: ChatOpenAI;
+  private readonly modelName: string;
 
   constructor(
     private readonly config: ConfigService,
@@ -23,6 +24,7 @@ export class DeepseekLlmProvider implements ILLMProvider {
     const apiKey = this.config.get<string>('llm.deepseek.apiKey');
     const baseUrl = this.config.get<string>('llm.deepseek.baseUrl');
     const modelName = this.config.get<string>('llm.deepseek.model');
+    this.modelName = modelName ?? 'unknown';
     const timeoutMs =
       this.config.get<number>('llm.deepseek.timeoutMs') ?? 30000;
     const maxTokens = this.config.get<number>('llm.deepseek.maxTokens') ?? 4096;
@@ -80,6 +82,7 @@ export class DeepseekLlmProvider implements ILLMProvider {
     const durationSeconds = Number(process.hrtime.bigint() - start) / 1e9;
     this.metricsService.observeLlmCall(
       'deepseek',
+      this.modelName,
       status,
       durationSeconds,
       inputTokensEstimated,

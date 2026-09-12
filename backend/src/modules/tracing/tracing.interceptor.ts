@@ -32,7 +32,7 @@ export class TracingInterceptor implements NestInterceptor {
     res: Response,
     trace: ReturnType<TracingService['start']>,
   ): void {
-    if (req.path === '/api/metrics') return;
+    if (req.path === '/api/metrics' || req.path === '/api/v1/metrics') return;
 
     const routePath = this.getRoutePath(req);
     const route = routePath ? req.baseUrl + routePath : req.path;

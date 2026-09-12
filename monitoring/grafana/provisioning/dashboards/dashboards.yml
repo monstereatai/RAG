@@ -1,0 +1,18 @@
+apiVersion: 1
+
+# 看板 provisioning：容器内挂载本目录后，Grafana 会在启动时扫描 /var/lib/grafana/dashboards
+# 并按 30s 周期增量加载，rag-overview.json 会被自动导入（无需手工 Import UI）。
+providers:
+  - name: RAG
+    orgId: 1
+    folder: RAG
+    folderUid: rag
+    type: file
+    # 允许在 UI 上临时调整；若想锁定为只读，改为 false 即可防止误改被覆盖。
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      # 看板文件平铺在该目录下，不按子目录建文件夹。
+      foldersFromFilesStructure: false

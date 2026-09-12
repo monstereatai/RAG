@@ -652,18 +652,41 @@ export class KarpathyRagService implements OnModuleInit {
       candidateDepth,
     );
     let bm25Hits = localBm25Hits;
-    if (this.elasticsearchProvider.isEnabled()) {
-      const esHits = await this.elasticsearchProvider.search(
-        normalizedQuery,
-        candidateDepth,
-        userId,
-        options.scope,
+    const bm25StartedAt = process.hrtime.bigint();
+    try {
+      if (this.elasticsearchProvider.isEnabled()) {
+        const esHits = await this.elasticsearchProvider.search(
+          normalizedQuery,
+          candidateDepth,
+          userId,
+          options.scope,
+        );
+        bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
+      }
+      this.metricsService.observeRetrievalStage(
+        'bm25',
+        'success',
+        Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
       );
-      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
+    } catch (error) {
+      this.metricsService.observeRetrievalStage(
+        'bm25',
+        'error',
+        Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
+      );
+      throw error;
     }
+    const bm25Source = this.elasticsearchProvider.isEnabled()
+      ? 'elasticsearch'
+      : 'bm25';
     this.metricsService.observeRetrievalHits(
-      this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
+      bm25Source,
       vectorSearch ? 'hybrid' : 'keyword',
+      bm25Hits.length,
+    );
+    this.metricsService.observeRetrievalRecalled(
+      'bm25',
+      bm25Source,
       bm25Hits.length,
     );
 
@@ -678,6 +701,8 @@ export class KarpathyRagService implements OnModuleInit {
     if (vectorSearch) {
       let milvusUsed = false;
       let queryVector: number[] | null = null;
+      let vectorFailed = false;
+      const vectorStartedAt = process.hrtime.bigint();
       try {
         queryVector = await this.embeddingProvider.embedQuery(query);
         const skipMilvus =
@@ -699,6 +724,7 @@ export class KarpathyRagService implements OnModuleInit {
           milvusUsed = true;
         }
       } catch (err) {
+        vectorFailed = true;
         this.logger.warn(
           `Vector search failed, fallback to BM25 only: ${
             (err as Error).message
@@ -742,12 +768,24 @@ export class KarpathyRagService implements OnModuleInit {
         : queryVector && esKnnReady
           ? 'elasticsearch'
           : 'none';
+      this.metricsService.observeRetrievalStage(
+        'vector_search',
+        vectorFailed ? 'error' : 'success',
+        Number(process.hrtime.bigint() - vectorStartedAt) / 1e9,
+      );
     }
     this.metricsService.observeRetrievalHits(
       'milvus',
       vectorSearch ? 'hybrid' : 'keyword',
       cosineHits.length,
     );
+    if (vectorSearch) {
+      this.metricsService.observeRetrievalRecalled(
+        'vector_search',
+        vectorSource,
+        cosineHits.length,
+      );
+    }
 
     // RRF 消除不同检索通道的原始分数尺度差异；它不改变后面的版本、权限和范围门禁。
     const fused = this.fuseByRrf(bm25Hits, cosineHits).filter(
@@ -758,7 +796,31 @@ export class KarpathyRagService implements OnModuleInit {
       .filter((chunk) => this.matchesScope(chunk, options.scope))
       .sort((a, b) => b.totalScore - a.totalScore);
     // DashScope 重排：authority/scope 过滤排序后、最终截断前执行，只调整顺序并挂 rerankScore
-    const rerankOutcome = await this.applyRerank(normalizedQuery, scoped);
+    const rerankStartedAt = process.hrtime.bigint();
+    let rerankOutcome: { chunks: typeof scoped; applied: boolean };
+    try {
+      rerankOutcome = await this.applyRerank(normalizedQuery, scoped);
+    } catch (error) {
+      this.metricsService.observeRetrievalStage(
+        'rerank',
+        'error',
+        Number(process.hrtime.bigint() - rerankStartedAt) / 1e9,
+      );
+      throw error;
+    }
+    // 未启用或短路（未真正调用远端）时不记录耗时，避免污染 P95/P99
+    if (rerankOutcome.applied) {
+      this.metricsService.observeRetrievalStage(
+        'rerank',
+        'success',
+        Number(process.hrtime.bigint() - rerankStartedAt) / 1e9,
+      );
+      this.metricsService.observeRetrievalRecalled(
+        'rerank',
+        'rerank',
+        rerankOutcome.chunks.length,
+      );
+    }
     const ranked = rerankOutcome.chunks
       .slice(0, profile.candidateDepth)
       .map((chunk) => ({
@@ -1065,19 +1127,42 @@ export class KarpathyRagService implements OnModuleInit {
       candidateDepth,
     );
     let bm25Hits = localBm25Hits;
-    if (includeElasticsearch && this.elasticsearchProvider.isEnabled()) {
-      const esHits = await this.elasticsearchProvider.search(
-        normalizedQuery,
-        candidateDepth,
-        userId,
-        scope,
+    const bm25StartedAt = process.hrtime.bigint();
+    try {
+      if (includeElasticsearch && this.elasticsearchProvider.isEnabled()) {
+        const esHits = await this.elasticsearchProvider.search(
+          normalizedQuery,
+          candidateDepth,
+          userId,
+          scope,
+        );
+        bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
+      }
+      this.metricsService.observeRetrievalStage(
+        'bm25',
+        'success',
+        Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
       );
-      bm25Hits = this.mergeRankedHits(esHits, localBm25Hits, candidateDepth);
+    } catch (error) {
+      this.metricsService.observeRetrievalStage(
+        'bm25',
+        'error',
+        Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
+      );
+      throw error;
     }
 
+    const bm25OnlySource = this.elasticsearchProvider.isEnabled()
+      ? 'elasticsearch'
+      : 'bm25';
     this.metricsService.observeRetrievalHits(
-      this.elasticsearchProvider.isEnabled() ? 'elasticsearch' : 'bm25',
+      bm25OnlySource,
       'keyword',
+      bm25Hits.length,
+    );
+    this.metricsService.observeRetrievalRecalled(
+      'bm25',
+      bm25OnlySource,
       bm25Hits.length,
     );
 

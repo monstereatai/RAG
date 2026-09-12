@@ -34,7 +34,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
   ) {
     this.collectionName =
       this.config.get<string>('vectorStore.milvus.conversationCollection') ??
-      'conversation_chunks';
+      'conversation_chunks_v2';
     this.dimension =
       this.config.get<number>('vectorStore.milvus.dimension') ?? 1024;
   }
@@ -84,6 +84,20 @@ export class ConversationEmbeddingService implements OnModuleInit {
       // 将问题和答案拼接为一段文本进行向量化
       const content = `Q: ${query}\nA: ${answer.slice(0, 500)}`;
       const vector = await this.embeddingProvider.embedQuery(content);
+      const createdAt = Date.now();
+      const queryKey = this.normalizeQueryKey(query);
+
+      // 同一会话中的同一问题采用“最新写入覆盖”语义，避免旧答案继续参与历史召回。
+      await this.withTimeout(
+        this.client.deleteEntities({
+          collection_name: this.collectionName,
+          filter: 'thread_id == $threadId && query_key == $queryKey',
+          exprValues: { threadId, queryKey },
+          timeout: this.deleteTimeoutMs,
+        }),
+        this.deleteTimeoutMs + 200,
+        'Conversation history supersede',
+      );
 
       await this.client.insert({
         collection_name: this.collectionName,
@@ -94,6 +108,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
             content,
             thread_id: threadId,
             query: query.slice(0, 500),
+            query_key: queryKey,
+            created_at: createdAt,
+            version: createdAt,
             user_id: userId ?? '',
           },
         ],
@@ -134,10 +151,11 @@ export class ConversationEmbeddingService implements OnModuleInit {
         this.client.search({
           collection_name: this.collectionName,
           vector: queryVector,
-          limit: k,
+          // 先扩大候选集，再叠加时间衰减，避免旧记录仅因语义相似度略高而压过新记录。
+          limit: Math.max(k * 4, 10),
           metric_type: MetricType.COSINE,
           params: { ef: 64 },
-          output_fields: ['content', 'thread_id', 'query'],
+          output_fields: ['content', 'thread_id', 'query', 'created_at'],
           expr: userId ? `user_id == "${userId}"` : undefined,
           timeout: this.searchTimeoutMs,
         }),
@@ -145,16 +163,27 @@ export class ConversationEmbeddingService implements OnModuleInit {
         'Conversation history search',
       );
 
+      const now = Date.now();
       return (searchResult.results as Array<Record<string, unknown>>)
         .filter((hit) => typeof hit['content'] === 'string')
-        .map((hit) => ({
-          content: hit['content'] as string,
-          threadId: (hit['thread_id'] as string) ?? '',
-          score:
+        .map((hit) => {
+          const semanticScore =
             typeof hit['score'] === 'number'
               ? hit['score']
-              : Number(hit['score'] ?? 0),
-        }));
+              : Number(hit['score'] ?? 0);
+          const createdAt = Number(hit['created_at'] ?? 0);
+          const ageDays =
+            createdAt > 0 ? Math.max(0, (now - createdAt) / 86_400_000) : 365;
+          const recencyScore = Math.exp(-ageDays / 14);
+          return {
+            content: hit['content'] as string,
+            threadId: (hit['thread_id'] as string) ?? '',
+            score: semanticScore * 0.85 + recencyScore * 0.15,
+            createdAt: createdAt > 0 ? new Date(createdAt).toISOString() : null,
+          };
+        })
+        .sort((left, right) => right.score - left.score)
+        .slice(0, k);
     } catch (err) {
       this.openCircuit();
       this.logger.warn(`Failed to search history: ${(err as Error).message}`);
@@ -236,6 +265,10 @@ export class ConversationEmbeddingService implements OnModuleInit {
     this.circuitOpenUntil = Date.now() + 30_000;
   }
 
+  private normalizeQueryKey(query: string): string {
+    return query.trim().toLocaleLowerCase().replace(/\s+/gu, ' ').slice(0, 500);
+  }
+
   /**
    * 检查集合是否存在并创建
    */
@@ -283,6 +316,19 @@ export class ConversationEmbeddingService implements OnModuleInit {
           name: 'query',
           data_type: DataType.VarChar,
           max_length: 1024,
+        },
+        {
+          name: 'query_key',
+          data_type: DataType.VarChar,
+          max_length: 512,
+        },
+        {
+          name: 'created_at',
+          data_type: DataType.Int64,
+        },
+        {
+          name: 'version',
+          data_type: DataType.Int64,
         },
         {
           name: 'user_id',

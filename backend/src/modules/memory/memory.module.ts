@@ -4,6 +4,7 @@ import { ShortTermMemoryService } from './short-term-memory.service';
 import { MemoryController } from './memory.controller';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { AgentRuntimeEventsModule } from '../agent-runtime-events/agent-runtime-events.module';
+import { MetricsModule } from '../metrics/metrics.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
@@ -12,6 +13,7 @@ import { MessageEntity } from '../../providers/db/entities/message.entity';
   imports: [
     LlmModule,
     AgentRuntimeEventsModule,
+    MetricsModule,
     TypeOrmModule.forFeature([ConversationEntity, MessageEntity]),
   ],
   controllers: [MemoryController],

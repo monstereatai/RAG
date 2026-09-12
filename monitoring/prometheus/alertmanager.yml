@@ -1,0 +1,89 @@
+# Alertmanager：把 Prometheus 的 firing 告警真正送出去
+#
+# 没有 Alertmanager 时，告警只会停在 Prometheus 的 /alerts 页面上，没有人会收到。
+# 本文件提供开箱可用的分组/抑制/静默策略，并把通知出口收在一个地方。
+#
+# 通知出口说明（按项目现状可用的三种）：
+# 1. 钉钉群机器人（项目已有 backend/src/providers/notify/dingtalk.provider.ts，加签模式）：
+#    社区标准做法是加一个 sidecar 把 Alertmanager 的 webhook 转成钉钉消息，
+#    例如 prometheus-webhook-dingtalk（默认监听 8060，路径 /dingtalk/webhook）。
+# 2. 企业微信机器人：同理用 sidecar（如 prometheus-webhook-wechat）或自建转发端点，
+#    项目 admin-backend 已有 sendEnterpriseWechatMarkdown() 可复用为接收端。
+# 3. 邮件：Alertmanager 原生支持，配置 smtp 即可，适合值班兜底。
+#
+# 未接 sidecar 时，default 接收器的 webhook 会打到本地 8060，收到 404 属正常——
+# Alertmanager 会在 UI 上把这些发送失败记录为 notify errors，不影响规则评估。
+
+global:
+  resolve_timeout: 5m
+  # 建议用环境变量注入真实地址，避免把 webhook 地址提交进仓库
+  # smtp_smarthost / smtp_from / smtp_auth_username ...
+
+# 路由树：先按严重级别分流，再按告警名与服务聚合
+route:
+  receiver: default
+  # 同一服务的同类告警合并成一条通知，避免一次故障刷屏
+  group_by: ['alertname', 'service']
+  # 30s：等同一批规则评估结果到齐再发，避免"刚发完又补一条"
+  group_wait: 30s
+  # 5m：持续故障期间每 5m 补一次进展，不至于信息断流
+  group_interval: 5m
+  # 4h：未处理的告警不要反复轰炸值班，4h 重提醒一次
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: critical
+      # 严重故障重提醒更频繁
+      repeat_interval: 1h
+    - matchers:
+        - severity = warning
+      receiver: default
+      repeat_interval: 12h
+
+receivers:
+  - name: default
+    webhook_configs:
+      # 指向 sidecar（钉钉/企微转发）或自建接收端
+      - url: 'http://host.docker.internal:8060/dingtalk/webhook'
+        send_resolved: true
+
+  - name: critical
+    webhook_configs:
+      - url: 'http://host.docker.internal:8060/dingtalk/webhook'
+        send_resolved: true
+    # 兜底邮件：把下面几行取消注释并配好 smtp 即可启用
+    # email_configs:
+    #   - to: 'oncall@example.com'
+    #     send_resolved: true
+
+# 抑制规则：故障根因已经把现象解释清楚时，不要再发衍生告警
+inhibit_rules:
+  # 1. 服务整体不可用时，该服务的错误率/延迟/缓存等告警全部抑制
+  #    （source 必须真的 firing，且 alertname 要精确匹配）
+  - source_matchers:
+      - alertname =~ "RagServiceDown|AdminServiceDown"
+    target_matchers:
+      - severity =~ "critical|warning"
+    equal: ['service']
+
+  # 2. 指标接口本身坏了（抓取成功但解析不出数据）时，抑制该服务全部业务告警，
+  #    否则会出现"监控失效 → 全量指标归零 → 触发一堆假告警"的连锁误报
+  - source_matchers:
+      - alertname = "RagMetricsEndpointBroken"
+    target_matchers:
+      - severity =~ "critical|warning"
+    equal: ['service']
+
+  # 3. Prometheus 自身抓取或规则评估异常时，抑制所有业务告警
+  - source_matchers:
+      - alertname =~ "PrometheusScrapeSlow|PrometheusRuleEvaluationFailing"
+    target_matchers:
+      - severity =~ "critical|warning"
+
+  # 4. 同一件事的 critical 已经在响时，抑制对应的 warning（例如错误率 5% 与 4% 两档）
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'service']

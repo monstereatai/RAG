@@ -1,0 +1,95 @@
+# Recording rules：把看板与告警反复使用的聚合结果预计算下来
+#
+# 为什么需要：
+# 1. 同一个 P99 表达式在 57 个面板里被反复计算，每次都要扫描全部 _bucket 序列；
+#    预计算后看板只查一条序列，查询延迟与 Prometheus 负载都明显下降。
+# 2. 告警与看板用同一份记录规则，口径天然一致，不会出现"看板算 5m、告警算 4m"的偏差。
+# 3. 计数口径（rate / ratio）集中在一处，修改阈值时不用逐个面板改。
+#
+# 命名规范：level:metric:operations，例如 job:rag_http_request_duration_seconds:p99_5m
+# 注意：record 出来的指标不要再加 _total / _bucket 后缀，它是"结果"而不是原始计数器。
+
+groups:
+  - name: rag-recording
+    interval: 30s
+    rules:
+      # ---- HTTP / RED ----
+      - record: job:rag_http_requests:rate5m
+        expr: sum by (job, route) (rate(rag_http_requests_total[5m]))
+
+      - record: job:rag_http_requests_errors:rate5m
+        # status=~"5.." 为服务端错误口径；4xx 另算，避免客户端问题污染可用性
+        expr: sum by (job, route) (rate(rag_http_requests_total{status=~"5.."}[5m]))
+
+      - record: job:rag_http_requests:error_ratio5m
+        # clamp_min 兜底：无流量时分母为 0，避免产生 NaN 序列
+        expr: |
+          job:rag_http_requests_errors:rate5m
+            / clamp_min(job:rag_http_requests:rate5m, 0.001)
+
+      - record: job:rag_http_request_duration_seconds:p50_5m
+        expr: |
+          histogram_quantile(0.5, sum by (job, le, route) (rate(rag_http_request_duration_seconds_bucket[5m])))
+
+      - record: job:rag_http_request_duration_seconds:p95_5m
+        expr: |
+          histogram_quantile(0.95, sum by (job, le, route) (rate(rag_http_request_duration_seconds_bucket[5m])))
+
+      - record: job:rag_http_request_duration_seconds:p99_5m
+        # 5m 窗口与告警口径一致；记录规则只算一次，看板与告警共用
+        expr: |
+          histogram_quantile(0.99, sum by (job, le, route) (rate(rag_http_request_duration_seconds_bucket[5m])))
+
+      # ---- LLM ----
+      - record: job:rag_llm_calls:rate5m
+        expr: sum by (job, provider, model) (rate(rag_llm_calls_total[5m]))
+
+      - record: job:rag_llm_calls:error_ratio5m
+        expr: |
+          sum by (job, provider, model) (rate(rag_llm_calls_total{status="error"}[5m]))
+            / clamp_min(sum by (job, provider, model) (rate(rag_llm_calls_total[5m])), 0.001)
+
+      - record: job:rag_llm_call_duration_seconds:p99_5m
+        expr: |
+          histogram_quantile(0.99, sum by (job, le, provider, model) (rate(rag_llm_call_duration_seconds_bucket[5m])))
+
+      - record: job:rag_llm_tokens:rate1h
+        # 成本核算用 1h：token 是低频累积量，短窗口在低流量下不稳
+        expr: sum by (job, provider, model, type) (rate(rag_llm_tokens_estimated_total[1h]))
+
+      # ---- 检索 ----
+      - record: job:rag_retrieval_duration_seconds:p99_5m
+        expr: |
+          histogram_quantile(0.99, sum by (job, le, stage) (rate(rag_retrieval_duration_seconds_bucket[5m])))
+
+      - record: job:rag_retrieval_recalled_chunks:p95_5m
+        expr: |
+          histogram_quantile(0.95, sum by (job, le, stage) (rate(rag_retrieval_recalled_chunks_bucket[5m])))
+
+      # ---- 缓存 ----
+      - record: job:rag_cache_requests:hit_ratio30m
+        # 30m：命中率是慢变量，与告警规则保持同窗口同口径
+        expr: |
+          sum by (job, cache) (rate(rag_cache_requests_total{result="hit"}[30m]))
+            / clamp_min(sum by (job, cache) (rate(rag_cache_requests_total[30m])), 0.001)
+
+      # ---- Agent ----
+      - record: job:rag_agent_first_token_duration_seconds:p95_5m
+        expr: |
+          histogram_quantile(0.95, sum by (job, le, route) (rate(rag_agent_first_token_duration_seconds_bucket[5m])))
+
+  - name: admin-recording
+    interval: 30s
+    rules:
+      - record: job:admin_http_requests:rate5m
+        expr: sum by (job, route) (rate(admin_http_requests_total[5m]))
+
+      - record: job:admin_http_requests:error_ratio5m
+        expr: |
+          sum by (job, route) (rate(admin_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum by (job, route) (rate(admin_http_requests_total[5m])), 0.001)
+
+      - record: job:admin_http_request_duration_seconds:p99_5m
+        # admin 的分桶最大只到 30s；若真实请求更慢，这个分位会被截断，需先扩桶
+        expr: |
+          histogram_quantile(0.99, sum by (job, le, route) (rate(admin_http_request_duration_seconds_bucket[5m])))

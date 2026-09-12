@@ -141,7 +141,16 @@ services:
     restart: unless-stopped
 
   # 监控 - Prometheus
+  #
+  # 注意：本服务默认不启动（profile: admin-monitoring）。
+  # 原因：它用的是通用镜像名 prom/prometheus、容器名固定为 prometheus、映射 9090 端口，
+  # 与仓库根目录 monitoring/docker-compose.monitoring.yml 里的 rag-prometheus 完全冲突
+  # （同样 9090、同样 grafana 端口）。两套监控只应启用一套，默认启用根目录那套。
+  # 需要用这一套时：
+  #   docker compose -f docker/docker-compose.yml --profile admin-monitoring up -d
+  # 同时记得停掉另一套（不要两套并存）。
   prometheus:
+    profiles: ['admin-monitoring']
     image: prom/prometheus
     container_name: prometheus
     ports:
@@ -161,7 +170,11 @@ services:
     restart: unless-stopped
 
   # 监控 - Grafana
+  #
+  # 同样默认不启动（profile: admin-monitoring）：容器名固定 grafana、映射 3000，
+  # 会与宿主机上 RAG 后端 dev 端口 3000（以及根目录那套 grafana 的 3030）撞车。
   grafana:
+    profiles: ['admin-monitoring']
     image: grafana/grafana
     container_name: grafana
     ports:

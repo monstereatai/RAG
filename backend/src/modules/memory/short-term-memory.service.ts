@@ -22,6 +22,7 @@ import { SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 interface StoredTurn {
   role: 'user' | 'assistant' | 'system';
@@ -83,6 +84,7 @@ export class ShortTermMemoryService {
     @InjectRepository(MessageEntity)
     private readonly messageRepo: Repository<MessageEntity>,
     @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
+    @Optional() private readonly metricsService?: MetricsService,
   ) {}
 
   isEnabled(): boolean {
@@ -116,14 +118,30 @@ export class ShortTermMemoryService {
 
     const key = this.turnsKey(conversationId);
     const raw = await this.redis.zrange(key, 0, -1);
+    const summaryLookupStartedAt = process.hrtime.bigint();
     let summary = await this.redis.get(this.summaryKey(conversationId));
+    this.metricsService?.observeCacheOperation(
+      'short_term_summary',
+      'get',
+      Number(process.hrtime.bigint() - summaryLookupStartedAt) / 1e9,
+    );
+    this.metricsService?.observeCacheRequest(
+      'short_term_summary',
+      Boolean(summary),
+    );
     if (!summary) {
       summary = await this.resolvePersistentSummary(conversationId);
       if (summary) {
+        const summaryWriteStartedAt = process.hrtime.bigint();
         await this.redis.set(
           this.summaryKey(conversationId),
           summary,
           TTL_SECONDS,
+        );
+        this.metricsService?.observeCacheOperation(
+          'short_term_summary',
+          'set',
+          Number(process.hrtime.bigint() - summaryWriteStartedAt) / 1e9,
         );
       }
     }

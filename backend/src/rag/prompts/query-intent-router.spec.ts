@@ -186,4 +186,54 @@ describe('QueryIntentRouter', () => {
       subQueries: ['React 是什么？', '1+1 等于多少？'],
     });
   });
+
+  it('rewrites a follow-up using only the historical entity, never its answer', async () => {
+    const invoke = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        intent: 'follow_up',
+        confidence: 0.96,
+        action: 'retrieve',
+        sourcePolicy: 'local_only',
+        standaloneQuery: 'React 吃什么？',
+        entities: ['React'],
+        rewriteQueries: ['React 吃什么？'],
+        historyPolicy: 'context_only',
+        ambiguity: { detected: false },
+      }),
+    );
+    const router = new QueryIntentRouter({ invoke } as never);
+
+    await expect(
+      router.classify('那它吃什么？', [
+        { role: 'human', content: 'React 是一种动物' },
+      ]),
+    ).resolves.toMatchObject({
+      intent: 'follow_up',
+      standaloneQuery: 'React 吃什么？',
+      historyPolicy: 'context_only',
+    });
+    expect(invoke.mock.calls[0][0]).toContain('React 是一种动物');
+  });
+
+  it('marks explicitly temporary history as hypothesis-only', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'follow_up',
+          confidence: 0.9,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          standaloneQuery: '小猫吃什么？',
+          entities: ['小猫'],
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(
+      router.classify('那它吃什么？', [
+        { role: 'human', content: '假设这只小猫会说话，仅用于本轮推演' },
+      ]),
+    ).resolves.toMatchObject({ historyPolicy: 'hypothesis_only' });
+  });
 });

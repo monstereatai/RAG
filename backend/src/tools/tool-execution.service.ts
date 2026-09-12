@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ArtifactsService } from '../modules/artifacts/artifacts.service';
 import { AgentRuntimeEventsService } from '../modules/agent-runtime-events/agent-runtime-events.service';
 import { RedisProvider } from '../providers/redis/redis.provider';
+import { MetricsService } from '../modules/metrics/metrics.service';
 import {
   ToolExecutionPolicyService,
   type ToolExecutionContext,
@@ -54,6 +55,7 @@ export class ToolExecutionService {
     private readonly events: AgentRuntimeEventsService,
     private readonly redis: RedisProvider,
     @Optional() private readonly artifacts?: ArtifactsService,
+    @Optional() private readonly metricsService?: MetricsService,
   ) {}
 
   async execute<T>(
@@ -127,7 +129,17 @@ export class ToolExecutionService {
       ? `tool-execution:${idempotencyKey}`
       : undefined;
     if (redisKey) {
+      const idempotencyLookupStartedAt = process.hrtime.bigint();
       const previous = await this.redis.get(redisKey);
+      this.metricsService?.observeCacheOperation(
+        'tool_idempotency',
+        'get',
+        Number(process.hrtime.bigint() - idempotencyLookupStartedAt) / 1e9,
+      );
+      this.metricsService?.observeCacheRequest(
+        'tool_idempotency',
+        Boolean(previous?.startsWith('completed:')),
+      );
       if (previous?.startsWith('completed:')) {
         let output: T | undefined;
         try {

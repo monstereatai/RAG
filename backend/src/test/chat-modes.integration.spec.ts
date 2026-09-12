@@ -127,6 +127,8 @@ describe('ChatModes Integration', () => {
       {
         adaptiveVectorSearch: true,
         karpathyDirectAnswer: true,
+        entities: [],
+        needsSynthesis: false,
         scope: { role: undefined },
       },
     );
@@ -175,7 +177,12 @@ describe('ChatModes Integration', () => {
       'user-1',
       expect.any(Array),
       false,
-      { scope: { role: undefined } },
+      {
+        entities: [],
+        needsSynthesis: false,
+        runtimeRunId: undefined,
+        scope: { role: undefined },
+      },
     );
     expect(karpathyRagService.answer).not.toHaveBeenCalled();
     expect(res.answer).toBe('Quantum computing is...');
@@ -188,7 +195,7 @@ describe('ChatModes Integration', () => {
     const query = 'Show status';
     const threadId = '11111111-1111-4111-8111-111111111111';
     conversationEmbeddingService.searchHistory.mockResolvedValue([
-      { id: 'h1', text: 'status ok', metadata: {} } as any,
+      { content: 'Q: Show status\nA: status ok', threadId, score: 0.9 },
     ]);
     karpathyRagService.answer.mockResolvedValue({
       answer: 'Status is OK',
@@ -202,9 +209,11 @@ describe('ChatModes Integration', () => {
       2,
       'user-1',
     );
-    expect(
-      conversationEmbeddingService.formatHistoryContext,
-    ).toHaveBeenCalled();
+    expect(karpathyRagService.answer.mock.calls[0]?.[3]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining('相关历史对话') }),
+      ]),
+    );
   });
 
   it('should apply the selected role to retrieval and answer context', async () => {
@@ -232,6 +241,8 @@ describe('ChatModes Integration', () => {
     expect(call?.[5]).toEqual({
       adaptiveVectorSearch: true,
       karpathyDirectAnswer: true,
+      entities: [],
+      needsSynthesis: false,
       scope: { role: 'product-manager' },
     });
   });

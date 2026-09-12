@@ -9,6 +9,7 @@ import { ImageIndexModule } from '../modules/image-index/image-index.module';
 import { AgentRuntimeEventsModule } from '../modules/agent-runtime-events/agent-runtime-events.module';
 import { RedisModule } from '../providers/redis/redis.module';
 import { ArtifactsModule } from '../modules/artifacts/artifacts.module';
+import { MetricsModule } from '../modules/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ArtifactsModule } from '../modules/artifacts/artifacts.module';
     RedisModule,
     ArtifactsModule,
     ImageIndexModule,
+    MetricsModule,
   ],
   providers: [
     BochaSearchService,

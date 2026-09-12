@@ -3,6 +3,16 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # admin-backend（compose 内服务名 app，端口 3001）
+  # 注意：指标接口在 /api/metrics，不加 metrics_path 时 Prometheus 默认抓 /metrics 会 404
   - job_name: 'nestjs-app'
+    metrics_path: '/api/metrics'
     static_configs:
       - targets: ['app:3001']
+
+  # RAG backend（指标接口带 URI 版本号：/api/v1/metrics）
+  # compose 内若不是同一网络，把 target 换成宿主机可达地址（本地 Docker Desktop 用 host.docker.internal）
+  - job_name: 'rag-backend'
+    metrics_path: '/api/v1/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:3000']

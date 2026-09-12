@@ -47,6 +47,8 @@ describe('KarpathyRagService exception scenarios', () => {
     const metricsService = {
       observeRetrievalHits,
       observeRetrievalContext: jest.fn(),
+      observeRetrievalStage: jest.fn(),
+      observeRetrievalRecalled: jest.fn(),
     } as unknown as MetricsService;
     const obsidianKnowledge = {
       search: jest.fn().mockResolvedValue([]),

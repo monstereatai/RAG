@@ -1,0 +1,25 @@
+apiVersion: 1
+
+# Grafana 数据源 provisioning：指向 Kubernetes / Compose 内名为 prometheus 的服务。
+# RAG 服务(3000) 指标路径 GET /api/v1/metrics，admin-backend(3001) 指标路径 GET /api/metrics。
+#
+# 注意：仓库内还存在一份历史数据源 admin-backend/docker/grafana/datasources/datasource.yml，
+# 其 name 同样是 Prometheus。二者不要挂载到同一个 Grafana 实例（同名会导致后者被跳过），
+# 迁移到 monitoring/grafana 这一套时请把旧的挂载点移除。
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    orgId: 1
+    url: http://prometheus:9090
+    # 与 Prometheus 全局 scrape_interval 保持一致，避免 Grafana 用更细步长拉取产生锯齿。
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: 2.50.0
+    isDefault: true
+    editable: false
+    version: 1

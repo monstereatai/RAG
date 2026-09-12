@@ -11,6 +11,7 @@ import { ILLMProvider } from './llm-provider.interface';
 export class ZhipuLlmProvider implements ILLMProvider {
   private readonly logger = new Logger(ZhipuLlmProvider.name);
   private readonly model: ChatOpenAI;
+  private readonly modelName: string;
 
   constructor(
     private readonly config: ConfigService,
@@ -19,6 +20,7 @@ export class ZhipuLlmProvider implements ILLMProvider {
     const apiKey = this.config.get<string>('llm.zhipu.apiKey');
     const baseUrl = this.config.get<string>('llm.zhipu.baseUrl');
     const model = this.config.get<string>('llm.zhipu.model');
+    this.modelName = model ?? 'unknown';
     const timeout = this.config.get<number>('llm.zhipu.timeoutMs') ?? 60_000;
     this.model = new ChatOpenAI({
       model,
@@ -69,6 +71,7 @@ export class ZhipuLlmProvider implements ILLMProvider {
   ) {
     this.metrics.observeLlmCall(
       'zhipu',
+      this.modelName,
       status,
       Number(process.hrtime.bigint() - startedAt) / 1e9,
       this.tokens(input),

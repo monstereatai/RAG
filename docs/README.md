@@ -31,6 +31,8 @@
 | ------------------------------ | ------------------------------------------------------------- |
 | `PRODUCTION_WORKFLOW_USAGE.md` | 六岗位单独使用、多岗位协作、审批策略、管理后台操作和 API 示例 |
 | `architecture/DOMAIN_EVENT_OUTBOX_USAGE.md` | 内部 Hook、领域事件 Outbox、企业微信／Webhook 订阅、重试与安全边界 |
+| `architecture/MONITORING_PROMETHEUS_GRAFANA.md` | Prometheus + Grafana 监控体系：指标契约、埋点、抓取配置、23 条告警规则、17 条记录规则、Alertmanager 通知、看板面板、分桶与 rate 窗口依据 |
+| `architecture/DOCKER_SERVICES_INVENTORY.md` | Docker 服务清单：三套 compose 栈、容器命名规范、端口、数据卷、冲突风险与安全操作约定 |
 
 ## 面试材料
 

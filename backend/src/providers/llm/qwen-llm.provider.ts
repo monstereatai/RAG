@@ -16,6 +16,7 @@ import { LlmInvocationError } from './llm-invocation.error';
 export class QwenLlmProvider implements ILLMProvider {
   private readonly logger = new Logger(QwenLlmProvider.name);
   private readonly model: ChatOpenAI;
+  private readonly modelName: string;
 
   constructor(
     private readonly config: ConfigService,
@@ -24,6 +25,7 @@ export class QwenLlmProvider implements ILLMProvider {
     const apiKey = this.config.get<string>('llm.qwen.apiKey');
     const baseUrl = this.config.get<string>('llm.qwen.baseUrl');
     const modelName = this.config.get<string>('llm.qwen.model');
+    this.modelName = modelName ?? 'unknown';
     const timeoutMs = this.config.get<number>('llm.qwen.timeoutMs') ?? 60000;
     const maxTokens = this.config.get<number>('llm.qwen.maxTokens') ?? 4096;
     const maxRetries = this.config.get<number>('llm.qwen.maxRetries') ?? 2;
@@ -82,6 +84,7 @@ export class QwenLlmProvider implements ILLMProvider {
     const durationSeconds = Number(process.hrtime.bigint() - start) / 1e9;
     this.metricsService.observeLlmCall(
       'qwen',
+      this.modelName,
       status,
       durationSeconds,
       inputTokensEstimated,
