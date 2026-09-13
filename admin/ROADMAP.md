@@ -104,6 +104,7 @@
 - [x] 补齐 antd CLI 在 macOS arm64 下需要的 oxc parser 可选原生绑定
 - [x] `/graph-ops` 三个二级菜单实现：`节点管理`、`关系检索`、`图谱统计`，包含子路由、筛选栏、表格、详情抽屉、局部图谱、统计分布和 demo 状态提示。
 - [x] 修复本地 admin 启动后 JS 资源返回 HTML 的问题：新增 `config/config.local.ts`，development 模式禁用异常的 Utoo dev server，回退到 webpack dev server。
+- [x] 优化顶部消息入口：铃铛未读数改为读取通知接口，点击展示最近消息、刷新、全部已读、单条标记已读和跳转通知中心。
 
 ## 进行中
 
@@ -123,6 +124,13 @@
 - 真实 Neo4j 图谱当前为空时，`/graph-ops` 页面会展示 `meta.demo=true` 的演示数据提示，不把演示数据当真实数据。
 
 ## 最近验证
+
+- 2026-09-13：顶部消息入口优化
+  - `AdminShell` 复用现有 `/api/admin/notifications` 与标记已读接口，移除硬编码未读数。
+  - 新增消息浮层、最近 6 条消息、未读状态、类型标签、刷新和「全部已读」操作。
+  - 定向 Biome：`pnpm exec biome lint src/components/AdminShell/index.tsx src/components/AdminShell/style.less` 通过。
+  - antd 专项扫描确认本次文件无新增 issue；全项目仍保留既有 25 个 deprecated 提示。
+  - 全项目 `pnpm exec tsc --noEmit` 仍被既有 React 类型重复、workflow-detail 字段和历史页面类型问题阻断，未指向本次改动文件。
 
 - 2026-08-03：Agent 运营工作台闭环
   - admin-backend Agent Ops 代理接口支持工作流、评测、坏例和 trace，8 Suites／71 Tests 与 build 通过

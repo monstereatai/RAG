@@ -3,6 +3,7 @@ import {
   AuditOutlined,
   BranchesOutlined,
   BellOutlined,
+  CheckOutlined,
   ClockCircleOutlined,
   CommentOutlined,
   ControlOutlined,
@@ -17,14 +18,34 @@ import {
   MenuOutlined,
   NodeIndexOutlined,
   PieChartOutlined,
+  ReloadOutlined,
+  RightOutlined,
   SearchOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { history, Link } from '@umijs/max';
-import { Avatar, Badge, Button, Dropdown, Space } from 'antd';
+import {
+  Avatar,
+  Badge,
+  Button,
+  Dropdown,
+  Empty,
+  Popover,
+  Space,
+  Tag,
+  Tooltip,
+  message,
+} from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
+import {
+  getNotifications,
+  markAllAsRead,
+  markAsRead,
+  type Notification,
+} from '@/pages/system/notifications/service';
 import './style.less';
 
 export interface SideNavItem {
@@ -55,6 +76,207 @@ const moduleMatchers: Record<string, string[]> = {
   '/account/center': ['/account', '/account-security'],
   '/system/users': ['/system'],
 };
+
+const notificationTypeMap: Record<
+  Notification['type'],
+  { color: string; label: string }
+> = {
+  system: { color: 'blue', label: '系统' },
+  alert: { color: 'red', label: '告警' },
+  info: { color: 'green', label: '信息' },
+};
+
+const normalizeNotificationResult = (result: unknown) => {
+  const payload = (result as any)?.data ?? result;
+  const items = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as any)?.items)
+      ? (payload as any).items
+      : [];
+
+  return {
+    items: items as Notification[],
+    total: Number((payload as any)?.total ?? items.length),
+    unread: Number(
+      (payload as any)?.unread ??
+        items.filter((item: Notification) => !item.read).length,
+    ),
+  };
+};
+
+const formatNotificationTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+};
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unread, setUnread] = useState(0);
+
+  const unreadIds = useMemo(
+    () => notifications.filter((item) => !item.read).map((item) => item.id),
+    [notifications],
+  );
+
+  const loadNotifications = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getNotifications({ current: 1, pageSize: 6 });
+      const normalized = normalizeNotificationResult(result);
+      setNotifications(normalized.items);
+      setUnread(normalized.unread);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '消息加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) {
+      loadNotifications();
+    }
+  };
+
+  const handleRead = async (id: string) => {
+    await markAsRead(id);
+    setNotifications((items) =>
+      items.map((item) => (item.id === id ? { ...item, read: true } : item)),
+    );
+    setUnread((count) => Math.max(0, count - 1));
+  };
+
+  const handleReadAll = async () => {
+    if (unreadIds.length === 0) return;
+    await markAllAsRead();
+    setNotifications((items) => items.map((item) => ({ ...item, read: true })));
+    setUnread(0);
+    message.success('消息已全部标记为已读');
+  };
+
+  const content = (
+    <div className="rag-notification-panel">
+      <div className="rag-notification-panel-head">
+        <div>
+          <strong>消息中心</strong>
+          <span>{unread > 0 ? `${unread} 条未读` : '暂无未读消息'}</span>
+        </div>
+        <Space size={4}>
+          <Tooltip title="刷新">
+            <Button
+              aria-label="刷新消息"
+              icon={<ReloadOutlined />}
+              loading={loading}
+              size="small"
+              type="text"
+              onClick={loadNotifications}
+            />
+          </Tooltip>
+          <Tooltip title="全部已读">
+            <Button
+              aria-label="全部已读"
+              disabled={unreadIds.length === 0}
+              icon={<CheckOutlined />}
+              size="small"
+              type="text"
+              onClick={handleReadAll}
+            />
+          </Tooltip>
+        </Space>
+      </div>
+      <ul className="rag-notification-list" aria-busy={loading}>
+        {notifications.length === 0 ? (
+          <Empty
+            description={loading ? '消息加载中' : '暂无消息'}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        ) : (
+          notifications.map((item) => {
+            const typeMeta = notificationTypeMap[item.type] ?? {
+              color: 'default',
+              label: item.type,
+            };
+            return (
+              <li
+                className={item.read ? 'rag-notification-row' : 'rag-notification-row unread'}
+                key={item.id}
+              >
+                <div className="rag-notification-item">
+                  <div className="rag-notification-item-title">
+                    <span>{item.title}</span>
+                    <Tag color={typeMeta.color} variant="filled">
+                      {typeMeta.label}
+                    </Tag>
+                  </div>
+                  <p>{item.content}</p>
+                  <div className="rag-notification-item-foot">
+                    <span>{formatNotificationTime(item.createdAt)}</span>
+                    {!item.read && (
+                      <Button
+                        size="small"
+                        type="link"
+                        onClick={() => handleRead(item.id)}
+                      >
+                        标记已读
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })
+        )}
+      </ul>
+      <Button
+        block
+        className="rag-notification-more"
+        icon={<RightOutlined />}
+        iconPlacement="end"
+        type="text"
+        onClick={() => {
+          setOpen(false);
+          history.push('/system/notifications');
+        }}
+      >
+        查看全部消息
+      </Button>
+    </div>
+  );
+
+  return (
+    <Popover
+      arrow={false}
+      content={content}
+      open={open}
+      placement="bottomRight"
+      trigger="click"
+      onOpenChange={handleOpenChange}
+    >
+      <Button
+        aria-label="打开消息中心"
+        className="rag-admin-bell-btn"
+        type="text"
+      >
+        <Badge count={unread} size="small">
+          <BellOutlined className="rag-admin-bell" />
+        </Badge>
+      </Button>
+    </Popover>
+  );
+}
 
 export const dashboardNav: SideNavItem[] = [
   {
@@ -317,9 +539,7 @@ export function AdminShell({
           ))}
         </nav>
         <div className="rag-admin-userbar">
-          <Badge count={12} size="small">
-            <BellOutlined className="rag-admin-bell" />
-          </Badge>
+          <NotificationBell />
           <Dropdown
             menu={{
               items: [{ key: 'logout', label: '退出登录' }],
