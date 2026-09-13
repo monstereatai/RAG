@@ -124,13 +124,13 @@ describe('ChatModes Integration', () => {
       'user-1',
       expect.any(Array),
       undefined,
-      {
+      expect.objectContaining({
         adaptiveVectorSearch: true,
         karpathyDirectAnswer: true,
         entities: [],
         needsSynthesis: false,
         scope: { role: undefined },
-      },
+      }),
     );
     expect(agenticRagService.run).not.toHaveBeenCalled();
     expect(res.answer).toBe('I am simple RAG');
@@ -144,12 +144,14 @@ describe('ChatModes Integration', () => {
       'human',
       query,
       'user-1',
+      expect.any(Object),
     );
     expect(conversationService.addMessage).toHaveBeenCalledWith(
       'new-thread-123',
       'ai',
       'I am simple RAG',
       'user-1',
+      expect.any(Object),
     );
   });
 
@@ -177,12 +179,12 @@ describe('ChatModes Integration', () => {
       'user-1',
       expect.any(Array),
       false,
-      {
+      expect.objectContaining({
         entities: [],
         needsSynthesis: false,
         runtimeRunId: undefined,
         scope: { role: undefined },
-      },
+      }),
     );
     expect(karpathyRagService.answer).not.toHaveBeenCalled();
     expect(res.answer).toBe('Quantum computing is...');
@@ -238,12 +240,12 @@ describe('ChatModes Integration', () => {
         message.content.includes('当前服务对象岗位：产品经理'),
       ),
     ).toBe(true);
-    expect(call?.[5]).toEqual({
+    expect(call?.[5]).toEqual(expect.objectContaining({
       adaptiveVectorSearch: true,
       karpathyDirectAnswer: true,
       entities: [],
       needsSynthesis: false,
       scope: { role: 'product-manager' },
-    });
+    }));
   });
 });

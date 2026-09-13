@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/interview/resume/resume-rag-project-game-marketing.md",
+                "file": "docs/interview/功能步骤流程.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "resume-rag-project-game-marketing"
+              "title": "功能步骤流程"
             }
           }
         ]
@@ -158,7 +158,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/interview/resume/resume-rag-project-game-marketing.md",
+                "file": "docs/interview/功能步骤流程.md",
                 "followCursor": true,
                 "showSearch": false,
                 "searchQuery": ""
@@ -186,19 +186,21 @@
       "config-sync:Config Sync": false
     }
   },
-  "active": "5f8e80d77bbc57b6",
+  "active": "fb77c0ea0cbfa8a8",
   "lastOpenFiles": [
+    "backend/dist/modules/grpc/rag.proto",
+    "backend/dist/modules/grpc",
+    "backend/dist/modules",
+    "backend/dist/tsconfig.build.tsbuildinfo",
+    "backend/dist/src/rag/karpathy/cosine.util.js",
+    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.js",
+    "backend/dist/src/migrations/1787500000000-AddDocumentReviewWorkflow.d.ts",
+    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.js.map",
+    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.d.ts",
+    "backend/dist/src/migrations/1787600000000-AddDomainEventOutbox.js",
+    "backend/dist/src/migrations/1787600000000-AddDomainEventOutbox.js.map",
+    "docs/interview/resume/resume-rag-project-game-marketing.md",
     "docs/interview/功能步骤流程.md",
-    "scripts/docker-status.sh",
-    "monitoring/grafana/provisioning/datasources/prometheus.yml",
-    "monitoring/grafana/provisioning/dashboards/dashboards.yml",
-    "monitoring/grafana/provisioning/datasources",
-    "monitoring/grafana/provisioning/dashboards",
-    "monitoring/grafana/dashboards/rag-overview.json",
-    "monitoring/prometheus/prometheus.yml",
-    "monitoring/grafana/provisioning",
-    "monitoring/prometheus/alertmanager.yml",
-    "monitoring/grafana/dashboards",
     "monitoring/grafana/PANELS.md",
     "docs/architecture/MONITORING_PROMETHEUS_GRAFANA.md",
     "docs/architecture/DOCKER_SERVICES_INVENTORY.md",
@@ -213,7 +215,6 @@
     "docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_GUIDE.md",
     "docs/BOSS_AI_AGENT_FULLSTACK_20K_PLUS.md",
     "docs/interview/resume/游戏营销RAG项目完整描述.md",
-    "docs/interview/resume/resume-rag-project-game-marketing.md",
     "docs/interview/开源项目参考能力归档.md",
     "docs/interview/resume/resume-rag-project.md",
     "docs/interview/resume/game-marketing-rag-evidence.md",

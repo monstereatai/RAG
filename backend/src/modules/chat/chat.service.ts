@@ -38,7 +38,9 @@ import { MetricsService } from '../metrics/metrics.service';
 import { SecurityAuditService } from '../metrics/security-audit.service';
 import {
   buildContextPolicyMessage,
+  buildContextualRetrievalQuery,
   formatUntrustedHistoryContext,
+  hasRelatedSessionSetting,
   isObjectiveFactQuery,
   selectHistoryForQuery,
 } from '../../rag/prompts/context-policy';
@@ -114,10 +116,10 @@ export class ChatService {
 
     const startTime = Date.now();
     const mode: ChatMode = req.mode ?? 'auto';
-    const queryIntent = this.queryIntentRouter
-      ? await this.queryIntentRouter.classify(req.query)
-      : ({
+    let queryIntent: QueryIntent = ({
           intent: 'general' as const,
+          contextMode: 'none' as const,
+          historyPolicy: 'context_only' as const,
           confidence: 0,
           standaloneQuery: req.query,
           multiIntent: false,
@@ -148,6 +150,12 @@ export class ChatService {
         ? Promise.resolve(req.threadId)
         : this.conversationService.create(req.query, 'auto', userId),
     ]);
+    // 路由阶段只使用请求显式携带的历史，避免为已有线程额外读取数据库；短期记忆窗口
+    // 会在后续上下文准备阶段加载，并通过 contextMode/状态投影参与回答。
+    const routingHistory = req.history ?? [];
+    if (this.queryIntentRouter) {
+      queryIntent = await this.queryIntentRouter.classify(req.query, routingHistory);
+    }
     const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
     const maxToolCalls = this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
     const requestContext: RequestContext = {
@@ -170,7 +178,12 @@ export class ChatService {
     onEvent?.({ type: 'thread', data: { threadId, requestId: requestContext.requestId } });
     onEvent?.({ type: 'routing', data: { mode, route: mode === 'simple' ? 'simple' : 'pending', requestId: requestContext.requestId } });
     const shouldSearchHistory = Boolean(req.threadId);
-    const objectiveFactQuery = isObjectiveFactQuery(req.query);
+    // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
+    const objectiveFactQuery =
+      queryIntent.intent === 'objective_fact' ||
+      queryIntent.intent === 'system_capability' ||
+      queryIntent.queryType === 'public_knowledge' ||
+      isObjectiveFactQuery(req.query);
     const [
       shortTermContext,
       memoryResult,
@@ -217,7 +230,50 @@ export class ChatService {
               userId,
             );
     }
-    history = selectHistoryForQuery(req.query, history);
+    if (
+      this.queryIntentRouter &&
+      queryIntent.contextMode === 'none' &&
+      history.length > 0
+    ) {
+      queryIntent = await this.queryIntentRouter.classify(req.query, history);
+      requestContext.queryIntent = queryIntent;
+    }
+    const unfilteredHistory = history;
+    if (
+      unfilteredHistory.length > 0 &&
+      isObjectiveFactQuery(req.query) &&
+      hasRelatedSessionSetting(req.query, unfilteredHistory)
+    ) {
+      queryIntent = {
+        ...queryIntent,
+        contextMode: 'mixed',
+        action: 'retrieve',
+        sourcePolicy: 'local_only',
+        queryType: 'private_entity',
+        reason: '同一实体存在冲突会话设定，先回答客观事实再补充历史',
+      };
+      requestContext.queryIntent = queryIntent;
+    }
+    history = selectHistoryForQuery(req.query, unfilteredHistory, {
+      preserveConflicts:
+        queryIntent.contextMode === 'factual_verification' ||
+        queryIntent.contextMode === 'mixed',
+    });
+    if (queryIntent.contextMode === 'conversation_setting') {
+      // 当前这条临时设定尚未持久化，先作为状态投影的最后一条有效陈述，
+      // 确保“鸡”更新为“南瓜”时不会仍回答上一轮状态。
+      history = [...history, { role: 'human', content: req.query }];
+    }
+    const conversationStateUpdate =
+      history.length > 0 &&
+      ['conversation_setting', 'context_follow_up'].includes(
+        queryIntent.contextMode,
+      );
+    if (conversationStateUpdate) requestContext.sourcePolicy = 'local_only';
+    const contextualRetrievalQuery = buildContextualRetrievalQuery(
+      req.query,
+      history,
+    );
     const memoryMessages: Array<{ role: string; content: string }> = [];
     memoryMessages.push({
       role: 'system',
@@ -236,8 +292,12 @@ export class ChatService {
       scope: retrievalScope,
       requestContext,
       queryIntent,
-      sourcePolicy: queryIntent.sourcePolicy,
-      knowledgeOnly: queryIntent.sourcePolicy === 'local_only',
+      sourcePolicy: conversationStateUpdate
+        ? 'local_only'
+        : queryIntent.sourcePolicy,
+      knowledgeOnly:
+        queryIntent.sourcePolicy === 'local_only' || conversationStateUpdate,
+      allowConversationStateAnswer: conversationStateUpdate,
       needsSynthesis: queryIntent.needsSynthesis,
       entities: queryIntent.entities,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
@@ -311,7 +371,7 @@ export class ChatService {
     }
 
     // Redis 短期记忆注入：最近 N 轮对话 + 历史摘要
-    if (threadId) {
+    if (threadId && !objectiveFactQuery) {
       if (shortTermContext.systemMessage) {
         memoryMessages.push({
           role: 'system',
@@ -354,6 +414,7 @@ export class ChatService {
         // 借由 Agentic 入口绕回状态图。Karpathy 负责固定线性取证和最终校验。
         const answerOptions = {
           ...retrievalOptions,
+          retrievalQuery: contextualRetrievalQuery,
           adaptiveVectorSearch: true,
           karpathyDirectAnswer: true,
         };
@@ -405,6 +466,20 @@ export class ChatService {
         userId,
         query: req.query,
         answer: result.answer,
+        skipLongTermMemory: queryIntent.contextMode !== 'none' &&
+          queryIntent.contextMode !== 'factual_verification',
+        metadata: {
+          contextMode: queryIntent.contextMode,
+          entities: queryIntent.entities,
+          source: 'session_context',
+        },
+        answerMetadata: {
+          route: 'simple',
+          retrievalSufficient: result.retrievalSufficient,
+          retrievalReason: result.retrievalReason,
+          references: result.references,
+          contextMode: queryIntent.contextMode,
+        },
       });
 
       const queryLogId = await this.logQuery({
@@ -516,7 +591,11 @@ export class ChatService {
         userId,
         memoryMessages,
         false,
-        { ...retrievalOptions, runtimeRunId: run?.id },
+        {
+          ...retrievalOptions,
+          retrievalQuery: contextualRetrievalQuery,
+          runtimeRunId: run?.id,
+        },
       );
     } catch (error) {
       await this.finishFailedRun(run, req.query, mode, error);
@@ -529,6 +608,22 @@ export class ChatService {
       userId,
       query: req.query,
       answer: result.answer,
+      skipLongTermMemory: queryIntent.contextMode !== 'none' &&
+        queryIntent.contextMode !== 'factual_verification',
+      metadata: {
+        contextMode: queryIntent.contextMode,
+        entities: queryIntent.entities,
+        source: 'session_context',
+      },
+      answerMetadata: {
+        route: result.route,
+        confidence: result.confidence,
+        retryCount: result.retryCount,
+        retrievalSufficient: result.retrievalSufficient,
+        retrievalReason: result.retrievalReason,
+        references: result.references,
+        contextMode: queryIntent.contextMode,
+      },
     });
 
     const queryLogId = await this.logQuery({
@@ -704,33 +799,40 @@ export class ChatService {
     userId: string;
     query: string;
     answer: string;
+    skipLongTermMemory?: boolean;
+    metadata?: Record<string, unknown>;
+    answerMetadata?: Record<string, unknown>;
   }): Promise<void> {
     await this.conversationService.addMessage(
       input.threadId,
       'human',
       input.query,
       input.userId,
+      input.metadata,
     );
     await this.conversationService.addMessage(
       input.threadId,
       'ai',
       input.answer,
       input.userId,
+      input.answerMetadata,
     );
     void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);
     void this.shortTermMemory.addTurn(input.threadId, 'assistant', input.answer);
-    void this.memoryService.classifyAndPersist(
-      input.userId,
-      input.threadId,
-      input.query,
-      input.answer,
-    );
-    void this.conversationEmbeddingService.indexConversation(
-      input.threadId,
-      input.query,
-      input.answer,
-      input.userId,
-    );
+    if (!input.skipLongTermMemory) {
+      void this.memoryService.classifyAndPersist(
+        input.userId,
+        input.threadId,
+        input.query,
+        input.answer,
+      );
+      void this.conversationEmbeddingService.indexConversation(
+        input.threadId,
+        input.query,
+        input.answer,
+        input.userId,
+      );
+    }
   }
 
   /**

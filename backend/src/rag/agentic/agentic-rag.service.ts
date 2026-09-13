@@ -23,6 +23,7 @@ import {
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
+import { isObjectiveFactQuery } from '../prompts/context-policy';
 import {
   detectDangerousQuery,
   sanitizeUntrustedContext,
@@ -1830,6 +1831,8 @@ export class AgenticRagService {
       ? await this.queryIntentRouter.classify(query)
       : {
           intent: 'general' as const,
+          contextMode: 'none' as const,
+          historyPolicy: 'context_only' as const,
           confidence: 0,
           standaloneQuery: query,
           multiIntent: false,
@@ -1938,7 +1941,10 @@ export class AgenticRagService {
         queryIntent.queryType === 'public_knowledge') &&
       (queryIntent.queryType === 'public_knowledge' ||
         queryIntent.confidence >= 0.85) &&
-      queryIntent.sourcePolicy === 'direct_answer'
+      (queryIntent.contextMode === 'none' ||
+        queryIntent.contextMode === 'factual_verification') &&
+      queryIntent.sourcePolicy === 'direct_answer' &&
+      retrieveOptions.sourcePolicy !== 'local_only'
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
       const prompt =
@@ -2029,6 +2035,12 @@ export class AgenticRagService {
         : null;
     const route = mode === 'simple'
         ? 'simple'
+        : retrieveOptions.allowConversationStateAnswer
+          ? 'simple'
+        : retrieveOptions.queryIntent?.contextMode === 'mixed'
+          ? 'simple'
+        : isObjectiveFactQuery(query)
+          ? 'simple'
         : multiIntent
           ? 'agentic'
         : mode === 'auto'

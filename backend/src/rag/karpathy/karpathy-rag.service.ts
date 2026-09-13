@@ -7,6 +7,7 @@ import { EmbeddingProvider } from '../../providers/embedding/embedding.provider'
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
+import { isObjectiveFactQuery } from '../prompts/context-policy';
 import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
 import { canonicalizeRole } from '../../modules/chat/role-presets';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
@@ -222,6 +223,10 @@ export interface PrefetchedFastPath {
 }
 
 export interface RetrieveOptions {
+  /** 用于召回的上下文查询；生成阶段仍使用原始用户问题。 */
+  retrievalQuery?: string;
+  /** 无权威片段时，允许使用本轮同实体的最近用户陈述回答状态确认。 */
+  allowConversationStateAnswer?: boolean;
   /** 当前问题只允许使用本地知识库，不调用联网兜底。 */
   knowledgeOnly?: boolean;
   /** 由语义路由决定的唯一联网授权；未传入时保持旧调用兼容。 */
@@ -1204,8 +1209,32 @@ export class KarpathyRagService implements OnModuleInit {
     retrieveOptions: RetrieveOptions = {},
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
+    const arithmeticAnswer = this.buildArithmeticAnswer(normalizedQuery, history);
+    if (arithmeticAnswer) {
+      onToken?.(arithmeticAnswer);
+      return {
+        answer: arithmeticAnswer,
+        references: [],
+        retrievalSufficient: true,
+        retrievalReason: '结构化算式求值，已忽略历史设定与无关检索片段',
+        obsidianPaths: [],
+        obsidianHits: [],
+        retrievalDiagnostics: {
+          intent: 'lookup',
+          candidateDepth: 0,
+          expandedChunks: 0,
+          duplicateChunksRemoved: 0,
+          documentLimitRemoved: 0,
+          budgetRemoved: 0,
+          contextCharacters: 0,
+        },
+      };
+    }
+    const retrievalQuery = this.normalizeQuery(
+      retrieveOptions.retrievalQuery ?? query,
+    );
     const profile =
-      retrieveOptions.profile ?? detectRetrievalProfile(normalizedQuery);
+      retrieveOptions.profile ?? detectRetrievalProfile(retrievalQuery);
     const canUseVector = retrieveOptions.vectorSearch !== false;
     // 直答未命中后统一执行完整 Hybrid RAG；旧的 adaptiveVectorSearch
     // 参数仅保留调用兼容，不再让 lookup 查询跳过向量召回。
@@ -1221,18 +1250,18 @@ export class KarpathyRagService implements OnModuleInit {
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.retrieval)
         : this.retrieveDetailed(
-            normalizedQuery,
+            retrievalQuery,
             initialRetrieveOptions,
             userId,
           );
     const retrieveBaseCaseKnowledge = () =>
       prefetchedFastPath?.badCaseMatches
         ? Promise.resolve(prefetchedFastPath.badCaseMatches)
-        : this.badCaseFlywheel.retrieveMatches(normalizedQuery, 2, userId);
+        : this.badCaseFlywheel.retrieveMatches(retrievalQuery, 2, userId);
     const retrieveObsidianKnowledge = () =>
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.obsidianHits)
-        : this.obsidianKnowledge.search(normalizedQuery, 5, {
+        : this.obsidianKnowledge.search(retrievalQuery, 5, {
             userId,
             roles: retrieveOptions.scope?.role ? [retrieveOptions.scope.role] : [],
           }).catch((error) => {
@@ -1313,7 +1342,7 @@ export class KarpathyRagService implements OnModuleInit {
         ? prefetchedBundle.assessment
         : retrieval.chunks.length === 0
           ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-          : this.assessRetrievalQuality(query, retrieval.chunks);
+          : this.assessRetrievalQuality(retrievalQuery, retrieval.chunks);
     const chunks = formalRetrievalGate.sufficient
       ? [...retrieval.chunks, ...reviewedBaseCaseChunks]
       : [...reviewedBaseCaseChunks, ...retrieval.chunks];
@@ -1354,7 +1383,7 @@ export class KarpathyRagService implements OnModuleInit {
     }
 
     const obsidianGate = this.obsidianKnowledge.assessHits(
-      normalizedQuery,
+      retrievalQuery,
       obsidianHits,
     );
     const badCasePrompt = badCaseMatches.length
@@ -1370,6 +1399,53 @@ export class KarpathyRagService implements OnModuleInit {
       normalizedQuery,
     );
     const evidenceChunks = evidenceBuild.chunks;
+    const shouldPreferConversationState =
+      retrieveOptions.allowConversationStateAnswer &&
+      history.length > 0 &&
+      !this.hasConversationEntityEvidence(
+        evidenceChunks,
+        retrieveOptions.entities ?? retrieveOptions.queryIntent?.entities,
+      );
+    if (shouldPreferConversationState) {
+      const answer = await this.generateConversationStateAnswer(
+        query,
+        history,
+        onToken,
+      );
+      if (answer) {
+        return {
+          answer,
+          references: [],
+          retrievalSufficient: true,
+          retrievalReason: '检索未命中同一实体权威证据，已按本轮最新对话状态回答',
+          obsidianPaths: obsidianHits.map((hit) => hit.path),
+          obsidianHits,
+          retrievalDiagnostics: retrieval.diagnostics,
+        };
+      }
+    }
+
+    if (
+      retrieveOptions.queryIntent?.contextMode === 'mixed' &&
+      history.some((item) => item.role === 'human')
+    ) {
+      const answer = await this.generateMixedContextAnswer(
+        query,
+        history,
+        onToken,
+      );
+      if (answer) {
+        return {
+          answer,
+          references: [],
+          retrievalSufficient: true,
+          retrievalReason: '客观事实优先，已补充当前会话中的历史设定',
+          obsidianPaths: obsidianHits.map((hit) => hit.path),
+          obsidianHits,
+          retrievalDiagnostics: retrieval.diagnostics,
+        };
+      }
+    }
 
     if (chunks.length === 0) {
       if (obsidianGate.sufficient) {
@@ -1390,6 +1466,24 @@ export class KarpathyRagService implements OnModuleInit {
           retrievalDiagnostics: retrieval.diagnostics,
         };
       }
+      if (retrieveOptions.allowConversationStateAnswer && history.length > 0) {
+        const answer = await this.generateConversationStateAnswer(
+          query,
+          history,
+          onToken,
+        );
+        if (answer) {
+          return {
+            answer,
+            references: [],
+            retrievalSufficient: true,
+            retrievalReason: '未命中权威资料，已按本轮最新对话状态回答',
+            obsidianPaths: [],
+            obsidianHits,
+            retrievalDiagnostics: retrieval.diagnostics,
+          };
+        }
+      }
       const webFallback = await this.answerWithWebFallback(
         query,
         `没有检索到候选片段；${obsidianGate.reason}`,
@@ -1398,15 +1492,21 @@ export class KarpathyRagService implements OnModuleInit {
         onToken,
         retrieveOptions,
       );
-      const answer = webFallback?.answer ?? this.unsupportedReliableAnswer();
-      if (!webFallback) onToken?.(answer);
+      const modelFallback = !webFallback
+        ? await this.answerWithModelFallback(query, history, onToken, retrieveOptions)
+        : null;
+      const answer =
+        webFallback?.answer ?? modelFallback?.answer ?? this.unsupportedReliableAnswer();
+      if (!webFallback && !modelFallback) onToken?.(answer);
       return {
         answer,
         references: webFallback?.references ?? [],
-        retrievalSufficient: Boolean(webFallback),
+        retrievalSufficient: Boolean(webFallback || modelFallback),
         retrievalReason: webFallback
           ? `没有检索到本地证据；${obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
-          : `没有检索到候选片段；${obsidianGate.reason}；联网搜索不可用，已进入安全降级`,
+          : modelFallback
+            ? `没有检索到本地证据；联网搜索不可用，已使用模型通用能力回答`
+            : `没有检索到候选片段；${obsidianGate.reason}；联网搜索和模型回答均不可用，已进入安全降级`,
         obsidianPaths: obsidianHits.map((hit) => hit.path),
         obsidianHits,
         retrievalDiagnostics: retrieval.diagnostics,
@@ -1434,6 +1534,24 @@ export class KarpathyRagService implements OnModuleInit {
     }
 
     if (!retrievalGate.sufficient && !obsidianGate.sufficient) {
+      if (retrieveOptions.allowConversationStateAnswer && history.length > 0) {
+        const answer = await this.generateConversationStateAnswer(
+          query,
+          history,
+          onToken,
+        );
+        if (answer) {
+          return {
+            answer,
+            references: [],
+            retrievalSufficient: true,
+            retrievalReason: '权威资料不足，已按本轮最新对话状态回答',
+            obsidianPaths: obsidianHits.map((hit) => hit.path),
+            obsidianHits,
+            retrievalDiagnostics: retrieval.diagnostics,
+          };
+        }
+      }
       const webFallback = await this.answerWithWebFallback(
         query,
         `${retrievalGate.reason}；${obsidianGate.reason}`,
@@ -1698,7 +1816,9 @@ ${memoryText || '无'}
     obsidianHits: ObsidianSearchHit[];
     prefetchedFastPath: PrefetchedFastPath;
   }> {
-    const normalizedQuery = this.normalizeQuery(query);
+    const normalizedQuery = this.normalizeQuery(
+      options.retrievalQuery ?? query,
+    );
     let badCaseFailure: string | undefined;
     let retrievalFailure: string | undefined;
     let obsidianFailure: string | undefined;
@@ -1752,7 +1872,7 @@ ${memoryText || '无'}
     const ragGate =
       retrieval.chunks.length === 0
         ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-        : this.assessRetrievalQuality(query, retrieval.chunks);
+        : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
       obsidianHits,
@@ -2390,6 +2510,148 @@ ${evidence}`;
       );
       return null;
     }
+  }
+
+  private buildArithmeticAnswer(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+  ): string | null {
+    if (!/(?:等于多少|等于几|结果是多少|怎么计算)[？?]?$/u.test(query)) {
+      return null;
+    }
+    const match = query.match(/(\d+(?:\.\d+)?)\s*([+\-*/×÷])\s*(\d+)/u);
+    if (!match) return null;
+    const left = Number(match[1]);
+    const right = Number(match[3]);
+    const result = match[2] === '+'
+      ? left + right
+      : match[2] === '-'
+        ? left - right
+        : match[2] === '*' || match[2] === '×'
+          ? left * right
+          : left / right;
+    const settings = history
+      .filter((item) => item.role === 'human' && /等于|=/u.test(item.content))
+      .slice(-5)
+      .map((item) => item.content);
+    return settings.length
+      ? `客观事实：${left}${match[2]}${right}等于${result}。\n历史对话设定：${settings.join('；')}`
+      : `客观事实：${left}${match[2]}${right}等于${result}。`;
+  }
+
+  private async generateConversationStateAnswer(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+    onToken?: (token: string) => void,
+  ): Promise<string | null> {
+    const latest = history
+      .filter((item) => item.role === 'human')
+      .at(-1)?.content;
+    if (!latest) return null;
+    const prompt = `你是严谨的事实核验与对话状态助手。用户正在确认本轮对话中某个实体的最新定义。
+回答必须分成两部分：
+1. 客观事实：如果实体属于通用常识、数学或技术知识，先给出可靠客观事实；不确定时明确写“未找到可验证的客观事实”，不要编造。
+2. 当前会话设定：再用“根据当前对话”说明用户最近的设定；如果与客观事实冲突，明确这是用户设定，不要把它包装成事实。
+如果之前有冲突，以最近一条陈述为当前会话状态；不要遗漏客观事实段落，也不要只复述历史。
+
+最近相关用户陈述：${latest}
+当前问题：${query}
+请直接、简洁回答：`;
+    try {
+      const answer = (await this.llmProvider.invoke(prompt)).trim();
+      if (answer) onToken?.(answer);
+      return answer || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async generateMixedContextAnswer(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+    onToken?: (token: string) => void,
+  ): Promise<string | null> {
+    const statements = history
+      .filter((item) => item.role === 'human')
+      .map((item) => item.content)
+      .slice(-5);
+    if (!statements.length) return null;
+    const arithmetic = query.match(/(\d+(?:\.\d+)?)\s*([+\-*/×÷])\s*(\d+(?:\.\d+)?)/u);
+    if (arithmetic) {
+      const left = Number(arithmetic[1]);
+      const right = Number(arithmetic[3]);
+      const result = arithmetic[2] === '+'
+        ? left + right
+        : arithmetic[2] === '-'
+          ? left - right
+          : arithmetic[2] === '*' || arithmetic[2] === '×'
+            ? left * right
+            : left / right;
+      const answer = `客观事实：${left}${arithmetic[2]}${right}等于${result}。\n历史对话设定：${statements.join('；')}`;
+      onToken?.(answer);
+      return answer;
+    }
+    const prompt = `你是严谨的事实核验助手。当前问题同时涉及客观定义和用户历史设定。
+必须先回答客观、通用、可验证的内容；再单独用“根据历史对话”列出用户曾经的设定。客观事实优先于历史内容和时间顺序，不能把用户设定包装成事实，也不要用泛化常识回避当前实体。
+历史用户陈述：
+${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
+当前问题：${query}
+请用中文简洁回答，分成“客观事实”和“历史对话设定”两部分：`;
+    try {
+      const answer = (await this.llmProvider.invoke(prompt)).trim();
+      if (answer) onToken?.(answer);
+      return answer || null;
+    } catch {
+      return `客观事实：当前问题缺少可验证的具体实体资料。\n历史对话设定：${statements.join('；')}`;
+    }
+  }
+
+  private async answerWithModelFallback(
+    query: string,
+    history: Array<{ role: 'human' | 'ai'; content: string }>,
+    onToken: ((token: string) => void) | undefined,
+    options: RetrieveOptions,
+  ): Promise<{ answer: string } | null> {
+    const intent = options.queryIntent;
+    const canUseGeneralModel =
+      isObjectiveFactQuery(query) ||
+      intent?.intent === 'objective_fact' ||
+      intent?.intent === 'system_capability' ||
+      intent?.queryType === 'public_knowledge' ||
+      intent?.sourcePolicy === 'direct_answer';
+    if (!canUseGeneralModel || options.queryIntent?.contextMode === 'conversation_setting') {
+      return null;
+    }
+    const prompt = `你是通用知识助手。当前资料库没有找到相关内容，联网搜索也不可用。请仅依据可靠通用知识回答，不要声称资料库有依据，也不要把历史用户说法当成事实。若历史中有相关说法，只在答案末尾用“历史对话设定”单独说明。\n历史上下文：${history.filter((item) => item.role === 'human').slice(-5).map((item) => item.content).join('；') || '无'}\n用户问题：${query}\n请直接回答：`;
+    const providers: Array<'default' | 'qwen'> = ['default'];
+    if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
+      providers.push('qwen');
+    }
+    for (const provider of providers) {
+      try {
+        const answer = (
+          provider === 'qwen'
+            ? await this.llmProvider.invoke(prompt, 'qwen')
+            : await this.llmProvider.invoke(prompt)
+        ).trim();
+        if (!answer) continue;
+        onToken?.(answer);
+        return { answer };
+      } catch {
+        // 首选模型返回空正文或调用失败时，继续尝试备用通用模型。
+      }
+    }
+    return null;
+  }
+
+  private hasConversationEntityEvidence(
+    chunks: RetrievedChunk[],
+    entities?: string[],
+  ): boolean {
+    if (!entities?.length || !chunks.length) return false;
+    return entities.some((entity) =>
+      chunks.some((chunk) => chunk.content.includes(entity)),
+    );
   }
 
   buildEvidenceFirstAnswer(

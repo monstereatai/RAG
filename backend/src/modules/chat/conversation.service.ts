@@ -190,13 +190,23 @@ export class ConversationService {
     threadId: string,
     maxTurns = 5,
     userId?: string,
-  ): Promise<Array<{ role: 'human' | 'ai'; content: string }>> {
+  ): Promise<
+    Array<{
+      role: 'human' | 'ai';
+      content: string;
+      metadata?: Record<string, unknown>;
+    }
+  >> {
     const conv = await this.get(threadId, userId);
     if (!conv || conv.messages.length === 0) return [];
 
     // 取最近 maxTurns * 2 条消息
     const recent = conv.messages.slice(-maxTurns * 2);
-    return recent.map((m) => ({ role: m.role, content: m.content }));
+    return recent.map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.metadata ? { metadata: m.metadata } : {}),
+    }));
   }
 
   /**

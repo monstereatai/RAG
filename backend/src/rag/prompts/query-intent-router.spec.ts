@@ -8,6 +8,50 @@ describe('QueryIntentRouter', () => {
     expect(requiresKnowledgeRetrieval('1+1 等于多少')).toBe(false);
   });
 
+  it('recognizes Chinese arithmetic assertions as session settings', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'objective_fact',
+          confidence: 0.99,
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          entities: [],
+          standaloneQuery: '1+1等于5',
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('1+1等于5')).resolves.toMatchObject({
+      contextMode: 'conversation_setting',
+      sourcePolicy: 'local_only',
+    });
+  });
+
+  it('forces internal business and engineering questions into the local KB', async () => {
+    const router = new QueryIntentRouter({
+      invoke: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'general',
+          confidence: 0.95,
+          action: 'direct_answer',
+          sourcePolicy: 'direct_answer',
+          entities: [],
+          standaloneQuery: '内部业务链路有哪些',
+          ambiguity: { detected: false },
+        }),
+      ),
+    } as never);
+
+    await expect(router.classify('内部业务链路有哪些')).resolves.toMatchObject({
+      action: 'retrieve',
+      sourcePolicy: 'local_only',
+      queryType: 'project_knowledge',
+      targetKbs: expect.arrayContaining(['company', 'project', 'documents']),
+    });
+  });
+
   it('normalizes a semantic private-entity decision without keyword extraction', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(

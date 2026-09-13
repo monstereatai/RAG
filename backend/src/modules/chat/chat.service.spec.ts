@@ -45,7 +45,18 @@ describe('ChatService', () => {
       conversationService as never,
       { searchHistory: jest.fn().mockResolvedValue([]), indexConversation: jest.fn() } as never,
       { searchMemory: jest.fn().mockResolvedValue({ systemMessage: null }), classifyAndPersist: jest.fn() } as never,
-      { getContext: jest.fn().mockResolvedValue({ recentTurns: [], truncatedHistory: false }), addTurn: jest.fn() } as never,
+      {
+        getContext: jest.fn().mockResolvedValue({
+          systemMessage: { content: '【历史摘要】小明先是一只狗，后来又是一只猫，最后是一条鱼' },
+          recentTurns: [
+            { role: 'user', content: '小明是一只狗' },
+            { role: 'user', content: '小明是一只猫' },
+            { role: 'user', content: '小明是一条鱼' },
+          ],
+          truncatedHistory: false,
+        }),
+        addTurn: jest.fn(),
+      } as never,
       { estimateTextTokens: () => 1, estimateCostUsd: () => 0, traceRagAnswer: jest.fn() } as never,
       { create: jest.fn((value) => value), save: jest.fn().mockResolvedValue(undefined) } as never,
       undefined,
@@ -76,6 +87,12 @@ describe('ChatService', () => {
         sourcePolicy: 'direct_answer',
         queryIntent: expect.objectContaining({ requiresGraph: false }),
       }),
+    );
+    const memoryMessages = answer.mock.calls[0][3] as Array<{ content: string }>;
+    expect(memoryMessages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining('小明是一只狗') }),
+      ]),
     );
   });
 

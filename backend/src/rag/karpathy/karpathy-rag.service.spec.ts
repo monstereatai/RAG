@@ -178,9 +178,60 @@ describe('KarpathyRagService exception scenarios', () => {
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已进入安全降级',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索和模型回答均不可用，已进入安全降级',
     });
     expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
+  it('uses the general model for objective questions when routing has no usable intent', async () => {
+    const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce('2');
+
+    await expect(service.answer('量子计算是什么')).resolves.toMatchObject({
+      answer: '2',
+      references: [],
+      retrievalSufficient: true,
+      retrievalReason: expect.stringContaining('已使用模型通用能力回答'),
+    });
+    expect(llmInvoke).toHaveBeenCalled();
+  });
+
+  it('answers arithmetic deterministically before mixed-history fallback', async () => {
+    const { service, llmInvoke } = createService();
+    const result = await service.answer(
+      '1+1等于多少',
+      [{ role: 'human', content: '1+1等于5' }],
+      undefined,
+      [],
+      undefined,
+      {
+        knowledgeOnly: true,
+        queryIntent: {
+          contextMode: 'mixed',
+        } as never,
+      },
+    );
+
+    expect(result.answer).toContain('客观事实：1+1等于2');
+    expect(result.answer).toContain('历史对话设定：1+1等于5');
+    expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
+  it('prompts conversation settings to include objective facts and the local setting', async () => {
+    const { service, llmInvoke } = createService();
+    await (service as unknown as {
+      generateConversationStateAnswer: Function;
+    }).generateConversationStateAnswer(
+      'React是什么',
+      [{ role: 'human', content: 'React是一种动物' }],
+    );
+
+    expect(llmInvoke).toHaveBeenCalledWith(
+      expect.stringContaining('客观事实'),
+    );
+    expect(llmInvoke).toHaveBeenCalledWith(
+      expect.stringContaining('当前会话设定'),
+    );
   });
 
   it('uses Bocha web search when local evidence is insufficient', async () => {
@@ -231,7 +282,7 @@ describe('KarpathyRagService exception scenarios', () => {
       references: [],
       retrievalSufficient: false,
       retrievalReason:
-        '没有检索到候选片段；Obsidian 未命中；联网搜索不可用，已进入安全降级',
+        '没有检索到候选片段；Obsidian 未命中；联网搜索和模型回答均不可用，已进入安全降级',
     });
     expect(llmInvoke).not.toHaveBeenCalled();
   });
