@@ -48,6 +48,18 @@
 
 ## 当前结论
 
+- **已阻断 AG-UI 空白回答的全链路传播（2026-09-13，模型配置待确认）**：模型 Provider 会将空 `content` 判为调用失败；Agentic 直答、Chat 会话持久化与 AG-UI token 判定均增加非空门禁，空 token 不再让前端误判为已流式输出。生产构建与真实 AG-UI SSE 已验证：`TEXT_MESSAGE_CONTENT`、`rag.final`、`RUN_FINISHED.output.answer` 均返回受控提示，不再为空。进一步最小调用实测当前 `DEEPSEEK_MODEL=deepseek-v4-flash` 返回 HTTP 200 但仅含 `reasoning_content`、正式 `content` 为空；需经主人确认后调整 `backend/.env` 中的模型配置，才能恢复该模型的实际自然语言回答。
+
+- **本地开发栈已恢复运行（2026-09-13）**：启动 Docker Desktop 后拉起 `rag-dev-postgres`、`rag-dev-redis`，复用已运行的 Milvus 组件；RAG Backend 已通过增量编译并监听 3000，健康检查 `/api/v1/health` 返回 200。
+
+- **已处理管理后台 MFSU 远程模块缓存异常（2026-09-13）**：针对 `mf-va_remoteEntry.js` 引用旧 `core-js` 绝对路径的问题，使用 Umi 官方 `max mfsu remove --all` 清理生成缓存并重启管理后台，当前已重新完成 Webpack 编译。该操作未删除源码或依赖。
+
+- **已修复本地启动编译阻断（2026-09-13）**：补齐 `DingTalkProvider` 注入、导出 `ChatService` 供 AG-UI 使用，并恢复 `ProductionWorkflowService.playwayPreview`。Backend TypeScript 增量编译已通过；完整启动仍依赖本机 PostgreSQL（5432）和 Redis（6379）。
+
+- **已修复 AG-UI 结束事件清空回答正文（2026-09-12）**：管理后台收到 `RUN_FINISHED` 时，空字符串 `answer` 不再覆盖此前 `TEXT_MESSAGE_CONTENT` 已流式拼接的内容，避免“运行轨迹正常但回答区域为空”。Biome 检查仍仅提示该页面既有导入排序和格式问题，本次改动未新增类型错误。
+
+- **已补齐功能步骤流程文档的过期模块口径（2026-09-12）**：重点重写历史污染链路，明确 `RequestContext`、客观事实门禁、`selectHistoryForQuery`、不可信历史标记、Mem0／历史向量跳过条件，以及短期摘要仍可能以 system 消息注入的残余风险；同步更新 Chat Agentic 原生 `Command.resume`、Obsidian frontmatter ACL、Prometheus／Grafana／Alertmanager 监控链路和面试速答口径。Mermaid 结构与 Markdown diff 已校验。
+
 - **统一问答剩余六项闭环已完成（2026-09-12）**：ChatService 事件回调已贯通 SSE／AG-UI，透传路由、检索、节点计时、工具、反思、引用、token、审批中断和恢复事件；新增 `RequestContext`、`ExecutionState`、`ChatResult` 类型契约，直连 Agentic 入口也会补建统一上下文。`EvidenceBundle` 记录来源状态和子问题覆盖率；Obsidian 支持 frontmatter 用户／角色 ACL；带用户身份时 Bad Case 只使用该用户已审核纠正，避免无租户向量跨用户泄露；Artifact 重新生成自动使旧审批变为 `stale`；LangGraph Checkpoint 保存已消耗步骤、剩余预算和暂停状态，resume 校验检查点、暂停态和预算后使用 `Command.resume` 恢复。定向测试 61／61 通过，`git diff --check` 通过；全仓 TypeScript 仍只有既有 playwayPreview、RAG Admin 测试构造和历史测试夹具错误。
 
 - **已收敛 Chat 问答为两执行引擎与 Auto 路由（2026-09-12）**：Chat 主入口默认 `auto`，并将已完成的 `QueryIntent`、来源策略、权限范围和图谱计划传入下游；Agentic 优先复用该请求上下文，不再对同一 HTTP 请求二次分类。SSE、AG-UI、QA Ops 的未指定模式也统一为 `auto`。显式 `simple` 保持线性边界，多问题、公共直答与歧义都不会再进入 Agentic 入口。Auto 取消独立 `answerDirect` 预探测，改为消费 `assessFastPath` 的 Base Case／Hybrid／Obsidian 快照；Karpathy 正式回答复用同一快照。Obsidian 不再在 Agentic 前二次读取；图谱由结构化 `requiresGraph` 计划按需进入共享 Hybrid 检索，移除 Agentic 子问题的第二条图谱工具查询。HTTP、SSE 与 AG-UI 统一调用 `ChatService`，入口层不再各自执行 Agentic 或重复保存会话／记忆；流式正文仅在统一最终结果生成后发布。`docs/interview/功能步骤流程.md` 已同步。验证：`pnpm install --frozen-lockfile` 未改 lockfile；`git diff --check` 通过；以 backend 的 Jest 30 环境显式运行 QueryIntent、Chat、AG-UI、Karpathy、Agentic 五组定向测试，58／58 通过。Backend build 仍被既有的两处 `ProductionWorkflowService.playwayPreview` 缺失类型定义阻断（`agent-ops-admin.controller.ts:211`、`workflow.controller.ts:151`），不属于本次改动。

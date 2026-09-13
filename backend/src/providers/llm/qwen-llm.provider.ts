@@ -60,6 +60,9 @@ export class QwenLlmProvider implements ILLMProvider {
         typeof response.content === 'string'
           ? response.content
           : JSON.stringify(response.content);
+      if (!answer.trim()) {
+        throw new Error('Qwen returned an empty completion');
+      }
       this.observeCall(start, 'success', inputTokensEstimated, answer);
       return answer;
     } catch (err) {

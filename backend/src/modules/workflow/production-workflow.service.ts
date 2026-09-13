@@ -452,6 +452,12 @@ export class ProductionWorkflowService {
     };
   }
 
+  async playwayPreview(threadId: string, userId: string) {
+    const context = await this.codingContext(threadId, userId);
+    const schemas = context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []);
+    return renderPlaywayPreview(schemas, context.projectId, context.brief);
+  }
+
   async generateProject(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
     const run = await this.agentRuns?.findLatestByThread(threadId);

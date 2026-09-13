@@ -14,6 +14,7 @@ import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 
 @Injectable()
 export class AguiService {
@@ -107,17 +108,24 @@ export class AguiService {
               options.userId,
               (event) => {
                 this.updateRunState(runState, event);
-                if (event.type === 'token') streamedContent = true;
+                if (
+                  event.type === 'token' &&
+                  typeof event.data === 'string' &&
+                  event.data.trim().length > 0
+                ) {
+                  streamedContent = true;
+                }
                 this.emitAguiEvent(event, emit, messageId);
               },
             ),
           );
+          const answer = result.answer.trim() || '模型未返回有效内容，请切换模型后重试。';
           runState.route = result.route;
           runState.phase = result.retrievalSufficient === false ? 'degraded' : 'citation';
           runState.citation = { count: result.references?.length ?? 0 };
           // ChatService 的 token 事件已经实时透传；这里不再重复发送完整正文。
           if (!streamedContent) {
-            emit('TEXT_MESSAGE_CONTENT', { messageId, delta: result.answer });
+            emit('TEXT_MESSAGE_CONTENT', { messageId, delta: answer });
           }
 
           let generatedArtifacts: unknown[] = [];
@@ -140,7 +148,7 @@ export class AguiService {
                 threadId: activeThreadId,
                 title: artifactIntent.title,
                 kind: artifactIntent.kind,
-                sourceText: result.answer,
+                sourceText: answer,
                 prompt: artifactIntent.kind === 'image' ? query : undefined,
               });
               generatedArtifacts = [artifact];
@@ -161,7 +169,7 @@ export class AguiService {
             userId: options.userId,
             threadId: activeThreadId,
             query,
-            answer: result.answer,
+            answer,
             mode: options.mode,
             route: result.route ?? 'simple',
             model: selectedModel,
@@ -174,6 +182,7 @@ export class AguiService {
             threadId: activeThreadId,
             output: {
               ...result,
+              answer,
               model: selectedModel,
               artifacts: generatedArtifacts,
               runState: { ...runState },

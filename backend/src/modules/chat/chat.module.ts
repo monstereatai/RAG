@@ -53,6 +53,7 @@ import { MetricsModule } from '../metrics/metrics.module';
     RagFeedbackService,
   ],
   exports: [
+    ChatService,
     ConversationService,
     ConversationEmbeddingService,
     RagFeedbackService,

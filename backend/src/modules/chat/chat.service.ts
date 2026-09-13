@@ -45,6 +45,7 @@ import {
 import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
 import type { QueryIntent } from '../../rag/prompts/query-intent-router';
 import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 
 @Injectable()
 export class ChatService {
@@ -377,6 +378,7 @@ export class ChatService {
         await this.finishFailedRun(run, req.query, mode, error);
         throw error;
       }
+      result = this.ensureNonEmptyAnswer(result);
 
       if (run) {
         await this.agentRuns?.recordRuntimeEvent(run.id, {
@@ -520,6 +522,7 @@ export class ChatService {
       await this.finishFailedRun(run, req.query, mode, error);
       throw error;
     }
+    result = this.ensureNonEmptyAnswer(result);
 
     await this.persistConversationResult({
       threadId,
@@ -728,6 +731,26 @@ export class ChatService {
       input.answer,
       input.userId,
     );
+  }
+
+  /**
+   * 空回答不是成功结果：禁止写入会话、记忆、日志和 SSE 结束事件，避免前端只剩运行轨迹。
+   */
+  private ensureNonEmptyAnswer<T extends {
+    answer: string;
+    retrievalSufficient?: boolean;
+    retrievalReason?: string;
+  }>(result: T): T {
+    const answer = result.answer?.trim();
+    if (answer) return { ...result, answer };
+
+    this.logger.error('Answer pipeline completed without usable model content');
+    return {
+      ...result,
+      answer: '模型未返回有效内容，请切换模型后重试。',
+      retrievalSufficient: false,
+      retrievalReason: '模型未返回有效内容',
+    };
   }
 
   private async resolveRetrievalProfile(

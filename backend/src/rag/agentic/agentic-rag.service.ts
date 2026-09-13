@@ -1962,8 +1962,11 @@ export class AgenticRagService {
       let answer: string;
       try {
         answer = await this.llmProvider.invoke(prompt);
+        if (!answer.trim()) {
+          throw new Error('LLM returned an empty direct answer');
+        }
       } catch {
-        const message = '模型服务暂时不可用，请稍后重试。';
+        const message = '模型未返回有效内容，请切换模型后重试。';
         this.logger.warn(
           `Direct answer failed for provider=${modelName}; returning controlled error`,
         );
@@ -2226,7 +2229,7 @@ export class AgenticRagService {
   }
 
   private splitAnswerTokens(answer: string): string[] {
-    return answer.match(/.{1,24}/gs) ?? [answer];
+    return answer.match(/.{1,24}/gs) ?? [];
   }
 
   private async persistStructuredArtifacts(

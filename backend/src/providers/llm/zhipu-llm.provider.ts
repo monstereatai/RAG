@@ -5,6 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { ILLMProvider } from './llm-provider.interface';
+import { LlmInvocationError } from './llm-invocation.error';
 
 /** 智谱 GLM Provider：复用官方 OpenAI 兼容接口，不依赖专有 SDK。 */
 @Injectable()
@@ -48,6 +49,9 @@ export class ZhipuLlmProvider implements ILLMProvider {
         typeof response.content === 'string'
           ? response.content
           : JSON.stringify(response.content);
+      if (!answer.trim()) {
+        throw new Error('Zhipu returned an empty completion');
+      }
       this.observe(startedAt, 'success', input, answer);
       return answer;
     } catch (error) {
@@ -55,7 +59,7 @@ export class ZhipuLlmProvider implements ILLMProvider {
         `[ZhipuLlmProvider] invoke failed: ${(error as Error).message}`,
       );
       this.observe(startedAt, 'error', input, '');
-      throw error;
+      throw new LlmInvocationError('zhipu', error);
     }
   }
 

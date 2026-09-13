@@ -821,8 +821,12 @@ const QaOps: React.FC = () => {
     if (event.type === 'RUN_FINISHED') {
       const output = event.data?.output;
       if (isRecord(output)) {
+        // 结束事件可能只携带元数据或空 answer；不能覆盖已经通过
+        // TEXT_MESSAGE_CONTENT 流式拼接出来的正文。
         const outputAnswer =
-          typeof output.answer === 'string' ? output.answer : undefined;
+          typeof output.answer === 'string' && output.answer.trim()
+            ? output.answer
+            : undefined;
         updateMessage(messageId, (message) => ({
           ...message,
           content: outputAnswer ?? message.content,
