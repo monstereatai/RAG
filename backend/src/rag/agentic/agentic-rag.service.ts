@@ -442,80 +442,100 @@ export class AgenticRagService {
       `Retrieving ${boundedSubQuestions.length}/${plannedSubQuestions.length} sub-questions with hybrid search for userId=${userId ?? 'none'}`,
     );
 
-    const retrievedSubQuestions = await Promise.all(
-      boundedSubQuestions.map(async (subQuestion, index) => {
-        const q = subQuestion.question;
-        try {
-          // 使用语义路由／查询规划生成的改写补召回，不依赖某一业务领域的关键词。
-          // 原问题始终保留为首项，改写仅用于覆盖资料与用户问法不一致的情况。
-          const retrievalQueries = this.buildRetrievalQueries(
-            q,
-            state.query,
-            fastPathChunks.length > 0 ? [] : state.augmentedQueries,
-            index,
-          );
-          const resultGroups = await Promise.all(
-            retrievalQueries.map(async (retrievalQuery, queryIndex) => {
-              // Auto 升级时只复用原问题的 Fast Path；补充改写必须实际检索。
-              let results =
-                index === 0 &&
-                queryIndex === 0 &&
-                retrievalQuery === state.query &&
-                fastPathChunks.length > 0
-                  ? fastPathChunks
-                  : await this.karpathyRagService.retrieve(
+    const [retrievedSubQuestions, reviewedBaseCaseChunks, obsidianContext] =
+      await Promise.all([
+        Promise.all(
+          boundedSubQuestions.map(async (subQuestion, index) => {
+            const q = subQuestion.question;
+            try {
+              // 使用语义路由／查询规划生成的改写补召回，不依赖某一业务领域的关键词。
+              // 原问题始终保留为首项，改写仅用于覆盖资料与用户问法不一致的情况。
+              const retrievalQueries = this.buildRetrievalQueries(
+                q,
+                state.query,
+                fastPathChunks.length > 0 ? [] : state.augmentedQueries,
+                index,
+              );
+              const resultGroups = await Promise.all(
+                retrievalQueries.map(async (retrievalQuery, queryIndex) => {
+                  // Auto 升级时只复用原问题的 Fast Path；补充改写必须实际检索。
+                  let results =
+                    index === 0 &&
+                    queryIndex === 0 &&
+                    retrievalQuery === state.query &&
+                    fastPathChunks.length > 0
+                      ? fastPathChunks
+                      : await this.karpathyRagService.retrieve(
+                          retrievalQuery,
+                          {
+                            ...retrieveOptions,
+                            // Auto 升级时原问题已由 Fast Path 完成图谱探测；
+                            // 显式 Agentic 的原问题在这里按结构化计划探测一次。
+                            // 子问题只补文本证据，不能隐式重复探测图谱。
+                            queryIntent: retrieveOptions.queryIntent
+                              ? {
+                                  ...retrieveOptions.queryIntent,
+                                  requiresGraph:
+                                    fastPathChunks.length === 0 &&
+                                    index === 0 &&
+                                    queryIndex === 0 &&
+                                    retrievalQuery === state.query
+                                      ? retrieveOptions.queryIntent.requiresGraph
+                                      : false,
+                                }
+                              : undefined,
+                          },
+                          userId,
+                        );
+                  // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
+                  if (results.length === 0) {
+                    results = await this.karpathyRagService.retrieveBm25Only(
                       retrievalQuery,
-                      {
-                        ...retrieveOptions,
-                        // 原问题的 Fast Path 已按结构化计划完成图谱探测。
-                        // 子问题只补文本证据；以后若规划器显式声明新的图谱缺口，
-                        // 再为该子问题追加独立计划，不能隐式重复探测。
-                        queryIntent: retrieveOptions.queryIntent
-                          ? {
-                              ...retrieveOptions.queryIntent,
-                              requiresGraph: false,
-                            }
-                          : undefined,
-                      },
                       userId,
+                      retrieveOptions.scope,
                     );
-              // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
-              if (results.length === 0) {
-                results = await this.karpathyRagService.retrieveBm25Only(
-                  retrievalQuery,
-                  userId,
-                  retrieveOptions.scope,
-                );
-              }
-              return results;
-            }),
-          );
-          // 图谱证据由共享 Hybrid 检索根据 RequestContext 的计划按需合并。
-          // Agentic 仅为新增子问题调用这条共享链路，避免额外的图谱工具调用。
-          const results = resultGroups.flat();
-          return {
-            ...subQuestion,
-            status:
-              results.length > 0
-                ? ('retrieved' as const)
-                : ('needs_more' as const),
-            evidenceIds: results.map((chunk) => chunk.id),
-            retrievalAttempts: subQuestion.retrievalAttempts + 1,
-            results,
-          };
-        } catch (err) {
-          this.logger.warn(
-            `Retrieve failed for query "${q.slice(0, 30)}": ${(err as Error).message}`,
-          );
-          return {
-            ...subQuestion,
-            status: 'needs_more' as const,
-            retrievalAttempts: subQuestion.retrievalAttempts + 1,
-            reason: (err as Error).message,
-            results: [] as RetrievedChunk[],
-          };
-        }
-      }),
+                  }
+                  return results;
+                }),
+              );
+              // 图谱证据由共享 Hybrid 检索根据 RequestContext 的计划按需合并。
+              // Agentic 仅为新增子问题调用这条共享链路，避免额外的图谱工具调用。
+              const results = resultGroups.flat();
+              return {
+                ...subQuestion,
+                status:
+                  results.length > 0
+                    ? ('retrieved' as const)
+                    : ('needs_more' as const),
+                evidenceIds: results.map((chunk) => chunk.id),
+                retrievalAttempts: subQuestion.retrievalAttempts + 1,
+                results,
+              };
+            } catch (err) {
+              this.logger.warn(
+                `Retrieve failed for query "${q.slice(0, 30)}": ${(err as Error).message}`,
+              );
+              return {
+                ...subQuestion,
+                status: 'needs_more' as const,
+                retrievalAttempts: subQuestion.retrievalAttempts + 1,
+                reason: (err as Error).message,
+                results: [] as RetrievedChunk[],
+              };
+            }
+          }),
+        ),
+        Promise.resolve(
+          this.karpathyRagService.toReviewedEvidenceChunks(
+            state.badCaseMatches ?? [],
+          ),
+        ),
+        this.karpathyRagService
+          .getObsidianContext(state.query, userId, retrieveOptions.scope?.role)
+          .catch(() => ({ hits: [], context: '' })),
+      ]);
+    const obsidianChunks = this.karpathyRagService.toObsidianChunks(
+      obsidianContext.hits,
     );
     const allResults = retrievedSubQuestions.map((item) => item.results);
     const updatedSubQuestions: AgenticSubQuestion[] = retrievedSubQuestions.map(
@@ -525,12 +545,22 @@ export class AgenticRagService {
       },
     );
 
-    const resultIds = new Set(allResults.flat().map((chunk) => chunk.id));
+    const baselineChunks = [
+      ...fastPathChunks,
+      ...reviewedBaseCaseChunks,
+      ...obsidianChunks,
+    ];
+    const resultIds = new Set(
+      [...allResults.flat(), ...baselineChunks].map((chunk) => chunk.id),
+    );
     const remainingSubQuestions = plannedSubQuestions
       .slice(boundedSubQuestions.length)
       .map((item) => ({ ...item, status: 'needs_more' as const }));
 
     const fusedMap = new Map<string, RetrievedChunk>();
+    for (const chunk of baselineChunks) {
+      fusedMap.set(chunk.id, chunk);
+    }
     for (const results of allResults) {
       for (const chunk of results) {
         const existing = fusedMap.get(chunk.id);
@@ -1830,34 +1860,34 @@ export class AgenticRagService {
     const queryIntent = retrieveOptions.queryIntent ?? (this.queryIntentRouter
       ? await this.queryIntentRouter.classify(query)
       : {
-          intent: 'general' as const,
-          contextMode: 'none' as const,
-          historyPolicy: 'context_only' as const,
-          confidence: 0,
-          standaloneQuery: query,
-          multiIntent: false,
-          subQueries: [],
-          action: 'retrieve' as const,
-          sourcePolicy: 'local_only' as const,
-          needsSynthesis: false,
-          requiresGraph: false,
-          targetKbs: ['general'] as QueryIntent['targetKbs'],
-          queryType: 'public_knowledge' as const,
-          entities: [],
-          filters: {
-            department: null,
-            project: null,
-            timeRange: null,
-            documentType: null,
-          },
-          rewriteQueries: [],
-          reason: '',
-          ambiguity: {
-            detected: false,
+            intent: 'general' as const,
+            contextMode: 'none' as const,
+            historyPolicy: 'context_only' as const,
             confidence: 0,
-            senses: [],
-            clarificationQuestion: undefined,
-          },
+            standaloneQuery: query,
+            multiIntent: false,
+            subQueries: [],
+            action: 'retrieve' as const,
+            sourcePolicy: 'local_only' as const,
+            needsSynthesis: false,
+            requiresGraph: false,
+            targetKbs: ['general'] as QueryIntent['targetKbs'],
+            queryType: 'public_knowledge' as const,
+            entities: [],
+            filters: {
+              department: null,
+              project: null,
+              timeRange: null,
+              documentType: null,
+            },
+            rewriteQueries: [],
+            reason: '',
+            ambiguity: {
+              detected: false,
+              confidence: 0,
+              senses: [],
+              clarificationQuestion: undefined,
+            },
         });
     const ambiguity = queryIntent.ambiguity;
     const multiIntent = this.isMultiIntentQuery(queryIntent);
@@ -1935,6 +1965,7 @@ export class AgenticRagService {
       };
     }
     if (
+      mode !== 'agentic' &&
       !multiIntent &&
       (queryIntent.intent === 'system_capability' ||
         queryIntent.intent === 'objective_fact' ||
@@ -2025,27 +2056,33 @@ export class AgenticRagService {
     ) {
       query = queryIntent.standaloneQuery;
     }
+    // Auto 的 Fast Path 只用于选择执行引擎和向升级后的 Agentic 复用首轮证据。
+    // 用户显式选择 Agentic 时直接进入状态机，由 Query Augment 规划后按需取证。
     let fastPathGate =
-      !multiIntent && mode !== 'simple'
+      !multiIntent && mode === 'auto'
         ? await this.karpathyRagService.assessFastPath(
             query,
             userId,
             retrieveOptions,
           )
         : null;
-    const route = mode === 'simple'
+    const route =
+      mode === 'simple'
         ? 'simple'
-        : retrieveOptions.allowConversationStateAnswer
-          ? 'simple'
-        : retrieveOptions.queryIntent?.contextMode === 'mixed'
-          ? 'simple'
-        : isObjectiveFactQuery(query)
-          ? 'simple'
-        : multiIntent
+        : mode === 'agentic'
           ? 'agentic'
-        : mode === 'auto'
-          ? this.resolveAutoRoute(query, Boolean(fastPathGate?.sufficient))
-          : this.classifyRoute(query, mode);
+          : retrieveOptions.allowConversationStateAnswer
+            ? 'simple'
+            : retrieveOptions.queryIntent?.contextMode === 'mixed'
+              ? 'simple'
+              : isObjectiveFactQuery(query)
+                ? 'simple'
+                : multiIntent
+                  ? 'agentic'
+                  : this.resolveAutoRoute(
+                      query,
+                      Boolean(fastPathGate?.sufficient),
+                    );
     observedRoute = route;
     onEvent?.({
       type: 'routing',
@@ -2102,17 +2139,10 @@ export class AgenticRagService {
       };
     }
 
-    if (!fastPathGate) {
-      fastPathGate = await this.karpathyRagService.assessFastPath(
-        query,
-        userId,
-        retrieveOptions,
-      );
-    }
     const obsidianContext = {
-      hits: fastPathGate.obsidianHits,
+      hits: fastPathGate?.obsidianHits ?? [],
       context: this.karpathyRagService.formatObsidianContext(
-        fastPathGate.obsidianHits,
+        fastPathGate?.obsidianHits ?? [],
       ),
     };
     if (obsidianContext.context) {
@@ -2179,8 +2209,8 @@ export class AgenticRagService {
           enableInterrupt,
           retrieveOptions,
           runtimeRunId: retrieveOptions.runtimeRunId,
-          fastPathChunks: fastPathGate.chunks,
-          fastPathBundle: fastPathGate.prefetchedFastPath.evidenceBundle,
+          fastPathChunks: fastPathGate?.chunks ?? [],
+          fastPathBundle: fastPathGate?.prefetchedFastPath.evidenceBundle,
           subQuestionLimit:
             mode === 'auto'
               ? Math.min(this.maxSubQuestions, 2)
@@ -2200,6 +2230,14 @@ export class AgenticRagService {
         (task: { interrupts?: unknown[] }) =>
           Array.isArray(task.interrupts) && task.interrupts.length > 0,
       );
+    const obsidianPaths = Array.from(
+      new Set([
+        ...obsidianContext.hits.map((hit) => hit.path),
+        ...finalState.retrievedChunks
+          .filter((chunk) => chunk.retrievalSource === 'obsidian')
+          .map((chunk) => chunk.id.replace(/^obsidian:/u, '')),
+      ]),
+    );
     if (interrupted) {
       return {
         answer: finalState.answer,
@@ -2209,7 +2247,7 @@ export class AgenticRagService {
         retryCount: 0,
         retrievalSufficient: finalState.retrievalSufficient,
         retrievalReason: finalState.retrievalReason,
-        obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
+        obsidianPaths,
         interrupted: true,
       };
     }
@@ -2222,8 +2260,8 @@ export class AgenticRagService {
       retryCount: finalState.retryCount,
       retrievalSufficient: finalState.retrievalSufficient,
       retrievalReason: finalState.retrievalReason,
-      obsidianPaths: obsidianContext.hits.map((hit) => hit.path),
-        evidenceCoverage: finalState.subQuestions.map((item) => ({
+      obsidianPaths,
+      evidenceCoverage: finalState.subQuestions.map((item) => ({
         id: item.id,
         query: item.question,
         covered: item.sufficient && item.evidenceIds.length > 0,

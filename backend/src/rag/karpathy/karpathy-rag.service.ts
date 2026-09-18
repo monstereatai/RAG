@@ -1495,8 +1495,7 @@ export class KarpathyRagService implements OnModuleInit {
       const modelFallback = !webFallback
         ? await this.answerWithModelFallback(query, history, onToken, retrieveOptions)
         : null;
-      const answer =
-        webFallback?.answer ?? modelFallback?.answer ?? this.unsupportedReliableAnswer();
+      const answer = webFallback?.answer ?? modelFallback?.answer ?? this.unsupportedReliableAnswer();
       if (!webFallback && !modelFallback) onToken?.(answer);
       return {
         answer,
@@ -1983,7 +1982,8 @@ ${memoryText || '无'}
     return this.toReviewedEvidenceChunks(matches);
   }
 
-  private toReviewedEvidenceChunks(matches: BadCaseMatch[]): RetrievedChunk[] {
+  /** 将已审核纠正候选转换为可参与统一证据门禁的片段。 */
+  toReviewedEvidenceChunks(matches: BadCaseMatch[]): RetrievedChunk[] {
     return matches
       .filter((match) => match.mode === 'exact' || match.mode === 'correction')
       .flatMap((match, index): RetrievedChunk[] => {
@@ -2622,7 +2622,13 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     if (!canUseGeneralModel || options.queryIntent?.contextMode === 'conversation_setting') {
       return null;
     }
-    const prompt = `你是通用知识助手。当前资料库没有找到相关内容，联网搜索也不可用。请仅依据可靠通用知识回答，不要声称资料库有依据，也不要把历史用户说法当成事实。若历史中有相关说法，只在答案末尾用“历史对话设定”单独说明。\n历史上下文：${history.filter((item) => item.role === 'human').slice(-5).map((item) => item.content).join('；') || '无'}\n用户问题：${query}\n请直接回答：`;
+    const prompt = `你是通用知识助手。当前资料库没有找到相关内容，联网搜索也不可用。请仅依据可靠通用知识回答，不要声称资料库有依据，也不要把历史用户说法当成事实。若历史中有相关说法，只在答案末尾用“历史对话设定”单独说明。\n历史上下文：${
+      history
+        .filter((item) => item.role === 'human')
+        .slice(-5)
+        .map((item) => item.content)
+        .join('；') || '无'
+    }\n用户问题：${query}\n请直接回答：`;
     const providers: Array<'default' | 'qwen'> = ['default'];
     if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
       providers.push('qwen');
@@ -3016,7 +3022,8 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     }));
   }
 
-  private toObsidianChunks(hits: ObsidianSearchHit[]): RetrievedChunk[] {
+  /** 将 Obsidian 编译知识转换为可引用的统一证据片段。 */
+  toObsidianChunks(hits: ObsidianSearchHit[]): RetrievedChunk[] {
     return hits.map((hit, index) => ({
       id: `obsidian:${hit.path}`,
       content: [

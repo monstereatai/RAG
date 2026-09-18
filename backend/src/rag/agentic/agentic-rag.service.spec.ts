@@ -43,6 +43,8 @@ describe('AgenticRagService budget boundaries', () => {
       getObsidianContext: jest
         .fn()
         .mockResolvedValue({ hits: [], context: '' }),
+      toReviewedEvidenceChunks: jest.fn().mockReturnValue([]),
+      toObsidianChunks: jest.fn().mockReturnValue([]),
       hasIndexedChunks: jest.fn().mockReturnValue(true),
       unsupportedReliableAnswer: jest
         .fn()
@@ -143,6 +145,70 @@ describe('AgenticRagService budget boundaries', () => {
     ).resolveAutoRoute('ACT100 的状态是什么？', true);
 
     expect(route).toBe('simple');
+  });
+
+  it('keeps an explicitly selected agentic request on the state machine', async () => {
+    const { service, karpathyRagService } = createService();
+    const invoke = jest.fn().mockResolvedValue({
+      answer: '已完成深度处理。',
+      retrievedChunks: [],
+      retrievalSufficient: true,
+      retrievalReason: '状态机已完成',
+      confidence: 1,
+      retryCount: 0,
+      subQuestions: [],
+      artifacts: [],
+      executionState: { remainingSteps: 1, remainingToolCalls: 1 },
+    });
+    (
+      service as unknown as { app: { invoke: jest.Mock; getState: jest.Mock } }
+    ).app = {
+      invoke,
+      getState: jest.fn().mockResolvedValue({ tasks: [] }),
+    };
+
+    await expect(
+      service.run(
+        'React 是什么？',
+        'agentic',
+        undefined,
+        [],
+        'thread-1',
+        undefined,
+        [],
+        false,
+        {
+          queryIntent: {
+            intent: 'objective_fact',
+            contextMode: 'none',
+            historyPolicy: 'context_only',
+            confidence: 1,
+            standaloneQuery: 'React 是什么？',
+            multiIntent: false,
+            subQueries: [],
+            action: 'direct_answer',
+            sourcePolicy: 'direct_answer',
+            needsSynthesis: false,
+            requiresGraph: false,
+            targetKbs: ['general'],
+            queryType: 'public_knowledge',
+            entities: [],
+            filters: {
+              department: null,
+              project: null,
+              timeRange: null,
+              documentType: null,
+            },
+            rewriteQueries: [],
+            reason: '稳定公共事实',
+            ambiguity: { detected: false, confidence: 1, senses: [] },
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ route: 'agentic' });
+
+    expect(karpathyRagService.assessFastPath).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it('keeps entity chapter and nickname lookups as one evidence question', () => {
@@ -324,6 +390,48 @@ describe('AgenticRagService budget boundaries', () => {
           producer: 'retrieval',
         }),
       ]),
+    );
+  });
+
+  it('merges planned correction and Obsidian evidence into explicit agentic retrieval', async () => {
+    const { service, karpathyRagService } = createService();
+    const reviewed = chunk('reviewed', 0.96);
+    const obsidian = chunk('obsidian', 0.82);
+    karpathyRagService.retrieve.mockResolvedValue([chunk('formal', 0.9)]);
+    karpathyRagService.toReviewedEvidenceChunks.mockReturnValue([reviewed]);
+    karpathyRagService.getObsidianContext.mockResolvedValue({
+      hits: [{ path: 'notes/rag.md' }],
+      context: 'Obsidian context',
+    });
+    karpathyRagService.toObsidianChunks.mockReturnValue([obsidian]);
+
+    const result = await service.retrievalNode(
+      {
+        query: '请分析活动方案风险',
+        augmentedQueries: [],
+        badCaseMatches: [
+          {
+            id: 'bad-case-1',
+            query: '活动方案风险',
+            text: '正确处理标准：先核对风险清单。',
+            score: 0.96,
+            mode: 'correction',
+          },
+        ],
+      } as unknown as AgenticRagStateType,
+      { configurable: { userId: 'user-1' } },
+    );
+
+    expect(karpathyRagService.getObsidianContext).toHaveBeenCalledWith(
+      '请分析活动方案风险',
+      'user-1',
+      undefined,
+    );
+    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith([
+      { path: 'notes/rag.md' },
+    ]);
+    expect(result.retrievedChunks?.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['reviewed', 'formal']),
     );
   });
 

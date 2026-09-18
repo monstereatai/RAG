@@ -193,6 +193,37 @@ describe('ChatModes Integration', () => {
     expect(res.confidence).toBe(0.95);
   });
 
+  it('should route auto mode through AgenticRagService for engine selection', async () => {
+    agenticRagService.run.mockResolvedValue({
+      answer: 'Auto 选择了 Simple 引擎。',
+      references: [],
+      route: 'simple',
+      confidence: 1,
+      retryCount: 0,
+      retrievalSufficient: true,
+      retrievalReason: '首轮证据充分，单轮回答即可',
+    });
+
+    const res = await chatService.chat(
+      { query: 'ACT100 的状态是什么？', mode: 'auto' },
+      'user-1',
+    );
+
+    expect(agenticRagService.run).toHaveBeenCalledWith(
+      'ACT100 的状态是什么？',
+      'auto',
+      expect.any(Function),
+      [],
+      'new-thread-123',
+      'user-1',
+      expect.any(Array),
+      false,
+      expect.objectContaining({ scope: { role: undefined } }),
+    );
+    expect(res.mode).toBe('auto');
+    expect(res.route).toBe('simple');
+  });
+
   it('should handle history context when matching historical conversations found', async () => {
     const query = 'Show status';
     const threadId = '11111111-1111-4111-8111-111111111111';

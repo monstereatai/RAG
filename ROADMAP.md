@@ -48,6 +48,38 @@
 
 ## 当前结论
 
+- **已新增 Playway 游戏营销活动运营玩法梳理（2026-09-17）**：基于 9 张组件截图、96 个组件清单和运行时注册表，整理新服预约、私域拉新、游戏促活、游戏回流 4 类活动模板，以及预热触达、任务转化、奖励刺激、社交竞争、结果留存、埋点、风控和验收规则；新增 `playway/营销活动运营玩法梳理.md`，并从 `playway/README.md` 建立入口。
+
+- **已收敛三种问答模式边界（2026-09-14）**：Auto 保留一次 Fast Path，仅用于选择 Simple 或 Agentic，并在升级时复用证据；显式 Agentic 不再执行 Auto Fast Path 或降级为 Simple，而是从 Query Augment 开始，规划后并发获取正式 Hybrid RAG、已审核纠正候选和 Obsidian 证据。已用 `chat-modes.integration.spec.ts` 模拟后台三模式完整入口并验证路由、回答持久化与引用参数，另用 `agentic-rag.service.spec.ts` 验证显式 Agentic 不执行 Fast Path 且并发证据汇合；本机后端已启动并通过 `/api/v1/health`、`/api/v1/health/ready`。带登录态的页面三模式实测待主人在后台操作或提供测试账号后补做。
+
+- **已标注 Chat Agentic 并发边界（2026-09-14）**：流程图明确 `retrievalNode` 以 `Promise.all` 并发执行正式 Hybrid RAG、Obsidian 和已审核 Bad Case 纠正证据；图谱仅在 `requiresGraph` 时按计划并入，随后统一进入 Evidence Bundle。
+
+- **已修复 Chat Agentic 流程图裸节点（2026-09-14）**：将 Mermaid 未声明标签的 `J` 改为「Evidence Bundle／证据汇合（统一去重、版本与权限治理）」。
+
+- **已补全 Chat Agentic 最终输出节点（2026-09-14）**：将 Mermaid 未声明标签的 `R` 改为「返回最终答案、引用与 Query Log（持久化正文、证据和运行审计）」。
+
+- **已拆开 Task Agentic 六岗位节点（2026-09-14）**：产研运流程图不再把设计与后端合并，产品、设计、后端、前端、测试、运营六个岗位均独立展示，并保留设计／后端并行、审批和按目标岗位局部重跑关系。
+
+- **已新增岗位产物验收标准（2026-09-15）**：新增 `docs/interview/岗位产物验收标准.md`，用通俗语言说明六岗位交付物、通用自动门禁、岗位依赖、人工审批边界，并区分当前代码已实现能力与待补齐的业务验收用例。
+
+- **已重构 Auto 流程图可读性（2026-09-14）**：补出内部来源约束、并发上下文、Fast Path 并发召回、Base Case 纠正层、正式 Hybrid RAG 的 RRF／Rerank、Obsidian／按需图谱、Evidence Bundle 汇合、质量评估，以及 Simple 复用或升级 Chat Agentic 的分支，节点与当前 `assessFastPath`／`resolveAutoRoute` 实现对应。`git diff --check` 通过。
+
+- **已显式标注 Simple 的用户偏好来源（2026-09-14）**：将 Simple、Auto、Chat Agentic 上下文节点中的“用户偏好”明确写为 `Mem0 用户偏好`，与会话历史、短期记忆／摘要并列展示，并标注为并发读取。`git diff --check` 通过。
+
+- **已标注上下文并发准备（2026-09-14）**：路由、Simple、Auto、Chat Agentic 图明确历史、短期记忆／摘要和用户偏好由 `ChatService` 并发读取，再进入查询标准化、意图路由和三条检索链路；避免被误解为逐项串行加载。`git diff --check` 通过。
+
+- **已补充问答流程的记忆上下文节点（2026-09-14）**：在路由总览、Simple、Auto、Chat Agentic 图中显式标注会话历史、短期记忆／摘要和用户偏好（Mem0）的加载与预算控制；明确这些内容参与查询改写和回答上下文，但仍受历史隔离与权限范围约束。`git diff --check` 通过。
+
+- **已修复 Simple 流程图显示裸节点 ID（2026-09-14）**：补回公共直答命中的结果节点文本「返回答案与引用」，避免 Mermaid 将未定义标签渲染成单独的 `I`。`git diff --check` 通过。
+
+- **已修正 Simple 纠正层并发流程（2026-09-14）**：根据 `KarpathyRagService` 的实际 `Promise.all` 调用，将内部问题改为「纠正层 Base Case 与正式 Hybrid RAG 并发召回，汇合后统一治理与门禁」；公共问题未命中直答门禁时复用同一并发召回，避免流程图误画成内部问题先纠正、再串行查库。`git diff --check` 通过。
+
+- **已修正内部问题绕过纠正层的流程图（2026-09-14）**：Simple 图已明确内部问题也纳入已审核 Bad Case／本地纠正知识范围，并与正式 `local_only` Hybrid RAG 并发召回后统一治理；公共问题保留独立的公共直答／纠正门禁，避免把内部资料误判为公共直答。`git diff --check` 通过。
+
+- **已补全 Simple 流程图知识点（2026-09-14）**：在不改变单轮链路的前提下，图中补明 Base Case、BM25／向量／Obsidian 多路召回、`local_only` 与权限过滤，以及 RRF、版本过滤、父子块补全、证据门禁、网页补证和引用校验，避免只展示抽象的「多路召回」而遗漏实际治理步骤。`git diff --check` 通过。
+
+- **已修正 Simple 流程图的纠正层表达（2026-09-14）**：将「直答命中」改为「直答／纠正门禁」，明确先查已审核 Bad Case 与本地纠正知识；只有未命中时才进入正式单轮 Hybrid RAG，避免图示误解为 Simple 跳过纠正层。`git diff --check` 通过。
+
 - **已补齐第二、三章流程图节点释义（2026-09-14）**：问答路由、Simple、Auto、Chat Agentic 以及 Task Agentic 的总流程、岗位内 Loop、Checkpoint 图均在节点名称后标注实际动作；同时将「需要澄清」与「公共直答」拆为独立门禁，明确内部问题固定进入 `local_only + RAG`。文档图数量保持 29 张，已核对本轮修改图的连线与 `linkStyle` 索引一一对应，`git diff --check` 通过。
 
 - **已重构功能步骤流程文档结构（2026-09-13）**：恢复第四章完整顺序（4.0～4.7）后再进入 Bad Case；压缩 Bad Case 图例，删除文末过期变更日志，统一内部 `local_only + RAG`、网页补证和引用持久化口径。保留 29 张 Mermaid 图，`git diff --check` 通过。
@@ -777,3 +809,6 @@
 - **全量功能流程与实现对照复核**：逐项核对《功能步骤流程.md》的 Simple／Auto／Agentic、RAG、Bad Case、Redis Checkpointer、LangFuse／Prometheus、Agent Ops／Artifact、Prompt Injection／Tool Registry、异步文档任务、Adoption、LLM Gateway、身份权限、记忆、答案质量、Tool／MCP、Prompt Registry、评测发布、SSE、GraphRAG、Web Search、缓存限流、DLP、成本和事故处理流程；新增“功能流程与代码入口对照”表，修正 Bad Case 的 `reviewedBy`／`reviewedAt`、审核分支和无需重启生效口径，补齐 RAG 的跨链路 Bad Case Preflight，并将 DocumentTask 阶段改为代码实际使用的 `parsing`／`embedding`／`vector_index`／`metadata`。文档 Mermaid、旧字段残留和格式检查通过。
 
 - **中国 PC 端与页游公开运营营销资料采集**：新增 `backend/eval/game-marketing-top100.catalog.json`，建立 PC 端候选 Top50 与页游候选 Top50 公开资料目录；新增 `collect-game-marketing-top100.mjs`，按榜单来源记录候选名次，抓取公开官网／活动／运营／营销／社区入口，保存 Markdown 快照、来源、抓取时间、content hash 和失败原因；新增 `docs/plans/游戏运营营销公开资料与Karpathy方案.md`，补充用户操作、数据状态流和 Simple Karpathy Fast Path；最新批次实际抓取 127 个公开页面，目录和 Karpathy 方案入库，108 份唯一目标文档全部完成索引；《失落的方舟》重复登录页面以同源去重摘要卡入库，完整快照保留本地。
+- 2026-09-14：补全 Auto 流程图的联网补证分支，明确仅 `web_allowed` 可调用 Bocha，`local_only` 内部问题禁止联网。
+- 2026-09-14：补充 Auto 与 Simple 的联网边界说明：Auto 主路径交给 Simple 时复用首轮证据且不主动联网，直接 Simple 模式在 `web_allowed` 且本地证据不足时才触发网页回退。
+- 2026-09-14：补充 Chat Agentic 的 Query 标准化节点，明确在来源判断和 Fast Path 前完成历史指代消解、术语统一与 standaloneQuery 生成。
