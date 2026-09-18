@@ -1,0 +1,30 @@
+{
+  "base_commit": "53a52ec456961f8be2f87b19ded01bf3fc2849a8",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/045-golden-evidence-consistency/scope-baseline-T001.json",
+  "new_files": [
+    ".github/workflows/quality-gate.yml",
+    "backend/eval/golden-business.dataset.json",
+    "backend/package.json",
+    "backend/scripts/eval-golden-business.mjs"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    ".github/workflows/quality-gate.yml",
+    "backend/eval/golden-business.dataset.json",
+    "backend/package.json",
+    "backend/scripts/eval-golden-business.mjs"
+  ],
+  "allow_patterns": [
+    "backend/eval/golden-business.dataset.json",
+    "backend/scripts/eval-golden-business.mjs",
+    "backend/package.json",
+    ".github/workflows/quality-gate.yml",
+    "specs/045-golden-evidence-consistency/**"
+  ],
+  "internal_patterns": [
+    "specs/045-golden-evidence-consistency/**",
+    "specs/045-golden-evidence-consistency/scope-baseline-T001.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

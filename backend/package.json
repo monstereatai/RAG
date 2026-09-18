@@ -27,6 +27,7 @@
     "eval:rag:maturity": "node scripts/eval-rag-maturity.mjs",
     "eval:rag:project": "node scripts/eval-rag-project.mjs",
     "eval:agent-platform": "node scripts/eval-agent-platform.mjs",
+    "eval:golden-business": "node scripts/eval-golden-business.mjs",
     "eval:rag:multimodal": "node scripts/eval-multimodal-rag.mjs",
     "eval:rag:multimodal:private": "MULTIMODAL_EVAL_DATASET=eval/private-multimodal.dataset.json MULTIMODAL_EVAL_REQUIRE_ASSETS=true node scripts/eval-multimodal-rag.mjs",
     "eval:rag:langsmith": "node scripts/eval-rag-langsmith.mjs",

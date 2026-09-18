@@ -22,11 +22,9 @@ import {
   type AgenticArtifact,
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
-import { generateAnswerPrompt } from '../prompts/rag.prompts';
 import { isObjectiveFactQuery } from '../prompts/context-policy';
 import {
   detectDangerousQuery,
-  sanitizeUntrustedContext,
 } from '../prompts/prompt-injection.guard';
 import {
   queryAugmentPrompt,
@@ -564,15 +562,16 @@ export class AgenticRagService {
     for (const results of allResults) {
       for (const chunk of results) {
         const existing = fusedMap.get(chunk.id);
-        if (!existing || chunk.totalScore > existing.totalScore) {
+        if (
+          !existing ||
+          this.rankEvidenceChunks([existing, chunk])[0] === chunk
+        ) {
           fusedMap.set(chunk.id, chunk);
         }
       }
     }
 
-    const rankedChunks = Array.from(fusedMap.values()).sort(
-      (a, b) => b.totalScore - a.totalScore,
-    );
+    const rankedChunks = this.rankEvidenceChunks(Array.from(fusedMap.values()));
     const requiredIds = updatedSubQuestions
       .map((item) => item.evidenceIds[0])
       .filter((id): id is string => Boolean(id));
@@ -1054,6 +1053,14 @@ export class AgenticRagService {
           ),
         config,
       );
+      const originalScoreById = new Map(
+        state.retrievedChunks.map((chunk) => [chunk.id, chunk.totalScore]),
+      );
+      const rerankedChunks = chunks.map((chunk) => ({
+        ...chunk,
+        totalScore: originalScoreById.get(chunk.id) ?? chunk.totalScore,
+        rerankScore: chunk.totalScore,
+      }));
       onEvent?.({
         type: 'rerank',
         data: {
@@ -1062,7 +1069,11 @@ export class AgenticRagService {
           count: chunks.length,
         },
       });
-      return { retrievedChunks: chunks, reranked: true };
+      return {
+        retrievedChunks:
+          this.rankEvidenceChunks(rerankedChunks),
+        reranked: true,
+      };
     } catch (err) {
       this.logger.warn(`DashScope rerank skipped: ${(err as Error).message}`);
       onEvent?.({
@@ -1094,6 +1105,8 @@ export class AgenticRagService {
       role: string;
       content: string;
     }>;
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
     const badCaseMatches = state.badCaseMatches ?? [];
     const badCasePrompt = badCaseMatches.length
       ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
@@ -1158,15 +1171,10 @@ export class AgenticRagService {
       };
     }
 
-    const context = state.retrievedChunks
-      .map((c, i) => `[片段 ${i + 1}]\n${sanitizeUntrustedContext(c.content)}`)
-      .join('\n\n---\n\n');
-
     type GenerationLoopState = {
       answer: string;
       citationGate?: { sufficient: boolean; reason: string };
     };
-    const model = this.llmProvider.getModel();
     const loop = await this.agentLoop.run<
       GenerationLoopState,
       GenerationLoopState
@@ -1184,52 +1192,21 @@ export class AgenticRagService {
             type: 'model' as const,
             name: 'generate_grounded_answer',
             execute: async () => {
-              const messages = await generateAnswerPrompt.formatMessages({
-                context,
-                query: state.query,
-                history,
-                memory: generationMemory,
-              });
-              const stream = await model.stream(messages);
-              let draft = '';
-              for await (const chunk of stream) {
-                const token =
-                  typeof chunk.content === 'string'
-                    ? chunk.content
-                    : JSON.stringify(chunk.content);
-                if (!token) continue;
-                draft += token;
-                onEvent?.({ type: 'token', data: token });
-              }
-              // 某些模型配置可建立连接但返回空内容；不能把这种空结果直接
-              // 交给引用门禁，否则用户只会看到“生成失败”。用默认 Qwen
-              // 复用同一批证据重试一次，仍失败再进入安全降级。
-              if (
-                !draft.trim() &&
-                this.llmProvider.getActiveProviderName() !== 'qwen'
-              ) {
-                const fallbackModel = this.llmProvider.getModel('qwen');
-                for await (const chunk of await fallbackModel.stream(
-                  messages,
-                )) {
-                  const token =
-                    typeof chunk.content === 'string'
-                      ? chunk.content
-                      : JSON.stringify(chunk.content);
-                  if (!token) continue;
-                  draft += token;
-                  onEvent?.({ type: 'token', data: token });
-                }
-              }
-              const withVersionNotice =
-                this.karpathyRagService.addVersionConflictNotice(
-                  draft,
+              const grounded =
+                await this.karpathyRagService.generateGroundedAnswer(
+                  state.query,
                   state.retrievedChunks,
+                  history,
+                  generationMemory,
+                  (token) => onEvent?.({ type: 'token', data: token }),
+                  {
+                    userId: this.userIdFromConfig(config),
+                    scope: retrieveOptions.scope,
+                    entities: retrieveOptions.entities,
+                    needsSynthesis: retrieveOptions.needsSynthesis,
+                  },
                 );
-              return this.karpathyRagService.repairAnswerCitations(
-                withVersionNotice,
-                state.retrievedChunks,
-              );
+              return grounded.answer;
             },
             reduce: (current: GenerationLoopState, answer: string) => ({
               ...current,
@@ -1368,7 +1345,11 @@ export class AgenticRagService {
       };
     }
 
-    onEvent?.({ type: 'citation', data: state.retrievedChunks });
+    const citedChunks = this.karpathyRagService.selectCitedChunks(
+      answer,
+      state.retrievedChunks,
+    );
+    onEvent?.({ type: 'citation', data: citedChunks });
     const artifacts = this.withAnswerArtifact(
       state,
       answer,
@@ -1377,7 +1358,7 @@ export class AgenticRagService {
       '答案通过引用和子问题覆盖校验',
     );
     onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-    return { answer, artifacts };
+    return { answer, retrievedChunks: citedChunks, artifacts };
   }
 
   private async synthesizeEvidenceAnswer(
@@ -2756,6 +2737,22 @@ export class AgenticRagService {
     const value = this.configService.get<number>(key) ?? fallback;
     if (!Number.isFinite(value)) return fallback;
     return Math.min(max, Math.max(min, value));
+  }
+
+  private rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[] {
+    const sharedRanker = (
+      this.karpathyRagService as KarpathyRagService & {
+        rankEvidenceChunks?: (items: RetrievedChunk[]) => RetrievedChunk[];
+      }
+    ).rankEvidenceChunks;
+    if (typeof sharedRanker === 'function') {
+      return sharedRanker.call(this.karpathyRagService, chunks);
+    }
+    return [...chunks].sort((left, right) => {
+      const leftScore = left.rerankScore ?? left.totalScore;
+      const rightScore = right.rerankScore ?? right.totalScore;
+      return rightScore - leftScore;
+    });
   }
 
   private async withTimeout<T>(

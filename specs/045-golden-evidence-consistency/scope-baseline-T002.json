@@ -1,0 +1,42 @@
+{
+  "schema_version": 2,
+  "base_commit": "53a52ec456961f8be2f87b19ded01bf3fc2849a8",
+  "initial_snapshots": {
+    ".github/workflows/quality-gate.yml": {
+      "kind": "file",
+      "sha256": "0cdc3a4df5ad2be01da79bc498ad08c5cbf1c3af184e4fa89ec3d74f64e8732c"
+    },
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "736d84013684db199a1e093b1917e145caf3f0a9dc9a59459cadf989df06a20a"
+    },
+    "backend/eval/golden-business.dataset.json": {
+      "kind": "file",
+      "sha256": "196b10545f124cbf42e95b72920bb42d0b4b37ff289a23c433fd2143e87c8821"
+    },
+    "backend/package.json": {
+      "kind": "file",
+      "sha256": "baa43f74c55520870b57deaa4e6a4511911a145efb1a8f4008489757f44eaf10"
+    },
+    "backend/scripts/eval-golden-business.mjs": {
+      "kind": "file",
+      "sha256": "d4c3773ee06dc5407eb2e314500dfafa75433337c77aca86f37aaaddd36a19b8"
+    },
+    "backend/src/rag/agentic/agentic-rag.service.ts": {
+      "kind": "file",
+      "sha256": "5ba80357ee9c29565f3ba5b488ce68808715b58c2ad73e2fa6159fe6cfb43394"
+    },
+    "backend/src/rag/karpathy/karpathy-rag.service.ts": {
+      "kind": "file",
+      "sha256": "56b02056e3c48fad369f43a2ee135f7ef13d8512685fc5cd1aed7f55fec666da"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "bfa8dc8efa033766628f9058a0691bd43d2381dfc0428d68690b9769081e75eb"
+    }
+  },
+  "internal_patterns": [
+    "specs/045-golden-evidence-consistency/**",
+    "specs/045-golden-evidence-consistency/scope-baseline-T002.json"
+  ]
+}

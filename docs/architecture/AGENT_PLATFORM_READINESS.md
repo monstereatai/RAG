@@ -47,6 +47,12 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 
 这会要求服务健康检查、登录、上传评测资料，并通过同一个 `/api/v1/chat` 入口逐模式执行。评测报告会保留答案、引用数量、检索充分性、路由和失败原因。
 
+本次补充了 `backend/eval/golden-business.dataset.json` 业务黄金评测集：当前包含 86 条可审计案例和 37 份脱敏／项目样本文档，覆盖内部业务问答、多轮上下文、冲突事实、引用准确性、拒答／联网降级和三模式路由六个维度。它通过 `npm run eval:golden-business` 做离线结构校验；设置 `GOLDEN_EVAL_REQUIRE_LIVE=true` 后，会登录真实后端、上传样本文档，并对同一批问题分别调用 `simple`、`auto`、`agentic` 三种模式，输出分模式通过率、引用数、检索充分性、路由和失败原因。
+
+评测集目前是仓库内可复现的脱敏基线，不等同于真实生产黄金集。接入真实内部问题时，只需保留同一字段和六类维度，将 `sourceDocument.content` 替换为经过权限脱敏的业务资料，并由业务专家确认参考答案、引用片段和拒答边界。
+
+三条链路现在共用证据顺序和回答门禁：已执行的 Rerank 结果优先按 `rerankScore` 排序，未执行 Rerank 的候选回退到 RRF 的 `totalScore`；生成结果统一经过引用校验，失败后按受约束语义总结、结构化事实抽取、安全降级依次处理。Agentic 的多路并发结果汇合后也复用同一排序器，不再把 Rerank 结果重新按旧 RRF 分数打乱。
+
 ### 可观测性
 
 - HTTP 和 Agent Node span 写入 `trace_spans`，查询接口优先读数据库。
@@ -59,6 +65,7 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 
 - 没有真实生产流量、真实业务评测集和告警接收地址时，不能宣称“生产 SLA 已达标”。
 - CI 默认只做确定性评测；真实三模式接口评测必须在后端、数据库、Redis、Milvus 和模型配置齐全时设置 `AGENT_PLATFORM_REQUIRE_LIVE=true`。
+- 黄金集的离线结构校验通过，不代表 86 条案例在真实模型和真实内部资料上全部答对；真实业务准确率、引用精度和路由准确率必须在 `GOLDEN_EVAL_REQUIRE_LIVE=true` 回放后，再由业务专家复核。
 - 新增迁移需要在目标环境执行 `npm run migration:run`，本地构建通过不代表生产数据库已经升级。
 
 ## 验证入口

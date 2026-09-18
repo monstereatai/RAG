@@ -49,6 +49,8 @@
 
 ## 当前结论
 
+- **已补充业务黄金评测集并统一三链路证据能力（2026-09-18）**：新增 `backend/eval/golden-business.dataset.json`，当前包含 86 条可复现案例、37 份脱敏／项目样本文档和六类质量维度，覆盖内部业务问答、多轮上下文、冲突事实、引用准确性、拒答／联网降级及 Simple／Auto／Agentic 路由；新增 `npm run eval:golden-business`，离线结构门禁已通过，并支持设置 `GOLDEN_EVAL_REQUIRE_LIVE=true` 后通过同一 `/api/v1/chat` 入口逐模式回放。证据排序统一为 Rerank 优先、RRF 兜底，Agentic 并发汇合不再按旧 `totalScore` 打乱；三链路共用受约束生成、引用校验和安全降级。Karpathy／Agentic 定向测试 50／50、backend build ✅。当前黄金集仍是脱敏基线，真实生产准确率和业务专家验收待接入真实内部资料后确认；真实回放当前被 Redis `MISCONF`（RDB 快照无法持久化导致写入被禁止）阻塞，未修改 Redis 配置。
+
 - **已补齐高级 Agent 平台运行闭环（2026-09-18）**：Agent Run 新增可取消、取消原因和最后检查点持久化，Agent Loop 在每轮安全边界读取 Redis 取消标记，失败／取消运行支持幂等重试；新增 `trace_spans` 迁移与数据库优先、内存降级的 Trace 查询；统一 `eval:agent-platform` 默认覆盖 Simple、Auto、Agentic，并接入 CI，离线路由、任务和产研流程门禁通过，服务不可用时明确标记真实回放为 skipped。新增 `docs/architecture/AGENT_PLATFORM_READINESS.md`、Prometheus 告警和 Grafana 看板模板。Docker 启动后已执行 23 个数据库迁移，后端健康检查返回 200，并完成三模式真实入口抽样回放；完整项目评测仍因 Milvus 容器反复重启导致上传阶段 `14 UNAVAILABLE`，待 Milvus 稳定后重跑 `AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform`。
 
 - **已完成高级 Agent 平台本地验证（2026-09-18）**：确定性门禁通过（路由 12／12、Agent Task 8／8、Production Workflow 10／10），Simple／Auto／Agentic 对内部差旅制度问题均返回带引用的 650 元结论（引用数 6／6／5）。RRF 流程问题的证据门禁按链路分别表现为 Simple 安全降级、Auto 返回 3 条引用、Agentic 安全降级；该抽样结果已写入 `specs/044-senior-agent-platform/verify.md`，不把 Milvus 故障下的完整 E2E 标为通过。

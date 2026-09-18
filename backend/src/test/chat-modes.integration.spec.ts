@@ -224,6 +224,42 @@ describe('ChatModes Integration', () => {
     expect(res.route).toBe('simple');
   });
 
+  it('preserves the same evidence response contract across simple, auto and agentic', async () => {
+    const reference = {
+      id: 'chunk-1',
+      docId: 'doc-1',
+      chunkIndex: 0,
+      content: '内部流程证据',
+      score: 0.91,
+    };
+    for (const mode of ['simple', 'auto', 'agentic'] as const) {
+      karpathyRagService.answer.mockResolvedValueOnce({
+        answer: '已根据证据回答。[片段1]',
+        references: [reference],
+        retrievalSufficient: true,
+        retrievalReason: '统一证据门禁通过',
+      });
+      agenticRagService.run.mockResolvedValueOnce({
+        answer: '已根据证据回答。[片段1]',
+        references: [reference],
+        route: mode === 'auto' ? 'simple' : 'agentic',
+        confidence: 1,
+        retryCount: 0,
+        retrievalSufficient: true,
+        retrievalReason: '统一证据门禁通过',
+      });
+
+      const result = await chatService.chat(
+        { query: `内部证据测试-${mode}`, mode },
+        'user-1',
+      );
+
+      expect(result.references).toEqual([reference]);
+      expect(result.retrievalSufficient).toBe(true);
+      expect(result.answer).toContain('[片段1]');
+    }
+  });
+
   it('should handle history context when matching historical conversations found', async () => {
     const query = 'Show status';
     const threadId = '11111111-1111-4111-8111-111111111111';

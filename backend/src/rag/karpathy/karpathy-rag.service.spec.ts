@@ -110,6 +110,36 @@ describe('KarpathyRagService exception scenarios', () => {
     };
   }
 
+  it('puts reranked evidence before RRF fallback evidence', () => {
+    const { service } = createService();
+    const chunks = [
+      {
+        id: 'rrf-high',
+        content: 'RRF candidate',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        bm25Score: 1,
+        cosineScore: 1,
+        totalScore: 0.9,
+      },
+      {
+        id: 'rerank-lower-rrf',
+        content: 'Rerank candidate',
+        docId: 'doc-2',
+        chunkIndex: 0,
+        bm25Score: 0.1,
+        cosineScore: 0.1,
+        totalScore: 0.1,
+        rerankScore: 0.8,
+      },
+    ];
+
+    expect(service.rankEvidenceChunks(chunks).map((chunk) => chunk.id)).toEqual([
+      'rerank-lower-rrf',
+      'rrf-high',
+    ]);
+  });
+
   it('merges reviewed Base Case evidence into the Simple answer gate', async () => {
     const { service, llmInvoke, retrieveBadCaseMatches } = createService();
     llmInvoke.mockResolvedValue(

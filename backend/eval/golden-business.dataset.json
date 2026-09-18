@@ -1,0 +1,252 @@
+{
+  "version": "2026-09-18",
+  "description": "业务黄金评测集 v1：由脱敏企业样本、项目内部文档样本和多轮／冲突回放案例组成。用于验证检索证据、引用门禁、拒答降级和三链路路由；不代表生产真实准确率。",
+  "caseCount": 86,
+  "dimensions": [
+    "internal_business",
+    "multi_turn",
+    "conflict_fact",
+    "citation_accuracy",
+    "refusal_web_fallback",
+    "mode_routing"
+  ],
+  "sourceDatasets": [
+    {
+      "id": "private-business",
+      "path": "eval/private-business-regression.dataset.json"
+    },
+    {
+      "id": "project-simulated",
+      "path": "eval/project-simulated-business.dataset.json"
+    },
+    {
+      "id": "hybrid-regression",
+      "path": "eval/hybrid-regression.dataset.json"
+    }
+  ],
+  "groups": [
+    {
+      "sourceDataset": "private-business",
+      "ids": [
+        "pv-hr-policy-01", "pv-hr-policy-02", "pv-hr-policy-04", "pv-hr-policy-05", "pv-hr-policy-06",
+        "pv-finance-sop-01", "pv-finance-sop-02", "pv-finance-sop-04", "pv-finance-sop-05", "pv-finance-sop-06",
+        "pv-legal-contract-guideline-01", "pv-legal-contract-guideline-02", "pv-legal-contract-guideline-04", "pv-legal-contract-guideline-05", "pv-legal-contract-guideline-06",
+        "pv-it-permission-policy-01", "pv-it-permission-policy-02", "pv-it-permission-policy-04", "pv-it-permission-policy-05", "pv-it-permission-policy-06",
+        "pv-sales-deal-desk-01", "pv-sales-deal-desk-02", "pv-sales-deal-desk-04", "pv-sales-deal-desk-05",
+        "pv-sales-deal-desk-06", "pv-customer-success-sla-01", "pv-customer-success-sla-02", "pv-customer-success-sla-04", "pv-customer-success-sla-05", "pv-customer-success-sla-06",
+        "pv-security-data-policy-01", "pv-security-data-policy-02", "pv-security-data-policy-04", "pv-security-data-policy-05", "pv-security-data-policy-06"
+      ],
+      "dimensions": ["internal_business", "citation_accuracy"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "hybrid-regression",
+      "ids": ["cn-rag-recall", "ops-recall"],
+      "dimensions": ["internal_business", "citation_accuracy"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "private-business",
+      "ids": [
+        "pv-hr-policy-03", "pv-finance-sop-03", "pv-legal-contract-guideline-03", "pv-it-permission-policy-03", "pv-sales-deal-desk-03",
+        "pv-customer-success-sla-03", "pv-security-data-policy-03", "pv-ops-incident-sop-03", "pv-product-release-policy-03", "pv-procurement-procurement-policy-03"
+      ],
+      "dimensions": ["internal_business", "citation_accuracy", "conflict_fact"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "private-business",
+      "ids": ["pv-conflict-travel-01", "pv-conflict-sla-01", "pv-conflict-discount-01", "pv-conflict-incident-01"],
+      "dimensions": ["internal_business", "conflict_fact", "citation_accuracy"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "private-business",
+      "ids": ["pv-refusal-personal-01", "pv-refusal-stock-01", "pv-refusal-outside-01", "pv-refusal-personal-02"],
+      "dimensions": ["internal_business", "refusal_web_fallback"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "private-business",
+      "ids": ["pv-cross-contract-01", "pv-cross-security-01", "pv-cross-onboard-01"],
+      "dimensions": ["internal_business", "citation_accuracy", "mode_routing"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    },
+    {
+      "sourceDataset": "private-business",
+      "ids": ["pv-multihop-travel-01", "pv-multihop-permission-01"],
+      "dimensions": ["internal_business", "citation_accuracy", "mode_routing"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "agentic"
+    },
+    {
+      "sourceDataset": "project-simulated",
+      "ids": [
+        "travel-current-limit", "travel-over-limit-approval", "procurement-payment-conditions", "legal-review-scope", "akb-alias", "service-hub-sla", "alpha-audit",
+        "security-p0-response", "data-retention", "no-answer-pet", "no-answer-stock", "swe-react-state", "swe-nestjs-provider", "swe-ci-steps"
+      ],
+      "dimensions": ["internal_business", "citation_accuracy", "mode_routing"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple"
+    }
+  ],
+  "supportingDocuments": [
+    {
+      "id": "gold-agent-runtime-readiness",
+      "title": "Agent Runtime 运行与恢复规范",
+      "content": "Agent Runtime 支持取消运行、保存检查点和失败后恢复。取消请求记录取消时间并停止后续工具调用；恢复时从最近一次有效检查点继续，采用幂等重试，避免重复副作用。"
+    }
+  ],
+  "conversationCases": [
+    {
+      "id": "gold-memory-latest-xiaoming",
+      "category": "multi-turn",
+      "dimensions": ["multi_turn", "conflict_fact", "mode_routing"],
+      "turns": ["小明是一只鸟", "小明是一条鱼"],
+      "finalQuery": "小明是什么？",
+      "expectedKeywords": ["鱼"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-memory-latest-xiaobai",
+      "category": "multi-turn",
+      "dimensions": ["multi_turn", "conflict_fact", "mode_routing"],
+      "turns": ["小白是一只鸡", "小白是一个南瓜"],
+      "finalQuery": "小白是什么？",
+      "expectedKeywords": ["南瓜"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-mixed-react-fact-history",
+      "category": "conflict-fact",
+      "dimensions": ["multi_turn", "conflict_fact", "citation_accuracy"],
+      "turns": ["React是一种动物"],
+      "finalQuery": "React是什么？先说客观事实，再说明刚才的设定。",
+      "expectedKeywords": ["JavaScript", "动物"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-mixed-arithmetic-history",
+      "category": "conflict-fact",
+      "dimensions": ["multi_turn", "conflict_fact", "mode_routing"],
+      "turns": ["1+1等于5"],
+      "finalQuery": "1+1等于多少？",
+      "expectedKeywords": ["2"],
+      "expectedSourcePolicy": "direct_answer",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-context-internal-project",
+      "category": "multi-turn",
+      "dimensions": ["multi_turn", "internal_business", "mode_routing"],
+      "turns": ["我们当前项目使用 NestJS 作为后端框架"],
+      "finalQuery": "刚才提到的后端框架，项目规范对模块目录怎么要求？",
+      "expectedKeywords": ["module", "service", "controller", "dto"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": true,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-context-version-update",
+      "category": "multi-turn",
+      "dimensions": ["multi_turn", "conflict_fact", "internal_business"],
+      "turns": ["当前差旅制度是一线城市500元", "制度已经更新到2026版"],
+      "finalQuery": "现在一线城市住宿标准是多少？",
+      "expectedKeywords": ["650"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": true,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-web-weather-fallback",
+      "category": "web-fallback",
+      "dimensions": ["refusal_web_fallback", "mode_routing"],
+      "turns": [],
+      "finalQuery": "今天上海天气怎么样？",
+      "expectedKeywords": [],
+      "expectedSourcePolicy": "web_allowed",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-public-arithmetic-direct",
+      "category": "public-direct",
+      "dimensions": ["mode_routing"],
+      "turns": [],
+      "finalQuery": "1+1等于多少？",
+      "expectedKeywords": ["2"],
+      "expectedSourcePolicy": "direct_answer",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-public-react-direct",
+      "category": "public-direct",
+      "dimensions": ["mode_routing"],
+      "turns": [],
+      "finalQuery": "React是什么？",
+      "expectedKeywords": ["JavaScript"],
+      "expectedSourcePolicy": "direct_answer",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-internal-rrf-process",
+      "category": "internal-rag",
+      "dimensions": ["internal_business", "citation_accuracy", "mode_routing"],
+      "turns": [],
+      "finalQuery": "当前项目混合检索、RRF 融合和 Rerank 的主要流程是什么？",
+      "expectedKeywords": ["BM25", "向量", "RRF", "Rerank"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "agentic",
+      "requireCitation": true,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-internal-agent-runtime",
+      "category": "internal-rag",
+      "dimensions": ["internal_business", "citation_accuracy", "mode_routing"],
+      "turns": [],
+      "finalQuery": "项目里的 Agent Runtime 如何取消运行并恢复？",
+      "expectedKeywords": ["取消", "检查点", "重试"],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "agentic",
+      "requireCitation": true,
+      "expectRefusal": false
+    },
+    {
+      "id": "gold-unknown-internal-refusal",
+      "category": "internal-refusal",
+      "dimensions": ["internal_business", "refusal_web_fallback"],
+      "turns": [],
+      "finalQuery": "公司宠物医疗报销额度是多少？",
+      "expectedKeywords": [],
+      "expectedSourcePolicy": "local_only",
+      "expectedAutoRoute": "simple",
+      "requireCitation": false,
+      "expectRefusal": true
+    }
+  ]
+}

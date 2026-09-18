@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "base_commit": "53a52ec456961f8be2f87b19ded01bf3fc2849a8",
+  "initial_snapshots": {
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "1e06b3affe511e1e3c2789696ad49adad0317dd77d03ebedaa178781120ab476"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "bfa8dc8efa033766628f9058a0691bd43d2381dfc0428d68690b9769081e75eb"
+    }
+  },
+  "internal_patterns": [
+    "specs/045-golden-evidence-consistency/**",
+    "specs/045-golden-evidence-consistency/scope-baseline-T001.json"
+  ]
+}

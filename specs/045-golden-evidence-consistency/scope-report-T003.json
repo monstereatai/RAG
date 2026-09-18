@@ -1,0 +1,27 @@
+{
+  "base_commit": "53a52ec456961f8be2f87b19ded01bf3fc2849a8",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/045-golden-evidence-consistency/scope-baseline-T003.json",
+  "new_files": [
+    "ROADMAP.md",
+    "backend/src/test/chat-modes.integration.spec.ts",
+    "docs/architecture/AGENT_PLATFORM_READINESS.md"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "ROADMAP.md",
+    "backend/src/test/chat-modes.integration.spec.ts",
+    "docs/architecture/AGENT_PLATFORM_READINESS.md"
+  ],
+  "allow_patterns": [
+    "backend/src/test/chat-modes.integration.spec.ts",
+    "docs/architecture/AGENT_PLATFORM_READINESS.md",
+    "ROADMAP.md",
+    "specs/045-golden-evidence-consistency/**"
+  ],
+  "internal_patterns": [
+    "specs/045-golden-evidence-consistency/**",
+    "specs/045-golden-evidence-consistency/scope-baseline-T003.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

@@ -28,3 +28,4 @@ jobs:
       - run: pnpm --dir backend run enterprise:readiness
       - run: pnpm --dir backend run eval:rag:quality
       - run: pnpm --dir backend run eval:agent-platform
+      - run: pnpm --dir backend run eval:golden-business

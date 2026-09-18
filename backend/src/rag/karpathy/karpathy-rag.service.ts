@@ -2032,6 +2032,200 @@ ${memoryText || '无'}
     return this.assessCitationSupport(answer, chunks);
   }
 
+  /**
+   * 统一证据顺序：已执行 Rerank 的候选优先按 rerankScore，未执行 Rerank
+   * 的候选回退到 Hybrid RRF 的 totalScore。这样 Agentic 合并多路结果后，
+   * 不会再把 Rerank 结果重新按旧的 RRF 分数打乱。
+   */
+  rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[] {
+    return [...chunks].sort((left, right) => {
+      const leftHasRerank = left.rerankScore !== undefined;
+      const rightHasRerank = right.rerankScore !== undefined;
+      if (leftHasRerank !== rightHasRerank) {
+        return leftHasRerank ? -1 : 1;
+      }
+      const leftScore = leftHasRerank
+        ? (left.rerankScore as number)
+        : left.totalScore;
+      const rightScore = rightHasRerank
+        ? (right.rerankScore as number)
+        : right.totalScore;
+      if (rightScore !== leftScore) return rightScore - leftScore;
+      if (right.totalScore !== left.totalScore) {
+        return right.totalScore - left.totalScore;
+      }
+      return left.id.localeCompare(right.id);
+    });
+  }
+
+  /**
+   * Agentic 生成节点复用的统一回答器。它与 Simple／Auto 共用同一套：
+   * 受约束生成 → 引用门禁 → 语义压缩 → 结构化抽取 → 安全降级。
+   * 生成过程先缓存在内存里，只有通过引用校验的答案才推送给前端，避免
+   * 先展示一段未被证据支持的草稿、随后又追加一段兜底答案。
+   */
+  async generateGroundedAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    memoryMessages: Array<{ role: string; content: string }> = [],
+    onToken?: (token: string) => void,
+    options: {
+      userId?: string;
+      scope?: RetrievalScope;
+      entities?: string[];
+      needsSynthesis?: boolean;
+    } = {},
+  ): Promise<KarpathyRagResult> {
+    const evidenceChunks = this.rankEvidenceChunks(chunks);
+    if (evidenceChunks.length === 0) {
+      return {
+        answer: this.unsupportedReliableAnswer(),
+        references: [],
+        retrievalSufficient: false,
+        retrievalReason: '没有检索到可用于回答的证据片段',
+      };
+    }
+
+    const normalizedQuery = this.normalizeQuery(query);
+    const deterministic = options.needsSynthesis
+      ? null
+      : this.buildDeterministicAnswer(
+          normalizedQuery,
+          evidenceChunks,
+          options.userId,
+          options.scope,
+        );
+    if (deterministic) {
+      onToken?.(deterministic);
+      return {
+        answer: deterministic,
+        references: this.toReferences(evidenceChunks),
+        retrievalSufficient: true,
+        retrievalReason: '命中明确结构化事实，已使用统一抽取式回答',
+      };
+    }
+
+    const context = evidenceChunks
+      .map(
+        (chunk, index) =>
+          `[片段 ${index + 1}｜${chunk.contextRole ?? 'hit'}]\n${sanitizeUntrustedContext(chunk.content)}`,
+      )
+      .join('\n\n---\n\n');
+    const messages = await generateAnswerPrompt.formatMessages({
+      context,
+      query: this.normalizePromptQuery(query),
+      history,
+      memory: memoryMessages,
+    });
+    const streamAnswer = async (model: ReturnType<LlmProvider['getModel']>) => {
+      let answer = '';
+      for await (const chunk of await model.stream(messages)) {
+        const token =
+          typeof chunk.content === 'string'
+            ? chunk.content
+            : JSON.stringify(chunk.content);
+        if (token) answer += token;
+      }
+      return answer.trim();
+    };
+
+    let rawAnswer = await streamAnswer(this.llmProvider.getModel());
+    if (
+      !rawAnswer &&
+      this.llmProvider.getActiveProviderName?.() !== 'qwen'
+    ) {
+      rawAnswer = await streamAnswer(this.llmProvider.getModel('qwen'));
+    }
+    const answer = this.attachMissingClaimCitations(
+      this.addVersionConflictNotice(rawAnswer, evidenceChunks),
+      evidenceChunks,
+    );
+    const citationGate = this.assessCitationSupport(answer, evidenceChunks);
+    if (citationGate.sufficient) {
+      const citedChunks = this.selectCitedChunks(answer, evidenceChunks);
+      onToken?.(answer);
+      return {
+        answer,
+        references: this.toReferences(citedChunks),
+        retrievalSufficient: true,
+        retrievalReason: '统一生成结果通过引用门禁',
+      };
+    }
+
+    let synthesized = await this.synthesizeEvidenceAnswer(
+      normalizedQuery,
+      evidenceChunks,
+    );
+    let synthesisGate = synthesized
+      ? this.assessCitationSupport(
+          this.attachMissingClaimCitations(synthesized, evidenceChunks),
+          evidenceChunks,
+        )
+      : null;
+    if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
+      try {
+        synthesized = await this.llmProvider.runWithModel('qwen', () =>
+          this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
+        );
+        synthesisGate = synthesized
+          ? this.assessCitationSupport(
+              this.attachMissingClaimCitations(synthesized, evidenceChunks),
+              evidenceChunks,
+            )
+          : null;
+      } catch (error) {
+        this.logger.warn(
+          `Qwen semantic fallback failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    const repairedSynthesis = synthesized
+      ? this.attachMissingClaimCitations(synthesized, evidenceChunks)
+      : null;
+    if (repairedSynthesis && synthesisGate?.sufficient) {
+      const citedChunks = this.selectCitedChunks(
+        repairedSynthesis,
+        evidenceChunks,
+      );
+      onToken?.(repairedSynthesis);
+      return {
+        answer: repairedSynthesis,
+        references: this.toReferences(citedChunks),
+        retrievalSufficient: true,
+        retrievalReason: '统一生成结果未过门禁，已用受约束语义总结通过校验',
+      };
+    }
+
+    const deterministicFallback = this.buildEvidenceFirstAnswer(
+      normalizedQuery,
+      evidenceChunks,
+      options.userId,
+      options.scope,
+      options.entities,
+    );
+    if (deterministicFallback) {
+      const citedChunks = this.selectCitedChunks(
+        deterministicFallback,
+        evidenceChunks,
+      );
+      onToken?.(deterministicFallback);
+      return {
+        answer: deterministicFallback,
+        references: this.toReferences(citedChunks),
+        retrievalSufficient: true,
+        retrievalReason: '统一生成结果未过门禁，已回退为结构化事实回答',
+      };
+    }
+
+    return {
+      answer: this.generationUnavailableWithEvidenceAnswer,
+      references: [],
+      retrievalSufficient: false,
+      retrievalReason: `${citationGate.reason}；统一语义总结未通过引用门禁，已安全降级`,
+    };
+  }
+
   /** 供 Agentic 生成链路复用的统一引用格式修复。 */
   repairAnswerCitations(answer: string, chunks: RetrievedChunk[]): string {
     return this.attachMissingClaimCitations(answer, chunks);

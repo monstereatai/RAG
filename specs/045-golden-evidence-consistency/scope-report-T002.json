@@ -1,0 +1,27 @@
+{
+  "base_commit": "53a52ec456961f8be2f87b19ded01bf3fc2849a8",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/045-golden-evidence-consistency/scope-baseline-T002.json",
+  "new_files": [
+    "backend/src/rag/karpathy/karpathy-rag.service.spec.ts"
+  ],
+  "modified_preexisting_files": [
+    "backend/src/rag/agentic/agentic-rag.service.ts"
+  ],
+  "touched_files": [
+    "backend/src/rag/karpathy/karpathy-rag.service.spec.ts",
+    "backend/src/rag/agentic/agentic-rag.service.ts"
+  ],
+  "allow_patterns": [
+    "backend/src/rag/karpathy/karpathy-rag.service.ts",
+    "backend/src/rag/agentic/agentic-rag.service.ts",
+    "backend/src/rag/karpathy/karpathy-rag.service.spec.ts",
+    "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+    "specs/045-golden-evidence-consistency/**"
+  ],
+  "internal_patterns": [
+    "specs/045-golden-evidence-consistency/**",
+    "specs/045-golden-evidence-consistency/scope-baseline-T002.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}
