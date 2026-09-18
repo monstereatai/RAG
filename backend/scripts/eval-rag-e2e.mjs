@@ -4,7 +4,7 @@ const baseUrl = (process.env.EVAL_RAG_E2E_BASE_URL ?? 'http://localhost:3000')
   .replace(/\/$/, '');
 const datasetPath =
   process.env.EVAL_RAG_E2E_DATASET ?? 'eval/hybrid-regression.dataset.json';
-const modes = (process.env.EVAL_RAG_E2E_MODES ?? 'simple,auto')
+const modes = (process.env.EVAL_RAG_E2E_MODES ?? 'simple,auto,agentic')
   .split(',')
   .map((mode) => mode.trim())
   .filter(Boolean);

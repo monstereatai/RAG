@@ -36,6 +36,7 @@ import { AgentTaskEntity } from './entities/agent-task.entity';
 import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
 import { DomainEventOutboxEntity } from './entities/domain-event-outbox.entity';
 import { DomainEventSubscriptionEntity } from './entities/domain-event-subscription.entity';
+import { TraceSpanEntity } from './entities/trace-span.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -107,6 +108,7 @@ import { DomainEventSubscriptionEntity } from './entities/domain-event-subscript
             AgentRuntimeEventEntity,
             DomainEventOutboxEntity,
             DomainEventSubscriptionEntity,
+            TraceSpanEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -153,6 +155,7 @@ import { DomainEventSubscriptionEntity } from './entities/domain-event-subscript
       AgentRuntimeEventEntity,
       DomainEventOutboxEntity,
       DomainEventSubscriptionEntity,
+      TraceSpanEntity,
     ]),
   ],
   exports: [TypeOrmModule],

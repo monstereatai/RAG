@@ -11,6 +11,7 @@ import { AgentActionEntity } from '../../providers/db/entities/agent-action.enti
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { AgentGoalService } from './agent-goal.service';
 import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
+import { RedisProvider } from '../../providers/redis/redis.provider';
 
 @Injectable()
 export class AgentRunsService {
@@ -22,6 +23,7 @@ export class AgentRunsService {
     private readonly events: AgentRuntimeEventsService,
     private readonly goals: AgentGoalService,
     private readonly runtime: AgentRuntimeService,
+    private readonly redis: RedisProvider,
   ) {}
 
   async start(input: {
@@ -93,6 +95,35 @@ export class AgentRunsService {
     return saved;
   }
 
+  async cancel(id: string, reason = '用户取消运行') {
+    const run = await this.runRepo.findOne({ where: { id } });
+    if (!run) throw new NotFoundException(`agent run ${id} not found`);
+    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+      return this.get(id);
+    }
+
+    const now = new Date();
+    run.status = 'cancelled';
+    run.cancelledAt = now;
+    run.cancelReason = reason.trim().slice(0, 500) || '用户取消运行';
+    run.errorMessage = run.cancelReason;
+    run.finishedAt = now;
+    const saved = await this.runRepo.save(run);
+    await this.redis.set(
+      `agent-loop:cancel:${saved.threadId}:${saved.id}`,
+      'cancelled',
+      24 * 60 * 60,
+    );
+    await this.events.emit({
+      threadId: saved.threadId,
+      runId: saved.id,
+      eventType: 'run.cancelled',
+      actor: saved.mode,
+      payload: { reason: saved.cancelReason },
+    });
+    return this.get(id);
+  }
+
   async recordRuntimeEvent(
     runId: string,
     input: {
@@ -105,7 +136,7 @@ export class AgentRunsService {
   ) {
     const run = await this.runRepo.findOne({ where: { id: runId } });
     if (!run) throw new NotFoundException(`agent run ${runId} not found`);
-    return this.events.emit({
+    const event = await this.events.emit({
       threadId: run.threadId,
       runId,
       taskId: input.taskId,
@@ -114,6 +145,10 @@ export class AgentRunsService {
       target: input.target,
       payload: input.payload,
     });
+    if (input.eventType === 'agent.loop.checkpoint.saved') {
+      await this.runRepo.update({ id: runId }, { lastCheckpointAt: new Date() });
+    }
+    return event;
   }
 
   async updateCurrentNode(
@@ -348,12 +383,20 @@ export class AgentRunsService {
 
   async retry(id: string) {
     const run = await this.get(id);
+    if (!['failed', 'cancelled'].includes(run.status)) {
+      throw new BadRequestException(
+        `agent run ${id} is not retryable from ${run.status}`,
+      );
+    }
+    await this.redis.del(`agent-loop:cancel:${run.threadId}:${run.id}`);
     await this.runRepo.update(
       { id },
       {
         status: 'running',
         retryCount: run.retryCount + 1,
         errorMessage: null,
+        cancelReason: null,
+        cancelledAt: null,
         finishedAt: null,
       },
     );

@@ -38,6 +38,12 @@ export class AgentRunEntity {
   @Column({ type: 'numeric', precision: 12, scale: 6, default: 0 })
   costUsd!: number;
   @Column({ type: 'boolean', default: false }) requiresApproval!: boolean;
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  cancelledAt!: Date | null;
+  @Column({ type: 'text', nullable: true, default: null })
+  cancelReason!: string | null;
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  lastCheckpointAt!: Date | null;
   @Column({ type: 'text', nullable: true, default: null }) errorMessage!:
     | string
     | null;

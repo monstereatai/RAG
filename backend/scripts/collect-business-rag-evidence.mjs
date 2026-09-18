@@ -17,7 +17,7 @@ const datasetPath =
   'eval/private-business-regression.dataset.json';
 const outputPath =
   process.env.RAG_BUSINESS_OUTPUT ?? '.tmp/evidence/rag-business.json';
-const modes = (process.env.RAG_BUSINESS_MODES ?? 'simple,auto')
+const modes = (process.env.RAG_BUSINESS_MODES ?? 'simple,auto,agentic')
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean);

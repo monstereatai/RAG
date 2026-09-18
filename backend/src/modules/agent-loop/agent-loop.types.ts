@@ -4,7 +4,8 @@ export type AgentLoopStatus =
   | 'completed'
   | 'blocked'
   | 'failed'
-  | 'budget_exceeded';
+  | 'budget_exceeded'
+  | 'cancelled';
 
 interface AgentLoopActionBase<TState, TResult> {
   name: string;

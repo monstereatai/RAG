@@ -1,0 +1,43 @@
+groups:
+  - name: rag-agent-runtime
+    interval: 30s
+    rules:
+      - alert: RagAgentLoopFailures
+        expr: sum(rate(rag_agent_loop_terminations_total{reason=~"failed|error"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: Agent 循环失败率持续升高
+          description: 检查运行事件、模型错误和工具失败原因。
+
+      - alert: RagAgentEmptyRetrieval
+        expr: sum(rate(rag_agent_empty_retrieval_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: Agent 检索连续为空
+          description: 检查三条链路的路由、知识库权限和索引健康度。
+
+      - alert: RagHttpP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, route) (rate(rag_http_request_duration_seconds_bucket[5m]))) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: RAG 接口 P95 延迟超过 10 秒
+          description: 按 route 下钻检索、模型和 Agent 节点耗时。
+
+      - alert: RagMetricsStale
+        expr: absent(rag_http_requests_total)
+        for: 5m
+        labels:
+          severity: critical
+          service: rag-backend
+        annotations:
+          summary: RAG 指标不可见
+          description: 检查 /api/v1/metrics 抓取配置和服务进程。

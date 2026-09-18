@@ -1,0 +1,50 @@
+{
+  "base_commit": "2fa14aa287f5f17e1a04d9df08e4cc00bfee0981",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/044-senior-agent-platform/scope-baseline-T003.json",
+  "new_files": [
+    "backend/src/migrations/1787900000000-AddTraceSpans.ts",
+    "backend/src/modules/tracing/tracing.controller.ts",
+    "backend/src/modules/tracing/tracing.module.ts",
+    "backend/src/modules/tracing/tracing.service.spec.ts",
+    "backend/src/modules/tracing/tracing.service.ts",
+    "backend/src/providers/db/database.module.ts",
+    "backend/src/providers/db/entities/trace-span.entity.ts",
+    "backend/src/providers/db/typeorm.config.ts",
+    "docker/monitoring/grafana/rag-agent-overview.json",
+    "docker/monitoring/prometheus/alerts.yml"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "backend/src/migrations/1787900000000-AddTraceSpans.ts",
+    "backend/src/modules/tracing/tracing.controller.ts",
+    "backend/src/modules/tracing/tracing.module.ts",
+    "backend/src/modules/tracing/tracing.service.spec.ts",
+    "backend/src/modules/tracing/tracing.service.ts",
+    "backend/src/providers/db/database.module.ts",
+    "backend/src/providers/db/entities/trace-span.entity.ts",
+    "backend/src/providers/db/typeorm.config.ts",
+    "docker/monitoring/grafana/rag-agent-overview.json",
+    "docker/monitoring/prometheus/alerts.yml"
+  ],
+  "allow_patterns": [
+    "backend/src/providers/db/entities/trace-span.entity.ts",
+    "backend/src/migrations/1787900000000-AddTraceSpans.ts",
+    "backend/src/providers/db/typeorm.config.ts",
+    "backend/src/providers/db/database.module.ts",
+    "backend/src/modules/tracing/tracing.module.ts",
+    "backend/src/modules/tracing/tracing.service.ts",
+    "backend/src/modules/tracing/tracing.controller.ts",
+    "backend/src/modules/tracing/tracing.service.spec.ts",
+    "backend/src/modules/metrics/metrics.service.ts",
+    "docker/monitoring/prometheus/alerts.yml",
+    "docker/monitoring/grafana/rag-agent-overview.json",
+    "specs/044-senior-agent-platform/**"
+  ],
+  "internal_patterns": [
+    "specs/044-senior-agent-platform/**",
+    ".obsidian/workspace.json",
+    "specs/044-senior-agent-platform/scope-baseline-T003.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

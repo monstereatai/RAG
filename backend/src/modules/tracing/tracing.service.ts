@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
+import type { Repository } from 'typeorm';
+import { TraceSpanEntity } from '../../providers/db/entities/trace-span.entity';
 
 export interface TraceSnapshot {
   traceId: string;
@@ -24,8 +27,15 @@ interface StartedTrace {
 
 @Injectable()
 export class TracingService {
+  private readonly logger = new Logger(TracingService.name);
   private readonly spans: TraceSnapshot[] = [];
   private readonly maxSpans = 200;
+
+  constructor(
+    @Optional()
+    @InjectRepository(TraceSpanEntity)
+    private readonly traceRepository?: Repository<TraceSpanEntity>,
+  ) {}
 
   start(incomingTraceparent?: string): StartedTrace {
     const parent = this.parseTraceparent(incomingTraceparent);
@@ -58,6 +68,7 @@ export class TracingService {
     };
 
     this.spans.push(snapshot);
+    void this.persist(snapshot);
     if (this.spans.length > this.maxSpans) {
       this.spans.splice(0, this.spans.length - this.maxSpans);
     }
@@ -89,6 +100,7 @@ export class TracingService {
     };
 
     this.spans.push(snapshot);
+    void this.persist(snapshot);
     if (this.spans.length > this.maxSpans) {
       this.spans.splice(0, this.spans.length - this.maxSpans);
     }
@@ -101,6 +113,66 @@ export class TracingService {
 
   recent(limit = 20): TraceSnapshot[] {
     return this.spans.slice(-limit).reverse();
+  }
+
+  async recentPersisted(limit = 20): Promise<TraceSnapshot[]> {
+    if (!this.traceRepository) return this.recent(limit);
+    try {
+      const rows = await this.traceRepository.find({
+        order: { createdAt: 'DESC' },
+        take: limit,
+      });
+      return rows.map((row) => this.toSnapshot(row));
+    } catch (error) {
+      this.logger.warn(
+        `trace persistence unavailable, using in-memory fallback: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return this.recent(limit);
+    }
+  }
+
+  private async persist(snapshot: TraceSnapshot): Promise<void> {
+    if (!this.traceRepository) return;
+    try {
+      await this.traceRepository.save(
+        this.traceRepository.create({
+          id: `${snapshot.traceId}-${snapshot.spanId}`,
+          traceId: snapshot.traceId,
+          spanId: snapshot.spanId,
+          parentSpanId: snapshot.parentSpanId ?? null,
+          method: snapshot.method,
+          route: snapshot.route,
+          status: snapshot.status,
+          durationMs: snapshot.durationMs,
+          startedAt: new Date(snapshot.startedAt),
+          kind: snapshot.kind ?? 'http',
+          alert: snapshot.alert ?? null,
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `trace span persistence failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private toSnapshot(row: TraceSpanEntity): TraceSnapshot {
+    return {
+      traceId: row.traceId,
+      spanId: row.spanId,
+      ...(row.parentSpanId ? { parentSpanId: row.parentSpanId } : {}),
+      method: row.method,
+      route: row.route,
+      status: row.status,
+      durationMs: row.durationMs,
+      startedAt: row.startedAt.toISOString(),
+      kind: row.kind,
+      ...(row.alert ? { alert: row.alert } : {}),
+    };
   }
 
   private parseTraceparent(

@@ -47,4 +47,30 @@ describe('TracingService agent node traces', () => {
 
     expect(latest?.alert).toBe('span_limit');
   });
+
+  it('persists spans asynchronously when a repository is available', async () => {
+    const repository = {
+      create: jest.fn((value) => value),
+      save: jest.fn().mockResolvedValue(undefined),
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const service = new TracingService(repository as never);
+
+    service.recordAgentNode({
+      threadId: 'persistent-thread',
+      node: 'retrieval',
+      status: 'success',
+      durationMs: 8,
+      startedAt: new Date('2026-08-03T00:00:00.000Z'),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: expect.any(String),
+        route: 'retrieval',
+        kind: 'agent_node',
+      }),
+    );
+  });
 });

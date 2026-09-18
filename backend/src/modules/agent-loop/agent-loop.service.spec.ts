@@ -171,4 +171,32 @@ describe('AgentLoopService', () => {
       }),
     ).rejects.toThrow('身份或运行标识不匹配');
   });
+
+  it('stops before the next round when the run is cancelled', async () => {
+    const service = new AgentLoopService(
+      tools as never,
+      events as never,
+      redis as never,
+    );
+    redis.get.mockResolvedValue('cancelled');
+    const decide = jest.fn();
+
+    const result = await service.run({
+      threadId: 'cancelled-thread',
+      runId: 'cancelled-run',
+      actor: 'test-agent',
+      initialState: {},
+      maxSteps: 3,
+      maxToolCalls: 1,
+      timeoutMs: 1_000,
+      decide,
+    });
+
+    expect(result).toMatchObject({
+      status: 'cancelled',
+      steps: 0,
+      toolCalls: 0,
+    });
+    expect(decide).not.toHaveBeenCalled();
+  });
 });

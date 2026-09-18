@@ -6,7 +6,7 @@ export class TracingController {
   constructor(private readonly tracingService: TracingService) {}
 
   @Get()
-  recent(@Query('limit') limit?: string) {
+  async recent(@Query('limit') limit?: string) {
     const parsed = limit ? Number(limit) : 20;
     const safeLimit = Number.isInteger(parsed)
       ? Math.min(Math.max(parsed, 1), 100)
@@ -14,8 +14,8 @@ export class TracingController {
 
     return {
       mode: 'w3c-trace-context',
-      exporter: 'in-memory',
-      spans: this.tracingService.recent(safeLimit),
+      exporter: 'database+in-memory-fallback',
+      spans: await this.tracingService.recentPersisted(safeLimit),
     };
   }
 }

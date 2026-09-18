@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "base_commit": "2fa14aa287f5f17e1a04d9df08e4cc00bfee0981",
+  "initial_snapshots": {
+    ".github/workflows/quality-gate.yml": {
+      "kind": "file",
+      "sha256": "80d32877fe88830497057be01b9b88f350d4245a0db9d6a2e3253e80b56c2a6f"
+    },
+    "backend/package.json": {
+      "kind": "file",
+      "sha256": "498ab05462324e03fde8c09e88180cb3913af13bc45b419de9dff4b34b2c0067"
+    },
+    "backend/scripts/collect-business-rag-evidence.mjs": {
+      "kind": "file",
+      "sha256": "d23d66011fac20fff2164d4893708427c1313644515400df4645e61facf5abe9"
+    },
+    "backend/scripts/eval-agent-platform.mjs": {
+      "kind": "file",
+      "sha256": "d0342d02e2db838a30d0c1c014f97662386d914ed583f84b0c377a072bb54f7c"
+    },
+    "backend/scripts/eval-rag-e2e.mjs": {
+      "kind": "file",
+      "sha256": "87870110b9913d12ca11151b971ef3a900db99757e4edb3b4e70d313dbedf94d"
+    },
+    "backend/scripts/eval-rag-project.mjs": {
+      "kind": "file",
+      "sha256": "5252a90a5b413f8942c3d8f5c6f7689362ce1d1cd18e721d5a39a753bb541205"
+    },
+    "backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts": {
+      "kind": "file",
+      "sha256": "09e70df266db5035df171fc879d23be3aab78838cbb3089f063ff01a116a92ad"
+    },
+    "backend/src/migrations/1787900000000-AddTraceSpans.ts": {
+      "kind": "file",
+      "sha256": "21d210d3a29d16a8fd5c42b596ed3b41e08354384fa43153d1beb55849756000"
+    },
+    "backend/src/modules/agent-loop/agent-loop.service.spec.ts": {
+      "kind": "file",
+      "sha256": "21050c410936c895c05762f7cd0a4f97815828623e616a356403d6373509ef73"
+    },
+    "backend/src/modules/agent-loop/agent-loop.service.ts": {
+      "kind": "file",
+      "sha256": "f6d88bcf3df5293609d10cc60c7c9bb3444ed53157232671b10f87d10d238841"
+    },
+    "backend/src/modules/agent-loop/agent-loop.types.ts": {
+      "kind": "file",
+      "sha256": "e85d9056a57148647cd44e84f12e7528b86b1a8a863bc8a9f324baf134915b70"
+    },
+    "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts": {
+      "kind": "file",
+      "sha256": "ba5478a20a7e2067f4305a63f352a1dc7166903e58f5defc7b5db8d24bb30d10"
+    },
+    "backend/src/modules/agent-runs/agent-runs.service.spec.ts": {
+      "kind": "file",
+      "sha256": "d3d3bd29843e4ffaa7bf4ac3e892c013e3e87bea42670cfb0dd5af7d502b36d2"
+    },
+    "backend/src/modules/agent-runs/agent-runs.service.ts": {
+      "kind": "file",
+      "sha256": "6f62ffc46cdae3bf59eda57dfe2f92890c3ab08704742c9ca556928a1102166b"
+    },
+    "backend/src/modules/tracing/tracing.controller.ts": {
+      "kind": "file",
+      "sha256": "ebc37dda4da13aace339b612728498bddddc56acb850654ff267fbfc023a4628"
+    },
+    "backend/src/modules/tracing/tracing.module.ts": {
+      "kind": "file",
+      "sha256": "3b3f2cce602e14679d23d7d3809f19e6574b1d89d5d6af2c0e73ebe727eadd79"
+    },
+    "backend/src/modules/tracing/tracing.service.spec.ts": {
+      "kind": "file",
+      "sha256": "e142def3a564264f74894b8f493daa63be159fa153b49398af52610df917dda2"
+    },
+    "backend/src/modules/tracing/tracing.service.ts": {
+      "kind": "file",
+      "sha256": "a71869edd5705606c3502881d2f63e8d2bb2ee012b3e256216cf55c18bcbb651"
+    },
+    "backend/src/providers/db/database.module.ts": {
+      "kind": "file",
+      "sha256": "817144a8c72241d85d4bc6a6b682206e0c9ce29c28d73130309eef55730456be"
+    },
+    "backend/src/providers/db/entities/agent-run.entity.ts": {
+      "kind": "file",
+      "sha256": "738bebe9c110524320f512f5b08c1a4acff4712ccf61c71a8982ec5e00631f85"
+    },
+    "backend/src/providers/db/entities/trace-span.entity.ts": {
+      "kind": "file",
+      "sha256": "0ea90c485827746a80241940ecbdd575a7a379a8f3d4699ad46eeba93344d6e2"
+    },
+    "backend/src/providers/db/typeorm.config.ts": {
+      "kind": "file",
+      "sha256": "c5162c0b1ded37c7e6276b94244d1edd357ed1e3f3000febbcf6e092b5db4d2a"
+    },
+    "docker/monitoring/grafana/rag-agent-overview.json": {
+      "kind": "file",
+      "sha256": "c738a1a8b6fcac08ee9ca1314ac392d4b9a81205ed12b1f5a96986a4928dbc88"
+    },
+    "docker/monitoring/prometheus/alerts.yml": {
+      "kind": "file",
+      "sha256": "133af1f04e63e0273af78a5b108341f62312e1e1fedb04e19aaa876cca739a40"
+    }
+  },
+  "internal_patterns": [
+    "specs/044-senior-agent-platform/**",
+    ".obsidian/workspace.json",
+    "specs/044-senior-agent-platform/scope-baseline-T004.json"
+  ]
+}

@@ -7,7 +7,7 @@ const datasetPath =
   'eval/project-simulated-business.dataset.json';
 const minScore = Number(process.env.PROJECT_EVAL_MIN_SCORE ?? '0.9');
 const requireLive = process.env.PROJECT_EVAL_REQUIRE_LIVE === 'true';
-const modes = (process.env.PROJECT_EVAL_MODES ?? 'simple,auto')
+const modes = (process.env.PROJECT_EVAL_MODES ?? 'simple,auto,agentic')
   .split(',')
   .map((mode) => mode.trim())
   .filter(Boolean);

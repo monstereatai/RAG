@@ -1,0 +1,69 @@
+# 高级 Agent 平台能力现状
+
+更新时间：2026-09-18
+
+这份文档只记录当前仓库已经落地、已经验证，或明确标注边界的能力。它不是“未来规划清单”。
+
+## 结论
+
+项目已经具备高级 AI 应用／Agent 的主要工程骨架：三条问答链路、Agent Loop、LangGraph Checkpoint、审批恢复、运行中心、质量评测、Prometheus 指标、Langfuse 追踪和故障降级都已存在。本次补齐了四个生产缺口：
+
+1. Agent Run 可以取消、记录取消原因和最后检查点，并且取消是幂等的。
+2. Trace span 从只保留内存，升级为优先写 PostgreSQL；数据库不可用时仍回退内存，不阻塞问答。
+3. 统一评测默认覆盖 `simple`、`auto`、`agentic`，CI 会执行确定性质量门禁。
+4. 增加 Agent Runtime 的 Prometheus 告警与 Grafana 看板模板，部署时再接入实际环境。
+
+## 能力边界
+
+### Agent Runtime
+
+- `agent_runs` 保存 `cancelledAt`、`cancelReason` 和 `lastCheckpointAt`。
+- `POST /api/v1/agent-ops/run-center/:id/cancel` 支持取消运行。
+- Agent Loop 每轮开始前读取 Redis 取消标记，在安全边界结束，不会在未知副作用状态下自动重放。
+- 失败或取消的运行才允许重试；终态运行的取消请求保持幂等，不会被重新打开。
+- 迁移文件：`backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts`。
+
+### 审批与恢复
+
+现有工作流继续使用 `pending_approval`、`revision_required`、`resume` 和 `revise` 状态流。工具层已有 `completed`、`running`、`unknown` 幂等状态：未知副作用只能进入人工确认或局部重跑，不能直接盲目重放。审批、恢复、运行和工具动作通过 Runtime Event 关联到 `threadId`、`runId`。
+
+这部分不等于“所有业务都自动审批”。高风险动作仍要走审批；不需要审批的任务只能通过自动门禁和证据校验后继续。
+
+### 三条问答链路评测
+
+`npm run eval:agent-platform` 是统一入口，执行以下门禁：
+
+- Query Routing：内部信息必须 `local_only + retrieve`，公共稳定事实才允许直答。
+- Agent Task：工作流、检索、Bad Case、工具降级、引用、拒答和记忆覆盖。
+- Production Workflow：岗位 DAG、并发批次、审批、局部重跑、证据门禁和工具预算。
+- Project／Hybrid RAG 接口回放：默认请求 Simple、Auto、Agentic 三种模式；后端不可用时只报告 `skipped`，不会冒充线上通过。
+
+真实服务回放时，可显式设置：
+
+```bash
+cd backend
+AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
+```
+
+这会要求服务健康检查、登录、上传评测资料，并通过同一个 `/api/v1/chat` 入口逐模式执行。评测报告会保留答案、引用数量、检索充分性、路由和失败原因。
+
+### 可观测性
+
+- HTTP 和 Agent Node span 写入 `trace_spans`，查询接口优先读数据库。
+- 数据库暂时不可用时，查询回退到最近 200 个内存 span，并写告警日志。
+- 原有 Prometheus 指标继续覆盖 HTTP、检索、LLM、缓存、Agent 节点、工具调用、空检索和循环终止原因。
+- 新增模板：`docker/monitoring/prometheus/alerts.yml`、`docker/monitoring/grafana/rag-agent-overview.json`。
+- 看板与告警模板不包含生产地址、密钥或通知接收人，部署时需由运维接入现有 `monitoring/` 配置。
+
+## 当前不能宣称的内容
+
+- 没有真实生产流量、真实业务评测集和告警接收地址时，不能宣称“生产 SLA 已达标”。
+- CI 默认只做确定性评测；真实三模式接口评测必须在后端、数据库、Redis、Milvus 和模型配置齐全时设置 `AGENT_PLATFORM_REQUIRE_LIVE=true`。
+- 新增迁移需要在目标环境执行 `npm run migration:run`，本地构建通过不代表生产数据库已经升级。
+
+## 验证入口
+
+本次变更的完整证据记录见：
+
+- `specs/044-senior-agent-platform/verify.md`
+- `specs/044-senior-agent-platform/evidence/`

@@ -65,7 +65,10 @@ describe('ProductionWorkflowService', () => {
         releaseLock: jest.fn(),
       } as never,
       { gather } as never,
-      { create: createArtifact } as never,
+      {
+        create: createArtifact,
+        markReviewState: jest.fn().mockResolvedValue({}),
+      } as never,
     );
     return { service, invoke, gather, createArtifact };
   };

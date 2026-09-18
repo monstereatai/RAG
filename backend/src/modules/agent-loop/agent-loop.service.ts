@@ -22,6 +22,7 @@ export class AgentLoopService {
    * 业务模块只能提供 `decide`／`reduce`，不能绕过工具权限策略自行执行副作用。
    */
   private readonly logger = new Logger(AgentLoopService.name);
+  private static readonly CANCEL_TTL_SECONDS = 24 * 60 * 60;
 
   constructor(
     private readonly tools: ToolExecutionService,
@@ -92,6 +93,16 @@ export class AgentLoopService {
     });
 
     for (let step = completedSteps + 1; step <= maxSteps; step += 1) {
+      if (await this.isCancellationRequested(input)) {
+        return this.finish(
+          input,
+          state,
+          step - 1,
+          toolCalls,
+          'cancelled',
+          'Agent Loop 已被用户取消',
+        );
+      }
       const remainingMs = input.timeoutMs - (Date.now() - startedAt);
       if (remainingMs <= 0) {
         return this.finish(
@@ -288,6 +299,16 @@ export class AgentLoopService {
           .slice(0, 16),
       },
     );
+  }
+
+  private async isCancellationRequested<TState, TOutput>(
+    input: AgentLoopInput<TState, TOutput>,
+  ): Promise<boolean> {
+    const runId = input.runId ?? 'anonymous';
+    const value = await this.redis.get(
+      `agent-loop:cancel:${input.threadId}:${runId}`,
+    );
+    return value === 'cancelled';
   }
 
   private async finish<TState, TOutput>(

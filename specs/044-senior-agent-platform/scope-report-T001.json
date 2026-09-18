@@ -1,0 +1,43 @@
+{
+  "base_commit": "2fa14aa287f5f17e1a04d9df08e4cc00bfee0981",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/044-senior-agent-platform/scope-baseline-T001.json",
+  "new_files": [
+    "backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.ts",
+    "backend/src/modules/agent-loop/agent-loop.types.ts",
+    "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.spec.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.ts",
+    "backend/src/providers/db/entities/agent-run.entity.ts"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.ts",
+    "backend/src/modules/agent-loop/agent-loop.types.ts",
+    "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.spec.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.ts",
+    "backend/src/providers/db/entities/agent-run.entity.ts"
+  ],
+  "allow_patterns": [
+    "backend/src/providers/db/entities/agent-run.entity.ts",
+    "backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.ts",
+    "backend/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+    "backend/src/modules/agent-loop/agent-loop.types.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.ts",
+    "backend/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "backend/src/modules/agent-runs/agent-runs.service.spec.ts",
+    "specs/044-senior-agent-platform/**"
+  ],
+  "internal_patterns": [
+    "specs/044-senior-agent-platform/**",
+    "specs/044-senior-agent-platform/scope-baseline-T001.json",
+    ".obsidian/workspace.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

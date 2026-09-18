@@ -357,6 +357,11 @@ export class AgentOpsAdminController {
     return this.runs.retry(id);
   }
 
+  @Post('run-center/:id/cancel')
+  cancelRunRecord(@Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.runs.cancel(id, body.reason);
+  }
+
   @Get('collaboration/sops')
   collaborationSops() {
     return this.collaboration.listSops();

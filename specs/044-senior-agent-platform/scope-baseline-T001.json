@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "base_commit": "2fa14aa287f5f17e1a04d9df08e4cc00bfee0981",
+  "initial_snapshots": {
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "07cb1dc1b01b06bcba683a148f1d49dce0d4732c366fd86558579fa713d03d3b"
+    }
+  },
+  "internal_patterns": [
+    "specs/044-senior-agent-platform/**",
+    "specs/044-senior-agent-platform/scope-baseline-T001.json",
+    ".obsidian/workspace.json"
+  ]
+}

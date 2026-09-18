@@ -1,0 +1,37 @@
+{
+  "base_commit": "2fa14aa287f5f17e1a04d9df08e4cc00bfee0981",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/044-senior-agent-platform/scope-baseline-T002.json",
+  "new_files": [
+    ".github/workflows/quality-gate.yml",
+    "backend/package.json",
+    "backend/scripts/collect-business-rag-evidence.mjs",
+    "backend/scripts/eval-agent-platform.mjs",
+    "backend/scripts/eval-rag-e2e.mjs",
+    "backend/scripts/eval-rag-project.mjs"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    ".github/workflows/quality-gate.yml",
+    "backend/package.json",
+    "backend/scripts/collect-business-rag-evidence.mjs",
+    "backend/scripts/eval-agent-platform.mjs",
+    "backend/scripts/eval-rag-e2e.mjs",
+    "backend/scripts/eval-rag-project.mjs"
+  ],
+  "allow_patterns": [
+    "backend/scripts/eval-rag-project.mjs",
+    "backend/scripts/eval-rag-e2e.mjs",
+    "backend/scripts/collect-business-rag-evidence.mjs",
+    "backend/scripts/eval-agent-platform.mjs",
+    "backend/package.json",
+    ".github/workflows/quality-gate.yml",
+    "specs/044-senior-agent-platform/**"
+  ],
+  "internal_patterns": [
+    "specs/044-senior-agent-platform/**",
+    ".obsidian/workspace.json",
+    "specs/044-senior-agent-platform/scope-baseline-T002.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

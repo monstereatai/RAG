@@ -45,8 +45,13 @@
 | `docs/interview/AI复盘四场面试问题与RAG项目回答-面试表达版.md` | 保留 58 题并强化业务价值、架构取舍、工程结果和术语解释的面试背诵版本 |
 | `docs/interview/Agent-Task-Artifact结构验收与驳回重跑.md` | Chat／Task／文件 Artifact 结构、自动与人工验收，以及驳回修改和岗位重跑操作说明 |
 | `docs/reference/企业级知识库课程与v1-v9对照优化建议.md` | 课程 11 份 PDF、knowledge-hub-backend v1～v9 与当前项目的能力核验、取舍和分批优化建议 |
+| `docs/architecture/AGENT_PLATFORM_READINESS.md` | 高级 Agent 平台运行时、审批恢复、三链路评测、可观测性和生产边界 |
 
 ## 当前结论
+
+- **已补齐高级 Agent 平台运行闭环（2026-09-18）**：Agent Run 新增可取消、取消原因和最后检查点持久化，Agent Loop 在每轮安全边界读取 Redis 取消标记，失败／取消运行支持幂等重试；新增 `trace_spans` 迁移与数据库优先、内存降级的 Trace 查询；统一 `eval:agent-platform` 默认覆盖 Simple、Auto、Agentic，并接入 CI，离线路由、任务和产研流程门禁通过，服务不可用时明确标记真实回放为 skipped。新增 `docs/architecture/AGENT_PLATFORM_READINESS.md`、Prometheus 告警和 Grafana 看板模板。Docker 启动后已执行 23 个数据库迁移，后端健康检查返回 200，并完成三模式真实入口抽样回放；完整项目评测仍因 Milvus 容器反复重启导致上传阶段 `14 UNAVAILABLE`，待 Milvus 稳定后重跑 `AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform`。
+
+- **已完成高级 Agent 平台本地验证（2026-09-18）**：确定性门禁通过（路由 12／12、Agent Task 8／8、Production Workflow 10／10），Simple／Auto／Agentic 对内部差旅制度问题均返回带引用的 650 元结论（引用数 6／6／5）。RRF 流程问题的证据门禁按链路分别表现为 Simple 安全降级、Auto 返回 3 条引用、Agentic 安全降级；该抽样结果已写入 `specs/044-senior-agent-platform/verify.md`，不把 Milvus 故障下的完整 E2E 标为通过。
 
 - **已新增 Playway 游戏营销活动运营玩法梳理（2026-09-17）**：基于 9 张组件截图、96 个组件清单和运行时注册表，整理新服预约、私域拉新、游戏促活、游戏回流 4 类活动模板，以及预热触达、任务转化、奖励刺激、社交竞争、结果留存、埋点、风控和验收规则；新增 `playway/营销活动运营玩法梳理.md`，并从 `playway/README.md` 建立入口。
 
