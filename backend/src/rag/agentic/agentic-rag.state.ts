@@ -1,5 +1,8 @@
 import { Annotation } from '@langchain/langgraph';
-import type { RetrievedChunk } from '../karpathy/karpathy-rag.service';
+import type {
+  RetrieveOptions,
+  RetrievedChunk,
+} from '../karpathy/karpathy-rag.service';
 import type { BadCaseMatch } from '../prompts/bad-case-flywheel.service';
 
 export interface AgenticSubQuestion {
@@ -56,6 +59,15 @@ export interface AgentExecutionState {
   checkpointId?: string;
   paused?: boolean;
   lastNode?: string;
+}
+
+/** 恢复时重新注入授权边界，避免 Command.resume 以空用户／空 scope 继续检索。 */
+export interface AgenticResumeContext {
+  userId?: string;
+  history: Array<{ role: 'human' | 'ai'; content: string }>;
+  memoryMessages: Array<{ role: string; content: string }>;
+  retrieveOptions: RetrieveOptions;
+  runtimeRunId?: string;
 }
 
 export function createAgenticArtifact<TPayload>(
@@ -187,6 +199,12 @@ export const AgenticRagState = Annotation.Root({
   executionState: Annotation<AgentExecutionState>({
     reducer: (_prev, next) => next,
     default: () => ({ consumedSteps: 0, consumedToolCalls: 0 }),
+  }),
+
+  /** 审批恢复所需的原始权限、上下文与检索限制；不通过 HTTP 返回给客户端。 */
+  resumeContext: Annotation<AgenticResumeContext | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
   }),
 });
 

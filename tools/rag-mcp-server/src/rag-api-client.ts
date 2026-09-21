@@ -194,8 +194,9 @@ export class RagApiClient {
   }
 
   async productionWorkflowHandoff(activityName: string): Promise<Record<string, unknown>> {
-    return buildProductionWorkflowHandoff(
-      await this.productionWorkflowCodingContext(activityName),
+    const completed = await this.completedProductionWorkflow(activityName);
+    return this.request<Record<string, unknown>>(
+      `/workflows/production/${encodeURIComponent(completed.threadId)}/handoff`,
     );
   }
 

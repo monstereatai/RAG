@@ -29,6 +29,7 @@ export class AguiController {
     @Query('model') model?: LlmModelProvider,
     @Query('rolePresetId') rolePresetId?: string,
     @Query('pluginKeys') pluginKeys?: string,
+    @Query('approvalRequired') approvalRequired?: string,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
@@ -48,6 +49,7 @@ export class AguiController {
         ?.split(',')
         .map((item) => item.trim())
         .filter(Boolean),
+      approvalRequired: approvalRequired === 'true',
     });
   }
 
@@ -61,6 +63,7 @@ export class AguiController {
     @Query('model') model?: LlmModelProvider,
     @Query('rolePresetId') rolePresetId?: string,
     @Query('pluginKeys') pluginKeys?: string,
+    @Query('approvalRequired') approvalRequired?: string,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
@@ -82,6 +85,7 @@ export class AguiController {
         ?.split(',')
         .map((item) => item.trim())
         .filter(Boolean),
+      approvalRequired: approvalRequired === 'true',
     });
   }
 

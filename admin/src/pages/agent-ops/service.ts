@@ -304,6 +304,11 @@ export const getProductionWorkflowCodingContext = (threadId: string) =>
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context`,
   );
 
+export const getProductionWorkflowHandoff = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/handoff`,
+  );
+
 export const generateProductionWorkflowProject = (threadId: string) =>
   authRequest<unknown>(
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project`,

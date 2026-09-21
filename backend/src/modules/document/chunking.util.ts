@@ -269,7 +269,7 @@ export class MarkdownChunker {
     for (const unit of units) {
       if (unit.length > budget) {
         flush();
-        chunks.push(unit);
+        chunks.push(...this.splitOversizedUnit(unit, budget));
         continue;
       }
       const candidate = current.length ? `${current.join(' ')} ${unit}` : unit;
@@ -277,6 +277,37 @@ export class MarkdownChunker {
       current.push(unit);
     }
     flush();
+    return chunks;
+  }
+
+  /** 句子本身超过预算时，优先按词切分；只有单词过长才按字符兜底。 */
+  private splitOversizedUnit(unit: string, budget: number): string[] {
+    const chunks: string[] = [];
+    let current = '';
+    const pushCurrent = () => {
+      const value = current.trim();
+      if (value) chunks.push(value);
+      current = '';
+    };
+
+    for (const part of unit.split(/(\s+)/u)) {
+      if (!part) continue;
+      const candidate = `${current}${part}`;
+      if (candidate.trim().length <= budget) {
+        current = candidate;
+        continue;
+      }
+      pushCurrent();
+      const token = part.trim();
+      if (token.length <= budget) {
+        current = token;
+        continue;
+      }
+      for (let index = 0; index < token.length; index += budget) {
+        chunks.push(token.slice(index, index + budget));
+      }
+    }
+    pushCurrent();
     return chunks;
   }
 
@@ -424,6 +455,10 @@ export class MarkdownChunker {
         );
       if (clause && current.headingPath.length > 0) {
         current.lines.push(`条款编号：${clause[1]}`);
+        current.lines.push(clause[2]);
+        current.end = offset + line.length;
+        offset += line.length + 1;
+        continue;
       }
 
       current.lines.push(line);
@@ -446,7 +481,10 @@ export class MarkdownChunker {
   }
 
   private extractClauseId(content: string): string | null {
-    const match = /条款编号：([^\n]+)/.exec(content);
+    const match =
+      /条款编号：(第[一二三四五六七八九十百千0-9]+[章节条款]|\d+(?:\.\d+)*[、.])/.exec(
+        content,
+      );
     return match?.[1]?.trim() || null;
   }
 }

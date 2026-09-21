@@ -203,6 +203,14 @@ export class AgentOpsAdminController {
     return this.workflows.codingContext(threadId, ownerUserId);
   }
 
+  @Get('workflows/:threadId/handoff')
+  handoff(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.workflows.handoffManifest(threadId, ownerUserId);
+  }
+
   @Get('workflows/:threadId/playway-preview')
   playwayPreview(
     @Param('threadId') threadId: string,
@@ -411,19 +419,43 @@ export class AgentOpsAdminController {
   }
 
   @Get('tasks')
-  listAgentTasks(@Query('threadId') threadId?: string) {
-    return this.tasks.list(threadId);
+  async listAgentTasks(
+    @Query('threadId') threadId: string | undefined,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    if (!ownerUserId?.trim()) {
+      throw new Error('ownerUserId is required for task listing');
+    }
+    if (threadId) {
+      await this.workflows.assertOwnedThread(threadId, ownerUserId);
+      return this.tasks.list(threadId);
+    }
+    const workflows = await this.workflows.list(ownerUserId);
+    const ownedThreads = new Set(workflows.map((item) => item.threadId));
+    const tasks = await this.tasks.list();
+    return tasks.filter((task) => ownedThreads.has(task.threadId));
   }
 
   @Post('tasks/:id/retry')
-  retryAgentTask(@Param('id') id: string) {
+  async retryAgentTask(
+    @Param('id') id: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    const task = await this.tasks.findById(id);
+    await this.workflows.assertOwnedThread(task.threadId, ownerUserId);
     return this.tasks.retry(id);
   }
 
   @Post('tasks/delegate')
   async delegateAgentTask(@Body() body: any) {
+    const ownerUserId = String(body.ownerUserId ?? '').trim();
+    if (!body.threadId || !ownerUserId) {
+      throw new Error('threadId and ownerUserId are required for task delegation');
+    }
+    await this.workflows.assertOwnedThread(body.threadId, ownerUserId);
     if (body.runId) await this.runs.reserveDelegation(body.runId);
-    return this.tasks.delegate(body);
+    const { ownerUserId: _ownerUserId, ...taskInput } = body;
+    return this.tasks.delegate(taskInput);
   }
 
   @Get('runtime-events')

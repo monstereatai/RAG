@@ -49,6 +49,22 @@ import type { QueryIntent } from '../../rag/prompts/query-intent-router';
 import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 
+type FinalizableChatResult = {
+  answer: string;
+  references: ChatResponse['references'];
+  confidence?: number;
+  retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
+  evidenceCoverage?: ChatResponse['evidenceCoverage'];
+  executionState?: ChatResponse['executionState'];
+  interrupted?: boolean;
+};
+
+type ChatExecutionOptions = {
+  model?: string;
+};
+
 @Injectable()
 export class ChatService {
   /**
@@ -84,14 +100,15 @@ export class ChatService {
   /**
    * 执行一轮问答。
    *
-   * 上下文准备阶段刻意并发：短期窗口、长期记忆、历史问答、运行计划和检索 Profile
-   * 没有相互依赖；全部就绪后才进入 Simple／Auto／Agentic 的单一执行主干，避免
-   * 让不同模式得到不一致的会话上下文。
+   * 先确定当前请求可见的历史并完成一次语义分类，再并发准备其余独立上下文；
+   * 全部就绪后进入 Simple／Auto／Agentic 的单一执行主干，避免不同模式得到
+   * 不一致的会话上下文。
    */
   async chat(
     req: ChatDto,
     userId: string,
     onEvent?: ChatEventCallback,
+    executionOptions?: ChatExecutionOptions,
   ): Promise<ChatResponse> {
     if (!req.query || req.query.trim().length === 0) {
       throw new BadRequestException('query is required');
@@ -116,31 +133,31 @@ export class ChatService {
 
     const startTime = Date.now();
     const mode: ChatMode = req.mode ?? 'auto';
-    let queryIntent: QueryIntent = ({
-          intent: 'general' as const,
-          contextMode: 'none' as const,
-          historyPolicy: 'context_only' as const,
-          confidence: 0,
-          standaloneQuery: req.query,
-          multiIntent: false,
-          subQueries: [],
-          action: 'retrieve' as const,
-          sourcePolicy: 'local_only' as const,
-          needsSynthesis: false,
-          requiresGraph: false,
-          targetKbs: ['general'],
-          queryType: 'private_entity' as const,
-          entities: [],
-          filters: {
-            department: null,
-            project: null,
-            timeRange: null,
-            documentType: null,
-          },
-          rewriteQueries: [],
-          reason: '语义路由不可用，保守使用本地检索',
-          ambiguity: { detected: false, confidence: 0, senses: [] },
-        } satisfies QueryIntent);
+    let queryIntent: QueryIntent = {
+      intent: 'general' as const,
+      contextMode: 'none' as const,
+      historyPolicy: 'context_only' as const,
+      confidence: 0,
+      standaloneQuery: req.query,
+      multiIntent: false,
+      subQueries: [],
+      action: 'retrieve' as const,
+      sourcePolicy: 'local_only' as const,
+      needsSynthesis: false,
+      requiresGraph: false,
+      targetKbs: ['general'],
+      queryType: 'private_entity' as const,
+      entities: [],
+      filters: {
+        department: null,
+        project: null,
+        timeRange: null,
+        documentType: null,
+      },
+      rewriteQueries: [],
+      reason: '语义路由不可用，保守使用本地检索',
+      ambiguity: { detected: false, confidence: 0, senses: [] },
+    } satisfies QueryIntent;
     // 插件策略与会话创建互不依赖，先并发完成请求准备。
     const [pluginComposition, threadId] = await Promise.all([
       req.pluginKeys?.length && this.plugins
@@ -148,71 +165,11 @@ export class ChatService {
         : Promise.resolve(undefined),
       req.threadId
         ? Promise.resolve(req.threadId)
-        : this.conversationService.create(req.query, 'auto', userId),
+        : this.conversationService.create(req.query, mode, userId),
     ]);
-    // 路由阶段只使用请求显式携带的历史，避免为已有线程额外读取数据库；短期记忆窗口
-    // 会在后续上下文准备阶段加载，并通过 contextMode/状态投影参与回答。
-    const routingHistory = req.history ?? [];
-    if (this.queryIntentRouter) {
-      queryIntent = await this.queryIntentRouter.classify(req.query, routingHistory);
-    }
-    const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
-    const maxToolCalls = this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
-    const requestContext: RequestContext = {
-      requestId: randomUUID(),
-      userId,
-      threadId,
-      query: req.query,
-      mode,
-      queryIntent,
-      sourcePolicy: queryIntent.sourcePolicy,
-      scope: req.scope,
-      deadlineAt: Date.now() + (this.config?.get<number>('agentRun.timeoutMs') ?? 120_000),
-      budget: {
-        maxSteps,
-        maxToolCalls,
-        remainingSteps: maxSteps,
-        remainingToolCalls: maxToolCalls,
-      },
-    };
-    onEvent?.({ type: 'thread', data: { threadId, requestId: requestContext.requestId } });
-    onEvent?.({ type: 'routing', data: { mode, route: mode === 'simple' ? 'simple' : 'pending', requestId: requestContext.requestId } });
-    const shouldSearchHistory = Boolean(req.threadId);
-    // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
-    const objectiveFactQuery =
-      queryIntent.intent === 'objective_fact' ||
-      queryIntent.intent === 'system_capability' ||
-      queryIntent.queryType === 'public_knowledge' ||
-      isObjectiveFactQuery(req.query);
-    const [
-      shortTermContext,
-      memoryResult,
-      historySearch,
-      runtimePlan,
-      retrievalProfile,
-    ] = await Promise.all([
-      // 短期记忆服务内部统一读取最近窗口和压缩摘要，负责裁剪、回退和去重。
-      this.shortTermMemory.getContext(threadId),
-      // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
-      objectiveFactQuery
-        ? Promise.resolve({
-            userMemories: [],
-            sessionMemories: [],
-            systemMessage: null,
-          })
-        : this.memoryService.searchMemory(req.query, userId, threadId),
-      // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
-      shouldSearchHistory && !objectiveFactQuery
-        ? this.conversationEmbeddingService.searchHistory(req.query, 2, userId)
-        : Promise.resolve([]),
-      this.runtime
-        ? this.runtime.createPlan({ objective: req.query, mode })
-        : Promise.resolve(undefined),
-      this.resolveRetrievalProfile(
-        req.query,
-        req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
-      ),
-    ]);
+    // 先准备本轮可见历史，再做唯一一次语义分类。这样路由器看到的上下文
+    // 与后续生成阶段一致，避免先按空历史分类、再按完整历史重新分类。
+    const shortTermContext = await this.shortTermMemory.getContext(threadId);
     let history = req.history ?? [];
     if (!req.history) {
       history =
@@ -230,14 +187,44 @@ export class ChatService {
               userId,
             );
     }
-    if (
-      this.queryIntentRouter &&
-      queryIntent.contextMode === 'none' &&
-      history.length > 0
-    ) {
+    if (this.queryIntentRouter) {
       queryIntent = await this.queryIntentRouter.classify(req.query, history);
-      requestContext.queryIntent = queryIntent;
     }
+    const shouldSearchHistory = Boolean(req.threadId);
+    // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
+    const objectiveFactQuery =
+      queryIntent.intent === 'objective_fact' ||
+      queryIntent.intent === 'system_capability' ||
+      queryIntent.queryType === 'public_knowledge' ||
+      isObjectiveFactQuery(req.query);
+    const [memoryResult, historySearch, runtimePlan, retrievalProfile] =
+      await Promise.all([
+        // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
+        objectiveFactQuery
+          ? Promise.resolve({
+              userMemories: [],
+              sessionMemories: [],
+              systemMessage: null,
+            })
+          : this.memoryService.searchMemory(req.query, userId, threadId),
+        // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
+        shouldSearchHistory && !objectiveFactQuery
+          ? this.conversationEmbeddingService.searchHistory(
+              req.query,
+              2,
+              userId,
+            )
+          : Promise.resolve([]),
+        this.runtime
+          ? this.runtime.createPlan({ objective: req.query, mode })
+          : Promise.resolve(undefined),
+        this.resolveRetrievalProfile(
+          req.query,
+          req.knowledgeBaseKey ??
+            req.scope?.projectId ??
+            req.scope?.documentType,
+        ),
+      ]);
     const unfilteredHistory = history;
     if (
       unfilteredHistory.length > 0 &&
@@ -252,7 +239,6 @@ export class ChatService {
         queryType: 'private_entity',
         reason: '同一实体存在冲突会话设定，先回答客观事实再补充历史',
       };
-      requestContext.queryIntent = queryIntent;
     }
     history = selectHistoryForQuery(req.query, unfilteredHistory, {
       preserveConflicts:
@@ -269,7 +255,67 @@ export class ChatService {
       ['conversation_setting', 'context_follow_up'].includes(
         queryIntent.contextMode,
       );
-    if (conversationStateUpdate) requestContext.sourcePolicy = 'local_only';
+    const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
+    const maxToolCalls =
+      this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
+    const requestContext: RequestContext = {
+      requestId: randomUUID(),
+      userId,
+      threadId,
+      query: req.query,
+      mode,
+      queryIntent,
+      sourcePolicy: conversationStateUpdate
+        ? 'local_only'
+        : queryIntent.sourcePolicy,
+      scope: req.scope,
+      deadlineAt:
+        Date.now() +
+        (this.config?.get<number>('agentRun.timeoutMs') ?? 120_000),
+      budget: {
+        maxSteps,
+        maxToolCalls,
+        remainingSteps: maxSteps,
+        remainingToolCalls: maxToolCalls,
+      },
+    };
+    onEvent?.({
+      type: 'thread',
+      data: { threadId, requestId: requestContext.requestId },
+    });
+    onEvent?.({
+      type: 'routing',
+      data: {
+        mode,
+        route: mode === 'simple' ? 'simple' : 'pending',
+        requestId: requestContext.requestId,
+      },
+    });
+    const bufferedTokens: string[] = [];
+    const publishEvent: ChatEventCallback = (event) => {
+      if (event.type === 'token') {
+        const token =
+          typeof event.data === 'string'
+            ? event.data
+            : event.data == null
+              ? ''
+              : (JSON.stringify(event.data) ?? '');
+        bufferedTokens.push(token);
+        return;
+      }
+      onEvent?.(event);
+    };
+    const flushBufferedTokens = (finalAnswer?: string) => {
+      const streamedAnswer = bufferedTokens.join('');
+      const tokens =
+        finalAnswer !== undefined && streamedAnswer !== finalAnswer
+          ? [finalAnswer]
+          : bufferedTokens;
+      for (const token of tokens) {
+        onEvent?.({ type: 'token', data: token });
+      }
+      bufferedTokens.length = 0;
+    };
     const contextualRetrievalQuery = buildContextualRetrievalQuery(
       req.query,
       history,
@@ -424,7 +470,7 @@ export class ChatService {
               history,
               userId,
               memoryMessages,
-              (token: string) => onEvent({ type: 'token', data: token }),
+              (token: string) => publishEvent({ type: 'token', data: token }),
               answerOptions,
             )
           : await this.karpathyRagService.answer(
@@ -441,106 +487,32 @@ export class ChatService {
       }
       result = this.ensureNonEmptyAnswer(result);
 
-      if (run) {
-        await this.agentRuns?.recordRuntimeEvent(run.id, {
-          eventType: 'route.selected',
-          target: 'simple',
-          payload: { requestedMode: mode, route: 'simple' },
-        });
-        await this.agentRuns?.recordRuntimeEvent(run.id, {
-          eventType: 'retrieval.completed',
-          target: 'karpathy_rag',
-          payload: {
-            references: result.references.length,
-            sufficient: result.retrievalSufficient,
-            reason: result.retrievalReason,
-          },
-        });
-      }
-      onEvent?.({ type: 'routing', data: { mode, route: 'simple', requestId: requestContext.requestId } });
-      onEvent?.({ type: 'retrieval', data: { references: result.references.length, sufficient: result.retrievalSufficient } });
+      onEvent?.({
+        type: 'routing',
+        data: { mode, route: 'simple', requestId: requestContext.requestId },
+      });
+      onEvent?.({
+        type: 'retrieval',
+        data: {
+          references: result.references.length,
+          sufficient: result.retrievalSufficient,
+        },
+      });
       onEvent?.({ type: 'citation', data: result.references });
-
-      await this.persistConversationResult({
-        threadId,
-        userId,
-        query: req.query,
-        answer: result.answer,
-        skipLongTermMemory: queryIntent.contextMode !== 'none' &&
-          queryIntent.contextMode !== 'factual_verification',
-        metadata: {
-          contextMode: queryIntent.contextMode,
-          entities: queryIntent.entities,
-          source: 'session_context',
-        },
-        answerMetadata: {
-          route: 'simple',
-          retrievalSufficient: result.retrievalSufficient,
-          retrievalReason: result.retrievalReason,
-          references: result.references,
-          contextMode: queryIntent.contextMode,
-        },
-      });
-
-      const queryLogId = await this.logQuery({
-        userId,
-        query: req.query,
-        mode,
-        threadId,
-        startTime,
-        refused:
-          result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
-        citationCount: result.references.length,
-        hasAnswer: result.answer.length > 0,
-        answer: result.answer,
-        references: result.references,
-      });
-      const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
-        this.langfuseProvider.estimateTextTokens(req.query),
-        this.langfuseProvider.estimateTextTokens(result.answer),
-      );
-      if (run)
-        await this.agentRuns?.finish(run.id, {
-          queryLogId,
-          route: 'simple',
-          status: 'completed',
-          costUsd: estimatedCostUsd,
-          requiresApproval:
-            estimatedCostUsd >
-            (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
-          resultSummary: result.answer.slice(0, 2000),
-        });
-      if (run) {
-        await this.agentGoals?.update({
-          threadId,
-          runId: run.id,
-          actor: mode,
-          objective: req.query,
-          maxRounds: run.maxSteps,
-          status:
-            result.answer ===
-            this.karpathyRagService.unsupportedReliableAnswer()
-              ? 'blocked'
-              : 'completed',
-          reason:
-            result.answer ===
-            this.karpathyRagService.unsupportedReliableAnswer()
-              ? result.retrievalReason
-              : undefined,
-        });
-      }
-      this.traceAnswer({
-        userId,
-        query: req.query,
+      flushBufferedTokens(result.answer);
+      return this.finalizeChatResult({
+        result,
         mode,
         route: 'simple',
+        req,
+        userId,
         threadId,
         startTime,
-        answer: result.answer,
-        references: result.references,
-        refused:
-          result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
-        events: [
+        queryIntent,
+        run,
+        onEvent,
+        model: executionOptions?.model,
+        traceEvents: [
           {
             type: 'citation',
             data: result.references,
@@ -552,19 +524,6 @@ export class ChatService {
             timestamp: new Date().toISOString(),
           },
         ],
-      });
-      onEvent?.({
-        type: 'final',
-        data: { ...result, mode: 'simple', route: 'simple', threadId, queryLogId },
-      });
-
-      return {
-        ...result,
-        mode: 'simple',
-        route: 'simple',
-        threadId,
-        queryLogId,
-        runId: run?.id,
         executionState: {
           phase: 'completed',
           consumedSteps: 1,
@@ -572,7 +531,7 @@ export class ChatService {
           remainingSteps: Math.max(0, requestContext.budget.maxSteps - 1),
           remainingToolCalls: requestContext.budget.remainingToolCalls,
         },
-      };
+      });
     }
 
     // agentic / auto 模式走 AgenticRagService
@@ -584,13 +543,13 @@ export class ChatService {
         mode,
         (event) => {
           traceEvents.push(this.toTraceEvent(event));
-          if (event.type !== 'final') onEvent?.(event);
+          if (event.type !== 'final') publishEvent(event);
         },
         history,
         threadId,
         userId,
         memoryMessages,
-        false,
+        req.approvalRequired === true,
         {
           ...retrievalOptions,
           retrievalQuery: contextualRetrievalQuery,
@@ -602,48 +561,109 @@ export class ChatService {
       throw error;
     }
     result = this.ensureNonEmptyAnswer(result);
+    flushBufferedTokens(result.answer);
+
+    return this.finalizeChatResult({
+      result,
+      mode,
+      route: result.route,
+      req,
+      userId,
+      threadId,
+      startTime,
+      queryIntent,
+      run: run ?? undefined,
+      onEvent,
+      model: executionOptions?.model,
+      traceEvents,
+    });
+  }
+
+  private async finalizeChatResult(input: {
+    result: FinalizableChatResult;
+    mode: ChatMode;
+    route: 'simple' | 'agentic';
+    req: ChatDto;
+    userId: string;
+    threadId: string;
+    startTime: number;
+    queryIntent: QueryIntent;
+    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
+    onEvent?: ChatEventCallback;
+    model?: string;
+    traceEvents?: RagTraceEvent[];
+    executionState?: ChatResponse['executionState'];
+    includeUserMessage?: boolean;
+  }): Promise<ChatResponse> {
+    const result = input.result;
+    if (result.interrupted) {
+      return this.finalizeInterruptedChat(input);
+    }
+    const refused =
+      result.answer === this.karpathyRagService.unsupportedReliableAnswer();
 
     await this.persistConversationResult({
-      threadId,
-      userId,
-      query: req.query,
+      threadId: input.threadId,
+      userId: input.userId,
+      query: input.req.query,
       answer: result.answer,
-      skipLongTermMemory: queryIntent.contextMode !== 'none' &&
-        queryIntent.contextMode !== 'factual_verification',
+      includeUserMessage: input.includeUserMessage,
+      skipLongTermMemory:
+        input.queryIntent.contextMode !== 'none' &&
+        input.queryIntent.contextMode !== 'factual_verification',
       metadata: {
-        contextMode: queryIntent.contextMode,
-        entities: queryIntent.entities,
+        contextMode: input.queryIntent.contextMode,
+        entities: input.queryIntent.entities,
         source: 'session_context',
       },
       answerMetadata: {
-        route: result.route,
+        route: input.route,
         confidence: result.confidence,
         retryCount: result.retryCount,
         retrievalSufficient: result.retrievalSufficient,
         retrievalReason: result.retrievalReason,
         references: result.references,
-        contextMode: queryIntent.contextMode,
+        contextMode: input.queryIntent.contextMode,
       },
     });
 
     const queryLogId = await this.logQuery({
-      userId,
-      query: req.query,
-      mode,
-      threadId,
-      startTime,
-      refused:
-        result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
-      citationCount: result.references?.length ?? 0,
+      userId: input.userId,
+      query: input.req.query,
+      mode: input.mode,
+      threadId: input.threadId,
+      startTime: input.startTime,
+      refused,
+      citationCount: result.references.length,
       hasAnswer: result.answer.length > 0,
       answer: result.answer,
-      references: result.references ?? [],
+      references: result.references,
     });
-    for (const event of traceEvents) {
+
+    if (input.run) {
+      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
+        eventType: 'route.selected',
+        target: input.route,
+        payload: { requestedMode: input.mode, route: input.route },
+      });
+      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
+        eventType: 'retrieval.completed',
+        target: input.route === 'simple' ? 'karpathy_rag' : 'agentic_rag',
+        payload: {
+          references: result.references.length,
+          sufficient: result.retrievalSufficient,
+          reason: result.retrievalReason,
+          retryCount: result.retryCount,
+        },
+      });
+    }
+
+    for (const event of input.traceEvents ?? []) {
       if (
-        event.type === 'tool_call' ||
-        event.type === 'node_start' ||
-        event.type === 'node_end'
+        input.run &&
+        (event.type === 'tool_call' ||
+          event.type === 'node_start' ||
+          event.type === 'node_end')
       ) {
         const data = event.data as Record<string, unknown> | undefined;
         const actionName =
@@ -651,39 +671,33 @@ export class ChatService {
         const riskLevel = /write|delete|send|publish|deploy/i.test(actionName)
           ? 'high'
           : 'low';
-        if (run)
-          await this.agentRuns?.recordAction(run.id, {
-            name: actionName,
-            actionType: event.type,
-            status: data?.error ? 'failed' : 'success',
-            riskLevel,
-            requiresApproval: riskLevel === 'high',
-            input: data,
-            output: data,
-          });
+        await this.agentRuns?.recordAction(input.run.id, {
+          name: actionName,
+          actionType: event.type,
+          status: data?.error ? 'failed' : 'success',
+          riskLevel,
+          requiresApproval: riskLevel === 'high',
+          input: data,
+          output: data,
+        });
       }
     }
-    if (run) {
-      await this.recordTraceTimeline(run.id, traceEvents, result.route);
-      await this.agentRuns?.recordRuntimeEvent(run.id, {
-        eventType: 'retrieval.completed',
-        target: 'agentic_rag',
-        payload: {
-          references: result.references?.length ?? 0,
-          sufficient: result.retrievalSufficient,
-          reason: result.retrievalReason,
-          retryCount: result.retryCount,
-        },
-      });
+    if (input.run && input.traceEvents?.length) {
+      await this.recordTraceTimeline(
+        input.run.id,
+        input.traceEvents,
+        input.route,
+      );
     }
+
     const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
-      this.langfuseProvider.estimateTextTokens(req.query),
+      this.langfuseProvider.estimateTextTokens(input.req.query),
       this.langfuseProvider.estimateTextTokens(result.answer),
     );
-    if (run)
-      await this.agentRuns?.finish(run.id, {
+    if (input.run) {
+      await this.agentRuns?.finish(input.run.id, {
         queryLogId,
-        route: result.route,
+        route: input.route,
         status: 'completed',
         retryCount: result.retryCount,
         costUsd: estimatedCostUsd,
@@ -692,66 +706,295 @@ export class ChatService {
           (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
         resultSummary: result.answer.slice(0, 2000),
       });
-    if (run) {
       await this.agentGoals?.update({
-        threadId,
-        runId: run.id,
-        actor: mode,
-        objective: req.query,
-        maxRounds: run.maxSteps,
-        status:
-          result.answer === this.karpathyRagService.unsupportedReliableAnswer()
-            ? 'blocked'
-            : 'completed',
-        reason:
-          result.answer === this.karpathyRagService.unsupportedReliableAnswer()
-            ? result.retrievalReason
-            : undefined,
+        threadId: input.threadId,
+        runId: input.run.id,
+        actor: input.mode,
+        objective: input.req.query,
+        maxRounds: input.run.maxSteps,
+        status: refused ? 'blocked' : 'completed',
+        reason: refused ? result.retrievalReason : undefined,
       });
     }
+
     this.traceAnswer({
-      userId,
-      query: req.query,
-      mode,
-      route: result.route,
-      threadId,
-      startTime,
-      answer: result.answer,
-      references: result.references ?? [],
-      refused:
-        result.answer === this.karpathyRagService.unsupportedReliableAnswer(),
-      events: traceEvents,
-    });
-
-    onEvent?.({
-      type: 'final',
-      data: {
-        answer: result.answer,
-        references: result.references,
-        mode,
-        route: result.route,
-        threadId,
-        queryLogId,
-      },
-    });
-
-    return {
+      userId: input.userId,
+      query: input.req.query,
+      mode: input.mode,
+      route: input.route,
+      threadId: input.threadId,
+      startTime: input.startTime,
       answer: result.answer,
       references: result.references,
-      mode,
-      route: result.route,
+      refused,
+      model: input.model,
+      events: input.traceEvents,
+    });
+
+    const response: ChatResponse = {
+      answer: result.answer,
+      references: result.references,
+      mode: input.mode,
+      route: input.route,
       confidence: result.confidence,
       retryCount: result.retryCount,
       retrievalSufficient: result.retrievalSufficient,
       retrievalReason: result.retrievalReason,
       evidenceCoverage: result.evidenceCoverage,
-      executionState: result.executionState
-        ? { phase: 'completed', ...result.executionState }
-        : undefined,
-      threadId,
+      executionState:
+        input.executionState ??
+        (result.executionState
+          ? { phase: 'completed', ...result.executionState }
+          : undefined),
+      threadId: input.threadId,
       queryLogId,
-      runId: run?.id,
+      runId: input.run?.id,
     };
+    input.onEvent?.({ type: 'final', data: response });
+    return response;
+  }
+
+  /**
+   * 审批暂停不是最终回答：仅保存用户请求与检查点关联，不写草稿答案、Query Log
+   * 或长期记忆。恢复后由 resume() 走同一套终态审计收口。
+   */
+  private async finalizeInterruptedChat(input: {
+    result: FinalizableChatResult;
+    mode: ChatMode;
+    route: 'simple' | 'agentic';
+    req: ChatDto;
+    userId: string;
+    threadId: string;
+    startTime: number;
+    queryIntent: QueryIntent;
+    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
+    onEvent?: ChatEventCallback;
+    model?: string;
+    traceEvents?: RagTraceEvent[];
+    executionState?: ChatResponse['executionState'];
+  }): Promise<ChatResponse> {
+    const executionState = {
+      phase: 'approval' as const,
+      consumedSteps: input.result.executionState?.consumedSteps ?? 0,
+      consumedToolCalls: input.result.executionState?.consumedToolCalls ?? 0,
+      remainingSteps: input.result.executionState?.remainingSteps,
+      remainingToolCalls: input.result.executionState?.remainingToolCalls,
+      checkpointId: input.result.executionState?.checkpointId,
+      paused: true,
+      lastNode: input.result.executionState?.lastNode ?? 'humanApprovalNode',
+    };
+    await this.conversationService.addMessage(
+      input.threadId,
+      'human',
+      input.req.query,
+      input.userId,
+      {
+        pendingApproval: true,
+        runId: input.run?.id,
+        mode: input.mode,
+        queryIntent: input.queryIntent,
+        skipLongTermMemory:
+          input.queryIntent.contextMode !== 'none' &&
+          input.queryIntent.contextMode !== 'factual_verification',
+        model: input.model,
+        checkpointId: executionState.checkpointId,
+      },
+    );
+    void this.shortTermMemory.addTurn(input.threadId, 'user', input.req.query);
+
+    if (input.run) {
+      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
+        eventType: 'approval.requested',
+        target: 'humanApprovalNode',
+        payload: {
+          checkpointId: executionState.checkpointId,
+          remainingSteps: executionState.remainingSteps,
+          remainingToolCalls: executionState.remainingToolCalls,
+        },
+      });
+      if (input.traceEvents?.length) {
+        await this.recordTraceTimeline(
+          input.run.id,
+          input.traceEvents,
+          input.route,
+        );
+      }
+      await this.agentRuns?.finish(input.run.id, {
+        route: input.route,
+        status: 'waiting_approval',
+        retryCount: input.result.retryCount,
+        requiresApproval: true,
+        resultSummary: '已生成草稿，等待人工审批。',
+      });
+      await this.agentGoals?.update({
+        threadId: input.threadId,
+        runId: input.run.id,
+        actor: input.mode,
+        objective: input.req.query,
+        maxRounds: input.run.maxSteps,
+        status: 'paused',
+        reason: '等待人工审批',
+      });
+    }
+
+    return {
+      answer: input.result.answer,
+      references: input.result.references,
+      mode: input.mode,
+      route: input.route,
+      confidence: input.result.confidence,
+      retryCount: input.result.retryCount,
+      retrievalSufficient: input.result.retrievalSufficient,
+      retrievalReason: input.result.retrievalReason,
+      evidenceCoverage: input.result.evidenceCoverage,
+      executionState,
+      threadId: input.threadId,
+      runId: input.run?.id,
+    };
+  }
+
+  /** 审批恢复统一回到 Chat 编排层，禁止 Controller 直接绕过审计与权限边界。 */
+  async resume(
+    threadId: string,
+    approval: 'approved' | 'rejected',
+    feedback: string | undefined,
+    userId: string,
+    onEvent?: ChatEventCallback,
+  ): Promise<ChatResponse> {
+    const conversation = await this.conversationService.get(threadId, userId);
+    if (!conversation) {
+      throw new BadRequestException('未找到可恢复的会话或无权访问');
+    }
+    const pending = [...conversation.messages]
+      .reverse()
+      .find((message) => {
+        const metadata = this.asRecord(message.metadata);
+        return message.role === 'human' && metadata?.pendingApproval === true;
+      });
+    const metadata = this.asRecord(pending?.metadata);
+    if (!pending || !metadata) {
+      throw new BadRequestException('当前会话没有等待审批的请求');
+    }
+    const runId = typeof metadata.runId === 'string' ? metadata.runId : undefined;
+    const run = runId
+      ? await this.agentRuns?.get(runId)
+      : await this.agentRuns?.findLatestByThread(threadId);
+    if (run?.userId && run.userId !== userId) {
+      throw new BadRequestException('无权恢复其他用户的运行');
+    }
+    if (run && run.status !== 'waiting_approval') {
+      throw new BadRequestException('当前运行不在等待审批状态');
+    }
+
+    const queryIntent = this.asQueryIntent(metadata.queryIntent);
+    const mode = this.asChatMode(metadata.mode) ?? 'agentic';
+    const traceEvents: RagTraceEvent[] = [];
+    const result = await this.agenticRagService.resumeGraph(
+      threadId,
+      approval,
+      feedback,
+      (event) => {
+        traceEvents.push(this.toTraceEvent(event));
+        if (event.type !== 'final') onEvent?.(event);
+      },
+    );
+    const startTime = Date.now();
+
+    if (approval === 'rejected') {
+      const rejectionAnswer = feedback?.trim()
+        ? `本次草稿未获批准：${feedback.trim()}`
+        : '本次草稿未获批准，未写入正式答案。';
+      await this.conversationService.addMessage(
+        threadId,
+        'ai',
+        rejectionAnswer,
+        userId,
+        { approval: 'rejected', runId: run?.id },
+      );
+      const queryLogId = await this.logQuery({
+        userId,
+        query: pending.content,
+        mode,
+        threadId,
+        startTime,
+        refused: true,
+        citationCount: 0,
+        hasAnswer: false,
+        answer: rejectionAnswer,
+        references: [],
+      });
+      if (run) {
+        await this.recordTraceTimeline(run.id, traceEvents, 'agentic');
+        await this.agentRuns?.finish(run.id, {
+          route: 'agentic',
+          status: 'completed',
+          queryLogId,
+          requiresApproval: true,
+          resultSummary: rejectionAnswer,
+        });
+        await this.agentGoals?.update({
+          threadId,
+          runId: run.id,
+          actor: mode,
+          objective: pending.content,
+          maxRounds: run.maxSteps,
+          status: 'blocked',
+          reason: feedback?.trim() || '人工审批拒绝',
+        });
+      }
+      const response: ChatResponse = {
+        answer: rejectionAnswer,
+        references: [],
+        mode,
+        route: 'agentic',
+        confidence: 0,
+        retryCount: result.retryCount,
+        retrievalSufficient: false,
+        retrievalReason: '人工审批拒绝',
+        executionState: {
+          phase: 'completed',
+          consumedSteps: result.executionState.consumedSteps,
+          consumedToolCalls: result.executionState.consumedToolCalls,
+          remainingSteps: result.executionState.remainingSteps,
+          remainingToolCalls: result.executionState.remainingToolCalls,
+          checkpointId: result.executionState.checkpointId,
+          paused: false,
+          lastNode: result.executionState.lastNode,
+        },
+        threadId,
+        queryLogId,
+        runId: run?.id,
+      };
+      onEvent?.({ type: 'final', data: response });
+      return response;
+    }
+
+    return this.finalizeChatResult({
+      result: this.ensureNonEmptyAnswer({
+        answer: result.answer,
+        references: result.references,
+        confidence: result.confidence,
+        retryCount: result.retryCount,
+        executionState: result.executionState,
+      }),
+      mode,
+      route: 'agentic',
+      req: { query: pending.content, mode },
+      userId,
+      threadId,
+      startTime,
+      queryIntent,
+      run: run ?? undefined,
+      onEvent,
+      model: typeof metadata.model === 'string' ? metadata.model : undefined,
+      traceEvents,
+      executionState: {
+        phase: 'completed',
+        ...result.executionState,
+        paused: false,
+      },
+      includeUserMessage: false,
+    });
   }
 
   async logQuery(params: {
@@ -799,17 +1042,20 @@ export class ChatService {
     userId: string;
     query: string;
     answer: string;
+    includeUserMessage?: boolean;
     skipLongTermMemory?: boolean;
     metadata?: Record<string, unknown>;
     answerMetadata?: Record<string, unknown>;
   }): Promise<void> {
-    await this.conversationService.addMessage(
-      input.threadId,
-      'human',
-      input.query,
-      input.userId,
-      input.metadata,
-    );
+    if (input.includeUserMessage !== false) {
+      await this.conversationService.addMessage(
+        input.threadId,
+        'human',
+        input.query,
+        input.userId,
+        input.metadata,
+      );
+    }
     await this.conversationService.addMessage(
       input.threadId,
       'ai',
@@ -817,8 +1063,14 @@ export class ChatService {
       input.userId,
       input.answerMetadata,
     );
-    void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);
-    void this.shortTermMemory.addTurn(input.threadId, 'assistant', input.answer);
+    if (input.includeUserMessage !== false) {
+      void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);
+    }
+    void this.shortTermMemory.addTurn(
+      input.threadId,
+      'assistant',
+      input.answer,
+    );
     if (!input.skipLongTermMemory) {
       void this.memoryService.classifyAndPersist(
         input.userId,
@@ -838,11 +1090,13 @@ export class ChatService {
   /**
    * 空回答不是成功结果：禁止写入会话、记忆、日志和 SSE 结束事件，避免前端只剩运行轨迹。
    */
-  private ensureNonEmptyAnswer<T extends {
-    answer: string;
-    retrievalSufficient?: boolean;
-    retrievalReason?: string;
-  }>(result: T): T {
+  private ensureNonEmptyAnswer<
+    T extends {
+      answer: string;
+      retrievalSufficient?: boolean;
+      retrievalReason?: string;
+    },
+  >(result: T): T {
     const answer = result.answer?.trim();
     if (answer) return { ...result, answer };
 
@@ -881,6 +1135,7 @@ export class ChatService {
     query: string;
     mode: string;
     route: string;
+    model?: string;
     threadId: string;
     startTime: number;
     answer: string;
@@ -903,6 +1158,7 @@ export class ChatService {
       answer: params.answer,
       mode: params.mode,
       route: params.route,
+      model: params.model,
       latencyMs: Date.now() - params.startTime,
       citationCount: params.references.length,
       refused: params.refused,
@@ -1059,5 +1315,48 @@ export class ChatService {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : undefined;
+  }
+
+  private asChatMode(value: unknown): ChatMode | undefined {
+    return value === 'simple' || value === 'auto' || value === 'agentic'
+      ? value
+      : undefined;
+  }
+
+  private asQueryIntent(value: unknown): QueryIntent {
+    const intent = this.asRecord(value);
+    if (
+      intent &&
+      typeof intent.contextMode === 'string' &&
+      typeof intent.sourcePolicy === 'string' &&
+      typeof intent.action === 'string'
+    ) {
+      return intent as unknown as QueryIntent;
+    }
+    return {
+      intent: 'general',
+      contextMode: 'none',
+      historyPolicy: 'context_only',
+      confidence: 0,
+      standaloneQuery: '',
+      multiIntent: false,
+      subQueries: [],
+      action: 'retrieve',
+      sourcePolicy: 'local_only',
+      needsSynthesis: false,
+      requiresGraph: false,
+      targetKbs: ['general'],
+      queryType: 'private_entity',
+      entities: [],
+      filters: {
+        department: null,
+        project: null,
+        timeRange: null,
+        documentType: null,
+      },
+      rewriteQueries: [],
+      reason: '恢复请求缺少原始语义上下文，保守使用本地边界',
+      ambiguity: { detected: false, confidence: 0, senses: [] },
+    };
   }
 }

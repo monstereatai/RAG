@@ -9,11 +9,35 @@ import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime
 
 @Injectable()
 export class AgentTasksService {
+  private retryHandler?: (task: AgentTaskEntity) => Promise<void>;
+
   constructor(
     @InjectRepository(AgentTaskEntity)
     private readonly tasks: Repository<AgentTaskEntity>,
     private readonly events: AgentRuntimeEventsService,
   ) {}
+
+  registerRetryHandler(
+    handler: (task: AgentTaskEntity) => Promise<void>,
+  ): void {
+    this.retryHandler = handler;
+  }
+
+  async markRetryFailed(id: string, error: unknown): Promise<void> {
+    const task = await this.findById(id);
+    task.status = 'failed';
+    task.errorMessage =
+      error instanceof Error ? error.message.slice(0, 2_000) : String(error);
+    await this.tasks.save(task);
+    await this.events.emit({
+      threadId: task.threadId,
+      taskId: task.id,
+      eventType: 'task.failed',
+      actor: task.role,
+      target: task.role,
+      payload: { error: task.errorMessage, retryCount: task.retryCount },
+    });
+  }
 
   async createPlan(input: {
     threadId: string;
@@ -99,6 +123,12 @@ export class AgentTasksService {
     });
   }
 
+  async findById(id: string) {
+    const task = await this.tasks.findOne({ where: { id } });
+    if (!task) throw new NotFoundException(`task ${id} not found`);
+    return task;
+  }
+
   async updateForRole(
     threadId: string,
     role: string,
@@ -171,8 +201,10 @@ export class AgentTasksService {
   }
 
   async retry(id: string) {
-    const task = await this.tasks.findOne({ where: { id } });
-    if (!task) throw new NotFoundException(`task ${id} not found`);
+    const task = await this.findById(id);
+    if (task.status !== 'failed') {
+      throw new Error(`task ${id} is not retryable from ${task.status}`);
+    }
     task.status = 'pending';
     task.retryCount += 1;
     task.errorMessage = null;
@@ -185,6 +217,11 @@ export class AgentTasksService {
       target: task.role,
       payload: { retryCount: task.retryCount },
     });
+    if (this.retryHandler) {
+      void this.retryHandler(saved).catch(async (error: unknown) => {
+        await this.markRetryFailed(saved.id, error);
+      });
+    }
     return saved;
   }
 

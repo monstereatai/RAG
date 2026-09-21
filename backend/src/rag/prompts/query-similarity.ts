@@ -21,15 +21,21 @@ export function filterSemanticQueries(
   candidates: unknown,
   threshold = 0.8,
 ): string[] {
-  if (!Array.isArray(candidates)) return [];
-  return candidates
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-    .filter(
-      (query) =>
-        query === original || querySimilarity(original, query) >= threshold,
-    )
-    .filter((query, index, all) => all.indexOf(query) === index);
+  const originalQuery = original.trim();
+  if (!originalQuery) return [];
+  const accepted = Array.isArray(candidates)
+    ? candidates
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+        .filter(
+          (query) =>
+            query === originalQuery ||
+            querySimilarity(originalQuery, query) >= threshold,
+        )
+    : [];
+  return [originalQuery, ...accepted].filter(
+    (query, index, all) => all.indexOf(query) === index,
+  );
 }
 
 function toFeatures(value: string): Map<string, number> {

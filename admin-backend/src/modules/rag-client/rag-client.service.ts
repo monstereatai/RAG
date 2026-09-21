@@ -289,8 +289,8 @@ export class RagClientService {
   detectCollaborationConflicts(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/conflicts/${encodeURIComponent(threadId)}`); }
   createDecisionRecord(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/collaboration/decisions', body); }
   getCollaborationReplay(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/replay/${encodeURIComponent(threadId)}`); }
-  listAgentTasks(threadId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks${this.toQueryString({ threadId })}`); }
-  retryAgentTask(id: string) { return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry`, {}); }
+  listAgentTasks(threadId: string | undefined, ownerUserId: string) { return this.getJson<Record<string, unknown>[]>(`/rag/admin/agent-ops/tasks${this.toQueryString({ threadId, ownerUserId })}`); }
+  retryAgentTask(id: string, ownerUserId: string) { return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry${this.toQueryString({ ownerUserId })}`, {}); }
   delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', body); }
   listRuntimeEvents(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events${this.toQueryString({ threadId, runId })}`); }
   getRuntimeEventMetrics(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events/metrics${this.toQueryString({ threadId, runId })}`); }

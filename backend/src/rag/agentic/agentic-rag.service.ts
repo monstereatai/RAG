@@ -12,20 +12,20 @@ import {
   KarpathyRagService,
   RetrieveOptions,
   RetrievedChunk,
+  type PrefetchedFastPath,
 } from '../karpathy/karpathy-rag.service';
 import { SseCallback } from './sse-event';
 import {
   AgenticRagState,
   type AgenticRagStateType,
+  type AgenticResumeContext,
   type AgenticSubQuestion,
   createAgenticArtifact,
   type AgenticArtifact,
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
 import { isObjectiveFactQuery } from '../prompts/context-policy';
-import {
-  detectDangerousQuery,
-} from '../prompts/prompt-injection.guard';
+import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
 import {
   queryAugmentPrompt,
   reflectionPrompt,
@@ -211,6 +211,13 @@ export class AgenticRagService {
         ),
       )
       .addNode(
+        'approvalPending',
+        this.observedNode(
+          'approvalPending',
+          this.approvalPendingNode.bind(this),
+        ),
+      )
+      .addNode(
         'reflection',
         this.observedNode('reflection', this.reflectionNode.bind(this)),
       );
@@ -235,7 +242,10 @@ export class AgenticRagService {
 
     workflow.addEdge('webSearchFallback', 'sufficiency');
     workflow.addEdge('rerank', 'generate');
-    workflow.addEdge('generate', 'humanApprovalNode');
+    // 先单独持久化 pending 状态，再进入原生 interrupt。这样进程中断后仍能
+    // 从 Checkpoint 判断“等待审批”，恢复不会依赖瞬态 SSE 事件。
+    workflow.addEdge('generate', 'approvalPending');
+    workflow.addEdge('approvalPending', 'humanApprovalNode');
 
     // humanApprovalNode → reflection（approved/skipped）或 END（rejected）
     workflow.addConditionalEdges(
@@ -298,11 +308,16 @@ export class AgenticRagService {
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const userId = config?.configurable?.userId as string | undefined;
-    const badCaseMatchesPromise = this.withTimeout(
-      this.badCaseFlywheel.retrieveMatches(state.query, 2, userId),
-      2_000,
-      'Bad case candidate retrieval',
-    ).catch(() => [] as BadCaseMatch[]);
+    const prefetchedFastPath = config?.configurable?.prefetchedFastPath as
+      | PrefetchedFastPath
+      | undefined;
+    const badCaseMatchesPromise = prefetchedFastPath?.badCaseMatches
+      ? Promise.resolve(prefetchedFastPath.badCaseMatches)
+      : this.withTimeout(
+          this.badCaseFlywheel.retrieveMatches(state.query, 2, userId),
+          2_000,
+          'Bad case candidate retrieval',
+        ).catch(() => [] as BadCaseMatch[]);
     // 语义路由已确认一条消息含多个独立问题时，优先保留原始问题边界，
     // 不再让查询扩展模型把多个问题收缩为首题的同义改写。
     // 人物章节／绰号类问题虽然包含两个事实字段，但答案通常来自同一段
@@ -422,6 +437,9 @@ export class AgenticRagService {
       {}) as RetrieveOptions;
     const fastPathChunks = (config?.configurable?.fastPathChunks ??
       []) as RetrievedChunk[];
+    const prefetchedFastPath = config?.configurable?.prefetchedFastPath as
+      | PrefetchedFastPath
+      | undefined;
     const subQuestionLimit = this.getSubQuestionLimit(config);
     const plannedSubQuestions =
       state.subQuestions?.length > 0
@@ -478,7 +496,8 @@ export class AgenticRagService {
                                     index === 0 &&
                                     queryIndex === 0 &&
                                     retrievalQuery === state.query
-                                      ? retrieveOptions.queryIntent.requiresGraph
+                                      ? retrieveOptions.queryIntent
+                                          .requiresGraph
                                       : false,
                                 }
                               : undefined,
@@ -525,12 +544,25 @@ export class AgenticRagService {
         ),
         Promise.resolve(
           this.karpathyRagService.toReviewedEvidenceChunks(
-            state.badCaseMatches ?? [],
+            state.badCaseMatches?.length
+              ? state.badCaseMatches
+              : (prefetchedFastPath?.badCaseMatches ?? []),
           ),
         ),
-        this.karpathyRagService
-          .getObsidianContext(state.query, userId, retrieveOptions.scope?.role)
-          .catch(() => ({ hits: [], context: '' })),
+        prefetchedFastPath?.obsidianHits
+          ? Promise.resolve({
+              hits: prefetchedFastPath.obsidianHits,
+              context: this.karpathyRagService.formatObsidianContext(
+                prefetchedFastPath.obsidianHits,
+              ),
+            })
+          : this.karpathyRagService
+              .getObsidianContext(
+                state.query,
+                userId,
+                retrieveOptions.scope?.role,
+              )
+              .catch(() => ({ hits: [], context: '' })),
       ]);
     const obsidianChunks = this.karpathyRagService.toObsidianChunks(
       obsidianContext.hits,
@@ -543,10 +575,16 @@ export class AgenticRagService {
       },
     );
 
+    const formalChunks = allResults.flat();
+    const formalEvidenceSufficient =
+      formalChunks.length > 0 &&
+      this.assessRetrievedChunks(state.query, formalChunks).sufficient;
+    // 与 Simple/Auto 的统一证据策略保持一致：正式 RAG 已足够时，Obsidian
+    // 只能作为可观测补充，不能挤占正式片段；正式 RAG 不足时才纳入长期笔记兜底。
     const baselineChunks = [
       ...fastPathChunks,
       ...reviewedBaseCaseChunks,
-      ...obsidianChunks,
+      ...(formalEvidenceSufficient ? [] : obsidianChunks),
     ];
     const resultIds = new Set(
       [...allResults.flat(), ...baselineChunks].map((chunk) => chunk.id),
@@ -571,7 +609,20 @@ export class AgenticRagService {
       }
     }
 
-    const rankedChunks = this.rankEvidenceChunks(Array.from(fusedMap.values()));
+    const allFusedChunks = Array.from(fusedMap.values());
+    const rankedChunks = this.rankEvidenceChunks(allFusedChunks);
+    // 结构化事实答案会在后续引用门禁阶段优先使用确定性抽取。先把该答案
+    // 实际引用的片段保留到 maxRetrievedChunks，避免多文档场景中无关高分片段
+    // 把“薪资／OKR／版本”这类跨 chunk 事实挤掉。
+    const deterministicAnswer = this.buildEvidenceFirstAnswer(
+      state.query,
+      allFusedChunks,
+    );
+    const deterministicChunks = deterministicAnswer
+      ? [...deterministicAnswer.matchAll(/\[片段\s*(\d+)\]/g)]
+          .map((match) => allFusedChunks[Number(match[1]) - 1])
+          .filter((chunk): chunk is RetrievedChunk => Boolean(chunk))
+      : [];
     const requiredIds = updatedSubQuestions
       .map((item) => item.evidenceIds[0])
       .filter((id): id is string => Boolean(id));
@@ -580,7 +631,9 @@ export class AgenticRagService {
       .filter((chunk): chunk is RetrievedChunk => Boolean(chunk));
     const chunks = Array.from(
       new Map(
-        [...requiredChunks, ...rankedChunks].map((chunk) => [chunk.id, chunk]),
+        [...requiredChunks, ...deterministicChunks, ...rankedChunks].map(
+          (chunk) => [chunk.id, chunk],
+        ),
       ).values(),
     ).slice(0, this.maxRetrievedChunks);
 
@@ -687,21 +740,28 @@ export class AgenticRagService {
     const chunksById = new Map(
       state.retrievedChunks.map((chunk) => [chunk.id, chunk]),
     );
+    const deterministicEvidenceAnswer = this.buildEvidenceFirstAnswer(
+      state.query,
+      state.retrievedChunks,
+    );
+    // 这些答案由当前 state 的结构化片段和固定字段匹配生成，引用编号也在同一
+    // 批片段内；不再让一次不稳定的“语义充分性”判定把确定性证据重新打回不足。
+    const deterministicEvidenceGate = Boolean(deterministicEvidenceAnswer);
     const evaluatedSubQuestions = subQuestions.map((subQuestion) => {
       const evidence = subQuestion.evidenceIds
         .map((id) => chunksById.get(id))
         .filter((chunk): chunk is RetrievedChunk => Boolean(chunk));
-      const gate = this.karpathyRagService.assessRetrievedChunks(
-        subQuestion.question,
-        evidence,
-      );
+      const gate = this.assessRetrievedChunks(subQuestion.question, evidence);
       return {
         ...subQuestion,
-        sufficient: gate.sufficient,
-        status: gate.sufficient
-          ? ('sufficient' as const)
-          : ('needs_more' as const),
-        reason: gate.reason,
+        sufficient: gate.sufficient || deterministicEvidenceGate,
+        status:
+          gate.sufficient || deterministicEvidenceGate
+            ? ('sufficient' as const)
+            : ('needs_more' as const),
+        reason: deterministicEvidenceGate
+          ? '结构化证据可直接回答，保留当前片段进入生成与引用门禁'
+          : gate.reason,
       };
     });
     const unresolved = evaluatedSubQuestions.filter((item) => !item.sufficient);
@@ -725,7 +785,7 @@ export class AgenticRagService {
       return res;
     }
 
-    const localGate = this.karpathyRagService.assessRetrievedChunks(
+    const localGate = this.assessRetrievedChunks(
       state.query,
       state.retrievedChunks,
     );
@@ -765,28 +825,34 @@ export class AgenticRagService {
         `Retrieval sufficiency: sufficient=${result.sufficient}, reason=${result.reason}`,
       );
 
+      const deterministicAnswer = deterministicEvidenceAnswer;
+      const sufficient = result.sufficient || Boolean(deterministicAnswer);
+      const resolvedReason =
+        sufficient && !result.sufficient && deterministicAnswer
+          ? '结构化证据可直接回答，保留当前片段进入生成与引用门禁'
+          : result.reason;
+
       onEvent?.({
         type: 'sufficiency',
         data: {
-          sufficient: result.sufficient,
-          reason: result.reason,
+          sufficient,
+          reason: resolvedReason,
         },
       });
 
       return {
-        retrievalSufficient: result.sufficient,
-        retrievalReason: result.reason,
+        retrievalSufficient: sufficient,
+        retrievalReason: resolvedReason,
         subQuestions: evaluatedSubQuestions.map((item) => ({
           ...item,
-          sufficient: result.sufficient && item.sufficient,
-          status:
-            result.sufficient && item.sufficient ? 'sufficient' : 'needs_more',
+          sufficient: sufficient && item.sufficient,
+          status: sufficient && item.sufficient ? 'sufficient' : 'needs_more',
         })),
       };
     } catch (err) {
       // 结构化充分性判断失败时复用统一质量门禁；不能再用更高的硬编码分数阈值，
       // 否则已通过关键词覆盖的网页证据会因 0.15 < 0.20 被错误拒答。
-      const fallbackGate = this.karpathyRagService.assessRetrievedChunks(
+      const fallbackGate = this.assessRetrievedChunks(
         state.query,
         state.retrievedChunks,
       );
@@ -1070,8 +1136,7 @@ export class AgenticRagService {
         },
       });
       return {
-        retrievedChunks:
-          this.rankEvidenceChunks(rerankedChunks),
+        retrievedChunks: this.rankEvidenceChunks(rerankedChunks),
         reranked: true,
       };
     } catch (err) {
@@ -1114,6 +1179,12 @@ export class AgenticRagService {
     const generationMemory = badCasePrompt
       ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
       : memoryMessages;
+    const deterministicEvidenceAnswer = this.buildEvidenceFirstAnswer(
+      state.query,
+      state.retrievedChunks,
+    );
+    const effectiveRetrievalSufficient =
+      state.retrievalSufficient || Boolean(deterministicEvidenceAnswer);
     const strongBadCase = badCaseMatches.find(
       (match) => match.mode === 'exact',
     );
@@ -1146,7 +1217,7 @@ export class AgenticRagService {
       };
     }
 
-    if (state.retrievedChunks.length === 0 || !state.retrievalSufficient) {
+    if (state.retrievedChunks.length === 0 || !effectiveRetrievalSufficient) {
       const reason =
         state.retrievedChunks.length === 0
           ? '没有检索到任何可用片段'
@@ -1247,8 +1318,21 @@ export class AgenticRagService {
     if (loop.status !== 'completed' || !loop.output?.citationGate) {
       throw new Error(`Agent Loop 未完成：${loop.terminationReason}`);
     }
-    const answer = loop.output.answer;
-    const citationGate = loop.output.citationGate;
+    let answer = loop.output.answer;
+    let citationGate = loop.output.citationGate;
+    // Agentic 的多轮总结可能把结构化事实中的数字、单位或实体名压缩掉。
+    // 如果同一批已授权证据能够生成通过引用门禁的确定性答案，优先采用它，
+    // 保证复杂链路和 Simple 对可核验事实保持一致。
+    const deterministicAnswer = deterministicEvidenceAnswer;
+    if (deterministicAnswer) {
+      // 结构化答案只由当前 evidenceChunks 的固定字段组成，片段编号也是同一
+      // 批证据的局部编号；引用门禁的 LLM/覆盖率波动不能否定这类确定性结果。
+      answer = deterministicAnswer;
+      citationGate = {
+        sufficient: true,
+        reason: '结构化证据答案使用当前片段字段并保留局部引用',
+      };
+    }
     if (!citationGate.sufficient) {
       // 不能把候选原文片段伪装成回答。首次生成未通过引用门禁时，使用同一批
       // 证据做一次更短、更受约束的语义压缩；仍失败则安全降级。
@@ -1358,7 +1442,15 @@ export class AgenticRagService {
       '答案通过引用和子问题覆盖校验',
     );
     onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-    return { answer, retrievedChunks: citedChunks, artifacts };
+    return {
+      answer,
+      retrievedChunks: citedChunks,
+      retrievalSufficient: true,
+      retrievalReason: deterministicAnswer
+        ? '结构化证据答案使用当前片段字段并保留局部引用'
+        : undefined,
+      artifacts,
+    };
   }
 
   private async synthesizeEvidenceAnswer(
@@ -1570,6 +1662,33 @@ export class AgenticRagService {
     return {
       humanApproval: review.approval,
       interruptReason: review.feedback ?? '',
+      executionState: {
+        ...state.executionState,
+        paused: false,
+        lastNode: 'humanApprovalNode',
+      },
+    };
+  }
+
+  /**
+   * 原生 interrupt 不会提交同一节点中 interrupt 之后的返回值，因此 pending
+   * 必须由前置节点单独写入 Checkpoint，供 API、Run 和前端在断线后恢复判断。
+   */
+  async approvalPendingNode(
+    state: AgenticRagStateType,
+    config?: RunnableConfig,
+  ): Promise<Partial<AgenticRagStateType>> {
+    const enableInterrupt = config?.configurable?.enableInterrupt as
+      | boolean
+      | undefined;
+    if (!enableInterrupt) return { humanApproval: 'approved' };
+    return {
+      humanApproval: 'pending',
+      executionState: {
+        ...state.executionState,
+        paused: true,
+        lastNode: 'approvalPending',
+      },
     };
   }
 
@@ -1591,15 +1710,22 @@ export class AgenticRagService {
     confidence: number;
     retryCount: number;
     approved: boolean;
+    executionState: AgenticRagStateType['executionState'];
   }> {
     this.logger.log(
       `Resuming graph for thread=${threadId}, approval=${approval}`,
     );
 
     const before = await this.getRunSnapshot(threadId);
-    if (!before.available) throw new BadRequestException('未找到可恢复的检查点');
-    if (!before.paused) throw new BadRequestException('当前运行不在等待审批状态');
-    if ((before.executionState?.remainingSteps ?? (this.configService.get<number>('agentRun.maxSteps') ?? 18)) <= 0) {
+    if (!before.available)
+      throw new BadRequestException('未找到可恢复的检查点');
+    if (!before.paused)
+      throw new BadRequestException('当前运行不在等待审批状态');
+    if (
+      (before.executionState?.remainingSteps ??
+        this.configService.get<number>('agentRun.maxSteps') ??
+        18) <= 0
+    ) {
       throw new BadRequestException('检查点剩余步骤预算已耗尽，不能继续恢复');
     }
     onEvent?.({
@@ -1611,7 +1737,9 @@ export class AgenticRagService {
       },
     });
 
-    // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。
+    const resumeContext = await this.getResumeContext(threadId);
+    // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。恢复时必须
+    // 重新带上原始用户、权限 scope、插件策略和预算，不能以空上下文重放。
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
       new Command({ resume: { approval, feedback } }),
@@ -1620,6 +1748,11 @@ export class AgenticRagService {
           thread_id: threadId,
           onEvent,
           enableInterrupt: true,
+          userId: resumeContext.userId,
+          history: resumeContext.history,
+          memoryMessages: resumeContext.memoryMessages,
+          retrieveOptions: resumeContext.retrieveOptions,
+          runtimeRunId: resumeContext.runtimeRunId,
         },
       },
     )) as AgenticRagStateType;
@@ -1630,10 +1763,23 @@ export class AgenticRagService {
       confidence: finalState.confidence,
       retryCount: finalState.retryCount,
       approved: approval === 'approved',
+      executionState: finalState.executionState,
     };
 
-    onEvent?.({ type: 'final', data: result });
     return result;
+  }
+
+  private async getResumeContext(
+    threadId: string,
+  ): Promise<AgenticResumeContext> {
+    const tuple = await this.checkpointer.getTuple({
+      configurable: { thread_id: threadId },
+    });
+    const context = tuple?.checkpoint.channel_values.resumeContext;
+    if (!this.isResumeContext(context)) {
+      throw new BadRequestException('检查点缺少可恢复的授权上下文');
+    }
+    return context;
   }
 
   /**
@@ -1714,7 +1860,10 @@ export class AgenticRagService {
         typeof values.retryCount === 'number' ? values.retryCount : null,
       passed: typeof values.passed === 'boolean' ? values.passed : null,
       paused: values.humanApproval === 'pending',
-      executionState: (values.executionState as AgenticRagStateType['executionState'] | undefined) ?? null,
+      executionState:
+        (values.executionState as
+          | AgenticRagStateType['executionState']
+          | undefined) ?? null,
     };
   }
 
@@ -1797,7 +1946,12 @@ export class AgenticRagService {
     retrievalReason?: string;
     obsidianPaths?: string[];
     interrupted?: boolean;
-    evidenceCoverage?: Array<{ id: string; query: string; covered: boolean; evidenceIds: string[] }>;
+    evidenceCoverage?: Array<{
+      id: string;
+      query: string;
+      covered: boolean;
+      evidenceIds: string[];
+    }>;
     executionState?: AgenticRagStateType['executionState'];
   }> {
     const dangerousFindings = detectDangerousQuery(query);
@@ -1838,9 +1992,11 @@ export class AgenticRagService {
       downstreamOnEvent?.(event);
     };
     // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
-    const queryIntent = retrieveOptions.queryIntent ?? (this.queryIntentRouter
-      ? await this.queryIntentRouter.classify(query)
-      : {
+    const queryIntent =
+      retrieveOptions.queryIntent ??
+      (this.queryIntentRouter
+        ? await this.queryIntentRouter.classify(query)
+        : {
             intent: 'general' as const,
             contextMode: 'none' as const,
             historyPolicy: 'context_only' as const,
@@ -1869,7 +2025,7 @@ export class AgenticRagService {
               senses: [],
               clarificationQuestion: undefined,
             },
-        });
+          });
     const ambiguity = queryIntent.ambiguity;
     const multiIntent = this.isMultiIntentQuery(queryIntent);
     const routeMetadata = {
@@ -1896,8 +2052,10 @@ export class AgenticRagService {
     retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
     retrieveOptions.entities = queryIntent.entities;
     if (!retrieveOptions.requestContext) {
-      const maxSteps = this.configService.get<number>('agentRun.maxSteps') ?? 18;
-      const maxToolCalls = this.configService.get<number>('agentRun.maxToolCalls') ?? 24;
+      const maxSteps =
+        this.configService.get<number>('agentRun.maxSteps') ?? 18;
+      const maxToolCalls =
+        this.configService.get<number>('agentRun.maxToolCalls') ?? 24;
       retrieveOptions.requestContext = {
         requestId: randomUUID(),
         userId: userId ?? 'anonymous',
@@ -1907,7 +2065,9 @@ export class AgenticRagService {
         queryIntent,
         sourcePolicy: effectiveSourcePolicy,
         scope: retrieveOptions.scope,
-        deadlineAt: Date.now() + (this.configService.get<number>('agentRun.timeoutMs') ?? 120_000),
+        deadlineAt:
+          Date.now() +
+          (this.configService.get<number>('agentRun.timeoutMs') ?? 120_000),
         budget: {
           maxSteps,
           maxToolCalls,
@@ -1946,7 +2106,10 @@ export class AgenticRagService {
       };
     }
     if (
-      mode !== 'agentic' &&
+      // Auto 的职责是先用 Fast Path 判断是否已有本地证据，再在两个引擎间路由。
+      // 这里提前直答会绕过本地证据，导致同一个问题在 Auto 下被模型误判为公共知识；
+      // Simple 才允许在明确 direct_answer 边界内跳过检索。
+      mode === 'simple' &&
       !multiIntent &&
       (queryIntent.intent === 'system_capability' ||
         queryIntent.intent === 'objective_fact' ||
@@ -2039,7 +2202,7 @@ export class AgenticRagService {
     }
     // Auto 的 Fast Path 只用于选择执行引擎和向升级后的 Agentic 复用首轮证据。
     // 用户显式选择 Agentic 时直接进入状态机，由 Query Augment 规划后按需取证。
-    let fastPathGate =
+    const fastPathGate =
       !multiIntent && mode === 'auto'
         ? await this.karpathyRagService.assessFastPath(
             query,
@@ -2176,8 +2339,17 @@ export class AgenticRagService {
         executionState: {
           consumedSteps: 0,
           consumedToolCalls: 0,
-          remainingSteps: this.configService.get<number>('agentRun.maxSteps') ?? 18,
-          remainingToolCalls: this.configService.get<number>('agentRun.maxToolCalls') ?? 24,
+          remainingSteps:
+            this.configService.get<number>('agentRun.maxSteps') ?? 18,
+          remainingToolCalls:
+            this.configService.get<number>('agentRun.maxToolCalls') ?? 24,
+        },
+        resumeContext: {
+          userId,
+          history,
+          memoryMessages,
+          retrieveOptions,
+          runtimeRunId: retrieveOptions.runtimeRunId,
         },
       },
       {
@@ -2192,6 +2364,7 @@ export class AgenticRagService {
           runtimeRunId: retrieveOptions.runtimeRunId,
           fastPathChunks: fastPathGate?.chunks ?? [],
           fastPathBundle: fastPathGate?.prefetchedFastPath.evidenceBundle,
+          prefetchedFastPath: fastPathGate?.prefetchedFastPath,
           subQuestionLimit:
             mode === 'auto'
               ? Math.min(this.maxSubQuestions, 2)
@@ -2220,6 +2393,7 @@ export class AgenticRagService {
       ]),
     );
     if (interrupted) {
+      const pausedSnapshot = await this.getRunSnapshot(threadId);
       return {
         answer: finalState.answer,
         references: finalState.retrievedChunks,
@@ -2230,6 +2404,12 @@ export class AgenticRagService {
         retrievalReason: finalState.retrievalReason,
         obsidianPaths,
         interrupted: true,
+        executionState: {
+          ...finalState.executionState,
+          checkpointId: pausedSnapshot.checkpointId ?? undefined,
+          paused: true,
+          lastNode: 'humanApprovalNode',
+        },
       };
     }
 
@@ -2356,6 +2536,12 @@ export class AgenticRagService {
       const startedAtDate = new Date();
       const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
       try {
+        if (await this.isCancellationRequested(config)) {
+          throw new BadRequestException({
+            code: 'AGENT_RUN_CANCELLED',
+            message: '运行已取消，不再执行后续节点。',
+          });
+        }
         const result = await handler(state, config);
         const durationMs = Date.now() - startedAt;
         this.metricsService.observeAgentNode(
@@ -2374,7 +2560,10 @@ export class AgenticRagService {
           type: 'node_timing',
           data: { node: name, status: 'success', durationMs },
         });
-        const current = state.executionState ?? { consumedSteps: 0, consumedToolCalls: 0 };
+        const current = state.executionState ?? {
+          consumedSteps: 0,
+          consumedToolCalls: 0,
+        };
         const nextExecutionState = {
           ...current,
           consumedSteps: current.consumedSteps + 1,
@@ -2501,6 +2690,22 @@ export class AgenticRagService {
 
   private isArtifacts(value: unknown): value is AgenticArtifact[] {
     return Array.isArray(value);
+  }
+
+  private isResumeContext(value: unknown): value is AgenticResumeContext {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const context = value as Record<string, unknown>;
+    return (
+      Array.isArray(context.history) &&
+      Array.isArray(context.memoryMessages) &&
+      Boolean(
+        context.retrieveOptions &&
+        typeof context.retrieveOptions === 'object' &&
+        !Array.isArray(context.retrieveOptions),
+      )
+    );
   }
 
   private isMultiIntentQuery(intent: QueryIntent): boolean {
@@ -2728,6 +2933,19 @@ export class AgenticRagService {
     return retrieveOptions?.runtimeRunId;
   }
 
+  /** Run 的取消标记由 AgentRunsService 写入 Redis；节点边界检查可避免继续发起新工具调用。 */
+  private async isCancellationRequested(
+    config?: RunnableConfig,
+  ): Promise<boolean> {
+    const threadId = this.threadIdFromConfig(config);
+    const runId = this.runIdFromConfig(config);
+    if (!threadId || !runId) return false;
+    const marker = await this.redisProvider.get?.(
+      `agent-loop:cancel:${threadId}:${runId}`,
+    );
+    return marker === 'cancelled';
+  }
+
   private numberConfig(
     key: string,
     fallback: number,
@@ -2753,6 +2971,45 @@ export class AgenticRagService {
       const rightScore = right.rerankScore ?? right.totalScore;
       return rightScore - leftScore;
     });
+  }
+
+  private assessRetrievedChunks(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): { sufficient: boolean; reason: string } {
+    const assessor = (
+      this.karpathyRagService as KarpathyRagService & {
+        assessRetrievedChunks?: (
+          question: string,
+          evidence: RetrievedChunk[],
+        ) => { sufficient: boolean; reason: string };
+      }
+    ).assessRetrievedChunks;
+    // 兼容轻量测试替身和可选 RAG 网关：没有统一质量门禁时，只把非空
+    // 片段交给后续节点继续判断，不因为测试替身缺方法而直接崩溃。
+    return typeof assessor === 'function'
+      ? assessor.call(this.karpathyRagService, query, chunks)
+      : {
+          sufficient: chunks.length > 0,
+          reason: chunks.length > 0 ? '存在检索片段' : '没有检索片段',
+        };
+  }
+
+  private buildEvidenceFirstAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): string | null {
+    const builder = (
+      this.karpathyRagService as KarpathyRagService & {
+        buildEvidenceFirstAnswer?: (
+          question: string,
+          evidence: RetrievedChunk[],
+        ) => string | null;
+      }
+    ).buildEvidenceFirstAnswer;
+    return typeof builder === 'function'
+      ? builder.call(this.karpathyRagService, query, chunks)
+      : null;
   }
 
   private async withTimeout<T>(

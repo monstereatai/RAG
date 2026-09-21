@@ -60,6 +60,7 @@ describe('AgenticRagService budget boundaries', () => {
     const semanticExampleSelector = {} as SemanticExampleSelector;
     const badCaseFlywheel = {
       selectPrompt: jest.fn().mockResolvedValue(''),
+      retrieveMatches: jest.fn().mockResolvedValue([]),
     };
     const metricsService = {
       observeAgentNode: jest.fn(),
@@ -87,7 +88,13 @@ describe('AgenticRagService budget boundaries', () => {
       redisProvider,
     );
 
-    return { service, karpathyRagService, llmProvider, getModelMock };
+    return {
+      service,
+      karpathyRagService,
+      llmProvider,
+      getModelMock,
+      badCaseFlywheel,
+    };
   }
 
   it('caps normalized augmented queries', () => {
@@ -209,6 +216,51 @@ describe('AgenticRagService budget boundaries', () => {
 
     expect(karpathyRagService.assessFastPath).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists the pending approval state before entering the native interrupt node', async () => {
+    const { service } = createService();
+
+    const result = await service.approvalPendingNode(
+      {
+        executionState: {
+          consumedSteps: 4,
+          consumedToolCalls: 1,
+          remainingSteps: 14,
+          remainingToolCalls: 23,
+        },
+      } as AgenticRagStateType,
+      { configurable: { enableInterrupt: true } },
+    );
+
+    expect(result).toEqual({
+      humanApproval: 'pending',
+      executionState: expect.objectContaining({
+        paused: true,
+        lastNode: 'approvalPending',
+      }),
+    });
+  });
+
+  it('recognizes a cancellation marker at the run boundary', async () => {
+    const { service } = createService();
+    (service as unknown as { redisProvider: { get: jest.Mock } }).redisProvider = {
+      get: jest.fn().mockResolvedValue('cancelled'),
+    };
+    const isCancellationRequested = (
+      service as unknown as {
+        isCancellationRequested: (config: unknown) => Promise<boolean>;
+      }
+    ).isCancellationRequested.bind(service);
+
+    await expect(
+      isCancellationRequested({
+        configurable: {
+          thread_id: 'thread-1',
+          retrieveOptions: { runtimeRunId: 'run-1' },
+        },
+      }),
+    ).resolves.toBe(true);
   });
 
   it('keeps entity chapter and nickname lookups as one evidence question', () => {
@@ -438,6 +490,22 @@ describe('AgenticRagService budget boundaries', () => {
   it('reuses fast-path evidence when agentic retrieval starts', async () => {
     const { service, karpathyRagService } = createService();
     karpathyRagService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
+    const prefetchedFastPath = {
+      retrieval: { chunks: [], diagnostics: {}, profile: {} },
+      obsidianHits: [{ path: 'notes/fast-path.md' }],
+      badCaseMatches: [
+        {
+          id: 'feedback-1',
+          query: '原始问题',
+          text: '正确处理标准：复用已有纠正证据。',
+          score: 0.95,
+          mode: 'correction',
+        },
+      ],
+    } as never;
+    karpathyRagService.toObsidianChunks.mockReturnValue([
+      chunk('obsidian:notes/fast-path.md', 0.8),
+    ]);
 
     const result = await service.retrievalNode(
       {
@@ -470,16 +538,59 @@ describe('AgenticRagService budget boundaries', () => {
         configurable: {
           userId: 'user-1',
           fastPathChunks: [chunk('c1', 0.9)],
+          prefetchedFastPath,
           subQuestionLimit: 2,
         },
       },
     );
 
     expect(karpathyRagService.retrieve.mock.calls).toHaveLength(1);
+    expect(karpathyRagService.getObsidianContext).not.toHaveBeenCalled();
+    expect(karpathyRagService.toReviewedEvidenceChunks).toHaveBeenCalledWith(
+      prefetchedFastPath.badCaseMatches,
+    );
+    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith(
+      prefetchedFastPath.obsidianHits,
+    );
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
       'c1',
       'c2',
     ]);
+  });
+
+  it('reuses Fast Path Bad Case candidates during query planning', async () => {
+    const { service, badCaseFlywheel } = createService();
+    const prefetchedFastPath = {
+      retrieval: { chunks: [], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+      badCaseMatches: [
+        {
+          id: 'feedback-1',
+          query: '原始问题',
+          text: '正确处理标准：复用已有纠正证据。',
+          score: 0.95,
+          mode: 'correction',
+        },
+      ],
+    } as never;
+
+    const result = await service.queryAugmentNode(
+      {
+        query: '原始问题',
+        augmentedQueries: ['原始问题'],
+        subQuestions: [],
+      } as unknown as AgenticRagStateType,
+      {
+        configurable: {
+          userId: 'user-1',
+          prefetchedFastPath,
+          subQuestionLimit: 1,
+        },
+      },
+    );
+
+    expect(badCaseFlywheel.retrieveMatches).not.toHaveBeenCalled();
+    expect(result.badCaseMatches).toBe(prefetchedFastPath.badCaseMatches);
   });
 
   it('does not reject a sufficient original evidence bundle after planning one subquestion', async () => {

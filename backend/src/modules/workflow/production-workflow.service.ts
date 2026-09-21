@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
@@ -43,6 +43,7 @@ import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -132,7 +133,7 @@ const ROLE_LLM_TIMEOUT_MS = 75_000;
 const ROLE_LLM_RETRY_BACKOFF_MS = 1_000;
 
 @Injectable()
-export class ProductionWorkflowService {
+export class ProductionWorkflowService implements OnModuleInit {
   /**
    * 产研运任务的状态机编排器：负责状态、依赖、审批与审计，不在控制器中直接执行岗位逻辑。
    * `threadId` 是恢复、驳回局部重跑和 Artifact 版本关联的稳定主键。
@@ -166,14 +167,126 @@ export class ProductionWorkflowService {
     @Optional() private readonly plugins?: PluginRuntimeService,
     @Optional() private readonly domainEvents?: DomainEventsService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
+    @Optional()
+    private readonly workflowQueue?: ProductionWorkflowQueueService,
   ) {
     this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
     this.app = this.buildGraph();
   }
 
+  onModuleInit(): void {
+    this.tasks?.registerRetryHandler((task) => this.dispatchRetryTask(task));
+    this.workflowQueue?.registerProcessor(async (job, attempt) => {
+      if (job.operation === 'retry_task') {
+        try {
+          await this.retryTask(job);
+        } catch (error) {
+          if (attempt.finalAttempt) {
+            await this.tasks?.markRetryFailed(job.taskId, error);
+          }
+          throw error;
+        }
+        return;
+      }
+      try {
+        if (job.operation === 'start') {
+          await this.start({ ...job.dto, threadId: job.threadId }, job.userId);
+        } else if (job.operation === 'resume') {
+          await this.resume(job.threadId, job.dto, job.userId);
+        } else {
+          await this.revise(job.threadId, job.dto, job.userId);
+        }
+      } catch (error) {
+        if (attempt.finalAttempt) {
+          await this.markScheduledFailure(job.threadId, job.userId, error);
+        } else {
+          this.logger.warn(
+            `production workflow ${job.threadId} attempt ${attempt.attempt} failed; queue will retry`,
+          );
+        }
+        throw error;
+      }
+    });
+  }
+
+  private async dispatchRetryTask(task: {
+    id: string;
+    threadId: string;
+    role: string;
+    retryCount: number;
+  }): Promise<void> {
+    const state = await this.getState(task.threadId);
+    if (!state?.projectId) throw new Error('workflow not found');
+    if (this.workflowQueue?.isEnabled()) {
+      const queued = await this.workflowQueue.enqueue({
+        id: `retry-task:${task.id}:${task.retryCount}`,
+        operation: 'retry_task',
+        threadId: task.threadId,
+        userId: state.userId,
+        taskId: task.id,
+        role: task.role,
+      });
+      if (queued) return;
+    }
+    await this.retryTask(task);
+  }
+
+  private async retryTask(task: {
+    threadId: string;
+    role: string;
+  }): Promise<void> {
+    const state = await this.getState(task.threadId);
+    if (!state?.projectId) throw new Error('workflow not found');
+    const role = task.role as ProductionRole;
+    if (!state.selectedRoles.includes(role)) {
+      throw new Error(`task role ${task.role} is not part of the workflow`);
+    }
+    await this.app.updateState(this.config(task.threadId), {
+      status: 'running',
+      currentBatch: [role],
+      rerunRoles: [role],
+      pendingApprovalRoles: [],
+      approval: null,
+      feedback: '',
+      error: '',
+    });
+    const settled = await this.runUntilSettled(
+      task.threadId,
+      await this.getOwnedState(task.threadId, state.userId),
+    );
+    await this.traceLangfuse(settled);
+    const result = this.view(task.threadId, settled, state.userId);
+    await this.emitWorkflowState(settled);
+    await this.saveWorkflowIndex(result);
+    await this.tasks?.updateForRole(task.threadId, role, {
+      status: settled.status === 'completed' ? 'completed' : 'failed',
+      summary: settled.results[role]?.summary ?? settled.error,
+      errorMessage: settled.status === 'completed' ? undefined : settled.error,
+      outputArtifactId: settled.results[role]?.generatedArtifact?.id,
+    });
+  }
+
   /** 创建初始状态并同步执行首轮工作流；异步入口复用相同状态创建逻辑。 */
   async start(dto: StartProductionWorkflowDto, userId: string) {
     const threadId = dto.threadId ?? randomUUID();
+    // BullMQ 重试或 Worker 接管时不能从零覆盖已有 Checkpoint；正在运行的
+    // 工作流从最后持久化状态继续，其他终态直接返回当前视图。
+    if (dto.threadId) {
+      try {
+        const existing = await this.getOwnedState(threadId, userId);
+        if (existing.status === 'running') {
+          const settled = await this.runUntilSettled(threadId, existing);
+          await this.traceLangfuse(settled);
+          const result = this.view(threadId, settled, userId);
+          await this.emitWorkflowState(settled);
+          await this.saveWorkflowIndex(result);
+          return result;
+        }
+        return this.view(threadId, existing, userId);
+      } catch {
+        // 首次执行尚无 Checkpoint，继续初始化。
+      }
+    }
     const initialState = await this.createInitialState(dto, userId, threadId);
     await this.ensureRun(initialState);
     await this.emitRuntimeEvent(
@@ -216,9 +329,18 @@ export class ProductionWorkflowService {
     void this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
     void this.saveWorkflowIndex(this.view(threadId, initialState, userId));
-    this.schedule(threadId, userId, () =>
-      this.start({ ...dto, threadId }, userId),
-    );
+    const queued = await this.workflowQueue?.enqueue({
+      id: randomUUID(),
+      operation: 'start',
+      threadId,
+      userId,
+      dto: { ...dto, threadId },
+    });
+    if (!queued) {
+      this.schedule(threadId, userId, () =>
+        this.start({ ...dto, threadId }, userId),
+      );
+    }
     return this.view(threadId, initialState, userId);
   }
 
@@ -282,7 +404,16 @@ export class ProductionWorkflowService {
     };
     this.pendingStates.set(threadId, pending);
     void this.saveWorkflowIndex(this.view(threadId, pending, userId));
-    this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
+    const queued = await this.workflowQueue?.enqueue({
+      id: randomUUID(),
+      operation: 'resume',
+      threadId,
+      userId,
+      dto,
+    });
+    if (!queued) {
+      this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
+    }
     return this.view(threadId, pending, userId);
   }
 
@@ -366,7 +497,16 @@ export class ProductionWorkflowService {
     };
     this.pendingStates.set(threadId, pending);
     void this.saveWorkflowIndex(this.view(threadId, pending, userId));
-    this.schedule(threadId, userId, () => this.revise(threadId, dto, userId));
+    const queued = await this.workflowQueue?.enqueue({
+      id: randomUUID(),
+      operation: 'revise',
+      threadId,
+      userId,
+      dto,
+    });
+    if (!queued) {
+      this.schedule(threadId, userId, () => this.revise(threadId, dto, userId));
+    }
     return this.view(threadId, pending, userId);
   }
 
@@ -379,7 +519,13 @@ export class ProductionWorkflowService {
       if (!pending || pending.userId !== userId) throw error;
       state = pending;
     }
-    if (state.status === 'running' && !this.activeRuns.has(threadId)) {
+    // 持久队列启用后由 BullMQ Worker 推进，状态查询不能再抢占为本进程执行，
+    // 否则会与 Worker 产生同一 Checkpoint 的并发推进。
+    if (
+      state.status === 'running' &&
+      !this.activeRuns.has(threadId) &&
+      !this.workflowQueue?.isEnabled()
+    ) {
       this.schedule(threadId, userId, () =>
         this.runUntilSettled(threadId, state),
       );
@@ -426,6 +572,22 @@ export class ProductionWorkflowService {
     if (state.status !== 'completed') {
       throw new Error(`workflow is not completed: ${state.status}`);
     }
+    const stages = state.selectedRoles
+      .map((role) => state.results[role])
+      .filter((result): result is ProductionStageResult => Boolean(result));
+    const notReady = stages.filter(
+      (result) =>
+        result.reviewStatus !== 'approved' || !result.readyForApproval,
+    );
+    if (stages.length !== state.selectedRoles.length || notReady.length > 0) {
+      const roles = [
+        ...state.selectedRoles.filter((role) => !state.results[role]),
+        ...notReady.map((result) => result.role),
+      ];
+      throw new Error(
+        `workflow handoff is not accepted for export: ${[...new Set(roles)].join(', ')}`,
+      );
+    }
     return {
       threadId: state.threadId,
       projectId: state.projectId,
@@ -433,28 +595,93 @@ export class ProductionWorkflowService {
       selectedRoles: state.selectedRoles,
       completedRoles: state.completedRoles,
       brief: state.brief,
-      stages: state.selectedRoles
-        .map((role) => state.results[role])
-        .filter((result): result is ProductionStageResult => Boolean(result))
-        .map((result) => ({
-          role: result.role,
-          summary: result.summary,
-          riskLevel: result.riskLevel,
-          evidenceCoverage: result.evidenceCoverage,
-          claims: result.claims,
-          issues: result.issues,
-          downstreamRisks: result.downstreamRisks,
-          deliverables: result.deliverables,
-          evidence: result.evidence,
-          generatedArtifact: result.generatedArtifact,
-          lowCodeSchemas: result.lowCodeSchemas,
-        })),
+      stages: stages.map((result) => ({
+        role: result.role,
+        revision: result.revision,
+        reviewStatus: result.reviewStatus,
+        summary: result.summary,
+        riskLevel: result.riskLevel,
+        evidenceCoverage: result.evidenceCoverage,
+        claims: result.claims,
+        issues: result.issues,
+        downstreamRisks: result.downstreamRisks,
+        deliverables: result.deliverables,
+        evidence: result.evidence,
+        generatedArtifact: result.generatedArtifact,
+        lowCodeSchemas: result.lowCodeSchemas,
+      })),
+    };
+  }
+
+  /** 管理端任务重跑前的租户边界校验；不新增任务表 owner 列，直接复用工作流状态 owner。 */
+  async assertOwnedThread(threadId: string, userId: string): Promise<void> {
+    await this.getOwnedState(threadId, userId);
+  }
+
+  /** 页面目录导出、项目 ZIP 和 MCP 共同消费的唯一交接契约。 */
+  async handoffManifest(threadId: string, userId: string) {
+    const context = await this.codingContext(threadId, userId);
+    const schemas = context.stages.flatMap((stage) =>
+      (stage.lowCodeSchemas ?? []).map((schema) => ({
+        ...schema,
+        role: stage.role,
+      })),
+    );
+    const citations = context.stages.flatMap((stage) =>
+      (stage.evidence ?? []).map((evidence) => ({
+        role: stage.role,
+        ...evidence,
+      })),
+    );
+    const stages = context.stages.map((stage) => ({
+      role: stage.role,
+      revision: stage.revision,
+      reviewStatus: stage.reviewStatus,
+      evidenceCoverage: stage.evidenceCoverage,
+      generatedArtifact: stage.generatedArtifact,
+      deliverables: stage.deliverables.map((item) => ({
+        type: item.type,
+        title: item.title,
+        sha256: this.handoffHash(item.markdown),
+      })),
+      schemaSha256: this.handoffHash(
+        JSON.stringify(stage.lowCodeSchemas ?? []),
+      ),
+      evidenceSha256: this.handoffHash(JSON.stringify(stage.evidence ?? [])),
+    }));
+    const markdown = this.buildHandoffMarkdown(context);
+    const contentHash = this.handoffHash(
+      JSON.stringify({
+        threadId: context.threadId,
+        projectId: context.projectId,
+        stages,
+        markdown,
+      }),
+    );
+    return {
+      formatVersion: 1,
+      artifactName: `${context.projectId}-handoff`,
+      threadId: context.threadId,
+      projectId: context.projectId,
+      contentHash,
+      context,
+      manifest: {
+        contentHash,
+        selectedRoles: context.selectedRoles,
+        completedRoles: context.completedRoles,
+        stages,
+      },
+      markdown,
+      schemas,
+      citations,
     };
   }
 
   async playwayPreview(threadId: string, userId: string) {
     const context = await this.codingContext(threadId, userId);
-    const schemas = context.stages.flatMap((stage) => stage.lowCodeSchemas ?? []);
+    const schemas = context.stages.flatMap(
+      (stage) => stage.lowCodeSchemas ?? [],
+    );
     return renderPlaywayPreview(schemas, context.projectId, context.brief);
   }
 
@@ -538,13 +765,18 @@ export class ProductionWorkflowService {
   }
 
   async generateProjectZip(threadId: string, userId: string): Promise<Buffer> {
-    const context = await this.codingContext(threadId, userId);
+    const handoff = await this.handoffManifest(threadId, userId);
+    const context = handoff.context;
     const generated = await this.generateProject(threadId, userId);
     const zip = new JSZip();
     generated.files.forEach((file) => zip.file(file.path, file.content));
     zip.file(
       'RAG_WORKFLOW_CONTEXT.json',
       JSON.stringify({ ...context, generatedProject: generated }, null, 2),
+    );
+    zip.file(
+      'HANDOFF_MANIFEST.json',
+      JSON.stringify(handoff.manifest, null, 2),
     );
     zip.file(
       'LOW_CODE_SCHEMAS.json',
@@ -559,7 +791,7 @@ export class ProductionWorkflowService {
     );
     zip.file('RAG_EVIDENCE.json', JSON.stringify(evidence, null, 2));
     zip.file('RAG_EVIDENCE.md', this.buildEvidenceMarkdown(evidence));
-    zip.file('HANDOFF.md', this.buildHandoffMarkdown(context));
+    zip.file('HANDOFF.md', handoff.markdown);
     zip.file(
       'README.md',
       `# ${generated.projectName}\n\n框架：${generated.framework}\n\n启动：\`${generated.runCommand}\`\n\n${generated.notes.map((note) => `- ${note}`).join('\n')}\n`,
@@ -618,6 +850,10 @@ export class ProductionWorkflowService {
         ? lines.join('\n')
         : '本次工作流未检索到可引用的 RAG 证据。',
     ].join('\n\n');
+  }
+
+  private handoffHash(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
   }
 
   private async createInitialState(
@@ -800,25 +1036,7 @@ export class ProductionWorkflowService {
         return task();
       })
       .then(() => undefined)
-      .catch(async (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`production workflow ${threadId} failed: ${message}`);
-        try {
-          await this.app.updateState(this.config(threadId), {
-            status: 'failed',
-            error: message,
-          });
-        } catch {
-          const pending = this.pendingStates.get(threadId);
-          if (pending?.userId === userId) {
-            this.pendingStates.set(threadId, {
-              ...pending,
-              status: 'failed',
-              error: message,
-            });
-          }
-        }
-      })
+      .catch((error) => this.markScheduledFailure(threadId, userId, error))
       .finally(() => {
         this.activeRuns.delete(threadId);
         void this.redisProvider.releaseLock(leaseKey, leaseToken);
@@ -827,6 +1045,30 @@ export class ProductionWorkflowService {
         }
       });
     this.activeRuns.set(threadId, run);
+  }
+
+  private async markScheduledFailure(
+    threadId: string,
+    userId: string,
+    error: unknown,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error(`production workflow ${threadId} failed: ${message}`);
+    try {
+      await this.app.updateState(this.config(threadId), {
+        status: 'failed',
+        error: message,
+      });
+    } catch {
+      const pending = this.pendingStates.get(threadId);
+      if (pending?.userId === userId) {
+        this.pendingStates.set(threadId, {
+          ...pending,
+          status: 'failed',
+          error: message,
+        });
+      }
+    }
   }
 
   private buildGraph() {
@@ -948,13 +1190,30 @@ export class ProductionWorkflowService {
         state.completedRoles,
         state.currentBatch,
       );
+      const approvedResults = Object.fromEntries(
+        Object.entries(results).map(([role, result]) => [
+          role,
+          { ...result, reviewStatus: 'approved' as const },
+        ]),
+      ) as Partial<Record<ProductionRole, ProductionStageResult>>;
+      await Promise.all(
+        Object.values(approvedResults).map((result) => {
+          const artifactId = result?.generatedArtifact?.id;
+          return artifactId
+            ? this.artifacts.markReviewState(artifactId, {
+                reviewStatus: 'approved',
+                revision: result.revision,
+              })
+            : Promise.resolve();
+        }),
+      );
       return {
         currentRole: state.currentBatch[0],
         batchIndex: state.batchIndex + 1,
         stageIndex: completedRoles.length,
         completedRoles,
         status: 'running',
-        results,
+        results: approvedResults,
         rerunRoles: [],
       };
     }
@@ -1678,11 +1937,15 @@ export class ProductionWorkflowService {
   }
 
   private async getOwnedState(threadId: string, userId: string) {
-    const snapshot = await this.app.getState(this.config(threadId));
-    const state = snapshot?.values as ProductionWorkflowStateType | undefined;
+    const state = await this.getState(threadId);
     if (!state?.projectId) throw new Error('workflow not found');
     if (state.userId !== userId) throw new Error('workflow not found');
     return state;
+  }
+
+  private async getState(threadId: string) {
+    const snapshot = await this.app.getState(this.config(threadId));
+    return snapshot?.values as ProductionWorkflowStateType | undefined;
   }
 
   private async runUntilSettled(

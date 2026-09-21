@@ -1,13 +1,15 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-const baseUrl = (process.env.EVAL_RAG_E2E_BASE_URL ?? 'http://localhost:3000')
-  .replace(/\/$/, '');
+const baseUrl = (
+  process.env.EVAL_RAG_E2E_BASE_URL ?? 'http://localhost:3000'
+).replace(/\/$/, '');
 const datasetPath =
   process.env.EVAL_RAG_E2E_DATASET ?? 'eval/hybrid-regression.dataset.json';
 const modes = (process.env.EVAL_RAG_E2E_MODES ?? 'simple,auto,agentic')
   .split(',')
   .map((mode) => mode.trim())
   .filter(Boolean);
+const requireLive = process.env.EVAL_RAG_E2E_REQUIRE_LIVE === 'true';
 
 const dataset = JSON.parse(await readFile(datasetPath, 'utf8'));
 const uploadedDocIds = [];
@@ -32,7 +34,8 @@ try {
       const shouldRefuse = item.minKeywordHits === 0;
       const citationPassed = shouldRefuse
         ? response.references.length === 0
-        : response.references.length > 0 && /\[片段\s*\d+\]/.test(response.answer);
+        : response.references.length > 0 &&
+          /\[片段\s*\d+\]/.test(response.answer);
       const refusalPassed = shouldRefuse
         ? response.references.length === 0 &&
           (response.retrievalSufficient === false ||
@@ -60,38 +63,29 @@ try {
   }
 
   const ok = results.every((item) => item.passed);
-  console.log(
-    JSON.stringify(
-      {
-        ok,
-        skipped: false,
-        baseUrl,
-        uploadedCount: uploadedDocIds.length,
-        modes,
-        summary: summarize(results),
-        results,
-      },
-      null,
-      2,
-    ),
-  );
+  const report = {
+    ok,
+    skipped: false,
+    baseUrl,
+    uploadedCount: uploadedDocIds.length,
+    modes,
+    summary: summarize(results),
+    results,
+  };
+  await writeReport(report, 'hybrid-rag-e2e-latest.json');
+  console.log(JSON.stringify(report, null, 2));
   if (!ok) process.exitCode = 1;
 } catch (err) {
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        skipped: true,
-        baseUrl,
-        reason: (err instanceof Error ? err.message : String(err)).slice(
-          0,
-          200,
-        ),
-      },
-      null,
-      2,
-    ),
-  );
+  const report = {
+    ok: !requireLive,
+    skipped: true,
+    baseUrl,
+    liveRequired: requireLive,
+    reason: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+  };
+  await writeReport(report, 'hybrid-rag-e2e-latest.json');
+  console.log(JSON.stringify(report, null, 2));
+  if (requireLive) process.exitCode = 1;
 } finally {
   await cleanup();
 }
@@ -183,4 +177,13 @@ function summarize(results) {
 
 function unwrap(body) {
   return body && typeof body === 'object' && 'data' in body ? body.data : body;
+}
+
+async function writeReport(report, filename) {
+  const directory = process.env.EVAL_REPORT_DIR ?? '.tmp/evidence';
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    `${directory}/${filename}`,
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
 }

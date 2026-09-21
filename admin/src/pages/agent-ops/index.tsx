@@ -1392,7 +1392,7 @@ export default function AgentOpsPage() {
           { title: "任务", dataIndex: "title" }, { title: "角色", dataIndex: "role" }, { title: "Process", dataIndex: "processType" },
           { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "completed" ? "success" : value === "waiting_approval" ? "warning" : value === "failed" ? "error" : "processing"}>{value}</Tag> },
           { title: "重试", dataIndex: "retryCount" }, { title: "产物", dataIndex: "outputArtifactId", render: (value) => value || "-" },
-          { title: "操作", render: (_, record) => <Button size="small" disabled={!['failed', 'waiting_approval'].includes(record.status)} onClick={() => void retryAgentTask(record.id).then(() => { message.success("Task 已重新排队"); return loadCollaboration(); }).catch(() => message.error("Task 重跑失败"))}>单任务重跑</Button> },
+          { title: "操作", render: (_, record) => <Button size="small" disabled={record.status !== 'failed'} onClick={() => void retryAgentTask(record.id).then(() => { message.success("Task 已重新排队并触发执行"); return loadCollaboration(); }).catch(() => message.error("Task 重跑失败"))}>单任务重跑</Button> },
         ]} />
       </Card>
       <Card title="受控委派（Agent as Tool）" size="small" style={{ marginTop: 16 }}>

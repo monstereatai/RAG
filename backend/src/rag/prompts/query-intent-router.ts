@@ -103,7 +103,9 @@ function isDeclarativeSessionSetting(query: string): boolean {
     text.length >= 3 &&
     text.length <= 160 &&
     !/[？?。！!；;]/u.test(text) &&
-    (/[^\s是为]{1,80}\s*(?:是(?!什么)|为|叫做|指的是)\s*[^\s]{1,80}$/u.test(text) ||
+    (/[^\s是为]{1,80}\s*(?:是(?!什么)|为|叫做|指的是)\s*[^\s]{1,80}$/u.test(
+      text,
+    ) ||
       /^\s*\d+\s*[+\-*/×÷]\s*(?:\d+)\s*(?:=|等于)\s*\d+\s*$/u.test(text))
   );
 }
@@ -148,7 +150,10 @@ export class QueryIntentRouter {
       // 避免 withStructuredOutput 触发 provider 的工具调用／重试，直接要求最小 JSON 响应并本地校验。
       const contextText = recentContext
         .slice(-8)
-        .map((item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`)
+        .map(
+          (item) =>
+            `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+        )
         .join('\n');
       const content = await this.withTimeout(
         this.llmProvider.invoke(
@@ -162,7 +167,9 @@ export class QueryIntentRouter {
         ...parsed,
         historyPolicy:
           rawParsed.historyPolicy ??
-          (recentContext.some((item) => /假设|仅用于本轮|临时设定/u.test(item.content))
+          (recentContext.some((item) =>
+            /假设|仅用于本轮|临时设定/u.test(item.content),
+          )
             ? 'hypothesis_only'
             : 'context_only'),
       });
@@ -223,10 +230,7 @@ export class QueryIntentRouter {
 
   private normalizeDecision(query: string, input: unknown): QueryIntent {
     const intent = queryIntentSchema.parse(input);
-    if (
-      intent.contextMode === 'none' &&
-      isDeclarativeSessionSetting(query)
-    ) {
+    if (intent.contextMode === 'none' && isDeclarativeSessionSetting(query)) {
       return this.normalizeDecision(query, {
         ...intent,
         contextMode: 'conversation_setting',
@@ -234,21 +238,23 @@ export class QueryIntentRouter {
         sourcePolicy: 'local_only',
         queryType: 'private_entity',
         targetKbs: ['documents'],
-        reason: '当前输入是会话中的局部断言，先记录为 session 设定，不当作公共事实直答',
+        reason:
+          '当前输入是会话中的局部断言，先记录为 session 设定，不当作公共事实直答',
       });
     }
     const raw = input as Partial<QueryIntent>;
     const contextualMode =
-      intent.contextMode !== 'none' && intent.contextMode !== 'factual_verification';
+      intent.contextMode !== 'none' &&
+      intent.contextMode !== 'factual_verification';
     const sourcePolicy =
       raw.sourcePolicy ??
       (contextualMode
         ? 'local_only'
         : intent.action === 'direct_answer'
-        ? 'direct_answer'
-        : intent.intent === 'realtime'
-          ? 'web_allowed'
-          : 'local_only');
+          ? 'direct_answer'
+          : intent.intent === 'realtime'
+            ? 'web_allowed'
+            : 'local_only');
     // 低置信度时只允许本地证据，避免模型不确定时意外放行公网搜索。
     const resolvedSourcePolicy =
       intent.confidence < 0.75 && sourcePolicy === 'direct_answer'
@@ -269,9 +275,13 @@ export class QueryIntentRouter {
     );
     // 公司／研发／项目流程属于本地业务事实，即使模型漏抽实体，也不能按公共
     // 概念直答。这里是来源策略的安全边界，不参与答案内容生成。
+    const normalizedQuery = query.replace(/知识哭/g, '知识库');
     const hasInternalBusinessContext =
-      /公司|本公司|内部|研发流程|研发过程|研发链路|开发流程|项目流程|业务流程|业务链路|发布流程|上线流程|内部系统|技术方案|开发规范|工程规范/u.test(
-        query,
+      /公司|本公司|内部|研发流程|研发过程|研发链路|开发流程|项目流程|业务流程|业务链路|发布流程|上线流程|内部系统|技术方案|开发规范|工程规范|知识库|知识中台|资料库|上传文档|员工|薪资|薪酬|工资|绩效奖金|报销制度/u.test(
+        normalizedQuery,
+      ) ||
+      /哪个(?:系统|项目|平台|模块)|(?:分别)?负责(?:什么|哪些)|职责|作用/u.test(
+        normalizedQuery,
       );
     if (hasInternalBusinessContext) {
       return {
@@ -313,14 +323,14 @@ export class QueryIntentRouter {
           : contextualMode
             ? 'private_entity'
             : mustRetrieve && intent.intent === 'follow_up'
-          ? 'follow_up'
-          : mustRetrieve
-            ? 'private_entity'
-            : intent.intent === 'realtime'
-              ? 'realtime'
-              : intent.intent === 'task_execution'
-                ? 'task_execution'
-                : 'public_knowledge';
+              ? 'follow_up'
+              : mustRetrieve
+                ? 'private_entity'
+                : intent.intent === 'realtime'
+                  ? 'realtime'
+                  : intent.intent === 'task_execution'
+                    ? 'task_execution'
+                    : 'public_knowledge';
     const targetKbs = (
       mustRetrieve
         ? [

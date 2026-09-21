@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 const root = new URL('../', import.meta.url);
@@ -11,7 +11,9 @@ const resolved = await resolveManifest(manifest);
 const report = validateManifest(manifest, resolved);
 
 if (!report.ok || !requireLive) {
-  console.log(JSON.stringify({ ...report, live: false, dataset: String(datasetPath) }, null, 2));
+  const offlineReport = { ...report, live: false, dataset: String(datasetPath), generatedAt: new Date().toISOString() };
+  await writeReport(offlineReport, 'golden-business-latest.json');
+  console.log(JSON.stringify(offlineReport, null, 2));
   if (!report.ok) process.exitCode = 1;
   if (!requireLive) process.exit(0);
 }
@@ -33,6 +35,7 @@ try {
   const passed = results.filter((item) => item.passed).length;
   const score = Number((passed / results.length).toFixed(3));
   const liveReport = {
+    generatedAt: new Date().toISOString(),
     ok: score >= Number(process.env.GOLDEN_EVAL_MIN_SCORE ?? '0.9'),
     live: true,
     dataset: String(datasetPath),
@@ -41,11 +44,14 @@ try {
     summary: summarize(results),
     results,
   };
+  await writeReport(liveReport, 'golden-business-latest.json');
   console.log(JSON.stringify(liveReport, null, 2));
   if (!liveReport.ok) process.exitCode = 1;
 } catch (error) {
   const reason = error instanceof Error ? error.message : String(error);
-  console.log(JSON.stringify({ ok: false, live: true, blocked: true, reason: reason.slice(0, 300) }, null, 2));
+  const blockedReport = { ok: false, live: true, blocked: true, generatedAt: new Date().toISOString(), dataset: String(datasetPath), reason: reason.slice(0, 300) };
+  await writeReport(blockedReport, 'golden-business-latest.json');
+  console.log(JSON.stringify(blockedReport, null, 2));
   process.exitCode = 1;
 } finally {
   await cleanup(uploadedDocIds);
@@ -167,4 +173,10 @@ async function cleanup(docIds) {
 
 function unwrap(body) {
   return body && typeof body === 'object' && 'data' in body ? body.data : body;
+}
+
+async function writeReport(value, filename) {
+  const directory = process.env.EVAL_REPORT_DIR ?? '.tmp/evidence';
+  await mkdir(directory, { recursive: true });
+  await writeFile(`${directory}/${filename}`, `${JSON.stringify(value, null, 2)}\n`);
 }

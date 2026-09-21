@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 const modes = (process.env.AGENT_PLATFORM_MODES ?? 'simple,auto,agentic')
   .split(',')
@@ -36,6 +37,7 @@ await validateDataset(
 );
 
 for (const [name, args] of [
+  ['docs-code-consistency', ['scripts/check-doc-code-consistency.mjs']],
   ['query-routing-contract', ['scripts/eval-query-routing.mjs']],
   ['agent-task-contract', ['scripts/eval-agent-task-metrics.mjs']],
   ['production-workflow-contract', ['scripts/eval-production-workflow.mjs']],
@@ -53,6 +55,7 @@ checks.push({
   live: project.live,
   skipped: project.skipped,
   summary: project.summary,
+  failures: project.failures,
 });
 
 const e2e = run('node', ['scripts/eval-rag-e2e.mjs'], {
@@ -64,21 +67,19 @@ checks.push({
   live: e2e.live,
   skipped: e2e.skipped,
   summary: e2e.summary,
+  failures: e2e.failures,
 });
 
 const ok = modeContractPassed && checks.every((check) => check.ok);
-console.log(
-  JSON.stringify(
-    {
-      ok,
-      modes,
-      liveRequired: process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true',
-      checks,
-    },
-    null,
-    2,
-  ),
-);
+const report = {
+  generatedAt: new Date().toISOString(),
+  ok,
+  modes,
+  liveRequired: process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true',
+  checks,
+};
+await writeReport(report, 'agent-platform-latest.json');
+console.log(JSON.stringify(report, null, 2));
 if (!ok) process.exitCode = 1;
 
 async function validateDataset(name, path, predicate) {
@@ -106,6 +107,8 @@ function run(command, args, extraEnv = {}) {
       ...extraEnv,
       PROJECT_EVAL_REQUIRE_LIVE:
         process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true' ? 'true' : 'false',
+      EVAL_RAG_E2E_REQUIRE_LIVE:
+        process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true' ? 'true' : 'false',
     },
     encoding: 'utf8',
   });
@@ -117,6 +120,9 @@ function run(command, args, extraEnv = {}) {
     live: parsed?.skipped === false,
     skipped: parsed?.skipped === true,
     summary: parsed?.summary,
+    failures: Array.isArray(parsed?.results)
+      ? parsed.results.filter((item) => item?.passed === false)
+      : undefined,
   };
 }
 
@@ -132,4 +138,13 @@ function parseLastJson(raw) {
     }
   }
   return null;
+}
+
+async function writeReport(report, filename) {
+  const directory = process.env.EVAL_REPORT_DIR ?? '.tmp/evidence';
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    `${directory}/${filename}`,
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
 }

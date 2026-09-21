@@ -1,7 +1,7 @@
 import { ProductionWorkflowService } from './production-workflow.service';
 
 describe('ProductionWorkflowService', () => {
-  const createService = () => {
+  const createService = (workflowQueue?: { enqueue: jest.Mock }) => {
     const invoke = jest.fn().mockResolvedValue({
       summary: '审查完成',
       deliverables: [
@@ -69,6 +69,18 @@ describe('ProductionWorkflowService', () => {
         create: createArtifact,
         markReviewState: jest.fn().mockResolvedValue({}),
       } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workflowQueue as never,
     );
     return { service, invoke, gather, createArtifact };
   };
@@ -104,6 +116,36 @@ describe('ProductionWorkflowService', () => {
     ]);
   });
 
+  it('exports one verified handoff manifest for ZIP, page and MCP consumers', async () => {
+    const { service } = createService();
+    const state = await service.start(
+      {
+        projectId: 'handoff-workflow',
+        brief: '验证导出的 Markdown、Schema 和 RAG 证据来自同一份交接契约。',
+        roles: ['product'],
+      },
+      'user-1',
+    );
+
+    const handoff = await service.handoffManifest(state.threadId, 'user-1');
+
+    expect(handoff).toMatchObject({
+      formatVersion: 1,
+      threadId: state.threadId,
+      projectId: 'handoff-workflow',
+      markdown: expect.stringContaining('# handoff-workflow 产研运交接包'),
+    });
+    expect(handoff.contentHash).toHaveLength(64);
+    expect(handoff.manifest.stages[0]).toMatchObject({
+      role: 'product',
+      reviewStatus: 'approved',
+    });
+    expect(handoff.schemas).toEqual(expect.any(Array));
+    expect(handoff.citations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: 'product' })]),
+    );
+  });
+
   it('returns immediately and exposes background progress through status', async () => {
     const { service } = createService();
 
@@ -126,6 +168,30 @@ describe('ProductionWorkflowService', () => {
     }
     expect(state.status).toBe('completed');
     expect(state.completedRoles).toEqual(['product']);
+  });
+
+  it('enqueues asynchronous workflow starts to the durable queue when available', async () => {
+    const workflowQueue = { enqueue: jest.fn().mockResolvedValue(true) };
+    const { service, invoke } = createService(workflowQueue);
+
+    const accepted = await service.startAsync(
+      {
+        projectId: 'queued-workflow',
+        brief: '验证异步工作流写入持久队列，而不是只依赖当前进程。',
+        roles: ['product'],
+      },
+      'user-1',
+    );
+
+    expect(accepted.status).toBe('running');
+    expect(workflowQueue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'start',
+        threadId: accepted.threadId,
+        userId: 'user-1',
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it('supports one role running independently', async () => {

@@ -22,19 +22,23 @@ describe('AguiService', () => {
         callback: () => Promise<unknown>,
       ) => callback(),
     };
-    const langfuseProvider = {
-      estimateTextTokens: () => 1,
-      estimateCostUsd: () => 0,
-      traceRagAnswer: () => undefined,
-    };
     const artifactsService = {
       create: () => Promise.reject(new Error('should not be called')),
     };
     const service = new AguiService(
-      { chat: () => Promise.resolve({ answer: 'hello', references: [], route: 'simple', confidence: 1, retryCount: 0, retrievalSufficient: true }) } as never,
+      {
+        chat: () =>
+          Promise.resolve({
+            answer: 'hello',
+            references: [],
+            route: 'simple',
+            confidence: 1,
+            retryCount: 0,
+            retrievalSufficient: true,
+          }),
+      } as never,
       conversationService as never,
       llmProvider as never,
-      langfuseProvider as never,
       artifactsService as never,
     );
 
@@ -56,7 +60,9 @@ describe('AguiService', () => {
       'TEXT_MESSAGE_END',
       'RUN_FINISHED',
     ]);
-    const content = events.find((event) => event.type === 'TEXT_MESSAGE_CONTENT');
+    const content = events.find(
+      (event) => event.type === 'TEXT_MESSAGE_CONTENT',
+    );
     expect(typeof content?.data?.messageId).toBe('string');
     expect(content?.data?.delta).toBe('hello');
     expect(addMessageCount).toBe(0);
@@ -73,7 +79,17 @@ describe('AguiService', () => {
       }),
     };
     const service = new AguiService(
-      { chat: () => Promise.resolve({ answer: '# 发布说明\n\n完整正文', references: [], route: 'simple', confidence: 1, retryCount: 0, retrievalSufficient: true }) } as never,
+      {
+        chat: () =>
+          Promise.resolve({
+            answer: '# 发布说明\n\n完整正文',
+            references: [],
+            route: 'simple',
+            confidence: 1,
+            retryCount: 0,
+            retrievalSufficient: true,
+          }),
+      } as never,
       {
         create: () => Promise.resolve('thread-1'),
         getRecentHistory: () => Promise.resolve([]),
@@ -84,11 +100,6 @@ describe('AguiService', () => {
           _model: string | undefined,
           callback: () => Promise<unknown>,
         ) => callback(),
-      } as never,
-      {
-        estimateTextTokens: () => 1,
-        estimateCostUsd: () => 0,
-        traceRagAnswer: () => undefined,
       } as never,
       artifactsService as never,
     );
@@ -122,5 +133,58 @@ describe('AguiService', () => {
         'TOOL_CALL_END',
       ]),
     );
+  });
+
+  it('emits RUN_INTERRUPTED instead of completing or creating artifacts for an approval pause', async () => {
+    const artifactsService = { create: jest.fn() };
+    const service = new AguiService(
+      {
+        chat: () =>
+          Promise.resolve({
+            answer: '待审批草稿',
+            references: [],
+            route: 'agentic',
+            confidence: 0.8,
+            retryCount: 0,
+            retrievalSufficient: true,
+            executionState: {
+              phase: 'approval',
+              consumedSteps: 4,
+              consumedToolCalls: 0,
+              paused: true,
+            },
+          }),
+      } as never,
+      {
+        create: () => Promise.resolve('thread-1'),
+      } as never,
+      {
+        runWithModel: (
+          _model: string | undefined,
+          callback: () => Promise<unknown>,
+        ) => callback(),
+      } as never,
+      artifactsService as never,
+    );
+
+    const events = await firstValueFrom(
+      service
+        .stream({
+          query: '请生成 Word 文件：待审批交接物',
+          mode: 'agentic',
+          userId: 'user-1',
+          approvalRequired: true,
+        })
+        .pipe(toArray()),
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      'RUN_STARTED',
+      'TEXT_MESSAGE_START',
+      'TEXT_MESSAGE_CONTENT',
+      'TEXT_MESSAGE_END',
+      'RUN_INTERRUPTED',
+    ]);
+    expect(artifactsService.create).not.toHaveBeenCalled();
   });
 });

@@ -65,4 +65,17 @@ describe('AgentRunsService runtime controls', () => {
       BadRequestException,
     );
   });
+
+  it('does not overwrite a cancelled run during a late completion', async () => {
+    const { service, repo, run } = createService();
+    run.status = 'cancelled';
+
+    const result = await service.finish('run-1', {
+      status: 'completed',
+      resultSummary: '不应覆盖取消状态',
+    });
+
+    expect(result).toBe(run);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
 });

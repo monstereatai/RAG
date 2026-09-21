@@ -77,6 +77,11 @@ export class AgentRunsService {
   ) {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
+    // 取消是终态：并发中的节点可能在取消后才抛错或返回，不能把用户明确
+    // 取消的 Run 覆盖成 failed／completed。
+    if (run.status === 'cancelled' && input.status !== 'cancelled') {
+      return run;
+    }
     Object.assign(run, input);
     run.finishedAt =
       input.status && input.status !== 'running' ? new Date() : run.finishedAt;
@@ -121,6 +126,18 @@ export class AgentRunsService {
       actor: saved.mode,
       payload: { reason: saved.cancelReason },
     });
+    const goal = await this.goals.get(saved.id);
+    if (goal) {
+      await this.goals.update({
+        threadId: saved.threadId,
+        runId: saved.id,
+        actor: saved.mode,
+        objective: goal.objective,
+        maxRounds: goal.maxRounds,
+        status: 'blocked',
+        reason: saved.cancelReason ?? undefined,
+      });
+    }
     return this.get(id);
   }
 

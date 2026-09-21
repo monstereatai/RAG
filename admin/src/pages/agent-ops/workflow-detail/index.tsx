@@ -31,7 +31,7 @@ import {
   getProductionComponentRules,
   getProductionPlaywayPreview,
   getProductionWorkflow,
-  getProductionWorkflowCodingContext,
+  getProductionWorkflowHandoff,
   importProductionPlaywayGraph,
   type PlaywayActivityTemplate,
   type PlaywayComponentRule,
@@ -188,36 +188,47 @@ export default function ProductionWorkflowDetailPage() {
   const loadCodingContext = async () => {
     if (workflow?.status !== 'completed')
       throw new Error('只有已完成工作流可以导出');
-    const result = await getProductionWorkflowCodingContext(workflow.threadId);
-    const context = unwrapData<Record<string, unknown>>(result);
-    if (!context) throw new Error('代码上下文为空');
-    return context;
+    const result = await getProductionWorkflowHandoff(workflow.threadId);
+    const handoff = unwrapData<Record<string, unknown>>(result);
+    if (!handoff) throw new Error('交接包为空');
+    return handoff;
   };
 
-  const buildHandoffFiles = (context: Record<string, unknown>) => {
+  const buildHandoffFiles = (handoff: Record<string, unknown>) => {
+    const context =
+      handoff.context &&
+      typeof handoff.context === 'object' &&
+      !Array.isArray(handoff.context)
+        ? (handoff.context as Record<string, unknown>)
+        : handoff;
     const stages = Array.isArray(context.stages)
       ? (context.stages as Array<Record<string, unknown>>)
       : [];
-    const evidence = stages.flatMap((stage) =>
-      (Array.isArray(stage.evidence) ? stage.evidence : []).map((item) => ({
-        role: stage.role,
-        ...(item as Record<string, unknown>),
-      })),
-    );
+    const schemas = Array.isArray(handoff.schemas)
+      ? (handoff.schemas as Array<Record<string, unknown>>)
+      : stages.flatMap((stage) =>
+          Array.isArray(stage.lowCodeSchemas) ? stage.lowCodeSchemas : [],
+        );
+    const evidence = Array.isArray(handoff.citations)
+      ? (handoff.citations as Array<Record<string, unknown>>)
+      : stages.flatMap((stage) =>
+          (Array.isArray(stage.evidence) ? stage.evidence : []).map((item) => ({
+            role: stage.role,
+            ...(item as Record<string, unknown>),
+          })),
+        );
     const files: Array<{ name: string; content: string }> = [
       {
         name: 'RAG_WORKFLOW_CONTEXT.json',
         content: `${JSON.stringify(context, null, 2)}\n`,
       },
       {
+        name: 'HANDOFF_MANIFEST.json',
+        content: `${JSON.stringify(handoff.manifest ?? handoff, null, 2)}\n`,
+      },
+      {
         name: 'LOW_CODE_SCHEMAS.json',
-        content: `${JSON.stringify(
-          stages.flatMap((stage) =>
-            Array.isArray(stage.lowCodeSchemas) ? stage.lowCodeSchemas : [],
-          ),
-          null,
-          2,
-        )}\n`,
+        content: `${JSON.stringify(schemas, null, 2)}\n`,
       },
       {
         name: 'RAG_EVIDENCE.json',
@@ -272,11 +283,14 @@ export default function ProductionWorkflowDetailPage() {
     });
     files.push({
       name: 'HANDOFF.md',
-      content: [
-        `# ${workflow?.projectId ?? '产研运项目'} 产研运交接包`,
-        '本文件供 AI Coding 工具阅读；结构化 Schema 见 `LOW_CODE_SCHEMAS.json`，RAG 引用证据见 `RAG_EVIDENCE.md`。',
-        ...handoffSections,
-      ].join('\n\n'),
+      content:
+        typeof handoff.markdown === 'string'
+          ? handoff.markdown
+          : [
+              `# ${workflow?.projectId ?? '产研运项目'} 产研运交接包`,
+              '本文件供 AI Coding 工具阅读；结构化 Schema 见 `LOW_CODE_SCHEMAS.json`，RAG 引用证据见 `RAG_EVIDENCE.md`。',
+              ...handoffSections,
+            ].join('\n\n'),
     });
     return files;
   };

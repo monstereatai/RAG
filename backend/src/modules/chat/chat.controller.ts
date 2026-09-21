@@ -15,7 +15,6 @@ import { ChatService } from './chat.service';
 import { ConversationService } from './conversation.service';
 import { ChatDto } from './chat.dto';
 import type { ChatResponse, ChatMode } from './chat.dto';
-import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -30,7 +29,6 @@ import { listRolePresets } from './role-presets';
 export class ChatController {
   constructor(
     private readonly chatService: ChatService,
-    private readonly agenticRagService: AgenticRagService,
     private readonly conversationService: ConversationService,
     private readonly ragFeedbackService: RagFeedbackService,
   ) {}
@@ -74,6 +72,7 @@ export class ChatController {
     @Query('threadId') threadId?: string,
     @Query('rolePresetId') rolePresetId?: string,
     @Query('pluginKeys') pluginKeys?: string,
+    @Query('approvalRequired') approvalRequired?: string,
   ): Observable<SseEvent> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('query is required');
@@ -94,6 +93,7 @@ export class ChatController {
             threadId,
             rolePresetId,
             pluginKeys: parsedPluginKeys,
+            approvalRequired: approvalRequired === 'true',
           },
           user.userId,
           (event) => subscriber.next(event),
@@ -167,22 +167,11 @@ export class ChatController {
    */
   @Post('resume')
   async resume(@Body() body: ChatResumeDto, @CurrentUser() user: JwtPayload) {
-    const result = await this.agenticRagService.resumeGraph(
+    return this.chatService.resume(
       body.threadId,
       body.approval,
       body.feedback,
+      user.userId,
     );
-
-    if (body.approval === 'approved') {
-      // 审批通过后持久化对话
-      await this.conversationService.addMessage(
-        body.threadId,
-        'ai',
-        result.answer,
-        user.userId,
-      );
-    }
-
-    return result;
   }
 }

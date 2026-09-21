@@ -143,6 +143,14 @@ export class WorkflowController {
     return this.productionWorkflow.codingContext(threadId, user.userId);
   }
 
+  @Get('production/:threadId/handoff')
+  productionHandoff(
+    @Param('threadId') threadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.productionWorkflow.handoffManifest(threadId, user.userId);
+  }
+
   @Get('production/:threadId/playway-preview')
   productionPlaywayPreview(
     @Param('threadId') threadId: string,

@@ -298,15 +298,19 @@ export class AgentOpsController {
 
   @Get('tasks')
   @RequirePermission('admin:qa-ops:read')
-  agentTasks(@Query('threadId') threadId?: string) { return this.ragClient.listAgentTasks(threadId); }
+  agentTasks(@Query('threadId') threadId: string | undefined, @Req() req: Request) {
+    return this.ragClient.listAgentTasks(threadId, this.userId(req));
+  }
 
   @Post('tasks/:id/retry')
   @RequirePermission('admin:qa-ops:write')
-  retryAgentTask(@Param('id') id: string) { return this.ragClient.retryAgentTask(id); }
+  retryAgentTask(@Param('id') id: string, @Req() req: Request) { return this.ragClient.retryAgentTask(id, this.userId(req)); }
 
   @Post('tasks/delegate')
   @RequirePermission('admin:qa-ops:write')
-  delegateAgentTask(@Body() body: unknown) { return this.ragClient.delegateAgentTask(body); }
+  delegateAgentTask(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    return this.ragClient.delegateAgentTask({ ...body, ownerUserId: this.userId(req) });
+  }
 
   @Get('runtime-events')
   @RequirePermission('admin:qa-ops:read')

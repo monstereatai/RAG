@@ -1,11 +1,7 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import {
-  LangfuseProvider,
-  type RagTraceEvent,
-} from '../../providers/observability/langfuse.provider';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { ConversationService } from '../chat/conversation.service';
 import { ChatService } from '../chat/chat.service';
@@ -13,8 +9,6 @@ import type { AguiEvent, AguiRunState, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
-import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
-import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 
 @Injectable()
 export class AguiService {
@@ -22,10 +16,7 @@ export class AguiService {
     private readonly chatService: ChatService,
     private readonly conversationService: ConversationService,
     private readonly llmProvider: LlmProvider,
-    private readonly langfuseProvider: LangfuseProvider,
     private readonly artifactsService: ArtifactsService,
-    @Optional() private readonly plugins?: PluginRuntimeService,
-    @Optional() private readonly dingTalk?: DingTalkProvider,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -38,8 +29,6 @@ export class AguiService {
       void (async () => {
         const runId = randomUUID();
         const messageId = randomUUID();
-        const startTime = Date.now();
-        const traceEvents: RagTraceEvent[] = [];
         const runState: AguiRunState = { phase: 'routing' };
         let streamedContent = false;
 
@@ -48,6 +37,7 @@ export class AguiService {
           data?: Record<string, unknown>,
         ) => {
           if (type === 'RUN_ERROR') runState.phase = 'error';
+          if (type === 'RUN_INTERRUPTED') runState.phase = 'approval';
           if (type === 'RUN_FINISHED') runState.phase = 'completed';
           subscriber.next({
             type,
@@ -62,10 +52,6 @@ export class AguiService {
           runState.mode = options.mode;
           runState.model = selectedModel;
           const roleContext = resolveRoleContext(options.rolePresetId);
-          const pluginComposition =
-            options.pluginKeys?.length && this.plugins
-              ? await this.plugins.resolve(options.pluginKeys, options.mode)
-              : undefined;
           const artifactIntent = parseArtifactIntent(query);
           const activeThreadId =
             options.threadId ??
@@ -81,51 +67,65 @@ export class AguiService {
               mode: options.mode,
               model: selectedModel,
               rolePresetId: roleContext.preset.id,
-              pluginKeys: pluginComposition?.pluginKeys ?? [],
-              pluginTools: pluginComposition?.toolNames ?? [],
+              pluginKeys: options.pluginKeys ?? [],
             },
             runState: { ...runState },
-          });
-          traceEvents.push({
-            type: 'run_started',
-            data: { mode: options.mode, model: selectedModel },
-            timestamp: new Date().toISOString(),
           });
           emit('TEXT_MESSAGE_START', {
             messageId,
             role: 'assistant',
           });
 
-          const result = await this.llmProvider.runWithModel(selectedModel, () =>
-            this.chatService.chat(
-              {
-                query,
-                mode: options.mode,
-                threadId: activeThreadId,
-                rolePresetId: options.rolePresetId,
-                pluginKeys: options.pluginKeys,
-              },
-              options.userId,
-              (event) => {
-                this.updateRunState(runState, event);
-                if (
-                  event.type === 'token' &&
-                  typeof event.data === 'string' &&
-                  event.data.trim().length > 0
-                ) {
-                  streamedContent = true;
-                }
-                this.emitAguiEvent(event, emit, messageId);
-              },
-            ),
+          const result = await this.llmProvider.runWithModel(
+            selectedModel,
+            () =>
+              this.chatService.chat(
+                {
+                  query,
+                  mode: options.mode,
+                  threadId: activeThreadId,
+                  rolePresetId: options.rolePresetId,
+                  pluginKeys: options.pluginKeys,
+                  approvalRequired: options.approvalRequired,
+                },
+                options.userId,
+                (event) => {
+                  this.updateRunState(runState, event);
+                  if (
+                    event.type === 'token' &&
+                    typeof event.data === 'string' &&
+                    event.data.trim().length > 0
+                  ) {
+                    streamedContent = true;
+                  }
+                  this.emitAguiEvent(event, emit, messageId);
+                },
+                { model: selectedModel },
+              ),
           );
-          const answer = result.answer.trim() || '模型未返回有效内容，请切换模型后重试。';
+          const answer =
+            result.answer.trim() || '模型未返回有效内容，请切换模型后重试。';
           runState.route = result.route;
-          runState.phase = result.retrievalSufficient === false ? 'degraded' : 'citation';
+          runState.phase =
+            result.retrievalSufficient === false ? 'degraded' : 'citation';
           runState.citation = { count: result.references?.length ?? 0 };
           // ChatService 的 token 事件已经实时透传；这里不再重复发送完整正文。
           if (!streamedContent) {
             emit('TEXT_MESSAGE_CONTENT', { messageId, delta: answer });
+          }
+
+          if (result.executionState?.paused) {
+            emit('TEXT_MESSAGE_END', { messageId });
+            emit('RUN_INTERRUPTED', {
+              threadId: activeThreadId,
+              output: {
+                ...result,
+                model: selectedModel,
+                runState: { ...runState, phase: 'approval' },
+              },
+            });
+            subscriber.complete();
+            return;
           }
 
           let generatedArtifacts: unknown[] = [];
@@ -165,19 +165,6 @@ export class AguiService {
           }
 
           emit('TEXT_MESSAGE_END', { messageId });
-          this.traceAnswer({
-            userId: options.userId,
-            threadId: activeThreadId,
-            query,
-            answer,
-            mode: options.mode,
-            route: result.route ?? 'simple',
-            model: selectedModel,
-            startTime,
-            references: result.references ?? [],
-            refused: result.retrievalSufficient === false,
-            events: traceEvents,
-          });
           emit('RUN_FINISHED', {
             threadId: activeThreadId,
             output: {
@@ -278,6 +265,8 @@ export class AguiService {
           typeof data?.sufficient === 'boolean' ? data.sufficient : undefined,
         reason: typeof data?.reason === 'string' ? data.reason : undefined,
       };
+    } else if (event.type === 'interrupt') {
+      state.phase = 'approval';
       if (data?.sufficient === false && typeof data.reason === 'string') {
         state.degradationReason = 'evidence_insufficient';
       }
@@ -325,85 +314,5 @@ export class AguiService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
-  }
-
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    fallback: T,
-  ): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<T>((resolve) => {
-      timer = setTimeout(() => resolve(fallback), ms);
-    });
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  private traceAnswer(params: {
-    userId: string;
-    threadId: string;
-    query: string;
-    answer: string;
-    mode: string;
-    route: string;
-    model: string;
-    startTime: number;
-    references: Array<{
-      docId: string;
-      chunkIndex: number;
-      totalScore?: number;
-    }>;
-    refused: boolean;
-    events: RagTraceEvent[];
-  }): void {
-    const inputTokens = this.langfuseProvider.estimateTextTokens(params.query);
-    const outputTokens = this.langfuseProvider.estimateTextTokens(
-      params.answer,
-    );
-    this.langfuseProvider.traceRagAnswer({
-      userId: params.userId,
-      threadId: params.threadId,
-      query: params.query,
-      answer: params.answer,
-      mode: params.mode,
-      route: params.route,
-      model: params.model,
-      latencyMs: Date.now() - params.startTime,
-      citationCount: params.references.length,
-      refused: params.refused,
-      references: params.references.map((ref) => ({
-        docId: ref.docId,
-        chunkIndex: ref.chunkIndex,
-        totalScore: ref.totalScore ?? 0,
-      })),
-      events: params.events,
-      inputTokensEstimated: inputTokens,
-      outputTokensEstimated: outputTokens,
-      costUsdEstimated: this.langfuseProvider.estimateCostUsd(
-        inputTokens,
-        outputTokens,
-      ),
-    });
-    // 钉钉问答推送（fire-and-forget，threadId 白名单过滤）
-    void this.dingTalk?.forwardRagAnswer({
-      threadId: params.threadId,
-      query: params.query,
-      answer: params.answer,
-      mode: params.mode,
-      latencyMs: Date.now() - params.startTime,
-      citationCount: params.references.length,
-    });
-  }
-
-  private toTraceEvent(event: SseEvent): RagTraceEvent {
-    return {
-      type: event.type,
-      data: event.type === 'token' ? undefined : event.data,
-      timestamp: new Date().toISOString(),
-    };
   }
 }

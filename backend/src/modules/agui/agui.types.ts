@@ -3,6 +3,7 @@ import type { LlmModelProvider } from '../../providers/llm/llm-provider.interfac
 
 export type AguiEventType =
   | 'RUN_STARTED'
+  | 'RUN_INTERRUPTED'
   | 'RUN_FINISHED'
   | 'RUN_ERROR'
   | 'TEXT_MESSAGE_START'
@@ -26,6 +27,7 @@ export type AguiRunPhase =
   | 'retrieval'
   | 'evidence'
   | 'generation'
+  | 'approval'
   | 'citation'
   | 'completed'
   | 'degraded'
@@ -54,4 +56,5 @@ export interface AguiStreamOptions {
   model?: LlmModelProvider;
   rolePresetId?: string;
   pluginKeys?: string[];
+  approvalRequired?: boolean;
 }

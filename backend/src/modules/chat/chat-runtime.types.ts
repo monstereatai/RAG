@@ -19,7 +19,15 @@ export interface RequestContext {
 
 /** 可序列化的执行状态，作为流式事件和检查点的稳定摘要。 */
 export interface ExecutionState {
-  phase: 'routing' | 'retrieval' | 'evidence' | 'generation' | 'reflection' | 'approval' | 'completed' | 'failed';
+  phase:
+    | 'routing'
+    | 'retrieval'
+    | 'evidence'
+    | 'generation'
+    | 'reflection'
+    | 'approval'
+    | 'completed'
+    | 'failed';
   route?: 'simple' | 'agentic';
   consumedSteps: number;
   consumedToolCalls: number;

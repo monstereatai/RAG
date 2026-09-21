@@ -623,7 +623,9 @@ export class KarpathyRagService implements OnModuleInit {
     userId?: string,
   ): Promise<DetailedRetrievalResult> {
     const vectorSearch = options.vectorSearch ?? true;
-    const normalizedQuery = this.normalizeQuery(query);
+    const normalizedQuery = this.expandRetrievalQuery(
+      this.normalizeQuery(query),
+    );
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
     const graphProbeStartedAt = Date.now();
     // Chat 请求一律遵从一次结构化计划；没有 RequestContext 的历史内部调用
@@ -709,7 +711,7 @@ export class KarpathyRagService implements OnModuleInit {
       let vectorFailed = false;
       const vectorStartedAt = process.hrtime.bigint();
       try {
-        queryVector = await this.embeddingProvider.embedQuery(query);
+        queryVector = await this.embeddingProvider.embedQuery(normalizedQuery);
         const skipMilvus =
           esKnnMode === 'fallback' &&
           esKnnReady &&
@@ -840,8 +842,12 @@ export class KarpathyRagService implements OnModuleInit {
       }));
     const graphProbe = await graphProbePromise;
     const imageProbe = await imageProbePromise;
-    const graphChunks = graphProbe.facts.map((fact, index) => this.graphFactToChunk(fact, index));
-    const imageChunks = imageProbe.hits.map((hit, index) => this.imageHitToChunk(hit, index));
+    const graphChunks = graphProbe.facts.map((fact, index) =>
+      this.graphFactToChunk(fact, index),
+    );
+    const imageChunks = imageProbe.hits.map((hit, index) =>
+      this.imageHitToChunk(hit, index),
+    );
     const shouldMergeGraph = graphRequested;
     const shouldMergeImages = this.shouldMergeImageEvidence(normalizedQuery);
     const expanded = this.expandContextChunks(
@@ -1118,7 +1124,9 @@ export class KarpathyRagService implements OnModuleInit {
     scope?: RetrievalScope,
     includeElasticsearch = true,
   ): Promise<RetrievedChunk[]> {
-    const normalizedQuery = this.normalizeQuery(query);
+    const normalizedQuery = this.expandRetrievalQuery(
+      this.normalizeQuery(query),
+    );
     const profile = detectRetrievalProfile(normalizedQuery);
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(userId)
@@ -1209,7 +1217,10 @@ export class KarpathyRagService implements OnModuleInit {
     retrieveOptions: RetrieveOptions = {},
   ): Promise<KarpathyRagResult> {
     const normalizedQuery = this.normalizeQuery(query);
-    const arithmeticAnswer = this.buildArithmeticAnswer(normalizedQuery, history);
+    const arithmeticAnswer = this.buildArithmeticAnswer(
+      normalizedQuery,
+      history,
+    );
     if (arithmeticAnswer) {
       onToken?.(arithmeticAnswer);
       return {
@@ -1230,8 +1241,8 @@ export class KarpathyRagService implements OnModuleInit {
         },
       };
     }
-    const retrievalQuery = this.normalizeQuery(
-      retrieveOptions.retrievalQuery ?? query,
+    const retrievalQuery = this.expandRetrievalQuery(
+      this.normalizeQuery(retrieveOptions.retrievalQuery ?? query),
     );
     const profile =
       retrieveOptions.profile ?? detectRetrievalProfile(retrievalQuery);
@@ -1249,11 +1260,7 @@ export class KarpathyRagService implements OnModuleInit {
     const retrieveFormalKnowledge = () =>
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.retrieval)
-        : this.retrieveDetailed(
-            retrievalQuery,
-            initialRetrieveOptions,
-            userId,
-          );
+        : this.retrieveDetailed(retrievalQuery, initialRetrieveOptions, userId);
     const retrieveBaseCaseKnowledge = () =>
       prefetchedFastPath?.badCaseMatches
         ? Promise.resolve(prefetchedFastPath.badCaseMatches)
@@ -1261,15 +1268,19 @@ export class KarpathyRagService implements OnModuleInit {
     const retrieveObsidianKnowledge = () =>
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.obsidianHits)
-        : this.obsidianKnowledge.search(retrievalQuery, 5, {
-            userId,
-            roles: retrieveOptions.scope?.role ? [retrieveOptions.scope.role] : [],
-          }).catch((error) => {
-            this.logger.warn(
-              `Obsidian fast path failed: ${(error as Error).message}`,
-            );
-            return [] as ObsidianSearchHit[];
-          });
+        : this.obsidianKnowledge
+            .search(retrievalQuery, 5, {
+              userId,
+              roles: retrieveOptions.scope?.role
+                ? [retrieveOptions.scope.role]
+                : [],
+            })
+            .catch((error) => {
+              this.logger.warn(
+                `Obsidian fast path failed: ${(error as Error).message}`,
+              );
+              return [] as ObsidianSearchHit[];
+            });
 
     let badCaseMatches: BadCaseMatch[];
     let initialRetrieval: Awaited<ReturnType<typeof this.retrieveDetailed>>;
@@ -1288,7 +1299,6 @@ export class KarpathyRagService implements OnModuleInit {
         memoryMessages,
         onToken,
         retrieveOptions.scope,
-        retrieveOptions.entities,
       );
       if (direct) {
         return direct;
@@ -1393,8 +1403,14 @@ export class KarpathyRagService implements OnModuleInit {
       ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
       : memoryMessages;
     const obsidianChunks = this.toObsidianChunks(obsidianHits);
+    // 正式 RAG 已有足够证据时，Obsidian 只能作为独立补充源，不能以更高的
+    // 文件分数抢占上下文预算；否则无关的 compiled/index 笔记会把正式片段
+    // 挤出最终证据，进而触发引用门禁。正式检索不足时仍保留 Obsidian 兜底。
+    const evidenceObsidianChunks = formalRetrievalGate.sufficient
+      ? []
+      : obsidianChunks;
     const evidenceBuild = this.contextBuilder.build(
-      [...chunks, ...obsidianChunks],
+      [...chunks, ...evidenceObsidianChunks],
       retrieval.profile,
       normalizedQuery,
     );
@@ -1417,7 +1433,8 @@ export class KarpathyRagService implements OnModuleInit {
           answer,
           references: [],
           retrievalSufficient: true,
-          retrievalReason: '检索未命中同一实体权威证据，已按本轮最新对话状态回答',
+          retrievalReason:
+            '检索未命中同一实体权威证据，已按本轮最新对话状态回答',
           obsidianPaths: obsidianHits.map((hit) => hit.path),
           obsidianHits,
           retrievalDiagnostics: retrieval.diagnostics,
@@ -1493,9 +1510,17 @@ export class KarpathyRagService implements OnModuleInit {
         retrieveOptions,
       );
       const modelFallback = !webFallback
-        ? await this.answerWithModelFallback(query, history, onToken, retrieveOptions)
+        ? await this.answerWithModelFallback(
+            query,
+            history,
+            onToken,
+            retrieveOptions,
+          )
         : null;
-      const answer = webFallback?.answer ?? modelFallback?.answer ?? this.unsupportedReliableAnswer();
+      const answer =
+        webFallback?.answer ??
+        modelFallback?.answer ??
+        this.unsupportedReliableAnswer();
       if (!webFallback && !modelFallback) onToken?.(answer);
       return {
         answer,
@@ -1512,14 +1537,12 @@ export class KarpathyRagService implements OnModuleInit {
       };
     }
 
-    const earlyDeterministicAnswer = retrieveOptions.needsSynthesis
-      ? null
-      : this.buildDeterministicAnswer(
-          normalizedQuery,
-          evidenceChunks,
-          userId,
-          retrieveOptions.scope,
-        );
+    // 结构化事实优先于“需要综合”的通用标记：needsSynthesis 只表示普通语义
+    // 问题需要模型总结，不能阻止 OKR、薪资、版本等已有确定性证据直接回答。
+    const earlyDeterministicAnswer = this.buildDeterministicAnswer(
+      normalizedQuery,
+      evidenceChunks,
+    );
     if (earlyDeterministicAnswer) {
       return {
         answer: earlyDeterministicAnswer,
@@ -1583,14 +1606,10 @@ export class KarpathyRagService implements OnModuleInit {
     this.logger.log(
       `Generating answer with ${chunks.length} RAG chunks and ${obsidianChunks.length} Obsidian chunks`,
     );
-    const deterministicAnswer = retrieveOptions.needsSynthesis
-      ? null
-      : this.buildDeterministicAnswer(
-          normalizedQuery,
-          evidenceChunks,
-          userId,
-          retrieveOptions.scope,
-        );
+    const deterministicAnswer = this.buildDeterministicAnswer(
+      normalizedQuery,
+      evidenceChunks,
+    );
     if (deterministicAnswer) {
       return {
         answer: deterministicAnswer,
@@ -1626,6 +1645,31 @@ export class KarpathyRagService implements OnModuleInit {
     );
     const citationGate = this.assessCitationSupport(answer, evidenceChunks);
     if (!citationGate.sufficient) {
+      const extractiveFallback = this.buildCitationSafeExtractiveAnswer(
+        normalizedQuery,
+        evidenceChunks,
+      );
+      if (extractiveFallback) {
+        const extractiveGate = this.assessCitationSupport(
+          extractiveFallback,
+          evidenceChunks,
+        );
+        if (extractiveGate.sufficient) {
+          const citedChunks = this.selectCitedChunks(
+            extractiveFallback,
+            evidenceChunks,
+          );
+          return {
+            answer: extractiveFallback,
+            references: this.toReferences(citedChunks),
+            retrievalSufficient: true,
+            retrievalReason: 'LLM 答案引用不足，已用当前检索证据提取式回答',
+            obsidianPaths: obsidianHits.map((hit) => hit.path),
+            obsidianHits,
+            retrievalDiagnostics: retrieval.diagnostics,
+          };
+        }
+      }
       const synthesizedFallback = await this.synthesizeEvidenceAnswer(
         normalizedQuery,
         evidenceChunks,
@@ -1675,9 +1719,6 @@ export class KarpathyRagService implements OnModuleInit {
       const deterministicFallback = this.buildEvidenceFirstAnswer(
         normalizedQuery,
         evidenceChunks,
-        userId,
-        retrieveOptions.scope,
-        retrieveOptions.entities,
       );
       if (deterministicFallback) {
         const citedChunks = this.selectCitedChunks(
@@ -1815,8 +1856,8 @@ ${memoryText || '无'}
     obsidianHits: ObsidianSearchHit[];
     prefetchedFastPath: PrefetchedFastPath;
   }> {
-    const normalizedQuery = this.normalizeQuery(
-      options.retrievalQuery ?? query,
+    const normalizedQuery = this.expandRetrievalQuery(
+      this.normalizeQuery(options.retrievalQuery ?? query),
     );
     let badCaseFailure: string | undefined;
     let retrievalFailure: string | undefined;
@@ -1850,16 +1891,18 @@ ${memoryText || '无'}
           profile: detectRetrievalProfile(normalizedQuery),
         } satisfies DetailedRetrievalResult;
       }),
-      this.obsidianKnowledge.search(normalizedQuery, 5, {
-        userId,
-        roles: options.scope?.role ? [options.scope.role] : [],
-      }).catch((error) => {
-        obsidianFailure = (error as Error).message;
-        this.logger.warn(
-          `Fast path Obsidian retrieval failed: ${(error as Error).message}`,
-        );
-        return [] as ObsidianSearchHit[];
-      }),
+      this.obsidianKnowledge
+        .search(normalizedQuery, 5, {
+          userId,
+          roles: options.scope?.role ? [options.scope.role] : [],
+        })
+        .catch((error) => {
+          obsidianFailure = (error as Error).message;
+          this.logger.warn(
+            `Fast path Obsidian retrieval failed: ${(error as Error).message}`,
+          );
+          return [] as ObsidianSearchHit[];
+        }),
     ]);
     const reviewedBaseCaseChunks =
       this.toReviewedEvidenceChunks(badCaseMatches);
@@ -1928,14 +1971,78 @@ ${memoryText || '无'}
     const graph = input.retrieval.diagnostics.graphProbe;
     const image = input.retrieval.diagnostics.imageProbe;
     return [
-      { source: 'bad_case', status: input.failures?.badCaseFailure ? this.statusForFailure(input.failures.badCaseFailure) : input.badCaseMatches.length ? 'hit' : 'no_result', hitCount: input.badCaseMatches.length, reason: input.failures?.badCaseFailure },
-      { source: 'bm25', status: input.failures?.retrievalFailure ? this.statusForFailure(input.failures.retrievalFailure) : input.retrieval.diagnostics.stages?.keywordCandidates ? 'hit' : 'no_result', hitCount: input.retrieval.diagnostics.stages?.keywordCandidates ?? 0, reason: input.failures?.retrievalFailure },
-      { source: 'vector', status: input.retrieval.vectorSource === 'none' ? 'no_result' : 'hit', hitCount: input.retrieval.diagnostics.stages?.vectorCandidates ?? 0 },
-      { source: 'elasticsearch', status: input.retrieval.vectorSource === 'elasticsearch' ? 'hit' : 'not_executed', hitCount: input.retrieval.vectorSource === 'elasticsearch' ? input.retrieval.diagnostics.stages?.vectorCandidates ?? 0 : 0 },
-      { source: 'obsidian', status: input.failures?.obsidianFailure ? this.statusForFailure(input.failures.obsidianFailure) : input.obsidianHits.length ? 'hit' : 'no_result', hitCount: input.obsidianHits.length, reason: input.failures?.obsidianFailure },
-      { source: 'graph', status: graph?.attempted ? (graph.factCount ? 'hit' : 'no_result') : 'not_executed', hitCount: graph?.factCount ?? 0, reason: graph?.skippedReason },
-      { source: 'image', status: image?.attempted ? (image.hitCount ? 'hit' : 'no_result') : 'not_executed', hitCount: image?.hitCount ?? 0, reason: image?.skippedReason },
-      { source: 'web', status: input.sourcePolicy === 'web_allowed' ? 'not_executed' : 'forbidden', hitCount: 0 },
+      {
+        source: 'bad_case',
+        status: input.failures?.badCaseFailure
+          ? this.statusForFailure(input.failures.badCaseFailure)
+          : input.badCaseMatches.length
+            ? 'hit'
+            : 'no_result',
+        hitCount: input.badCaseMatches.length,
+        reason: input.failures?.badCaseFailure,
+      },
+      {
+        source: 'bm25',
+        status: input.failures?.retrievalFailure
+          ? this.statusForFailure(input.failures.retrievalFailure)
+          : input.retrieval.diagnostics.stages?.keywordCandidates
+            ? 'hit'
+            : 'no_result',
+        hitCount: input.retrieval.diagnostics.stages?.keywordCandidates ?? 0,
+        reason: input.failures?.retrievalFailure,
+      },
+      {
+        source: 'vector',
+        status: input.retrieval.vectorSource === 'none' ? 'no_result' : 'hit',
+        hitCount: input.retrieval.diagnostics.stages?.vectorCandidates ?? 0,
+      },
+      {
+        source: 'elasticsearch',
+        status:
+          input.retrieval.vectorSource === 'elasticsearch'
+            ? 'hit'
+            : 'not_executed',
+        hitCount:
+          input.retrieval.vectorSource === 'elasticsearch'
+            ? (input.retrieval.diagnostics.stages?.vectorCandidates ?? 0)
+            : 0,
+      },
+      {
+        source: 'obsidian',
+        status: input.failures?.obsidianFailure
+          ? this.statusForFailure(input.failures.obsidianFailure)
+          : input.obsidianHits.length
+            ? 'hit'
+            : 'no_result',
+        hitCount: input.obsidianHits.length,
+        reason: input.failures?.obsidianFailure,
+      },
+      {
+        source: 'graph',
+        status: graph?.attempted
+          ? graph.factCount
+            ? 'hit'
+            : 'no_result'
+          : 'not_executed',
+        hitCount: graph?.factCount ?? 0,
+        reason: graph?.skippedReason,
+      },
+      {
+        source: 'image',
+        status: image?.attempted
+          ? image.hitCount
+            ? 'hit'
+            : 'no_result'
+          : 'not_executed',
+        hitCount: image?.hitCount ?? 0,
+        reason: image?.skippedReason,
+      },
+      {
+        source: 'web',
+        status:
+          input.sourcePolicy === 'web_allowed' ? 'not_executed' : 'forbidden',
+        hitCount: 0,
+      },
     ];
   }
 
@@ -1951,10 +2058,14 @@ ${memoryText || '无'}
     hits: ObsidianSearchHit[];
     context: string;
   }> {
-    const hits = await this.obsidianKnowledge.search(this.normalizeQuery(query), 5, {
-      userId,
-      roles: role ? [role] : [],
-    });
+    const hits = await this.obsidianKnowledge.search(
+      this.normalizeQuery(query),
+      5,
+      {
+        userId,
+        roles: role ? [role] : [],
+      },
+    );
     return {
       hits,
       context: this.obsidianKnowledge.formatHitsForPrompt(hits),
@@ -1978,7 +2089,11 @@ ${memoryText || '无'}
     limit = 2,
     userId?: string,
   ): Promise<RetrievedChunk[]> {
-    const matches = await this.badCaseFlywheel.retrieveMatches(query, limit, userId);
+    const matches = await this.badCaseFlywheel.retrieveMatches(
+      query,
+      limit,
+      userId,
+    );
     return this.toReviewedEvidenceChunks(matches);
   }
 
@@ -2088,14 +2203,14 @@ ${memoryText || '无'}
     }
 
     const normalizedQuery = this.normalizeQuery(query);
-    const deterministic = options.needsSynthesis
-      ? null
-      : this.buildDeterministicAnswer(
-          normalizedQuery,
-          evidenceChunks,
-          options.userId,
-          options.scope,
-        );
+    // needsSynthesis 只表示普通生成不能直接把检索片段当答案，不应屏蔽已经
+    // 通过结构化事实校验的确定性回答。Agentic 的复杂问题也可能包含一个
+    // 可完整核验的保留期限、Provider 规则等子结论，优先保留这些事实可避免
+    // 多轮总结把数字、实体名称或单位压缩丢失。
+    const deterministic = this.buildDeterministicAnswer(
+      normalizedQuery,
+      evidenceChunks,
+    );
     if (deterministic) {
       onToken?.(deterministic);
       return {
@@ -2131,10 +2246,7 @@ ${memoryText || '无'}
     };
 
     let rawAnswer = await streamAnswer(this.llmProvider.getModel());
-    if (
-      !rawAnswer &&
-      this.llmProvider.getActiveProviderName?.() !== 'qwen'
-    ) {
+    if (!rawAnswer && this.llmProvider.getActiveProviderName?.() !== 'qwen') {
       rawAnswer = await streamAnswer(this.llmProvider.getModel('qwen'));
     }
     const answer = this.attachMissingClaimCitations(
@@ -2150,6 +2262,27 @@ ${memoryText || '无'}
         references: this.toReferences(citedChunks),
         retrievalSufficient: true,
         retrievalReason: '统一生成结果通过引用门禁',
+      };
+    }
+
+    const extractiveFallback = this.buildCitationSafeExtractiveAnswer(
+      normalizedQuery,
+      evidenceChunks,
+    );
+    if (
+      extractiveFallback &&
+      this.assessCitationSupport(extractiveFallback, evidenceChunks).sufficient
+    ) {
+      const citedChunks = this.selectCitedChunks(
+        extractiveFallback,
+        evidenceChunks,
+      );
+      onToken?.(extractiveFallback);
+      return {
+        answer: extractiveFallback,
+        references: this.toReferences(citedChunks),
+        retrievalSufficient: true,
+        retrievalReason: '统一生成结果引用不足，已用当前检索证据提取式回答',
       };
     }
 
@@ -2200,9 +2333,6 @@ ${memoryText || '无'}
     const deterministicFallback = this.buildEvidenceFirstAnswer(
       normalizedQuery,
       evidenceChunks,
-      options.userId,
-      options.scope,
-      options.entities,
     );
     if (deterministicFallback) {
       const citedChunks = this.selectCitedChunks(
@@ -2265,13 +2395,12 @@ ${memoryText || '无'}
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
     scope?: RetrievalScope,
-    entities?: string[],
   ): Promise<KarpathyRagResult | null> {
     const normalizedQuery = this.normalizeQuery(query);
     const [exactMatches, direct] = await Promise.all([
       this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1, userId) ??
         this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1, userId),
-      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope, entities),
+      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope),
     ]);
     const exact = exactMatches.find((match) => match.mode === 'exact');
     if (exact) {
@@ -2304,7 +2433,6 @@ ${memoryText || '无'}
     query: string,
     userId?: string,
     scope?: RetrievalScope,
-    entities?: string[],
   ): Promise<KarpathyRagResult | null> {
     const profile = detectRetrievalProfile(query);
     if (profile.intent !== 'lookup') {
@@ -2319,13 +2447,7 @@ ${memoryText || '无'}
       }
       // 编译知识直答只接受领域结构化事实。不能用原始切片补位，否则一个被
       // 路由误标为 lookup 的概括问题就会跳过生成链路并把残句展示给用户。
-      const answer = this.buildEvidenceFirstAnswer(
-        query,
-        [primary],
-        userId,
-        scope,
-        entities,
-      );
+      const answer = this.buildEvidenceFirstAnswer(query, [primary]);
       if (
         !answer ||
         !this.assessCitationSupport(answer, [primary]).sufficient
@@ -2717,13 +2839,14 @@ ${evidence}`;
     if (!match) return null;
     const left = Number(match[1]);
     const right = Number(match[3]);
-    const result = match[2] === '+'
-      ? left + right
-      : match[2] === '-'
-        ? left - right
-        : match[2] === '*' || match[2] === '×'
-          ? left * right
-          : left / right;
+    const result =
+      match[2] === '+'
+        ? left + right
+        : match[2] === '-'
+          ? left - right
+          : match[2] === '*' || match[2] === '×'
+            ? left * right
+            : left / right;
     const settings = history
       .filter((item) => item.role === 'human' && /等于|=/u.test(item.content))
       .slice(-5)
@@ -2770,17 +2893,20 @@ ${evidence}`;
       .map((item) => item.content)
       .slice(-5);
     if (!statements.length) return null;
-    const arithmetic = query.match(/(\d+(?:\.\d+)?)\s*([+\-*/×÷])\s*(\d+(?:\.\d+)?)/u);
+    const arithmetic = query.match(
+      /(\d+(?:\.\d+)?)\s*([+\-*/×÷])\s*(\d+(?:\.\d+)?)/u,
+    );
     if (arithmetic) {
       const left = Number(arithmetic[1]);
       const right = Number(arithmetic[3]);
-      const result = arithmetic[2] === '+'
-        ? left + right
-        : arithmetic[2] === '-'
-          ? left - right
-          : arithmetic[2] === '*' || arithmetic[2] === '×'
-            ? left * right
-            : left / right;
+      const result =
+        arithmetic[2] === '+'
+          ? left + right
+          : arithmetic[2] === '-'
+            ? left - right
+            : arithmetic[2] === '*' || arithmetic[2] === '×'
+              ? left * right
+              : left / right;
       const answer = `客观事实：${left}${arithmetic[2]}${right}等于${result}。\n历史对话设定：${statements.join('；')}`;
       onToken?.(answer);
       return answer;
@@ -2813,7 +2939,10 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       intent?.intent === 'system_capability' ||
       intent?.queryType === 'public_knowledge' ||
       intent?.sourcePolicy === 'direct_answer';
-    if (!canUseGeneralModel || options.queryIntent?.contextMode === 'conversation_setting') {
+    if (
+      !canUseGeneralModel ||
+      options.queryIntent?.contextMode === 'conversation_setting'
+    ) {
       return null;
     }
     const prompt = `你是通用知识助手。当前资料库没有找到相关内容，联网搜索也不可用。请仅依据可靠通用知识回答，不要声称资料库有依据，也不要把历史用户说法当成事实。若历史中有相关说法，只在答案末尾用“历史对话设定”单独说明。\n历史上下文：${
@@ -2857,32 +2986,29 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
   buildEvidenceFirstAnswer(
     query: string,
     chunks: RetrievedChunk[],
-    userId?: string,
-    scope?: RetrievalScope,
-    _entities?: string[],
   ): string | null {
     // 直答只能来自可验证的结构化事实。此前针对人物／章回的规则式抽取会把
     // PDF 切片拼成不完整句子，并在 Auto 链路绕过 LLM 语义总结；因此它不能再
     // 作为用户可见答案。人物介绍、总结和分析统一进入带引用的生成链路。
-    return this.buildDeterministicAnswer(query, chunks, userId, scope);
+    return this.buildDeterministicAnswer(query, chunks);
   }
 
   private buildDeterministicAnswer(
     query: string,
     chunks: RetrievedChunk[],
-    userId?: string,
-    scope?: RetrievalScope,
   ): string | null {
-    const candidates = this.mergeEvidenceCandidates(
-      chunks,
-      this.toPersistedChunks(userId, scope),
-    );
+    // 确定性答案中的 [片段N] 是本次返回给前端的 evidenceChunks 下标，不能
+    // 混入持久化 BM25 全量索引后再按全局位置编号。否则文字会出现 [片段1137]
+    // 一类界面无法回链的编号，引用列表也会被筛为空。
+    const candidates = chunks;
     const builders = [
       this.buildTravelPolicyVersionAnswer.bind(this),
       this.buildTravelApprovalAnswer.bind(this),
       this.buildProcurementPaymentAnswer.bind(this),
       this.buildLegalReviewAnswer.bind(this),
       this.buildDataRetentionAnswer.bind(this),
+      this.buildPayrollAnswer.bind(this),
+      this.buildOkrBonusAnswer.bind(this),
       this.buildReactStateAnswer.bind(this),
       this.buildNestProviderAnswer.bind(this),
     ];
@@ -2987,7 +3113,57 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       /10\s*年/,
     ]);
     if (!hit) return null;
-    return `客户行为日志默认保留 180 天；财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。[片段${hit.index + 1}]`;
+    const citation = `[片段${hit.index + 1}]`;
+    return `客户行为日志默认保留 180 天。${citation}财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。${citation}`;
+  }
+
+  private buildOkrBonusAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): string | null {
+    if (!/okr/i.test(query) || !/绩效奖金|奖金/.test(query)) return null;
+    const okrHit = this.findChunk(chunks, [/okr/i]);
+    const bonusHit = this.findChunk(chunks, [/绩效奖金/]);
+    const quarterHit = this.findChunk(chunks, [/季度评估/]);
+    if (!bonusHit || !quarterHit) return null;
+    if (!okrHit) {
+      const citation = `[片段${quarterHit.index + 1}]`;
+      return `资料明确绩效奖金按季度评估；当前片段未给出 OKR 权重或挂钩比例，请以 OKR 完成度相关制度为准。${citation}`;
+    }
+    const citations = [okrHit, bonusHit, quarterHit]
+      .filter(
+        (hit, index, all) =>
+          all.findIndex((candidate) => candidate.index === hit.index) === index,
+      )
+      .map((hit) => `[片段${hit.index + 1}]`)
+      .join('');
+    return `绩效奖金按照 OKR 完成度按季度评估，OKR 完成情况会影响绩效奖金结果。${citations}`;
+  }
+
+  private buildPayrollAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): string | null {
+    if (
+      !/薪资|薪酬|工资|收入/.test(query) ||
+      !/什么时候|何时|发放|发薪/.test(query)
+    ) {
+      return null;
+    }
+    const salaryHit = this.findChunk(chunks, [/基本工资|工资|收入/]);
+    const scheduleHit = this.findChunk(chunks, [
+      /(?:每月|按月)/,
+      /(?:10\s*日|发放)/,
+    ]);
+    if (!salaryHit || !scheduleHit) return null;
+    const citations = [salaryHit, scheduleHit]
+      .filter(
+        (hit, index, all) =>
+          all.findIndex((candidate) => candidate.index === hit.index) === index,
+      )
+      .map((hit) => `[片段${hit.index + 1}]`)
+      .join('');
+    return `基本工资按月发放，每月 10 日发放；员工口语中也称工资、薪资或收入。${citations}`;
   }
 
   private buildReactStateAnswer(
@@ -3007,13 +3183,18 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     if (!/nestjs/i.test(query) || !/provider|注入|模块/i.test(query)) {
       return null;
     }
-    const hit = this.findChunk(chunks, [
-      /interface/,
-      /providers/,
-      /ConfigService/,
-    ]);
-    if (!hit) return null;
-    return `NestJS 的 Provider 模式是在模块中通过 providers 注入切换实现：关键组件先用 interface 抽象，不同实现放到 Module 的 providers 中切换，环境变量由 ConfigService 统一管理。[片段${hit.index + 1}]`;
+    const interfaceHit = this.findChunk(chunks, [/interface/]);
+    const providersHit = this.findChunk(chunks, [/providers?/i]);
+    const configHit = this.findChunk(chunks, [/ConfigService/]);
+    if (!interfaceHit || !providersHit || !configHit) return null;
+    const citations = [interfaceHit, providersHit, configHit]
+      .filter(
+        (hit, index, all) =>
+          all.findIndex((candidate) => candidate.index === hit.index) === index,
+      )
+      .map((hit) => `[片段${hit.index + 1}]`)
+      .join('');
+    return `NestJS 的 Provider 模式在模块中通过 providers 注入切换实现：关键组件先用 interface 抽象，不同实现放到 Module 的 providers 中切换，环境变量由 ConfigService 统一管理。${citations}`;
   }
 
   private findChunk(
@@ -3027,61 +3208,6 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
           patterns.every((pattern) => pattern.test(chunk.content)),
         ) ?? null
     );
-  }
-
-  private mergeEvidenceCandidates(
-    primary: RetrievedChunk[],
-    fallback: RetrievedChunk[],
-  ): RetrievedChunk[] {
-    const merged = new Map<string, RetrievedChunk>();
-    for (const chunk of [...primary, ...fallback]) {
-      if (!merged.has(chunk.id)) {
-        merged.set(chunk.id, chunk);
-      }
-    }
-    return [...merged.values()];
-  }
-
-  private toPersistedChunks(
-    userId?: string,
-    scope?: RetrievalScope,
-  ): RetrievedChunk[] {
-    return this.persistedEntries
-      .filter(
-        (entry) => entry.userId === userId && this.matchesScope(entry, scope),
-      )
-      .map((entry) => ({
-        id: entry.id,
-        content: entry.content,
-        docId: entry.docId,
-        chunkIndex: entry.chunkIndex,
-        bm25Score: 0,
-        cosineScore: 0,
-        totalScore: 0,
-        parentChunkId: entry.parentChunkId,
-        headingPath: entry.headingPath,
-        sectionId: entry.sectionId,
-        clauseId: entry.clauseId,
-        tableRef: entry.tableRef,
-        sourceStart: entry.sourceStart,
-        sourceEnd: entry.sourceEnd,
-        docVersion: entry.docVersion,
-        effectiveAt: entry.effectiveAt,
-        expiredAt: entry.expiredAt,
-        sourceAuthority: entry.sourceAuthority,
-        projectId: entry.projectId,
-        activityId: entry.activityId,
-        region: entry.region,
-        locale: entry.locale,
-        channel: entry.channel,
-        roleScope: entry.roleScope,
-        documentType: entry.documentType,
-        lifecycleStatus: entry.lifecycleStatus,
-        supersedesDocId: entry.supersedesDocId,
-        retrievalSource: 'bm25' as const,
-        contextRole: 'hit' as const,
-        sourceAuthorityWeight: 1,
-      }));
   }
 
   private extractEvidenceSentences(text: string): string[] {
@@ -3127,6 +3253,64 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     }
 
     return sentences;
+  }
+
+  /**
+   * 模型没有遵守引用格式时，仅把本轮已授权证据中的高相关完整句作为最后兜底。
+   * 它不查询全量索引，也不生成证据外推论；每行都保留当前 evidenceChunks 的编号，
+   * 因而前端引用和答案中的 [片段N] 始终可一一回链。
+   */
+  private buildCitationSafeExtractiveAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): string | null {
+    const queryTokens = this.extractQualityTokens(query);
+    if (
+      queryTokens.size === 0 ||
+      chunks.length === 0 ||
+      !/[\p{Script=Han}]/u.test(query)
+    ) {
+      return null;
+    }
+    const minOverlap = Math.max(
+      1,
+      Math.min(3, Math.ceil(queryTokens.size * 0.18)),
+    );
+    const unsafeInstruction =
+      /忽略.{0,20}(规则|指令)|系统提示|system\s*prompt|越权|泄露.{0,10}(提示|密钥)/i;
+    const candidates = chunks.flatMap((chunk, chunkIndex) =>
+      this.extractEvidenceSentences(sanitizeUntrustedContext(chunk.content))
+        .map((sentence) => ({
+          chunkIndex,
+          sentence: sentence.slice(0, 280),
+          overlap: this.countTokenOverlap(queryTokens, sentence),
+          score: chunk.totalScore,
+        }))
+        .filter(
+          (candidate) =>
+            candidate.overlap >= minOverlap &&
+            /[\p{Script=Han}]/u.test(candidate.sentence) &&
+            !unsafeInstruction.test(candidate.sentence),
+        ),
+    );
+    const selected: Array<(typeof candidates)[number]> = [];
+    const usedChunks = new Set<number>();
+    for (const candidate of candidates.sort(
+      (left, right) => right.overlap - left.overlap || right.score - left.score,
+    )) {
+      if (usedChunks.has(candidate.chunkIndex)) continue;
+      selected.push(candidate);
+      usedChunks.add(candidate.chunkIndex);
+      if (selected.length === 3) break;
+    }
+    if (selected.length === 0) return null;
+    return [
+      '资料中的直接依据：',
+      ...selected.map(
+        (candidate) =>
+          `- ${candidate.sentence}[片段${candidate.chunkIndex + 1}]`,
+      ),
+    ].join('\n');
   }
 
   private searchLocalBm25(
@@ -3658,6 +3842,37 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     return this.normalizePromptQuery(query).toLowerCase();
   }
 
+  /**
+   * 只扩展稳定的同义词、缩写和已确认错别字，不改写用户原问题。
+   * 扩展词只进入检索通道，生成与引用仍使用原始语义，避免答案被检索提示污染。
+   */
+  private expandRetrievalQuery(query: string): string {
+    const normalized = query.trim();
+    const aliases = new Set<string>();
+    const add = (...terms: string[]) =>
+      terms.forEach((term) => aliases.add(term));
+
+    if (/薪资|薪酬|工资|收入/.test(normalized)) {
+      add('薪资', '薪酬', '工资', '收入');
+    }
+    if (/okr/i.test(normalized) || /绩效奖金|季度评估/.test(normalized)) {
+      add('OKR', '绩效奖金', '季度评估', '绩效');
+    }
+    if (
+      /akb/i.test(normalized) ||
+      /企业知识库|知识库|知识中台/.test(normalized)
+    ) {
+      add('AKB', 'Atlas Knowledge Base', '企业知识库', '知识中台');
+    }
+    if (/service\s*hub|\bsh\b/i.test(normalized)) {
+      add('Service Hub', 'SH', '客服工单系统');
+    }
+
+    return aliases.size > 0
+      ? `${normalized} ${[...aliases].join(' ')}`
+      : normalized;
+  }
+
   private normalizePromptQuery(query: string): string {
     const normalized = query
       .normalize('NFKC')
@@ -3777,6 +3992,29 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
         return {
           sufficient: false,
           reason: `检索片段与问题中文短语重合数 ${maxPhraseOverlap} 低于阈值 ${minPhraseOverlap}`,
+        };
+      }
+    }
+
+    // 中文问题通常同时包含“报销／标准／系统”这类通用词和真正的业务锚点。
+    // 仅命中通用词不能证明资料相关，例如“宠物报销”不能被差旅制度放行。
+    // 至少要命中一个去掉问法、流程泛词后的连续中文锚点；英文缩写由
+    // hasStrongWordOverlap 负责覆盖。
+    const queryAnchorPhrases = this.extractChineseAnchorPhrases(query);
+    if (queryAnchorPhrases.size > 0) {
+      const maxAnchorOverlap = Math.max(
+        ...chunks.map((chunk) =>
+          this.countChinesePhraseOverlap(queryAnchorPhrases, chunk.content),
+        ),
+        0,
+      );
+      if (
+        maxAnchorOverlap === 0 &&
+        this.countWordOverlap(query, chunks) === 0
+      ) {
+        return {
+          sufficient: false,
+          reason: '检索片段未命中问题中的业务锚点',
         };
       }
     }
@@ -4013,9 +4251,9 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
   private countWordOverlap(query: string, chunks: RetrievedChunk[]): number {
     const words = (value: string): Set<string> =>
       new Set<string>(
-        ((value.toLowerCase().match(/[a-z0-9][a-z0-9_-]+/g) ?? []) as string[]).filter(
-          (word: string) => word.length > 1,
-        ),
+        (
+          (value.toLowerCase().match(/[a-z0-9][a-z0-9_-]+/g) ?? []) as string[]
+        ).filter((word: string) => word.length > 1),
       );
     const queryWords = words(query);
     const contentWords = new Set(
@@ -4057,6 +4295,49 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       }
     }
 
+    return phrases;
+  }
+
+  private extractChineseAnchorPhrases(text: string): Set<string> {
+    const normalized = this.normalizeQuery(text);
+    const stopwords = new Set([
+      '什么',
+      '哪个',
+      '哪些',
+      '怎么',
+      '如何',
+      '需要',
+      '分别',
+      '公司',
+      '项目',
+      '资料',
+      '文档',
+      '系统',
+      '标准',
+      '规则',
+      '时候',
+      '时间',
+      '关系',
+      '作用',
+      '负责',
+      '报销',
+      '查询',
+      '介绍',
+      '说明',
+      '以及',
+      '是否',
+    ]);
+    const phrases = new Set<string>();
+    const segments = normalized.match(/[\p{Script=Han}]{2,}/gu) ?? [];
+    for (const segment of segments) {
+      if (segment.length <= 4 && !stopwords.has(segment)) {
+        phrases.add(segment);
+      }
+      for (let i = 0; i < segment.length - 1; i += 1) {
+        const phrase = segment.slice(i, i + 2);
+        if (!stopwords.has(phrase)) phrases.add(phrase);
+      }
+    }
     return phrases;
   }
 

@@ -134,10 +134,41 @@ describe('KarpathyRagService exception scenarios', () => {
       },
     ];
 
-    expect(service.rankEvidenceChunks(chunks).map((chunk) => chunk.id)).toEqual([
-      'rerank-lower-rrf',
-      'rrf-high',
-    ]);
+    expect(service.rankEvidenceChunks(chunks).map((chunk) => chunk.id)).toEqual(
+      ['rerank-lower-rrf', 'rrf-high'],
+    );
+  });
+
+  it('does not cite persisted BM25 content that is absent from this response evidence', () => {
+    const { service } = createService();
+    (service as unknown as { persistedEntries: unknown[] }).persistedEntries = [
+      {
+        id: 'persisted-procurement',
+        userId: 'user-1',
+        docId: 'procurement',
+        chunkIndex: 1136,
+        content:
+          'PO 金额超过 100000 元时，付款前必须完成预算审批、法务合同归档和供应商准入检查，并取得增值税专用发票。',
+      },
+    ];
+    const visibleEvidence = [
+      {
+        id: 'visible-unrelated',
+        docId: 'other',
+        chunkIndex: 0,
+        content: '这是与采购付款无关的可见证据。',
+        bm25Score: 0.8,
+        cosineScore: 0.8,
+        totalScore: 0.8,
+      },
+    ];
+
+    expect(
+      service.buildEvidenceFirstAnswer(
+        'PO 超过 10 万付款前必须完成哪些动作？',
+        visibleEvidence,
+      ),
+    ).toBeNull();
   });
 
   it('merges reviewed Base Case evidence into the Simple answer gate', async () => {
@@ -249,16 +280,15 @@ describe('KarpathyRagService exception scenarios', () => {
 
   it('prompts conversation settings to include objective facts and the local setting', async () => {
     const { service, llmInvoke } = createService();
-    await (service as unknown as {
-      generateConversationStateAnswer: Function;
-    }).generateConversationStateAnswer(
-      'React是什么',
-      [{ role: 'human', content: 'React是一种动物' }],
-    );
+    await (
+      service as unknown as {
+        generateConversationStateAnswer: Function;
+      }
+    ).generateConversationStateAnswer('React是什么', [
+      { role: 'human', content: 'React是一种动物' },
+    ]);
 
-    expect(llmInvoke).toHaveBeenCalledWith(
-      expect.stringContaining('客观事实'),
-    );
+    expect(llmInvoke).toHaveBeenCalledWith(expect.stringContaining('客观事实'));
     expect(llmInvoke).toHaveBeenCalledWith(
       expect.stringContaining('当前会话设定'),
     );
@@ -531,6 +561,89 @@ describe('KarpathyRagService exception scenarios', () => {
       retrievalSufficient: false,
       retrievalReason: expect.stringContaining('已禁止输出原始片段'),
     });
+  });
+
+  it('uses only current evidence for a cited extractive fallback', async () => {
+    const { service } = createService();
+    const visibleEvidence = [
+      {
+        id: 'procurement-1',
+        content:
+          '采购订单 PO 金额超过 100000 元时，必须完成预算审批、法务合同归档和供应商准入检查后才能付款。',
+        docId: 'procurement-doc',
+        chunkIndex: 0,
+        bm25Score: 0.8,
+        cosineScore: 0.8,
+        totalScore: 0.9,
+      },
+      {
+        id: 'procurement-2',
+        content: '付款前必须取得增值税专用发票或财务确认的等效票据。',
+        docId: 'procurement-doc',
+        chunkIndex: 1,
+        bm25Score: 0.7,
+        cosineScore: 0.7,
+        totalScore: 0.8,
+      },
+    ];
+    const answer = (
+      service as unknown as {
+        buildCitationSafeExtractiveAnswer: (
+          query: string,
+          chunks: typeof visibleEvidence,
+        ) => string | null;
+      }
+    ).buildCitationSafeExtractiveAnswer(
+      'PO 超过 10 万付款前必须完成哪些动作？',
+      visibleEvidence,
+    );
+
+    expect(answer).not.toBeNull();
+    expect(answer).toContain('预算审批');
+    expect(answer).toContain('[片段1]');
+    expect(
+      (
+        service as unknown as {
+          assessCitationSupport: (
+            value: string,
+            chunks: typeof visibleEvidence,
+          ) => { sufficient: boolean; reason: string };
+        }
+      ).assessCitationSupport(answer!, visibleEvidence),
+    ).toMatchObject({ sufficient: true });
+    expect(
+      service
+        .selectCitedChunks(answer!, visibleEvidence)
+        .map((chunk) => chunk.id),
+    ).toContain('procurement-1');
+  });
+
+  it('keeps deterministic facts when Agentic requests synthesis', async () => {
+    const { service, llmInvoke } = createService();
+    const result = await service.generateGroundedAnswer(
+      '客户行为日志和财务审计凭证分别保留多久？',
+      [
+        {
+          id: 'retention-1',
+          content:
+            '章节路径：数据保留与删除制度 > 保留期限\n客户行为日志默认保留 180 天，用于问题排查。财务审计凭证保留 10 年，包含发票和付款审批。',
+          docId: 'retention-doc',
+          chunkIndex: 0,
+          bm25Score: 1,
+          cosineScore: 1,
+          totalScore: 1,
+        },
+      ],
+      [],
+      [],
+      undefined,
+      { needsSynthesis: true },
+    );
+
+    expect(result.answer).toContain('180 天');
+    expect(result.answer).toContain('10 年');
+    expect(result.retrievalSufficient).toBe(true);
+    expect(llmInvoke).not.toHaveBeenCalled();
   });
 
   it('repairs a missing citation when the generated claim is supported', async () => {

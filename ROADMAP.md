@@ -49,6 +49,36 @@
 
 ## 当前结论
 
+- **已同步三种问答链路说明（2026-09-21）**：`docs/interview/功能步骤流程.md` 已按当前代码重写 Simple、Auto 与 Chat Agentic 的用户操作、数据状态和代码入口。Auto 明确为「一次 Hybrid Fast Path 后路由到两个执行引擎」，不再描述为检索前公共直答；显式 Agentic 直接进入状态图，只有 Auto 升级时才复用首轮快照。文档同时补齐正式 RAG 优先于 Obsidian、确定性结构化事实、审批暂停／恢复、SSE 最终正文发布与统一结果收口边界。29 张 Mermaid 图的链接索引结构检查和文档代码一致性门禁已通过。
+
+- **本轮生产化回归已通过（2026-09-21）**：统一检索证据策略现在会在正式 RAG 足够时抑制无关 Obsidian 竞争；检索查询保留原问题并补充已确认的缩写／同义词／错别字，业务锚点不足时拒绝泛匹配。结构化事实支持跨切片合并并保留当前片段引用，覆盖薪资、OKR／绩效奖金、版本冲突和 NestJS Provider；Simple 在需要综合的意图下也优先使用确定性事实，避免漏掉关键字段。Agentic 对结构化证据保留同一快照，不再被语义充分性误判打回。`AGENT_PLATFORM_REQUIRE_LIVE=true pnpm run eval:agent-platform` 已整体通过，项目集三模式 live 均为 14／14，混合 RAG 三模式 live 均为 9／9；全量 Jest 70 套、351 项通过，Backend／Admin／Admin Backend 构建、Redis Checkpoint 双进程恢复、文档代码一致性门禁和 MCP 10 项测试通过。全量 lint 仍有 234 个既有错误、16 个警告，未伪装成通过。
+
+- **已补齐 Chat 人工审批暂停／恢复闭环（2026-09-20）**：`approvalPending` 在 LangGraph 原生 `interrupt()` 前单独提交 `pending` Checkpoint，避免暂停状态丢失；Chat 请求可显式启用审批，暂停时只持久化原用户请求、检查点和 `waiting_approval` Run，不把草稿、Query Log、长期记忆或 SSE `final` 误写成完成。恢复入口先校验会话与运行归属，再恢复原始用户、权限／检索选项、历史、记忆和剩余预算；审批通过统一复用 Chat 收口且不重复写用户消息，拒绝保留审计但不写正式草稿。AG-UI 对暂停返回 `RUN_INTERRUPTED`，不生成 Artifact 或 `RUN_FINISHED`。Agentic 每个节点开始前检查取消标记，且已取消的 Run 不允许被迟到的失败／完成收口覆盖。定向 4 套测试共 28 项、Backend 生产构建与 Diff 检查通过；真实 Redis Checkpoint／登录态 SSE 回放仍待本地依赖可用后验证。
+
+- **已将异步产研运工作流接入 BullMQ（2026-09-20）**：新增 `ProductionWorkflowQueueService`，Redis 可用时 `startAsync`、`resumeAsync`、`reviseAsync` 和失败岗位局部重跑均提交持久 Job，由 Worker 串行执行、指数退避重试并在 Worker 失败时记录工作流／任务失败状态；`start` 会识别已有 Checkpoint，队列重试／接管不会从零覆盖运行中的工作流。Redis 不可用时保留现有进程内降级执行，避免本地开发不可用。工作流与任务定向测试 16 项、Backend 生产构建与 Diff 检查通过；真实 Redis 队列接管演练待本地 Redis 可用后执行。
+
+- **已统一工作流交接 Manifest 与导出门禁（2026-09-20）**：工作流完成后，只有所有选中岗位均有结果、当前版本为 `approved` 且通过岗位交付门禁时才允许导出。后端 `handoffManifest()` 生成唯一的 Markdown、Schema、RAG 引用、岗位修订号、Artifact 状态与内容 SHA-256；页面目录导出改为读取该契约，项目 ZIP 写入 `HANDOFF_MANIFEST.json`，MCP 直接请求相同 Handoff 接口，不再自行拼装三套字段。工作流定向测试 14 项、Backend／Admin 构建、MCP Server 测试 10 项与 Diff 检查通过。
+
+- **已完成产研运单任务重跑验证（2026-09-20）**：8 个定向测试套件共 63 项通过，Backend／Admin 生产构建与 `git diff --check` 通过；重跑失败任务会进入真实工作流局部执行回调，审批等待态仍明确拒绝重跑。工作流任务实体当前仍由管理端服务令牌访问，跨租户任务级 owner 字段未新增数据库列，生产环境需继续沿用工作流详情的 owner 校验并由组织权限控制管理端入口。
+
+- **已治理 Backend lint 执行语义（2026-09-20）**：`backend lint` 改为只检查、不自动修改工作区；新增显式 `lint:fix` 供人工确认后使用。当前全量 no-fix 基线为 329 errors、15 warnings，尚未全部清零；本轮没有把 lint 失败伪装成通过，也没有让验证命令继续污染用户文件。定向工作流／任务文件仍有 11 个既有类型安全或测试夹具问题，未把它们伪装成通过。
+
+- **已补强评测门禁真实语义（2026-09-20）**：`eval:query-routing` 现在加载编译后的生产 `QueryIntentRouter`，逐例校验 action、sourcePolicy、queryType 和多意图收敛；12／12 通过。三模式 Hybrid E2E 在普通离线模式仍明确标记 `skipped`，设置 `AGENT_PLATFORM_REQUIRE_LIVE=true` 时服务不可用会返回非零，不再把跳过伪装成通过。Bad Case 回归改走标准 `/api/v1/chat`，增加引用、证据充分性、禁词、预期路由和最低通过率门禁，并保留带数据集历史的 JSONL 趋势记录；真实样本为空时标记 skipped，不计为成功。
+
+- **已补齐任务重跑的 owner 边界（2026-09-20）**：管理后台任务重跑从登录态传入 owner，RAG 管理端先读取任务所属工作流并复用 Checkpoint 的 `userId` 校验，再允许 `failed` 任务进入局部重跑；跨租户或缺少工作流归属时拒绝，不新增数据库列。Backend／Admin Backend 构建通过，任务与工作流定向测试 16 项通过。
+
+- **已补强任务级多租户回归（2026-09-21）**：新增 Agent Ops Admin 控制器测试，验证无 `threadId` 的任务列表只返回当前 owner 的工作流任务、任务重跑先做 thread owner 校验、委派请求不会把浏览器传入的 owner 写进任务数据。定向 3 项测试与 Backend 构建通过。
+
+- **已补强模型切换运行时回归（2026-09-21）**：新增 LLM Provider 请求作用域测试，验证后台选择智谱模型会命中 Zhipu Provider，调用结束后下一次请求仍按默认模型执行；DeepSeek 作用域同样不会污染默认 Provider。定向 2 项测试与 Backend 构建通过，API Key 仍只从后端环境配置读取。
+
+- **已增加文档与代码一致性门禁（2026-09-20）**：新增 `backend/scripts/check-doc-code-consistency.mjs` 与 `npm run docs:consistency`，校验 Chat 编排、审批／AG-UI、工作流队列／交接包和评测边界的关键代码入口与流程文档术语；该检查已接入 `eval:agent-platform`，当前通过。
+
+- **已把评测结果接入治理后台（2026-09-21）**：新增 `backend/src/modules/evaluation-reports/evaluation-report.store.ts`，后台 RAG Admin 与 RAG Ops 不再返回硬编码评测数组，而是读取 `.tmp/evidence` 中的 Agent Platform、黄金业务集、Bad Case 和 Query Routing 报告；缺报告时明确返回不可用及原因。Query Routing、Agent Platform、Golden Business 离线脚本均会写入带时间戳的最新报告，便于后台展示与历史留痕。新增报告读取回归测试，验证 Query Routing 的 12／12 结果和缺失报告均能被准确显示；Backend／Admin Backend／Admin 构建和离线评测通过。
+
+- **当前验证边界（2026-09-21）**：已修复两条会影响检索质量的全量 Jest 回归：超长句子改为按词优先切分、条款号与正文分离；查询扩展始终保留原问题。完整 Jest 现为 70 套、348 项全部通过，Backend／Admin Backend／Admin 构建、MCP Server 10 项与 `git diff --check` 通过。全量 no-fix lint 当前仍为 320 errors、16 warnings，主要是历史类型安全与格式基线问题。本机 Docker daemon、Redis、Milvus、数据库和后端均不可达；已复验 `AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform` 以非零退出，真实三模式 E2E、Redis BullMQ 接管仍待依赖恢复后执行。
+
+- **已完成 Chat 三模式编排收敛（2026-09-20）**：`ChatService` 现在先准备可见历史并只执行一次 `QueryIntentRouter.classify()`，再把同一个 `RequestContext` 传入 Simple／Auto／Agentic；Auto 仍只负责选择 Simple 或 Agentic，不新增第三套执行引擎。Auto Fast Path 命中的 Bad Case 与 Obsidian 证据通过 `prefetchedFastPath` 传入 Agentic，避免重复读取；Simple 与 Agentic 共用统一结果收口、会话持久化、Query Log、Run／Trace 和最终 SSE 事件，生成正文在引用／证据事件之后再发送。AG-UI 不再重复解析插件或重复写 Trace。已通过 8 个定向测试套件、91 个用例、Backend 生产构建与 Diff 检查；完整 lint 仍受项目既有类型安全问题阻塞，未将其标记为通过。
+
 - **已补充业务黄金评测集并统一三链路证据能力（2026-09-18）**：新增 `backend/eval/golden-business.dataset.json`，当前包含 86 条可复现案例、37 份脱敏／项目样本文档和六类质量维度，覆盖内部业务问答、多轮上下文、冲突事实、引用准确性、拒答／联网降级及 Simple／Auto／Agentic 路由；新增 `npm run eval:golden-business`，离线结构门禁已通过，并支持设置 `GOLDEN_EVAL_REQUIRE_LIVE=true` 后通过同一 `/api/v1/chat` 入口逐模式回放。证据排序统一为 Rerank 优先、RRF 兜底，Agentic 并发汇合不再按旧 `totalScore` 打乱；三链路共用受约束生成、引用校验和安全降级。Karpathy／Agentic 定向测试 50／50、backend build ✅。当前黄金集仍是脱敏基线，真实生产准确率和业务专家验收待接入真实内部资料后确认；真实回放当前被 Redis `MISCONF`（RDB 快照无法持久化导致写入被禁止）阻塞，未修改 Redis 配置。
 
 - **已补齐高级 Agent 平台运行闭环（2026-09-18）**：Agent Run 新增可取消、取消原因和最后检查点持久化，Agent Loop 在每轮安全边界读取 Redis 取消标记，失败／取消运行支持幂等重试；新增 `trace_spans` 迁移与数据库优先、内存降级的 Trace 查询；统一 `eval:agent-platform` 默认覆盖 Simple、Auto、Agentic，并接入 CI，离线路由、任务和产研流程门禁通过，服务不可用时明确标记真实回放为 skipped。新增 `docs/architecture/AGENT_PLATFORM_READINESS.md`、Prometheus 告警和 Grafana 看板模板。Docker 启动后已执行 23 个数据库迁移，后端健康检查返回 200，并完成三模式真实入口抽样回放；完整项目评测仍因 Milvus 容器反复重启导致上传阶段 `14 UNAVAILABLE`，待 Milvus 稳定后重跑 `AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform`。

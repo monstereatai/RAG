@@ -17,6 +17,7 @@ import {
   RagDocumentQueryDto,
   RagEvaluationRunDto,
 } from './dto/rag-ops-api.dto';
+import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -407,35 +408,7 @@ export class RagOpsApiService {
   // ─── Evaluations ─────────────────────────────────────────────
 
   getEvaluations(): EvaluationSummary[] {
-    return [
-      {
-        datasetName: 'rag-smoke',
-        mode: 'offline',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 10,
-        refusalRate: 0.2,
-        citationRate: 0.8,
-      },
-      {
-        datasetName: 'business-regression',
-        mode: 'offline',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 120,
-        refusalRate: 0.1,
-        citationRate: 0.85,
-      },
-      {
-        datasetName: 'project-simulated-business',
-        mode: 'live',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 22,
-        refusalRate: 0.09,
-        citationRate: 0.91,
-      },
-    ];
+    return readEvaluationReportSummaries();
   }
 
   runEvaluation(dto: RagEvaluationRunDto) {

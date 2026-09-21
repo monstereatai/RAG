@@ -1,7 +1,8 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-const baseUrl = (process.env.PROJECT_EVAL_BASE_URL ?? 'http://localhost:3000')
-  .replace(/\/$/, '');
+const baseUrl = (
+  process.env.PROJECT_EVAL_BASE_URL ?? 'http://localhost:3000'
+).replace(/\/$/, '');
 const datasetPath =
   process.env.PROJECT_EVAL_DATASET ??
   'eval/project-simulated-business.dataset.json';
@@ -39,25 +40,21 @@ try {
   const score = Number((passedCount / results.length).toFixed(3));
   const ok = score >= minScore;
 
-  console.log(
-    JSON.stringify(
-      {
-        ok,
-        skipped: false,
-        baseUrl,
-        dataset: datasetPath,
-        version: dataset.version,
-        score,
-        minScore,
-        uploadedCount: uploadedDocIds.length,
-        modes,
-        summary: summarize(results),
-        results,
-      },
-      null,
-      2,
-    ),
-  );
+  const report = {
+    ok,
+    skipped: false,
+    baseUrl,
+    dataset: datasetPath,
+    version: dataset.version,
+    score,
+    minScore,
+    uploadedCount: uploadedDocIds.length,
+    modes,
+    summary: summarize(results),
+    results,
+  };
+  await writeReport(report, 'project-rag-e2e-latest.json');
+  console.log(JSON.stringify(report, null, 2));
 
   if (!ok) process.exitCode = 1;
 } catch (err) {
@@ -75,11 +72,14 @@ try {
     datasetSummary: {
       documentCount: dataset.documents.length,
       queryCount: dataset.queries.length,
-      negativeCount: dataset.queries.filter((item) => item.expectRefusal).length,
-      conflictCount: dataset.queries.filter((item) => item.expectConflictHandling)
+      negativeCount: dataset.queries.filter((item) => item.expectRefusal)
         .length,
+      conflictCount: dataset.queries.filter(
+        (item) => item.expectConflictHandling,
+      ).length,
     },
   };
+  await writeReport(report, 'project-rag-e2e-latest.json');
   console.log(JSON.stringify(report, null, 2));
   if (requireLive) process.exitCode = 1;
 } finally {
@@ -98,7 +98,8 @@ function assertDataset(value) {
   }
   const ids = new Set();
   for (const doc of value.documents) {
-    if (!doc.id || ids.has(doc.id)) throw new Error(`invalid doc id: ${doc.id}`);
+    if (!doc.id || ids.has(doc.id))
+      throw new Error(`invalid doc id: ${doc.id}`);
     ids.add(doc.id);
     if (!doc.content || doc.content.length < 80) {
       throw new Error(`doc ${doc.id} content is too short`);
@@ -108,7 +109,8 @@ function assertDataset(value) {
   const hasConflict = value.queries.some(
     (item) => item.expectConflictHandling === true,
   );
-  if (!hasNegative) throw new Error('dataset requires negative refusal queries');
+  if (!hasNegative)
+    throw new Error('dataset requires negative refusal queries');
   if (!hasConflict) throw new Error('dataset requires conflict queries');
 }
 
@@ -161,7 +163,8 @@ async function assertServiceReady() {
   const response = await fetch(`${baseUrl}/api/v1/health`, {
     signal: AbortSignal.timeout(2_000),
   });
-  if (!response.ok) throw new Error(`service health failed: ${response.status}`);
+  if (!response.ok)
+    throw new Error(`service health failed: ${response.status}`);
 }
 
 async function login() {
@@ -248,4 +251,13 @@ function addBucket(target, key, passed) {
 
 function unwrap(body) {
   return body && typeof body === 'object' && 'data' in body ? body.data : body;
+}
+
+async function writeReport(report, filename) {
+  const directory = process.env.EVAL_REPORT_DIR ?? '.tmp/evidence';
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    `${directory}/${filename}`,
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
 }

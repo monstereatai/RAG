@@ -38,6 +38,7 @@ import {
 } from '../document/document-parser.util';
 import { DocumentQueueService } from '../document/document-queue.service';
 import type { DocumentBusinessMetadata } from '../document/document-profile.util';
+import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -1477,46 +1478,7 @@ export class RagAdminService {
   // ─── Evaluations ─────────────────────────────────────────────
 
   getEvaluations(): EvaluationSummary[] {
-    // Returns available evaluation datasets and their last known results.
-    // Real results come from running eval scripts; here we report what's available.
-    return [
-      {
-        datasetName: 'rag-smoke',
-        mode: 'offline',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 10,
-        refusalRate: 0.2,
-        citationRate: 0.8,
-      },
-      {
-        datasetName: 'business-regression',
-        mode: 'offline',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 120,
-        refusalRate: 0.1,
-        citationRate: 0.85,
-      },
-      {
-        datasetName: 'project-simulated-business',
-        mode: 'live',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 22,
-        refusalRate: 0.09,
-        citationRate: 0.91,
-      },
-      {
-        datasetName: 'langsmith-rag-export',
-        mode: 'offline-export',
-        passed: true,
-        averageScore: 1.0,
-        totalSamples: 5,
-        refusalRate: 0.2,
-        citationRate: 0.8,
-      },
-    ];
+    return readEvaluationReportSummaries();
   }
 
   runEvaluation(dto: RagEvaluationRunDto) {

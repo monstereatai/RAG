@@ -99,6 +99,11 @@ export class ChatDto {
   @ArrayUnique()
   @IsString({ each: true })
   pluginKeys?: string[];
+
+  /** 仅 Agentic 路径可用：生成草稿后暂停，等待人工审批再完成收口。 */
+  @IsOptional()
+  @IsBoolean()
+  approvalRequired?: boolean;
 }
 
 export interface ChatReference {
@@ -141,7 +146,7 @@ export interface ChatResponse {
     evidenceIds: string[];
   }>;
   executionState?: {
-    phase?: string;
+    phase?: 'approval' | 'completed' | 'failed';
     consumedSteps: number;
     consumedToolCalls: number;
     remainingSteps?: number;
