@@ -16,6 +16,10 @@ export class DocumentChunkEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
 
+  @Index('IDX_document_chunks_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 64 })
   docId!: string;
 
@@ -33,6 +37,12 @@ export class DocumentChunkEntity {
 
   @Column({ type: 'text' })
   content!: string;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  contentHash!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  indexGeneration!: string | null;
 
   @Column({ type: 'text', nullable: true, default: null })
   hypotheticalQuestions!: string | null;

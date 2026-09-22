@@ -1,4 +1,4 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 /**
  * 对话会话表
@@ -8,6 +8,10 @@ import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
 export class ConversationEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+
+  @Index('IDX_conversations_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   /** 关联用户（可选，单租户时为空） */
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })

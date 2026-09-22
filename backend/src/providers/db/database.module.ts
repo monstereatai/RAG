@@ -37,6 +37,14 @@ import { AgentRuntimeEventEntity } from './entities/agent-runtime-event.entity';
 import { DomainEventOutboxEntity } from './entities/domain-event-outbox.entity';
 import { DomainEventSubscriptionEntity } from './entities/domain-event-subscription.entity';
 import { TraceSpanEntity } from './entities/trace-span.entity';
+import { IamTenantEntity } from './entities/iam-tenant.entity';
+import { IamMembershipEntity } from './entities/iam-membership.entity';
+import { IamRoleEntity } from './entities/iam-role.entity';
+import { IamPermissionEntity } from './entities/iam-permission.entity';
+import { IamRolePermissionEntity } from './entities/iam-role-permission.entity';
+import { IamMembershipRoleEntity } from './entities/iam-membership-role.entity';
+import { AgentRuntimeEventSequenceEntity } from './entities/agent-runtime-event-sequence.entity';
+import { DomainEventDeliveryEntity } from './entities/domain-event-delivery.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -109,6 +117,14 @@ import { TraceSpanEntity } from './entities/trace-span.entity';
             DomainEventOutboxEntity,
             DomainEventSubscriptionEntity,
             TraceSpanEntity,
+            IamTenantEntity,
+            IamMembershipEntity,
+            IamRoleEntity,
+            IamPermissionEntity,
+            IamRolePermissionEntity,
+            IamMembershipRoleEntity,
+            AgentRuntimeEventSequenceEntity,
+            DomainEventDeliveryEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -156,6 +172,14 @@ import { TraceSpanEntity } from './entities/trace-span.entity';
       DomainEventOutboxEntity,
       DomainEventSubscriptionEntity,
       TraceSpanEntity,
+      IamTenantEntity,
+      IamMembershipEntity,
+      IamRoleEntity,
+      IamPermissionEntity,
+      IamRolePermissionEntity,
+      IamMembershipRoleEntity,
+      AgentRuntimeEventSequenceEntity,
+      DomainEventDeliveryEntity,
     ]),
   ],
   exports: [TypeOrmModule],

@@ -5,7 +5,7 @@ describe('DocumentQueueService', () => {
     taskId: 'task-1',
     userId: 'user-1',
     filename: 'note.md',
-    originalBufferBase64: Buffer.from('content').toString('base64'),
+    objectKey: 'documents/user-1/queue/task-1/note.md',
   };
 
   it('rejects the process-local fallback when production requires Redis', async () => {

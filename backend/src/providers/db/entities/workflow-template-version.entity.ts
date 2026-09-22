@@ -12,6 +12,9 @@ import {
 })
 export class WorkflowTemplateVersionEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_workflow_template_versions_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) templateId!: string;
   @Column({ type: 'int' }) version!: number;
   @Column({ type: 'text' }) definition!: string;

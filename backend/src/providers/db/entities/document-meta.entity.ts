@@ -19,8 +19,18 @@ export class DocumentMetaEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   docId!: string;
 
+  @Index('IDX_documents_meta_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 512 })
   filename!: string;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  contentHash!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  indexGeneration!: string | null;
 
   @Column({ type: 'int', default: 0 })
   chunkCount!: number;

@@ -12,6 +12,9 @@ import {
 @Index('IDX_domain_event_outbox_event_created', ['eventType', 'createdAt'])
 export class DomainEventOutboxEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_domain_event_outbox_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 96, unique: true })
   idempotencyKey!: string;
   @Column({ type: 'varchar', length: 96 }) eventType!: string;

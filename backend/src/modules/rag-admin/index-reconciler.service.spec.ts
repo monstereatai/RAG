@@ -30,27 +30,40 @@ describe('IndexReconcilerService', () => {
   it('queues only repairable index mismatches', async () => {
     const { service, ragAdmin, repairQueue } = create();
     ragAdmin.auditDocumentIndexes.mockResolvedValue({
-      scanned: 3,
+      scanned: 4,
       issues: [
         { docId: 'doc-1', reasons: ['bm25_chunk_count_mismatch'] },
         { docId: 'doc-2', reasons: ['effective_without_approval'] },
         { docId: 'doc-3', reasons: ['graph_index_missing'] },
+        { docId: 'doc-4', reasons: ['elasticsearch_content_hash_mismatch'] },
       ],
     });
 
     await expect(service.runOnce()).resolves.toEqual({
       available: true,
-      scanned: 3,
-      mismatched: 2,
-      queued: 2,
+      scanned: 4,
+      mismatched: 3,
+      queued: 3,
       skipped: 1,
     });
-    expect(repairQueue.enqueue).toHaveBeenCalledTimes(2);
+    expect(repairQueue.enqueue).toHaveBeenCalledTimes(3);
     expect(repairQueue.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ docId: 'doc-1', requestedBy: 'index-reconciler' }),
+      expect.objectContaining({
+        docId: 'doc-1',
+        requestedBy: 'index-reconciler',
+      }),
     );
     expect(repairQueue.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ docId: 'doc-3', requestedBy: 'index-reconciler' }),
+      expect.objectContaining({
+        docId: 'doc-3',
+        requestedBy: 'index-reconciler',
+      }),
+    );
+    expect(repairQueue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        docId: 'doc-4',
+        requestedBy: 'index-reconciler',
+      }),
     );
   });
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { AgentPipelineService } from '../../rag/agents/agent-pipeline.service';
 import { z } from 'zod';
@@ -116,41 +117,67 @@ export class SupervisorService {
   constructor(
     private readonly llmProvider: LlmProvider,
     private readonly agentPipeline: AgentPipelineService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
    * Supervisor 入口：自动路由到合适领域 → 执行对应 Agent 管线
    */
-  async query(task: string): Promise<SupervisorResult> {
+  async query(task: string, signal?: AbortSignal): Promise<SupervisorResult> {
     const start = Date.now();
-
-    // 1. 领域路由
-    const domain = await this.routeToDomain(task);
-    this.logger.log(`Routed to domain: ${domain.name} (${domain.description})`);
-
-    // 2. 执行该领域的 Agent 管线
-    const pipelineResult = await this.agentPipeline.runPartial(
-      task,
-      domain.pipeline,
+    const timeoutMs = Math.min(
+      Math.max(
+        Number(this.config.get<number>('supervisor.timeoutMs') ?? 120_000),
+        1_000,
+      ),
+      900_000,
     );
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error(`Supervisor timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    const forwardAbort = () => controller.abort(signal?.reason);
+    if (signal) {
+      signal.throwIfAborted();
+      signal.addEventListener('abort', forwardAbort, { once: true });
+    }
 
-    return {
-      domain: domain.name,
-      answer: pipelineResult.finalOutput ?? '',
-      confidence: pipelineResult.overallConfidence,
-      stages: pipelineResult.stages.map((s) => ({
-        agent: s.agent,
-        durationMs: s.durationMs,
-        confidence: s.confidence,
-      })),
-      totalDurationMs: Date.now() - start,
-    };
+    try {
+      // 1. 领域路由
+      const domain = await this.routeToDomain(task, controller.signal);
+      this.logger.log(`Routed to domain: ${domain.name} (${domain.description})`);
+
+      // 2. 执行该领域的 Agent 管线
+      const pipelineResult = await this.agentPipeline.runPartial(
+        task,
+        domain.pipeline,
+        undefined,
+        controller.signal,
+      );
+
+      return {
+        domain: domain.name,
+        answer: pipelineResult.finalOutput ?? '',
+        confidence: pipelineResult.overallConfidence,
+        stages: pipelineResult.stages.map((s) => ({
+          agent: s.agent,
+          durationMs: s.durationMs,
+          confidence: s.confidence,
+        })),
+        totalDurationMs: Date.now() - start,
+      };
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', forwardAbort);
+    }
   }
 
   /**
    * 领域路由：先用关键词快速匹配，再用 LLM 分类
    */
-  private async routeToDomain(task: string): Promise<DomainConfig> {
+  private async routeToDomain(task: string, signal?: AbortSignal): Promise<DomainConfig> {
+    signal?.throwIfAborted();
     // 关键词快速匹配
     const keywordMatch = this.matchByKeywords(task);
     if (keywordMatch) {
@@ -159,7 +186,7 @@ export class SupervisorService {
     }
 
     // LLM 分类
-    return this.classifyByLlm(task);
+    return this.classifyByLlm(task, signal);
   }
 
   private matchByKeywords(task: string): DomainConfig | null {
@@ -180,7 +207,7 @@ export class SupervisorService {
     return bestScore >= 2 ? bestMatch : null;
   }
 
-  private async classifyByLlm(task: string): Promise<DomainConfig> {
+  private async classifyByLlm(task: string, signal?: AbortSignal): Promise<DomainConfig> {
     const model = this.llmProvider.getModel();
     const domainNames = this.domains.map((d) => d.name);
 
@@ -201,7 +228,7 @@ export class SupervisorService {
 ${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
         },
         { role: 'user', content: task },
-      ]);
+      ], { signal });
 
       const matched = this.domains.find((d) => d.name === result.domain);
       if (matched) {
@@ -211,6 +238,7 @@ ${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
         return matched;
       }
     } catch (err) {
+      if (signal?.aborted) throw err;
       this.logger.warn(
         `LLM domain classification failed: ${(err as Error).message}`,
       );

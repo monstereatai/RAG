@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Injectable,
   ForbiddenException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -12,6 +13,7 @@ import { ApiTokenService } from '../../modules/auth/api-token.service';
 import { JwtPayload } from '../interfaces/api-response.interface';
 import { SseTicketService } from '../../modules/auth/sse-ticket.service';
 import { API_SCOPES_KEY } from '../decorators/api-scopes.decorator';
+import { IamService } from '../../modules/iam/iam.service';
 
 /**
  * JWT 认证守卫
@@ -29,6 +31,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly sseTicketService: SseTicketService,
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
+    @Optional() private readonly iamService?: IamService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -82,6 +85,28 @@ export class JwtAuthGuard implements CanActivate {
       API_SCOPES_KEY,
       [context.getHandler(), context.getClass()],
     );
+
+    // API scope 解决调用方最小权限，IAM 解决用户在租户内是否有成员权限。
+    // 两者不能互相替代：服务令牌走 ServiceTokenGuard，不进入这里。
+    if (
+      this.configService.get<boolean>('auth.enforceIam') === true &&
+      authenticatedPayload.authType !== 'service' &&
+      requiredScopes?.length
+    ) {
+      const tenantId = authenticatedPayload.tenantId?.trim();
+      if (!tenantId || !this.iamService) {
+        throw new ForbiddenException('IAM tenant membership is required');
+      }
+      const allowed = await this.iamService.hasPermission(
+        authenticatedPayload.userId,
+        'platform.read',
+        tenantId,
+      );
+      if (!allowed) {
+        throw new ForbiddenException('IAM permission is insufficient');
+      }
+    }
+
     if (
       requiredScopes?.length &&
       authenticatedPayload.authType === 'api-token' &&

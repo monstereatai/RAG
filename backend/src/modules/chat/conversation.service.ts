@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
@@ -80,6 +80,7 @@ export class ConversationService {
     firstQuery: string,
     mode = 'auto',
     userId?: string,
+    tenantId?: string,
   ): Promise<string> {
     const threadId = randomUUID();
     const title = firstQuery.slice(0, 50);
@@ -88,6 +89,7 @@ export class ConversationService {
       title,
       mode,
       userId,
+      tenantId: tenantId ?? 'legacy',
     });
     await this.conversationRepo.save(conv);
     this.logger.log(
@@ -99,10 +101,17 @@ export class ConversationService {
   /**
    * 获取对话（带 Redis 缓存，与 userId 绑定，过期时间 30 分钟）
    */
-  async get(threadId: string, userId?: string): Promise<Conversation | null> {
+  async get(
+    threadId: string,
+    userId?: string,
+    tenantId?: string,
+  ): Promise<Conversation | null> {
+    const scopeKey = tenantId?.trim() || 'legacy';
     const cacheKey = userId
-      ? `conv:messages:${userId}:${threadId}`
-      : `conv:messages:${threadId}`;
+      ? `conv:messages:${scopeKey}:${userId}:${threadId}`
+      : tenantId?.trim()
+        ? `conv:messages:${scopeKey}:${threadId}`
+        : `conv:messages:${threadId}`;
 
     if (this.redisProvider.isEnabled()) {
       const cached = await this.redisProvider.get(cacheKey);
@@ -115,16 +124,24 @@ export class ConversationService {
       }
     }
 
-    const where: { id: string; userId?: string } = { id: threadId };
+    const where: { id: string; userId?: string; tenantId?: string } = {
+      id: threadId,
+    };
     if (userId) {
       where.userId = userId;
+    }
+    if (tenantId?.trim()) {
+      where.tenantId = tenantId.trim();
     }
 
     const conv = await this.conversationRepo.findOne({ where });
     if (!conv) return null;
 
     const messages = await this.messageRepo.find({
-      where: { conversationId: threadId },
+      where: {
+        conversationId: threadId,
+        ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+      },
       order: { createdAt: 'ASC' },
     });
 
@@ -158,7 +175,18 @@ export class ConversationService {
     content: string,
     userId?: string,
     metadata?: Record<string, unknown>,
+    tenantId?: string,
   ): Promise<void> {
+    const conversation = await this.conversationRepo.findOne({
+      where: {
+        id: threadId,
+        ...(userId ? { userId } : {}),
+        ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+      },
+    });
+    if (!conversation) {
+      throw new NotFoundException(`conversation ${threadId} not found`);
+    }
     const storedContent = metadata
       ? `${content}\n\n${MESSAGE_META_PREFIX}${Buffer.from(JSON.stringify(metadata), 'utf8').toString('base64')}${MESSAGE_META_SUFFIX}`
       : content;
@@ -167,15 +195,19 @@ export class ConversationService {
       conversationId: threadId,
       role,
       content: storedContent,
+      tenantId: tenantId?.trim() || conversation.tenantId || 'legacy',
     });
     await this.messageRepo.save(msg);
     this.logger.log(`Message saved to DB: threadId=${threadId}, role=${role}`);
 
     // 清除 Redis 缓存（同时清 userId 版和无 userId 版，避免脏读）
     if (this.redisProvider.isEnabled()) {
+      const scopeKey = tenantId?.trim() || 'legacy';
       const cacheKey = userId
-        ? `conv:messages:${userId}:${threadId}`
-        : `conv:messages:${threadId}`;
+        ? `conv:messages:${scopeKey}:${userId}:${threadId}`
+        : tenantId?.trim()
+          ? `conv:messages:${scopeKey}:${threadId}`
+          : `conv:messages:${threadId}`;
       await this.redisProvider.del(cacheKey);
       if (userId) {
         await this.redisProvider.del(`conv:messages:${threadId}`);
@@ -190,14 +222,15 @@ export class ConversationService {
     threadId: string,
     maxTurns = 5,
     userId?: string,
+    tenantId?: string,
   ): Promise<
     Array<{
       role: 'human' | 'ai';
       content: string;
       metadata?: Record<string, unknown>;
-    }
-  >> {
-    const conv = await this.get(threadId, userId);
+    }>
+  > {
+    const conv = await this.get(threadId, userId, tenantId);
     if (!conv || conv.messages.length === 0) return [];
 
     // 取最近 maxTurns * 2 条消息
@@ -212,7 +245,10 @@ export class ConversationService {
   /**
    * 列出所有对话摘要（不含消息体）
    */
-  async listConversations(userId?: string): Promise<
+  async listConversations(
+    userId?: string,
+    tenantId?: string,
+  ): Promise<
     Array<{
       threadId: string;
       title: string;
@@ -252,6 +288,11 @@ export class ConversationService {
     if (userId) {
       query.where('conversation.userId = :userId', { userId });
     }
+    if (tenantId?.trim()) {
+      query.andWhere('conversation.tenantId = :tenantId', {
+        tenantId: tenantId.trim(),
+      });
+    }
 
     const rows = await query.getRawMany<{
       threadId: string;
@@ -275,24 +316,39 @@ export class ConversationService {
   /**
    * 删除对话并清理 Redis 缓存
    */
-  async delete(threadId: string, userId?: string): Promise<boolean> {
-    const where: { id: string; userId?: string } = { id: threadId };
+  async delete(
+    threadId: string,
+    userId?: string,
+    tenantId?: string,
+  ): Promise<boolean> {
+    const where: { id: string; userId?: string; tenantId?: string } = {
+      id: threadId,
+    };
     if (userId) {
       where.userId = userId;
+    }
+    if (tenantId?.trim()) {
+      where.tenantId = tenantId.trim();
     }
 
     const conv = await this.conversationRepo.findOne({ where });
     if (!conv) return false;
 
-    await this.messageRepo.delete({ conversationId: threadId });
-    await this.conversationRepo.delete({ id: threadId });
+    await this.messageRepo.delete({
+      conversationId: threadId,
+      ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+    });
+    await this.conversationRepo.delete(where);
     this.logger.log(`Conversation deleted from DB: threadId=${threadId}`);
 
     // 清除 Redis 缓存
     if (this.redisProvider.isEnabled()) {
+      const scopeKey = tenantId?.trim() || 'legacy';
       const cacheKey = userId
-        ? `conv:messages:${userId}:${threadId}`
-        : `conv:messages:${threadId}`;
+        ? `conv:messages:${scopeKey}:${userId}:${threadId}`
+        : tenantId?.trim()
+          ? `conv:messages:${scopeKey}:${threadId}`
+          : `conv:messages:${threadId}`;
       await this.redisProvider.del(cacheKey);
     }
     return true;

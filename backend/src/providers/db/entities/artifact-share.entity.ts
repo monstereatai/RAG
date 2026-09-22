@@ -14,6 +14,9 @@ export type ArtifactShareVisibility = 'internal' | 'external';
 export class ArtifactShareEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_artifact_shares_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   @Column({ type: 'varchar', length: 64 })
   artifactId!: string;

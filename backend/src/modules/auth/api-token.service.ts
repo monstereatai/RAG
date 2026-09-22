@@ -64,9 +64,10 @@ export class ApiTokenService {
       name: dto.name.trim(),
       prefix: token.slice(0, 16),
       hash: this.hashToken(token),
+      // 新 Token 默认只允许问答；高风险能力必须由调用方显式申请 scope。
       scopes: dto.scopes?.length
         ? [...new Set(dto.scopes.map((scope) => scope.trim()).filter(Boolean))]
-        : ['rag:*'],
+        : ['rag:chat'],
       user: {
         userId: user.userId,
         username: user.username,

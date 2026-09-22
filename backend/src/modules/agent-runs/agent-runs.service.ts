@@ -29,6 +29,7 @@ export class AgentRunsService {
   async start(input: {
     threadId: string;
     userId?: string;
+    tenantId?: string;
     mode: AgentRunEntity['mode'];
     maxSteps?: number;
     maxToolCalls?: number;
@@ -39,6 +40,7 @@ export class AgentRunsService {
         id: randomUUID(),
         threadId: input.threadId,
         userId: input.userId ?? null,
+        tenantId: input.tenantId ?? 'legacy',
         mode: input.mode,
         maxSteps: input.maxSteps ?? 18,
         maxToolCalls: input.maxToolCalls ?? 24,
@@ -54,6 +56,7 @@ export class AgentRunsService {
     );
     await this.events.emit({
       threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
       runId: run.id,
       eventType: 'run.started',
       actor: run.mode,
@@ -93,7 +96,10 @@ export class AgentRunsService {
         { id, status: In(['running', 'waiting_approval']) },
         { ...input, finishedAt },
       );
-      if (typeof updateResult.affected === 'number' && updateResult.affected === 0) {
+      if (
+        typeof updateResult.affected === 'number' &&
+        updateResult.affected === 0
+      ) {
         return this.get(id);
       }
       const refreshed = await this.runRepo.findOne({ where: { id } });
@@ -105,6 +111,7 @@ export class AgentRunsService {
     }
     await this.events.emit({
       threadId: saved.threadId,
+      tenantId: saved.tenantId ?? 'legacy',
       runId: saved.id,
       eventType: `run.${saved.status === 'completed' ? 'completed' : saved.status === 'failed' ? 'failed' : 'updated'}`,
       actor: saved.mode,
@@ -136,7 +143,10 @@ export class AgentRunsService {
         finishedAt: now,
       },
     );
-    if (typeof updateResult.affected === 'number' && updateResult.affected === 0) {
+    if (
+      typeof updateResult.affected === 'number' &&
+      updateResult.affected === 0
+    ) {
       return this.get(id);
     }
     const saved = await this.runRepo.findOne({ where: { id } });
@@ -148,6 +158,7 @@ export class AgentRunsService {
     );
     await this.events.emit({
       threadId: saved.threadId,
+      tenantId: saved.tenantId ?? 'legacy',
       runId: saved.id,
       eventType: 'run.cancelled',
       actor: saved.mode,
@@ -176,11 +187,22 @@ export class AgentRunsService {
     threadId: string,
     userId: string,
     reason = '用户取消运行',
+    tenantId?: string,
   ) {
     const run = await this.runRepo.findOne({
       where: [
-        { threadId, userId, status: 'running' },
-        { threadId, userId, status: 'waiting_approval' },
+        {
+          threadId,
+          userId,
+          status: 'running',
+          ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+        },
+        {
+          threadId,
+          userId,
+          status: 'waiting_approval',
+          ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+        },
       ],
       order: { createdAt: 'DESC' },
     });
@@ -201,6 +223,7 @@ export class AgentRunsService {
     if (!run) throw new NotFoundException(`agent run ${runId} not found`);
     const event = await this.events.emit({
       threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
       runId,
       taskId: input.taskId,
       eventType: input.eventType,
@@ -209,7 +232,10 @@ export class AgentRunsService {
       payload: input.payload,
     });
     if (input.eventType === 'agent.loop.checkpoint.saved') {
-      await this.runRepo.update({ id: runId }, { lastCheckpointAt: new Date() });
+      await this.runRepo.update(
+        { id: runId },
+        { lastCheckpointAt: new Date() },
+      );
     }
     return event;
   }
@@ -225,6 +251,7 @@ export class AgentRunsService {
     await this.runRepo.save(run);
     return this.events.emit({
       threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
       runId,
       eventType: 'node.started',
       actor: run.mode,
@@ -252,10 +279,18 @@ export class AgentRunsService {
     if (!runBeforeAction)
       throw new NotFoundException(`agent run ${runId} not found`);
     if (runBeforeAction.toolCallCount >= runBeforeAction.maxToolCalls) {
-      await this.emitBudgetExceeded(runBeforeAction, runId, 'tool_calls', input.name, {
-        maxToolCalls: runBeforeAction.maxToolCalls,
-      });
-      throw new BadRequestException(`agent run ${runId} exceeded max tool calls`);
+      await this.emitBudgetExceeded(
+        runBeforeAction,
+        runId,
+        'tool_calls',
+        input.name,
+        {
+          maxToolCalls: runBeforeAction.maxToolCalls,
+        },
+      );
+      throw new BadRequestException(
+        `agent run ${runId} exceeded max tool calls`,
+      );
     }
 
     // 不能用“先读计数、再 increment”的方式做预算判断：并发工具调用会
@@ -275,9 +310,15 @@ export class AgentRunsService {
     if (reservation.affected === 0) {
       const current = await this.runRepo.findOne({ where: { id: runId } });
       if (current && current.status === 'running') {
-        await this.emitBudgetExceeded(current, runId, 'tool_calls', input.name, {
-          maxToolCalls: current.maxToolCalls,
-        });
+        await this.emitBudgetExceeded(
+          current,
+          runId,
+          'tool_calls',
+          input.name,
+          {
+            maxToolCalls: current.maxToolCalls,
+          },
+        );
         throw new BadRequestException(
           `agent run ${runId} exceeded max tool calls`,
         );
@@ -302,6 +343,7 @@ export class AgentRunsService {
     if (run)
       await this.events.emit({
         threadId: run.threadId,
+        tenantId: run.tenantId ?? 'legacy',
         runId,
         eventType: input.status === 'failed' ? 'tool.failed' : 'tool.called',
         actor: run.mode,
@@ -338,9 +380,15 @@ export class AgentRunsService {
     if (reservation.affected === 0) {
       const current = await this.runRepo.findOne({ where: { id: runId } });
       if (current && current.status === 'running') {
-        await this.emitBudgetExceeded(current, runId, 'delegations', undefined, {
-          maxDelegations: current.maxDelegations,
-        });
+        await this.emitBudgetExceeded(
+          current,
+          runId,
+          'delegations',
+          undefined,
+          {
+            maxDelegations: current.maxDelegations,
+          },
+        );
         throw new BadRequestException(
           `agent run ${runId} exceeded max delegations`,
         );
@@ -442,15 +490,20 @@ export class AgentRunsService {
     };
   }
 
-  async findLatestByThread(threadId: string) {
+  async findLatestByThread(threadId: string, tenantId?: string) {
     return this.runRepo.findOne({
-      where: { threadId },
+      where: {
+        threadId,
+        ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+      },
       order: { createdAt: 'DESC' },
     });
   }
 
-  async get(id: string) {
-    const run = await this.runRepo.findOne({ where: { id } });
+  async get(id: string, tenantId?: string) {
+    const run = await this.runRepo.findOne({
+      where: { id, ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}) },
+    });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
     const actions = await this.actionRepo.find({
       where: { runId: id },
@@ -475,8 +528,8 @@ export class AgentRunsService {
     };
   }
 
-  async retry(id: string) {
-    const run = await this.get(id);
+  async retry(id: string, tenantId?: string) {
+    const run = await this.get(id, tenantId);
     if (!['failed', 'cancelled'].includes(run.status)) {
       throw new BadRequestException(
         `agent run ${id} is not retryable from ${run.status}`,
@@ -496,12 +549,13 @@ export class AgentRunsService {
     );
     await this.events.emit({
       threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
       runId: id,
       eventType: 'run.retry',
       actor: run.mode,
       payload: { retryCount: run.retryCount + 1 },
     });
-    return this.get(id);
+    return this.get(id, tenantId);
   }
 
   private stringify(value: unknown): string | null {
@@ -520,6 +574,7 @@ export class AgentRunsService {
   ): Promise<void> {
     await this.events.emit({
       threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
       runId,
       eventType: 'budget.exceeded',
       actor: run.mode,

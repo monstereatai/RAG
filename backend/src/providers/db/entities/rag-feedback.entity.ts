@@ -14,6 +14,9 @@ import {
 export class RagFeedbackEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_rag_feedback_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   queryLogId!: string | null;

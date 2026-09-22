@@ -3,16 +3,19 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EntityManager, Repository } from 'typeorm';
 import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-event-outbox.entity';
 import { DomainEventSubscriptionEntity } from '../../providers/db/entities/domain-event-subscription.entity';
+import { DomainEventDeliveryEntity } from '../../providers/db/entities/domain-event-delivery.entity';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 
 export type DomainEventInput = {
+  tenantId?: string;
   eventType: string;
   aggregateType: string;
   aggregateId: string;
@@ -36,6 +39,9 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(DomainEventSubscriptionEntity)
     private readonly subscriptions: Repository<DomainEventSubscriptionEntity>,
     private readonly redisProvider: RedisProvider,
+    @Optional()
+    @InjectRepository(DomainEventDeliveryEntity)
+    private readonly deliveries?: Repository<DomainEventDeliveryEntity>,
   ) {
     // 生产默认要求共享租约；开发环境可以保留单实例降级，便于本地启动。
     this.requireDistributedLock =
@@ -78,9 +84,23 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     outbox: Repository<DomainEventOutboxEntity>,
     input: DomainEventInput,
   ): Promise<void> {
+    const safePayload = this.safePayload(input.payload ?? {});
+    const tenantId = input.tenantId ?? 'legacy';
+    // 没有显式幂等键时按事件内容生成摘要：同一事件重试仍幂等，
+    // 但同一聚合的后续状态变更不会被旧事件吞掉。
     const idempotencyKey =
       input.idempotencyKey ??
-      `${input.eventType}:${input.aggregateType}:${input.aggregateId}`;
+      `auto:${createHash('sha256')
+        .update(
+          JSON.stringify({
+            eventType: input.eventType,
+            tenantId,
+            aggregateType: input.aggregateType,
+            aggregateId: input.aggregateId,
+            payload: safePayload,
+          }),
+        )
+        .digest('hex')}`;
     const existing = await outbox.findOne({ where: { idempotencyKey } });
     if (existing) return;
     try {
@@ -89,9 +109,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
           id: randomUUID(),
           idempotencyKey,
           eventType: input.eventType,
+          tenantId,
           aggregateType: input.aggregateType,
           aggregateId: input.aggregateId,
-          payload: JSON.stringify(this.safePayload(input.payload ?? {})),
+          payload: JSON.stringify(safePayload),
           status: 'pending',
           availableAt: new Date(),
         }),
@@ -121,6 +142,18 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     row.lastError = null;
     row.availableAt = new Date();
     row.deliveredAt = null;
+    await this.deliveries
+      ?.createQueryBuilder()
+      .update(DomainEventDeliveryEntity)
+      .set({
+        status: 'pending',
+        attempts: 0,
+        availableAt: new Date(),
+        deliveredAt: null,
+        lastError: null,
+      })
+      .where('eventId = :eventId', { eventId: id })
+      .execute();
     return this.outbox.save(row);
   }
 
@@ -135,6 +168,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async upsertSubscription(input: {
+    tenantId?: string;
     id?: string;
     name: string;
     eventTypes: string[];
@@ -147,6 +181,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       : null;
     const entity = row ?? this.subscriptions.create({ id: randomUUID() });
     entity.name = input.name.trim();
+    entity.tenantId = input.tenantId ?? 'legacy';
     entity.eventTypes = JSON.stringify([...new Set(input.eventTypes)]);
     entity.channel = input.channel;
     entity.endpointKey = input.endpointKey.trim();
@@ -207,8 +242,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   private async deliver(row: DomainEventOutboxEntity): Promise<void> {
     const subscribers = (
       await this.subscriptions.find({ where: { enabled: true } })
-    ).filter((item) =>
-      this.parseArray(item.eventTypes).includes(row.eventType),
+    ).filter(
+      (item) =>
+        this.parseArray(item.eventTypes).includes(row.eventType) &&
+        (item.tenantId === null || item.tenantId === row.tenantId),
     );
     if (subscribers.length === 0) {
       row.status = 'skipped';
@@ -216,17 +253,89 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       await this.outbox.save(row);
       return;
     }
-    try {
-      for (const subscription of subscribers)
-        await this.post(subscription, row);
+    if (!this.deliveries) {
+      try {
+        for (const subscription of subscribers)
+          await this.post(subscription, row, row.id);
+        row.status = 'delivered';
+        row.deliveredAt = new Date();
+        row.lastError = null;
+      } catch (error) {
+        row.attempts += 1;
+        row.lastError = this.message(error).slice(0, 1000);
+        if (row.attempts >= row.maxAttempts) row.status = 'failed';
+        else row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      await this.outbox.save(row);
+      return;
+    }
+    const now = new Date();
+    const states: DomainEventDeliveryEntity[] = [];
+    for (const subscription of subscribers) {
+      let delivery = await this.deliveries.findOne({
+        where: { eventId: row.id, subscriptionId: subscription.id },
+      });
+      if (!delivery) {
+        try {
+          delivery = await this.deliveries.save(
+            this.deliveries.create({
+              id: randomUUID(),
+              eventId: row.id,
+              subscriptionId: subscription.id,
+              status: 'pending',
+              availableAt: now,
+            }),
+          );
+        } catch (error) {
+          if (!this.isUniqueViolation(error)) throw error;
+          delivery = await this.deliveries.findOneOrFail({
+            where: { eventId: row.id, subscriptionId: subscription.id },
+          });
+        }
+      }
+      if (delivery.status === 'delivered') {
+        states.push(delivery);
+        continue;
+      }
+      if (delivery.availableAt && delivery.availableAt > now) {
+        states.push(delivery);
+        continue;
+      }
+      try {
+        await this.post(subscription, row, delivery.id);
+        delivery.status = 'delivered';
+        delivery.deliveredAt = new Date();
+        delivery.lastError = null;
+      } catch (error) {
+        delivery.attempts += 1;
+        delivery.lastError = this.message(error).slice(0, 1000);
+        delivery.status =
+          delivery.attempts >= delivery.maxAttempts ? 'failed' : 'pending';
+        delivery.availableAt = new Date(
+          Date.now() + 1000 * 2 ** delivery.attempts,
+        );
+        row.lastError = delivery.lastError;
+      }
+      await this.deliveries.save(delivery);
+      states.push(delivery);
+    }
+    const hasPending = states.some((state) => state.status === 'pending');
+    const hasFailed = states.some((state) => state.status === 'failed');
+    row.attempts = Math.max(
+      row.attempts,
+      ...states.map((state) => state.attempts),
+    );
+    if (!hasPending && !hasFailed) {
       row.status = 'delivered';
       row.deliveredAt = new Date();
       row.lastError = null;
-    } catch (error) {
-      row.attempts += 1;
-      row.lastError = this.message(error).slice(0, 1000);
-      if (row.attempts >= row.maxAttempts) row.status = 'failed';
-      else row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+    } else if (!hasPending && hasFailed) {
+      row.status = 'failed';
+    } else {
+      row.status = 'pending';
+      row.availableAt = new Date(
+        Date.now() + 1000 * 2 ** Math.min(row.attempts, 8),
+      );
     }
     await this.outbox.save(row);
   }
@@ -234,6 +343,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   private async post(
     subscription: DomainEventSubscriptionEntity,
     row: DomainEventOutboxEntity,
+    deliveryId: string,
   ): Promise<void> {
     const endpoint = this.config.get<string>(subscription.endpointKey);
     if (!endpoint)
@@ -241,7 +351,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         `missing server configuration for ${subscription.endpointKey}`,
       );
     const content =
-      `[${row.eventType}] ${row.aggregateType}/${row.aggregateId}\n${JSON.stringify(this.parse(row.payload))}`.slice(
+      `[${row.eventType}] tenant=${row.tenantId ?? 'legacy'} ${row.aggregateType}/${row.aggregateId}\n${JSON.stringify(this.parse(row.payload))}`.slice(
         0,
         3500,
       );
@@ -250,6 +360,8 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         ? { msgtype: 'markdown', markdown: { content } }
         : {
             id: row.id,
+            deliveryId,
+            tenantId: row.tenantId ?? 'legacy',
             eventType: row.eventType,
             aggregateType: row.aggregateType,
             aggregateId: row.aggregateId,
@@ -265,8 +377,22 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     if (!response.ok) throw new Error(`webhook HTTP ${response.status}`);
   }
 
-  private safePayload(payload: Record<string, unknown>) {
-    const { prompt, token, password, secret, ...safe } = payload;
+  private safePayload(payload: unknown): unknown {
+    if (Array.isArray(payload)) {
+      return payload.map((item) => this.safePayload(item));
+    }
+    if (!payload || typeof payload !== 'object') return payload;
+    const safe: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (
+        /^(prompt|token|password|secret|api[_-]?key|authorization|cookie|set-cookie)$/i.test(
+          key,
+        )
+      ) {
+        continue;
+      }
+      safe[key] = this.safePayload(value);
+    }
     return safe;
   }
   private parse(value: string): Record<string, unknown> {

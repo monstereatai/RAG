@@ -12,6 +12,9 @@ import {
 @Index('IDX_agent_runs_status_created', ['status', 'createdAt'])
 export class AgentRunEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_agent_runs_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) threadId!: string;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   queryLogId!: string | null;

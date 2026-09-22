@@ -144,6 +144,7 @@ export class ChatController {
             activeThreadId,
             user.userId,
             '客户端断开流式连接',
+            user.tenantId,
           );
         }
       };
@@ -158,6 +159,8 @@ export class ChatController {
     const run = await this.agentRuns?.cancelActiveForThread(
       threadId,
       user.userId,
+      '用户取消运行',
+      user.tenantId,
     );
     return { status: run?.status ?? 'idle', runId: run?.id ?? null };
   }
@@ -168,7 +171,10 @@ export class ChatController {
    */
   @Get('conversations')
   async listConversations(@CurrentUser() user: JwtPayload) {
-    return await this.conversationService.listConversations(user.userId);
+    return await this.conversationService.listConversations(
+      user.userId,
+      user.tenantId,
+    );
   }
 
   /**
@@ -180,7 +186,11 @@ export class ChatController {
     @Param('threadId') threadId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    const conv = await this.conversationService.get(threadId, user.userId);
+    const conv = await this.conversationService.get(
+      threadId,
+      user.userId,
+      user.tenantId,
+    );
     if (!conv) {
       throw new BadRequestException(`conversation ${threadId} not found`);
     }
@@ -199,6 +209,7 @@ export class ChatController {
     const deleted = await this.conversationService.delete(
       threadId,
       user.userId,
+      user.tenantId,
     );
     if (!deleted) {
       throw new BadRequestException(`conversation ${threadId} not found`);

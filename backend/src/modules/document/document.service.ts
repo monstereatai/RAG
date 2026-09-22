@@ -175,6 +175,7 @@ export class DocumentService implements OnModuleInit {
           docId,
           taskId,
           userId,
+          tenantId: options.tenantId,
           filename,
           buffer: options.originalBuffer,
           contentType: options.contentType,
@@ -194,6 +195,7 @@ export class DocumentService implements OnModuleInit {
             docId,
             taskId,
             userId,
+            tenantId: options.tenantId,
             filename,
             buffer: Buffer.from(content, 'utf8'),
             contentType: options.contentType ?? 'text/plain',
@@ -229,6 +231,9 @@ export class DocumentService implements OnModuleInit {
         structuredChunks,
       );
       const contentSha256 = createHash('sha256').update(content).digest('hex');
+      const indexGeneration = createHash('sha256')
+        .update(`${docId}:${contentSha256}:${business.docVersion ?? ''}`)
+        .digest('hex');
       const existingDocs = await this.docMetaRepo.find({ where: { userId } });
       const duplicate = existingDocs.find((item) => {
         try {
@@ -284,6 +289,9 @@ export class DocumentService implements OnModuleInit {
         docId,
         chunkIndex: idx,
         userId,
+        tenantId: options.tenantId ?? 'legacy',
+        contentHash: createHash('sha256').update(chunk).digest('hex'),
+        indexGeneration,
       }));
       const chunkDocs = chunks.map((chunk, idx) => ({
         id: records[idx].id,
@@ -291,6 +299,9 @@ export class DocumentService implements OnModuleInit {
         docId,
         chunkIndex: idx,
         userId,
+        tenantId: options.tenantId ?? 'legacy',
+        contentHash: createHash('sha256').update(chunk).digest('hex'),
+        indexGeneration,
         parentChunkId: structuredChunks[idx]?.parentChunkId ?? null,
         headingPath: structuredChunks[idx]?.headingPath ?? [],
         sectionId: structuredChunks[idx]?.sectionId ?? null,
@@ -326,7 +337,10 @@ export class DocumentService implements OnModuleInit {
 
       const docMeta = this.docMetaRepo.create({
         docId,
+        tenantId: options.tenantId ?? 'legacy',
         filename,
+        contentHash: contentSha256,
+        indexGeneration,
         chunkCount: chunks.length,
         userId,
         docVersion: indexingGovernance.docVersion,
@@ -385,6 +399,7 @@ export class DocumentService implements OnModuleInit {
               filename,
               content,
               userId,
+              tenantId: options.tenantId ?? 'legacy',
               title: filename,
               sourceAuthority: indexingGovernance.sourceAuthority,
               projectId: indexingGovernance.projectId,
@@ -396,6 +411,8 @@ export class DocumentService implements OnModuleInit {
               documentType: indexingGovernance.documentType,
               lifecycleStatus: indexingGovernance.lifecycleStatus,
               docVersion: indexingGovernance.docVersion,
+              contentHash: contentSha256,
+              indexGeneration,
               effectiveAt: indexingGovernance.effectiveAt,
               expiredAt: indexingGovernance.expiredAt,
             }),
@@ -411,6 +428,8 @@ export class DocumentService implements OnModuleInit {
             structuredChunks,
             indexingGovernance,
             hypotheticalQuestions,
+            options.tenantId ?? 'legacy',
+            indexGeneration,
           );
           await this.detectAndSaveFactConflicts(
             docId,
@@ -624,11 +643,13 @@ export class DocumentService implements OnModuleInit {
   createQueuedTask(
     filename: string,
     userId: string,
+    tenantId?: string,
   ): Promise<DocumentTaskEntity> {
     const task = this.taskRepo.create({
       id: randomUUID(),
       filename,
       userId,
+      tenantId: tenantId ?? 'legacy',
       status: 'queued',
       stage: 'queued',
       progress: 0,
@@ -771,6 +792,7 @@ export class DocumentService implements OnModuleInit {
     docId: string;
     taskId: string;
     userId: string;
+    tenantId?: string;
     filename: string;
     buffer: Buffer;
     contentType?: string;
@@ -790,6 +812,7 @@ export class DocumentService implements OnModuleInit {
     await this.resourceRepo.save(
       this.resourceRepo.create({
         id: randomUUID(),
+        tenantId: params.tenantId ?? 'legacy',
         docId: params.docId,
         taskId: params.taskId,
         userId: params.userId,
@@ -1050,21 +1073,33 @@ export class DocumentService implements OnModuleInit {
   private async saveChunkMetadata(
     docId: string,
     userId: string,
-    records: Array<{ id: string; content: string; chunkIndex: number }>,
+    records: Array<{
+      id: string;
+      content: string;
+      chunkIndex: number;
+      tenantId: string;
+      contentHash: string;
+      indexGeneration: string;
+    }>,
     chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,
     governance: DocumentGovernanceMetadata,
     hypotheticalQuestions: string[][],
+    tenantId: string,
+    indexGeneration: string,
   ): Promise<void> {
     const entities = records.map((record, index) => {
       const chunk = chunks[index];
       return this.docChunkRepo.create({
         id: record.id,
+        tenantId,
         docId,
         userId,
         parentChunkId: chunk?.parentChunkId ?? null,
         chunkIndex: record.chunkIndex,
         chunkType: 'leaf',
         content: record.content,
+        contentHash: record.contentHash,
+        indexGeneration,
         headingPath:
           chunk && chunk.headingPath.length > 0
             ? JSON.stringify(chunk.headingPath)

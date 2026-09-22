@@ -144,6 +144,24 @@ export class ObjectStorageProvider implements OnModuleInit {
     return fs.readFile(path.join(this.localRoot, safeKey));
   }
 
+  async deleteObject(key: string): Promise<void> {
+    const safeKey = key.replace(/^\/+/, '');
+    if (!safeKey || safeKey.split('/').includes('..')) {
+      throw new Error('Invalid object key.');
+    }
+
+    if (this.provider === 'minio' && this.client && this.minioReady) {
+      await this.client.removeObject(this.bucket, safeKey);
+      return;
+    }
+
+    if (this.requireRemote) {
+      throw new Error('远程对象存储未就绪，拒绝删除本地对象。');
+    }
+
+    await fs.rm(path.join(this.localRoot, safeKey), { force: true });
+  }
+
   private resolveMinioUrl(key: string): string {
     if (this.publicBaseUrl) {
       return `${this.publicBaseUrl.replace(/\/$/, '')}/${this.bucket}/${key}`;

@@ -14,6 +14,10 @@ export class DocumentTaskEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
 
+  @Index('IDX_document_tasks_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   docId!: string | null;
 

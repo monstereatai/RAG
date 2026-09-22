@@ -10,6 +10,9 @@ import {
 @Index('IDX_agent_actions_run_created', ['runId', 'createdAt'])
 export class AgentActionEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_agent_actions_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) runId!: string;
   @Column({ type: 'varchar', length: 64 }) name!: string;
   @Column({ type: 'varchar', length: 32 }) actionType!: string;

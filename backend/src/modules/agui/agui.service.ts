@@ -63,6 +63,7 @@ export class AguiService {
               query,
               options.mode,
               options.userId,
+              options.tenantId,
             ));
           emit('RUN_STARTED', {
             threadId: activeThreadId,
@@ -203,6 +204,7 @@ export class AguiService {
             activeThreadId,
             options.userId,
             '客户端断开流式连接',
+            options.tenantId,
           );
         }
       };

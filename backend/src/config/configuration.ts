@@ -26,6 +26,11 @@ export const configuration = () => ({
     requireTenantContext:
       process.env.AUTH_REQUIRE_TENANT_CONTEXT === 'true' ||
       process.env.NODE_ENV === 'production',
+    // 生产用户请求必须有 IAM 成员和 platform.read 权限；服务令牌走独立守卫。
+    enforceIam:
+      process.env.AUTH_ENFORCE_IAM === 'true' ||
+      (process.env.AUTH_ENFORCE_IAM !== 'false' &&
+        process.env.NODE_ENV === 'production'),
   },
 
   // API 限流（默认 60 req/min）

@@ -47,6 +47,7 @@ export class AgentPipelineService {
     task: string,
     context?: string,
     onStage?: (agent: string, output: AgentOutput) => void,
+    signal?: AbortSignal,
   ): Promise<AgentPipelineState> {
     const pipeline: ISubAgent[] = [
       this.researcher,
@@ -65,11 +66,13 @@ export class AgentPipelineService {
     let currentContext = context ?? '';
 
     for (const agent of pipeline) {
+      signal?.throwIfAborted();
       this.logger.log(`Pipeline stage: ${agent.name}`);
 
       const input: AgentInput = {
         task,
         context: currentContext,
+        signal,
       };
 
       const output = await agent.execute(input);
@@ -109,6 +112,7 @@ export class AgentPipelineService {
     task: string,
     agentNames: string[],
     context?: string,
+    signal?: AbortSignal,
   ): Promise<AgentPipelineState> {
     const state: AgentPipelineState = {
       task,
@@ -119,6 +123,7 @@ export class AgentPipelineService {
     let currentContext = context ?? '';
 
     for (const name of agentNames) {
+      signal?.throwIfAborted();
       const agent = this.agentRegistry.get(name);
       if (!agent) {
         this.logger.warn(`Agent "${name}" not found in registry, skipping`);
@@ -128,6 +133,7 @@ export class AgentPipelineService {
       const output = await agent.execute({
         task,
         context: currentContext,
+        signal,
       });
       state.stages.push(output);
       currentContext = output.content;

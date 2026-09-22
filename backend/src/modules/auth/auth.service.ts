@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   Optional,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ import {
   buildActivationEmailHtml,
   buildPasswordResetCodeHtml,
 } from './mail-templates';
+import { IamService } from '../iam/iam.service';
 
 /** access token 默认有效期（JWT_ACCESS_EXPIRES 未配置时） */
 const DEFAULT_ACCESS_EXPIRES_IN = '2h';
@@ -59,6 +61,7 @@ const PASSWORD_RESET_CODE_DISPATCHED_MESSAGE =
  */
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   /** DI 注入的用户存储（未注入时懒加载默认实现，保持手工构造兼容） */
   private userStoreRef?: AuthUserStore;
   private tokenStoreRef?: TokenStoreService;
@@ -70,6 +73,7 @@ export class AuthService {
     @Optional() injectedUserStore?: AuthUserStore,
     @Optional() injectedTokenStore?: TokenStoreService,
     @Optional() injectedMailService?: MailService,
+    @Optional() private readonly iamService?: IamService,
   ) {
     this.userStoreRef = injectedUserStore;
     this.tokenStoreRef = injectedTokenStore;
@@ -107,6 +111,7 @@ export class AuthService {
       );
     }
 
+    await this.syncIamMembership(user);
     return this.issueTokenPair(this.toPayload(user));
   }
 
@@ -268,6 +273,7 @@ export class AuthService {
       throw new UnauthorizedException('user not found or disabled');
     }
 
+    await this.syncIamMembership(user);
     return this.issueTokenPair(this.toPayload(user));
   }
 
@@ -294,6 +300,21 @@ export class AuthService {
       role: user.role,
       tenantId: user.tenantId,
     };
+  }
+
+  /**
+   * 登录／刷新时把认证用户同步到正式 IAM 成员表。
+   * 认证存储仍可渐进迁移，但业务请求不再依赖 JWT 中的 role 作为唯一授权依据。
+   */
+  private async syncIamMembership(user: AuthUserRecord): Promise<void> {
+    if (!this.iamService) return;
+    const tenantId = user.tenantId?.trim() || 'legacy';
+    await this.iamService.ensureMembership(
+      user.id,
+      tenantId,
+      user.role === 'admin' ? 'admin' : 'reader',
+    );
+    this.logger.debug(`IAM membership ensured for ${user.id}:${tenantId}`);
   }
 
   /** 激活 token 的存储 key：email:activation:token:{token} → userId */

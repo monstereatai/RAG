@@ -14,6 +14,10 @@ export class AgenticStructuredArtifactEntity {
   @PrimaryColumn({ type: 'varchar', length: 128 })
   id!: string;
 
+  @Index('IDX_agentic_structured_artifacts_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 64 })
   threadId!: string;
 

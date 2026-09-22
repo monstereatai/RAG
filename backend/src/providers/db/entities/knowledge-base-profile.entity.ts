@@ -13,6 +13,9 @@ import {
 })
 export class KnowledgeBaseProfileEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_knowledge_base_profiles_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 128 }) key!: string;
   @Column({ type: 'varchar', length: 255 }) name!: string;
   @Column({ type: 'varchar', length: 64, default: 'default' })

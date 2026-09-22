@@ -189,7 +189,12 @@ export class ChatService {
         : Promise.resolve(undefined),
       req.threadId
         ? Promise.resolve(req.threadId)
-        : this.conversationService.create(req.query, mode, userId),
+        : this.createConversation(
+            req.query,
+            mode,
+            userId,
+            executionOptions?.tenantId,
+          ),
     ]);
     // 先准备本轮可见历史，再做唯一一次语义分类。这样路由器看到的上下文
     // 与后续生成阶段一致，避免先按空历史分类、再按完整历史重新分类。
@@ -205,10 +210,11 @@ export class ChatService {
                   : ('human' as const),
               content: turn.content,
             }))
-          : await this.conversationService.getRecentHistory(
+          : await this.getConversationHistory(
               threadId,
               5,
               userId,
+              executionOptions?.tenantId,
             );
     }
     if (this.queryIntentRouter) {
@@ -386,6 +392,7 @@ export class ChatService {
     const run = await this.agentRuns?.start({
       threadId,
       userId,
+      tenantId: executionOptions?.tenantId,
       mode,
       maxSteps: this.config?.get<number>('agentRun.maxSteps') ?? 18,
       maxToolCalls: this.config?.get<number>('agentRun.maxToolCalls') ?? 24,
@@ -569,6 +576,7 @@ export class ChatService {
           remainingToolCalls: requestContext.budget.remainingToolCalls,
         },
         actualUsage,
+        tenantId: executionOptions?.tenantId,
       });
     }
 
@@ -627,6 +635,7 @@ export class ChatService {
       model: executionOptions?.model,
       traceEvents,
       actualUsage,
+      tenantId: executionOptions?.tenantId,
     });
   }
 
@@ -646,6 +655,7 @@ export class ChatService {
     executionState?: ChatResponse['executionState'];
     includeUserMessage?: boolean;
     actualUsage?: AggregatedLlmUsage;
+    tenantId?: string;
   }): Promise<ChatResponse> {
     const result = input.result;
     if (result.interrupted) {
@@ -659,6 +669,7 @@ export class ChatService {
       userId: input.userId,
       query: input.req.query,
       answer: result.answer,
+      tenantId: input.tenantId,
       includeUserMessage: input.includeUserMessage,
       skipLongTermMemory:
         input.queryIntent.contextMode !== 'none' &&
@@ -847,6 +858,7 @@ export class ChatService {
     model?: string;
     traceEvents?: RagTraceEvent[];
     executionState?: ChatResponse['executionState'];
+    tenantId?: string;
   }): Promise<ChatResponse> {
     const executionState = {
       phase: 'approval' as const,
@@ -858,7 +870,7 @@ export class ChatService {
       paused: true,
       lastNode: input.result.executionState?.lastNode ?? 'humanApprovalNode',
     };
-    await this.conversationService.addMessage(
+    await this.addConversationMessage(
       input.threadId,
       'human',
       input.req.query,
@@ -874,6 +886,7 @@ export class ChatService {
         model: input.model,
         checkpointId: executionState.checkpointId,
       },
+      input.tenantId,
     );
     void this.shortTermMemory.addTurn(input.threadId, 'user', input.req.query);
 
@@ -937,7 +950,7 @@ export class ChatService {
     tenantId?: string,
     onEvent?: ChatEventCallback,
   ): Promise<ChatResponse> {
-    const conversation = await this.conversationService.get(threadId, userId);
+    const conversation = await this.getConversation(threadId, userId, tenantId);
     if (!conversation) {
       throw new BadRequestException('未找到可恢复的会话或无权访问');
     }
@@ -952,8 +965,8 @@ export class ChatService {
     const runId =
       typeof metadata.runId === 'string' ? metadata.runId : undefined;
     const run = runId
-      ? await this.agentRuns?.get(runId)
-      : await this.agentRuns?.findLatestByThread(threadId);
+      ? await this.agentRuns?.get(runId, tenantId)
+      : await this.agentRuns?.findLatestByThread(threadId, tenantId);
     if (run?.userId && run.userId !== userId) {
       throw new BadRequestException('无权恢复其他用户的运行');
     }
@@ -988,12 +1001,13 @@ export class ChatService {
       const rejectionAnswer = feedback?.trim()
         ? `本次草稿未获批准：${feedback.trim()}`
         : '本次草稿未获批准，未写入正式答案。';
-      await this.conversationService.addMessage(
+      await this.addConversationMessage(
         threadId,
         'ai',
         rejectionAnswer,
         userId,
         { approval: 'rejected', runId: run?.id },
+        tenantId,
       );
       const queryLogId = await this.logQuery({
         userId,
@@ -1078,6 +1092,7 @@ export class ChatService {
         paused: false,
       },
       includeUserMessage: false,
+      tenantId,
     });
   }
 
@@ -1160,32 +1175,94 @@ export class ChatService {
       .execute();
   }
 
+  private createConversation(
+    query: string,
+    mode: ChatMode,
+    userId: string,
+    tenantId?: string,
+  ): Promise<string> {
+    return tenantId?.trim()
+      ? this.conversationService.create(query, mode, userId, tenantId.trim())
+      : this.conversationService.create(query, mode, userId);
+  }
+
+  private getConversationHistory(
+    threadId: string,
+    maxTurns: number,
+    userId: string,
+    tenantId?: string,
+  ) {
+    return tenantId?.trim()
+      ? this.conversationService.getRecentHistory(
+          threadId,
+          maxTurns,
+          userId,
+          tenantId.trim(),
+        )
+      : this.conversationService.getRecentHistory(threadId, maxTurns, userId);
+  }
+
+  private getConversation(threadId: string, userId: string, tenantId?: string) {
+    return tenantId?.trim()
+      ? this.conversationService.get(threadId, userId, tenantId.trim())
+      : this.conversationService.get(threadId, userId);
+  }
+
+  private addConversationMessage(
+    threadId: string,
+    role: 'human' | 'ai',
+    content: string,
+    userId: string,
+    metadata?: Record<string, unknown>,
+    tenantId?: string,
+  ) {
+    return tenantId?.trim()
+      ? this.conversationService.addMessage(
+          threadId,
+          role,
+          content,
+          userId,
+          metadata,
+          tenantId.trim(),
+        )
+      : this.conversationService.addMessage(
+          threadId,
+          role,
+          content,
+          userId,
+          metadata,
+        );
+  }
+
   /** 两个执行引擎共用同一份会话、记忆与历史向量收口，避免分支漏写。 */
   private async persistConversationResult(input: {
     threadId: string;
     userId: string;
     query: string;
     answer: string;
+    tenantId?: string;
     includeUserMessage?: boolean;
     skipLongTermMemory?: boolean;
     metadata?: Record<string, unknown>;
     answerMetadata?: Record<string, unknown>;
   }): Promise<void> {
     if (input.includeUserMessage !== false) {
-      await this.conversationService.addMessage(
+      await this.addConversationMessage(
         input.threadId,
         'human',
         input.query,
         input.userId,
         input.metadata,
+        input.tenantId,
       );
     }
-    await this.conversationService.addMessage(
+    await this.addConversationMessage(
       input.threadId,
       'ai',
       input.answer,
       input.userId,
       input.answerMetadata,
+      input.tenantId,
     );
     if (input.includeUserMessage !== false) {
       void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);

@@ -22,7 +22,8 @@ export interface DocumentProcessingJob {
   /** 请求侧租户上下文必须随持久队列一起传递，避免 Worker 丢失隔离边界。 */
   tenantId?: string;
   filename: string;
-  originalBufferBase64: string;
+  /** 原始文件已落入对象存储，队列只传 key，避免把大文件塞进 Redis。 */
+  objectKey: string;
   contentType?: string;
   businessMetadata?: DocumentBusinessMetadata;
 }

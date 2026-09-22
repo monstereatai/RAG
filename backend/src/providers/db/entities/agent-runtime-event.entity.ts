@@ -8,9 +8,17 @@ import {
 
 @Entity('agent_runtime_events')
 @Index('IDX_agent_runtime_events_thread_seq', ['threadId', 'sequence'])
+@Index(
+  'UQ_agent_runtime_events_tenant_thread_sequence',
+  ['tenantId', 'threadId', 'sequence'],
+  { unique: true },
+)
 @Index('IDX_agent_runtime_events_run_created', ['runId', 'createdAt'])
 export class AgentRuntimeEventEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_agent_runtime_events_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) threadId!: string;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   runId!: string | null;

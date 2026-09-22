@@ -11,6 +11,9 @@ import {
 @Index('IDX_decision_records_thread_created', ['threadId', 'createdAt'])
 export class DecisionRecordEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_decision_records_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) threadId!: string;
   @Column({ type: 'varchar', length: 128, nullable: true, default: null })
   projectId!: string | null;

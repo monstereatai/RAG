@@ -22,7 +22,7 @@ import { RedisProvider } from '../../providers/redis/redis.provider';
  * 决策说明：UserEntity（users 表）没有 email / emailVerified 列，且共享实体
  * 与迁移文件不在本模块可修改范围内；同时本项目要求「数据库不可用不阻断启动」。
  * 生产环境优先使用 Redis 共享 JSON 存储，开发环境才允许本地 JSON 文件；
- * 原硬编码测试账号保留为种子数据（emailVerified=true，兼容既有演示流程）。
+ * 种子账号仅允许在非生产环境启用，生产环境必须通过一次性初始化流程创建管理员。
  * 后续接入 PG 时可平滑替换为 users 表 + email 迁移列，接口签名保持不变。
  */
 export interface AuthUserRecord {
@@ -49,7 +49,7 @@ interface AuthUserFile {
   users: AuthUserRecord[];
 }
 
-/** 种子用户（原 AuthService 硬编码测试账号，保持既有演示与冒烟脚本兼容） */
+/** 种子用户（仅开发／测试环境，生产环境绝不自动创建） */
 const SEED_USERS: Array<{
   id: string;
   username: string;
@@ -80,7 +80,7 @@ const SCRYPT_KEYLEN = 64;
  * 认证用户存储（Redis 共享存储，开发环境 JSON 文件降级）
  *
  * - Redis 可用时所有实例读写同一份数据；
- * - 种子用户在文件缺失或被删时自动补齐；
+ * - 非生产环境中种子用户在文件缺失或被删时自动补齐；
  * - 测试可通过 RAG_AUTH_USERS_STORE 把落盘文件指到临时路径（冒烟注入点）。
  */
 @Injectable()
@@ -217,7 +217,8 @@ export class AuthUserStore {
       }
     }
 
-    // 种子用户兜底：文件缺失或种子被删时自动补齐（emailVerified=true 保证原演示流程可用）
+    // 种子用户只允许在非生产环境兜底；生产环境不因 Redis／文件为空而生成已知凭据。
+    if (!this.allowSeedUsers) return file;
     let mutated = false;
     for (const seed of SEED_USERS) {
       const exists = file.users.some(
@@ -287,6 +288,14 @@ export class AuthUserStore {
     );
   }
 
+  private get allowSeedUsers(): boolean {
+    return (
+      this.configService?.get<string>('nodeEnv') !== 'production' &&
+      process.env.NODE_ENV !== 'production' &&
+      process.env.ALLOW_AUTH_SEED_USERS !== 'false'
+    );
+  }
+
   /** Redis JSON 读改写需要跨实例互斥，否则两个注册／改密请求会互相覆盖。 */
   private async withSharedWrite<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.redisProvider?.isEnabled()) return operation();
@@ -324,6 +333,7 @@ export class AuthUserStore {
         );
       }
     }
+    if (!this.allowSeedUsers) return file;
     let mutated = false;
     for (const seed of SEED_USERS) {
       if (file.users.some((user) => user.username.toLowerCase() === seed.username)) {

@@ -61,6 +61,13 @@ type DocumentUploadBody = Partial<
   >
 >;
 
+const DOCUMENT_UPLOAD_MAX_BYTES = Number(
+  process.env.DOCUMENT_UPLOAD_MAX_BYTES ?? 200 * 1024 * 1024,
+);
+const DOCUMENT_UPLOAD_LIMITS = {
+  limits: { fileSize: DOCUMENT_UPLOAD_MAX_BYTES },
+};
+
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
 @ApiScopes('rag:documents')
@@ -76,22 +83,33 @@ export class DocumentController {
     private readonly objectStorageProvider: ObjectStorageProvider,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
-      return this.processAsyncUpload(
-        {
-          originalname: job.filename,
-          mimetype: job.contentType ?? 'application/octet-stream',
-          buffer: Buffer.from(job.originalBufferBase64, 'base64'),
-        } as Express.Multer.File,
-        job.userId,
-        job.taskId,
-        job.businessMetadata,
-        job.tenantId,
-      );
+      const buffer = await this.objectStorageProvider.getObject(job.objectKey);
+      try {
+        return await this.processAsyncUpload(
+          {
+            originalname: job.filename,
+            mimetype: job.contentType ?? 'application/octet-stream',
+            buffer,
+          } as Express.Multer.File,
+          job.userId,
+          job.taskId,
+          job.businessMetadata,
+          job.tenantId,
+        );
+      } finally {
+        await this.objectStorageProvider
+          .deleteObject(job.objectKey)
+          .catch((error: unknown) =>
+            this.logger.warn(
+              `queued upload cleanup failed for ${job.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+      }
     });
   }
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
   async upload(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: DocumentUploadBody,
@@ -126,7 +144,7 @@ export class DocumentController {
   }
 
   @Post('upload/async')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
   async uploadAsync(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: DocumentUploadBody,
@@ -138,20 +156,30 @@ export class DocumentController {
     const task = await this.documentService.createQueuedTask(
       file.originalname,
       user.userId,
+      user.tenantId,
     );
 
     if (this.documentQueue.enabled) {
+      const objectKey = `documents/${this.sanitizeObjectKeyPart(user.userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
       try {
+        await this.objectStorageProvider.putObject({
+          key: objectKey,
+          body: file.buffer,
+          contentType: file.mimetype,
+        });
         await this.documentQueue.enqueue({
           taskId: task.id,
           userId: user.userId,
           tenantId: user.tenantId,
           filename: file.originalname,
-          originalBufferBase64: file.buffer.toString('base64'),
+          objectKey,
           contentType: file.mimetype,
           businessMetadata: this.parseBusinessMetadata(body),
         });
       } catch (error) {
+        await this.objectStorageProvider
+          .deleteObject(objectKey)
+          .catch(() => undefined);
         const message =
           error instanceof Error ? error.message : 'document queue unavailable';
         await this.documentService.markTaskFailed(task.id, message);

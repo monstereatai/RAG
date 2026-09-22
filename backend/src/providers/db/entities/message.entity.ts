@@ -15,6 +15,9 @@ import {
 export class MessageEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_messages_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   @Column({ type: 'varchar', length: 64 })
   conversationId!: string;

@@ -11,6 +11,9 @@ import {
 @Index('IDX_evaluation_cases_status', ['status', 'createdAt'])
 export class EvaluationCaseEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_evaluation_cases_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   sourceFeedbackId!: string | null;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })

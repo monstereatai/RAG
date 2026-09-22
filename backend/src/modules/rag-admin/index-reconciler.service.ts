@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { RagAdminService } from './rag-admin.service';
@@ -42,9 +47,7 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
       (requested === undefined && nodeEnv === 'production');
     this.intervalMs = Math.min(
       Math.max(
-        Number(
-          config.get<number>('ragIndexReconciler.intervalMs') ?? 300_000,
-        ),
+        Number(config.get<number>('ragIndexReconciler.intervalMs') ?? 300_000),
         30_000,
       ),
       86_400_000,
@@ -66,7 +69,10 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
-    this.timer = setInterval(() => void this.runOnce('interval'), this.intervalMs);
+    this.timer = setInterval(
+      () => void this.runOnce('interval'),
+      this.intervalMs,
+    );
     this.timer.unref?.();
     // 首次运行延后一个周期，确保所有模块的 Worker processor 已注册。
   }
@@ -96,7 +102,8 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
         reason: !this.enabled ? 'disabled' : 'repair_queue_unavailable',
       } as const;
     }
-    if (this.running) return { available: false, reason: 'already_running' } as const;
+    if (this.running)
+      return { available: false, reason: 'already_running' } as const;
 
     this.running = true;
     this.lastRunAt = new Date().toISOString();
@@ -107,6 +114,8 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
         issue.reasons.some(
           (reason) =>
             reason.endsWith('_count_mismatch') ||
+            reason.endsWith('_content_hash_mismatch') ||
+            reason.endsWith('_generation_mismatch') ||
             reason === 'graph_index_missing' ||
             reason === 'graph_index_failed' ||
             reason === 'graph_index_pending',

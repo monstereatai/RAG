@@ -326,6 +326,8 @@ export class KarpathyRagService implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      contentHash?: string | null;
+      indexGeneration?: string | null;
       hypotheticalQuestions?: string[];
     }
   >();
@@ -430,6 +432,8 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: entry.documentType,
         lifecycleStatus: entry.lifecycleStatus,
         supersedesDocId: entry.supersedesDocId,
+        contentHash: entry.contentHash,
+        indexGeneration: entry.indexGeneration,
         hypotheticalQuestions: entry.hypotheticalQuestions,
       });
       this.persistedEntries.push(entry);
@@ -465,6 +469,8 @@ export class KarpathyRagService implements OnModuleInit {
       documentType?: string;
       lifecycleStatus?: string;
       supersedesDocId?: string | null;
+      contentHash?: string | null;
+      indexGeneration?: string | null;
       hypotheticalQuestions?: string[];
     }>,
     userId?: string,
@@ -501,6 +507,8 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: c.documentType,
         lifecycleStatus: c.lifecycleStatus,
         supersedesDocId: c.supersedesDocId,
+        contentHash: c.contentHash,
+        indexGeneration: c.indexGeneration,
         hypotheticalQuestions: c.hypotheticalQuestions,
       });
       this.persistedEntries.push({
@@ -530,6 +538,8 @@ export class KarpathyRagService implements OnModuleInit {
         documentType: c.documentType,
         lifecycleStatus: c.lifecycleStatus,
         supersedesDocId: c.supersedesDocId,
+        contentHash: c.contentHash,
+        indexGeneration: c.indexGeneration,
         hypotheticalQuestions: c.hypotheticalQuestions,
       });
     }
@@ -1879,6 +1889,27 @@ ${memoryText || '无'}
     return this.persistedEntries.filter(
       (entry) => entry.docId === docId && (!userId || entry.userId === userId),
     ).length;
+  }
+
+  getIndexedChunkHashes(docId: string, userId?: string): {
+    hashes: string[];
+    generations: string[];
+    complete: boolean;
+  } {
+    const entries = this.persistedEntries.filter(
+      (entry) => entry.docId === docId && (!userId || entry.userId === userId),
+    );
+    return {
+      hashes: entries.flatMap((entry) => (entry.contentHash ? [entry.contentHash] : [])),
+      generations: [
+        ...new Set(
+          entries.flatMap((entry) =>
+            entry.indexGeneration ? [entry.indexGeneration] : [],
+          ),
+        ),
+      ],
+      complete: entries.length === 0 || entries.every((entry) => Boolean(entry.contentHash)),
+    };
   }
 
   /** 获取 BM25 索引统计信息（供运营 API 使用） */

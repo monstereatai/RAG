@@ -19,6 +19,7 @@ export class ResearcherAgent implements ISubAgent {
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const start = Date.now();
+    input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
     const systemPrompt = `你是一个专业的信息研究员。你的任务是根据提供的上下文和问题，提取所有相关的事实、数据和关键信息。
@@ -36,10 +37,13 @@ export class ResearcherAgent implements ISubAgent {
       .join('\n');
 
     try {
-      const response = await model.invoke([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
+      const response = await model.invoke(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { signal: input.signal },
+      );
 
       const content =
         typeof response.content === 'string'
@@ -57,6 +61,7 @@ export class ResearcherAgent implements ISubAgent {
         durationMs: Date.now() - start,
       };
     } catch (err) {
+      if (input.signal?.aborted) throw err;
       this.logger.error(`Researcher failed: ${(err as Error).message}`);
       return {
         content: `研究阶段失败：${(err as Error).message}`,

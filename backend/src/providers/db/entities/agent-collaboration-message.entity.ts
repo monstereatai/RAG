@@ -10,6 +10,9 @@ import {
 @Index('IDX_agent_messages_thread_created', ['threadId', 'createdAt'])
 export class AgentCollaborationMessageEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_agent_collaboration_messages_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) threadId!: string;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   runId!: string | null;

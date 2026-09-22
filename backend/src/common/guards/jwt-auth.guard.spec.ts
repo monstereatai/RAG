@@ -20,13 +20,22 @@ describe('JwtAuthGuard API Token scopes', () => {
   function createGuard(
     payload: Record<string, unknown>,
     requireTenantContext = false,
+    enforceIam = false,
+    iamService?: { hasPermission: jest.Mock },
   ) {
     return new JwtAuthGuard(
       { verifyToken: jest.fn().mockResolvedValue(payload) } as never,
       { verifyApiToken: jest.fn() } as never,
       { consume: jest.fn() } as never,
       reflector as never,
-      { get: jest.fn().mockReturnValue(requireTenantContext) } as never,
+      {
+        get: jest.fn((key: string) =>
+          key === 'auth.requireTenantContext'
+            ? requireTenantContext
+            : enforceIam,
+        ),
+      } as never,
+      iamService as never,
     );
   }
 
@@ -126,5 +135,35 @@ describe('JwtAuthGuard API Token scopes', () => {
     );
 
     await expect(guard.canActivate(context(request, []))).resolves.toBe(true);
+  });
+
+  it('requires an active IAM read permission for production user routes', async () => {
+    reflector.getAllAndOverride.mockReturnValue(['rag:chat']);
+    const iamService = { hasPermission: jest.fn().mockResolvedValue(true) };
+    const request = {
+      headers: { authorization: 'Bearer access-token' },
+      query: {},
+    };
+    const guard = createGuard(
+      {
+        userId: 'user-1',
+        username: 'user-1',
+        role: 'user',
+        authType: 'jwt',
+        tenantId: 'tenant-a',
+      },
+      true,
+      true,
+      iamService,
+    );
+
+    await expect(
+      guard.canActivate(context(request, ['rag:chat'])),
+    ).resolves.toBe(true);
+    expect(iamService.hasPermission).toHaveBeenCalledWith(
+      'user-1',
+      'platform.read',
+      'tenant-a',
+    );
   });
 });

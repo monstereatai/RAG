@@ -12,6 +12,9 @@ import {
 export class DocumentReviewEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_document_reviews_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   @Column({ type: 'varchar', length: 64 })
   docId!: string;

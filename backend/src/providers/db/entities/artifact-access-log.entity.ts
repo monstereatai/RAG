@@ -12,6 +12,9 @@ import {
 export class ArtifactAccessLogEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_artifact_access_logs_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   @Column({ type: 'varchar', length: 64 })
   artifactId!: string;

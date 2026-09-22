@@ -8,7 +8,10 @@ type DeepAgentFactory = {
     systemPrompt: string;
     middleware?: unknown[];
   }) => {
-    invoke: (input: unknown) => Promise<unknown>;
+    invoke: (
+      input: unknown,
+      options?: { signal?: AbortSignal },
+    ) => Promise<unknown>;
   };
 };
 
@@ -33,6 +36,7 @@ export class AnalystAgent implements ISubAgent {
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const start = Date.now();
+    input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
     const systemPrompt = `你是一个专业的分析师。对于任何复杂的计算、排序、数据对比，你必须使用 JavaScript 代码并在沙箱执行环境（js_eval 工具）中运行它，以确保结果的绝对正确。
@@ -67,14 +71,17 @@ export class AnalystAgent implements ISubAgent {
         middleware: [createCodeInterpreterMiddleware()],
       });
 
-      const response = await agent.invoke({
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ],
-      });
+      const response = await agent.invoke(
+        {
+          messages: [
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+        },
+        { signal: input.signal },
+      );
 
       // Extract content from DeepAgent response
       const maybeMessages = (response as { messages?: unknown }).messages;
@@ -115,15 +122,19 @@ export class AnalystAgent implements ISubAgent {
         durationMs: Date.now() - start,
       };
     } catch (err) {
+      if (input.signal?.aborted) throw err;
       this.logger.error(
         `Failed to run Analyst with DeepAgent/QuickJS: ${(err as Error).message}. Falling back to standard LLM invoke.`,
       );
 
       try {
-        const response = await model.invoke([
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ]);
+        const response = await model.invoke(
+          [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          { signal: input.signal },
+        );
 
         const content =
           typeof response.content === 'string'
@@ -137,6 +148,7 @@ export class AnalystAgent implements ISubAgent {
           durationMs: Date.now() - start,
         };
       } catch (fallbackErr) {
+        if (input.signal?.aborted) throw fallbackErr;
         this.logger.error(
           `Analyst fallback failed: ${(fallbackErr as Error).message}`,
         );

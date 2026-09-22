@@ -159,7 +159,15 @@ export class RagAdminController {
   }
 
   @Post('documents/upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: Number(
+          process.env.DOCUMENT_UPLOAD_MAX_BYTES ?? 200 * 1024 * 1024,
+        ),
+      },
+    }),
+  )
   async uploadDocument(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: Record<string, unknown>,

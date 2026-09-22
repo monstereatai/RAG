@@ -17,6 +17,7 @@ export class CriticAgent implements ISubAgent {
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const start = Date.now();
+    input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
     const systemPrompt = `你是一个严格的质量评审员。你的任务是对文本内容进行全面质量检查。
@@ -36,10 +37,13 @@ export class CriticAgent implements ISubAgent {
       .join('\n');
 
     try {
-      const response = await model.invoke([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
+      const response = await model.invoke(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { signal: input.signal },
+      );
 
       const content =
         typeof response.content === 'string'
@@ -63,6 +67,7 @@ export class CriticAgent implements ISubAgent {
         metadata: { score },
       };
     } catch (err) {
+      if (input.signal?.aborted) throw err;
       this.logger.error(`Critic failed: ${(err as Error).message}`);
       return {
         content: `评审阶段失败：${(err as Error).message}`,

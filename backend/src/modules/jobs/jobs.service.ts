@@ -59,7 +59,7 @@ export class JobsService implements OnModuleInit {
       );
       for (const job of activeJobs) {
         try {
-          this.startRuntime(job);
+          await this.startRuntime(job);
           job.running = true;
           await this.jobRepo.save(job);
         } catch (err) {
@@ -148,7 +148,7 @@ export class JobsService implements OnModuleInit {
     if (job.running) return job;
 
     this.ensureSchedulingBackend();
-    this.startRuntime(job);
+    await this.startRuntime(job);
 
     await this.deactivateOtherVersions(job);
 
@@ -210,7 +210,7 @@ export class JobsService implements OnModuleInit {
 
   async stop(id: string): Promise<ScheduledJobEntity> {
     const job = await this.get(id);
-    this.stopRuntime(job);
+    await this.stopRuntime(job);
 
     job.enabled = false;
     job.running = false;
@@ -222,7 +222,7 @@ export class JobsService implements OnModuleInit {
 
   async delete(id: string): Promise<ScheduledJobEntity> {
     const job = await this.get(id);
-    this.stopRuntime(job);
+    await this.stopRuntime(job);
     await this.jobRepo.remove(job);
     return { ...job, enabled: false, running: false };
   }
@@ -256,18 +256,12 @@ export class JobsService implements OnModuleInit {
     }
   }
 
-  private startRuntime(job: ScheduledJobEntity): void {
+  private async startRuntime(job: ScheduledJobEntity): Promise<void> {
     // 模块启动恢复、创建、启动和重启都必须经过同一个持久队列门禁；否则
     // onModuleInit 会在 Redis 缺失时悄悄恢复为当前进程的 cron／timer。
     this.ensureSchedulingBackend();
     if (this.scheduledQueue?.enabled) {
-      void this.scheduledQueue
-        .schedule(job)
-        .catch((error) =>
-          this.logger.warn(
-            `BullMQ scheduler registration failed for ${job.id}: ${(error as Error).message}`,
-          ),
-        );
+      await this.scheduledQueue.schedule(job);
       return;
     }
     if (job.type === 'cron') {
@@ -280,7 +274,10 @@ export class JobsService implements OnModuleInit {
   }
 
   private ensureSchedulingBackend(): void {
-    if (this.scheduledQueue?.required === true && !this.scheduledQueue.enabled) {
+    if (
+      this.scheduledQueue?.required === true &&
+      !this.scheduledQueue.enabled
+    ) {
       throw new BadRequestException(
         '生产定时任务要求 Redis 持久队列可用，当前不可用，已拒绝进程内降级。',
       );
@@ -298,7 +295,7 @@ export class JobsService implements OnModuleInit {
       if (other.id === job.id || (other.versionGroupId ?? other.id) !== groupId)
         continue;
       if (other.running || other.enabled || other.isCurrent)
-        this.stopRuntime(other);
+        await this.stopRuntime(other);
       other.enabled = false;
       other.running = false;
       other.isCurrent = false;
@@ -468,7 +465,7 @@ export class JobsService implements OnModuleInit {
         'completed',
         durationMs / 1000,
       );
-      this.refreshNextRun(job);
+      await this.refreshNextRun(job);
       await this.domainEvents.emit({
         eventType: 'job.completed',
         aggregateType: 'scheduled_job',
@@ -520,9 +517,9 @@ export class JobsService implements OnModuleInit {
     }
   }
 
-  private refreshNextRun(job: ScheduledJobEntity): void {
+  private async refreshNextRun(job: ScheduledJobEntity): Promise<void> {
     if (this.scheduledQueue?.enabled) {
-      void this.scheduledQueue.schedule(job).catch(() => undefined);
+      await this.scheduledQueue.schedule(job);
       return;
     }
     if (job.type === 'cron') {
@@ -535,12 +532,12 @@ export class JobsService implements OnModuleInit {
     } else if (job.type === 'every') {
       job.nextRunAt = new Date(Date.now() + (job.everyMs ?? 0));
     }
-    void this.jobRepo.save(job);
+    await this.jobRepo.save(job);
   }
 
-  private stopRuntime(job: ScheduledJobEntity): void {
+  private async stopRuntime(job: ScheduledJobEntity): Promise<void> {
     if (this.scheduledQueue?.enabled) {
-      void this.scheduledQueue.unschedule(job.id).catch(() => undefined);
+      await this.scheduledQueue.unschedule(job.id);
       return;
     }
     if (job.type === 'cron') {

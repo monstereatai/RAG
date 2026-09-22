@@ -11,6 +11,9 @@ import {
 @Index('IDX_artifact_dependencies_artifact', ['artifactId'])
 export class ArtifactDependencyEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_artifact_dependencies_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64 }) threadId!: string;
   @Column({ type: 'varchar', length: 128 }) artifactId!: string;
   @Column({ type: 'varchar', length: 128 }) dependsOnArtifactId!: string;

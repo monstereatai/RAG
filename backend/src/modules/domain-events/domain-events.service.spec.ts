@@ -72,6 +72,45 @@ describe('DomainEventsService', () => {
     );
   });
 
+  it('keeps implicit idempotency distinct for later aggregate transitions', async () => {
+    const { service, outbox } = createService();
+
+    await service.emit({
+      eventType: 'document.lifecycle_changed',
+      aggregateType: 'document',
+      aggregateId: 'doc-1',
+      payload: { lifecycleStatus: 'archived' },
+    });
+    await service.emit({
+      eventType: 'document.lifecycle_changed',
+      aggregateType: 'document',
+      aggregateId: 'doc-1',
+      payload: { lifecycleStatus: 'effective' },
+    });
+
+    const first = outbox.create.mock.calls[0][0];
+    const second = outbox.create.mock.calls[1][0];
+    expect(first.idempotencyKey).not.toBe(second.idempotencyKey);
+  });
+
+  it('redacts sensitive fields nested inside event payloads', async () => {
+    const { service, outbox } = createService();
+
+    await service.emit({
+      eventType: 'test.created',
+      aggregateType: 'test',
+      aggregateId: '1',
+      payload: {
+        public: { value: 'ok' },
+        nested: [{ prompt: 'hidden', token: 'hidden', value: 'kept' }],
+      },
+    });
+
+    expect(outbox.create.mock.calls[0][0].payload).toBe(
+      JSON.stringify({ public: { value: 'ok' }, nested: [{ value: 'kept' }] }),
+    );
+  });
+
   it('does not dispatch without the required distributed lock', async () => {
     const { service, outbox } = createService();
     await (service as any).dispatchPending();

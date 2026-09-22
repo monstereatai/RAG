@@ -15,6 +15,9 @@ import {
 export class WeeklySummaryEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
+  @Index('IDX_weekly_summaries_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
 
   /** 关联用户（null 表示系统级汇总） */
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })

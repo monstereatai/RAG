@@ -41,6 +41,7 @@ import { DocumentQueueService } from '../document/document-queue.service';
 import type { DocumentBusinessMetadata } from '../document/document-profile.util';
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 import { IndexRepairQueueService } from './index-repair-queue.service';
+import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -93,7 +94,7 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
-type IndexAuditStatus = 'ok' | 'mismatch' | 'unavailable' | 'skipped';
+type IndexAuditStatus = 'ok' | 'mismatch' | 'unavailable' | 'skipped' | 'unverified';
 
 type IndexAuditCheck = {
   status: IndexAuditStatus;
@@ -101,6 +102,10 @@ type IndexAuditCheck = {
   actual?: number;
   documentCount?: number;
   sourcePresent?: boolean;
+  expectedContentHash?: string;
+  actualContentHashes?: string[];
+  expectedIndexGeneration?: string;
+  actualIndexGenerations?: string[];
   reason?: string;
 };
 
@@ -161,6 +166,7 @@ export class RagAdminService implements OnModuleInit {
     private readonly queryLogRepo?: Repository<QueryLogEntity>,
     @Optional()
     private readonly indexRepairQueue?: IndexRepairQueueService,
+    @Optional() private readonly objectStorageProvider?: ObjectStorageProvider,
   ) {}
 
   onModuleInit(): void {
@@ -197,6 +203,11 @@ export class RagAdminService implements OnModuleInit {
     fields: Record<string, unknown> = {},
   ) {
     if (!this.documentQueue.enabled) {
+      if (this.documentQueue.required) {
+        throw new BadRequestException(
+          '生产文档处理要求使用 Redis 持久队列，当前队列未初始化，任务未执行。',
+        );
+      }
       return this.uploadDocument(file, userId, fields);
     }
     const task = await this.documentService.createQueuedTask(
@@ -205,14 +216,40 @@ export class RagAdminService implements OnModuleInit {
     );
     const businessMetadata = { ...fields } as Record<string, unknown>;
     delete businessMetadata.ownerUserId;
-    await this.documentQueue.enqueue({
-      taskId: task.id,
-      userId,
-      filename: file.originalname,
-      originalBufferBase64: file.buffer.toString('base64'),
-      contentType: file.mimetype,
-      businessMetadata: businessMetadata,
-    });
+    if (!this.objectStorageProvider) {
+      await this.documentService.markTaskFailed(
+        task.id,
+        'object storage is required for asynchronous document processing',
+      );
+      throw new BadRequestException(
+        'object storage is required for asynchronous document processing',
+      );
+    }
+    const objectKey = `documents/${this.sanitizeObjectKeyPart(userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
+    try {
+      await this.objectStorageProvider.putObject({
+        key: objectKey,
+        body: file.buffer,
+        contentType: file.mimetype,
+      });
+      await this.documentQueue.enqueue({
+        taskId: task.id,
+        userId,
+        filename: file.originalname,
+        objectKey,
+        contentType: file.mimetype,
+        businessMetadata,
+      });
+    } catch (error) {
+      await this.objectStorageProvider
+        .deleteObject(objectKey)
+        .catch(() => undefined);
+      await this.documentService.markTaskFailed(
+        task.id,
+        error instanceof Error ? error.message : 'document queue unavailable',
+      );
+      throw error;
+    }
     return {
       taskId: task.id,
       status: task.status,
@@ -220,6 +257,10 @@ export class RagAdminService implements OnModuleInit {
       progress: task.progress,
       queueEnabled: true,
     };
+  }
+
+  private sanitizeObjectKeyPart(value: string): string {
+    return value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
   }
 
   getDocumentTask(taskId: string, userId: string) {
@@ -1161,17 +1202,31 @@ export class RagAdminService implements OnModuleInit {
     const chunks = docs.length
       ? await this.chunkRepo.find({
           where: { docId: In(docs.map((doc) => doc.docId)) },
-          select: ['docId'],
+          select: ['docId', 'contentHash', 'indexGeneration'],
         })
       : [];
     const dbChunkCounts = new Map<string, number>();
+    const dbChunkHashes = new Map<string, Set<string>>();
+    const dbGenerations = new Map<string, Set<string>>();
     for (const chunk of chunks) {
       dbChunkCounts.set(chunk.docId, (dbChunkCounts.get(chunk.docId) ?? 0) + 1);
+      if (chunk.contentHash) {
+        const hashes = dbChunkHashes.get(chunk.docId) ?? new Set<string>();
+        hashes.add(chunk.contentHash);
+        dbChunkHashes.set(chunk.docId, hashes);
+      }
+      if (chunk.indexGeneration) {
+        const generations = dbGenerations.get(chunk.docId) ?? new Set<string>();
+        generations.add(chunk.indexGeneration);
+        dbGenerations.set(chunk.docId, generations);
+      }
     }
     const now = Date.now();
     const checks = await Promise.all(
       docs.map(async (doc) => {
         const expected = dbChunkCounts.get(doc.docId) ?? 0;
+        const expectedHashes = [...(dbChunkHashes.get(doc.docId) ?? new Set())];
+        const expectedGenerations = [...(dbGenerations.get(doc.docId) ?? new Set())];
         const bm25 = this.karpathyRagService.getIndexedChunkCount(
           doc.docId,
           doc.userId ?? undefined,
@@ -1180,6 +1235,21 @@ export class RagAdminService implements OnModuleInit {
           doc.docId,
           doc.userId ?? undefined,
         );
+        const bm25Hashes =
+          typeof this.karpathyRagService.getIndexedChunkHashes === 'function'
+            ? this.karpathyRagService.getIndexedChunkHashes(
+                doc.docId,
+                doc.userId ?? undefined,
+              )
+            : { hashes: [], generations: [], complete: false };
+        const bm25HashMismatch =
+          expectedHashes.length > 0 &&
+          (bm25Hashes.hashes.length !== expectedHashes.length ||
+            !expectedHashes.every((hash) => bm25Hashes.hashes.includes(hash)));
+        const esHashMismatch =
+          expectedHashes.length > 0 &&
+          (es.contentHashes?.length !== expectedHashes.length ||
+            !expectedHashes.every((hash) => es.contentHashes?.includes(hash)));
         const vectorRuntime = this.vectorStoreProvider.getRuntimeStatus();
         const milvus = await this.readIndexCheck(
           vectorRuntime.available,
@@ -1204,29 +1274,46 @@ export class RagAdminService implements OnModuleInit {
             ...(doc.chunkCount === expected
               ? {}
               : { reason: 'documents_meta_chunk_count_mismatch' }),
+            expectedContentHash: doc.contentHash ?? undefined,
+            expectedIndexGeneration: doc.indexGeneration ?? undefined,
           },
           bm25: {
-            status: bm25 === expected ? 'ok' : 'mismatch',
+            status: bm25 === expected && !bm25HashMismatch ? 'ok' : 'mismatch',
             expected,
             actual: bm25,
-            ...(bm25 === expected
+            expectedContentHash: expectedHashes.join(','),
+            actualContentHashes: bm25Hashes.hashes,
+            expectedIndexGeneration: expectedGenerations.join(','),
+            actualIndexGenerations: bm25Hashes.generations,
+            ...(bm25 === expected && !bm25HashMismatch
               ? {}
-              : { reason: 'bm25_chunk_count_mismatch' }),
+              : { reason: bm25 !== expected ? 'bm25_chunk_count_mismatch' : 'bm25_content_hash_mismatch' }),
           },
           elasticsearch: es.available
             ? {
                 status:
                   es.chunkCount === expected &&
-                  (expected === 0 || es.documentCount === 1)
+                  (expected === 0 || es.documentCount === 1) &&
+                  !esHashMismatch
                     ? 'ok'
                     : 'mismatch',
                 expected,
                 actual: es.chunkCount,
                 documentCount: es.documentCount,
+                expectedContentHash: expectedHashes.join(','),
+                actualContentHashes: es.contentHashes,
+                expectedIndexGeneration: expectedGenerations.join(','),
+                actualIndexGenerations: es.indexGenerations,
                 ...(es.chunkCount === expected &&
-                (expected === 0 || es.documentCount === 1)
+                (expected === 0 || es.documentCount === 1) &&
+                !esHashMismatch
                   ? {}
-                  : { reason: 'elasticsearch_index_count_mismatch' }),
+                  : {
+                      reason:
+                        es.chunkCount !== expected || es.documentCount !== 1
+                          ? 'elasticsearch_index_count_mismatch'
+                          : 'elasticsearch_content_hash_mismatch',
+                    }),
               }
             : {
                 status: 'skipped',
@@ -1240,9 +1327,18 @@ export class RagAdminService implements OnModuleInit {
         if (indexChecks.postgres.status === 'mismatch')
           reasons.push('metadata_chunk_count_mismatch');
         if (indexChecks.bm25.status === 'mismatch')
-          reasons.push('bm25_chunk_count_mismatch');
+          reasons.push(
+            indexChecks.bm25.reason === 'bm25_content_hash_mismatch'
+              ? 'bm25_content_hash_mismatch'
+              : 'bm25_chunk_count_mismatch',
+          );
         if (indexChecks.elasticsearch.status === 'mismatch')
-          reasons.push('elasticsearch_index_count_mismatch');
+          reasons.push(
+            indexChecks.elasticsearch.reason ===
+            'elasticsearch_content_hash_mismatch'
+              ? 'elasticsearch_content_hash_mismatch'
+              : 'elasticsearch_index_count_mismatch',
+          );
         if (indexChecks.milvus.status === 'mismatch')
           reasons.push('milvus_chunk_count_mismatch');
         if (indexChecks.milvus.status === 'unavailable')
@@ -1295,6 +1391,10 @@ export class RagAdminService implements OnModuleInit {
           'elasticsearch_index_count_mismatch',
         ),
         milvusChunkCountMismatch: count('milvus_chunk_count_mismatch'),
+        bm25ContentHashMismatch: count('bm25_content_hash_mismatch'),
+        elasticsearchContentHashMismatch: count(
+          'elasticsearch_content_hash_mismatch',
+        ),
         milvusUnavailable: count('milvus_unavailable'),
         graphIndexMissing: count('graph_index_missing'),
       },

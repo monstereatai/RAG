@@ -17,6 +17,7 @@ export class WriterAgent implements ISubAgent {
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const start = Date.now();
+    input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
     const systemPrompt = `你是一个专业的技术写作者。你的任务是基于分析结果撰写清晰、结构化的回答。
@@ -35,10 +36,13 @@ export class WriterAgent implements ISubAgent {
       .join('\n');
 
     try {
-      const response = await model.invoke([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
+      const response = await model.invoke(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { signal: input.signal },
+      );
 
       const content =
         typeof response.content === 'string'
@@ -56,6 +60,7 @@ export class WriterAgent implements ISubAgent {
         durationMs: Date.now() - start,
       };
     } catch (err) {
+      if (input.signal?.aborted) throw err;
       this.logger.error(`Writer failed: ${(err as Error).message}`);
       return {
         content: `撰写阶段失败：${(err as Error).message}`,

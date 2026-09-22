@@ -13,6 +13,10 @@ export class TraceSpanEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
 
+  @Index('IDX_trace_spans_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 64 })
   traceId!: string;
 

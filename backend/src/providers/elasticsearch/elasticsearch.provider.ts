@@ -188,6 +188,10 @@ export class ElasticsearchProvider implements OnModuleInit {
               analyzer: 'ik_smart_analyzer',
             };
           }
+          if (!properties?.contentHash) patch.contentHash = { type: 'keyword' };
+          if (!properties?.indexGeneration)
+            patch.indexGeneration = { type: 'keyword' };
+          if (!properties?.tenantId) patch.tenantId = { type: 'keyword' };
           if (Object.keys(patch).length > 0) {
             try {
               await this.client.indices.putMapping({
@@ -258,6 +262,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           sourceStart: { type: 'integer' },
           sourceEnd: { type: 'integer' },
           docVersion: { type: 'keyword' },
+          contentHash: { type: 'keyword' },
+          indexGeneration: { type: 'keyword' },
+          tenantId: { type: 'keyword' },
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
           sourceAuthority: { type: 'keyword' },
@@ -339,6 +346,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           documentType: { type: 'keyword' },
           lifecycleStatus: { type: 'keyword' },
           docVersion: { type: 'keyword' },
+          contentHash: { type: 'keyword' },
+          indexGeneration: { type: 'keyword' },
+          tenantId: { type: 'keyword' },
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
           updatedAt: { type: 'date' },
@@ -353,6 +363,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     filename: string;
     content: string;
     userId?: string | null;
+    tenantId?: string | null;
     title?: string | null;
     summary?: string | null;
     sourceAuthority?: string;
@@ -365,6 +376,8 @@ export class ElasticsearchProvider implements OnModuleInit {
     documentType?: string;
     lifecycleStatus?: string;
     docVersion?: string | null;
+    contentHash?: string | null;
+    indexGeneration?: string | null;
     effectiveAt?: Date | null;
     expiredAt?: Date | null;
   }): Promise<void> {
@@ -400,6 +413,7 @@ export class ElasticsearchProvider implements OnModuleInit {
       docId: string;
       chunkIndex: number;
       userId?: string;
+      tenantId?: string;
       parentChunkId?: string | null;
       headingPath?: string[];
       sectionId?: string | null;
@@ -408,6 +422,8 @@ export class ElasticsearchProvider implements OnModuleInit {
       sourceStart?: number | null;
       sourceEnd?: number | null;
       docVersion?: string | null;
+      contentHash?: string | null;
+      indexGeneration?: string | null;
       effectiveAt?: Date | null;
       expiredAt?: Date | null;
       sourceAuthority?: string;
@@ -450,6 +466,7 @@ export class ElasticsearchProvider implements OnModuleInit {
             content: c.content,
             hypotheticalQuestions: c.hypotheticalQuestions ?? [],
             userId: c.userId || userId,
+            tenantId: c.tenantId,
             parentChunkId: c.parentChunkId,
             headingPath: c.headingPath,
             sectionId: c.sectionId,
@@ -458,6 +475,8 @@ export class ElasticsearchProvider implements OnModuleInit {
             sourceStart: c.sourceStart,
             sourceEnd: c.sourceEnd,
             docVersion: c.docVersion,
+            contentHash: c.contentHash,
+            indexGeneration: c.indexGeneration,
             effectiveAt: c.effectiveAt?.toISOString() ?? null,
             expiredAt: c.expiredAt?.toISOString() ?? null,
             sourceAuthority: c.sourceAuthority,
@@ -543,6 +562,8 @@ export class ElasticsearchProvider implements OnModuleInit {
     available: boolean;
     chunkCount: number;
     documentCount: number;
+    contentHashes?: string[];
+    indexGenerations?: string[];
     reason?: string;
   }> {
     if (!this.enabled) {
@@ -550,6 +571,8 @@ export class ElasticsearchProvider implements OnModuleInit {
         available: false,
         chunkCount: 0,
         documentCount: 0,
+        contentHashes: [],
+        indexGenerations: [],
         reason: 'elasticsearch_disabled',
       };
     }
@@ -557,14 +580,29 @@ export class ElasticsearchProvider implements OnModuleInit {
     if (userId) filter.push({ term: { userId } });
     const query: estypes.QueryDslQueryContainer = { bool: { filter } };
     try {
-      const [chunks, documents] = await Promise.all([
+      const [chunks, documents, metadata] = await Promise.all([
         this.client.count({ index: this.indexName, query }),
         this.client.count({ index: this.documentIndexName, query }),
+        this.client.search({
+          index: this.indexName,
+          query,
+          size: 0,
+          aggs: {
+            contentHashes: { terms: { field: 'contentHash', size: 10000 } },
+            indexGenerations: { terms: { field: 'indexGeneration', size: 100 } },
+          },
+        }),
       ]);
+      const aggregations = metadata.aggregations as {
+        contentHashes?: { buckets?: Array<{ key: string }> };
+        indexGenerations?: { buckets?: Array<{ key: string }> };
+      } | undefined;
       return {
         available: true,
         chunkCount: chunks.count,
         documentCount: documents.count,
+        contentHashes: aggregations?.contentHashes?.buckets?.map((bucket) => bucket.key) ?? [],
+        indexGenerations: aggregations?.indexGenerations?.buckets?.map((bucket) => bucket.key) ?? [],
       };
     } catch (err) {
       return {

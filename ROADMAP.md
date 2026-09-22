@@ -49,6 +49,8 @@
 
 ## 当前结论
 
+- **本轮高风险生产治理（2026-09-22）**：生产环境不再因认证存储为空自动创建 `admin／user` 已知凭据；新建 API Token 默认仅授予 `rag:chat`，高风险 scope 必须显式申请。文档同步上传增加 Multer 文件大小上限；异步入库先写入对象存储，BullMQ 只传 `objectKey`，Worker 完成或失败后清理临时对象，避免把完整 Base64 文件塞进 Redis。Domain Event Outbox 的隐式幂等键改为事件内容摘要，后续生命周期事件不会被同一聚合的旧事件吞掉；事件 payload 改为递归移除 prompt、凭据、Cookie 等敏感字段。定时任务恢复、启动、刷新和停止会等待 BullMQ Scheduler 成功或显式失败，数据库不会在注册失败时标记为 running。Backend 全量 Jest 83 套／416 项、Backend lint、Backend build 与 `git diff --check` 通过。关系型资源 `tenant_id`／IAM 主数据、跨实例运行事件序号、按订阅投递账本、真实模型超时取消和索引内容 hash 对账仍需 schema／目标环境授权与验证。
+
 - **本轮工作流租户读取与覆盖保护（2026-09-22）**：产研工作流的状态、列表、编码上下文、交接 Manifest、Schema 预览与项目导出接口现在都会复用请求中的 `tenantId` 校验；带租户请求不能读取未绑定租户的历史 Checkpoint。`start／startAsync` 遇到已有同 `threadId` 的 Checkpoint 时先做 owner／tenant 校验，不再把无权访问误判为首次执行并覆盖其他租户工作流。新增跨租户覆盖回归测试，工作流定向测试 16 项、Backend 全量 Jest 81 套／408 项、根目录构建和 Backend 构建通过。该修复只补应用层边界，不替代关系型资源 `tenant_id` 迁移与组织 IAM 主数据。
 
 - **本轮审批恢复租户校验（2026-09-22）**：Chat 审批恢复把当前认证 `tenantId` 传入 Agentic Checkpoint 恢复入口；当请求带租户而检查点缺少租户或租户不一致时拒绝恢复，避免只靠 `threadId／userId` 继续执行旧检查点。Chat 与 Agentic 定向 23 项、Backend 构建通过。历史无租户检查点需要迁移或明确兼容策略，当前带租户请求默认拒绝。
@@ -901,3 +903,8 @@
 - 2026-09-14：补全 Auto 流程图的联网补证分支，明确仅 `web_allowed` 可调用 Bocha，`local_only` 内部问题禁止联网。
 - 2026-09-14：补充 Auto 与 Simple 的联网边界说明：Auto 主路径交给 Simple 时复用首轮证据且不主动联网，直接 Simple 模式在 `web_allowed` 且本地证据不足时才触发网页回退。
 - 2026-09-14：补充 Chat Agentic 的 Query 标准化节点，明确在来源判断和 Fast Path 前完成历史指代消解、术语统一与 standaloneQuery 生成。
+### 2026-09-22
+
+- **六项生产治理改造完成**：资源表完整补齐 `tenantId` 并回填 `legacy`，新增默认租户值；新增 PostgreSQL IAM／组织／角色／权限表和 `IamService`；运行事件改为按租户／线程使用数据库原子序号；Outbox 新增按订阅的持久投递账本；Supervisor 超时和取消信号贯穿路由、Agent 管线及模型调用；文档与 BM25／Elasticsearch 写入 `contentHash`、`indexGeneration`，RAG Admin 对账增加内容 hash／版本检查。
+- **迁移与验证**：执行 `1788100000000-AddTenantIamRuntimeGovernance`、`1788200000000-DefaultLegacyTenantScope`、`1788300000000-UniqueRuntimeEventSequence`、`1788400000000-SeedRuntimeEventSequences`；Backend build ✅；定向 Jest ✅；全量 Jest 修复索引对账测试兼容后通过；`migration:show` 显示 27 条迁移已执行。`.obsidian/workspace.json`、`workspace/bm25-index.json` 为既有本地变更，未纳入本轮。
+- **剩余生产大项收口**：认证登录／刷新自动同步 IAM 成员与默认角色，生产用户接口在 API scope 之外增加 IAM `platform.read` 门禁并保留 Service Token 独立边界；Conversation 与 Agent Run 创建、读取、列表、删除、消息／事件写入、取消和缓存统一带 `tenantId`；索引 Reconciler 将 BM25／Elasticsearch 内容 hash／版本不一致投递到持久修复队列；IAM 初始化、角色绑定支持多实例并发幂等。Backend build ✅；全量 Jest 83 套／419 项、Chat／Agent Run／JWT-IAM／Index Reconciler 定向测试 ✅；未新增破坏性迁移。

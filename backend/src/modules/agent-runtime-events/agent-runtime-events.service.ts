@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { AgentRuntimeEventEntity } from '../../providers/db/entities/agent-runtime-event.entity';
+import { AgentRuntimeEventSequenceEntity } from '../../providers/db/entities/agent-runtime-event-sequence.entity';
 
 @Injectable()
 export class AgentRuntimeEventsService {
@@ -11,9 +12,13 @@ export class AgentRuntimeEventsService {
   constructor(
     @InjectRepository(AgentRuntimeEventEntity)
     private readonly events: Repository<AgentRuntimeEventEntity>,
+    @InjectRepository(AgentRuntimeEventSequenceEntity)
+    private readonly sequences: Repository<AgentRuntimeEventSequenceEntity>,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async emit(input: {
+    tenantId?: string;
     threadId: string;
     runId?: string;
     taskId?: string;
@@ -36,6 +41,7 @@ export class AgentRuntimeEventsService {
   }
 
   private async persist(input: {
+    tenantId?: string;
     threadId: string;
     runId?: string;
     taskId?: string;
@@ -44,36 +50,60 @@ export class AgentRuntimeEventsService {
     target?: string;
     payload?: unknown;
   }) {
-    const latest = await this.events.findOne({
-      where: { threadId: input.threadId },
-      order: { sequence: 'DESC' },
-    });
+    const tenantId = input.tenantId ?? 'legacy';
+    const sequence = await this.nextSequence(tenantId, input.threadId);
     return this.events.save(
       this.events.create({
         id: randomUUID(),
+        tenantId,
         threadId: input.threadId,
         runId: input.runId ?? null,
         taskId: input.taskId ?? null,
         eventType: input.eventType,
         actor: input.actor,
         target: input.target ?? null,
-        sequence: (latest?.sequence ?? 0) + 1,
+        sequence,
         payload: JSON.stringify(input.payload ?? {}),
       }),
     );
   }
 
-  async list(threadId?: string, runId?: string) {
+  private async nextSequence(tenantId: string, threadId: string): Promise<number> {
+    if (this.dataSource.options.type === 'postgres') {
+      const rows = await this.dataSource.query(
+        `INSERT INTO "agent_runtime_event_sequences" ("id", "tenantId", "threadId", "nextSequence") VALUES ($1, $2, $3, 1)
+         ON CONFLICT ("tenantId", "threadId") DO UPDATE SET "nextSequence" = "agent_runtime_event_sequences"."nextSequence" + 1, "updatedAt" = CURRENT_TIMESTAMP
+         RETURNING "nextSequence"`,
+        [randomUUID(), tenantId, threadId],
+      );
+      return Number(rows[0]?.nextSequence ?? 1);
+    }
+
+    // MySQL fallback：唯一键保证每个租户/线程只有一条序号行，更新后再读取。
+    await this.dataSource.query(
+      `INSERT INTO agent_runtime_event_sequences (id, tenantId, threadId, nextSequence) VALUES (?, ?, ?, 1)
+       ON DUPLICATE KEY UPDATE nextSequence = nextSequence + 1, updatedAt = CURRENT_TIMESTAMP`,
+      [randomUUID(), tenantId, threadId],
+    );
+    const rows = await this.sequences.findOne({ where: { tenantId, threadId } });
+    return rows?.nextSequence ?? 1;
+  }
+
+  async list(threadId?: string, runId?: string, tenantId = 'legacy') {
     const rows = await this.events.find({
-      where: { ...(threadId ? { threadId } : {}), ...(runId ? { runId } : {}) },
+      where: {
+        tenantId,
+        ...(threadId ? { threadId } : {}),
+        ...(runId ? { runId } : {}),
+      },
       order: { sequence: 'ASC' },
       take: 2000,
     });
     return rows.map((row) => ({ ...row, payload: this.parse(row.payload) }));
   }
 
-  async metrics(threadId?: string, runId?: string) {
-    const events = await this.list(threadId, runId);
+  async metrics(threadId?: string, runId?: string, tenantId = 'legacy') {
+    const events = await this.list(threadId, runId, tenantId);
     const count = (type: string) =>
       events.filter((event) => event.eventType === type).length;
     return {

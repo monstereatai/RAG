@@ -14,6 +14,10 @@ export class QueryLogEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
 
+  @Index('IDX_query_logs_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   userId!: string | null;
 

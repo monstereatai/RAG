@@ -17,6 +17,7 @@ export class EditorAgent implements ISubAgent {
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const start = Date.now();
+    input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
     const systemPrompt = `你是一个专业的编辑。你的任务是根据评审意见对文本进行最终修改和润色。
@@ -35,10 +36,13 @@ export class EditorAgent implements ISubAgent {
       .join('\n');
 
     try {
-      const response = await model.invoke([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
+      const response = await model.invoke(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { signal: input.signal },
+      );
 
       const content =
         typeof response.content === 'string'
@@ -56,6 +60,7 @@ export class EditorAgent implements ISubAgent {
         durationMs: Date.now() - start,
       };
     } catch (err) {
+      if (input.signal?.aborted) throw err;
       this.logger.error(`Editor failed: ${(err as Error).message}`);
       return {
         content: `编辑阶段失败：${(err as Error).message}`,

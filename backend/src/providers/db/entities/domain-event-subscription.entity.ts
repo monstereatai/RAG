@@ -11,6 +11,9 @@ import {
 @Index('IDX_domain_event_subscriptions_enabled', ['enabled', 'channel'])
 export class DomainEventSubscriptionEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_domain_event_subscriptions_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 120 }) name!: string;
   @Column({ type: 'text' }) eventTypes!: string;
   @Column({ type: 'varchar', length: 32 }) channel!:

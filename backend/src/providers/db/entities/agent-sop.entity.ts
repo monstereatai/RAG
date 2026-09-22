@@ -11,6 +11,9 @@ import {
 @Index('IDX_agent_sops_role_status', ['role', 'status'])
 export class AgentSopEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_agent_sops_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 64, unique: true }) key!: string;
   @Column({ type: 'varchar', length: 64 }) role!: string;
   @Column({ type: 'varchar', length: 128 }) name!: string;

@@ -96,26 +96,52 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 
 ### 运行治理边界
 
+- 生产认证存储为空时不再自动补齐 `admin／user` 已知种子账号；新建 API Token 默认只授予 `rag:chat`，其他能力必须显式申请 scope。认证用户和 Token 仍可使用 Redis 共享 JSON；正式 IAM、组织角色和租户主数据已落 PostgreSQL，认证存储切换仍需按环境逐步完成。
+- 文档异步入库会先把原始文件写入对象存储，BullMQ 只携带 `objectKey`、任务和租户上下文，Worker 在处理完成或失败后清理临时对象；同步与管理端上传统一受 `DOCUMENT_UPLOAD_MAX_BYTES`（默认 200 MB）限制。对象存储不可用时不会把完整文件重新塞入 Redis。
+- Domain Event Outbox 的隐式幂等键按事件内容摘要生成，显式 `idempotencyKey` 仍可用于业务操作级幂等；payload 脱敏递归处理嵌套对象和数组；按订阅维度的持久投递账本已记录每次尝试、退避和最终状态。
+- 定时任务只有在 BullMQ Scheduler 注册成功后才会写入 `running`，刷新和停止也会等待持久调度操作完成；注册／注销失败会显式返回错误，不再静默吞掉。Supervisor 的总超时和取消信号已贯穿领域路由、Agent 管线及模型调用；真实供应商连接释放和跨实例故障演练仍需目标环境验证。
+
 - 队列状态和失败任务接口只提供应用层观测与按 owner 重试；真正的跨实例死信转移、告警接收、值班和容量水位仍由 Redis／BullMQ 生产环境验收。
 - 外部 URL 的 SSRF 防护覆盖常见私网地址、DNS 解析、重定向和 Playwright 最终地址；生产仍应在网络层补充 egress 白名单、代理隔离和请求审计，不能只依赖应用层校验。
-- `tenantId` 仍是现有数据库中的预留字段。本轮未执行数据库迁移，因此不能宣称已经完成企业级 IAM／ABAC 的租户级隔离；必须在明确租户模型、数据迁移和索引过滤契约后再验收。
+- `tenantId` 已通过两条迁移覆盖资源表并回填 `legacy`，但字段暂时可空、应用层仍有旧调用方，尚不能宣称 ABAC 规则已经覆盖所有业务资源；后续需按租户逐模块收紧查询过滤。
 - 产研工作流的状态、列表、交接 Manifest、Schema 预览和项目导出会复用请求租户校验；带租户请求拒绝读取未绑定租户的历史 Checkpoint。启动同一 `threadId` 时先校验已有 Checkpoint 的 owner／tenant，避免把越权访问误判为首次执行并覆盖已有工作流。这是应用层保护，不替代资源表 `tenant_id` 迁移。
 - Chat 审批恢复也会把当前认证租户传入 Agentic Checkpoint；请求租户与检查点租户不一致或检查点缺少租户时拒绝恢复。该 fail-closed 规则保护新链路，但历史无租户检查点需在迁移或兼容策略确定后处理。
 - LangGraph Checkpoint 在生产或严格依赖模式下对 Redis 读写采用严格错误语义，连接失败不会退回进程内 `MemorySaver`，避免单实例假成功和跨实例恢复丢失；开发环境才保留内存降级。真实 Redis 故障转移与恢复演练仍需目标环境验收。
 - Artifact 生成队列和定时任务启动恢复同样在生产／严格依赖模式下拒绝 Redis 缺失时的进程内降级；Artifact 入队失败会落库为 `failed`，定时任务不会被当前实例私自接管。真实 BullMQ 故障转移、死信和重放仍需目标环境演练。
 - 生产 `JwtAuthGuard` 已对用户 JWT／API Token 启用租户上下文 fail-closed：没有 `tenantId` 的用户身份不能访问业务接口；内部 Service Token 仍由独立守卫处理。该门禁避免迁移前的无租户身份继续读写共享资源，但不替代关系型租户字段迁移。
 - 多索引补偿目前保留失败状态、删除重试和人工入口；Milvus 删除重试在 Redis 可用时已持久化并可跨实例恢复。管理端索引审计已能逐文档核对 PostgreSQL、Elasticsearch、BM25、Milvus 和 Neo4j 来源状态，生产 Reconciler 会把可修复缺口投递到 `rag-index-repair`；Domain Event Outbox 已有 Redis 派发租约和并发幂等保护，文档审核状态／审核记录、文档生命周期／版本生效已在同一 PostgreSQL 事务中写入 Outbox，其他业务领域、告警和真实故障演练仍未完成。
-- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 不可用时不会退回 JWT URL 参数或不安全的进程内票据。认证用户和 API Token 现在优先使用 Redis 共享 JSON 存储，生产 Redis 不可用时认证读写直接 fail-closed；激活／重置 token 在生产同样默认要求 Redis（`REQUIRE_DISTRIBUTED_TOKEN_STORE=true`），仅开发环境允许进程内降级。仅开发环境允许 JSON 文件存储（`ALLOW_FILE_AUTH_STORE=true`）。Redis 共享 JSON 仍不是关系型用户表，组织、角色和租户主数据迁移仍待数据库方案确认。
-- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 不可用时不会退回 JWT URL 参数或不安全的进程内票据。Redis 低版本不支持 `GETDEL` 时使用 Lua 原子读删，避免并发重复消费。认证用户和 API Token 现在优先使用 Redis 共享 JSON 存储，生产 Redis 不可用时认证读写直接 fail-closed；激活／重置 token 在生产同样默认要求 Redis（`REQUIRE_DISTRIBUTED_TOKEN_STORE=true`），仅开发环境允许进程内降级。仅开发环境允许 JSON 文件存储（`ALLOW_FILE_AUTH_STORE=true`）。Redis 共享 JSON 仍不是关系型用户表，组织、角色和租户主数据迁移仍待数据库方案确认。
+- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 不可用时不会退回 JWT URL 参数或不安全的进程内票据。认证用户和 API Token 仍优先使用 Redis 共享 JSON 存储，生产 Redis 不可用时认证读写直接 fail-closed；激活／重置 token 在生产同样默认要求 Redis（`REQUIRE_DISTRIBUTED_TOKEN_STORE=true`），仅开发环境允许进程内降级。组织、角色和租户主数据已具备 PostgreSQL IAM 表，但认证用户切换到 IAM 的迁移仍需按环境执行。
+- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 低版本不支持 `GETDEL` 时使用 Lua 原子读删，避免并发重复消费。
 - 工作流失败任务现在记录结构化 dead-letter 日志并支持配置保留期；生产 Redis／BullMQ 不可用时拒绝进程内降级。真正的持久化死信、告警路由、值班确认和跨实例重放仍需目标环境接入。
 - 文档异步入库队列与工作流／定时队列保持相同边界：生产或 `core.requireDependencies=true` 时 Redis／BullMQ 不可用会拒绝入队并把任务标记为失败，开发环境才允许受限同步降级；Redis 队列可用时使用稳定 `taskId` 去重并由 Worker 接管。
-- `tenantId` 已进入 JWT／用户记录类型和运行时匹配工具；文档 ACL 在用户带 `tenantId` 时会按文档 owner 所属租户过滤共享／public／role 结果，避免已有 owner 数据跨租户泄露。但资源表和外部索引仍没有自己的 `tenantId`，队列、审计和组织／角色主数据也未完成全链路租户过滤，不能把企业级 IAM／ABAC 标为已完成。
-- API Token 的 `scopes` 现在进入请求身份并由 `JwtAuthGuard` 按接口元数据校验；Chat、AG-UI 用户流、文档、Graph、Memory、Workflow、RAG Gateway、周报、Structured、MCP、Skills、Supervisor、Agent Runtime、Agent Evals、Jobs、Obsidian、Speech、Observability 和 Token 管理接口分别声明最小 scope，SSE 一次性票据会保留 API Token 身份和 scope，普通 JWT 与内部 Service Token 继续走各自认证边界。资源表级 tenant_id／组织角色主数据迁移仍未完成。
-- Chat、Chat SSE 和 AG-UI 用户流会把认证上下文中的 `tenantId` 传入统一 RequestContext、Hybrid／BM25-only 检索和 Document ACL；当 `users` 表尚未同步租户但认证存储已有租户时，ACL 仍按认证租户过滤；数据库用户与认证租户冲突时直接拒绝。资源表级 tenant_id／组织角色主数据迁移仍未完成。
+- `tenantId` 已进入 JWT／用户记录类型和运行时匹配工具；资源表已拥有对应字段和索引，文档 ACL 在用户带 `tenantId` 时会按文档 owner 所属租户过滤共享／public／role 结果。外部索引已写入租户字段，但旧索引仍需通过对账和重建逐步补齐，不能把 ABAC 视为一次迁移后自动完成。
+- API Token 的 `scopes` 现在进入请求身份并由 `JwtAuthGuard` 按接口元数据校验；Chat、AG-UI 用户流、文档、Graph、Memory、Workflow、RAG Gateway、周报、Structured、MCP、Skills、Supervisor、Agent Runtime、Agent Evals、Jobs、Obsidian、Speech、Observability 和 Token 管理接口分别声明最小 scope，SSE 一次性票据会保留 API Token 身份和 scope，普通 JWT 与内部 Service Token 继续走各自认证边界。资源表租户字段和组织角色主数据迁移已完成，仍需逐接口把旧角色判断切换到 IAM 权限码。
+- Chat、Chat SSE 和 AG-UI 用户流会把认证上下文中的 `tenantId` 传入统一 RequestContext、Hybrid／BM25-only 检索和 Document ACL；当 `users` 表尚未同步租户但认证存储已有租户时，ACL 仍按认证租户过滤；数据库用户与认证租户冲突时直接拒绝。资源表已完成租户字段回填，旧入口未传租户时由数据库默认落到 `legacy`，后续按模块收紧为必填。
 - 生产对象存储默认要求 MinIO 或兼容远程对象存储；`OBJECT_STORAGE_REQUIRE_REMOTE=true` 或 `NODE_ENV=production` 时，初始化、读写失败均直接报错，不会静默落到本地磁盘。
 - 查询日志和 LangFuse 追踪默认执行邮箱、手机号、凭据和长编号脱敏；`QUERY_LOG_RETENTION_DAYS` 控制查询日志保留期，`LANGFUSE_REDACT_CONTENT=false` 只能在完成数据分级与第三方合规评审后使用。
 - Simple／Agentic 的关键模型流式生成、结构化判断、证据压缩兜底、公共知识直答和 DeepAgent 查询规划会接收请求级 `AbortSignal`；`LlmProvider.getModel()` 返回的底层模型及其结构化 Runnable、stream／batch／transform 也会自动继承当前信号。Bocha 联网搜索与 DashScope Rerank 的出站 `fetch` 同样合并请求取消信号与 10 秒超时，Simple、Auto、Agentic 三条入口均会传递；仍有少数独立离线脚本或不经过 Chat 执行上下文的旧调用，需要在目标环境做取消演练。
 - Chat／AG-UI 用户入口已增加租户／用户固定窗口限流和可选日成本预算；生产通过 Redis Lua 原子“限额内预留”实现跨实例共享，超额请求不会先增加计数再拒绝，Redis 不可用时按 `TENANT_QUOTA_REQUIRE_REDIS` fail-closed。成本目前按每请求估算额度预留，真实模型 usage 对账和租户账单仍需接入真实计费数据。
+
+## 2026-09-22 六项生产治理改造
+
+- **资源租户字段迁移**：迁移 `1788100000000-AddTenantIamRuntimeGovernance` 为资源表补齐 `tenantId`、租户索引，并将历史记录回填到 `legacy`；迁移 `1788200000000-DefaultLegacyTenantScope` 为旧调用方设置安全默认值。字段暂时保持可空，应用层可渐进收紧，避免历史任务在升级时丢失。
+- **关系型 IAM**：新增 `iam_tenants`、`iam_memberships`、`iam_roles`、`iam_permissions`、`iam_role_permissions`、`iam_membership_roles`，内置 legacy 管理员／只读角色和 `platform.read` 权限；`IamService` 提供租户、成员、角色和权限查询，认证存储仍可独立运行，后续可按租户逐步切换正式授权。
+- **跨实例运行事件序号**：`agent_runtime_event_sequences` 以 `(tenantId, threadId)` 唯一键和 PostgreSQL 原子 upsert 分配序号；`agent_runtime_events` 另加 `(tenantId, threadId, sequence)` 唯一索引，运行事件不再依赖单实例内存队列，跨实例追加事件不会产生重复序号。
+- **订阅级 Outbox 账本**：`domain_event_deliveries` 以 `(eventId, subscriptionId)` 唯一键记录每个订阅的尝试次数、退避、成功和失败；某个 webhook 失败不会重复投递已经成功的其他订阅，人工 retry 会重置对应账本。
+- **Supervisor 全链路取消**：Supervisor 自带可配置总超时，并把 `AbortSignal` 传入领域路由、Agent 管线和每个模型调用；取消或超时会中断后续阶段，不再把取消误报成普通低置信度结果。
+- **索引 hash／版本对账**：文档元数据和切片保存 `contentHash`、`indexGeneration`；BM25 与 Elasticsearch 写入同一版本字段，RAG Admin 对账同时比较 chunk 数、内容 hash 和 generation，外部索引字段缺失会被标记为未完成对账而不是假成功。
+
+本轮已在本地 PostgreSQL 执行四条迁移（`1788100000000-AddTenantIamRuntimeGovernance`、`1788200000000-DefaultLegacyTenantScope`、`1788300000000-UniqueRuntimeEventSequence`、`1788400000000-SeedRuntimeEventSequences`）并通过 `migration:show`；迁移只新增表／字段、回填租户、设置默认值、建立唯一索引和初始化运行事件序号，不删除既有业务数据。生产发布仍需先备份数据库，再按同样顺序执行迁移并核对资源表数量、IAM 成员数和索引对账报告。
+
+## 2026-09-22 剩余生产大项收口
+
+- **IAM 正式接管用户入口**：登录／刷新会为用户补齐租户成员、`reader`／`admin` 系统角色和 `platform.read` 权限；生产开启 `AUTH_ENFORCE_IAM` 时，所有带 `ApiScopes` 的用户接口除 API Token scope 外，还必须通过当前租户的 IAM 成员权限检查，服务令牌仍由独立 `ServiceTokenGuard` 处理。成员、角色和权限初始化具备并发幂等保护。
+- **问答会话租户隔离**：Conversation 的创建、读取、列表、删除、消息写入、历史缓存和审批恢复均携带租户条件；同一用户跨租户时不会复用另一租户的会话缓存或向其中写入消息。
+- **运行中心租户隔离**：Chat／AG-UI 创建 Agent Run 时写入租户，运行事件、客户端断流取消、审批恢复和按线程查找活动 Run 都复用同一租户条件，避免只凭 `threadId` 或 `runId` 跨租户读取或取消。
+- **索引自动修复闭环**：`bm25_content_hash_mismatch`、`elasticsearch_content_hash_mismatch` 及 generation 不一致现在会进入 Index Reconciler 的持久修复队列，不再只被审计报告发现而不自动修复。
+- **Outbox 故障恢复边界**：订阅级账本与 Redis 派发租约共同保证多实例单扫描；进程在 webhook 已发送但账本尚未落库时，下一轮会按稳定 `deliveryId` 继续恢复，人工 retry 只重置对应订阅投递状态。
+
+本轮验证：Backend build 通过；Chat、JWT/IAM 门禁、索引 Reconciler 定向测试通过（共 20 项）；未新增破坏性数据库迁移。
 
 ## 当前不能宣称的内容
 

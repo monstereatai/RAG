@@ -13,6 +13,9 @@ import {
 })
 export class WorkflowTemplateEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
+  @Index('IDX_workflow_templates_tenant')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  tenantId!: string | null;
   @Column({ type: 'varchar', length: 128 }) key!: string;
   @Column({ type: 'varchar', length: 255 }) name!: string;
   @Column({ type: 'text', nullable: true, default: null }) description!:

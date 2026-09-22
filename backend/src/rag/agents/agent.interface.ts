@@ -17,6 +17,8 @@ export interface AgentInput {
   history?: Array<{ role: 'human' | 'ai'; content: string }>;
   /** 额外配置 */
   metadata?: Record<string, unknown>;
+  /** Supervisor 的全链路取消信号。 */
+  signal?: AbortSignal;
 }
 
 export interface AgentOutput {
@@ -39,6 +41,12 @@ export interface ISubAgent {
   readonly role: string;
   /** 执行任务 */
   execute(input: AgentInput): Promise<AgentOutput>;
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : Boolean((error as { name?: string })?.name === 'AbortError');
 }
 
 /**

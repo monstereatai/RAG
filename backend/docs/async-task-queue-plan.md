@@ -55,6 +55,7 @@ Client → 轮询 GET /api/v1/documents/tasks/:taskId → 返回进度
 - [x] 处理成功／失败写回 `document_tasks`，空内容失败也会落状态。
 - [x] 提供任务状态 API，修复 `queue/status` 路由顺序。
 - [x] 开发环境 Redis 未配置时降级为同步处理；生产环境或 `REQUIRE_CORE_DEPENDENCIES=true` 时 Redis 不可用直接拒绝入队。
+- [x] 原始文件先写入对象存储，BullMQ 仅传递 `objectKey`、任务和租户上下文；Worker 完成或失败后清理临时对象，避免把 Base64 文件内容写入 Redis。同步、用户端和管理端上传统一受 `DOCUMENT_UPLOAD_MAX_BYTES` 限制（默认 200 MB）。
 - [x] 索引对账后的重建使用独立 `rag-index-repair` BullMQ 队列；生产／严格依赖模式 Redis 不可用时拒绝修复，开发环境才允许同步降级。
 - [x] 生产索引自动对账按周期读取只读审计结果，只把可修复的索引缺口投递到 `rag-index-repair`；固定路径提供状态和手动触发入口，Redis／BullMQ 不可用时自动修复 fail-closed。
 

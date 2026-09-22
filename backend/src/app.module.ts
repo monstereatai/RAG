@@ -53,6 +53,7 @@ import { AgentTasksModule } from './modules/agent-tasks/agent-tasks.module';
 import { AgentRuntimeEventsModule } from './modules/agent-runtime-events/agent-runtime-events.module';
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
 import { DomainEventsModule } from './modules/domain-events/domain-events.module';
+import { IamModule } from './modules/iam/iam.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { DomainEventsModule } from './modules/domain-events/domain-events.module
     AgentRuntimeEventsModule,
     AgentRuntimeModule,
     DomainEventsModule,
+    IamModule,
   ],
   providers: [
     {
