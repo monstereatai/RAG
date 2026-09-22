@@ -23,6 +23,7 @@ export class KarpathyObsidianIngestService {
     url: string;
     extracted: UrlExtractionResult;
     userId: string;
+    tenantId?: string;
     filename: string;
     businessMetadata?: DocumentBusinessMetadata;
   }): Promise<KarpathyObsidianIngestResult> {
@@ -48,6 +49,7 @@ export class KarpathyObsidianIngestService {
           content,
           params.userId,
           {
+            tenantId: params.tenantId,
             originalBuffer: params.extracted.snapshot,
             contentType: params.extracted.contentType || 'text/plain',
             businessMetadata: params.businessMetadata,
@@ -88,6 +90,7 @@ export class KarpathyObsidianIngestService {
       content,
       params.userId,
       {
+        tenantId: params.tenantId,
         originalBuffer: params.extracted.snapshot,
         contentType: params.extracted.contentType || 'text/plain',
         businessMetadata: params.businessMetadata,
@@ -113,6 +116,7 @@ export class KarpathyObsidianIngestService {
     title: string;
     content: string;
     userId: string;
+    tenantId?: string;
     filename: string;
     sourceUrl?: string;
     sourceType: 'document' | 'official-docs' | 'manual';
@@ -139,6 +143,7 @@ export class KarpathyObsidianIngestService {
           params.userId,
           {
             taskId: params.taskId,
+            tenantId: params.tenantId,
             originalBuffer:
               params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
             contentType: params.contentType ?? 'text/markdown',
@@ -182,6 +187,7 @@ export class KarpathyObsidianIngestService {
       params.userId,
       {
         taskId: params.taskId,
+        tenantId: params.tenantId,
         originalBuffer:
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',

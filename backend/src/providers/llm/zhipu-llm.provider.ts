@@ -4,8 +4,13 @@ import { ChatOpenAI } from '@langchain/openai';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from '../../modules/metrics/metrics.service';
-import { ILLMProvider } from './llm-provider.interface';
+import { ILLMProvider, LlmInvokeOptions } from './llm-provider.interface';
 import { LlmInvocationError } from './llm-invocation.error';
+import { readLlmUsage } from './llm-usage';
+import {
+  createLlmUsageCallback,
+  hasLlmUsageObserver,
+} from './llm-usage-context';
 
 /** 智谱 GLM Provider：复用官方 OpenAI 兼容接口，不依赖专有 SDK。 */
 @Injectable()
@@ -32,19 +37,34 @@ export class ZhipuLlmProvider implements ILLMProvider {
       maxTokens: this.config.get<number>('llm.zhipu.maxTokens') ?? 4096,
       maxRetries: this.config.get<number>('llm.zhipu.maxRetries') ?? 2,
       configuration: { baseURL: baseUrl },
+      callbacks: [
+        createLlmUsageCallback((usage) =>
+          this.metrics.observeLlmUsage('zhipu', this.modelName, usage),
+        ),
+      ],
     });
   }
 
-  async invoke(messages: string | BaseMessageLike[]): Promise<string> {
+  async invoke(
+    messages: string | BaseMessageLike[],
+    options: LlmInvokeOptions = {},
+  ): Promise<string> {
     const startedAt = process.hrtime.bigint();
     const input =
       typeof messages === 'string' ? messages : JSON.stringify(messages);
     try {
-      const response = await this.model.invoke(messages, {
-        signal: AbortSignal.timeout(
-          this.config.get<number>('llm.zhipu.timeoutMs') ?? 60_000,
-        ),
-      });
+      const timeoutSignal = AbortSignal.timeout(
+        this.config.get<number>('llm.zhipu.timeoutMs') ?? 60_000,
+      );
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
+      const response = await this.model.invoke(messages, { signal });
+      const usage = readLlmUsage(response);
+      if (usage) {
+        // 经由 LlmProvider.runWithUsage 时，模型回调已采集真实 usage；避免重复计数。
+        if (!hasLlmUsageObserver()) options.onUsage?.(usage);
+      }
       const answer =
         typeof response.content === 'string'
           ? response.content

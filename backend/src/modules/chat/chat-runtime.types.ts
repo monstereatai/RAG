@@ -7,6 +7,7 @@ import type { SseEvent } from '../../rag/agentic/sse-event';
 export interface RequestContext {
   requestId: string;
   userId: string;
+  tenantId?: string;
   threadId: string;
   query: string;
   mode: ChatMode;
@@ -14,7 +15,12 @@ export interface RequestContext {
   sourcePolicy: QueryIntent['sourcePolicy'];
   scope?: RetrievalScope;
   deadlineAt: number;
-  budget: { maxSteps: number; maxToolCalls: number; remainingSteps: number; remainingToolCalls: number };
+  budget: {
+    maxSteps: number;
+    maxToolCalls: number;
+    remainingSteps: number;
+    remainingToolCalls: number;
+  };
 }
 
 /** 可序列化的执行状态，作为流式事件和检查点的稳定摘要。 */

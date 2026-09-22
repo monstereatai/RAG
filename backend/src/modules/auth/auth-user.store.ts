@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   randomBytes,
@@ -8,13 +14,14 @@ import {
 } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { RedisProvider } from '../../providers/redis/redis.provider';
 
 /**
  * 认证用户落盘记录（workspace/auth-users.json）
  *
  * 决策说明：UserEntity（users 表）没有 email / emailVerified 列，且共享实体
  * 与迁移文件不在本模块可修改范围内；同时本项目要求「数据库不可用不阻断启动」。
- * 因此注册用户采用「进程内 Map + JSON 文件持久化」方案，保证重启不丢，
+ * 生产环境优先使用 Redis 共享 JSON 存储，开发环境才允许本地 JSON 文件；
  * 原硬编码测试账号保留为种子数据（emailVerified=true，兼容既有演示流程）。
  * 后续接入 PG 时可平滑替换为 users 表 + email 迁移列，接口签名保持不变。
  */
@@ -29,6 +36,8 @@ export interface AuthUserRecord {
   /** scrypt 口令哈希（格式 scrypt:<saltHex>:<hashHex>） */
   passwordHash: string;
   role: 'admin' | 'user';
+  /** 数据库租户迁移完成前可选；新部署应在签发 token 前补齐。 */
+  tenantId?: string;
   /** 邮箱是否已激活（登录是否放行由 AUTH_REQUIRE_EMAIL_VERIFIED 控制） */
   emailVerified: boolean;
   createdAt: string;
@@ -68,9 +77,9 @@ const SEED_USERS: Array<{
 const SCRYPT_KEYLEN = 64;
 
 /**
- * 认证用户存储（内存 Map + JSON 文件持久化）
+ * 认证用户存储（Redis 共享存储，开发环境 JSON 文件降级）
  *
- * - 读写每次都经文件（与 ApiTokenService 一致），保证多进程视角一致；
+ * - Redis 可用时所有实例读写同一份数据；
  * - 种子用户在文件缺失或被删时自动补齐；
  * - 测试可通过 RAG_AUTH_USERS_STORE 把落盘文件指到临时路径（冒烟注入点）。
  */
@@ -80,7 +89,10 @@ export class AuthUserStore {
   private readonly filePath: string;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly configService?: ConfigService) {
+  constructor(
+    private readonly configService?: ConfigService,
+    @Optional() private readonly redisProvider?: RedisProvider,
+  ) {
     const uploadDir =
       this.configService?.get<string>('workspace.uploadDir') ??
       resolve(process.cwd(), '../workspace/uploads');
@@ -118,62 +130,76 @@ export class AuthUserStore {
     realName?: string;
     role?: 'admin' | 'user';
   }): Promise<AuthUserRecord> {
-    const { users } = await this.load();
-    const username = input.username.trim();
-    const email = input.email.trim().toLowerCase();
+    return this.withSharedWrite(async () => {
+      const { users } = await this.load();
+      const username = input.username.trim();
+      const email = input.email.trim().toLowerCase();
 
-    if (
-      users.some(
-        (user) => user.username.toLowerCase() === username.toLowerCase(),
-      )
-    ) {
-      throw new ConflictException('username already exists');
-    }
-    if (users.some((user) => user.email.toLowerCase() === email)) {
-      throw new ConflictException('email already registered');
-    }
+      if (
+        users.some(
+          (user) => user.username.toLowerCase() === username.toLowerCase(),
+        )
+      ) {
+        throw new ConflictException('username already exists');
+      }
+      if (users.some((user) => user.email.toLowerCase() === email)) {
+        throw new ConflictException('email already registered');
+      }
 
-    const now = new Date().toISOString();
-    const record: AuthUserRecord = {
-      id: randomUUID(),
-      username,
-      email,
-      realName: input.realName?.trim() || undefined,
-      passwordHash: input.passwordHash,
-      role: input.role ?? 'user',
-      emailVerified: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-    users.push(record);
-    await this.save({ version: 1, users });
-    return record;
+      const now = new Date().toISOString();
+      const record: AuthUserRecord = {
+        id: randomUUID(),
+        username,
+        email,
+        realName: input.realName?.trim() || undefined,
+        passwordHash: input.passwordHash,
+        role: input.role ?? 'user',
+        emailVerified: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      users.push(record);
+      await this.save({ version: 1, users });
+      return record;
+    });
   }
 
   async updatePassword(id: string, passwordHash: string): Promise<void> {
-    const { users } = await this.load();
-    const user = users.find((item) => item.id === id);
-    if (!user) {
-      throw new ConflictException('user not found');
-    }
-    user.passwordHash = passwordHash;
-    user.updatedAt = new Date().toISOString();
-    await this.save({ version: 1, users });
+    await this.withSharedWrite(async () => {
+      const { users } = await this.load();
+      const user = users.find((item) => item.id === id);
+      if (!user) {
+        throw new ConflictException('user not found');
+      }
+      user.passwordHash = passwordHash;
+      user.updatedAt = new Date().toISOString();
+      await this.save({ version: 1, users });
+    });
   }
 
   async markEmailVerified(id: string): Promise<void> {
-    const { users } = await this.load();
-    const user = users.find((item) => item.id === id);
-    if (!user) {
-      throw new ConflictException('user not found');
-    }
-    user.emailVerified = true;
-    user.updatedAt = new Date().toISOString();
-    await this.save({ version: 1, users });
+    await this.withSharedWrite(async () => {
+      const { users } = await this.load();
+      const user = users.find((item) => item.id === id);
+      if (!user) {
+        throw new ConflictException('user not found');
+      }
+      user.emailVerified = true;
+      user.updatedAt = new Date().toISOString();
+      await this.save({ version: 1, users });
+    });
   }
 
   /** 加载用户列表并补齐种子用户；文件缺失 / 损坏时从空表开始 */
   private async load(): Promise<AuthUserFile> {
+    if (this.redisProvider?.isEnabled()) {
+      return this.loadShared();
+    }
+    if (!this.allowFileStore) {
+      throw new ServiceUnavailableException(
+        'shared auth user store is required but Redis is unavailable',
+      );
+    }
     let file: AuthUserFile = { version: 1, users: [] };
     try {
       const raw = await readFile(this.filePath, 'utf8');
@@ -212,18 +238,37 @@ export class AuthUserStore {
       mutated = true;
     }
     if (mutated) {
-      // 持久化失败不阻断读取（种子仍在内存中可用）
-      await this.save(file).catch((error: unknown) => {
+      try {
+        await this.save(file);
+      } catch (error) {
+        if (!this.allowFileStore) throw error;
         this.logger.warn(
           `failed to persist seed users: ${(error as Error).message}`,
         );
-      });
+      }
     }
     return file;
   }
 
   /** 串行化原子写（临时文件 + rename），避免并发写坏文件 */
   private async save(file: AuthUserFile): Promise<void> {
+    if (this.redisProvider?.isEnabled()) {
+      const saved = await this.redisProvider.setRequired(
+        'rag:auth:users:v1',
+        JSON.stringify(file),
+      );
+      if (!saved) {
+        throw new ServiceUnavailableException(
+          'shared auth user store write failed',
+        );
+      }
+      return;
+    }
+    if (!this.allowFileStore) {
+      throw new ServiceUnavailableException(
+        'shared auth user store is required but Redis is unavailable',
+      );
+    }
     this.writeQueue = this.writeQueue.then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const tmpPath = `${this.filePath}.${randomBytes(4).toString('hex')}.tmp`;
@@ -233,6 +278,72 @@ export class AuthUserStore {
       await rename(tmpPath, this.filePath);
     });
     return this.writeQueue;
+  }
+
+  private get allowFileStore(): boolean {
+    return (
+      this.configService?.get<boolean>('auth.allowFileStore') !== false &&
+      process.env.ALLOW_FILE_AUTH_STORE !== 'false'
+    );
+  }
+
+  /** Redis JSON 读改写需要跨实例互斥，否则两个注册／改密请求会互相覆盖。 */
+  private async withSharedWrite<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.redisProvider?.isEnabled()) return operation();
+    const lockKey = 'rag:auth:users:lock:v1';
+    const lockValue = randomUUID();
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (await this.redisProvider.setIfAbsent(lockKey, lockValue, 10)) {
+        try {
+          return await operation();
+        } finally {
+          await this.redisProvider.releaseLock(lockKey, lockValue);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new ServiceUnavailableException(
+      'shared auth user store is busy; retry the request',
+    );
+  }
+
+  private async loadShared(): Promise<AuthUserFile> {
+    const raw = await this.redisProvider?.get('rag:auth:users:v1');
+    let file: AuthUserFile = { version: 1, users: [] };
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as AuthUserFile;
+        file = {
+          version: 1,
+          users: Array.isArray(parsed.users) ? parsed.users : [],
+        };
+      } catch {
+        throw new ServiceUnavailableException(
+          'shared auth user store contains invalid data',
+        );
+      }
+    }
+    let mutated = false;
+    for (const seed of SEED_USERS) {
+      if (file.users.some((user) => user.username.toLowerCase() === seed.username)) {
+        continue;
+      }
+      const now = new Date().toISOString();
+      file.users.push({
+        id: seed.id,
+        username: seed.username,
+        email: seed.email,
+        passwordHash: AuthUserStore.hashPassword(seed.password),
+        role: seed.role,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      mutated = true;
+    }
+    if (mutated) await this.save(file);
+    return file;
   }
 
   /** 口令哈希：scrypt + 随机盐（无新增第三方依赖） */

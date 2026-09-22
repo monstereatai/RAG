@@ -73,7 +73,15 @@ export class ArtifactsService implements OnModuleInit {
       errorMessage: null,
     });
     await this.artifacts.save(artifact);
-    await this.queue.enqueue(id);
+    try {
+      await this.queue.enqueue(id);
+    } catch (error) {
+      artifact.status = 'failed';
+      artifact.errorMessage =
+        error instanceof Error ? error.message : 'artifact queue unavailable';
+      await this.artifacts.save(artifact);
+      throw error;
+    }
     return this.toView(artifact);
   }
 

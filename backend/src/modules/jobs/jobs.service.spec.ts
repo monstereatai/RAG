@@ -15,6 +15,7 @@ describe('JobsService', () => {
   let mockSupervisorService: any;
   let mockScheduledAnalysis: any;
   let mockRedisProvider: any;
+  let mockExecutionRepo: any;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -43,7 +44,7 @@ describe('JobsService', () => {
         return Promise.resolve(entity);
       }),
     };
-    const mockExecutionRepo = {
+    mockExecutionRepo = {
       create: jest.fn().mockImplementation((dto) => dto),
       save: jest.fn().mockResolvedValue({}),
       find: jest.fn().mockResolvedValue([]),
@@ -150,6 +151,59 @@ describe('JobsService', () => {
       `rag:scheduled-job:${job.id}:lock`,
       expect.any(String),
     );
+  });
+
+  it('fails closed when distributed locking is required but Redis is unavailable', async () => {
+    const previous = process.env.REQUIRE_DISTRIBUTED_LOCK;
+    process.env.REQUIRE_DISTRIBUTED_LOCK = 'true';
+    try {
+      const job = await service.create({
+        type: 'every',
+        everyMs: 60_000,
+        instruction: 'must be distributed',
+      });
+
+      await expect(service.runNow(job.id)).rejects.toThrow(
+        'Redis 分布式锁不可用',
+      );
+      expect(mockScheduledAnalysis.execute).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.REQUIRE_DISTRIBUTED_LOCK;
+      else process.env.REQUIRE_DISTRIBUTED_LOCK = previous;
+    }
+  });
+
+  it('does not restore active jobs into in-process timers when Redis queue is required', async () => {
+    const scheduledQueue = {
+      enabled: false,
+      required: true,
+      setProcessor: jest.fn(),
+    };
+    const guardedService = new JobsService(
+      scheduler,
+      mockJobRepo,
+      mockExecutionRepo as any,
+      mockSupervisorService,
+      mockScheduledAnalysis,
+      { observeScheduledJob: jest.fn() } as any,
+      { emit: jest.fn() } as any,
+      mockRedisProvider,
+      scheduledQueue as any,
+    );
+    const job = {
+      id: 'restore-required-queue',
+      type: 'every',
+      everyMs: 60_000,
+      enabled: true,
+      running: true,
+      instruction: 'must use durable queue',
+    };
+    mockJobsMap.set(job.id, job);
+
+    await guardedService.onModuleInit();
+
+    expect(scheduler.getIntervals()).not.toContain(job.id);
+    expect(job.running).toBe(false);
   });
 
   it('creates an at job and disables it after running once', async () => {

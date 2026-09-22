@@ -129,6 +129,14 @@ export const ProductionWorkflowState = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => '',
   }),
+  /**
+   * 队列／多实例恢复时携带的租户上下文。旧 checkpoint 没有该字段时仍按
+   * userId 兼容读取；新工作流必须在创建时写入，避免 Worker 丢失租户边界。
+   */
+  tenantId: Annotation<string | undefined>({
+    reducer: (_previous, next) => next,
+    default: () => undefined,
+  }),
   runId: Annotation<string>({
     reducer: (_previous, next) => next,
     default: () => '',

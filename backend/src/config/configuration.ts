@@ -6,17 +6,50 @@ dotenv.config();
 export const configuration = () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  core: {
+    requireDependencies:
+      process.env.REQUIRE_CORE_DEPENDENCIES === 'true' ||
+      process.env.NODE_ENV === 'production',
+  },
 
   // 认证（JWT）
   auth: {
     jwtSecret: process.env.JWT_SECRET ?? '',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+    requireDistributedTokenStore:
+      process.env.REQUIRE_DISTRIBUTED_TOKEN_STORE === 'true' ||
+      process.env.NODE_ENV === 'production',
+    allowFileStore:
+      process.env.NODE_ENV !== 'production' ||
+      process.env.ALLOW_FILE_AUTH_STORE === 'true',
+    // 生产用户身份必须带租户上下文；内部 Service Token 走独立守卫，不受此门禁影响。
+    requireTenantContext:
+      process.env.AUTH_REQUIRE_TENANT_CONTEXT === 'true' ||
+      process.env.NODE_ENV === 'production',
   },
 
   // API 限流（默认 60 req/min）
   throttle: {
     ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '60', 10),
+  },
+
+  // 租户／用户级请求和 AI 成本预算；生产默认启用并要求 Redis 共享计数。
+  tenantQuota: {
+    enabled:
+      process.env.TENANT_QUOTA_ENABLED === 'true' ||
+      process.env.NODE_ENV === 'production',
+    requireDistributed:
+      process.env.TENANT_QUOTA_REQUIRE_REDIS === 'true' ||
+      process.env.NODE_ENV === 'production',
+    windowMs: parseInt(process.env.TENANT_QUOTA_WINDOW_MS ?? '60000', 10),
+    requestLimit: parseInt(process.env.TENANT_QUOTA_REQUEST_LIMIT ?? '60', 10),
+    dailyBudgetUsd: parseFloat(
+      process.env.TENANT_QUOTA_DAILY_BUDGET_USD ?? '0',
+    ),
+    estimatedCostPerRequestUsd: parseFloat(
+      process.env.TENANT_QUOTA_ESTIMATED_COST_USD ?? '0.02',
+    ),
   },
 
   // 向量库（可插拔：milvus | pgvector）
@@ -79,11 +112,52 @@ export const configuration = () => ({
   // Redis（对话历史 + 缓存）
   redis: {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    requireDistributedLock:
+      process.env.REQUIRE_DISTRIBUTED_LOCK === 'true' ||
+      process.env.NODE_ENV === 'production',
+  },
+
+  // Outbox 派发由多个 Backend 实例共享时必须使用 Redis 租约，避免重复投递。
+  domainEvents: {
+    requireDistributedLock:
+      process.env.DOMAIN_EVENTS_REQUIRE_DISTRIBUTED_LOCK === 'true' ||
+      process.env.NODE_ENV === 'production',
+    lockTtlSeconds: parseInt(
+      process.env.DOMAIN_EVENTS_LOCK_TTL_SECONDS ?? '120',
+      10,
+    ),
+  },
+
+  workflowQueue: {
+    failedRetentionSeconds: parseInt(
+      process.env.QUEUE_FAILED_RETENTION_SECONDS ?? '604800',
+      10,
+    ),
+  },
+
+  // 外部索引自动对账：生产默认开启，但只有 Redis/BullMQ 可用时才会投递修复任务。
+  ragIndexReconciler: {
+    enabled:
+      process.env.RAG_INDEX_RECONCILER_ENABLED === 'true' ||
+      (process.env.RAG_INDEX_RECONCILER_ENABLED !== 'false' &&
+        process.env.NODE_ENV === 'production'),
+    intervalMs: parseInt(
+      process.env.RAG_INDEX_RECONCILER_INTERVAL_MS ?? '300000',
+      10,
+    ),
+    batchSize: parseInt(
+      process.env.RAG_INDEX_RECONCILER_BATCH_SIZE ?? '100',
+      10,
+    ),
   },
 
   // 对象存储（业务原始文件与解析资源）
   objectStorage: {
     provider: process.env.OBJECT_STORAGE_PROVIDER ?? 'local',
+    // 生产环境禁止在远程对象存储不可用时静默写入本机磁盘。
+    requireRemote:
+      process.env.OBJECT_STORAGE_REQUIRE_REMOTE === 'true' ||
+      process.env.NODE_ENV === 'production',
     endpoint: process.env.OBJECT_STORAGE_ENDPOINT ?? '127.0.0.1',
     port: parseInt(process.env.OBJECT_STORAGE_PORT ?? '9000', 10),
     useSSL: process.env.OBJECT_STORAGE_USE_SSL === 'true',
@@ -214,6 +288,11 @@ export const configuration = () => ({
     sourceAuthorityRules: process.env.RAG_SOURCE_AUTHORITY_RULES ?? '',
   },
 
+  // 问答运营日志：只保留脱敏后的查询文本，默认 180 天自动清理。
+  queryLog: {
+    retentionDays: parseInt(process.env.QUERY_LOG_RETENTION_DAYS ?? '180', 10),
+  },
+
   // Agentic RAG 成本与复杂度边界
   agentic: {
     confidenceThreshold: parseFloat(
@@ -269,6 +348,11 @@ export const configuration = () => ({
   // LangFuse 线上观测（可选）
   langfuse: {
     enabled: process.env.LANGFUSE_ENABLED === 'true',
+    // 生产默认只向第三方追踪系统发送脱敏内容。
+    redactContent:
+      process.env.LANGFUSE_REDACT_CONTENT === 'true' ||
+      (process.env.LANGFUSE_REDACT_CONTENT !== 'false' &&
+        process.env.NODE_ENV === 'production'),
     publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? '',
     secretKey: process.env.LANGFUSE_SECRET_KEY ?? '',
     baseUrl: process.env.LANGFUSE_BASE_URL ?? 'https://cloud.langfuse.com',

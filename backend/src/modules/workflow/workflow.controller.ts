@@ -15,6 +15,7 @@ import {
   parseSseEventTypes,
 } from './agentic-workflow.mermaid';
 import { ProductionWorkflowService } from './production-workflow.service';
+import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
 import { GraphService } from '../graph/graph.service';
 import {
   ResumeProductionWorkflowDto,
@@ -26,14 +27,44 @@ import {
   searchPlaywayActivityTemplates,
   searchPlaywayComponents,
 } from './playway-component-registry';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('workflows')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:workflow')
 export class WorkflowController {
   constructor(
     private readonly productionWorkflow: ProductionWorkflowService,
     private readonly graphService: GraphService,
+    private readonly productionQueue: ProductionWorkflowQueueService,
   ) {}
+
+  @Get('production/queue/status')
+  productionQueueStatus() {
+    return this.productionQueue.getStatus();
+  }
+
+  @Get('production/queue/failed')
+  productionQueueFailed(
+    @CurrentUser() user: JwtPayload,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = Number.parseInt(limit ?? '50', 10);
+    return this.productionQueue.listFailed(
+      user.userId,
+      Number.isFinite(parsedLimit)
+        ? Math.min(Math.max(parsedLimit, 1), 200)
+        : 50,
+    );
+  }
+
+  @Post('production/queue/failed/:jobId/retry')
+  productionQueueRetry(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.productionQueue.retryFailed(jobId, user.userId);
+  }
 
   @Get('agentic/mermaid')
   getAgenticMermaid(@Query('events') events?: string) {
@@ -45,12 +76,12 @@ export class WorkflowController {
     @Body() body: StartProductionWorkflowDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.startAsync(body, user.userId);
+    return this.productionWorkflow.startAsync(body, user.userId, user.tenantId);
   }
 
   @Get('production')
   listProduction(@CurrentUser() user: JwtPayload) {
-    return this.productionWorkflow.list(user.userId);
+    return this.productionWorkflow.list(user.userId, user.tenantId);
   }
 
   @Get('production/component-rules')
@@ -123,7 +154,12 @@ export class WorkflowController {
     @Body() body: ResumeProductionWorkflowDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.resumeAsync(threadId, body, user.userId);
+    return this.productionWorkflow.resumeAsync(
+      threadId,
+      body,
+      user.userId,
+      user.tenantId,
+    );
   }
 
   @Post('production/:threadId/revise')
@@ -132,7 +168,12 @@ export class WorkflowController {
     @Body() body: ReviseProductionWorkflowDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.reviseAsync(threadId, body, user.userId);
+    return this.productionWorkflow.reviseAsync(
+      threadId,
+      body,
+      user.userId,
+      user.tenantId,
+    );
   }
 
   @Get('production/:threadId/coding-context')
@@ -140,7 +181,11 @@ export class WorkflowController {
     @Param('threadId') threadId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.codingContext(threadId, user.userId);
+    return this.productionWorkflow.codingContext(
+      threadId,
+      user.userId,
+      user.tenantId,
+    );
   }
 
   @Get('production/:threadId/handoff')
@@ -148,7 +193,11 @@ export class WorkflowController {
     @Param('threadId') threadId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.handoffManifest(threadId, user.userId);
+    return this.productionWorkflow.handoffManifest(
+      threadId,
+      user.userId,
+      user.tenantId,
+    );
   }
 
   @Get('production/:threadId/playway-preview')
@@ -156,7 +205,11 @@ export class WorkflowController {
     @Param('threadId') threadId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.playwayPreview(threadId, user.userId);
+    return this.productionWorkflow.playwayPreview(
+      threadId,
+      user.userId,
+      user.tenantId,
+    );
   }
 
   @Get('production/:threadId')
@@ -164,6 +217,6 @@ export class WorkflowController {
     @Param('threadId') threadId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.productionWorkflow.status(threadId, user.userId);
+    return this.productionWorkflow.status(threadId, user.userId, user.tenantId);
   }
 }

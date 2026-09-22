@@ -83,7 +83,12 @@ export class AgenticRagService {
   private readonly logger = new Logger(AgenticRagService.name);
   private readonly deepAgents = new Map<
     string,
-    { invoke: (input: unknown) => Promise<unknown> }
+    {
+      invoke: (
+        input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => Promise<unknown>;
+    }
   >();
   private app: any;
   private readonly checkpointer: RedisCheckpointer;
@@ -167,7 +172,13 @@ export class AgenticRagService {
       0.5,
       1,
     );
-    this.checkpointer = new RedisCheckpointer(this.redisProvider);
+    this.checkpointer = new RedisCheckpointer(
+      this.redisProvider,
+      86400 * 7,
+      undefined,
+      this.configService.get<boolean>('core.requireDependencies') === true ||
+        this.configService.get<string>('nodeEnv') === 'production',
+    );
     this.initGraph();
   }
 
@@ -308,6 +319,9 @@ export class AgenticRagService {
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const userId = config?.configurable?.userId as string | undefined;
+    const abortSignal = config?.configurable?.abortSignal as
+      | AbortSignal
+      | undefined;
     const prefetchedFastPath = config?.configurable?.prefetchedFastPath as
       | PrefetchedFastPath
       | undefined;
@@ -330,7 +344,7 @@ export class AgenticRagService {
     const deepAgentQueries =
       seededSubQuestions.length > 0 || state.augmentedQueries.length > 0
         ? []
-        : await this.planQueriesWithDeepAgent(state.query);
+        : await this.planQueriesWithDeepAgent(state.query, abortSignal);
     let queries: string[];
 
     if (seededSubQuestions.length > 0) {
@@ -381,10 +395,15 @@ export class AgenticRagService {
         }
 
         const raw = await this.withTimeout(
-          chain.invoke({
-            query: state.query,
-            few_shot_block: fewShotBlock,
-          }),
+          chain.invoke(
+            {
+              query: state.query,
+              few_shot_block: fewShotBlock,
+            },
+            {
+              signal: abortSignal,
+            },
+          ),
           8_000,
           'Query augment structured output',
         );
@@ -510,6 +529,8 @@ export class AgenticRagService {
                       retrievalQuery,
                       userId,
                       retrieveOptions.scope,
+                      true,
+                      retrieveOptions.tenantId,
                     );
                   }
                   return results;
@@ -816,10 +837,15 @@ export class AgenticRagService {
       const context = state.retrievedChunks
         .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 500)}`)
         .join('\n\n');
-      const result = await chain.invoke({
-        query: state.query,
-        context,
-      });
+      const result = await chain.invoke(
+        {
+          query: state.query,
+          context,
+        },
+        {
+          signal: config?.configurable?.abortSignal as AbortSignal | undefined,
+        },
+      );
 
       this.logger.log(
         `Retrieval sufficiency: sufficient=${result.sufficient}, reason=${result.reason}`,
@@ -961,6 +987,9 @@ export class AgenticRagService {
                     this.bochaSearchService.search(
                       item.question,
                       this.maxWebSearchResults,
+                      config?.configurable?.abortSignal as
+                        | AbortSignal
+                        | undefined,
                     ),
                   config,
                 )
@@ -1116,6 +1145,7 @@ export class AgenticRagService {
             state.query,
             state.retrievedChunks,
             this.maxRerankTopN,
+            config?.configurable?.abortSignal as AbortSignal | undefined,
           ),
         config,
       );
@@ -1199,6 +1229,7 @@ export class AgenticRagService {
         memoryMessages,
         (token) => onEvent?.({ type: 'token', data: token }),
         strongBadCase.query,
+        retrieveOptions.signal,
       );
       onEvent?.({ type: 'citation', data: state.retrievedChunks });
       const artifacts = this.withAnswerArtifact(
@@ -1275,6 +1306,7 @@ export class AgenticRagService {
                     scope: retrieveOptions.scope,
                     entities: retrieveOptions.entities,
                     needsSynthesis: retrieveOptions.needsSynthesis,
+                    signal: retrieveOptions.signal,
                   },
                 );
               return grounded.answer;
@@ -1339,6 +1371,7 @@ export class AgenticRagService {
       const fallbackAnswer = await this.synthesizeEvidenceAnswer(
         state.query,
         state.retrievedChunks,
+        retrieveOptions.signal,
       );
       let repairedFallbackAnswer = fallbackAnswer
         ? this.karpathyRagService.repairAnswerCitations(
@@ -1361,7 +1394,11 @@ export class AgenticRagService {
         // 语义总结；统一切换备用模型重新压缩同一批证据。
         try {
           const qwenAnswer = await this.llmProvider.runWithModel('qwen', () =>
-            this.synthesizeEvidenceAnswer(state.query, state.retrievedChunks),
+            this.synthesizeEvidenceAnswer(
+              state.query,
+              state.retrievedChunks,
+              retrieveOptions.signal,
+            ),
           );
           repairedFallbackAnswer = qwenAnswer
             ? this.karpathyRagService.repairAnswerCitations(
@@ -1456,6 +1493,7 @@ export class AgenticRagService {
   private async synthesizeEvidenceAnswer(
     query: string,
     chunks: RetrievedChunk[],
+    signal?: AbortSignal,
   ): Promise<string | null> {
     if (chunks.length === 0) return null;
     const evidence = chunks
@@ -1468,7 +1506,9 @@ export class AgenticRagService {
     const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
     try {
       const answer = await this.withTimeout(
-        this.llmProvider.invoke(prompt),
+        this.llmProvider.invoke(prompt, {
+          signal: this.composeSignal(signal, 20_000),
+        }),
         20_000,
         'Evidence synthesis fallback',
       );
@@ -1476,7 +1516,9 @@ export class AgenticRagService {
       if (this.llmProvider.getActiveProviderName() !== 'qwen') {
         const fallback = await this.withTimeout(
           this.llmProvider.runWithModel('qwen', () =>
-            this.llmProvider.invoke(prompt),
+            this.llmProvider.invoke(prompt, {
+              signal: this.composeSignal(signal, 20_000),
+            }),
           ),
           20_000,
           'Qwen evidence synthesis fallback',
@@ -1492,7 +1534,9 @@ export class AgenticRagService {
         try {
           const fallback = await this.withTimeout(
             this.llmProvider.runWithModel('qwen', () =>
-              this.llmProvider.invoke(prompt),
+              this.llmProvider.invoke(prompt, {
+                signal: this.composeSignal(signal, 20_000),
+              }),
             ),
             20_000,
             'Qwen evidence synthesis fallback',
@@ -1567,13 +1611,18 @@ export class AgenticRagService {
     try {
       const structured = model.withStructuredOutput(schema);
       const chain = reflectionPrompt.pipe(structured);
-      const result = await chain.invoke({
-        query: state.query,
-        context: state.retrievedChunks
-          .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 800)}`)
-          .join('\n'),
-        answer: state.answer,
-      });
+      const result = await chain.invoke(
+        {
+          query: state.query,
+          context: state.retrievedChunks
+            .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 800)}`)
+            .join('\n'),
+          answer: state.answer,
+        },
+        {
+          signal: config?.configurable?.abortSignal as AbortSignal | undefined,
+        },
+      );
 
       const passed = result.confidence >= this.confidenceThreshold;
       const retryCount = state.retryCount + 1;
@@ -1704,6 +1753,7 @@ export class AgenticRagService {
     approval: 'approved' | 'rejected',
     feedback?: string,
     onEvent?: SseCallback,
+    tenantId?: string,
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -1737,7 +1787,7 @@ export class AgenticRagService {
       },
     });
 
-    const resumeContext = await this.getResumeContext(threadId);
+    const resumeContext = await this.getResumeContext(threadId, tenantId);
     // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。恢复时必须
     // 重新带上原始用户、权限 scope、插件策略和预算，不能以空上下文重放。
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -1771,6 +1821,7 @@ export class AgenticRagService {
 
   private async getResumeContext(
     threadId: string,
+    tenantId?: string,
   ): Promise<AgenticResumeContext> {
     const tuple = await this.checkpointer.getTuple({
       configurable: { thread_id: threadId },
@@ -1778,6 +1829,13 @@ export class AgenticRagService {
     const context = tuple?.checkpoint.channel_values.resumeContext;
     if (!this.isResumeContext(context)) {
       throw new BadRequestException('检查点缺少可恢复的授权上下文');
+    }
+    const requestedTenant = tenantId?.trim();
+    if (requestedTenant) {
+      const checkpointTenant = context.retrieveOptions.tenantId?.trim();
+      if (!checkpointTenant || checkpointTenant !== requestedTenant) {
+        throw new BadRequestException('检查点租户与当前身份不匹配');
+      }
     }
     return context;
   }
@@ -1936,6 +1994,7 @@ export class AgenticRagService {
     memoryMessages: Array<{ role: string; content: string }> = [],
     enableInterrupt = false,
     retrieveOptions: RetrieveOptions = {},
+    executionOptions: { signal?: AbortSignal } = {},
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -1954,6 +2013,13 @@ export class AgenticRagService {
     }>;
     executionState?: AgenticRagStateType['executionState'];
   }> {
+    if (executionOptions.signal?.aborted) {
+      throw new BadRequestException({
+        code: 'AGENT_RUN_CANCELLED',
+        message: '运行已取消，不再执行后续节点。',
+      });
+    }
+    retrieveOptions.signal = executionOptions.signal;
     const dangerousFindings = detectDangerousQuery(query);
     if (dangerousFindings.length > 0) {
       for (const finding of dangerousFindings) {
@@ -2059,6 +2125,7 @@ export class AgenticRagService {
       retrieveOptions.requestContext = {
         requestId: randomUUID(),
         userId: userId ?? 'anonymous',
+        tenantId: retrieveOptions.tenantId,
         threadId,
         query,
         mode,
@@ -2142,7 +2209,9 @@ export class AgenticRagService {
       });
       let answer: string;
       try {
-        answer = await this.llmProvider.invoke(prompt);
+        answer = await this.llmProvider.invoke(prompt, {
+          signal: this.composeSignal(retrieveOptions.signal, 30_000),
+        });
         if (!answer.trim()) {
           throw new Error('LLM returned an empty direct answer');
         }
@@ -2361,6 +2430,7 @@ export class AgenticRagService {
           memoryMessages,
           enableInterrupt,
           retrieveOptions,
+          abortSignal: executionOptions.signal,
           runtimeRunId: retrieveOptions.runtimeRunId,
           fastPathChunks: fastPathGate?.chunks ?? [],
           fastPathBundle: fastPathGate?.prefetchedFastPath.evidenceBundle,
@@ -2937,6 +3007,10 @@ export class AgenticRagService {
   private async isCancellationRequested(
     config?: RunnableConfig,
   ): Promise<boolean> {
+    const abortSignal = config?.configurable?.abortSignal as
+      | AbortSignal
+      | undefined;
+    if (abortSignal?.aborted) return true;
     const threadId = this.threadIdFromConfig(config);
     const runId = this.runIdFromConfig(config);
     if (!threadId || !runId) return false;
@@ -3032,10 +3106,18 @@ export class AgenticRagService {
     }
   }
 
+  private composeSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  }
+
   /**
    * 使用 deepagents 做 agentic 检索规划。
    */
-  private async planQueriesWithDeepAgent(query: string): Promise<string[]> {
+  private async planQueriesWithDeepAgent(
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
     try {
       const agent = await this.withTimeout(
         this.getDeepAgent(),
@@ -3044,14 +3126,17 @@ export class AgenticRagService {
       );
       const formatted = await deepAgentQueryPlanUserPrompt.format({ query });
       const result = await this.withTimeout(
-        agent.invoke({
-          messages: [
-            {
-              role: 'user',
-              content: formatted,
-            },
-          ],
-        }),
+        agent.invoke(
+          {
+            messages: [
+              {
+                role: 'user',
+                content: formatted,
+              },
+            ],
+          },
+          signal ? { signal } : undefined,
+        ),
         8_000,
         'DeepAgent query planning',
       );
@@ -3066,7 +3151,10 @@ export class AgenticRagService {
   }
 
   private async getDeepAgent(): Promise<{
-    invoke: (input: unknown) => Promise<unknown>;
+    invoke: (
+      input: unknown,
+      options?: { signal?: AbortSignal },
+    ) => Promise<unknown>;
   }> {
     const modelName = this.llmProvider.getActiveProviderName();
     const cached = this.deepAgents.get(modelName);
@@ -3082,7 +3170,12 @@ export class AgenticRagService {
       createDeepAgent: (params: {
         model: ReturnType<LlmProvider['getModel']>;
         systemPrompt: string;
-      }) => { invoke: (input: unknown) => Promise<unknown> };
+      }) => {
+        invoke: (
+          input: unknown,
+          options?: { signal?: AbortSignal },
+        ) => Promise<unknown>;
+      };
     }>;
     const { createDeepAgent } = await dynamicImport('deepagents');
 

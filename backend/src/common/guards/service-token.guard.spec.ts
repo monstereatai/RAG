@@ -1,6 +1,5 @@
 import { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { ServiceTokenGuard } from './service-token.guard';
 
 describe('ServiceTokenGuard', () => {
@@ -48,25 +47,28 @@ describe('ServiceTokenGuard', () => {
     );
   });
 
-  it('uses configured service token before JWT verification', () => {
-    const verifyAsync = jest.fn();
-    const jwtService = {
-      verifyAsync,
-    } as unknown as JwtService;
-    const guard = createGuard('configured-token', jwtService);
+  it('accepts the configured service token', () => {
+    const guard = createGuard('configured-token');
     const request = {
       headers: { authorization: 'Bearer configured-token' },
     };
 
     expect(guard.canActivate(createContext(request))).toBe(true);
-    expect(verifyAsync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a valid-looking user JWT instead of treating it as a service identity', async () => {
+    const guard = createGuard('configured-token');
+    const request = {
+      headers: { authorization: 'Bearer user-jwt' },
+    };
+
+    expect(() => guard.canActivate(createContext(request))).toThrow(
+      'invalid internal service authentication',
+    );
   });
 });
 
-function createGuard(
-  serviceToken?: string,
-  jwtService: JwtService = { verifyAsync: jest.fn() } as unknown as JwtService,
-) {
+function createGuard(serviceToken?: string) {
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'RAG_SERVICE_TOKEN') return serviceToken;
@@ -75,7 +77,7 @@ function createGuard(
     }),
   } as unknown as ConfigService;
 
-  return new ServiceTokenGuard(jwtService, configService);
+  return new ServiceTokenGuard(configService);
 }
 
 function createContext(request: Record<string, unknown>): ExecutionContext {

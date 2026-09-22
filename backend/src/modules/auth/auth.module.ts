@@ -7,6 +7,10 @@ import { ApiTokenService } from './api-token.service';
 import { AuthUserStore } from './auth-user.store';
 import { TokenStoreService } from './token-store/token-store.service';
 import { MailModule } from '../mail/mail.module';
+import { SseTicketService } from './sse-ticket.service';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
+import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard';
 
 @Global()
 @Module({
@@ -26,7 +30,25 @@ import { MailModule } from '../mail/mail.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, ApiTokenService, AuthUserStore, TokenStoreService],
-  exports: [AuthService, ApiTokenService, AuthUserStore, JwtModule],
+  providers: [
+    AuthService,
+    ApiTokenService,
+    AuthUserStore,
+    TokenStoreService,
+    SseTicketService,
+    JwtAuthGuard,
+    ServiceTokenGuard,
+    ApiTokenAccessGuard,
+  ],
+  exports: [
+    AuthService,
+    ApiTokenService,
+    AuthUserStore,
+    SseTicketService,
+    JwtAuthGuard,
+    ServiceTokenGuard,
+    ApiTokenAccessGuard,
+    JwtModule,
+  ],
 })
 export class AuthModule {}

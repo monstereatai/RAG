@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  OnModuleInit,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -39,6 +40,7 @@ import {
 import { DocumentQueueService } from '../document/document-queue.service';
 import type { DocumentBusinessMetadata } from '../document/document-profile.util';
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
+import { IndexRepairQueueService } from './index-repair-queue.service';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -91,6 +93,17 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
+type IndexAuditStatus = 'ok' | 'mismatch' | 'unavailable' | 'skipped';
+
+type IndexAuditCheck = {
+  status: IndexAuditStatus;
+  expected?: number;
+  actual?: number;
+  documentCount?: number;
+  sourcePresent?: boolean;
+  reason?: string;
+};
+
 /** 文档全文检索的高级筛选（全部可选；不传时行为与原先一致） */
 export interface DocumentSearchFilters {
   fileType?: string;
@@ -115,7 +128,7 @@ export interface DocumentAdminItem {
 }
 
 @Injectable()
-export class RagAdminService {
+export class RagAdminService implements OnModuleInit {
   private readonly logger = new Logger(RagAdminService.name);
 
   constructor(
@@ -146,7 +159,20 @@ export class RagAdminService {
     @Optional()
     @InjectRepository(QueryLogEntity)
     private readonly queryLogRepo?: Repository<QueryLogEntity>,
+    @Optional()
+    private readonly indexRepairQueue?: IndexRepairQueueService,
   ) {}
+
+  onModuleInit(): void {
+    this.indexRepairQueue?.registerProcessor(async (job) => {
+      const result = await this.reindexDocument(job.docId);
+      if (!result?.reindexed) {
+        throw new Error(
+          result?.reason ?? `document ${job.docId} reindex failed`,
+        );
+      }
+    });
+  }
 
   async uploadDocument(
     file: Express.Multer.File,
@@ -276,6 +302,10 @@ export class RagAdminService {
         available: true,
       },
     };
+  }
+
+  getIndexCompensationStatus() {
+    return this.documentService.getIndexCompensationStatus();
   }
 
   // ─── Documents ───────────────────────────────────────────────
@@ -991,14 +1021,13 @@ export class RagAdminService {
       docId,
       doc.userId,
       lifecycleStatus,
-    );
-    if (updated)
-      await this.domainEvents.emit({
+      {
         eventType: 'document.lifecycle_changed',
         aggregateType: 'document',
         aggregateId: docId,
         payload: { lifecycleStatus },
-      });
+      },
+    );
     return updated ? { docId, lifecycleStatus } : null;
   }
 
@@ -1052,14 +1081,13 @@ export class RagAdminService {
       docId,
       target.userId,
       versions.map((version) => version.docId),
-    );
-    if (updated)
-      await this.domainEvents.emit({
+      {
         eventType: 'document.effective',
         aggregateType: 'document',
         aggregateId: docId,
         payload: { docVersion: target.docVersion ?? null },
-      });
+      },
+    );
     return updated ? { docId, lifecycleStatus: 'effective' } : null;
   }
 
@@ -1130,65 +1158,219 @@ export class RagAdminService {
       order: { createdAt: 'DESC' },
       take: Math.min(Math.max(limit, 1), 1000),
     });
+    const chunks = docs.length
+      ? await this.chunkRepo.find({
+          where: { docId: In(docs.map((doc) => doc.docId)) },
+          select: ['docId'],
+        })
+      : [];
+    const dbChunkCounts = new Map<string, number>();
+    for (const chunk of chunks) {
+      dbChunkCounts.set(chunk.docId, (dbChunkCounts.get(chunk.docId) ?? 0) + 1);
+    }
     const now = Date.now();
-    const issues = docs.flatMap((doc) => {
-      const reasons: string[] = [];
-      if (doc.chunkCount <= 0) reasons.push('missing_chunks');
-      if (doc.graphIndexStatus === 'failed') reasons.push('graph_index_failed');
-      if (doc.graphIndexStatus === 'pending')
-        reasons.push('graph_index_pending');
-      if (
-        doc.lifecycleStatus === 'effective' &&
-        doc.reviewStatus !== 'approved'
-      )
-        reasons.push('effective_without_approval');
-      if (
-        doc.lifecycleStatus === 'effective' &&
-        doc.expiredAt &&
-        doc.expiredAt.getTime() <= now
-      )
-        reasons.push('expired_but_effective');
-      return reasons.length
-        ? [
-            {
-              docId: doc.docId,
-              filename: doc.filename,
-              chunkCount: doc.chunkCount,
-              lifecycleStatus: doc.lifecycleStatus,
-              reviewStatus: doc.reviewStatus,
-              graphIndexStatus: doc.graphIndexStatus,
-              reasons,
-            },
-          ]
-        : [];
-    });
+    const checks = await Promise.all(
+      docs.map(async (doc) => {
+        const expected = dbChunkCounts.get(doc.docId) ?? 0;
+        const bm25 = this.karpathyRagService.getIndexedChunkCount(
+          doc.docId,
+          doc.userId ?? undefined,
+        );
+        const es = await this.elasticsearchProvider.getIndexCountsByDocId(
+          doc.docId,
+          doc.userId ?? undefined,
+        );
+        const vectorRuntime = this.vectorStoreProvider.getRuntimeStatus();
+        const milvus = await this.readIndexCheck(
+          vectorRuntime.available,
+          () =>
+            this.vectorStoreProvider.countByDocId(
+              doc.docId,
+              doc.userId ?? undefined,
+            ),
+          expected,
+          'milvus',
+        );
+        const graph = await this.readGraphIndexCheck(
+          doc.graphIndexStatus,
+          doc.docId,
+          doc.userId ?? 'system',
+        );
+        const indexChecks: Record<string, IndexAuditCheck> = {
+          postgres: {
+            status: doc.chunkCount === expected ? 'ok' : 'mismatch',
+            expected,
+            actual: doc.chunkCount,
+            ...(doc.chunkCount === expected
+              ? {}
+              : { reason: 'documents_meta_chunk_count_mismatch' }),
+          },
+          bm25: {
+            status: bm25 === expected ? 'ok' : 'mismatch',
+            expected,
+            actual: bm25,
+            ...(bm25 === expected
+              ? {}
+              : { reason: 'bm25_chunk_count_mismatch' }),
+          },
+          elasticsearch: es.available
+            ? {
+                status:
+                  es.chunkCount === expected &&
+                  (expected === 0 || es.documentCount === 1)
+                    ? 'ok'
+                    : 'mismatch',
+                expected,
+                actual: es.chunkCount,
+                documentCount: es.documentCount,
+                ...(es.chunkCount === expected &&
+                (expected === 0 || es.documentCount === 1)
+                  ? {}
+                  : { reason: 'elasticsearch_index_count_mismatch' }),
+              }
+            : {
+                status: 'skipped',
+                reason: es.reason ?? 'elasticsearch_disabled',
+              },
+          milvus,
+          graph,
+        };
+        const reasons: string[] = [];
+        if (expected <= 0) reasons.push('missing_chunks');
+        if (indexChecks.postgres.status === 'mismatch')
+          reasons.push('metadata_chunk_count_mismatch');
+        if (indexChecks.bm25.status === 'mismatch')
+          reasons.push('bm25_chunk_count_mismatch');
+        if (indexChecks.elasticsearch.status === 'mismatch')
+          reasons.push('elasticsearch_index_count_mismatch');
+        if (indexChecks.milvus.status === 'mismatch')
+          reasons.push('milvus_chunk_count_mismatch');
+        if (indexChecks.milvus.status === 'unavailable')
+          reasons.push('milvus_unavailable');
+        if (indexChecks.graph.status === 'mismatch')
+          reasons.push('graph_index_missing');
+        if (doc.graphIndexStatus === 'failed')
+          reasons.push('graph_index_failed');
+        if (doc.graphIndexStatus === 'pending')
+          reasons.push('graph_index_pending');
+        if (
+          doc.lifecycleStatus === 'effective' &&
+          doc.reviewStatus !== 'approved'
+        )
+          reasons.push('effective_without_approval');
+        if (
+          doc.lifecycleStatus === 'effective' &&
+          doc.expiredAt &&
+          doc.expiredAt.getTime() <= now
+        )
+          reasons.push('expired_but_effective');
+        return {
+          docId: doc.docId,
+          filename: doc.filename,
+          chunkCount: expected,
+          lifecycleStatus: doc.lifecycleStatus,
+          reviewStatus: doc.reviewStatus,
+          graphIndexStatus: doc.graphIndexStatus,
+          checks: indexChecks,
+          reasons: [...new Set(reasons)],
+        };
+      }),
+    );
+    const issues = checks.filter((item) => item.reasons.length > 0);
+    const count = (reason: string) =>
+      issues.filter((item) => item.reasons.includes(reason)).length;
     return {
       available: true,
       scanned: docs.length,
       issueCount: issues.length,
       counts: {
-        missingChunks: issues.filter((item) =>
-          item.reasons.includes('missing_chunks'),
-        ).length,
-        graphIndexFailed: issues.filter((item) =>
-          item.reasons.includes('graph_index_failed'),
-        ).length,
-        graphIndexPending: issues.filter((item) =>
-          item.reasons.includes('graph_index_pending'),
-        ).length,
-        effectiveWithoutApproval: issues.filter((item) =>
-          item.reasons.includes('effective_without_approval'),
-        ).length,
-        expiredButEffective: issues.filter((item) =>
-          item.reasons.includes('expired_but_effective'),
-        ).length,
+        missingChunks: count('missing_chunks'),
+        graphIndexFailed: count('graph_index_failed'),
+        graphIndexPending: count('graph_index_pending'),
+        effectiveWithoutApproval: count('effective_without_approval'),
+        expiredButEffective: count('expired_but_effective'),
+        metadataChunkCountMismatch: count('metadata_chunk_count_mismatch'),
+        bm25ChunkCountMismatch: count('bm25_chunk_count_mismatch'),
+        elasticsearchIndexCountMismatch: count(
+          'elasticsearch_index_count_mismatch',
+        ),
+        milvusChunkCountMismatch: count('milvus_chunk_count_mismatch'),
+        milvusUnavailable: count('milvus_unavailable'),
+        graphIndexMissing: count('graph_index_missing'),
       },
       issues,
+      checks,
       repairActions: [
         'POST /rag/admin/documents/:docId/reindex',
         'POST /rag/admin/documents/tasks/:taskId/retry',
       ],
     };
+  }
+
+  private async readIndexCheck(
+    available: boolean,
+    read: () => Promise<number>,
+    expected: number,
+    indexName: string,
+  ): Promise<IndexAuditCheck> {
+    if (!available) {
+      return {
+        status: 'unavailable',
+        expected,
+        reason: `${indexName}_unavailable`,
+      };
+    }
+    try {
+      const actual = await read();
+      return {
+        status: actual === expected ? 'ok' : 'mismatch',
+        expected,
+        actual,
+        ...(actual === expected
+          ? {}
+          : { reason: `${indexName}_count_mismatch` }),
+      };
+    } catch (err) {
+      return {
+        status: 'unavailable',
+        expected,
+        reason: `${indexName}_unavailable:${(err as Error).message}`,
+      };
+    }
+  }
+
+  private async readGraphIndexCheck(
+    graphIndexStatus: DocumentMetaEntity['graphIndexStatus'],
+    docId: string,
+    userId: string,
+  ): Promise<IndexAuditCheck> {
+    if (!this.graphService.isEnabled()) {
+      return { status: 'skipped', reason: 'graph_disabled' };
+    }
+    if (graphIndexStatus !== 'indexed') {
+      return {
+        status: graphIndexStatus === 'failed' ? 'mismatch' : 'skipped',
+        sourcePresent: false,
+        reason: `graph_status_${graphIndexStatus}`,
+      };
+    }
+    try {
+      const result = await this.graphService.getSourceIndexStatus(
+        docId,
+        userId,
+      );
+      return {
+        status: result.sourcePresent ? 'ok' : 'mismatch',
+        actual: result.nodeCount + result.relationshipCount,
+        sourcePresent: result.sourcePresent,
+        reason: result.sourcePresent ? undefined : 'graph_source_missing',
+      };
+    } catch (err) {
+      return {
+        status: 'unavailable',
+        reason: `graph_unavailable:${(err as Error).message}`,
+      };
+    }
   }
 
   async repairDocumentIndexes(input: { docIds?: string[]; limit?: number }) {
@@ -1197,10 +1379,57 @@ export class RagAdminService {
     const targets = audit.issues.filter(
       (issue) => !requested || requested.has(issue.docId),
     );
+    if (
+      this.indexRepairQueue?.isEnabled() ||
+      this.indexRepairQueue?.isRequired()
+    ) {
+      const jobs = [];
+      for (const issue of targets) {
+        const job = {
+          id: IndexRepairQueueService.jobId(issue.docId),
+          docId: issue.docId,
+          requestedBy: 'rag-admin',
+          reason: issue.reasons.join(','),
+        };
+        const queued = await this.indexRepairQueue!.enqueue(job);
+        jobs.push({ ...job, queued });
+      }
+      return {
+        available: true,
+        queued: true,
+        requested: targets.length,
+        jobs,
+        queue: await this.indexRepairQueue!.getStatus(),
+      };
+    }
     const results = await Promise.all(
       targets.map((issue) => this.reindexDocument(issue.docId)),
     );
     return { available: true, requested: targets.length, results };
+  }
+
+  getIndexRepairQueueStatus() {
+    return (
+      this.indexRepairQueue?.getStatus() ??
+      Promise.resolve({
+        enabled: false,
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+      })
+    );
+  }
+
+  getFailedIndexRepairs(limit = 50) {
+    return this.indexRepairQueue?.listFailed(limit) ?? Promise.resolve([]);
+  }
+
+  retryIndexRepair(jobId: string) {
+    return (
+      this.indexRepairQueue?.retryFailed(jobId) ??
+      Promise.resolve({ retried: false, reason: 'queue is disabled' })
+    );
   }
 
   async listSecurityAudit(limit = 100) {
@@ -1228,28 +1457,31 @@ export class RagAdminService {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc) return null;
     const now = new Date();
-    await this.docMetaRepo.update(docId, {
-      reviewStatus,
-      reviewedBy: operatorId ?? null,
-      reviewedAt: action === 'submitted' ? null : now,
-      reviewComment: comment?.trim() || null,
-    });
-    await this.documentReviewRepo.save(
-      this.documentReviewRepo.create({
-        id: randomUUID(),
-        docId,
-        action,
-        operatorId: operatorId ?? null,
-        comment: comment?.trim() || null,
-      }),
-    );
-    if (action === 'approved' || action === 'rejected')
-      await this.domainEvents.emit({
-        eventType: `document.review_${action}`,
-        aggregateType: 'document',
-        aggregateId: docId,
-        payload: { reviewStatus, operatorId: operatorId ?? null },
+    await this.docMetaRepo.manager.transaction(async (manager) => {
+      await manager.getRepository(DocumentMetaEntity).update(docId, {
+        reviewStatus,
+        reviewedBy: operatorId ?? null,
+        reviewedAt: action === 'submitted' ? null : now,
+        reviewComment: comment?.trim() || null,
       });
+      await manager.getRepository(DocumentReviewEntity).save(
+        this.documentReviewRepo.create({
+          id: randomUUID(),
+          docId,
+          action,
+          operatorId: operatorId ?? null,
+          comment: comment?.trim() || null,
+        }),
+      );
+      if (action === 'approved' || action === 'rejected') {
+        await this.domainEvents.emitInTransaction(manager, {
+          eventType: `document.review_${action}`,
+          aggregateType: 'document',
+          aggregateId: docId,
+          payload: { reviewStatus, operatorId: operatorId ?? null },
+        });
+      }
+    });
     return { docId, reviewStatus, action };
   }
 

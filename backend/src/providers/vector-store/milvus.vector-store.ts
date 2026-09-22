@@ -337,6 +337,36 @@ export class MilvusVectorStoreProvider
     }
   }
 
+  async countByDocId(docId: string, userId?: string): Promise<number> {
+    if (!this.connected || !this.client) {
+      throw new Error('Milvus is unavailable');
+    }
+    const filters = ['doc_id == $docId'];
+    const exprValues: Record<string, string> = { docId };
+    if (userId) {
+      filters.push('user_id == $userId');
+      exprValues.userId = userId;
+    }
+    try {
+      const result = await this.withTimeout(
+        this.client.query({
+          collection_name: this.collection,
+          filter: filters.join(' && '),
+          exprValues,
+          output_fields: ['id'],
+          limit: 16_384,
+        }),
+        this.searchTimeoutMs + 200,
+        'Milvus count by docId',
+      );
+      this.recordSuccess();
+      return Array.isArray(result.data) ? result.data.length : 0;
+    } catch (err) {
+      this.recordFailure(err);
+      throw err;
+    }
+  }
+
   getIndexInfo(): VectorIndexInfo {
     return {
       provider: 'milvus',

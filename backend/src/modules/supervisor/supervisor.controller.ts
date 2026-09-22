@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
 import { SupervisorService } from './supervisor.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { IsString } from 'class-validator';
 
 class SupervisorQueryDto {
@@ -10,6 +11,7 @@ class SupervisorQueryDto {
 
 @Controller('supervisor')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:agent')
 export class SupervisorController {
   constructor(private readonly supervisorService: SupervisorService) {}
 

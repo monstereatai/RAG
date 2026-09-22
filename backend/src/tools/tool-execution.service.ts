@@ -14,6 +14,7 @@ export type ToolExecutionStatus =
   | 'success'
   | 'failed'
   | 'blocked'
+  | 'unknown'
   | 'recovered';
 
 export interface ExecuteRegisteredToolInput<T> extends ToolExecutionContext {
@@ -122,6 +123,15 @@ export class ToolExecutionService {
       }
     }
 
+    // 写入型工具必须依赖 Redis 的跨实例幂等锁。Redis 不可用时无法区分
+    // “尚未执行”和“已执行但结果丢失”，继续执行会把未知副作用放大成重复写入。
+    if (input.sideEffect && !this.redis.isEnabled()) {
+      return this.finish(input, callId, actor, startedAt, {
+        status: 'blocked',
+        error: '幂等存储不可用，写入型工具按安全策略暂不执行。',
+      });
+    }
+
     const idempotencyKey = input.sideEffect
       ? (input.idempotencyKey ?? this.fingerprint(input))
       : undefined;
@@ -169,12 +179,25 @@ export class ToolExecutionService {
 
     try {
       const output = await input.execute();
-      if (redisKey)
-        await this.redis.set(
+      if (redisKey) {
+        const markerWritten = await this.redis.setRequired(
           redisKey,
           `completed:${this.toText(output).slice(0, 20_000)}`,
           ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
         );
+        if (!markerWritten) {
+          return this.finish(input, callId, actor, startedAt, {
+            status: 'unknown',
+            output,
+            error:
+              '副作用已经执行，但幂等完成标记未确认；结果状态未知，禁止自动重试。',
+            outputPreview: this.toText(output).slice(
+              0,
+              ToolExecutionService.OUTPUT_PREVIEW_LIMIT,
+            ),
+          });
+        }
+      }
       const spilled = await this.spillIfNeeded(input, callId, output);
       return this.finish(input, callId, actor, startedAt, {
         status: 'success',
@@ -208,11 +231,13 @@ export class ToolExecutionService {
       threadId: input.threadId,
       runId: input.runId,
       eventType:
-        result.status === 'failed'
-          ? 'tool.failed'
-          : result.status === 'blocked'
-            ? 'tool.blocked'
-            : 'tool.result',
+        result.status === 'unknown'
+          ? 'tool.unknown'
+          : result.status === 'failed'
+            ? 'tool.failed'
+            : result.status === 'blocked'
+              ? 'tool.blocked'
+              : 'tool.result',
       actor,
       target: input.toolName,
       payload: {

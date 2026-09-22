@@ -4,9 +4,14 @@ import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { BaseMessageLike } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ILLMProvider } from './llm-provider.interface';
+import { ILLMProvider, LlmInvokeOptions } from './llm-provider.interface';
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { LlmInvocationError } from './llm-invocation.error';
+import { readLlmUsage } from './llm-usage';
+import {
+  createLlmUsageCallback,
+  hasLlmUsageObserver,
+} from './llm-usage-context';
 
 /**
  * 通义千问 LLM Provider
@@ -43,19 +48,34 @@ export class QwenLlmProvider implements ILLMProvider {
       maxTokens,
       maxRetries,
       configuration: { baseURL: baseUrl },
+      callbacks: [
+        createLlmUsageCallback((usage) =>
+          this.metricsService.observeLlmUsage('qwen', this.modelName, usage),
+        ),
+      ],
     });
   }
 
-  async invoke(messages: string | BaseMessageLike[]): Promise<string> {
+  async invoke(
+    messages: string | BaseMessageLike[],
+    options: LlmInvokeOptions = {},
+  ): Promise<string> {
     const start = process.hrtime.bigint();
     const inputTokensEstimated = this.estimateTokens(
       typeof messages === 'string' ? messages : JSON.stringify(messages),
     );
     try {
       const timeoutMs = this.config.get<number>('llm.qwen.timeoutMs') ?? 60000;
-      const response = await this.model.invoke(messages, {
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
+      const response = await this.model.invoke(messages, { signal });
+      const usage = readLlmUsage(response);
+      if (usage) {
+        // 经由 LlmProvider.runWithUsage 时，模型回调已采集真实 usage；避免重复计数。
+        if (!hasLlmUsageObserver()) options.onUsage?.(usage);
+      }
       const answer =
         typeof response.content === 'string'
           ? response.content

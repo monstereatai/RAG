@@ -82,10 +82,87 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** 读取持久化状态的严格版本；命令失败不能被伪装成“没有数据”。 */
+  async getRequired(key: string): Promise<string | null> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return await this.client.get(key);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async setRequiredOrThrow(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      if (ttlSeconds) {
+        await this.client.set(key, value, 'EX', ttlSeconds);
+      } else {
+        await this.client.set(key, value);
+      }
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async zrangeRequired(
+    key: string,
+    start: number,
+    stop: number,
+    direction?: 'REV',
+  ): Promise<string[]> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return direction === 'REV'
+        ? await this.client.zrange(key, start, stop, 'REV')
+        : await this.client.zrange(key, start, stop);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async zaddRequired(key: string, score: number, member: string): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      await this.client.zadd(key, score, member);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async delRequired(key: string): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      await this.client.del(key);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async keysRequired(pattern: string): Promise<string[]> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return await this.client.keys(pattern);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
   /**
    * 读取并删除（GETDEL，Redis >= 6.2），用于激活 token / 验证码等
    * 「一次性消费」场景：读取即删除，避免二次使用。
-   * 服务端版本过低不支持 GETDEL 时降级为 GET + DEL；Redis 不可用返回 null，
+   * 服务端版本过低不支持 GETDEL 时使用 Lua 原子读删；不能降级为分离的
+   * GET + DEL，否则并发请求可能重复消费一次性 token。Redis 不可用返回 null，
    * 由调用方按「token 不存在」处理。
    */
   async getdel(key: string): Promise<string | null> {
@@ -97,11 +174,11 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
         `Redis GETDEL failed for key=${key}: ${(err as Error).message}`,
       );
       try {
-        const value = await this.client.get(key);
-        if (value !== null) {
-          await this.client.del(key);
-        }
-        return value;
+        return (await this.client.eval(
+          "local value = redis.call('get', KEYS[1]); if value then redis.call('del', KEYS[1]); end; return value",
+          1,
+          key,
+        )) as string | null;
       } catch (fallbackErr) {
         this.logger.warn(
           `Redis GET+DEL fallback failed for key=${key}: ${(fallbackErr as Error).message}`,
@@ -126,6 +203,92 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Redis SET failed for key=${key}: ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * 写入一个安全边界要求必须成功的 key。
+   * 普通缓存可以容忍 Redis 故障，但一次性票据和幂等完成标记不能在
+   * “调用已经发生、结果却没有落盘”时继续宣称成功。
+   */
+  async setRequired(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      if (ttlSeconds) {
+        await this.client.set(key, value, 'EX', ttlSeconds);
+      } else {
+        await this.client.set(key, value);
+      }
+      return true;
+    } catch (err) {
+      this.logger.warn(
+        `Redis required SET failed for key=${key}: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Redis 原子固定窗口计数。用于租户级限流与成本预算，返回当前计数和窗口剩余毫秒数。
+   * Redis 不可用时返回 null，由上层按生产 fail-closed／开发降级策略处理。
+   */
+  async incrementWindow(
+    key: string,
+    ttlMs: number,
+    amount = 1,
+  ): Promise<{ value: number; ttlMs: number } | null> {
+    if (!this.enabled) return null;
+    try {
+      const result = (await this.client.eval(
+        "local value = redis.call('incrby', KEYS[1], ARGV[1]); if value == tonumber(ARGV[1]) then redis.call('pexpire', KEYS[1], ARGV[2]); end; return {value, redis.call('pttl', KEYS[1])}",
+        1,
+        key,
+        String(amount),
+        String(Math.max(1, Math.trunc(ttlMs))),
+      )) as [number | string, number | string];
+      return { value: Number(result[0]), ttlMs: Number(result[1]) };
+    } catch (err) {
+      this.logger.warn(
+        `Redis INCR window failed for key=${key}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * 在固定窗口内原子预留额度。超出 limit 时不修改计数，避免“拒绝请求仍消耗预算”。
+   * Redis 不可用返回 null，由上层按生产 fail-closed／开发降级策略处理。
+   */
+  async reserveWindow(
+    key: string,
+    ttlMs: number,
+    amount: number,
+    limit: number,
+  ): Promise<{ allowed: boolean; value: number; ttlMs: number } | null> {
+    if (!this.enabled) return null;
+    try {
+      const result = (await this.client.eval(
+        "local current = tonumber(redis.call('get', KEYS[1]) or '0'); local amount = tonumber(ARGV[1]); local limit = tonumber(ARGV[2]); local ttl = redis.call('pttl', KEYS[1]); if current + amount > limit then return {0, current, ttl}; end; local value = redis.call('incrby', KEYS[1], ARGV[1]); if current == 0 then redis.call('pexpire', KEYS[1], ARGV[3]); ttl = tonumber(ARGV[3]); else ttl = redis.call('pttl', KEYS[1]); end; return {1, value, ttl}",
+        1,
+        key,
+        String(Math.max(1, Math.trunc(amount))),
+        String(Math.max(0, Math.trunc(limit))),
+        String(Math.max(1, Math.trunc(ttlMs))),
+      )) as [number | string, number | string, number | string];
+      return {
+        allowed: Number(result[0]) === 1,
+        value: Number(result[1]),
+        ttlMs: Number(result[2]),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `Redis RESERVE window failed for key=${key}: ${(err as Error).message}`,
+      );
+      return null;
     }
   }
 
@@ -178,6 +341,30 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Redis release lock failed for key=${key}: ${(err as Error).message}`,
       );
+    }
+  }
+
+  /** 仅在仍由当前实例持有时续租，避免长任务超过租约后被另一实例并行推进。 */
+  async renewLock(
+    key: string,
+    value: string,
+    seconds: number,
+  ): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      const result = await this.client.eval(
+        'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("expire", KEYS[1], ARGV[2]) else return 0 end',
+        1,
+        key,
+        value,
+        String(seconds),
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.logger.warn(
+        `Redis renew lock failed for key=${key}: ${(err as Error).message}`,
+      );
+      return false;
     }
   }
 
@@ -251,6 +438,34 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(
         `Redis KEYS failed for pattern=${pattern}: ${(err as Error).message}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * 使用 SCAN 分批遍历键，避免在生产 Redis 上执行阻塞性的 KEYS。
+   */
+  async scan(pattern: string): Promise<string[]> {
+    if (!this.enabled) return [];
+    try {
+      const matched: string[] = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          500,
+        );
+        cursor = nextCursor;
+        matched.push(...keys);
+      } while (cursor !== '0');
+      return matched;
+    } catch (err) {
+      this.logger.warn(
+        `Redis SCAN failed for pattern=${pattern}: ${(err as Error).message}`,
       );
       return [];
     }

@@ -6,10 +6,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { SkillsService } from './skills.service';
 
 @Controller('skills')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:skills')
 export class SkillsController {
   constructor(private readonly skillsService: SkillsService) {}
 

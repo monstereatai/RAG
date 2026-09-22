@@ -14,13 +14,16 @@ import type { ChatMode } from '../chat/chat.dto';
 import type { LlmModelProvider } from '../../providers/llm/llm-provider.interface';
 import { AguiService } from './agui.service';
 import type { AguiEvent } from './agui.types';
+import { TenantQuotaGuard } from '../../common/guards/tenant-quota.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('agui')
 export class AguiController {
   constructor(private readonly aguiService: AguiService) {}
 
   @Sse('stream')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TenantQuotaGuard)
+  @ApiScopes('rag:chat')
   stream(
     @Query('query') query: string,
     @CurrentUser() user: JwtPayload,
@@ -43,6 +46,7 @@ export class AguiController {
       mode: chatMode,
       threadId,
       userId: user.userId,
+      tenantId: user.tenantId,
       model: chatModel,
       rolePresetId,
       pluginKeys: pluginKeys

@@ -18,6 +18,8 @@ import { DocumentReviewEntity } from '../../providers/db/entities/document-revie
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { MemoryModule } from '../memory/memory.module';
+import { IndexRepairQueueService } from './index-repair-queue.service';
+import { IndexReconcilerService } from './index-reconciler.service';
 
 @Module({
   imports: [
@@ -40,7 +42,12 @@ import { MemoryModule } from '../memory/memory.module';
     MemoryModule,
   ],
   controllers: [RagAdminController],
-  providers: [RagAdminService, QueryLogService],
+  providers: [
+    RagAdminService,
+    QueryLogService,
+    IndexRepairQueueService,
+    IndexReconcilerService,
+  ],
   exports: [QueryLogService],
 })
 export class RagAdminModule {}

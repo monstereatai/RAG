@@ -13,6 +13,8 @@ export interface EvaluationReportSummary {
   lastRunAt?: string;
   source?: string;
   reason?: string;
+  outcome?: 'passed' | 'failed' | 'skipped' | 'unavailable';
+  failedSamples?: number;
 }
 
 const REPORTS = [
@@ -54,26 +56,13 @@ export function readEvaluationReportSummaries(): EvaluationReportSummary[] {
         string,
         unknown
       >;
-      const summary =
-        report.summary && typeof report.summary === 'object'
-          ? (report.summary as Record<string, unknown>)
-          : {};
+      const normalized = normalizeReport(definition, report);
       return {
         datasetName: definition.datasetName,
-        mode: report.live === true ? 'live' : definition.mode,
-        passed: passedValue(report),
-        averageScore: numberValue(
-          report.score ?? report.accuracy ?? report.passRate,
-        ),
-        totalSamples: numberValue(
-          report.total ?? report.caseCount ?? report.cases,
-        ),
-        refusalRate: numberValue(report.refusalRate ?? summary.refusalRate),
-        citationRate: numberValue(report.citationRate ?? summary.citationRate),
+        ...normalized,
         available: true,
         lastRunAt: stringValue(report.generatedAt),
         source: 'report-file',
-        reason: passedValue(report) ? undefined : stringValue(report.reason),
       };
     } catch (error) {
       return unavailable(
@@ -99,7 +88,99 @@ function unavailable(
     available: false,
     source: 'report-file',
     reason,
+    outcome: 'unavailable',
+    failedSamples: 0,
   };
+}
+
+function normalizeReport(
+  definition: (typeof REPORTS)[number],
+  report: Record<string, unknown>,
+): Omit<EvaluationReportSummary, 'datasetName' | 'available' | 'lastRunAt' | 'source'> {
+  // golden-business 的离线文件只证明数据集结构和样本可读，不能冒充真实问答通过。
+  // 之前直接读取 ok:true，导致后台同时显示“通过”和 86 个失败样本。
+  if (definition.datasetName === 'golden-business' && report.live !== true) {
+    const caseCount = numberValue(report.caseCount ?? report.total ?? report.cases);
+    const validationFailed = report.ok === false;
+    return {
+      mode: definition.mode,
+      passed: false,
+      averageScore: 0,
+      totalSamples: caseCount,
+      refusalRate: 0,
+      citationRate: 0,
+      reason: validationFailed
+        ? stringValue(report.reason) ?? '数据集结构校验失败'
+        : '仅完成数据集结构校验，未执行真实问答',
+      outcome: validationFailed ? 'failed' : 'skipped',
+      failedSamples: 0,
+    };
+  }
+  const summary = recordOf(report.summary);
+  const platform = platformSummary(report);
+  const totalSamples = platform.totalSamples || numberValue(
+    report.total ?? report.caseCount ?? report.cases,
+  );
+  const passedSamples = platform.passedSamples || numberValue(report.passed);
+  const skipped = report.skipped === true || platform.skipped;
+  // 有逐样本统计时，以统计结果为准；顶层 ok:true 不能覆盖失败样本。
+  const passed =
+    !skipped &&
+    platform.checksPassed &&
+    (platform.totalSamples > 0
+      ? platform.passedSamples === platform.totalSamples
+      : passedValue(report));
+  return {
+    mode: platform.live || report.live === true ? 'live' : definition.mode,
+    passed,
+    averageScore:
+      totalSamples > 0
+        ? passedSamples / totalSamples
+        : numberValue(report.score ?? report.accuracy ?? report.passRate),
+    totalSamples,
+    refusalRate: numberValue(report.refusalRate ?? summary.refusalRate),
+    citationRate: numberValue(report.citationRate ?? summary.citationRate),
+    reason: skipped
+      ? stringValue(report.reason) ?? '本次评测已跳过'
+      : passed
+        ? undefined
+        : stringValue(report.reason),
+    outcome: skipped ? 'skipped' : passed ? 'passed' : 'failed',
+    failedSamples: Math.max(0, totalSamples - passedSamples),
+  };
+}
+
+function platformSummary(report: Record<string, unknown>): {
+  totalSamples: number;
+  passedSamples: number;
+  skipped: boolean;
+  live: boolean;
+  checksPassed: boolean;
+} {
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const liveChecks = checks
+    .map(recordOf)
+    .filter((check) => recordOf(check.summary).byMode);
+  let totalSamples = 0;
+  let passedSamples = 0;
+  let skipped = liveChecks.length > 0;
+  let live = false;
+  const checksPassed = checks.every((check) => recordOf(check).ok !== false);
+  for (const check of liveChecks) {
+    const byMode = recordOf(recordOf(check.summary).byMode);
+    const values = Object.values(byMode).map(recordOf);
+    totalSamples += values.reduce((sum, value) => sum + numberValue(value.total), 0);
+    passedSamples += values.reduce((sum, value) => sum + numberValue(value.passed), 0);
+    skipped &&= check.skipped === true;
+    live ||= check.live === true;
+  }
+  return { totalSamples, passedSamples, skipped, live, checksPassed };
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function numberValue(value: unknown): number {

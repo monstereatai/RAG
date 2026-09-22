@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import type { SseEvent } from '../../rag/agentic/sse-event';
@@ -9,6 +9,7 @@ import type { AguiEvent, AguiRunState, AguiStreamOptions } from './agui.types';
 import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
 
 @Injectable()
 export class AguiService {
@@ -17,6 +18,7 @@ export class AguiService {
     private readonly conversationService: ConversationService,
     private readonly llmProvider: LlmProvider,
     private readonly artifactsService: ArtifactsService,
+    @Optional() private readonly agentRuns?: AgentRunsService,
   ) {}
 
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
@@ -25,13 +27,15 @@ export class AguiService {
       throw new BadRequestException('query is required');
     }
 
+    let activeThreadId: string | undefined = options.threadId;
+    let settled = false;
     return new Observable<AguiEvent>((subscriber) => {
+      const abortController = new AbortController();
       void (async () => {
         const runId = randomUUID();
         const messageId = randomUUID();
         const runState: AguiRunState = { phase: 'routing' };
         let streamedContent = false;
-
         const emit = (
           type: AguiEvent['type'],
           data?: Record<string, unknown>,
@@ -53,7 +57,7 @@ export class AguiService {
           runState.model = selectedModel;
           const roleContext = resolveRoleContext(options.rolePresetId);
           const artifactIntent = parseArtifactIntent(query);
-          const activeThreadId =
+          activeThreadId =
             options.threadId ??
             (await this.conversationService.create(
               query,
@@ -100,7 +104,11 @@ export class AguiService {
                   }
                   this.emitAguiEvent(event, emit, messageId);
                 },
-                { model: selectedModel },
+                {
+                  model: selectedModel,
+                  signal: abortController.signal,
+                  tenantId: options.tenantId,
+                },
               ),
           );
           const answer =
@@ -181,8 +189,23 @@ export class AguiService {
             message: (error as Error).message,
           });
           subscriber.complete();
+        } finally {
+          settled = true;
         }
       })();
+
+      // AG-UI/SSE 退订时统一写取消标记。AgentRunsService 会再次校验用户归属，
+      // 因而不会因为客户端携带了别人的 threadId 而越权取消运行。
+      return () => {
+        abortController.abort();
+        if (!settled && activeThreadId && this.agentRuns) {
+          void this.agentRuns.cancelActiveForThread(
+            activeThreadId,
+            options.userId,
+            '客户端断开流式连接',
+          );
+        }
+      };
     });
   }
 

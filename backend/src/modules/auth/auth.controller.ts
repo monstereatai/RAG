@@ -25,15 +25,18 @@ import type {
 } from './dto/password-reset.dto';
 import { CreateApiTokenDto } from './dto/api-token.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
+import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { SseTicketService } from './sse-ticket.service';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly apiTokenService: ApiTokenService,
+    private readonly sseTicketService: SseTicketService,
   ) {}
 
   @Post('login')
@@ -92,14 +95,22 @@ export class AuthController {
     return user;
   }
 
+  @Post('sse-ticket')
+  @UseGuards(JwtAuthGuard)
+  issueSseTicket(@CurrentUser() user: JwtPayload) {
+    return this.sseTicketService.issue(user);
+  }
+
   @Get('api-tokens')
-  @UseGuards(ServiceTokenGuard)
+  @UseGuards(ApiTokenAccessGuard)
+  @ApiScopes('rag:token:manage')
   listApiTokens(@CurrentUser() user: JwtPayload) {
     return this.apiTokenService.listTokens(user);
   }
 
   @Post('api-tokens')
-  @UseGuards(ServiceTokenGuard)
+  @UseGuards(ApiTokenAccessGuard)
+  @ApiScopes('rag:token:manage')
   createApiToken(
     @Body() dto: CreateApiTokenDto,
     @CurrentUser() user: JwtPayload,
@@ -108,7 +119,8 @@ export class AuthController {
   }
 
   @Delete('api-tokens/:id')
-  @UseGuards(ServiceTokenGuard)
+  @UseGuards(ApiTokenAccessGuard)
+  @ApiScopes('rag:token:manage')
   revokeApiToken(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.apiTokenService.revokeToken(id, user);
   }

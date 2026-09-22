@@ -98,6 +98,52 @@ export class GraphService {
     return this.neo4jProvider.isEnabled();
   }
 
+  /**
+   * 查询指定文档在图谱中的实际来源数量。
+   * 只读对账，不改变图谱；Neo4j 不可用时向上抛出受控错误。
+   */
+  async getSourceIndexStatus(sourceId: string, userId: string): Promise<{
+    nodeCount: number;
+    relationshipCount: number;
+    sourcePresent: boolean;
+  }> {
+    this.assertEnabled();
+    const [nodes, relationships] = await Promise.all([
+      this.neo4jProvider.executeRead<{ count: unknown }>(
+        `
+        MATCH (n:GraphEntity {userId: $userId})
+        WHERE $sourceId IN coalesce(n.sourceIds, [coalesce(n.sourceId, '')])
+        RETURN count(n) AS count
+        `,
+        { sourceId, userId },
+      ),
+      this.neo4jProvider.executeRead<{ count: unknown }>(
+        `
+        MATCH ()-[r:GRAPH_RELATION {userId: $userId}]->()
+        WHERE $sourceId IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+        RETURN count(r) AS count
+        `,
+        { sourceId, userId },
+      ),
+    ]);
+    const toNumber = (value: unknown): number => {
+      if (typeof value === 'number') return value;
+      if (value && typeof value === 'object') {
+        const candidate = value as { toNumber?: () => number; low?: number };
+        if (typeof candidate.toNumber === 'function') return candidate.toNumber();
+        if (typeof candidate.low === 'number') return candidate.low;
+      }
+      return Number(value ?? 0) || 0;
+    };
+    const nodeCount = toNumber(nodes[0]?.count);
+    const relationshipCount = toNumber(relationships[0]?.count);
+    return {
+      nodeCount,
+      relationshipCount,
+      sourcePresent: nodeCount > 0 || relationshipCount > 0,
+    };
+  }
+
   async extract(text: string): Promise<GraphData> {
     return this.graphExtractor.extractFromText(text);
   }

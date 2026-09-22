@@ -100,6 +100,7 @@ describe('RagAdminService document versions', () => {
       'new',
       'user-1',
       ['old', 'new'],
+      expect.objectContaining({ eventType: 'document.effective' }),
     );
   });
 
@@ -131,7 +132,19 @@ describe('RagAdminService document versions', () => {
 });
 
 describe('RagAdminService document listing and archive', () => {
-  const docMetaRepo = { findOne: jest.fn(), find: jest.fn() };
+  const transactionDocMetaRepo = { update: jest.fn() };
+  const transactionReviewRepo = { save: jest.fn() };
+  const transactionManager = {
+    getRepository: jest.fn(),
+  };
+  const docMetaRepo = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (work) => work(transactionManager)),
+    },
+  };
+  const documentReviewRepo = { create: jest.fn((value) => value) };
   const permissionRepo = { find: jest.fn() };
   const obsidianKnowledge = { findNoteByRagDocId: jest.fn() };
   const elasticsearchProvider = { isEnabled: jest.fn(() => false) };
@@ -139,7 +152,7 @@ describe('RagAdminService document listing and archive', () => {
     updateLifecycle: jest.fn(),
     activateVersion: jest.fn(),
   };
-  const domainEvents = { emit: jest.fn() };
+  const domainEvents = { emit: jest.fn(), emitInTransaction: jest.fn() };
 
   const service = new RagAdminService(
     {} as never,
@@ -155,7 +168,7 @@ describe('RagAdminService document listing and archive', () => {
     obsidianKnowledge as never,
     {} as never,
     docMetaRepo as never,
-    {} as never,
+    documentReviewRepo as never,
     {} as never,
     permissionRepo as never,
     domainEvents as never,
@@ -163,8 +176,18 @@ describe('RagAdminService document listing and archive', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    transactionManager.getRepository
+      .mockReturnValueOnce(transactionDocMetaRepo)
+      .mockReturnValueOnce(transactionReviewRepo);
+    docMetaRepo.manager.transaction.mockImplementation(async (work) =>
+      work(transactionManager),
+    );
+    documentReviewRepo.create.mockImplementation((value) => value);
+    transactionDocMetaRepo.update.mockResolvedValue(undefined);
+    transactionReviewRepo.save.mockResolvedValue(undefined);
     obsidianKnowledge.findNoteByRagDocId.mockResolvedValue(null);
     domainEvents.emit.mockResolvedValue(undefined);
+    domainEvents.emitInTransaction.mockResolvedValue(undefined);
     // 默认：无权限行（scope 查询与权限摘要查询共用）
     permissionRepo.find.mockResolvedValue([]);
   });
@@ -189,6 +212,27 @@ describe('RagAdminService document listing and archive', () => {
 
     expect(result.total).toBe(1);
     expect(result.items[0].docId).toBe('b');
+  });
+
+  it('writes review state, audit record and review event in one transaction', async () => {
+    docMetaRepo.findOne.mockResolvedValue({ docId: 'd', userId: 'user-1' });
+
+    await expect(
+      service.approveDocumentReview('d', 'reviewer-1'),
+    ).resolves.toEqual(
+      expect.objectContaining({ docId: 'd', reviewStatus: 'approved' }),
+    );
+
+    expect(docMetaRepo.manager.transaction).toHaveBeenCalled();
+    expect(transactionDocMetaRepo.update).toHaveBeenCalledWith(
+      'd',
+      expect.objectContaining({ reviewStatus: 'approved' }),
+    );
+    expect(transactionReviewRepo.save).toHaveBeenCalled();
+    expect(domainEvents.emitInTransaction).toHaveBeenCalledWith(
+      transactionManager,
+      expect.objectContaining({ eventType: 'document.review_approved' }),
+    );
   });
 
   it('queries documents by latest upload time first with a stable id tie-breaker', async () => {
@@ -321,10 +365,11 @@ describe('RagAdminService document listing and archive', () => {
       'd',
       'user-1',
       'archived',
+      expect.objectContaining({
+        eventType: 'document.lifecycle_changed',
+      }),
     );
-    expect(domainEvents.emit).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: 'document.lifecycle_changed' }),
-    );
+    expect(domainEvents.emit).not.toHaveBeenCalled();
   });
 
   it('rejects unarchive for a document that is not archived', async () => {
@@ -374,6 +419,7 @@ describe('RagAdminService document listing and archive', () => {
       'd',
       'user-1',
       ['d'],
+      expect.objectContaining({ eventType: 'document.effective' }),
     );
   });
 });

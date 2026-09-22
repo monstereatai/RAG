@@ -1,9 +1,16 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { RedisProvider } from '../../providers/redis/redis.provider';
 import type {
   ApiTokenRecordView,
   CreateApiTokenDto,
@@ -34,7 +41,10 @@ export class ApiTokenService {
   private readonly filePath: string;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly redisProvider?: RedisProvider,
+  ) {
     const uploadDir =
       this.configService.get<string>('workspace.uploadDir') ??
       resolve(process.cwd(), '../workspace/uploads');
@@ -54,15 +64,24 @@ export class ApiTokenService {
       name: dto.name.trim(),
       prefix: token.slice(0, 16),
       hash: this.hashToken(token),
-      scopes: dto.scopes?.length ? dto.scopes : ['rag:*'],
-      user,
+      scopes: dto.scopes?.length
+        ? [...new Set(dto.scopes.map((scope) => scope.trim()).filter(Boolean))]
+        : ['rag:*'],
+      user: {
+        userId: user.userId,
+        username: user.username,
+        role: user.role,
+        tenantId: user.tenantId,
+      },
       createdAt: now,
       expiresAt: dto.expiresAt,
     };
 
-    const store = await this.load();
-    store.tokens.push(record);
-    await this.save(store);
+    await this.withSharedWrite(async () => {
+      const store = await this.load();
+      store.tokens.push(record);
+      await this.save(store);
+    });
 
     return {
       ...this.toView(record),
@@ -79,16 +98,18 @@ export class ApiTokenService {
   }
 
   async revokeToken(id: string, user: JwtPayload): Promise<ApiTokenRecordView> {
-    const store = await this.load();
-    const record = store.tokens.find(
-      (token) => token.id === id && token.user.userId === user.userId,
-    );
-    if (!record) {
-      throw new UnauthorizedException('api token not found');
-    }
-    record.revokedAt = record.revokedAt ?? new Date().toISOString();
-    await this.save(store);
-    return this.toView(record);
+    return this.withSharedWrite(async () => {
+      const store = await this.load();
+      const record = store.tokens.find(
+        (token) => token.id === id && token.user.userId === user.userId,
+      );
+      if (!record) {
+        throw new UnauthorizedException('api token not found');
+      }
+      record.revokedAt = record.revokedAt ?? new Date().toISOString();
+      await this.save(store);
+      return this.toView(record);
+    });
   }
 
   async verifyApiToken(token: string): Promise<JwtPayload> {
@@ -111,19 +132,48 @@ export class ApiTokenService {
       ) {
         throw new UnauthorizedException('api token expired');
       }
-      record.lastUsedAt = new Date().toISOString();
-      await this.save(store).catch((error: unknown) => {
+      await this.withSharedWrite(async () => {
+        const latest = await this.load();
+        const current = latest.tokens.find((item) => item.id === record.id);
+        if (!current) return;
+        current.lastUsedAt = new Date().toISOString();
+        await this.save(latest);
+      }).catch((error: unknown) => {
         this.logger.warn(
           `failed to update api token lastUsedAt: ${(error as Error).message}`,
         );
       });
-      return record.user;
+      return {
+        ...record.user,
+        authType: 'api-token',
+        scopes: [...new Set(record.scopes)],
+      };
     }
 
     throw new UnauthorizedException('token invalid or expired');
   }
 
   private async load(): Promise<ApiTokenStore> {
+    if (this.redisProvider?.isEnabled()) {
+      const raw = await this.redisProvider.get('rag:auth:api-tokens:v1');
+      if (!raw) return { version: 1, tokens: [] };
+      try {
+        const parsed = JSON.parse(raw) as ApiTokenStore;
+        return {
+          version: 1,
+          tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
+        };
+      } catch {
+        throw new ServiceUnavailableException(
+          'shared API token store contains invalid data',
+        );
+      }
+    }
+    if (!this.allowFileStore) {
+      throw new ServiceUnavailableException(
+        'shared API token store is required but Redis is unavailable',
+      );
+    }
     try {
       const raw = await readFile(this.filePath, 'utf8');
       const parsed = JSON.parse(raw) as ApiTokenStore;
@@ -141,6 +191,21 @@ export class ApiTokenService {
   }
 
   private async save(store: ApiTokenStore): Promise<void> {
+    if (this.redisProvider?.isEnabled()) {
+      const saved = await this.redisProvider.setRequired(
+        'rag:auth:api-tokens:v1',
+        JSON.stringify(store),
+      );
+      if (!saved) {
+        throw new ServiceUnavailableException('shared API token store write failed');
+      }
+      return;
+    }
+    if (!this.allowFileStore) {
+      throw new ServiceUnavailableException(
+        'shared API token store is required but Redis is unavailable',
+      );
+    }
     this.writeQueue = this.writeQueue.then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const tmpPath = `${this.filePath}.tmp`;
@@ -150,6 +215,34 @@ export class ApiTokenService {
       await rename(tmpPath, this.filePath);
     });
     return this.writeQueue;
+  }
+
+  private get allowFileStore(): boolean {
+    return (
+      this.configService.get<boolean>('auth.allowFileStore') !== false &&
+      process.env.ALLOW_FILE_AUTH_STORE !== 'false'
+    );
+  }
+
+  /** Redis JSON 读改写需要跨实例互斥，避免创建／撤销 Token 互相覆盖。 */
+  private async withSharedWrite<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.redisProvider?.isEnabled()) return operation();
+    const lockKey = 'rag:auth:api-tokens:lock:v1';
+    const lockValue = randomBytes(16).toString('hex');
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (await this.redisProvider.setIfAbsent(lockKey, lockValue, 10)) {
+        try {
+          return await operation();
+        } finally {
+          await this.redisProvider.releaseLock(lockKey, lockValue);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new ServiceUnavailableException(
+      'shared API token store is busy; retry the request',
+    );
   }
 
   private hashToken(token: string): string {

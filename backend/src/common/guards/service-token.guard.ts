@@ -5,7 +5,6 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 
 const LOCAL_DEV_RAG_SERVICE_TOKEN = 'local-rag-service-token';
 const MISSING_PRODUCTION_TOKEN_MESSAGE =
@@ -17,8 +16,11 @@ interface AuthenticatedRequest {
 }
 
 /**
- * 复合认证守卫：支持 JWT token 和内部服务 token
- * - JWT: Authorization: Bearer <jwt>
+ * 内部服务令牌守卫。
+ *
+ * 这里故意不接受用户 JWT。管理、运维和跨服务接口通常带有 userId、runId
+ * 或租户范围参数，若把普通 JWT 当作服务身份放行，会把内部接口变成 IDOR
+ * 入口。需要用户身份的接口应显式使用 JwtAuthGuard。
  * - 服务 token: Authorization: Bearer <service_token> 或 X-Service-Token: <token>
  */
 @Injectable()
@@ -26,7 +28,6 @@ export class ServiceTokenGuard implements CanActivate {
   private readonly serviceToken: string;
 
   constructor(
-    private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {
     this.serviceToken = this.resolveServiceToken();
@@ -39,34 +40,18 @@ export class ServiceTokenGuard implements CanActivate {
       request.headers['x-service-token'],
     );
 
-    // 1. 先尝试服务 token
     const token = serviceTokenHeader ?? this.extractBearerToken(authHeader);
     if (token && this.serviceToken && token === this.serviceToken) {
       request.user = {
         userId: 'admin-backend',
         username: 'admin-backend',
         role: 'admin',
+        authType: 'service',
       };
       return true;
     }
 
-    // 2. 再尝试 JWT
-    if (authHeader) {
-      const jwtToken = this.extractBearerToken(authHeader);
-      if (jwtToken) {
-        return this.jwtService
-          .verifyAsync(jwtToken)
-          .then((payload) => {
-            request.user = payload;
-            return true;
-          })
-          .catch(() => {
-            throw new UnauthorizedException('token invalid or expired');
-          });
-      }
-    }
-
-    throw new UnauthorizedException('missing or invalid authentication');
+    throw new UnauthorizedException('invalid internal service authentication');
   }
 
   private extractBearerToken(header?: string): string | null {

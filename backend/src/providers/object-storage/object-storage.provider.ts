@@ -14,6 +14,7 @@ export interface StoredObject {
 export class ObjectStorageProvider implements OnModuleInit {
   private readonly logger = new Logger(ObjectStorageProvider.name);
   private readonly provider: 'local' | 'minio';
+  private readonly requireRemote: boolean;
   private readonly bucket: string;
   private readonly publicBaseUrl: string;
   private readonly localRoot: string;
@@ -25,6 +26,8 @@ export class ObjectStorageProvider implements OnModuleInit {
       this.config.get<string>('objectStorage.provider') === 'minio'
         ? 'minio'
         : 'local';
+    this.requireRemote =
+      this.config.get<boolean>('objectStorage.requireRemote') === true;
     this.bucket =
       this.config.get<string>('objectStorage.bucket') ?? 'rag-documents';
     this.publicBaseUrl =
@@ -37,6 +40,11 @@ export class ObjectStorageProvider implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     if (this.provider === 'local') {
+      if (this.requireRemote) {
+        throw new Error(
+          '本地对象存储已被生产策略禁用，请配置 OBJECT_STORAGE_PROVIDER=minio 或兼容的远程对象存储。',
+        );
+      }
       await fs.mkdir(this.localRoot, { recursive: true });
       this.logger.log(`Object storage using local path: ${this.localRoot}`);
       return;
@@ -62,6 +70,13 @@ export class ObjectStorageProvider implements OnModuleInit {
       this.logger.log(`Object storage using MinIO bucket: ${this.bucket}`);
     } catch (err) {
       this.minioReady = false;
+      if (this.requireRemote) {
+        throw new Error(
+          `远程对象存储不可用，生产模式拒绝降级到本地磁盘：${
+            (err as Error).message
+          }`,
+        );
+      }
       this.logger.warn(
         `MinIO unavailable, falling back to local object storage: ${
           (err as Error).message
@@ -93,6 +108,10 @@ export class ObjectStorageProvider implements OnModuleInit {
       };
     }
 
+    if (this.requireRemote) {
+      throw new Error('远程对象存储未就绪，拒绝写入本地磁盘。');
+    }
+
     const target = path.join(this.localRoot, safeKey);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, params.body);
@@ -116,6 +135,10 @@ export class ObjectStorageProvider implements OnModuleInit {
         chunks.push(Buffer.from(chunk as Uint8Array));
       }
       return Buffer.concat(chunks);
+    }
+
+    if (this.requireRemote) {
+      throw new Error('远程对象存储未就绪，拒绝从本地磁盘读取对象。');
     }
 
     return fs.readFile(path.join(this.localRoot, safeKey));

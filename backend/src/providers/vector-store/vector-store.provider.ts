@@ -56,6 +56,10 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
     return this.provider.deleteByDocId(docId);
   }
 
+  countByDocId(docId: string, userId?: string): Promise<number> {
+    return this.provider.countByDocId(docId, userId);
+  }
+
   getIndexInfo(): VectorIndexInfo {
     return this.provider.getIndexInfo();
   }

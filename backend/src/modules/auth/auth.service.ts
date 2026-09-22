@@ -51,8 +51,8 @@ const PASSWORD_RESET_CODE_DISPATCHED_MESSAGE =
  *   - access：短有效期（默认 2h），用于访问业务接口（JwtAuthGuard 放行）
  *   - refresh：长有效期（默认 7d），仅用于 POST /auth/refresh 换发新双 token
  *
- * 用户存储：AuthUserStore（内存 Map + workspace/auth-users.json 落盘，
- * 原硬编码测试账号保留为种子）；一次性 token 走 TokenStoreService
+ * 用户存储：AuthUserStore（Redis 共享 JSON，开发环境才降级到
+ * workspace/auth-users.json，原硬编码测试账号保留为种子）；一次性 token 走 TokenStoreService
  * （Redis 可用走 Redis，不可用降级进程内存）；邮件经 MailService
  * （未配置 SMTP 时本地模拟写入 workspace/mail-outbox/latest.json）。
  * 种子账号：admin / admin123（admin），user / user1234（user）。
@@ -288,7 +288,12 @@ export class AuthService {
 
   /** JwtPayload 组装（双 token 共用的基础声明） */
   private toPayload(user: AuthUserRecord): JwtPayload {
-    return { userId: user.id, username: user.username, role: user.role };
+    return {
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+      tenantId: user.tenantId,
+    };
   }
 
   /** 激活 token 的存储 key：email:activation:token:{token} → userId */

@@ -10,9 +10,11 @@ import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('memories')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:memory')
 export class MemoryController {
   constructor(private readonly memoryService: MemoryService) {}
 

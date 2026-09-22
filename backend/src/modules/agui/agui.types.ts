@@ -52,6 +52,7 @@ export interface AguiStreamOptions {
   query: string;
   mode: ChatMode;
   userId: string;
+  tenantId?: string;
   threadId?: string;
   model?: LlmModelProvider;
   rolePresetId?: string;

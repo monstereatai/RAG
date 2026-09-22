@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { createHash, randomUUID } from 'node:crypto';
 import JSZip from 'jszip';
@@ -44,6 +45,7 @@ import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
+import type { ProductionWorkflowJob } from './production-workflow-queue.service';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -169,8 +171,15 @@ export class ProductionWorkflowService implements OnModuleInit {
     @Optional() private readonly dingTalk?: DingTalkProvider,
     @Optional()
     private readonly workflowQueue?: ProductionWorkflowQueueService,
+    @Optional() private readonly configService?: ConfigService,
   ) {
-    this.checkpointer = new RedisCheckpointer(redisProvider, 86400 * 30);
+    this.checkpointer = new RedisCheckpointer(
+      redisProvider,
+      86400 * 30,
+      undefined,
+      configService?.get<boolean>('core.requireDependencies') === true ||
+        configService?.get<string>('nodeEnv') === 'production',
+    );
     this.app = this.buildGraph();
   }
 
@@ -190,11 +199,15 @@ export class ProductionWorkflowService implements OnModuleInit {
       }
       try {
         if (job.operation === 'start') {
-          await this.start({ ...job.dto, threadId: job.threadId }, job.userId);
+          await this.start(
+            { ...job.dto, threadId: job.threadId },
+            job.userId,
+            job.tenantId,
+          );
         } else if (job.operation === 'resume') {
-          await this.resume(job.threadId, job.dto, job.userId);
+          await this.resume(job.threadId, job.dto, job.userId, job.tenantId);
         } else {
-          await this.revise(job.threadId, job.dto, job.userId);
+          await this.revise(job.threadId, job.dto, job.userId, job.tenantId);
         }
       } catch (error) {
         if (attempt.finalAttempt) {
@@ -219,14 +232,24 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (!state?.projectId) throw new Error('workflow not found');
     if (this.workflowQueue?.isEnabled()) {
       const queued = await this.workflowQueue.enqueue({
-        id: `retry-task:${task.id}:${task.retryCount}`,
+        id: this.workflowJobId(
+          'retry_task',
+          task.threadId,
+          `${task.id}-${task.retryCount}`,
+        ),
         operation: 'retry_task',
         threadId: task.threadId,
         userId: state.userId,
+        tenantId: state.tenantId,
         taskId: task.id,
         role: task.role,
       });
       if (queued) return;
+    }
+    if (this.workflowQueue?.isRequired?.()) {
+      throw new Error(
+        '生产工作流要求使用 Redis 持久队列，队列不可用时拒绝进程内重试。',
+      );
     }
     await this.retryTask(task);
   }
@@ -267,13 +290,20 @@ export class ProductionWorkflowService implements OnModuleInit {
   }
 
   /** 创建初始状态并同步执行首轮工作流；异步入口复用相同状态创建逻辑。 */
-  async start(dto: StartProductionWorkflowDto, userId: string) {
+  async start(
+    dto: StartProductionWorkflowDto,
+    userId: string,
+    tenantId?: string,
+  ) {
     const threadId = dto.threadId ?? randomUUID();
     // BullMQ 重试或 Worker 接管时不能从零覆盖已有 Checkpoint；正在运行的
     // 工作流从最后持久化状态继续，其他终态直接返回当前视图。
     if (dto.threadId) {
-      try {
-        const existing = await this.getOwnedState(threadId, userId);
+      const checkpoint = await this.getState(threadId);
+      if (checkpoint?.projectId) {
+        // 已存在的 Checkpoint 必须先通过 owner／tenant 校验，不能把“无权访问”
+        // 当成“首次执行”并覆盖另一个用户或租户的工作流。
+        const existing = await this.getOwnedState(threadId, userId, tenantId);
         if (existing.status === 'running') {
           const settled = await this.runUntilSettled(threadId, existing);
           await this.traceLangfuse(settled);
@@ -283,11 +313,14 @@ export class ProductionWorkflowService implements OnModuleInit {
           return result;
         }
         return this.view(threadId, existing, userId);
-      } catch {
-        // 首次执行尚无 Checkpoint，继续初始化。
       }
     }
-    const initialState = await this.createInitialState(dto, userId, threadId);
+    const initialState = await this.createInitialState(
+      dto,
+      userId,
+      threadId,
+      tenantId,
+    );
     await this.ensureRun(initialState);
     await this.emitRuntimeEvent(
       initialState,
@@ -322,23 +355,50 @@ export class ProductionWorkflowService implements OnModuleInit {
     return result;
   }
 
-  async startAsync(dto: StartProductionWorkflowDto, userId: string) {
+  async startAsync(
+    dto: StartProductionWorkflowDto,
+    userId: string,
+    tenantId?: string,
+  ) {
     const threadId = dto.threadId ?? randomUUID();
-    const initialState = await this.createInitialState(dto, userId, threadId);
+    if (dto.threadId) {
+      const pending = this.pendingStates.get(threadId);
+      if (pending) {
+        if (
+          pending.userId !== userId ||
+          !this.tenantMatches(pending.tenantId, tenantId)
+        ) {
+          throw new Error('workflow not found');
+        }
+        return this.view(threadId, pending, userId);
+      }
+      const checkpoint = await this.getState(threadId);
+      if (checkpoint?.projectId) {
+        const existing = await this.getOwnedState(threadId, userId, tenantId);
+        return this.view(threadId, existing, userId);
+      }
+    }
+    const initialState = await this.createInitialState(
+      dto,
+      userId,
+      threadId,
+      tenantId,
+    );
     await this.ensureRun(initialState);
     void this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
     void this.saveWorkflowIndex(this.view(threadId, initialState, userId));
     const queued = await this.workflowQueue?.enqueue({
-      id: randomUUID(),
+      id: this.workflowJobId('start', threadId),
       operation: 'start',
       threadId,
       userId,
+      tenantId,
       dto: { ...dto, threadId },
     });
-    if (!queued) {
+    if (!queued && !this.workflowQueue?.isRequired?.()) {
       this.schedule(threadId, userId, () =>
-        this.start({ ...dto, threadId }, userId),
+        this.start({ ...dto, threadId }, userId, tenantId),
       );
     }
     return this.view(threadId, initialState, userId);
@@ -348,8 +408,9 @@ export class ProductionWorkflowService implements OnModuleInit {
     threadId: string,
     dto: ResumeProductionWorkflowDto,
     userId: string,
+    tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId);
+    const current = await this.getOwnedState(threadId, userId, tenantId);
     await this.ensureRun(current);
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
@@ -386,14 +447,15 @@ export class ProductionWorkflowService implements OnModuleInit {
     threadId: string,
     dto: ResumeProductionWorkflowDto,
     userId: string,
+    tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId);
+    const current = await this.getOwnedState(threadId, userId, tenantId);
     await this.ensureRun(current);
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
     if (dto.approval === 'rejected') {
-      return this.resume(threadId, dto, userId);
+      return this.resume(threadId, dto, userId, tenantId);
     }
     const pending = {
       ...current,
@@ -405,14 +467,21 @@ export class ProductionWorkflowService implements OnModuleInit {
     this.pendingStates.set(threadId, pending);
     void this.saveWorkflowIndex(this.view(threadId, pending, userId));
     const queued = await this.workflowQueue?.enqueue({
-      id: randomUUID(),
+      id: this.workflowJobId(
+        'resume',
+        threadId,
+        `${current.stepCount}-${current.batchIndex}`,
+      ),
       operation: 'resume',
       threadId,
       userId,
+      tenantId,
       dto,
     });
-    if (!queued) {
-      this.schedule(threadId, userId, () => this.resume(threadId, dto, userId));
+    if (!queued && !this.workflowQueue?.isRequired?.()) {
+      this.schedule(threadId, userId, () =>
+        this.resume(threadId, dto, userId, tenantId),
+      );
     }
     return this.view(threadId, pending, userId);
   }
@@ -425,8 +494,9 @@ export class ProductionWorkflowService implements OnModuleInit {
     threadId: string,
     dto: ReviseProductionWorkflowDto,
     userId: string,
+    tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId);
+    const current = await this.getOwnedState(threadId, userId, tenantId);
     if (current.status !== 'revision_required') {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
@@ -454,7 +524,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       revisionHistory,
       error: '',
     });
-    const state = await this.getOwnedState(threadId, userId);
+    const state = await this.getOwnedState(threadId, userId, tenantId);
     await this.emitRuntimeEvent(state, 'revision.started', 'human_reviewer', {
       revision: state.revisionNumber ?? 1,
       rerunRoles: requested,
@@ -473,8 +543,9 @@ export class ProductionWorkflowService implements OnModuleInit {
     threadId: string,
     dto: ReviseProductionWorkflowDto,
     userId: string,
+    tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId);
+    const current = await this.getOwnedState(threadId, userId, tenantId);
     if (current.status !== 'revision_required') {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
@@ -498,25 +569,37 @@ export class ProductionWorkflowService implements OnModuleInit {
     this.pendingStates.set(threadId, pending);
     void this.saveWorkflowIndex(this.view(threadId, pending, userId));
     const queued = await this.workflowQueue?.enqueue({
-      id: randomUUID(),
+      id: this.workflowJobId(
+        'revise',
+        threadId,
+        `${current.revisionNumber}-${requested.join(',')}`,
+      ),
       operation: 'revise',
       threadId,
       userId,
+      tenantId,
       dto,
     });
-    if (!queued) {
-      this.schedule(threadId, userId, () => this.revise(threadId, dto, userId));
+    if (!queued && !this.workflowQueue?.isRequired?.()) {
+      this.schedule(threadId, userId, () =>
+        this.revise(threadId, dto, userId, tenantId),
+      );
     }
     return this.view(threadId, pending, userId);
   }
 
-  async status(threadId: string, userId: string) {
+  async status(threadId: string, userId: string, tenantId?: string) {
     let state: ProductionWorkflowStateType;
     try {
-      state = await this.getOwnedState(threadId, userId);
+      state = await this.getOwnedState(threadId, userId, tenantId);
     } catch (error) {
       const pending = this.pendingStates.get(threadId);
-      if (!pending || pending.userId !== userId) throw error;
+      if (
+        !pending ||
+        pending.userId !== userId ||
+        !this.tenantMatches(pending.tenantId, tenantId)
+      )
+        throw error;
       state = pending;
     }
     // 持久队列启用后由 BullMQ Worker 推进，状态查询不能再抢占为本进程执行，
@@ -524,7 +607,8 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (
       state.status === 'running' &&
       !this.activeRuns.has(threadId) &&
-      !this.workflowQueue?.isEnabled()
+      !this.workflowQueue?.isEnabled() &&
+      !this.workflowQueue?.isRequired?.()
     ) {
       this.schedule(threadId, userId, () =>
         this.runUntilSettled(threadId, state),
@@ -535,7 +619,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     return result;
   }
 
-  async list(userId: string) {
+  async list(userId: string, tenantId?: string) {
     const ids = await this.redisProvider.zrange(
       `production:workflows:${userId}`,
       0,
@@ -549,9 +633,11 @@ export class ProductionWorkflowService implements OnModuleInit {
     );
     const redisItems = items
       .filter((item): item is string => Boolean(item))
-      .map((item) => JSON.parse(item) as Record<string, unknown>);
+      .map((item) => JSON.parse(item) as Record<string, unknown>)
+      .filter((item) => this.tenantMatches(item.tenantId, tenantId));
     const memoryItems = [...this.workflowIndexMemory.values()].filter(
-      (item) => item.userId === userId,
+      (item) =>
+        item.userId === userId && this.tenantMatches(item.tenantId, tenantId),
     );
     const merged = new Map<string, Record<string, unknown>>();
     [...redisItems, ...memoryItems].forEach((item) => {
@@ -567,8 +653,8 @@ export class ProductionWorkflowService implements OnModuleInit {
     return workflows;
   }
 
-  async codingContext(threadId: string, userId: string) {
-    const state = await this.getOwnedState(threadId, userId);
+  async codingContext(threadId: string, userId: string, tenantId?: string) {
+    const state = await this.getOwnedState(threadId, userId, tenantId);
     if (state.status !== 'completed') {
       throw new Error(`workflow is not completed: ${state.status}`);
     }
@@ -619,8 +705,8 @@ export class ProductionWorkflowService implements OnModuleInit {
   }
 
   /** 页面目录导出、项目 ZIP 和 MCP 共同消费的唯一交接契约。 */
-  async handoffManifest(threadId: string, userId: string) {
-    const context = await this.codingContext(threadId, userId);
+  async handoffManifest(threadId: string, userId: string, tenantId?: string) {
+    const context = await this.codingContext(threadId, userId, tenantId);
     const schemas = context.stages.flatMap((stage) =>
       (stage.lowCodeSchemas ?? []).map((schema) => ({
         ...schema,
@@ -677,16 +763,16 @@ export class ProductionWorkflowService implements OnModuleInit {
     };
   }
 
-  async playwayPreview(threadId: string, userId: string) {
-    const context = await this.codingContext(threadId, userId);
+  async playwayPreview(threadId: string, userId: string, tenantId?: string) {
+    const context = await this.codingContext(threadId, userId, tenantId);
     const schemas = context.stages.flatMap(
       (stage) => stage.lowCodeSchemas ?? [],
     );
     return renderPlaywayPreview(schemas, context.projectId, context.brief);
   }
 
-  async generateProject(threadId: string, userId: string) {
-    const context = await this.codingContext(threadId, userId);
+  async generateProject(threadId: string, userId: string, tenantId?: string) {
+    const context = await this.codingContext(threadId, userId, tenantId);
     const run = await this.agentRuns?.findLatestByThread(threadId);
     const handoff = context.stages
       .map(
@@ -764,10 +850,14 @@ export class ProductionWorkflowService implements OnModuleInit {
     return execution.output;
   }
 
-  async generateProjectZip(threadId: string, userId: string): Promise<Buffer> {
-    const handoff = await this.handoffManifest(threadId, userId);
+  async generateProjectZip(
+    threadId: string,
+    userId: string,
+    tenantId?: string,
+  ): Promise<Buffer> {
+    const handoff = await this.handoffManifest(threadId, userId, tenantId);
     const context = handoff.context;
-    const generated = await this.generateProject(threadId, userId);
+    const generated = await this.generateProject(threadId, userId, tenantId);
     const zip = new JSZip();
     generated.files.forEach((file) => zip.file(file.path, file.content));
     zip.file(
@@ -860,6 +950,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     dto: StartProductionWorkflowDto,
     userId: string,
     threadId: string,
+    tenantId?: string,
   ): Promise<ProductionWorkflowStateType> {
     const selectedRoles = normalizeProductionRoles(dto.roles);
     const composition = this.plugins
@@ -877,6 +968,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       threadId,
       projectId: dto.projectId.trim(),
       userId,
+      tenantId: tenantId?.trim() || undefined,
       runId: '',
       pluginKeys: composition.pluginKeys,
       pluginTools: composition.toolNames,
@@ -1021,10 +1113,43 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (this.activeRuns.has(threadId)) return;
     const leaseToken = randomUUID();
     const leaseKey = `production:workflow:lease:${threadId}`;
+    const leaseSeconds = 5 * 60;
+    let leaseRenewal: NodeJS.Timeout | undefined;
     const run = Promise.resolve()
       .then(async () => {
-        if (!this.redisProvider.isEnabled()) return true;
-        return this.redisProvider.setIfAbsent(leaseKey, leaseToken, 5 * 60);
+        if (!this.redisProvider.isEnabled()) {
+          if (
+            this.configService?.get<boolean>('redis.requireDistributedLock') ===
+              true ||
+            this.configService?.get<boolean>('core.requireDependencies') ===
+              true ||
+            this.configService?.get<string>('nodeEnv') === 'production'
+          ) {
+            throw new Error(
+              'Redis 分布式锁不可用，生产模式拒绝执行工作流副作用。',
+            );
+          }
+          return true;
+        }
+        const acquired = await this.redisProvider.setIfAbsent(
+          leaseKey,
+          leaseToken,
+          leaseSeconds,
+        );
+        if (acquired) {
+          leaseRenewal = setInterval(() => {
+            void this.redisProvider
+              .renewLock(leaseKey, leaseToken, leaseSeconds)
+              .then((renewed) => {
+                if (!renewed) {
+                  this.logger.error(
+                    `production workflow ${threadId} lease renewal failed; another instance may take over`,
+                  );
+                }
+              });
+          }, 60_000);
+        }
+        return acquired;
       })
       .then((acquired) => {
         if (!acquired) {
@@ -1038,6 +1163,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       .then(() => undefined)
       .catch((error) => this.markScheduledFailure(threadId, userId, error))
       .finally(() => {
+        if (leaseRenewal) clearInterval(leaseRenewal);
         this.activeRuns.delete(threadId);
         void this.redisProvider.releaseLock(leaseKey, leaseToken);
         if (this.pendingStates.get(threadId)?.status !== 'failed') {
@@ -1045,6 +1171,19 @@ export class ProductionWorkflowService implements OnModuleInit {
         }
       });
     this.activeRuns.set(threadId, run);
+  }
+
+  /** BullMQ 自定义 jobId 不能包含冒号；哈希同时保证稳定去重且不泄露 threadId。 */
+  private workflowJobId(
+    operation: ProductionWorkflowJob['operation'],
+    threadId: string,
+    suffix = '',
+  ): string {
+    const digest = createHash('sha256')
+      .update(`${operation}:${threadId}:${suffix}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `production-workflow-${operation}-${digest}`;
   }
 
   private async markScheduledFailure(
@@ -1936,11 +2075,26 @@ export class ProductionWorkflowService implements OnModuleInit {
     return PRODUCTION_ROLES.filter((role) => included.has(role));
   }
 
-  private async getOwnedState(threadId: string, userId: string) {
+  private async getOwnedState(
+    threadId: string,
+    userId: string,
+    tenantId?: string,
+  ) {
     const state = await this.getState(threadId);
     if (!state?.projectId) throw new Error('workflow not found');
     if (state.userId !== userId) throw new Error('workflow not found');
+    if (!this.tenantMatches(state.tenantId, tenantId)) {
+      throw new Error('workflow not found');
+    }
     return state;
+  }
+
+  /** 有租户请求不能读取未绑定租户的历史状态，避免把旧的无租户数据当成当前租户数据。 */
+  private tenantMatches(resourceTenantId?: unknown, requestedTenantId?: string) {
+    const requested = requestedTenantId?.trim();
+    if (!requested) return true;
+    const resource = typeof resourceTenantId === 'string' ? resourceTenantId.trim() : '';
+    return Boolean(resource) && resource === requested;
   }
 
   private async getState(threadId: string) {
@@ -2238,6 +2392,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       pluginTools: state.pluginTools,
       projectId: state.projectId,
       userId,
+      tenantId: state.tenantId,
       currentRole: state.currentRole,
       selectedRoles: state.selectedRoles,
       executionBatches: state.executionBatches,

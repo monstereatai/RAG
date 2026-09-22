@@ -168,10 +168,10 @@ export class ElasticsearchProvider implements OnModuleInit {
           | Record<string, unknown>
           | undefined;
         if (properties && (!properties.userId || !properties.sourceAuthority)) {
-          this.logger.warn(
-            `ES mapping outdated (missing userId property). Re-creating...`,
+          this.logger.error(
+            `ES mapping outdated for "${this.indexName}"; refusing automatic deletion. Create a new versioned index and reindex before switching traffic.`,
           );
-          await this.client.indices.delete({ index: this.indexName });
+          return;
         } else {
           // 幂等补字段：为存量索引补齐业务元数据与 dense_vector embedding 字段
           // ES 支持给现有索引新增字段；失败仅告警，不阻塞启动，也绝不删除存量索引
@@ -219,11 +219,9 @@ export class ElasticsearchProvider implements OnModuleInit {
         }
       } catch (err) {
         this.logger.warn(
-          `Failed to inspect ES index: ${(err as Error).message}. Re-creating...`,
+          `Failed to inspect ES index: ${(err as Error).message}. Existing data is preserved; manual reindex is required.`,
         );
-        await this.client.indices
-          .delete({ index: this.indexName })
-          .catch(() => {});
+        return;
       }
     }
 
@@ -500,18 +498,81 @@ export class ElasticsearchProvider implements OnModuleInit {
   async deleteByDocId(docId: string, _userId?: string): Promise<void> {
     if (!this.enabled) return;
     try {
+      const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
+      if (_userId) filter.push({ term: { userId: _userId } });
       await this.client.deleteByQuery({
         index: this.indexName,
-        query: { term: { docId } },
+        query: { bool: { filter } },
       });
-      await this.client
-        .delete({ index: this.documentIndexName, id: docId, refresh: true })
-        .catch(() => undefined);
+      if (_userId) {
+        await this.client
+          .deleteByQuery({
+            index: this.documentIndexName,
+            query: {
+              bool: {
+                filter: [
+                  { term: { docId } },
+                  { term: { userId: _userId } },
+                ],
+              },
+            },
+            refresh: true,
+          })
+          .catch(() => undefined);
+      } else {
+        await this.client
+          .delete({ index: this.documentIndexName, id: docId, refresh: true })
+          .catch(() => undefined);
+      }
       this.logger.log(
         `ES deleted chunks for docId=${docId} and userId=${_userId ?? 'none'}`,
       );
     } catch (err) {
       this.logger.warn(`ES deleteByDocId failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * 返回文档分块索引和文档索引的对账结果。
+   * 该方法不经过检索门禁，避免 draft／archived 文档被误判为缺索引。
+   */
+  async getIndexCountsByDocId(
+    docId: string,
+    userId?: string,
+  ): Promise<{
+    available: boolean;
+    chunkCount: number;
+    documentCount: number;
+    reason?: string;
+  }> {
+    if (!this.enabled) {
+      return {
+        available: false,
+        chunkCount: 0,
+        documentCount: 0,
+        reason: 'elasticsearch_disabled',
+      };
+    }
+    const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
+    if (userId) filter.push({ term: { userId } });
+    const query: estypes.QueryDslQueryContainer = { bool: { filter } };
+    try {
+      const [chunks, documents] = await Promise.all([
+        this.client.count({ index: this.indexName, query }),
+        this.client.count({ index: this.documentIndexName, query }),
+      ]);
+      return {
+        available: true,
+        chunkCount: chunks.count,
+        documentCount: documents.count,
+      };
+    } catch (err) {
+      return {
+        available: false,
+        chunkCount: 0,
+        documentCount: 0,
+        reason: `elasticsearch_count_failed:${(err as Error).message}`,
+      };
     }
   }
 

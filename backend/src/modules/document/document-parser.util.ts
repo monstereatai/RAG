@@ -9,6 +9,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -172,6 +174,10 @@ interface PlaywrightBrowser {
 }
 
 interface PlaywrightPage {
+  route(
+    pattern: string,
+    handler: (route: PlaywrightRoute) => Promise<void>,
+  ): Promise<void>;
   goto(
     url: string,
     options: {
@@ -182,6 +188,12 @@ interface PlaywrightPage {
   waitForTimeout(ms: number): Promise<void>;
   content(): Promise<string>;
   url(): string;
+}
+
+interface PlaywrightRoute {
+  request(): { url(): string };
+  abort(errorCode?: string): Promise<void>;
+  continue(): Promise<void>;
 }
 
 export function detectDocumentKind(filename: string): SupportedDocumentKind {
@@ -314,6 +326,7 @@ export async function extractUrlContent(
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new BadRequestException('only http and https urls are supported');
   }
+  await assertSafeExternalUrl(parsed);
 
   const dynamicEnabled = process.env.URL_EXTRACT_DYNAMIC_ENABLED === 'true';
   if (dynamicEnabled) {
@@ -347,13 +360,7 @@ async function extractStaticUrlContent(
   parsed: URL,
   sourceUrl: string,
 ): Promise<UrlExtractionResult> {
-  const response = await fetch(parsed, {
-    headers: {
-      accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.8',
-      'user-agent': 'RAG-KnowledgeBase/1.0',
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
+  const { response, finalUrl } = await fetchSafeExternalUrl(parsed);
   if (!response.ok) {
     throw new BadRequestException(
       `failed to fetch url: ${response.status} ${response.statusText}`,
@@ -371,7 +378,7 @@ async function extractStaticUrlContent(
     throw new BadRequestException('url content is too large');
   }
 
-  const finalUrl = response.url || parsed.toString();
+  await assertSafeExternalUrl(new URL(response.url || finalUrl));
   const fetchedAt = new Date().toISOString();
   if (contentType.includes('application/json')) {
     return {
@@ -472,12 +479,33 @@ async function renderDynamicUrl(url: string): Promise<{
   html: string;
   finalUrl: string;
 }> {
+  await assertSafeExternalUrl(new URL(url));
   const playwright = await dynamicImport<PlaywrightModule>('playwright');
   const browser = await playwright.chromium.launch({
     headless: true,
   });
   try {
     const page = await browser.newPage();
+    await page.route('**/*', async (route) => {
+      try {
+        const requestUrl = new URL(route.request().url());
+        const host = requestUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        const localHost =
+          host === 'localhost' ||
+          host.endsWith('.localhost') ||
+          host.endsWith('.local') ||
+          host.endsWith('.internal') ||
+          host.endsWith('.home.arpa') ||
+          host.endsWith('.test');
+        if (localHost || isBlockedIp(host)) {
+          await route.abort('blockedbyclient');
+          return;
+        }
+        await route.continue();
+      } catch {
+        await route.abort('blockedbyclient');
+      }
+    });
     await page.goto(url, {
       waitUntil:
         (process.env.URL_EXTRACT_DYNAMIC_WAIT_UNTIL as
@@ -490,13 +518,109 @@ async function renderDynamicUrl(url: string): Promise<{
     if (settleMs > 0) {
       await page.waitForTimeout(settleMs);
     }
-    return {
-      html: await page.content(),
-      finalUrl: page.url(),
-    };
+    const finalUrl = page.url();
+    await assertSafeExternalUrl(new URL(finalUrl));
+    return { html: await page.content(), finalUrl };
   } finally {
     await browser.close();
   }
+}
+
+const MAX_EXTERNAL_REDIRECTS = 3;
+
+/**
+ * 仅允许访问公网 HTTP(S) 地址，避免文档导入接口被用作 SSRF 探针。
+ * DNS 解析失败也按拒绝处理，避免在无法确认目标地址时继续请求。
+ */
+async function assertSafeExternalUrl(parsed: URL): Promise<void> {
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new BadRequestException('only http and https urls are supported');
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (
+    !hostname ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.home.arpa') ||
+    hostname.endsWith('.test')
+  ) {
+    throw new BadRequestException('private or local urls are not allowed');
+  }
+
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = isIP(hostname)
+      ? [{ address: hostname }]
+      : await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new BadRequestException('unable to resolve external url');
+  }
+  if (addresses.length === 0 || addresses.some(({ address }) => isBlockedIp(address))) {
+    throw new BadRequestException('private or local urls are not allowed');
+  }
+}
+
+function isBlockedIp(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized.startsWith('::ffff:')) {
+    return isBlockedIp(normalized.slice('::ffff:'.length));
+  }
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split('.').map(Number);
+    const [a, b] = octets;
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && b >= 18 && b <= 19) ||
+      a >= 224
+    );
+  }
+  return (
+    normalized === '::1' ||
+    normalized === '::' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe8') ||
+    normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') ||
+    normalized.startsWith('feb')
+  );
+}
+
+async function fetchSafeExternalUrl(
+  parsed: URL,
+): Promise<{ response: Response; finalUrl: string }> {
+  let current = new URL(parsed);
+  for (let redirectCount = 0; redirectCount <= MAX_EXTERNAL_REDIRECTS; redirectCount += 1) {
+    await assertSafeExternalUrl(current);
+    const response = await fetch(current, {
+      headers: {
+        accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.8',
+        'user-agent': 'RAG-KnowledgeBase/1.0',
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status < 300 || response.status >= 400) {
+      return { response, finalUrl: current.toString() };
+    }
+    const location = response.headers.get('location');
+    if (!location) return { response, finalUrl: current.toString() };
+    if (redirectCount === MAX_EXTERNAL_REDIRECTS) {
+      throw new BadRequestException('too many url redirects');
+    }
+    await response.body?.cancel();
+    current = new URL(location, current);
+  }
+  throw new BadRequestException('too many url redirects');
 }
 
 /** 扫描件兜底 OCR：每页首次识别失败后再重试一次（共 2 次尝试） */

@@ -4,9 +4,11 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { GraphService } from './graph.service';
 import { GraphExtractDto, GraphImportDto, GraphQueryDto } from './graph.dto';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('graph')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:graph')
 export class GraphController {
   constructor(private readonly graphService: GraphService) {}
 

@@ -38,7 +38,11 @@ export class BochaSearchService {
     return Boolean(this.config.get<string>('bocha.apiKey'));
   }
 
-  async search(query: string, count = 5): Promise<BochaSearchResult[]> {
+  async search(
+    query: string,
+    count = 5,
+    signal?: AbortSignal,
+  ): Promise<BochaSearchResult[]> {
     const apiKey = this.config.get<string>('bocha.apiKey');
     if (!apiKey) {
       this.logger.warn('BOCHA_API_KEY is empty, skip web_search');
@@ -58,7 +62,7 @@ export class BochaSearchService {
         summary: true,
         count,
       }),
-      signal: AbortSignal.timeout(10_000),
+      signal: this.composeSignal(signal, 10_000),
     });
 
     if (!response.ok) {
@@ -90,5 +94,10 @@ export class BochaSearchService {
 
   private toString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private composeSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   }
 }

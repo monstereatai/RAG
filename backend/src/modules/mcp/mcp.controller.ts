@@ -1,5 +1,6 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { McpProvider } from '../../providers/mcp/mcp.provider';
 
 interface McpToolView {
@@ -11,6 +12,7 @@ interface McpToolView {
 
 @Controller('mcp')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:mcp')
 export class McpController {
   constructor(private readonly mcpProvider: McpProvider) {}
 

@@ -8,6 +8,7 @@ import {
   Query,
   Param,
   BadRequestException,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -23,14 +24,19 @@ import { ChatResumeDto } from './chat-resume.dto';
 import { ChatFeedbackDto } from './chat-feedback.dto';
 import { RagFeedbackService } from './rag-feedback.service';
 import { listRolePresets } from './role-presets';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
+import { TenantQuotaGuard } from '../../common/guards/tenant-quota.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('chat')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantQuotaGuard)
+@ApiScopes('rag:chat')
 export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly conversationService: ConversationService,
     private readonly ragFeedbackService: RagFeedbackService,
+    @Optional() private readonly agentRuns?: AgentRunsService,
   ) {}
 
   @Get('role-presets')
@@ -49,7 +55,9 @@ export class ChatController {
     @Body() body: ChatDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<ChatResponse> {
-    return this.chatService.chat(body, user.userId);
+    return this.chatService.chat(body, user.userId, undefined, {
+      tenantId: user.tenantId,
+    });
   }
 
   @Post('feedback')
@@ -84,7 +92,10 @@ export class ChatController {
       .filter(Boolean);
     // SSE 只适配传输协议；请求语义、执行引擎、最终校验和持久化全部收敛到
     // ChatService，避免流式链路重新分类或与 HTTP 写出不同的最终答案。
+    let activeThreadId = threadId;
+    let settled = false;
     return new Observable<SseEvent>((subscriber) => {
+      const abortController = new AbortController();
       void this.chatService
         .chat(
           {
@@ -96,7 +107,17 @@ export class ChatController {
             approvalRequired: approvalRequired === 'true',
           },
           user.userId,
-          (event) => subscriber.next(event),
+          (event) => {
+            if (
+              event.type === 'thread' &&
+              typeof (event.data as { threadId?: unknown } | undefined)
+                ?.threadId === 'string'
+            ) {
+              activeThreadId = (event.data as { threadId: string }).threadId;
+            }
+            subscriber.next(event);
+          },
+          { signal: abortController.signal, tenantId: user.tenantId },
         )
         .then((result) => {
           // ChatService 已在最终持久化前后发出完整生命周期事件；这里只负责结束传输。
@@ -109,9 +130,36 @@ export class ChatController {
             data: { message: (error as Error).message },
           });
           subscriber.complete();
+        })
+        .finally(() => {
+          settled = true;
         });
-    });
 
+      // 浏览器关闭 SSE 时，Nest 会退订 Observable。把该退订映射到运行
+      // 取消标记，Agentic Loop 会在下一轮边界停止并保留运行审计。
+      return () => {
+        abortController.abort();
+        if (!settled && activeThreadId && this.agentRuns) {
+          void this.agentRuns.cancelActiveForThread(
+            activeThreadId,
+            user.userId,
+            '客户端断开流式连接',
+          );
+        }
+      };
+    });
+  }
+
+  @Post('conversations/:threadId/cancel')
+  async cancelConversationRun(
+    @Param('threadId') threadId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const run = await this.agentRuns?.cancelActiveForThread(
+      threadId,
+      user.userId,
+    );
+    return { status: run?.status ?? 'idle', runId: run?.id ?? null };
   }
 
   /**
@@ -172,6 +220,7 @@ export class ChatController {
       body.approval,
       body.feedback,
       user.userId,
+      user.tenantId,
     );
   }
 }

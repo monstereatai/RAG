@@ -104,6 +104,7 @@ export class JobsService implements OnModuleInit {
 
   async create(input: CreateJobInput): Promise<ScheduledJobEntity> {
     this.validateInput(input);
+    this.ensureSchedulingBackend();
 
     const job = this.jobRepo.create({
       id: randomUUID(),
@@ -146,6 +147,7 @@ export class JobsService implements OnModuleInit {
     const job = await this.get(id);
     if (job.running) return job;
 
+    this.ensureSchedulingBackend();
     this.startRuntime(job);
 
     await this.deactivateOtherVersions(job);
@@ -255,6 +257,9 @@ export class JobsService implements OnModuleInit {
   }
 
   private startRuntime(job: ScheduledJobEntity): void {
+    // 模块启动恢复、创建、启动和重启都必须经过同一个持久队列门禁；否则
+    // onModuleInit 会在 Redis 缺失时悄悄恢复为当前进程的 cron／timer。
+    this.ensureSchedulingBackend();
     if (this.scheduledQueue?.enabled) {
       void this.scheduledQueue
         .schedule(job)
@@ -271,6 +276,14 @@ export class JobsService implements OnModuleInit {
       this.startInterval(job);
     } else {
       this.startTimeout(job);
+    }
+  }
+
+  private ensureSchedulingBackend(): void {
+    if (this.scheduledQueue?.required === true && !this.scheduledQueue.enabled) {
+      throw new BadRequestException(
+        '生产定时任务要求 Redis 持久队列可用，当前不可用，已拒绝进程内降级。',
+      );
     }
   }
 
@@ -375,6 +388,14 @@ export class JobsService implements OnModuleInit {
     }
     const lockKey = `rag:scheduled-job:${id}:lock`;
     const lockToken = randomUUID();
+    if (
+      !this.redisProvider.isEnabled() &&
+      process.env.REQUIRE_DISTRIBUTED_LOCK === 'true'
+    ) {
+      throw new BadRequestException(
+        'Redis 分布式锁不可用，生产模式拒绝执行定时任务副作用。',
+      );
+    }
     const distributedLock = this.redisProvider.isEnabled()
       ? await this.redisProvider.setIfAbsent(lockKey, lockToken, 180)
       : true;

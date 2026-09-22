@@ -8,10 +8,12 @@ import {
 import { Observable } from 'rxjs';
 import { StructuredService } from './structured.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { SseEvent } from '../../rag/agentic/sse-event';
 
 @Controller('structured')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:structured')
 export class StructuredController {
   constructor(private readonly structuredService: StructuredService) {}
 

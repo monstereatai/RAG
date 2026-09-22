@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
@@ -82,10 +82,27 @@ export class AgentRunsService {
     if (run.status === 'cancelled' && input.status !== 'cancelled') {
       return run;
     }
-    Object.assign(run, input);
-    run.finishedAt =
-      input.status && input.status !== 'running' ? new Date() : run.finishedAt;
-    const saved = await this.runRepo.save(run);
+    const isTerminalTransition =
+      input.status !== undefined && input.status !== 'running';
+    const finishedAt = isTerminalTransition ? new Date() : run.finishedAt;
+    let saved: AgentRunEntity;
+    if (isTerminalTransition) {
+      // 取消与完成可能并发到达。只有仍处于活动态的 Run 才允许完成，
+      // 通过带状态条件的 UPDATE 避免迟到的完成覆盖 cancelled。
+      const updateResult = await this.runRepo.update(
+        { id, status: In(['running', 'waiting_approval']) },
+        { ...input, finishedAt },
+      );
+      if (typeof updateResult.affected === 'number' && updateResult.affected === 0) {
+        return this.get(id);
+      }
+      const refreshed = await this.runRepo.findOne({ where: { id } });
+      if (!refreshed) throw new NotFoundException(`agent run ${id} not found`);
+      saved = refreshed;
+    } else {
+      Object.assign(run, input, { finishedAt });
+      saved = await this.runRepo.save(run);
+    }
     await this.events.emit({
       threadId: saved.threadId,
       runId: saved.id,
@@ -108,12 +125,22 @@ export class AgentRunsService {
     }
 
     const now = new Date();
-    run.status = 'cancelled';
-    run.cancelledAt = now;
-    run.cancelReason = reason.trim().slice(0, 500) || '用户取消运行';
-    run.errorMessage = run.cancelReason;
-    run.finishedAt = now;
-    const saved = await this.runRepo.save(run);
+    const cancelReason = reason.trim().slice(0, 500) || '用户取消运行';
+    const updateResult = await this.runRepo.update(
+      { id, status: In(['running', 'waiting_approval']) },
+      {
+        status: 'cancelled',
+        cancelledAt: now,
+        cancelReason,
+        errorMessage: cancelReason,
+        finishedAt: now,
+      },
+    );
+    if (typeof updateResult.affected === 'number' && updateResult.affected === 0) {
+      return this.get(id);
+    }
+    const saved = await this.runRepo.findOne({ where: { id } });
+    if (!saved) throw new NotFoundException(`agent run ${id} not found`);
     await this.redis.set(
       `agent-loop:cancel:${saved.threadId}:${saved.id}`,
       'cancelled',
@@ -139,6 +166,25 @@ export class AgentRunsService {
       });
     }
     return this.get(id);
+  }
+
+  /**
+   * 按会话取消当前用户仍在执行的运行。只允许匹配运行归属用户，避免
+   * 仅凭 threadId 取消其他租户或其他用户的任务。
+   */
+  async cancelActiveForThread(
+    threadId: string,
+    userId: string,
+    reason = '用户取消运行',
+  ) {
+    const run = await this.runRepo.findOne({
+      where: [
+        { threadId, userId, status: 'running' },
+        { threadId, userId, status: 'waiting_approval' },
+      ],
+      order: { createdAt: 'DESC' },
+    });
+    return run ? this.cancel(run.id, reason) : null;
   }
 
   async recordRuntimeEvent(
@@ -206,20 +252,37 @@ export class AgentRunsService {
     if (!runBeforeAction)
       throw new NotFoundException(`agent run ${runId} not found`);
     if (runBeforeAction.toolCallCount >= runBeforeAction.maxToolCalls) {
-      await this.events.emit({
-        threadId: runBeforeAction.threadId,
-        runId,
-        eventType: 'budget.exceeded',
-        actor: runBeforeAction.mode,
-        target: input.name,
-        payload: {
-          budget: 'tool_calls',
-          maxToolCalls: runBeforeAction.maxToolCalls,
-        },
+      await this.emitBudgetExceeded(runBeforeAction, runId, 'tool_calls', input.name, {
+        maxToolCalls: runBeforeAction.maxToolCalls,
       });
-      throw new BadRequestException(
-        `agent run ${runId} exceeded max tool calls`,
-      );
+      throw new BadRequestException(`agent run ${runId} exceeded max tool calls`);
+    }
+
+    // 不能用“先读计数、再 increment”的方式做预算判断：并发工具调用会
+    // 同时读到同一个剩余值并一起通过。把读取到的旧计数放进 UPDATE 条件，
+    // 只有一个调用能成功预留该额度。
+    const reservation = await this.runRepo.update(
+      {
+        id: runId,
+        status: In(['running', 'waiting_approval']),
+        toolCallCount: runBeforeAction.toolCallCount,
+      },
+      {
+        actionCount: () => 'actionCount + 1',
+        toolCallCount: () => 'toolCallCount + 1',
+      },
+    );
+    if (reservation.affected === 0) {
+      const current = await this.runRepo.findOne({ where: { id: runId } });
+      if (current && current.status === 'running') {
+        await this.emitBudgetExceeded(current, runId, 'tool_calls', input.name, {
+          maxToolCalls: current.maxToolCalls,
+        });
+        throw new BadRequestException(
+          `agent run ${runId} exceeded max tool calls`,
+        );
+      }
+      throw new BadRequestException(`agent run ${runId} is not active`);
     }
     const action = await this.actionRepo.save(
       this.actionRepo.create({
@@ -235,8 +298,6 @@ export class AgentRunsService {
         output: this.stringify(input.output),
       }),
     );
-    await this.runRepo.increment({ id: runId }, 'actionCount', 1);
-    await this.runRepo.increment({ id: runId }, 'toolCallCount', 1);
     const run = await this.runRepo.findOne({ where: { id: runId } });
     if (run)
       await this.events.emit({
@@ -258,18 +319,34 @@ export class AgentRunsService {
     const run = await this.runRepo.findOne({ where: { id: runId } });
     if (!run) throw new NotFoundException(`agent run ${runId} not found`);
     if (run.delegationCount >= run.maxDelegations) {
-      await this.events.emit({
-        threadId: run.threadId,
-        runId,
-        eventType: 'budget.exceeded',
-        actor: run.mode,
-        payload: { budget: 'delegations', maxDelegations: run.maxDelegations },
+      await this.emitBudgetExceeded(run, runId, 'delegations', undefined, {
+        maxDelegations: run.maxDelegations,
       });
       throw new BadRequestException(
         `agent run ${runId} exceeded max delegations`,
       );
     }
-    await this.runRepo.increment({ id: runId }, 'delegationCount', 1);
+
+    const reservation = await this.runRepo.update(
+      {
+        id: runId,
+        status: In(['running', 'waiting_approval']),
+        delegationCount: run.delegationCount,
+      },
+      { delegationCount: () => 'delegationCount + 1' },
+    );
+    if (reservation.affected === 0) {
+      const current = await this.runRepo.findOne({ where: { id: runId } });
+      if (current && current.status === 'running') {
+        await this.emitBudgetExceeded(current, runId, 'delegations', undefined, {
+          maxDelegations: current.maxDelegations,
+        });
+        throw new BadRequestException(
+          `agent run ${runId} exceeded max delegations`,
+        );
+      }
+      throw new BadRequestException(`agent run ${runId} is not active`);
+    }
     return {
       allowed: true,
       remaining: run.maxDelegations - run.delegationCount - 1,
@@ -432,5 +509,22 @@ export class AgentRunsService {
     return typeof value === 'string'
       ? value.slice(0, 20000)
       : JSON.stringify(value).slice(0, 20000);
+  }
+
+  private async emitBudgetExceeded(
+    run: AgentRunEntity,
+    runId: string,
+    budget: 'tool_calls' | 'delegations',
+    target?: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.events.emit({
+      threadId: run.threadId,
+      runId,
+      eventType: 'budget.exceeded',
+      actor: run.mode,
+      target,
+      payload: { budget, ...payload },
+    });
   }
 }

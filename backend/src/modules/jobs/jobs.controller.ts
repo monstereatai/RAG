@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateJobDto } from './dto/create-job.dto';
@@ -17,6 +18,7 @@ import { JobsService } from './jobs.service';
 
 @Controller('jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiScopes('rag:jobs')
 export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
 

@@ -109,6 +109,30 @@ describe('AgenticRagService budget boundaries', () => {
     expect(result).toEqual(['原始问题', '原始问题']);
   });
 
+  it('passes request cancellation into evidence synthesis fallback', async () => {
+    const { service, llmProvider } = createService();
+    const invoke = jest.fn().mockResolvedValue('结论[片段1]');
+    (llmProvider as any).invoke = invoke;
+    (llmProvider as any).getActiveProviderName = jest
+      .fn()
+      .mockReturnValue('qwen');
+    const controller = new AbortController();
+
+    await expect(
+      (service as any).synthesizeEvidenceAnswer(
+        '问题',
+        [{ content: '证据' }],
+        controller.signal,
+      ),
+    ).resolves.toBe('结论[片段1]');
+
+    expect(invoke).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    controller.abort();
+  });
+
   it('does not force overly long complex auto queries to simple mode', () => {
     const { service } = createService();
 

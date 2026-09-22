@@ -5,6 +5,7 @@ import {
   Histogram,
   register,
 } from 'prom-client';
+import type { LlmUsage } from '../../providers/llm/llm-provider.interface';
 
 /**
  * 命名规范（Prometheus 官方约定）：
@@ -55,9 +56,7 @@ export class MetricsService implements OnModuleInit {
     name: 'rag_retrieval_duration_seconds',
     help: 'Retrieval stage duration in seconds',
     labelNames: ['stage', 'status'] as const,
-    buckets: [
-      0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.5, 3, 5, 10,
-    ],
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.5, 3, 5, 10],
   });
 
   private readonly retrievalContextChunks = new Histogram({
@@ -91,15 +90,20 @@ export class MetricsService implements OnModuleInit {
     name: 'rag_llm_call_duration_seconds',
     help: 'LLM call duration in seconds',
     labelNames: ['provider', 'model', 'status'] as const,
-    buckets: [
-      0.1, 0.3, 0.5, 0.8, 1, 1.5, 2, 3, 5, 8, 10, 15, 20, 30, 45, 60,
-    ],
+    buckets: [0.1, 0.3, 0.5, 0.8, 1, 1.5, 2, 3, 5, 8, 10, 15, 20, 30, 45, 60],
   });
 
   /** token 消耗：type 区分 prompt / completion，便于分别核算成本。 */
   private readonly llmTokensEstimatedTotal = new Counter({
     name: 'rag_llm_tokens_estimated_total',
     help: 'Estimated LLM tokens by prompt/completion',
+    labelNames: ['provider', 'model', 'type'] as const,
+  });
+
+  /** 供应商返回的真实 token 用量；与 estimated 指标分开，禁止混作账单。 */
+  private readonly llmTokensActualTotal = new Counter({
+    name: 'rag_llm_tokens_actual_total',
+    help: 'Provider-reported LLM tokens by prompt/completion',
     labelNames: ['provider', 'model', 'type'] as const,
   });
 
@@ -114,7 +118,9 @@ export class MetricsService implements OnModuleInit {
     name: 'rag_cache_operation_duration_seconds',
     help: 'Cache operation duration in seconds',
     labelNames: ['cache', 'operation'] as const,
-    buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    buckets: [
+      0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1,
+    ],
   });
 
   private readonly agentNodeDuration = new Histogram({
@@ -201,11 +207,7 @@ export class MetricsService implements OnModuleInit {
   }
 
   /** 记录某阶段召回条数（0 也记录，便于发现召回为空的情况）。 */
-  observeRetrievalRecalled(
-    stage: string,
-    source: string,
-    count: number,
-  ): void {
+  observeRetrievalRecalled(stage: string, source: string, count: number): void {
     this.retrievalRecalledChunks.observe(
       { stage: stage || 'unknown', source: source || 'unknown' },
       count,
@@ -250,6 +252,25 @@ export class MetricsService implements OnModuleInit {
       this.llmTokensEstimatedTotal.inc(
         { provider: labels.provider, model: labels.model, type: 'completion' },
         completionTokensEstimated,
+      );
+    }
+  }
+
+  observeLlmUsage(provider: string, model: string, usage: LlmUsage): void {
+    const labels = {
+      provider: provider || 'unknown',
+      model: model || 'unknown',
+    };
+    if (usage.inputTokens > 0) {
+      this.llmTokensActualTotal.inc(
+        { ...labels, type: 'prompt' },
+        usage.inputTokens,
+      );
+    }
+    if (usage.outputTokens > 0) {
+      this.llmTokensActualTotal.inc(
+        { ...labels, type: 'completion' },
+        usage.outputTokens,
       );
     }
   }

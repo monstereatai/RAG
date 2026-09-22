@@ -100,6 +100,7 @@ describe('AgentLoopService', () => {
         runId: 'run-1',
         step: 1,
         toolCalls: 1,
+        elapsedMs: 1_500,
         state: { draft: 'already-generated' },
         updatedAt: new Date().toISOString(),
       }),
@@ -127,7 +128,7 @@ describe('AgentLoopService', () => {
       initialState: { draft: '' },
       maxSteps: 3,
       maxToolCalls: 1,
-      timeoutMs: 1_000,
+      timeoutMs: 2_000,
       decide,
     });
 
@@ -138,6 +139,65 @@ describe('AgentLoopService', () => {
       toolCalls: 1,
     });
     expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restore a checkpoint with a fresh timeout budget', async () => {
+    const service = new AgentLoopService(
+      tools as never,
+      events as never,
+      redis as never,
+    );
+    redis.get.mockResolvedValue(
+      JSON.stringify({
+        version: 1,
+        threadId: 'thread-timeout',
+        actor: 'test-agent',
+        runId: 'run-1',
+        step: 1,
+        toolCalls: 0,
+        elapsedMs: 2_000,
+        state: {},
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+
+    const result = await service.resume({
+      threadId: 'thread-timeout',
+      runId: 'run-1',
+      actor: 'test-agent',
+      initialState: {},
+      maxSteps: 3,
+      maxToolCalls: 0,
+      timeoutMs: 1_000,
+      decide: jest.fn(),
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.terminationReason).toBe('Agent Loop 总超时');
+  });
+
+  it('enforces the total timeout while the decision function is running', async () => {
+    const service = new AgentLoopService(
+      tools as never,
+      events as never,
+      redis as never,
+    );
+
+    const result = await service.run({
+      threadId: 'decision-timeout',
+      actor: 'test-agent',
+      initialState: {},
+      maxSteps: 1,
+      maxToolCalls: 0,
+      timeoutMs: 10,
+      decide: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { type: 'complete' as const, output: 'late', reason: 'late' };
+      },
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.terminationReason).toContain('timeout');
   });
 
   it('rejects a checkpoint from another run', async () => {
@@ -170,6 +230,23 @@ describe('AgentLoopService', () => {
         decide: () => ({ type: 'blocked', reason: 'should not run' }),
       }),
     ).rejects.toThrow('身份或运行标识不匹配');
+  });
+
+  it('isolates checkpoints for concurrent runs in the same thread', () => {
+    const service = new AgentLoopService(
+      tools as never,
+      events as never,
+      redis as never,
+    );
+    const buildKey = (service as any).checkpointKey as (
+      threadId: string,
+      actor: string,
+      runId?: string,
+    ) => string;
+
+    expect(buildKey.call(service, 'thread-1', 'agent', 'run-1')).not.toBe(
+      buildKey.call(service, 'thread-1', 'agent', 'run-2'),
+    );
   });
 
   it('stops before the next round when the run is cancelled', async () => {

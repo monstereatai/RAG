@@ -488,14 +488,16 @@ export const getAgentRunCenter = () =>
     params: { limit: 50 },
   });
 
-export const getAgentRunDetail = (id: string) =>
-  authRequest<unknown>(
+export const getAgentRunDetail = (id: string, signal?: AbortSignal) =>
+  authRequest<AgentRunDetail>(
     `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}`,
+    { signal },
   );
 
-export const getAgentRunDetailArtifacts = (id: string) =>
-  authRequest<unknown>(
+export const getAgentRunDetailArtifacts = (id: string, signal?: AbortSignal) =>
+  authRequest<AgentRunArtifactSummary>(
     `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/artifacts`,
+    { signal },
   );
 
 export interface AgentRunSummary {
@@ -578,6 +580,70 @@ export const retryAgentRunRecord = (id: string) =>
     `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`,
     { method: 'POST', data: {} },
   );
+
+export interface AgentRunEvent {
+  id: string;
+  sequence: number;
+  eventType: string;
+  actor?: string | null;
+  target?: string | null;
+  payload?: Record<string, unknown> | null;
+  createdAt?: string | null;
+}
+
+export interface AgentRunAction {
+  id: string;
+  name: string;
+  status: string;
+  riskLevel?: string;
+  durationMs?: number;
+  input?: string | null;
+  output?: string | null;
+}
+
+export interface AgentRunDetail {
+  id: string;
+  threadId: string;
+  status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
+  mode: string;
+  route?: string | null;
+  actionCount: number;
+  maxSteps: number;
+  toolCallCount: number;
+  maxToolCalls: number;
+  retryCount: number;
+  costUsd?: number | null;
+  resultSummary?: string | null;
+  errorMessage?: string | null;
+  events: AgentRunEvent[];
+  actions: AgentRunAction[];
+  metrics?: Record<string, number>;
+  goal?: { status: string; objective: string; reason?: string | null } | null;
+  failureOnset?: {
+    found: boolean;
+    eventType?: string;
+    sequence?: number;
+    reason?: string;
+    recommendation?: string;
+  };
+}
+
+export interface AgentRunArtifactSummary {
+  files: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    status: string;
+    sourceText?: string | null;
+    errorMessage?: string | null;
+  }>;
+  structuredArtifacts: Array<{
+    id: string;
+    type: string;
+    producer: string;
+    payload: Record<string, unknown>;
+  }>;
+}
 
 export const cloneGovernanceWorkflow = (
   id: string,

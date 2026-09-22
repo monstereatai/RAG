@@ -22,6 +22,7 @@ import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
 import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 import { DocumentModule } from '../document/document.module';
 import { MetricsModule } from '../metrics/metrics.module';
+import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { MetricsModule } from '../metrics/metrics.module';
     AgentRuntimeModule,
     DocumentModule,
     MetricsModule,
+    TenantQuotaModule,
   ],
   controllers: [ChatController],
   providers: [

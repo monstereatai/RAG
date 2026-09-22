@@ -127,7 +127,7 @@ sequenceDiagram
 - Milvus 存储 dense vector，主 collection 默认 HNSW。
 - Elasticsearch 存储全文检索索引。
 - 内存 BM25 索引用于快速关键词召回和降级。
-- 文档删除会删除元数据、BM25 索引、ES 索引和 Milvus 向量；Milvus 删除失败会进入进程内退避重试。
+- 文档删除会删除元数据、BM25 索引、ES 索引和 Milvus 向量；Milvus 删除失败会进入 Redis 持久化退避重试（Redis 不可用时明确暴露为非耐久化状态）。
 
 ### 5.2 问答链路
 

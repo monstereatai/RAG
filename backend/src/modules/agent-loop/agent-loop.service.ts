@@ -47,7 +47,7 @@ export class AgentLoopService {
     if (!this.redis.isEnabled())
       throw new Error('Agent Loop 恢复需要 Redis 检查点');
     const raw = await this.redis.get(
-      this.checkpointKey(input.threadId, input.actor),
+      this.checkpointKey(input.threadId, input.actor, input.runId),
     );
     if (!raw) throw new Error('未找到可恢复的 Agent Loop 检查点');
     let checkpoint: AgentLoopCheckpoint<TState>;
@@ -71,6 +71,7 @@ export class AgentLoopService {
       checkpoint.state,
       checkpoint.step,
       checkpoint.toolCalls,
+      Math.max(0, checkpoint.elapsedMs ?? 0),
     );
   }
 
@@ -79,8 +80,10 @@ export class AgentLoopService {
     initialState: TState,
     completedSteps: number,
     initialToolCalls: number,
+    initialElapsedMs = 0,
   ): Promise<AgentLoopResult<TState, TOutput>> {
-    const startedAt = Date.now();
+    // 恢复不能把已经消耗的时间预算重置为完整 timeoutMs。
+    const startedAt = Date.now() - Math.max(0, initialElapsedMs);
     const maxSteps = Math.max(1, input.maxSteps);
     const maxToolCalls = Math.max(0, input.maxToolCalls);
     let state = initialState;
@@ -122,7 +125,11 @@ export class AgentLoopService {
       });
       let decision: AgentLoopDecision<TState, TOutput>;
       try {
-        decision = await input.decide(state, { step, toolCalls, remainingMs });
+        decision = await this.withTimeout(
+          Promise.resolve(input.decide(state, { step, toolCalls, remainingMs })),
+          remainingMs,
+          'Agent Loop decision',
+        );
       } catch (error) {
         return this.finish(
           input,
@@ -131,6 +138,18 @@ export class AgentLoopService {
           toolCalls,
           'failed',
           error instanceof Error ? error.message : String(error),
+        );
+      }
+
+      const actionRemainingMs = input.timeoutMs - (Date.now() - startedAt);
+      if (actionRemainingMs <= 0) {
+        return this.finish(
+          input,
+          state,
+          step,
+          toolCalls,
+          'failed',
+          'Agent Loop 总超时',
         );
       }
 
@@ -169,7 +188,11 @@ export class AgentLoopService {
           );
         }
         toolCalls += 1;
-        const execution = await this.executeTool(input, decision, remainingMs);
+        const execution = await this.executeTool(
+          input,
+          decision,
+          actionRemainingMs,
+        );
         if (execution.status === 'blocked') {
           return this.finish(
             input,
@@ -200,7 +223,7 @@ export class AgentLoopService {
         try {
           const result = await this.withTimeout(
             decision.execute(),
-            remainingMs,
+            actionRemainingMs,
             decision.name,
           );
           state = decision.reduce(state, result);
@@ -221,7 +244,7 @@ export class AgentLoopService {
         }
       }
 
-      await this.checkpoint(input, state, step, toolCalls);
+      await this.checkpoint(input, state, step, toolCalls, Date.now() - startedAt);
       await this.emit(input, 'agent.loop.round.completed', { step, toolCalls });
     }
 
@@ -265,6 +288,7 @@ export class AgentLoopService {
     state: TState,
     step: number,
     toolCalls: number,
+    elapsedMs: number,
   ) {
     const snapshot = JSON.stringify({
       version: 1,
@@ -273,13 +297,14 @@ export class AgentLoopService {
       runId: input.runId,
       step,
       toolCalls,
+      elapsedMs,
       state,
       updatedAt: new Date().toISOString(),
     } satisfies AgentLoopCheckpoint<TState>);
     const redisEnabled = this.redis.isEnabled();
     if (redisEnabled) {
       await this.redis.set(
-        this.checkpointKey(input.threadId, input.actor),
+        this.checkpointKey(input.threadId, input.actor, input.runId),
         snapshot,
         input.checkpointTtlSeconds ?? 86_400,
       );
@@ -356,9 +381,9 @@ export class AgentLoopService {
     }
   }
 
-  private checkpointKey(threadId: string, actor: string) {
+  private checkpointKey(threadId: string, actor: string, runId?: string) {
     const scope = createHash('sha256')
-      .update(`${threadId}:${actor}`)
+      .update(`${threadId}:${actor}:${runId ?? 'anonymous'}`)
       .digest('hex');
     return `agent-loop:checkpoint:${scope}`;
   }

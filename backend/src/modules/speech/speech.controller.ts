@@ -16,6 +16,7 @@ import type { Response } from 'express';
 import { Observable } from 'rxjs';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 interface SpeechSseEvent {
   type: 'meta' | 'chunk' | 'done' | 'error';
@@ -38,6 +39,7 @@ interface SpeechSseEvent {
  */
 @Controller('speech')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:speech')
 export class SpeechController {
   private readonly logger = new Logger(SpeechController.name);
 

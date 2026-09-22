@@ -1,10 +1,12 @@
 import { Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { LangfuseProvider } from './langfuse.provider';
 import { DingTalkProvider } from '../notify/dingtalk.provider';
 
 @Controller('observability')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:observability')
 export class ObservabilityController {
   constructor(
     private readonly langfuseProvider: LangfuseProvider,

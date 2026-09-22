@@ -181,6 +181,7 @@ describe('ProductionWorkflowService', () => {
         roles: ['product'],
       },
       'user-1',
+      'tenant-a',
     );
 
     expect(accepted.status).toBe('running');
@@ -189,9 +190,57 @@ describe('ProductionWorkflowService', () => {
         operation: 'start',
         threadId: accepted.threadId,
         userId: 'user-1',
+        tenantId: 'tenant-a',
+        id: expect.stringMatching(/^production-workflow-start-[a-f0-9]{32}$/),
       }),
     );
+    expect(accepted.tenantId).toBe('tenant-a');
+    expect(workflowQueue.enqueue.mock.calls[0][0].id).not.toContain(':');
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an existing workflow when tenant or owner does not match', async () => {
+    const { service } = createService();
+    const state = await service.start(
+      {
+        projectId: 'tenant-isolation',
+        brief: '验证带租户的工作流不能被其他租户复用同一个 threadId。',
+        roles: ['product'],
+        threadId: 'shared-thread-id',
+      },
+      'user-1',
+      'tenant-a',
+    );
+
+    await expect(
+      service.start(
+        {
+          projectId: 'attacker-project',
+          brief: '不能覆盖已有工作流。',
+          roles: ['product'],
+          threadId: state.threadId,
+        },
+        'user-1',
+        'tenant-b',
+      ),
+    ).rejects.toThrow('workflow not found');
+
+    await expect(
+      service.startAsync(
+        {
+          projectId: 'attacker-project',
+          brief: '异步入口也不能覆盖已有工作流。',
+          roles: ['product'],
+          threadId: state.threadId,
+        },
+        'user-1',
+        'tenant-b',
+      ),
+    ).rejects.toThrow('workflow not found');
+
+    await expect(service.status(state.threadId, 'user-1', 'tenant-b')).rejects.toThrow(
+      'workflow not found',
+    );
   });
 
   it('supports one role running independently', async () => {

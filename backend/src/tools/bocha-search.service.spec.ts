@@ -77,4 +77,23 @@ describe('BochaSearchService', () => {
       'Bocha web_search failed: 503 service unavailable',
     );
   });
+
+  it('combines caller cancellation with the outbound timeout', async () => {
+    const service = new BochaSearchService({
+      get: jest.fn().mockReturnValue('test-key'),
+    } as unknown as ConfigService);
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: { webPages: { value: [] } } }),
+    });
+    global.fetch = fetchMock;
+
+    await service.search('query', 3, controller.signal);
+
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toEqual(
+      expect.objectContaining({ aborted: true }),
+    );
+  });
 });

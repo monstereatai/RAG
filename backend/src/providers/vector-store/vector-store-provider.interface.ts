@@ -90,6 +90,12 @@ export interface IVectorStoreProvider {
   deleteByDocId(docId: string): Promise<void>;
 
   /**
+   * 返回某个文档在向量索引中的分块数量，用于与 PostgreSQL 对账。
+   * 底层索引不可用时应抛出受控错误，由上层标记为 unavailable，而不是当成 0。
+   */
+  countByDocId(docId: string, userId?: string): Promise<number>;
+
+  /**
    * 返回当前索引配置，用于调试和验收。
    */
   getIndexInfo(): VectorIndexInfo;

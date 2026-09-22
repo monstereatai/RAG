@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -39,6 +40,9 @@ import {
   getChunkStrategy,
   IngestionQualityReport,
 } from './document-profile.util';
+import { RedisProvider } from '../../providers/redis/redis.provider';
+import { DomainEventsService } from '../domain-events/domain-events.service';
+import type { DomainEventInput } from '../domain-events/domain-events.service';
 
 export interface UploadResult {
   docId: string;
@@ -75,6 +79,8 @@ export interface UploadResult {
 export interface UploadOptions {
   docId?: string;
   taskId?: string;
+  /** Worker／跨服务调用携带的租户上下文；持久化租户列仍需后续迁移补齐。 */
+  tenantId?: string;
   originalBuffer?: Buffer;
   contentType?: string;
   businessMetadata?: DocumentBusinessMetadata;
@@ -99,11 +105,12 @@ type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
  * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
  */
 @Injectable()
-export class DocumentService {
+export class DocumentService implements OnModuleInit {
   private readonly logger = new Logger(DocumentService.name);
   private readonly pendingMilvusDeletes = new Map<string, number>();
   private readonly pendingGraphIndexes = new Map<string, Promise<void>>();
   private readonly cancelledGraphIndexes = new Set<string>();
+  private readonly milvusCompensationKey = 'rag:index:milvus:delete:pending:v1';
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -125,11 +132,17 @@ export class DocumentService {
     private readonly permissionService: DocumentPermissionService,
     private readonly graphService: GraphService,
     private readonly documentQueueService: DocumentQueueService,
+    private readonly domainEvents: DomainEventsService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly imageIndexService: ImageIndexService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
+    @Optional() private readonly redisProvider?: RedisProvider,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.restoreMilvusDeleteCompensations();
+  }
 
   /**
    * 接收解析后的正文并创建可审计的异步入库任务。
@@ -141,6 +154,7 @@ export class DocumentService {
     userId: string,
     options: UploadOptions = {},
   ): Promise<UploadResult> {
+    await this.permissionService.assertTenant(userId, options.tenantId);
     const docId = options.docId ?? randomUUID();
     const taskId = options.taskId ?? randomUUID();
     this.logger.log(`Uploading ${filename}, docId=${docId}, userId=${userId}`);
@@ -531,6 +545,7 @@ export class DocumentService {
     cleanupResults.forEach((result, index) => {
       if (result.status === 'rejected') {
         const target = ['Milvus', 'Elasticsearch', 'Karpathy/BM25'][index];
+        if (index === 0) this.scheduleMilvusDeleteRetry(docId);
         this.logger.warn(
           `Failed to compensate ${target} index for docId=${docId}: ${String(result.reason)}`,
         );
@@ -631,6 +646,27 @@ export class DocumentService {
       order: { updatedAt: 'DESC' },
       take: Math.min(Math.max(limit, 1), 100),
     });
+  }
+
+  /**
+   * 暴露当前进程可观察到的索引补偿状态。这里不是耐久化 outbox：进程重启
+   * 后内存重试会丢失，接口明确标记 pendingDurable=false，避免运营误以为
+   * 已经具备跨实例恢复能力。
+   */
+  getIndexCompensationStatus() {
+    const pendingMilvus = [...this.pendingMilvusDeletes.entries()].map(
+      ([docId, attempts]) => ({ docId, attempts }),
+    );
+    void this.restoreMilvusDeleteCompensations();
+    return {
+      pendingDurable: Boolean(this.redisProvider?.isEnabled()),
+      pendingMilvusDeletes: pendingMilvus,
+      pendingMilvusDeleteCount: pendingMilvus.length,
+      pendingGraphIndexCount: this.pendingGraphIndexes.size,
+      note: this.redisProvider?.isEnabled()
+        ? 'Milvus 删除补偿已写入 Redis，可跨实例恢复；ES、BM25、图谱全量对账仍需后续 Reconciler。'
+        : 'Redis 不可用时 Milvus 补偿仍为进程内状态，需启用 Redis 或后续 outbox/schema 迁移。',
+    };
   }
 
   async retryFailedTask(taskId: string) {
@@ -845,6 +881,7 @@ export class DocumentService {
 
     const nextAttempt = attempts + 1;
     this.pendingMilvusDeletes.set(docId, nextAttempt);
+    void this.persistMilvusDeleteCompensations();
     const delayMs = Math.min(5_000 * 2 ** attempts, 60_000);
 
     const timer = setTimeout(() => {
@@ -857,6 +894,7 @@ export class DocumentService {
     try {
       await this.vectorStoreProvider.deleteByDocId(docId);
       this.pendingMilvusDeletes.delete(docId);
+      void this.persistMilvusDeleteCompensations();
       this.logger.log(`Milvus delete retry succeeded for docId=${docId}`);
     } catch (err) {
       this.logger.warn(
@@ -865,6 +903,35 @@ export class DocumentService {
         }`,
       );
       this.scheduleMilvusDeleteRetry(docId);
+    }
+  }
+
+  private async persistMilvusDeleteCompensations(): Promise<void> {
+    if (!this.redisProvider?.isEnabled()) return;
+    const saved = await this.redisProvider.setRequired(
+      this.milvusCompensationKey,
+      JSON.stringify([...this.pendingMilvusDeletes.entries()]),
+    );
+    if (!saved) {
+      this.logger.warn('Failed to persist Milvus delete compensation state');
+    }
+  }
+
+  private async restoreMilvusDeleteCompensations(): Promise<void> {
+    if (!this.redisProvider?.isEnabled()) return;
+    const raw = await this.redisProvider.get(this.milvusCompensationKey);
+    if (!raw) return;
+    try {
+      const entries = JSON.parse(raw) as Array<[string, number]>;
+      for (const [docId, attempts] of entries) {
+        if (!docId || !Number.isFinite(attempts)) continue;
+        this.pendingMilvusDeletes.set(docId, Math.max(0, attempts));
+        this.scheduleMilvusDeleteRetry(docId);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to restore Milvus delete compensations: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -1224,18 +1291,26 @@ export class DocumentService {
     docId: string,
     userId: string,
     lifecycleStatus: DocumentLifecycleStatus,
+    event?: DomainEventInput,
   ): Promise<boolean> {
     const exists = await this.docMetaRepo.exist({ where: { docId, userId } });
     if (!exists) return false;
-    await Promise.all([
-      this.docMetaRepo.update({ docId, userId }, { lifecycleStatus }),
-      this.docChunkRepo.update({ docId, userId }, { lifecycleStatus }),
-      this.elasticsearchProvider.updateDocumentLifecycle(
-        docId,
-        lifecycleStatus,
-        userId,
-      ),
-    ]);
+    await this.docMetaRepo.manager.transaction(async (manager) => {
+      await Promise.all([
+        manager
+          .getRepository(DocumentMetaEntity)
+          .update({ docId, userId }, { lifecycleStatus }),
+        manager
+          .getRepository(DocumentChunkEntity)
+          .update({ docId, userId }, { lifecycleStatus }),
+      ]);
+      if (event) await this.domainEvents.emitInTransaction(manager, event);
+    });
+    await this.elasticsearchProvider.updateDocumentLifecycle(
+      docId,
+      lifecycleStatus,
+      userId,
+    );
     this.karpathyRagService.updateDocumentLifecycle(
       docId,
       lifecycleStatus,
@@ -1248,6 +1323,7 @@ export class DocumentService {
     docId: string,
     userId: string,
     versionDocIds: string[],
+    event?: DomainEventInput,
   ): Promise<boolean> {
     const docIds = [...new Set(versionDocIds)];
     if (!docIds.includes(docId)) return false;
@@ -1287,6 +1363,7 @@ export class DocumentService {
           { lifecycleStatus: 'effective' },
         ),
       ]);
+      if (event) await this.domainEvents.emitInTransaction(manager, event);
     });
 
     for (const id of deprecatedDocIds) {

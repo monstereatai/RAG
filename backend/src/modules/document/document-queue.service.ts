@@ -5,7 +5,8 @@
  * 上传完成后立即返回 taskId，队列 Worker 异步完成切片、Embedding、向量入库等操作。
  *
  * 依赖 Redis（复用现有 RedisProvider 的连接配置）。
- * 未配置 Redis 时自动降级为同步处理。
+ * 开发环境未配置 Redis 时可由上层降级为同步处理；生产环境拒绝进程内降级，
+ * 防止异步入库任务绕过持久队列后无法跨实例接管。
  */
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
@@ -18,6 +19,8 @@ export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 export interface DocumentProcessingJob {
   taskId: string;
   userId: string;
+  /** 请求侧租户上下文必须随持久队列一起传递，避免 Worker 丢失隔离边界。 */
+  tenantId?: string;
   filename: string;
   originalBufferBase64: string;
   contentType?: string;
@@ -43,14 +46,22 @@ export class DocumentQueueService implements OnModuleDestroy {
   private readonly worker: Worker<DocumentProcessingJob>;
   private processor: DocumentProcessingProcessor | null = null;
   readonly enabled: boolean;
+  readonly required: boolean;
 
   constructor(config: ConfigService) {
+    const nodeEnv =
+      config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
+    this.required =
+      nodeEnv === 'production' ||
+      config.get<boolean>('core.requireDependencies') === true;
     const redisUrl = config.get<string>('redis.url');
     this.enabled = Boolean(redisUrl);
 
     if (!this.enabled) {
       this.logger.warn(
-        'BullMQ disabled (no Redis URL). Document processing will be synchronous.',
+        this.required
+          ? 'BullMQ disabled (no Redis URL). Production document processing queue is required and will reject enqueue.'
+          : 'BullMQ disabled (no Redis URL). Document processing will be synchronous in development.',
       );
       // Stub objects to avoid null checks
       this.queue = null!;
@@ -125,6 +136,11 @@ export class DocumentQueueService implements OnModuleDestroy {
    */
   async enqueue(job: DocumentProcessingJob): Promise<string> {
     if (!this.enabled) {
+      if (this.required) {
+        throw new Error(
+          '生产文档处理要求使用 Redis 持久队列，当前队列未初始化，拒绝降级到进程内执行。',
+        );
+      }
       // 降级：直接处理（同步）
       this.logger.warn(
         'BullMQ not available, processing synchronously. ' +

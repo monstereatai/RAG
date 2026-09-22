@@ -223,6 +223,10 @@ export interface PrefetchedFastPath {
 }
 
 export interface RetrieveOptions {
+  /** 请求级取消信号，贯穿检索与模型流式生成。 */
+  signal?: AbortSignal;
+  /** 认证上下文中的租户；优先于旧的单租户兼容路径参与 ACL 过滤。 */
+  tenantId?: string;
   /** 用于召回的上下文查询；生成阶段仍使用原始用户问题。 */
   retrievalQuery?: string;
   /** 无权威片段时，允许使用本轮同实体的最近用户陈述回答状态确认。 */
@@ -648,7 +652,12 @@ export class KarpathyRagService implements OnModuleInit {
 
     // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
     const allowedDocIds = userId
-      ? await this.documentPermissionService.getAllowedDocIds(userId)
+      ? await this.documentPermissionService.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          options.tenantId,
+        )
       : null;
     const candidateDepth = allowedDocIds
       ? profile.candidateDepth * 3
@@ -806,7 +815,11 @@ export class KarpathyRagService implements OnModuleInit {
     const rerankStartedAt = process.hrtime.bigint();
     let rerankOutcome: { chunks: typeof scoped; applied: boolean };
     try {
-      rerankOutcome = await this.applyRerank(normalizedQuery, scoped);
+      rerankOutcome = await this.applyRerank(
+        normalizedQuery,
+        scoped,
+        options.signal,
+      );
     } catch (error) {
       this.metricsService.observeRetrievalStage(
         'rerank',
@@ -1123,13 +1136,19 @@ export class KarpathyRagService implements OnModuleInit {
     userId?: string,
     scope?: RetrievalScope,
     includeElasticsearch = true,
+    tenantId?: string,
   ): Promise<RetrievedChunk[]> {
     const normalizedQuery = this.expandRetrievalQuery(
       this.normalizeQuery(query),
     );
     const profile = detectRetrievalProfile(normalizedQuery);
     const allowedDocIds = userId
-      ? await this.documentPermissionService.getAllowedDocIds(userId)
+      ? await this.documentPermissionService.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          tenantId,
+        )
       : null;
     const candidateDepth = allowedDocIds
       ? profile.candidateDepth * 3
@@ -1299,6 +1318,8 @@ export class KarpathyRagService implements OnModuleInit {
         memoryMessages,
         onToken,
         retrieveOptions.scope,
+        retrieveOptions.signal,
+        retrieveOptions.tenantId,
       );
       if (direct) {
         return direct;
@@ -1328,6 +1349,7 @@ export class KarpathyRagService implements OnModuleInit {
           memoryMessages,
           onToken,
           exactBadCase.query,
+          retrieveOptions.signal,
         );
         return {
           answer,
@@ -1381,6 +1403,7 @@ export class KarpathyRagService implements OnModuleInit {
           memoryMessages,
           onToken,
           correctionBaseCase.query,
+          retrieveOptions.signal,
         );
         return {
           answer,
@@ -1427,6 +1450,7 @@ export class KarpathyRagService implements OnModuleInit {
         query,
         history,
         onToken,
+        retrieveOptions.signal,
       );
       if (answer) {
         return {
@@ -1450,6 +1474,7 @@ export class KarpathyRagService implements OnModuleInit {
         query,
         history,
         onToken,
+        retrieveOptions.signal,
       );
       if (answer) {
         return {
@@ -1472,6 +1497,7 @@ export class KarpathyRagService implements OnModuleInit {
           history,
           generationMemory,
           onToken,
+          retrieveOptions.signal,
         );
         return {
           answer,
@@ -1488,6 +1514,7 @@ export class KarpathyRagService implements OnModuleInit {
           query,
           history,
           onToken,
+          retrieveOptions.signal,
         );
         if (answer) {
           return {
@@ -1561,6 +1588,7 @@ export class KarpathyRagService implements OnModuleInit {
           query,
           history,
           onToken,
+          retrieveOptions.signal,
         );
         if (answer) {
           return {
@@ -1628,7 +1656,11 @@ export class KarpathyRagService implements OnModuleInit {
       history,
       memory: generationMemory,
     });
-    const stream = await this.llmProvider.getModel().stream(messages);
+    const stream = await this.streamModel(
+      this.llmProvider.getModel(),
+      messages,
+      retrieveOptions.signal,
+    );
     let rawAnswer = '';
     for await (const chunk of stream) {
       const token =
@@ -1673,6 +1705,7 @@ export class KarpathyRagService implements OnModuleInit {
       const synthesizedFallback = await this.synthesizeEvidenceAnswer(
         normalizedQuery,
         evidenceChunks,
+        retrieveOptions.signal,
       );
       let repairedSynthesis = synthesizedFallback
         ? this.attachMissingClaimCitations(synthesizedFallback, evidenceChunks)
@@ -1687,7 +1720,11 @@ export class KarpathyRagService implements OnModuleInit {
           const qwenSynthesis = await this.llmProvider.runWithModel(
             'qwen',
             () =>
-              this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
+              this.synthesizeEvidenceAnswer(
+                normalizedQuery,
+                evidenceChunks,
+                retrieveOptions.signal,
+              ),
           );
           repairedSynthesis = qwenSynthesis
             ? this.attachMissingClaimCitations(qwenSynthesis, evidenceChunks)
@@ -1772,6 +1809,7 @@ export class KarpathyRagService implements OnModuleInit {
     memoryMessages: Array<{ role: string; content: string }>,
     onToken?: (token: string) => void,
     reviewedQuery?: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     const historyText = history
       .slice(-6)
@@ -1808,7 +1846,11 @@ ${memoryText || '无'}
 
 回答：`;
     try {
-      const stream = await this.llmProvider.getModel().stream(prompt);
+      const stream = await this.streamModel(
+        this.llmProvider.getModel(),
+        prompt,
+        signal,
+      );
       let answer = '';
       for await (const chunk of stream) {
         const token =
@@ -1821,7 +1863,7 @@ ${memoryText || '无'}
       }
       return answer.trim();
     } catch {
-      const answer = await this.llmProvider.invoke(prompt);
+      const answer = await this.invokeModel(prompt, signal);
       onToken?.(answer);
       return answer.trim();
     }
@@ -1830,6 +1872,13 @@ ${memoryText || '无'}
   /** 获取当前索引中的所有 docId（用于校验） */
   getIndexedDocIds(): Set<string> {
     return new Set(this.persistedEntries.map((e) => e.docId));
+  }
+
+  /** 返回某个文档在持久化 BM25 快照中的分块数量，用于索引对账。 */
+  getIndexedChunkCount(docId: string, userId?: string): number {
+    return this.persistedEntries.filter(
+      (entry) => entry.docId === docId && (!userId || entry.userId === userId),
+    ).length;
   }
 
   /** 获取 BM25 索引统计信息（供运营 API 使用） */
@@ -2190,6 +2239,7 @@ ${memoryText || '无'}
       scope?: RetrievalScope;
       entities?: string[];
       needsSynthesis?: boolean;
+      signal?: AbortSignal;
     } = {},
   ): Promise<KarpathyRagResult> {
     const evidenceChunks = this.rankEvidenceChunks(chunks);
@@ -2235,7 +2285,11 @@ ${memoryText || '无'}
     });
     const streamAnswer = async (model: ReturnType<LlmProvider['getModel']>) => {
       let answer = '';
-      for await (const chunk of await model.stream(messages)) {
+      for await (const chunk of await this.streamModel(
+        model,
+        messages,
+        options.signal,
+      )) {
         const token =
           typeof chunk.content === 'string'
             ? chunk.content
@@ -2289,6 +2343,7 @@ ${memoryText || '无'}
     let synthesized = await this.synthesizeEvidenceAnswer(
       normalizedQuery,
       evidenceChunks,
+      options.signal,
     );
     let synthesisGate = synthesized
       ? this.assessCitationSupport(
@@ -2299,7 +2354,11 @@ ${memoryText || '无'}
     if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
       try {
         synthesized = await this.llmProvider.runWithModel('qwen', () =>
-          this.synthesizeEvidenceAnswer(normalizedQuery, evidenceChunks),
+          this.synthesizeEvidenceAnswer(
+            normalizedQuery,
+            evidenceChunks,
+            options.signal,
+          ),
         );
         synthesisGate = synthesized
           ? this.assessCitationSupport(
@@ -2395,12 +2454,14 @@ ${memoryText || '无'}
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
     scope?: RetrievalScope,
+    signal?: AbortSignal,
+    tenantId?: string,
   ): Promise<KarpathyRagResult | null> {
     const normalizedQuery = this.normalizeQuery(query);
     const [exactMatches, direct] = await Promise.all([
       this.badCaseFlywheel.retrieveExactMatches?.(normalizedQuery, 1, userId) ??
         this.badCaseFlywheel.retrieveMatches(normalizedQuery, 1, userId),
-      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope),
+      this.tryKarpathyDirectAnswer(normalizedQuery, userId, scope, tenantId),
     ]);
     const exact = exactMatches.find((match) => match.mode === 'exact');
     if (exact) {
@@ -2413,6 +2474,7 @@ ${memoryText || '无'}
           memoryMessages,
           onToken,
           exact.query,
+          signal,
         );
         return {
           answer,
@@ -2433,6 +2495,7 @@ ${memoryText || '无'}
     query: string,
     userId?: string,
     scope?: RetrievalScope,
+    tenantId?: string,
   ): Promise<KarpathyRagResult | null> {
     const profile = detectRetrievalProfile(query);
     if (profile.intent !== 'lookup') {
@@ -2440,7 +2503,13 @@ ${memoryText || '无'}
     }
 
     try {
-      const chunks = await this.retrieveBm25Only(query, userId, scope, false);
+      const chunks = await this.retrieveBm25Only(
+        query,
+        userId,
+        scope,
+        false,
+        tenantId,
+      );
       const primary = chunks[0];
       if (!primary || !this.isGovernedDirectAnswerCandidate(query, primary)) {
         return null;
@@ -2518,7 +2587,13 @@ ${memoryText || '无'}
     try {
       const maxResults =
         this.configService.get<number>('agentic.maxWebSearchResults') ?? 5;
-      const results = await this.bochaSearchService.search(query, maxResults);
+      const results = retrieveOptions.signal
+        ? await this.bochaSearchService.search(
+            query,
+            maxResults,
+            retrieveOptions.signal,
+          )
+        : await this.bochaSearchService.search(query, maxResults);
       if (!results.length) return null;
       const references = results.map((result, index) =>
         this.toWebChunk(result, index),
@@ -2536,6 +2611,7 @@ ${memoryText || '无'}
         history,
         memoryMessages,
         onToken,
+        retrieveOptions.signal,
       );
       // 对齐引用类型：web 来源同样携带 score（=totalScore）
       return {
@@ -2584,6 +2660,7 @@ ${memoryText || '无'}
     history: Array<{ role: 'human' | 'ai'; content: string }>,
     memoryMessages: Array<{ role: string; content: string }>,
     onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
     const historyText = history
       .slice(-6)
@@ -2617,7 +2694,11 @@ ${memoryText || '无'}
 用户问题：${query}
 
 回答：`;
-    const stream = await this.llmProvider.getModel().stream(prompt);
+    const stream = await this.streamModel(
+      this.llmProvider.getModel(),
+      prompt,
+      signal,
+    );
     let answer = '';
     for await (const chunk of stream) {
       const token =
@@ -2637,6 +2718,7 @@ ${memoryText || '无'}
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
     const today = new Intl.DateTimeFormat('zh-CN', {
       timeZone: 'Asia/Shanghai',
@@ -2676,7 +2758,11 @@ ${historyText || '无'}
 回答：`;
 
     try {
-      const stream = await this.llmProvider.getModel().stream(prompt);
+      const stream = await this.streamModel(
+        this.llmProvider.getModel(),
+        prompt,
+        signal,
+      );
       let answer = '';
       for await (const chunk of stream) {
         const token =
@@ -2689,7 +2775,7 @@ ${historyText || '无'}
       }
       return answer.trim();
     } catch {
-      const answer = await this.llmProvider.invoke(prompt);
+      const answer = await this.invokeModel(prompt, signal);
       onToken?.(answer);
       return answer.trim();
     }
@@ -2701,6 +2787,7 @@ ${historyText || '无'}
     history: Array<{ role: 'human' | 'ai'; content: string }> = [],
     memoryMessages: Array<{ role: string; content: string }> = [],
     onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
     const historyText = history
       .slice(-6)
@@ -2739,7 +2826,11 @@ ${context}
 回答：`;
 
     try {
-      const stream = await this.llmProvider.getModel().stream(prompt);
+      const stream = await this.streamModel(
+        this.llmProvider.getModel(),
+        prompt,
+        signal,
+      );
       let answer = '';
       for await (const chunk of stream) {
         const token =
@@ -2752,7 +2843,7 @@ ${context}
       }
       return answer.trim();
     } catch {
-      const answer = await this.llmProvider.invoke(prompt);
+      const answer = await this.invokeModel(prompt, signal);
       onToken?.(answer);
       return answer.trim();
     }
@@ -2786,6 +2877,7 @@ ${context}
   private async synthesizeEvidenceAnswer(
     query: string,
     chunks: RetrievedChunk[],
+    signal?: AbortSignal,
   ): Promise<string | null> {
     if (chunks.length === 0) return null;
     const evidence = chunks
@@ -2810,7 +2902,7 @@ ${evidence}`;
 
     try {
       const answer = await Promise.race([
-        this.llmProvider.invoke(prompt),
+        this.invokeModel(prompt, signal),
         new Promise<string>((_, reject) =>
           setTimeout(
             () => reject(new Error('Evidence synthesis timeout')),
@@ -2860,6 +2952,7 @@ ${evidence}`;
     query: string,
     history: Array<{ role: 'human' | 'ai'; content: string }>,
     onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string | null> {
     const latest = history
       .filter((item) => item.role === 'human')
@@ -2875,7 +2968,7 @@ ${evidence}`;
 当前问题：${query}
 请直接、简洁回答：`;
     try {
-      const answer = (await this.llmProvider.invoke(prompt)).trim();
+      const answer = (await this.invokeModel(prompt, signal)).trim();
       if (answer) onToken?.(answer);
       return answer || null;
     } catch {
@@ -2887,6 +2980,7 @@ ${evidence}`;
     query: string,
     history: Array<{ role: 'human' | 'ai'; content: string }>,
     onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string | null> {
     const statements = history
       .filter((item) => item.role === 'human')
@@ -2918,7 +3012,7 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 当前问题：${query}
 请用中文简洁回答，分成“客观事实”和“历史对话设定”两部分：`;
     try {
-      const answer = (await this.llmProvider.invoke(prompt)).trim();
+      const answer = (await this.invokeModel(prompt, signal)).trim();
       if (answer) onToken?.(answer);
       return answer || null;
     } catch {
@@ -2960,8 +3054,12 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       try {
         const answer = (
           provider === 'qwen'
-            ? await this.llmProvider.invoke(prompt, 'qwen')
-            : await this.llmProvider.invoke(prompt)
+            ? options.signal
+              ? await this.llmProvider.invoke(prompt, 'qwen', {
+                  signal: options.signal,
+                })
+              : await this.llmProvider.invoke(prompt, 'qwen')
+            : await this.invokeModel(prompt, options.signal)
         ).trim();
         if (!answer) continue;
         onToken?.(answer);
@@ -2971,6 +3069,20 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       }
     }
     return null;
+  }
+
+  private invokeModel(prompt: string, signal?: AbortSignal): Promise<string> {
+    return signal
+      ? this.llmProvider.invoke(prompt, { signal })
+      : this.llmProvider.invoke(prompt);
+  }
+
+  private streamModel(
+    model: ReturnType<LlmProvider['getModel']>,
+    input: Parameters<ReturnType<LlmProvider['getModel']>['stream']>[0],
+    signal?: AbortSignal,
+  ) {
+    return signal ? model.stream(input, { signal }) : model.stream(input);
   }
 
   private hasConversationEntityEvidence(
@@ -2997,217 +3109,148 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     query: string,
     chunks: RetrievedChunk[],
   ): string | null {
-    // 确定性答案中的 [片段N] 是本次返回给前端的 evidenceChunks 下标，不能
-    // 混入持久化 BM25 全量索引后再按全局位置编号。否则文字会出现 [片段1137]
-    // 一类界面无法回链的编号，引用列表也会被筛为空。
-    const candidates = chunks;
-    const builders = [
-      this.buildTravelPolicyVersionAnswer.bind(this),
-      this.buildTravelApprovalAnswer.bind(this),
-      this.buildProcurementPaymentAnswer.bind(this),
-      this.buildLegalReviewAnswer.bind(this),
-      this.buildDataRetentionAnswer.bind(this),
-      this.buildPayrollAnswer.bind(this),
-      this.buildOkrBonusAnswer.bind(this),
-      this.buildReactStateAnswer.bind(this),
-      this.buildNestProviderAnswer.bind(this),
-    ];
-
-    for (const builder of builders) {
-      const answer = builder(query, candidates);
-      if (answer) return answer;
-    }
-    return null;
-  }
-
-  private buildTravelPolicyVersionAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/住宿|差旅|报销/.test(query) || !/上限|标准/.test(query)) {
-      return null;
-    }
-    if (!/2026|2025|历史|冲突|优先/.test(query)) {
-      return null;
-    }
-
-    const current = chunks
-      .map((chunk, index) => ({ chunk, index }))
-      .find(
-        ({ chunk }) =>
-          /2026/.test(chunk.content) && /650\s*元/.test(chunk.content),
-      );
-    const historical = chunks
-      .map((chunk, index) => ({ chunk, index }))
-      .find(
-        ({ chunk }) =>
-          /2025/.test(chunk.content) && /500\s*元/.test(chunk.content),
-      );
-
-    if (!current || !historical) return null;
-
-    return [
-      `2026 年一线城市住宿报销上限为 650 元。[片段${current.index + 1}]`,
-      `如果 2025 版写的是 500 元，应按 2026 版优先生效；2025 版仅用于历史审计，不再作为 2026 年新增报销的执行依据。[片段${historical.index + 1}]`,
-    ].join('\n');
-  }
-
-  private buildTravelApprovalAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/住宿|差旅|报销/.test(query) || !/审批|超过|超标|标准/.test(query)) {
-      return null;
-    }
-    const hit = this.findChunk(chunks, [/直属负责人/, /财务\s*BP/, /双重审批/]);
-    if (!hit) return null;
-    return `住宿费用超过标准时，必须由直属负责人和财务 BP 双重审批。[片段${hit.index + 1}]`;
-  }
-
-  private buildProcurementPaymentAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/po|采购|付款|10\s*万|100000/i.test(query)) return null;
-    const actionHit = this.findChunk(chunks, [
-      /预算审批/,
-      /法务合同归档/,
-      /供应商准入/,
-    ]);
-    const invoiceHit = this.findChunk(chunks, [/发票|票据/]);
-    if (!actionHit) return null;
-    const invoiceCitation =
-      invoiceHit && invoiceHit.index !== actionHit.index
-        ? `[片段${invoiceHit.index + 1}]`
-        : `[片段${actionHit.index + 1}]`;
-    return [
-      `PO 金额超过 100000 元时，付款前必须完成预算审批、法务合同归档和供应商准入检查。[片段${actionHit.index + 1}]`,
-      `付款前还必须取得增值税专用发票或财务确认的等效票据。${invoiceCitation}`,
-    ].join('\n');
-  }
-
-  private buildLegalReviewAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/合同|法务|审查/.test(query)) return null;
-    const hit = this.findChunk(chunks, [
-      /个人信息/,
-      /跨境数据/,
-      /排他条款/,
-      /违约金/,
-    ]);
-    if (!hit) return null;
-    return `涉及个人信息处理、跨境数据传输、排他条款，或违约金超过合同金额 20% 的合同，必须进入法务审查。[片段${hit.index + 1}]`;
-  }
-
-  private buildDataRetentionAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/客户行为日志|财务审计凭证|保留/.test(query)) return null;
-    const hit = this.findChunk(chunks, [
-      /客户行为日志/,
-      /180\s*天/,
-      /财务审计凭证/,
-      /10\s*年/,
-    ]);
-    if (!hit) return null;
-    const citation = `[片段${hit.index + 1}]`;
-    return `客户行为日志默认保留 180 天。${citation}财务审计凭证保留 10 年，包含发票、付款审批、合同编号和对账记录。${citation}`;
-  }
-
-  private buildOkrBonusAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/okr/i.test(query) || !/绩效奖金|奖金/.test(query)) return null;
-    const okrHit = this.findChunk(chunks, [/okr/i]);
-    const bonusHit = this.findChunk(chunks, [/绩效奖金/]);
-    const quarterHit = this.findChunk(chunks, [/季度评估/]);
-    if (!bonusHit || !quarterHit) return null;
-    if (!okrHit) {
-      const citation = `[片段${quarterHit.index + 1}]`;
-      return `资料明确绩效奖金按季度评估；当前片段未给出 OKR 权重或挂钩比例，请以 OKR 完成度相关制度为准。${citation}`;
-    }
-    const citations = [okrHit, bonusHit, quarterHit]
-      .filter(
-        (hit, index, all) =>
-          all.findIndex((candidate) => candidate.index === hit.index) === index,
-      )
-      .map((hit) => `[片段${hit.index + 1}]`)
-      .join('');
-    return `绩效奖金按照 OKR 完成度按季度评估，OKR 完成情况会影响绩效奖金结果。${citations}`;
-  }
-
-  private buildPayrollAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
+    const questionParts = this.splitStructuredQuestion(query);
+    const candidates = chunks.flatMap((chunk, index) =>
+      this.extractEvidenceSentences(chunk.content).map((sentence) => {
+        const scores = questionParts.map((part) => {
+          const domains = this.structuredEvidenceDomains(part);
+          return domains.length > 0 &&
+            this.structuredEvidenceSupportsQuery(part, sentence)
+            ? this.scoreStructuredEvidence(sentence, domains, part)
+            : 0;
+        });
+        return {
+          sentence,
+          index,
+          scores,
+          score: Math.max(...scores, 0),
+        };
+      }),
+    );
+    const matchesByPart = questionParts.map((part, partIndex) =>
+      candidates.filter(
+        (candidate) =>
+          candidate.scores[partIndex] >= 3 &&
+          this.structuredEvidenceSupportsQuery(part, candidate.sentence),
+      ),
+    );
+    // 结构化抽取只在每个子问题都有对应证据时成立，避免把一个子问题的
+    // 命中误当成整句多问题都已回答。
     if (
-      !/薪资|薪酬|工资|收入/.test(query) ||
-      !/什么时候|何时|发放|发薪/.test(query)
+      matchesByPart.some((matches) => matches.length === 0) ||
+      questionParts.length === 0
     ) {
       return null;
     }
-    const salaryHit = this.findChunk(chunks, [/基本工资|工资|收入/]);
-    const scheduleHit = this.findChunk(chunks, [
-      /(?:每月|按月)/,
-      /(?:10\s*日|发放)/,
-    ]);
-    if (!salaryHit || !scheduleHit) return null;
-    const citations = [salaryHit, scheduleHit]
-      .filter(
-        (hit, index, all) =>
-          all.findIndex((candidate) => candidate.index === hit.index) === index,
+    const selected = matchesByPart
+      .flat()
+      .sort(
+        (left, right) => right.score - left.score || left.index - right.index,
       )
-      .map((hit) => `[片段${hit.index + 1}]`)
-      .join('');
-    return `基本工资按月发放，每月 10 日发放；员工口语中也称工资、薪资或收入。${citations}`;
-  }
-
-  private buildReactStateAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/react/i.test(query) || !/状态管理|组件/.test(query)) return null;
-    const hit = this.findChunk(chunks, [/React Query/, /Zustand/, /Context/]);
-    if (!hit) return null;
-    return `React 组件状态管理应按数据类型选择：服务端数据用 React Query 自动缓存和重新获取；跨组件共享用 Zustand；全局 UI 状态用 Context。[片段${hit.index + 1}]`;
-  }
-
-  private buildNestProviderAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-  ): string | null {
-    if (!/nestjs/i.test(query) || !/provider|注入|模块/i.test(query)) {
-      return null;
-    }
-    const interfaceHit = this.findChunk(chunks, [/interface/]);
-    const providersHit = this.findChunk(chunks, [/providers?/i]);
-    const configHit = this.findChunk(chunks, [/ConfigService/]);
-    if (!interfaceHit || !providersHit || !configHit) return null;
-    const citations = [interfaceHit, providersHit, configHit]
       .filter(
-        (hit, index, all) =>
-          all.findIndex((candidate) => candidate.index === hit.index) === index,
-      )
-      .map((hit) => `[片段${hit.index + 1}]`)
-      .join('');
-    return `NestJS 的 Provider 模式在模块中通过 providers 注入切换实现：关键组件先用 interface 抽象，不同实现放到 Module 的 providers 中切换，环境变量由 ConfigService 统一管理。${citations}`;
+        (candidate, index, all) =>
+          all.findIndex((item) => item.sentence === candidate.sentence) ===
+          index,
+      );
+    if (!selected.length) return null;
+    return selected
+      .map(({ sentence, index }) => `${sentence}[片段${index + 1}]`)
+      .join('\n');
   }
 
-  private findChunk(
-    chunks: RetrievedChunk[],
-    patterns: RegExp[],
-  ): { chunk: RetrievedChunk; index: number } | null {
-    return (
-      chunks
-        .map((chunk, index) => ({ chunk, index }))
-        .find(({ chunk }) =>
-          patterns.every((pattern) => pattern.test(chunk.content)),
-        ) ?? null
+  private splitStructuredQuestion(query: string): string[] {
+    const parts = query
+      .split(/[？?；;。]/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length <= 1) return parts.length > 0 ? parts : [query.trim()];
+
+    // 多问题经常只在首句写出业务域，后续句子依赖上下文（例如“如果 2025
+    // 版……怎么办”）。把原问题中的域词带入子问题，既不改变用户语义，也避免
+    // 因拆句后丢失“差旅／工资／合同”等检索约束。
+    const contextTerms =
+      query.match(
+        /薪资|薪酬|工资|收入|发薪|发放|差旅|住宿|报销|采购|付款|票据|发票|合同|法务|审查|保留|日志|审计凭证|okr|绩效|奖金|react|状态管理|组件|nestjs|provider|注入|模块/giu,
+      ) ?? [];
+    return parts.map((part) =>
+      this.structuredEvidenceDomains(part).length > 0 ||
+      contextTerms.length === 0
+        ? part
+        : `${part} ${Array.from(new Set(contextTerms)).join(' ')}`,
     );
+  }
+
+  private structuredEvidenceSupportsQuery(
+    query: string,
+    sentence: string,
+  ): boolean {
+    const targetRules: Array<[RegExp, RegExp]> = [
+      [/税|纳税|个税|所得税|社保/u, /税|纳税|个税|所得税|社保/u],
+      [/发放|发薪|什么时候|何时|哪天/u, /发放|发薪|每月|按月|\d+\s*日/u],
+      [/保留|期限|多久|多少年|多少天/u, /保留|期限|\d+\s*(?:天|年|月)/u],
+      [
+        /上限|额度|金额|多少元|多少钱|多少万/u,
+        /上限|额度|金额|\d+\s*(?:元|万)/u,
+      ],
+      [/谁|负责人|审批人/u, /负责人|审批|由.{0,8}(?:人|部门)/u],
+      [/版本|哪一版|生效/u, /版本|\d{4}\s*版|生效|优先/u],
+    ];
+    const targetMatched = targetRules.every(
+      ([questionPattern, evidencePattern]) =>
+        !questionPattern.test(query) || evidencePattern.test(sentence),
+    );
+    if (!targetMatched) return false;
+    if (
+      /[不未无非]|条件|前提|除非|如果|若|如|禁止|不得|才能|仅当/u.test(query)
+    ) {
+      return /不|未|无|非|条件|前提|除非|如果|若|如|禁止|不得|才能|仅当/u.test(
+        sentence,
+      );
+    }
+    return true;
+  }
+
+  /**
+   * 结构化事实只决定“从哪类证据取原文”，不保存任何业务金额、日期、版本或规则。
+   * 这样资料更新后，输出会随当前证据变化，不会被历史演示数据覆盖。
+   */
+  private structuredEvidenceDomains(query: string): RegExp[] {
+    const domains: Array<[RegExp, RegExp]> = [
+      [/薪资|薪酬|工资|收入|发薪|发放/, /工资|薪资|薪酬|收入|发薪|发放/],
+      [/差旅|住宿/, /差旅|住宿|报销/],
+      [/采购|\bpo\b|付款|票据|发票/i, /采购|\bpo\b|付款|票据|发票/i],
+      [/合同|法务|审查/, /合同|法务|审查|违约|跨境|个人信息/],
+      [/保留|日志|审计凭证/, /保留|日志|审计凭证/],
+      [/okr|绩效|奖金/i, /okr|绩效|奖金/i],
+      [/react|状态管理|组件/i, /react|zustand|context|react query/i],
+      [
+        /nestjs|provider|注入|模块/i,
+        /nestjs|provider|providers|inject|configservice/i,
+      ],
+    ];
+    return domains
+      .filter(([queryPattern]) => queryPattern.test(query))
+      .map(([, evidencePattern]) => evidencePattern);
+  }
+
+  private scoreStructuredEvidence(
+    sentence: string,
+    domains: RegExp[],
+    query: string,
+  ): number {
+    const domainScore = domains.reduce(
+      (score, pattern) => score + (pattern.test(sentence) ? 2 : 0),
+      0,
+    );
+    const factScore =
+      /\d|必须|应当|优先|有效|保留|发放|审批|注入|缓存|状态/.test(sentence)
+        ? 1
+        : 0;
+    const versionResolutionScore =
+      /历史|冲突|怎么办|优先/.test(query) && /优先|生效|冲突/.test(sentence)
+        ? 2
+        : 0;
+    return domainScore + factScore + versionResolutionScore;
   }
 
   private extractEvidenceSentences(text: string): string[] {
@@ -3661,6 +3704,7 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
   private async applyRerank(
     query: string,
     chunks: RetrievedChunk[],
+    signal?: AbortSignal,
   ): Promise<{ chunks: RetrievedChunk[]; applied: boolean }> {
     if (
       chunks.length < 2 ||
@@ -3676,7 +3720,9 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       return { chunks, applied: false };
     }
     try {
-      const reranked = await this.rerankService.rerank(query, candidates, topN);
+      const reranked = signal
+        ? await this.rerankService.rerank(query, candidates, topN, signal)
+        : await this.rerankService.rerank(query, candidates, topN);
       // rerank 服务短路（未真正调用远端）时会原样返回同一数组，视为未生效
       if (reranked === candidates || reranked.length === 0) {
         return { chunks, applied: false };

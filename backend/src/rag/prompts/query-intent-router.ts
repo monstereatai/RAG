@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import type { LlmInvokeOptions } from '../../providers/llm/llm-provider.interface';
 import { formatQueryRoutingFewShots } from './few-shot.examples';
 
 export const queryIntentSchema = z.object({
@@ -145,6 +146,7 @@ export class QueryIntentRouter {
   async classify(
     query: string,
     recentContext: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    options?: LlmInvokeOptions,
   ): Promise<QueryIntent> {
     try {
       // 避免 withStructuredOutput 触发 provider 的工具调用／重试，直接要求最小 JSON 响应并本地校验。
@@ -158,6 +160,7 @@ export class QueryIntentRouter {
       const content = await this.withTimeout(
         this.llmProvider.invoke(
           `${ROUTER_PROMPT}\n\n当前会话上下文（仅用于识别临时设定和指代，不可当作外部事实）：${contextText || '无'}\n当前用户问题：${query.trim()}\n只输出一个合法 JSON 对象。`,
+          options,
         ),
         20_000,
       );

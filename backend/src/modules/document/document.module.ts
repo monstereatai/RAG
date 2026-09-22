@@ -20,6 +20,7 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { DocumentPermissionModule } from './document-permission.module';
 import { ImageIndexModule } from '../image-index/image-index.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ImageIndexModule } from '../image-index/image-index.module';
     GraphModule,
     DocumentPermissionModule,
     ImageIndexModule,
+    DomainEventsModule,
   ],
   controllers: [DocumentController],
   providers: [

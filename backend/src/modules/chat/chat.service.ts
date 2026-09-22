@@ -33,6 +33,8 @@ import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { createHash } from 'node:crypto';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
+import { LlmProvider } from '../../providers/llm/llm.provider';
+import type { LlmUsage } from '../../providers/llm/llm-provider.interface';
 import { detectDangerousQuery } from '../../rag/prompts/prompt-injection.guard';
 import { MetricsService } from '../metrics/metrics.service';
 import { SecurityAuditService } from '../metrics/security-audit.service';
@@ -48,6 +50,10 @@ import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
 import type { QueryIntent } from '../../rag/prompts/query-intent-router';
 import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
+import {
+  redactAuditText,
+  redactAuditValue,
+} from '../../common/security/audit-redaction';
 
 type FinalizableChatResult = {
   answer: string;
@@ -63,7 +69,11 @@ type FinalizableChatResult = {
 
 type ChatExecutionOptions = {
   model?: string;
+  signal?: AbortSignal;
+  tenantId?: string;
 };
+
+type AggregatedLlmUsage = LlmUsage & { calls: number };
 
 @Injectable()
 export class ChatService {
@@ -72,6 +82,7 @@ export class ChatService {
    * 检索细节下沉到 KarpathyRagService，复杂推理下沉到 AgenticRagService。
    */
   private readonly logger = new Logger(ChatService.name);
+  private lastQueryLogRetentionSweepAt = 0;
 
   constructor(
     private readonly karpathyRagService: KarpathyRagService,
@@ -95,6 +106,7 @@ export class ChatService {
     @Optional() private readonly securityAudit?: SecurityAuditService,
     @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
     @Optional() private readonly dingTalk?: DingTalkProvider,
+    @Optional() private readonly llmProvider?: LlmProvider,
   ) {}
 
   /**
@@ -132,6 +144,18 @@ export class ChatService {
     }
 
     const startTime = Date.now();
+    const actualUsage: AggregatedLlmUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      calls: 0,
+    };
+    const collectUsage = (usage: LlmUsage) => {
+      actualUsage.inputTokens += Math.max(0, usage.inputTokens);
+      actualUsage.outputTokens += Math.max(0, usage.outputTokens);
+      actualUsage.calls += 1;
+    };
+    const runWithUsage = <T>(callback: () => Promise<T>) =>
+      this.llmProvider?.runWithUsage?.(collectUsage, callback) ?? callback();
     const mode: ChatMode = req.mode ?? 'auto';
     let queryIntent: QueryIntent = {
       intent: 'general' as const,
@@ -188,7 +212,9 @@ export class ChatService {
             );
     }
     if (this.queryIntentRouter) {
-      queryIntent = await this.queryIntentRouter.classify(req.query, history);
+      queryIntent = await this.queryIntentRouter.classify(req.query, history, {
+        onUsage: collectUsage,
+      });
     }
     const shouldSearchHistory = Boolean(req.threadId);
     // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
@@ -261,6 +287,7 @@ export class ChatService {
     const requestContext: RequestContext = {
       requestId: randomUUID(),
       userId,
+      tenantId: executionOptions?.tenantId,
       threadId,
       query: req.query,
       mode,
@@ -341,6 +368,7 @@ export class ChatService {
       sourcePolicy: conversationStateUpdate
         ? 'local_only'
         : queryIntent.sourcePolicy,
+      tenantId: executionOptions?.tenantId,
       knowledgeOnly:
         queryIntent.sourcePolicy === 'local_only' || conversationStateUpdate,
       allowConversationStateAnswer: conversationStateUpdate,
@@ -460,27 +488,36 @@ export class ChatService {
         // 借由 Agentic 入口绕回状态图。Karpathy 负责固定线性取证和最终校验。
         const answerOptions = {
           ...retrievalOptions,
+          signal: executionOptions?.signal,
           retrievalQuery: contextualRetrievalQuery,
           adaptiveVectorSearch: true,
           karpathyDirectAnswer: true,
         };
-        result = onEvent
-          ? await this.karpathyRagService.answer(
-              req.query,
-              history,
-              userId,
-              memoryMessages,
-              (token: string) => publishEvent({ type: 'token', data: token }),
-              answerOptions,
-            )
-          : await this.karpathyRagService.answer(
-              req.query,
-              history,
-              userId,
-              memoryMessages,
-              undefined,
-              answerOptions,
-            );
+        const executeSimple = () =>
+          onEvent
+            ? this.karpathyRagService.answer(
+                req.query,
+                history,
+                userId,
+                memoryMessages,
+                (token: string) => publishEvent({ type: 'token', data: token }),
+                answerOptions,
+              )
+            : this.karpathyRagService.answer(
+                req.query,
+                history,
+                userId,
+                memoryMessages,
+                undefined,
+                answerOptions,
+              );
+        result = await runWithUsage(
+          () =>
+            this.llmProvider?.runWithSignal(
+              executionOptions?.signal,
+              executeSimple,
+            ) ?? executeSimple(),
+        );
       } catch (error) {
         await this.finishFailedRun(run, req.query, mode, error);
         throw error;
@@ -531,6 +568,7 @@ export class ChatService {
           remainingSteps: Math.max(0, requestContext.budget.maxSteps - 1),
           remainingToolCalls: requestContext.budget.remainingToolCalls,
         },
+        actualUsage,
       });
     }
 
@@ -538,23 +576,35 @@ export class ChatService {
     const traceEvents: RagTraceEvent[] = [];
     let result;
     try {
-      result = await this.agenticRagService.run(
-        req.query,
-        mode,
-        (event) => {
-          traceEvents.push(this.toTraceEvent(event));
-          if (event.type !== 'final') publishEvent(event);
-        },
-        history,
-        threadId,
-        userId,
-        memoryMessages,
-        req.approvalRequired === true,
-        {
-          ...retrievalOptions,
-          retrievalQuery: contextualRetrievalQuery,
-          runtimeRunId: run?.id,
-        },
+      const agenticExecutionOptions = executionOptions?.signal
+        ? { signal: executionOptions.signal }
+        : undefined;
+      const executeAgentic = () =>
+        this.agenticRagService.run(
+          req.query,
+          mode,
+          (event) => {
+            traceEvents.push(this.toTraceEvent(event));
+            if (event.type !== 'final') publishEvent(event);
+          },
+          history,
+          threadId,
+          userId,
+          memoryMessages,
+          req.approvalRequired === true,
+          {
+            ...retrievalOptions,
+            retrievalQuery: contextualRetrievalQuery,
+            runtimeRunId: run?.id,
+          },
+          ...(agenticExecutionOptions ? [agenticExecutionOptions] : []),
+        );
+      result = await runWithUsage(
+        () =>
+          this.llmProvider?.runWithSignal(
+            executionOptions?.signal,
+            executeAgentic,
+          ) ?? executeAgentic(),
       );
     } catch (error) {
       await this.finishFailedRun(run, req.query, mode, error);
@@ -576,6 +626,7 @@ export class ChatService {
       onEvent,
       model: executionOptions?.model,
       traceEvents,
+      actualUsage,
     });
   }
 
@@ -594,6 +645,7 @@ export class ChatService {
     traceEvents?: RagTraceEvent[];
     executionState?: ChatResponse['executionState'];
     includeUserMessage?: boolean;
+    actualUsage?: AggregatedLlmUsage;
   }): Promise<ChatResponse> {
     const result = input.result;
     if (result.interrupted) {
@@ -641,7 +693,7 @@ export class ChatService {
     });
 
     if (input.run) {
-      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
+      await this.agentRuns?.recordRuntimeEvent?.(input.run.id, {
         eventType: 'route.selected',
         target: input.route,
         payload: { requestedMode: input.mode, route: input.route },
@@ -690,19 +742,41 @@ export class ChatService {
       );
     }
 
-    const estimatedCostUsd = this.langfuseProvider.estimateCostUsd(
-      this.langfuseProvider.estimateTextTokens(input.req.query),
-      this.langfuseProvider.estimateTextTokens(result.answer),
+    const estimatedUsage = this.estimateRunUsage(
+      input.req.query,
+      result.answer,
+      input.route,
+      input.traceEvents,
     );
+    const usage =
+      input.actualUsage &&
+      (input.actualUsage.inputTokens > 0 || input.actualUsage.outputTokens > 0)
+        ? {
+            ...estimatedUsage,
+            modelCallsEstimated: input.actualUsage.calls,
+            inputTokens: input.actualUsage.inputTokens,
+            outputTokens: input.actualUsage.outputTokens,
+            costUsd: this.langfuseProvider.estimateCostUsd(
+              input.actualUsage.inputTokens,
+              input.actualUsage.outputTokens,
+            ),
+            source: 'provider_reported_tokens' as const,
+          }
+        : estimatedUsage;
     if (input.run) {
+      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
+        eventType: 'cost.estimated',
+        target: input.route,
+        payload: usage,
+      });
       await this.agentRuns?.finish(input.run.id, {
         queryLogId,
         route: input.route,
         status: 'completed',
         retryCount: result.retryCount,
-        costUsd: estimatedCostUsd,
+        costUsd: usage.costUsd,
         requiresApproval:
-          estimatedCostUsd >
+          usage.costUsd >
           (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
         resultSummary: result.answer.slice(0, 2000),
       });
@@ -729,6 +803,7 @@ export class ChatService {
       refused,
       model: input.model,
       events: input.traceEvents,
+      usage,
     });
 
     const response: ChatResponse = {
@@ -859,23 +934,23 @@ export class ChatService {
     approval: 'approved' | 'rejected',
     feedback: string | undefined,
     userId: string,
+    tenantId?: string,
     onEvent?: ChatEventCallback,
   ): Promise<ChatResponse> {
     const conversation = await this.conversationService.get(threadId, userId);
     if (!conversation) {
       throw new BadRequestException('未找到可恢复的会话或无权访问');
     }
-    const pending = [...conversation.messages]
-      .reverse()
-      .find((message) => {
-        const metadata = this.asRecord(message.metadata);
-        return message.role === 'human' && metadata?.pendingApproval === true;
-      });
+    const pending = [...conversation.messages].reverse().find((message) => {
+      const metadata = this.asRecord(message.metadata);
+      return message.role === 'human' && metadata?.pendingApproval === true;
+    });
     const metadata = this.asRecord(pending?.metadata);
     if (!pending || !metadata) {
       throw new BadRequestException('当前会话没有等待审批的请求');
     }
-    const runId = typeof metadata.runId === 'string' ? metadata.runId : undefined;
+    const runId =
+      typeof metadata.runId === 'string' ? metadata.runId : undefined;
     const run = runId
       ? await this.agentRuns?.get(runId)
       : await this.agentRuns?.findLatestByThread(threadId);
@@ -889,15 +964,24 @@ export class ChatService {
     const queryIntent = this.asQueryIntent(metadata.queryIntent);
     const mode = this.asChatMode(metadata.mode) ?? 'agentic';
     const traceEvents: RagTraceEvent[] = [];
-    const result = await this.agenticRagService.resumeGraph(
-      threadId,
-      approval,
-      feedback,
-      (event) => {
-        traceEvents.push(this.toTraceEvent(event));
-        if (event.type !== 'final') onEvent?.(event);
-      },
-    );
+    const resumeEvent = (event: SseEvent) => {
+      traceEvents.push(this.toTraceEvent(event));
+      if (event.type !== 'final') onEvent?.(event);
+    };
+    const result = tenantId?.trim()
+      ? await this.agenticRagService.resumeGraph(
+          threadId,
+          approval,
+          feedback,
+          resumeEvent,
+          tenantId,
+        )
+      : await this.agenticRagService.resumeGraph(
+          threadId,
+          approval,
+          feedback,
+          resumeEvent,
+        );
     const startTime = Date.now();
 
     if (approval === 'rejected') {
@@ -1015,25 +1099,65 @@ export class ChatService {
         this.queryLogRepo.create({
           id,
           userId: params.userId ?? null,
-          query: params.query.slice(0, 2000),
+          query: redactAuditText(params.query).slice(0, 2000),
           mode: params.mode as 'simple' | 'agentic' | 'auto',
           threadId: params.threadId ?? null,
           refused: params.refused,
           citationCount: params.citationCount,
           latencyMs: Date.now() - params.startTime,
           hasAnswer: params.hasAnswer,
-          answer: params.answer.slice(0, 20_000),
-          retrievalSnapshot: JSON.stringify(params.references).slice(
-            0,
-            100_000,
-          ),
+          answer: redactAuditText(params.answer).slice(0, 20_000),
+          retrievalSnapshot: JSON.stringify(
+            redactAuditValue(params.references),
+          ).slice(0, 100_000),
         }),
       );
+      this.scheduleQueryLogRetentionSweep();
       return id;
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
       return undefined;
     }
+  }
+
+  /**
+   * ChatService 直接写入 query_logs，不能依赖仅由运营 QueryLogService 触发的清理。
+   * 保持低频触发，清理失败只记录日志，不影响回答主链路。
+   */
+  private scheduleQueryLogRetentionSweep(): void {
+    const now = Date.now();
+    if (now - this.lastQueryLogRetentionSweepAt < 60 * 60 * 1000) return;
+    this.lastQueryLogRetentionSweepAt = now;
+    const repo = this.queryLogRepo as unknown as {
+      createQueryBuilder?: () => {
+        delete: () => unknown;
+      };
+    };
+    if (typeof repo.createQueryBuilder !== 'function') return;
+    void this.purgeExpiredQueryLogs().catch((error: unknown) => {
+      this.logger.warn(
+        `Failed to purge expired query logs: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  }
+
+  private async purgeExpiredQueryLogs(): Promise<void> {
+    const retentionDays = Math.min(
+      Math.max(
+        Number(this.config?.get<number>('queryLog.retentionDays') ?? 180),
+        1,
+      ),
+      3650,
+    );
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    await this.queryLogRepo
+      .createQueryBuilder()
+      .delete()
+      .from(QueryLogEntity)
+      .where('createdAt < :cutoff', { cutoff })
+      .execute();
   }
 
   /** 两个执行引擎共用同一份会话、记忆与历史向量收口，避免分支漏写。 */
@@ -1130,6 +1254,49 @@ export class ChatService {
     }
   }
 
+  /**
+   * Provider 当前只提供文本结果，不能稳定取得所有模型的真实 usage；这里按实际
+   * 完成的模型节点汇总估算，并把 estimated 标记写入 Run 事件，避免把它当账单。
+   */
+  private estimateRunUsage(
+    query: string,
+    answer: string,
+    route: 'simple' | 'agentic',
+    events?: RagTraceEvent[],
+  ): {
+    modelCallsEstimated: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    source: 'estimated_from_completed_nodes';
+  } {
+    const modelNodes = new Set(['queryAugment', 'generate', 'reflection']);
+    const completedModelNodes = (events ?? []).flatMap((event) => {
+      if (event.type !== 'node_timing') return [];
+      const data = this.asRecord(event.data);
+      const node = typeof data?.node === 'string' ? data.node : undefined;
+      return data?.status === 'success' && node && modelNodes.has(node)
+        ? [node]
+        : [];
+    });
+    const modelCallsEstimated =
+      1 + (route === 'agentic' ? completedModelNodes.length : 0);
+    const queryTokens = this.langfuseProvider.estimateTextTokens(query);
+    const answerTokens = this.langfuseProvider.estimateTextTokens(answer);
+    const reflectionCount = completedModelNodes.filter(
+      (node) => node === 'reflection',
+    ).length;
+    const inputTokens =
+      queryTokens * modelCallsEstimated + answerTokens * reflectionCount;
+    return {
+      modelCallsEstimated,
+      inputTokens,
+      outputTokens: answerTokens,
+      costUsd: this.langfuseProvider.estimateCostUsd(inputTokens, answerTokens),
+      source: 'estimated_from_completed_nodes',
+    };
+  }
+
   private traceAnswer(params: {
     userId: string;
     query: string;
@@ -1146,11 +1313,19 @@ export class ChatService {
     }>;
     refused: boolean;
     events?: RagTraceEvent[];
+    usage?: {
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+      source?: string;
+    };
   }): void {
-    const inputTokens = this.langfuseProvider.estimateTextTokens(params.query);
-    const outputTokens = this.langfuseProvider.estimateTextTokens(
-      params.answer,
-    );
+    const inputTokens =
+      params.usage?.inputTokens ??
+      this.langfuseProvider.estimateTextTokens(params.query);
+    const outputTokens =
+      params.usage?.outputTokens ??
+      this.langfuseProvider.estimateTextTokens(params.answer);
     this.langfuseProvider.traceRagAnswer({
       userId: params.userId,
       threadId: params.threadId,
@@ -1170,10 +1345,13 @@ export class ChatService {
       events: params.events,
       inputTokensEstimated: inputTokens,
       outputTokensEstimated: outputTokens,
-      costUsdEstimated: this.langfuseProvider.estimateCostUsd(
-        inputTokens,
-        outputTokens,
-      ),
+      costUsdEstimated:
+        params.usage?.costUsd ??
+        this.langfuseProvider.estimateCostUsd(inputTokens, outputTokens),
+      usageSource:
+        params.usage?.source === 'provider_reported_tokens'
+          ? 'provider_reported'
+          : 'estimated',
     });
     // 钉钉问答推送（fire-and-forget，threadId 白名单过滤）
     void this.dingTalk?.forwardRagAnswer({

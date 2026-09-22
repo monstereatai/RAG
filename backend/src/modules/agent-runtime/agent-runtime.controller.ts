@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { AgentRuntimeService } from './agent-runtime.service';
 import type { AgentRuntimeMode } from './agent-runtime.types';
 
 @Controller('agent-runtime')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:agent')
 export class AgentRuntimeController {
   constructor(private readonly runtime: AgentRuntimeService) {}
 

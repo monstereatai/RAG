@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
+import { createHash } from 'node:crypto';
 
 export const SCHEDULED_JOB_QUEUE = 'scheduled-analysis-jobs';
 
@@ -11,8 +12,14 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
   private readonly worker?: Worker<{ jobId: string; triggerKey: string }>;
   private processor?: (jobId: string, triggerKey: string) => Promise<void>;
   readonly enabled: boolean;
+  readonly required: boolean;
 
   constructor(@Optional() private readonly config?: ConfigService) {
+    const nodeEnv =
+      config?.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
+    this.required =
+      nodeEnv === 'production' ||
+      config?.get<boolean>('core.requireDependencies') === true;
     const redisUrl = config?.get<string>('redis.url');
     this.enabled = Boolean(redisUrl);
     if (!redisUrl) return;
@@ -59,12 +66,19 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
     triggerKey: string,
     delayMs = 0,
   ): Promise<boolean> {
-    if (!this.enabled || !this.queue) return false;
+    if (!this.enabled || !this.queue) {
+      if (this.required) {
+        throw new Error(
+          '生产定时任务要求使用 Redis 持久队列，当前队列未初始化，拒绝降级到进程内调度。',
+        );
+      }
+      return false;
+    }
     await this.queue.add(
       'scheduled-job',
       { jobId, triggerKey },
       {
-        jobId: `scheduled:${jobId}:${triggerKey}`,
+        jobId: this.queueJobId(jobId, triggerKey),
         delay: Math.max(0, delayMs),
       },
     );
@@ -78,7 +92,14 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
     everyMs?: number | null;
     at?: string | null;
   }): Promise<boolean> {
-    if (!this.enabled || !this.queue) return false;
+    if (!this.enabled || !this.queue) {
+      if (this.required) {
+        throw new Error(
+          '生产定时任务要求使用 Redis 持久队列，当前队列未初始化，拒绝降级到进程内调度。',
+        );
+      }
+      return false;
+    }
     const queue = this.queue as Queue & { upsertJobScheduler?: Function };
     if (input.type === 'at') {
       const delay = Math.max(
@@ -114,5 +135,14 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
     await this.queue?.close();
+  }
+
+  /** BullMQ 自定义 jobId 禁止冒号；哈希保留稳定去重并避免泄露业务标识。 */
+  private queueJobId(jobId: string, triggerKey: string): string {
+    const digest = createHash('sha256')
+      .update(`${jobId}:${triggerKey}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `scheduled-job-${digest}`;
   }
 }

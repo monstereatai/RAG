@@ -10,15 +10,23 @@ export class ArtifactQueueService implements OnModuleDestroy {
   private readonly logger = new Logger(ArtifactQueueService.name);
   private readonly queue: Queue<{ artifactId: string }> | null;
   private readonly worker: Worker<{ artifactId: string }> | null;
+  readonly required: boolean;
   private processor: Processor | null = null;
 
   constructor(config: ConfigService) {
+    const nodeEnv =
+      config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
+    this.required =
+      nodeEnv === 'production' ||
+      config.get<boolean>('core.requireDependencies') === true;
     const redisUrl = config.get<string>('redis.url');
     if (!redisUrl) {
       this.queue = null;
       this.worker = null;
       this.logger.warn(
-        'Artifact queue uses in-process fallback because Redis is unavailable.',
+        this.required
+          ? 'Artifact queue is unavailable because Redis is required in production; enqueue will fail closed.'
+          : 'Artifact queue uses in-process fallback because Redis is unavailable.',
       );
       return;
     }
@@ -57,6 +65,11 @@ export class ArtifactQueueService implements OnModuleDestroy {
     if (this.queue) {
       await this.queue.add(artifactId, { artifactId }, { jobId: artifactId });
       return;
+    }
+    if (this.required) {
+      throw new Error(
+        '生产 Artifact 生成要求使用 Redis 持久队列，拒绝进程内降级。',
+      );
     }
     setImmediate(() => {
       void this.processor?.(artifactId).catch((error: Error) => {

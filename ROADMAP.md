@@ -49,6 +49,58 @@
 
 ## 当前结论
 
+- **本轮工作流租户读取与覆盖保护（2026-09-22）**：产研工作流的状态、列表、编码上下文、交接 Manifest、Schema 预览与项目导出接口现在都会复用请求中的 `tenantId` 校验；带租户请求不能读取未绑定租户的历史 Checkpoint。`start／startAsync` 遇到已有同 `threadId` 的 Checkpoint 时先做 owner／tenant 校验，不再把无权访问误判为首次执行并覆盖其他租户工作流。新增跨租户覆盖回归测试，工作流定向测试 16 项、Backend 全量 Jest 81 套／408 项、根目录构建和 Backend 构建通过。该修复只补应用层边界，不替代关系型资源 `tenant_id` 迁移与组织 IAM 主数据。
+
+- **本轮审批恢复租户校验（2026-09-22）**：Chat 审批恢复把当前认证 `tenantId` 传入 Agentic Checkpoint 恢复入口；当请求带租户而检查点缺少租户或租户不一致时拒绝恢复，避免只靠 `threadId／userId` 继续执行旧检查点。Chat 与 Agentic 定向 23 项、Backend 构建通过。历史无租户检查点需要迁移或明确兼容策略，当前带租户请求默认拒绝。
+
+- **本轮 LangGraph 检查点生产 fail-closed（2026-09-22）**：Agentic RAG 与产研工作流在生产／`core.requireDependencies=true` 时不再把 Redis 不可用降级为进程内 `MemorySaver`；读取、写入、pending writes、列表和删除的严格 Redis 操作会把连接失败显式抛出，避免检查点丢失后被当成新运行或空状态。开发环境仍保留 MemorySaver 便于本地运行；新增 Redis 严格操作与 Checkpointer 回归测试，Backend 构建通过。真实 Redis 故障转移仍需目标环境演练。
+
+- **本轮剩余队列降级边界收口（2026-09-22）**：Artifact 生成队列在生产／严格依赖模式下 Redis 不可用会拒绝入队并把已创建记录标记为 `failed`，不再留下假 `queued`；定时任务模块启动恢复也统一经过持久队列门禁，不会在 Redis 缺失时偷偷恢复成当前进程的 cron／timer。开发环境保留原有降级；新增 Artifact 队列和定时任务恢复回归测试，Backend 构建通过。
+
+- **本轮文档状态与 Outbox 原子写入补齐（2026-09-22）**：`DomainEventsService` 新增基于 TypeORM `EntityManager` 的事务写入入口；文档审核现在会在同一个 PostgreSQL 事务内更新审核状态、写入审核记录，并在通过／驳回时写入对应 Outbox 记录；归档／恢复／版本生效同样会在一个事务内更新文档元数据与切片状态，并写入 `document.lifecycle_changed` 或 `document.effective` Outbox 记录。事务回滚不会留下幽灵事件，提交后仍由现有 Redis 租约 Dispatcher 投递；ES／BM25 属于外部索引，继续在提交后同步并由 Index Reconciler 对账修复。新增事务 Outbox 回归测试，Backend 全量 Jest 81 套／403 项通过。其他业务领域尚未全部接入同事务 Outbox，仍需逐域迁移和真实故障演练。
+
+- **本轮底层模型真实 usage 补齐（2026-09-22）**：统一 LLM 请求上下文新增 LangChain `handleLLMEnd` 回调。`getModel()` 直连的结构化输出和流式模型调用现在可从原始 `LLMResult.llmOutput.tokenUsage` 回传真实 token，进入同一 Chat Run 成本统计与 Prometheus usage 指标；统一 `invoke()` 在同一上下文中避免重复上报。供应商未返回 usage 时仍明确退回估算，供应商账单对账、价格版本和租户账单仍需目标环境接入。新增回调与 LangChain usage 格式回归测试，Backend 全量 Jest 81 套／404 项与 Backend 构建通过。
+
+- **本轮异步租户上下文与真实 usage 观测补齐（2026-09-22）**：文档入库 BullMQ Job、产研工作流 `start／resume／revise／retry_task` Job 和新工作流 Redis Checkpoint 现在携带 `tenantId`；Worker 恢复时继续传入租户上下文，文档写入侧会校验认证租户与用户主数据冲突，工作流恢复会校验 Checkpoint 租户。LLM Provider 新增兼容 LangChain／OpenAI 供应商格式的真实 usage 解析，Prometheus 增加 `rag_llm_tokens_actual_total`，Chat Run 在供应商返回 usage 时用真实 prompt／completion token 计算成本估算并标记 `provider_reported_tokens`，没有 usage 时继续明确使用估算值。新增 usage、工作流租户和 ACL 写入边界回归测试；Backend 全量 Jest 81 套／401 项、Backend 构建通过。仍未执行数据库迁移，因此资源表／外部索引租户列、同事务 Outbox、真实供应商账单和生产故障演练继续列为待确认。
+
+- **本轮 ACL 租户边界补强（2026-09-22）**：用户带 `tenantId` 时，文档 ACL 会先解析文档 owner 的租户，只返回同租户的 public／role／department／user 授权文档；跨租户 owner 和没有 owner 的旧文档默认不进入租户用户的共享结果，缓存键也包含租户。保留无 `tenantId` 的 legacy 行为以兼容迁移前数据；资源表／外部索引仍无租户列，因此这不是完整企业 IAM／ABAC。新增租户 ACL 回归测试。
+
+- **本轮取消传播补齐（2026-09-22）**：Agentic 的证据压缩兜底、公共知识直答和 DeepAgent 查询规划现在都接收同一个请求级 `AbortSignal`，超时信号与用户退订信号合并；`LlmProvider.getModel()` 返回的底层模型、结构化 Runnable、stream／batch／transform 也会自动继承同一信号，避免主链路已取消但备用模型仍继续消耗预算。新增取消信号回归测试，Backend 定向构建通过；全量 Jest 81 套／405 项通过。
+
+- **本轮外部检索取消传播补齐（2026-09-22）**：Bocha 联网搜索与 DashScope Rerank 的出站 `fetch` 现在会合并请求级 `AbortSignal` 与自身 10 秒超时；Simple、Auto、Agentic 调用入口均传递该信号，请求退订或超时后不会继续占用外部检索／重排资源。新增两个出站取消回归测试，定向 4 套／66 项通过；本轮最终 Backend 全量 Jest 83 套／416 项、根目录全量构建、文档一致性、企业就绪本地门禁 12／12 和 `git diff --check` 均通过；仍需目标环境验证真实供应商在取消后的连接释放行为。
+
+- **本轮生产租户身份 fail-closed（2026-09-22）**：`JwtAuthGuard` 在生产默认要求用户 JWT／API Token 带 `tenantId`，没有租户上下文直接拒绝业务接口；内部 `ServiceTokenGuard` 保持独立，不受用户租户门禁影响。新增缺失租户拒绝和服务身份放行回归测试，Backend 全量 Jest 81 套／407 项、Backend 构建通过。关系型资源的 `tenant_id` 字段、数据回填和外部索引租户过滤仍需迁移授权。
+
+- **本轮索引对账与修复队列补齐（2026-09-22）**：管理端 `documents/index-audit` 现在以 PostgreSQL 分块记录为基准，逐文档核对 `documents_meta`、BM25 快照、Elasticsearch 分块／文档索引、Milvus 向量数量和 Neo4j 来源投影；结果区分 `ok／mismatch／unavailable／skipped`，并保留具体原因、计数和已有重建入口。新增 Redis／BullMQ `rag-index-repair` 修复队列，生产或严格依赖模式没有 Redis 时拒绝修复任务，Redis 可用时使用稳定 Job ID、重试、失败任务和状态接口；开发环境才保留同步降级。固定路径（含 `tasks/failed`、`index-audit`、修复队列和 Reconciler 接口）已置于动态任务／文档参数路由之前，生产默认按周期把可修复缺口投递到修复队列；真实服务调用 `/api/v1/rag/admin/documents/index-audit?limit=10` 返回 200，并检测到当前本地存量资料存在 BM25／ES／Milvus 外部索引缺口；新增对账、队列和 Reconciler 回归测试。该能力不是数据库事务内 Outbox，跨写入原子性和生产故障演练仍待目标环境。
+
+- **本轮运行环境验收已补齐（2026-09-22）**：在不执行 schema／数据迁移的前提下，使用 `TYPEORM_SYNCHRONIZE=false` 启动两份 Backend（3000／3001），PostgreSQL、Redis、Elasticsearch、Milvus、Neo4j 均成功连接；两实例的 health、登录和文档队列状态接口均返回 200，队列保持 Redis／BullMQ 模式且无待处理／失败任务；`smoke:redis-checkpointer` 的双进程共享 Redis 检查点恢复通过。该证据只覆盖本地双实例启动与共享状态读取，不等同于生产故障转移、死信接管或 SLA 验收。Backend 全量 Jest 76 套／385 项、根目录全量构建、文档一致性和 `git diff --check` 继续通过。
+
+- **本轮上线边界继续收口（2026-09-22）**：生产对象存储默认 fail-closed，MinIO 不可用时不再静默写本地磁盘；生产工作流、定时任务和文档异步入库队列 Redis／BullMQ 不可用时拒绝进程内降级，开发环境仍保留受限本地路径；查询日志与 LangFuse 内容默认脱敏并按保留期清理；Simple／Agentic 关键模型流式与结构化调用开始携带请求级取消信号；认证用户／API Token 与激活／重置 token 在生产默认要求 Redis 共享存储，Chat／AG-UI 增加 Redis 原子计数的租户／用户限流和可选日成本预算；Milvus 删除补偿在 Redis 可用时持久化并支持重启恢复；`.env.example` 明确开发环境可用文件认证存储，避免本地无 Redis 时无法登录。Backend 全量 Jest 76 套／385 项、根目录全量构建、文档一致性和 `git diff --check` 通过。租户资源表迁移、关系型 IAM 主数据、跨写入事务原子性、真实 usage 账单和多实例演练仍待数据库迁移授权与目标环境依赖。
+
+- **本轮剩余生产优化已落地并完成验证（2026-09-22）**：内部 `ServiceTokenGuard` 改为只接受服务令牌，API Token 管理仅在专用边界兼容服务令牌或当前用户 JWT；SSE／TTS 新增一次性 Redis 流票据，前端不再把长期 JWT 放入 URL；工具副作用完成标记使用必达写入，写入失败返回 `unknown`；AgentRun 工具调用／委派预算使用带旧计数条件的原子预留；LLM provider 继承请求 AbortSignal，Agentic 兜底／直答／DeepAgent 规划也继承同一取消信号；生产可配置严格核心依赖和文件认证存储禁用；查询日志入库脱敏并按保留期清理；工作流死信日志结构化且保留期可配置；文档队列在生产 Redis 缺失时拒绝进程内执行；索引补偿、自动 Reconciler 和状态接口已补齐，并明确跨写入事务原子性边界；已有 tenantId 用户的文档 ACL 共享结果按 owner 租户过滤；JWT／用户类型补充可选 tenantId 与运行时匹配工具；管理后台运行详情使用显式契约并取消过期轮询请求。Backend 全量 Jest 76 套／385 项通过（保留既有异步句柄提示），根目录全量构建、管理后台构建、文档一致性检查和 `git diff --check` 通过。数据库租户迁移、关系型 IAM 主数据、真实 Redis／多实例回放仍待目标环境验收。
+
+- **本轮生产边界收口（2026-09-22）**：Agent Run 完成／取消改为带状态条件的原子更新，迟到完成不会覆盖取消；Agent Loop 检查点键加入 `runId`；定时任务与生产工作流队列使用稳定安全的任务 ID，并提供队列状态、失败任务列表和按 owner 重试入口。Redis 不可用且启用 `REQUIRE_DISTRIBUTED_LOCK=true` 时拒绝执行副作用，写入型工具在幂等存储不可用时 fail-closed；ACL 缓存失效改用 `SCAN`，ES 映射异常不再自动删索引，文档删除按 owner 过滤；外部 URL 解析增加私网／本机、DNS、重定向和动态渲染最终地址校验；聊天与 AG-UI 退订同时触发本地 AbortSignal 和持久取消标记；成本估算按实际完成模型节点计数。定向 Jest 41 项、Backend 构建、全仓库构建和 `git diff --check` 已通过。真实 Redis／BullMQ、多实例取消、租户 IAM／ABAC、跨索引补偿、生产死信值班与 DLP 仍需目标环境验收。
+
+- **本轮 Outbox 多实例派发边界补齐（2026-09-22）**：Domain Event Outbox 的派发定时器现在使用 Redis 租约，同一时间只允许一个 Backend 实例扫描并投递，生产 Redis 不可用时不再静默降级为多实例重复派发；并发 `emit` 撞到数据库唯一幂等键时按已存在处理，其他数据库错误继续抛出。新增派发锁与并发幂等回归测试；Backend 全量 Jest 77 套／388 项、构建、文档一致性和 `git diff --check` 通过（保留既有异步句柄提示）；跨业务写入与 Outbox 写入仍不是同一数据库事务，需后续迁移／目标环境验收。
+
+- **本轮生产就绪检查补齐（2026-09-22）**：`core.requireDependencies` 在生产默认开启，`/health/ready` 同时把认证共享存储、租户配额、Redis 分布式锁和 Domain Event Outbox 锁视为 Redis 必需边界；Redis 不可用时返回未就绪，避免队列已经拒绝入队但负载均衡仍继续导流。开发环境保持可降级。Backend 全量 Jest 77 套／389 项通过（保留既有异步句柄提示）。
+
+- **本轮租户成本预留语义补齐（2026-09-22）**：租户请求数和日成本预算改为 Redis Lua 原子“限额内预留”，超额请求不再先写入计数再拒绝；开发环境的本地降级计数保持同样的先判断后增加语义。Backend 定向配额／就绪／Outbox 测试 9 项、全量 Jest 77 套／390 项、构建、文档一致性和 Diff 检查通过。该能力仍按估算额度预留，真实模型 usage 对账和账单需要供应商 usage 数据。
+
+- **本轮企业就绪门禁复核（2026-09-22）**：`pnpm --dir backend enterprise:readiness` 的 12 项本地检查全部通过；输出明确把真实组织权限回显、生产目标环境与资源规格、真实业务原件和安全合规口径列为外部输入，不能用本地 fixture 冒充完成。数据库租户迁移、真实 usage 账单和生产故障演练仍保持未完成状态。
+
+- **本轮 API Token 最小权限补齐（2026-09-22）**：API Token 原先虽保存 `scopes`，但鉴权阶段未校验；现在 API Token 身份携带 scope，并由 `JwtAuthGuard` 按控制器元数据执行精确／前缀通配校验。Chat、AG-UI 用户流、文档、Graph、Memory、Workflow、RAG Gateway、周报、Structured、MCP、Skills、Supervisor、Agent Runtime、Agent Evals、Jobs、Obsidian、Speech、Observability 和 Token 管理接口均声明最小 scope；SSE 一次性票据同步保留 API Token scope，避免流式 URL 票据绕过门禁；普通 JWT 和 Service Token 不受误伤。新增 scope 门禁回归测试；Backend 全量 Jest 79 套／394 项、根目录构建、文档一致性、目标文件 lint 和 Diff 检查通过；数据库级租户 IAM 仍待迁移授权。
+
+- **本轮一次性 Token 消费竞态修复（2026-09-22）**：Redis 低版本不支持 `GETDEL` 时，回退路径改为 Lua 原子读删，不再使用可被并发请求重复消费的 `GET + DEL`；新增 Redis provider 回归测试。该修复覆盖 SSE、激活和密码重置 token 的共享消费边界，不涉及数据库迁移。当前 Backend 全量 Jest 80 套／395 项、Backend 构建、文档一致性和 Diff 检查通过。
+
+- **本轮租户上下文贯穿问答检索（2026-09-22）**：Chat 非流式、Chat SSE 和 AG-UI 用户流把认证 JWT／API Token 中的 `tenantId` 写入统一 `RequestContext` 与 `RetrieveOptions`；Document ACL 在数据库用户记录未同步租户时使用已认证租户，并在两者冲突时拒绝请求；Hybrid 与 BM25-only 检索均复用该租户过滤。新增 ACL 回归测试，兼容旧的无租户调用和管理 Service Token 路径；Backend 全量 Jest 80 套／396 项通过、Backend 构建通过；未执行数据库迁移。
+
+- **已完成上一轮审计的可验证修复（2026-09-22）**：生产工作流的 BullMQ Job ID 改为稳定且不含 `:` 的哈希 ID，避免队列直接拒绝任务；结构化直答按子问题覆盖证据，并继承多问题上下文，否定／条件问句不再被正向事实误命中；Agent Loop 的决策阶段纳入总超时和剩余动作预算；评测报告只有在检查项与样本均通过时才汇总为 `passed`，离线黄金集结构失败明确为 `failed`。聊天／AG-UI 流断开和用户主动取消现在会按 thread＋user 查找活动 Run 并写入取消标记，Agentic Loop 在安全边界停止；文档 ACL 替换改为事务内原子更新，提交后再失效缓存。新增 ACL、取消和回归测试，定向 Jest 7 套 76 项通过，全仓库构建、Backend 文档一致性和 `git diff --check` 通过。Jest 仍提示既有异步句柄未退出；Backend 全量 `tsc --noEmit` 仍有既有测试夹具类型错误，未将其伪装成通过。真实 Redis／BullMQ 接管、浏览器断流到运行停止的跨进程验收、数据库并发 ACL 压测和生产 IAM／DLP 仍待目标环境验证。
+
+- **已完成本轮 24＋5 项可落地优化（2026-09-22）**：结构化直答新增问题目标与证据事实匹配门禁，避免把发薪日回答成税务结论；多问题按子问题选择证据，不再固定截取两句。评测报告读取层按逐样本统计优先于顶层 `ok`，区分 `passed／failed／skipped／unavailable`，离线黄金集结构校验不再冒充真实 QA 通过。通用 Agent Loop 检查点保存并恢复累计 `elapsedMs`，不会恢复时重置总超时预算；生产工作流队列使用稳定任务 ID 去重，Redis 租约每分钟续期。同步更新高级 Agent 平台现状和三链路流程文档。定向 Jest 49 项、全仓库构建、Backend 文档一致性检查和 `git diff --check` 已通过；Jest 仍提示既有异步句柄未退出，未将其伪装成零警告。真实业务评测、生产压测／SLA、跨实例故障演练、企业 IAM／DLP、生产死信值班、真实 GraphRAG／多模态效果和灾备仍待目标环境验收。
+
+- **已完成回答真实性与评测可读性优化（2026-09-22）**：`buildEvidenceFirstAnswer` 不再保存薪资、金额、日期、版本、流程规则等演示业务结论，而是仅按问题领域从本次 Evidence Bundle 中抽取带当前片段引用的事实；版本冲突时优先保留资料中实际写明的生效／优先语句，普通语义问题仍走受约束生成。新增“发薪日由当前资料决定”的最小回归。评测报告读取层现在能汇总 Agent Platform 三模式真实回放的样本数、失败数和通过率，并将 `skipped` 单独展示；Chat Run 的 `costUsd` 与 Langfuse 使用同一份按已完成生成节点汇总的估算，并在运行事件明确标注为估算值。同步修正 Auto 多意图直接进入 Agentic、不会创建 Fast Path 快照的文档分支。Karpathy、Chat、评测报告定向测试共 45 项、Backend 构建、文档代码一致性和 Mermaid 结构检查通过。
+
 - **已同步三种问答链路说明（2026-09-21）**：`docs/interview/功能步骤流程.md` 已按当前代码重写 Simple、Auto 与 Chat Agentic 的用户操作、数据状态和代码入口。Auto 明确为「一次 Hybrid Fast Path 后路由到两个执行引擎」，不再描述为检索前公共直答；显式 Agentic 直接进入状态图，只有 Auto 升级时才复用首轮快照。文档同时补齐正式 RAG 优先于 Obsidian、确定性结构化事实、审批暂停／恢复、SSE 最终正文发布与统一结果收口边界。29 张 Mermaid 图的链接索引结构检查和文档代码一致性门禁已通过。
 
 - **本轮生产化回归已通过（2026-09-21）**：统一检索证据策略现在会在正式 RAG 足够时抑制无关 Obsidian 竞争；检索查询保留原问题并补充已确认的缩写／同义词／错别字，业务锚点不足时拒绝泛匹配。结构化事实支持跨切片合并并保留当前片段引用，覆盖薪资、OKR／绩效奖金、版本冲突和 NestJS Provider；Simple 在需要综合的意图下也优先使用确定性事实，避免漏掉关键字段。Agentic 对结构化证据保留同一快照，不再被语义充分性误判打回。`AGENT_PLATFORM_REQUIRE_LIVE=true pnpm run eval:agent-platform` 已整体通过，项目集三模式 live 均为 14／14，混合 RAG 三模式 live 均为 9／9；全量 Jest 70 套、351 项通过，Backend／Admin／Admin Backend 构建、Redis Checkpoint 双进程恢复、文档代码一致性门禁和 MCP 10 项测试通过。全量 lint 仍有 234 个既有错误、16 个警告，未伪装成通过。

@@ -15,6 +15,7 @@ describe('ToolExecutionService', () => {
         get: jest.fn(),
         setIfAbsent: jest.fn(),
         set: jest.fn(),
+        setRequired: jest.fn(),
       } as never,
     );
     return { service, emit };
@@ -64,6 +65,7 @@ describe('ToolExecutionService', () => {
         get: jest.fn().mockResolvedValue('completed:{"id":"artifact-1"}'),
         setIfAbsent: jest.fn(),
         set: jest.fn(),
+        setRequired: jest.fn(),
       } as never,
     );
     const result = await service.execute({
@@ -78,6 +80,54 @@ describe('ToolExecutionService', () => {
       status: 'recovered',
       output: { id: 'artifact-1' },
     });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('returns unknown when a side effect completes but its idempotency marker is not confirmed', async () => {
+    const emit = jest.fn().mockResolvedValue(undefined);
+    const execute = jest.fn().mockResolvedValue({ id: 'artifact-2' });
+    const service = new ToolExecutionService(
+      {
+        decide: jest.fn().mockReturnValue({ allowed: true, requiresApproval: false }),
+      },
+      { emit } as never,
+      {
+        isEnabled: () => true,
+        get: jest.fn().mockResolvedValue(null),
+        setIfAbsent: jest.fn().mockResolvedValue(true),
+        set: jest.fn(),
+        setRequired: jest.fn().mockResolvedValue(false),
+      } as never,
+    );
+
+    const result = await service.execute({
+      toolName: 'artifact_generate',
+      threadId: 'thread-1',
+      mode: 'production',
+      sideEffect: true,
+      idempotencyKey: 'artifact-key',
+      execute,
+    });
+
+    expect(result.status).toBe('unknown');
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({
+      eventType: 'tool.unknown',
+    });
+  });
+
+  it('blocks side effects when Redis cannot provide an idempotency lock', async () => {
+    const { service } = createService();
+    const execute = jest.fn().mockResolvedValue('not-run');
+    const result = await service.execute({
+      toolName: 'artifact_generate',
+      threadId: 'thread-1',
+      mode: 'production',
+      sideEffect: true,
+      execute,
+    });
+
+    expect(result.status).toBe('blocked');
     expect(execute).not.toHaveBeenCalled();
   });
 });

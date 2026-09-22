@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
+import { redactAuditText } from '../../common/security/audit-redaction';
 
 export interface QueryLogEntry {
   query: string;
@@ -50,10 +52,12 @@ export class QueryLogService {
    * 日志失败只能降级告警，绝不能影响用户问答主链路。
    */
   private readonly logger = new Logger(QueryLogService.name);
+  private lastRetentionSweepAt = 0;
 
   constructor(
     @InjectRepository(QueryLogEntity)
     private readonly queryLogRepo: Repository<QueryLogEntity>,
+    private readonly configService: ConfigService,
   ) {}
 
   /** 截断用户查询并持久化可统计字段，控制审计表增长和敏感内容暴露范围。 */
@@ -62,7 +66,7 @@ export class QueryLogService {
       const entity = this.queryLogRepo.create({
         id: randomUUID(),
         userId: entry.userId ?? null,
-        query: entry.query.slice(0, 2000),
+        query: QueryLogService.redact(entry.query).slice(0, 2000),
         mode: entry.mode,
         refused: entry.refused,
         citationCount: entry.citationCount,
@@ -72,9 +76,49 @@ export class QueryLogService {
         hasAnswer: entry.hasAnswer,
       });
       await this.queryLogRepo.save(entity);
+      this.scheduleRetentionSweep();
     } catch (err) {
       this.logger.warn(`Failed to log query: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * 只在写入路径按小时触发一次清理，避免为运营日志额外引入定时任务。
+   * 删除范围由配置控制，失败只记日志，不影响主问答链路。
+   */
+  private scheduleRetentionSweep(): void {
+    const now = Date.now();
+    if (now - this.lastRetentionSweepAt < 60 * 60 * 1000) return;
+    this.lastRetentionSweepAt = now;
+    void this.purgeExpired().catch((error: unknown) => {
+      this.logger.warn(`Failed to purge expired query logs: ${(error as Error).message}`);
+    });
+  }
+
+  async purgeExpired(): Promise<number> {
+    const retentionDays = Math.min(
+      Math.max(
+        Number(this.configService.get<number>('queryLog.retentionDays') ?? 180),
+        1,
+      ),
+      3650,
+    );
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const result = await this.queryLogRepo
+      .createQueryBuilder()
+      .delete()
+      .from(QueryLogEntity)
+      .where('createdAt < :cutoff', { cutoff })
+      .execute();
+    return result.affected ?? 0;
+  }
+
+  /**
+   * 运营日志只用于聚合统计，不应成为个人信息或凭据的二次存储。
+   * 规则保持保守：邮箱、手机号、Bearer/API key 和连续长数字统一替换。
+   */
+  static redact(query: string): string {
+    return redactAuditText(query);
   }
 
   /**

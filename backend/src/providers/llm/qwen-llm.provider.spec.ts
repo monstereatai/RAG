@@ -33,15 +33,20 @@ describe('QwenLlmProvider', () => {
   it('forwards the stability policy to ChatOpenAI', () => {
     createProvider();
 
-    expect(ChatOpenAI).toHaveBeenCalledWith({
-      temperature: 0.2,
-      model: 'qwen-plus',
-      apiKey: 'test-key',
-      timeout: 60_000,
-      maxTokens: 4_096,
-      maxRetries: 2,
-      configuration: { baseURL: 'https://example.test/v1' },
-    });
+    expect(ChatOpenAI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        temperature: 0.2,
+        model: 'qwen-plus',
+        apiKey: 'test-key',
+        timeout: 60_000,
+        maxTokens: 4_096,
+        maxRetries: 2,
+        configuration: { baseURL: 'https://example.test/v1' },
+        callbacks: [
+          expect.objectContaining({ handleLLMEnd: expect.any(Function) }),
+        ],
+      }),
+    );
   });
 
   it('throws a controlled error instead of returning the request prompt on failure', async () => {

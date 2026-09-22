@@ -58,4 +58,42 @@ describe('LlmProvider request model selection', () => {
 
     expect(service.getActiveProviderName()).toBe('qwen');
   });
+
+  it('forwards provider usage through the request scope', async () => {
+    const usage = { inputTokens: 12, outputTokens: 4 };
+    await service.runWithUsage(
+      (received) => expect(received).toEqual(usage),
+      () => service.invoke('带 usage 的问题'),
+    );
+
+    expect(qwen.invoke).toHaveBeenCalledWith(
+      '带 usage 的问题',
+      expect.objectContaining({ onUsage: expect.any(Function) }),
+    );
+    const options = qwen.invoke.mock.calls[0][1] as {
+      onUsage: (value: typeof usage) => void;
+    };
+    options.onUsage(usage);
+  });
+
+  it('propagates the request AbortSignal through direct model and structured Runnable calls', async () => {
+    const signal = new AbortController().signal;
+    const structuredInvoke = jest.fn().mockResolvedValue({ ok: true });
+    const structured = { invoke: structuredInvoke };
+    const modelInvoke = jest.fn().mockResolvedValue('answer');
+    const model = {
+      invoke: modelInvoke,
+      withStructuredOutput: jest.fn().mockReturnValue(structured),
+    };
+    qwen.getModel.mockReturnValue(model);
+
+    const wrapped = service.getModel();
+    await service.runWithSignal(signal, () => wrapped.invoke('问题'));
+    await service.runWithSignal(signal, () =>
+      wrapped.withStructuredOutput({}).invoke('结构化问题'),
+    );
+
+    expect(modelInvoke).toHaveBeenCalledWith('问题', { signal });
+    expect(structuredInvoke).toHaveBeenCalledWith('结构化问题', { signal });
+  });
 });

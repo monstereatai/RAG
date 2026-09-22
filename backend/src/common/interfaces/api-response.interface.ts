@@ -14,6 +14,12 @@ export class JwtPayload {
   userId!: string;
   username!: string;
   role!: 'admin' | 'user';
+  /** 当前请求的认证来源；普通 JWT 省略时按 jwt 处理。 */
+  authType?: 'jwt' | 'api-token' | 'service';
+  /** API Token 的最小权限集合；普通 JWT 不携带该字段。 */
+  scopes?: string[];
+  /** 多租户迁移完成前保持可选；新签发 token 应携带该字段。 */
+  tenantId?: string;
 
   /**
    * token 类型：

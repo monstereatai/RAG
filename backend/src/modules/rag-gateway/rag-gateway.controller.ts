@@ -4,9 +4,11 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { RagContextDto, RagSearchDto } from './rag-gateway.dto';
 import { RagGatewayService } from './rag-gateway.service';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 @Controller('rag')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:search')
 export class RagGatewayController {
   constructor(private readonly ragGatewayService: RagGatewayService) {}
 

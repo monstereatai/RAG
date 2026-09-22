@@ -4,7 +4,7 @@
 
 ## 问题
 
-原始问题是文档上传后的切片、Embedding 和索引处理在请求线程内同步执行。当前已经接入 BullMQ 和 Redis Worker，异步任务会写回状态，Redis 不可用时保守降级为同步处理。
+原始问题是文档上传后的切片、Embedding 和索引处理在请求线程内同步执行。当前已经接入 BullMQ 和 Redis Worker，异步任务会写回状态；开发环境 Redis 不可用时允许受限同步降级，生产环境或开启严格依赖时拒绝进程内降级。
 
 ## 目标
 
@@ -54,6 +54,8 @@ Client → 轮询 GET /api/v1/documents/tasks/:taskId → 返回进度
 - [x] 异步上传返回任务标识，Worker 调用真实解析、Embedding 和索引链路。
 - [x] 处理成功／失败写回 `document_tasks`，空内容失败也会落状态。
 - [x] 提供任务状态 API，修复 `queue/status` 路由顺序。
-- [x] Redis 未配置或不可用时降级为同步处理。
+- [x] 开发环境 Redis 未配置时降级为同步处理；生产环境或 `REQUIRE_CORE_DEPENDENCIES=true` 时 Redis 不可用直接拒绝入队。
+- [x] 索引对账后的重建使用独立 `rag-index-repair` BullMQ 队列；生产／严格依赖模式 Redis 不可用时拒绝修复，开发环境才允许同步降级。
+- [x] 生产索引自动对账按周期读取只读审计结果，只把可修复的索引缺口投递到 `rag-index-repair`；固定路径提供状态和手动触发入口，Redis／BullMQ 不可用时自动修复 fail-closed。
 
 目标机器上的队列容量、并发、积压告警和故障恢复仍属于根目录 `ROADMAP.md` 中的生产规格压测事项，不在本文档重复维护。

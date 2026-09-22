@@ -1,6 +1,6 @@
 # 高级 Agent 平台能力现状
 
-更新时间：2026-09-21
+更新时间：2026-09-22
 
 这份文档只记录当前仓库已经落地、已经验证，或明确标注边界的能力。它不是“未来规划清单”。
 
@@ -13,12 +13,27 @@
 3. 统一评测默认覆盖 `simple`、`auto`、`agentic`，CI 会执行确定性质量门禁。
 4. 增加 Agent Runtime 的 Prometheus 告警与 Grafana 看板模板，部署时再接入实际环境。
 
+本轮又收敛了五类容易造成“看起来通过、实际不可靠”的问题：结构化直答会校验问题目标与证据事实是否匹配，评测后台区分离线结构校验与真实问答，Agent Loop 检查点保存并恢复已消耗的时间预算，生产工作流租约会续期且队列操作使用稳定任务 ID，Auto 文档与多意图实现保持一致。
+
+本轮还把异步租户上下文和真实 usage 观测接入运行边界：文档入库队列、产研工作流队列和新工作流 Redis Checkpoint 均携带 `tenantId`，Worker 恢复时继续传递并在文档写入／工作流读取侧校验；LLM Provider 解析 LangChain／OpenAI 兼容响应中的真实 prompt／completion token，Prometheus 以 `rag_llm_tokens_actual_total` 单独记录，Chat Run 在有真实 usage 时标记 `provider_reported_tokens`，没有 usage 时保留 `estimated_from_completed_nodes`，避免把估算值误当供应商账单。统一请求上下文还注册了 LangChain `handleLLMEnd` 回调：直接使用底层 `getModel()` 的结构化／流式调用会从原始 `LLMResult.llmOutput.tokenUsage` 回传 usage，并与 `invoke()` 走同一统计口径且不会重复上报。供应商没有返回 usage 时仍只能使用估算，供应商账单对账和价格版本管理仍需目标环境接入。
+
+本轮生产边界又补齐了运行控制与安全门禁：Agent Run 的完成／取消使用带状态条件的原子更新；检查点键包含 `runId`，并发运行互不覆盖；Redis 不可用且开启 `REQUIRE_DISTRIBUTED_LOCK=true` 时，定时任务和生产工作流拒绝执行副作用，写入型工具在幂等存储不可用时 fail-closed。生产工作流队列提供状态、失败任务列表和按 owner 重试入口；ACL 缓存失效使用 `SCAN`，ES 映射异常不再自动删除已有索引，文档删除按 owner 过滤。外部 URL 导入会拒绝私网／本机地址并校验 DNS、重定向和动态渲染后的最终地址；聊天与 AG-UI 断流同时触发本地 AbortSignal 和持久取消标记。
+本次补齐运行治理边界：聊天／AG-UI 的 SSE 退订会按会话和用户写入取消标记，并提供 `POST /api/v1/chat/conversations/:threadId/cancel` 主动取消入口；文档 ACL 替换在单事务内完成，提交后才清理权限缓存。
+本轮继续收口安全与可靠性边界：内部管理 API 的 `ServiceTokenGuard` 不再接受普通 JWT；浏览器 SSE／TTS 改用 60 秒、一次性 Redis 票据，长期 JWT 不进入 URL；工具预算使用带旧计数条件的原子预留，副作用完成标记写入失败会返回 `unknown`；LLM 调用会继承请求取消信号，生产可通过 `REQUIRE_CORE_DEPENDENCIES=true` 和 `REQUIRE_DISTRIBUTED_TOKEN_STORE=true` 将 Redis 缺失提升为未就绪。查询日志在入库前脱敏并按保留期清理，Milvus 删除补偿在 Redis 可用时持久化，其他索引通过只读对账接口暴露状态；生产启用周期性索引 Reconciler，将可修复缺口投递到 Redis／BullMQ，队列不可用时自动修复 fail-closed。
+管理后台运行详情补上显式 Run／Artifact 契约，首次加载、轮询和页面卸载都会传播 `AbortSignal`，避免旧请求在切换运行详情后覆盖新状态。
+本地运行验收已在 `TYPEORM_SYNCHRONIZE=false` 下完成：两份 Backend 实例同时连接 PostgreSQL、Redis、Elasticsearch、Milvus、Neo4j，并分别通过健康检查、登录和文档队列状态检查；Redis Checkpoint 双进程恢复 smoke 通过。该结果证明共享依赖和基础运行路径可用，不代表生产故障转移、死信接管、容量水位或 SLA 已验收。
+索引对账接口现在以 PostgreSQL 分块数为基准，同时核对 BM25、Elasticsearch、Milvus 和启用时的 Neo4j 来源投影；每个索引明确返回 `ok／mismatch／unavailable／skipped`。发现异常后，管理端可将选中文档提交到 Redis／BullMQ `rag-index-repair` 队列，由任一 Backend 实例执行重建并提供失败重试；生产或严格依赖模式缺少 Redis 时拒绝修复任务，开发环境才允许同步降级。生产默认按周期运行 Reconciler，仅将计数不一致或图谱缺口投递到修复队列，避免把审批／过期等治理问题误当成索引问题；状态和手动触发入口为 `/rag/admin/documents/index-reconciler/status` 与 `/rag/admin/documents/index-reconciler/run`。这仍不等同于数据库事务内 Outbox，跨写入原子性和真实故障演练需在目标环境验收。
+Domain Event Outbox 的多实例定时派发现在使用 Redis 租约，同一时刻只由一个 Backend 扫描并投递；生产 Redis 不可用时停止派发，避免退化成重复 webhook。并发写入撞到唯一幂等键按已存在处理，其他数据库错误继续暴露。文档审核状态／审核记录、归档／恢复与版本生效已经把业务写入和对应 Outbox 记录放入同一个 PostgreSQL 事务；事务边界外的 ES／BM25 同步继续由索引对账修复。其他业务领域尚未接入同事务 Outbox。
+生产 `core.requireDependencies` 默认开启，`/health/ready` 会把认证共享存储、租户配额、分布式锁和 Outbox 租约涉及的 Redis 视为必需依赖；异步队列拒绝入队时，实例也会同时从负载均衡就绪池摘除。
+固定的 `documents/index-audit` 路由已置于动态任务／文档参数路由之前，真实本地服务回放返回 200；当前存量资料中发现 BM25、Elasticsearch、Milvus 与 PostgreSQL 分块数不一致。生产 Reconciler 会把可修复缺口交给持久修复队列，开发环境仍不会因只读审计自动改写本地存量索引，需通过人工确认后的重建入口处理。
+
 ## 能力边界
 
 ### Agent Runtime
 
 - `agent_runs` 保存 `cancelledAt`、`cancelReason` 和 `lastCheckpointAt`。
 - `POST /api/v1/agent-ops/run-center/:id/cancel` 支持取消运行。
+- `POST /api/v1/chat/conversations/:threadId/cancel` 支持用户按本人会话主动取消当前运行；浏览器断开聊天／AG-UI SSE 时也会触发同一归属校验和取消标记。
 - Agent Loop 每轮开始前读取 Redis 取消标记，在安全边界结束，不会在未知副作用状态下自动重放。
 - 失败或取消的运行才允许重试；终态运行的取消请求保持幂等，不会被重新打开。
 - 迁移文件：`backend/src/migrations/1787800000000-AddAgentRuntimeControls.ts`。
@@ -28,6 +43,10 @@
 现有工作流继续使用 `pending_approval`、`revision_required`、`resume` 和 `revise` 状态流。工具层已有 `completed`、`running`、`unknown` 幂等状态：未知副作用只能进入人工确认或局部重跑，不能直接盲目重放。审批、恢复、运行和工具动作通过 Runtime Event 关联到 `threadId`、`runId`。
 
 这部分不等于“所有业务都自动审批”。高风险动作仍要走审批；不需要审批的任务只能通过自动门禁和证据校验后继续。
+
+通用 Agent Loop 的恢复语义是“从最后一个成功检查点继续”：检查点包含 `step`、`toolCalls`、`state` 和累计 `elapsedMs`，恢复时不会重新获得已经消耗的总超时预算。未知副作用仍不会自动重放；取消、审批和重试需要由上层业务明确决定。
+
+生产工作流在 Redis 可用时使用稳定的 `start／resume／revise` 任务 ID 做队列去重，并对五分钟租约每分钟续期。生产环境 Redis 不可用时现在直接拒绝队列任务和进程内接管；仅开发环境允许受限的本地降级，因此不能把开发模式结果宣称为跨实例互斥或死信接管。
 
 ### 三条问答链路评测
 
@@ -62,6 +81,41 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 - 原有 Prometheus 指标继续覆盖 HTTP、检索、LLM、缓存、Agent 节点、工具调用、空检索和循环终止原因。
 - 新增模板：`docker/monitoring/prometheus/alerts.yml`、`docker/monitoring/grafana/rag-agent-overview.json`。
 - 看板与告警模板不包含生产地址、密钥或通知接收人，部署时需由运维接入现有 `monitoring/` 配置。
+
+### 评测结果的解释规则
+
+- `passed` 只表示已执行的评测样本全部通过；
+- `skipped` 表示只完成结构校验、没有审核样本，或运行条件不足；
+- `unavailable` 表示没有报告文件或报告无法解析；
+- `golden-business-latest.json` 在 `live !== true` 时只显示“结构校验已完成”，不会把 `ok: true` 当成真实问答通过；
+- `failedSamples` 只统计已执行样本中的失败数，不把“未执行”伪装成失败。
+
+### 本轮完整优化门禁
+
+仓库内可以直接验证的门禁已经收敛为：回答与问题目标匹配、证据不足拒答、多问题按子问题覆盖、版本／条件／否定词不被忽略、评测状态可解释、估算成本带来源标记、预算和取消边界统一、工作流队列稳定去重、长任务租约续期、Agent Loop 恢复位置与剩余时间、ACL 原子替换、文档与实现分支一致。真实业务数据、生产 QPS／SLA、跨实例故障演练、真实 IAM／ABAC／DLP、生产死信与值班、真实 GraphRAG／多模态效果和备份灾备仍必须在目标环境完成验收。
+
+### 运行治理边界
+
+- 队列状态和失败任务接口只提供应用层观测与按 owner 重试；真正的跨实例死信转移、告警接收、值班和容量水位仍由 Redis／BullMQ 生产环境验收。
+- 外部 URL 的 SSRF 防护覆盖常见私网地址、DNS 解析、重定向和 Playwright 最终地址；生产仍应在网络层补充 egress 白名单、代理隔离和请求审计，不能只依赖应用层校验。
+- `tenantId` 仍是现有数据库中的预留字段。本轮未执行数据库迁移，因此不能宣称已经完成企业级 IAM／ABAC 的租户级隔离；必须在明确租户模型、数据迁移和索引过滤契约后再验收。
+- 产研工作流的状态、列表、交接 Manifest、Schema 预览和项目导出会复用请求租户校验；带租户请求拒绝读取未绑定租户的历史 Checkpoint。启动同一 `threadId` 时先校验已有 Checkpoint 的 owner／tenant，避免把越权访问误判为首次执行并覆盖已有工作流。这是应用层保护，不替代资源表 `tenant_id` 迁移。
+- Chat 审批恢复也会把当前认证租户传入 Agentic Checkpoint；请求租户与检查点租户不一致或检查点缺少租户时拒绝恢复。该 fail-closed 规则保护新链路，但历史无租户检查点需在迁移或兼容策略确定后处理。
+- LangGraph Checkpoint 在生产或严格依赖模式下对 Redis 读写采用严格错误语义，连接失败不会退回进程内 `MemorySaver`，避免单实例假成功和跨实例恢复丢失；开发环境才保留内存降级。真实 Redis 故障转移与恢复演练仍需目标环境验收。
+- Artifact 生成队列和定时任务启动恢复同样在生产／严格依赖模式下拒绝 Redis 缺失时的进程内降级；Artifact 入队失败会落库为 `failed`，定时任务不会被当前实例私自接管。真实 BullMQ 故障转移、死信和重放仍需目标环境演练。
+- 生产 `JwtAuthGuard` 已对用户 JWT／API Token 启用租户上下文 fail-closed：没有 `tenantId` 的用户身份不能访问业务接口；内部 Service Token 仍由独立守卫处理。该门禁避免迁移前的无租户身份继续读写共享资源，但不替代关系型租户字段迁移。
+- 多索引补偿目前保留失败状态、删除重试和人工入口；Milvus 删除重试在 Redis 可用时已持久化并可跨实例恢复。管理端索引审计已能逐文档核对 PostgreSQL、Elasticsearch、BM25、Milvus 和 Neo4j 来源状态，生产 Reconciler 会把可修复缺口投递到 `rag-index-repair`；Domain Event Outbox 已有 Redis 派发租约和并发幂等保护，文档审核状态／审核记录、文档生命周期／版本生效已在同一 PostgreSQL 事务中写入 Outbox，其他业务领域、告警和真实故障演练仍未完成。
+- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 不可用时不会退回 JWT URL 参数或不安全的进程内票据。认证用户和 API Token 现在优先使用 Redis 共享 JSON 存储，生产 Redis 不可用时认证读写直接 fail-closed；激活／重置 token 在生产同样默认要求 Redis（`REQUIRE_DISTRIBUTED_TOKEN_STORE=true`），仅开发环境允许进程内降级。仅开发环境允许 JSON 文件存储（`ALLOW_FILE_AUTH_STORE=true`）。Redis 共享 JSON 仍不是关系型用户表，组织、角色和租户主数据迁移仍待数据库方案确认。
+- SSE 票据依赖 Redis 的 `SET` 与一次性消费；Redis 不可用时不会退回 JWT URL 参数或不安全的进程内票据。Redis 低版本不支持 `GETDEL` 时使用 Lua 原子读删，避免并发重复消费。认证用户和 API Token 现在优先使用 Redis 共享 JSON 存储，生产 Redis 不可用时认证读写直接 fail-closed；激活／重置 token 在生产同样默认要求 Redis（`REQUIRE_DISTRIBUTED_TOKEN_STORE=true`），仅开发环境允许进程内降级。仅开发环境允许 JSON 文件存储（`ALLOW_FILE_AUTH_STORE=true`）。Redis 共享 JSON 仍不是关系型用户表，组织、角色和租户主数据迁移仍待数据库方案确认。
+- 工作流失败任务现在记录结构化 dead-letter 日志并支持配置保留期；生产 Redis／BullMQ 不可用时拒绝进程内降级。真正的持久化死信、告警路由、值班确认和跨实例重放仍需目标环境接入。
+- 文档异步入库队列与工作流／定时队列保持相同边界：生产或 `core.requireDependencies=true` 时 Redis／BullMQ 不可用会拒绝入队并把任务标记为失败，开发环境才允许受限同步降级；Redis 队列可用时使用稳定 `taskId` 去重并由 Worker 接管。
+- `tenantId` 已进入 JWT／用户记录类型和运行时匹配工具；文档 ACL 在用户带 `tenantId` 时会按文档 owner 所属租户过滤共享／public／role 结果，避免已有 owner 数据跨租户泄露。但资源表和外部索引仍没有自己的 `tenantId`，队列、审计和组织／角色主数据也未完成全链路租户过滤，不能把企业级 IAM／ABAC 标为已完成。
+- API Token 的 `scopes` 现在进入请求身份并由 `JwtAuthGuard` 按接口元数据校验；Chat、AG-UI 用户流、文档、Graph、Memory、Workflow、RAG Gateway、周报、Structured、MCP、Skills、Supervisor、Agent Runtime、Agent Evals、Jobs、Obsidian、Speech、Observability 和 Token 管理接口分别声明最小 scope，SSE 一次性票据会保留 API Token 身份和 scope，普通 JWT 与内部 Service Token 继续走各自认证边界。资源表级 tenant_id／组织角色主数据迁移仍未完成。
+- Chat、Chat SSE 和 AG-UI 用户流会把认证上下文中的 `tenantId` 传入统一 RequestContext、Hybrid／BM25-only 检索和 Document ACL；当 `users` 表尚未同步租户但认证存储已有租户时，ACL 仍按认证租户过滤；数据库用户与认证租户冲突时直接拒绝。资源表级 tenant_id／组织角色主数据迁移仍未完成。
+- 生产对象存储默认要求 MinIO 或兼容远程对象存储；`OBJECT_STORAGE_REQUIRE_REMOTE=true` 或 `NODE_ENV=production` 时，初始化、读写失败均直接报错，不会静默落到本地磁盘。
+- 查询日志和 LangFuse 追踪默认执行邮箱、手机号、凭据和长编号脱敏；`QUERY_LOG_RETENTION_DAYS` 控制查询日志保留期，`LANGFUSE_REDACT_CONTENT=false` 只能在完成数据分级与第三方合规评审后使用。
+- Simple／Agentic 的关键模型流式生成、结构化判断、证据压缩兜底、公共知识直答和 DeepAgent 查询规划会接收请求级 `AbortSignal`；`LlmProvider.getModel()` 返回的底层模型及其结构化 Runnable、stream／batch／transform 也会自动继承当前信号。Bocha 联网搜索与 DashScope Rerank 的出站 `fetch` 同样合并请求取消信号与 10 秒超时，Simple、Auto、Agentic 三条入口均会传递；仍有少数独立离线脚本或不经过 Chat 执行上下文的旧调用，需要在目标环境做取消演练。
+- Chat／AG-UI 用户入口已增加租户／用户固定窗口限流和可选日成本预算；生产通过 Redis Lua 原子“限额内预留”实现跨实例共享，超额请求不会先增加计数再拒绝，Redis 不可用时按 `TENANT_QUOTA_REQUIRE_REDIS` fail-closed。成本目前按每请求估算额度预留，真实模型 usage 对账和租户账单仍需接入真实计费数据。
 
 ## 当前不能宣称的内容
 

@@ -13,6 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RagAdminService } from './rag-admin.service';
@@ -23,6 +24,7 @@ import { DomainEventsService } from '../domain-events/domain-events.service';
 import { MemoryService } from '../memory/memory.service';
 import { DEFAULT_ROLE_PRESET_ID, listRolePresets } from '../chat/role-presets';
 import { listSafetyPolicies } from '../../rag/prompts/prompt-injection.guard';
+import { IndexReconcilerService } from './index-reconciler.service';
 
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
@@ -38,6 +40,7 @@ export class RagAdminController {
     private readonly ragFeedbackService: RagFeedbackService,
     private readonly domainEvents: DomainEventsService,
     private readonly memoryService: MemoryService,
+    @Optional() private readonly indexReconciler?: IndexReconcilerService,
   ) {}
 
   // ─── Capabilities ───────────────────────────────────────────
@@ -45,6 +48,32 @@ export class RagAdminController {
   @Get('capabilities')
   getCapabilities() {
     return this.ragAdminService.getCapabilities();
+  }
+
+  @Get('documents/index-compensation')
+  getIndexCompensationStatus() {
+    return this.ragAdminService.getIndexCompensationStatus();
+  }
+
+  @Get('documents/index-reconciler/status')
+  getIndexReconcilerStatus() {
+    return (
+      this.indexReconciler?.getStatus() ?? {
+        enabled: false,
+        configured: false,
+        queueEnabled: false,
+        running: false,
+        reason: 'reconciler is not registered',
+      }
+    );
+  }
+
+  @Post('documents/index-reconciler/run')
+  runIndexReconciler() {
+    return (
+      this.indexReconciler?.runOnce('manual') ??
+      Promise.resolve({ available: false, reason: 'reconciler is not registered' })
+    );
   }
 
   @Get('role-presets')
@@ -140,19 +169,6 @@ export class RagAdminController {
     return this.ragAdminService.uploadDocumentAsync(file, ownerUserId, body);
   }
 
-  @Get('documents/tasks/:taskId')
-  async getDocumentTask(
-    @Param('taskId') taskId: string,
-    @Query('ownerUserId') ownerUserId?: string,
-  ) {
-    const task = await this.ragAdminService.getDocumentTask(
-      taskId,
-      ownerUserId ?? 'admin',
-    );
-    if (!task) throw new NotFoundException(`task ${taskId} not found`);
-    return task;
-  }
-
   @Get('documents/search')
   searchDocuments(
     @Query('q') query: string,
@@ -220,6 +236,50 @@ export class RagAdminController {
   @Get('documents/stats')
   getDocumentStats() {
     return this.ragAdminService.getDocumentStats();
+  }
+
+  // 具体文档参数路由之前必须先注册这些固定路径，避免被 :docId 吞掉。
+  @Get('documents/tasks/failed')
+  getFailedDocumentTasks(@Query('limit') limit?: string) {
+    return this.ragAdminService.getFailedDocumentTasks(Number(limit) || 50);
+  }
+
+  @Get('documents/tasks/:taskId')
+  async getDocumentTask(
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId?: string,
+  ) {
+    const task = await this.ragAdminService.getDocumentTask(
+      taskId,
+      ownerUserId ?? 'admin',
+    );
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
+    return task;
+  }
+
+  @Get('documents/index-audit')
+  auditDocumentIndexes(@Query('limit') limit?: string) {
+    return this.ragAdminService.auditDocumentIndexes(Number(limit) || 200);
+  }
+
+  @Post('documents/index-audit/repair')
+  repairDocumentIndexes(@Body() body: { docIds?: string[]; limit?: number }) {
+    return this.ragAdminService.repairDocumentIndexes(body ?? {});
+  }
+
+  @Get('documents/index-repair/status')
+  getIndexRepairQueueStatus() {
+    return this.ragAdminService.getIndexRepairQueueStatus();
+  }
+
+  @Get('documents/index-repair/failed')
+  getFailedIndexRepairs(@Query('limit') limit?: string) {
+    return this.ragAdminService.getFailedIndexRepairs(Number(limit) || 50);
+  }
+
+  @Post('documents/index-repair/:jobId/retry')
+  retryIndexRepair(@Param('jobId') jobId: string) {
+    return this.ragAdminService.retryIndexRepair(jobId);
   }
 
   @Get('documents/:docId')
@@ -375,21 +435,6 @@ export class RagAdminController {
       throw new NotFoundException(`doc ${docId} not found`);
     }
     return result;
-  }
-
-  @Get('documents/tasks/failed')
-  getFailedDocumentTasks(@Query('limit') limit?: string) {
-    return this.ragAdminService.getFailedDocumentTasks(Number(limit) || 50);
-  }
-
-  @Get('documents/index-audit')
-  auditDocumentIndexes(@Query('limit') limit?: string) {
-    return this.ragAdminService.auditDocumentIndexes(Number(limit) || 200);
-  }
-
-  @Post('documents/index-audit/repair')
-  repairDocumentIndexes(@Body() body: { docIds?: string[]; limit?: number }) {
-    return this.ragAdminService.repairDocumentIndexes(body ?? {});
   }
 
   @Get('quality/summary')

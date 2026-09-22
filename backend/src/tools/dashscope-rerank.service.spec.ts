@@ -69,4 +69,28 @@ describe('DashScopeRerankService', () => {
     expect(result.map((chunk) => chunk.id)).toEqual(['b', 'a']);
     expect(result.map((chunk) => chunk.totalScore)).toEqual([0.98, 0.42]);
   });
+
+  it('combines caller cancellation with the outbound timeout', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'rerank.apiKey') return 'test-key';
+        if (key === 'rerank.model') return 'qwen3-rerank';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new DashScopeRerankService(config);
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ results: [] }),
+    });
+    global.fetch = fetchMock;
+
+    await service.rerank('query', chunks, chunks.length, controller.signal);
+
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toEqual(
+      expect.objectContaining({ aborted: true }),
+    );
+  });
 });

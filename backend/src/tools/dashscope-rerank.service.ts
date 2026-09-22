@@ -30,6 +30,7 @@ export class DashScopeRerankService {
     query: string,
     chunks: RetrievedChunk[],
     topN = chunks.length,
+    signal?: AbortSignal,
   ): Promise<RetrievedChunk[]> {
     const apiKey = this.config.get<string>('rerank.apiKey');
     if (!apiKey || chunks.length < 2) {
@@ -48,7 +49,7 @@ export class DashScopeRerankService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(this.buildRequestBody(model, query, chunks, topN)),
-        signal: AbortSignal.timeout(10_000),
+        signal: this.composeSignal(signal, 10_000),
       },
     );
 
@@ -118,5 +119,10 @@ export class DashScopeRerankService {
         return_documents: false,
       },
     };
+  }
+
+  private composeSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   }
 }

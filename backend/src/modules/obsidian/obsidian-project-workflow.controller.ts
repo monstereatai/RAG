@@ -7,6 +7,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import {
   ObsidianKnowledgeService,
   ProjectWorkflowType,
@@ -29,6 +30,7 @@ const WORKFLOW_TYPES: ProjectWorkflowType[] = [
 
 @Controller('obsidian/project-workflows')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:obsidian')
 export class ObsidianProjectWorkflowController {
   constructor(private readonly obsidianKnowledge: ObsidianKnowledgeService) {}
 

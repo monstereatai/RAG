@@ -67,6 +67,8 @@ export interface AgentLoopCheckpoint<TState> {
   runId?: string;
   step: number;
   toolCalls: number;
+  /** 从本次运行开始累计的执行时间，用于恢复时继续消耗同一总超时预算。 */
+  elapsedMs?: number;
   state: TState;
   updatedAt: string;
 }

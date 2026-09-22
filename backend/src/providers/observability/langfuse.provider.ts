@@ -2,6 +2,10 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createRequire } from 'node:module';
 import type { Langfuse as LangfuseClient } from 'langfuse';
+import {
+  redactAuditText,
+  redactAuditValue,
+} from '../../common/security/audit-redaction';
 
 const nodeRequire = createRequire(__filename);
 
@@ -21,6 +25,7 @@ export interface RagTracePayload {
   inputTokensEstimated?: number;
   outputTokensEstimated?: number;
   costUsdEstimated?: number;
+  usageSource?: 'estimated' | 'provider_reported';
 }
 
 export interface RagTraceEvent {
@@ -188,12 +193,14 @@ export class LangfuseProvider implements OnModuleDestroy {
 
     try {
       const usage = this.buildUsage(payload);
+      const query = this.observabilityText(payload.query);
+      const answer = this.observabilityText(payload.answer);
       const trace = this.client.trace({
         name: 'rag.answer',
         userId: payload.userId,
         sessionId: payload.threadId,
-        input: payload.query,
-        output: payload.answer,
+        input: query,
+        output: answer,
         metadata: {
           mode: payload.mode,
           route: payload.route,
@@ -209,8 +216,8 @@ export class LangfuseProvider implements OnModuleDestroy {
       this.recordEventSpans(trace, payload.events ?? []);
       trace.generation({
         name: 'rag.generate',
-        input: payload.query,
-        output: payload.answer,
+        input: query,
+        output: answer,
         model: payload.model,
         usageDetails: {
           input: usage.inputTokens,
@@ -249,7 +256,7 @@ export class LangfuseProvider implements OnModuleDestroy {
         sessionId: payload.threadId,
         input: {
           projectId: payload.projectId,
-          brief: payload.brief,
+          brief: this.observabilityText(payload.brief),
           selectedRoles: payload.selectedRoles,
         },
         output: {
@@ -284,8 +291,8 @@ export class LangfuseProvider implements OnModuleDestroy {
           readyForApproval: stage.readyForApproval,
           claims: stage.claims,
           supportedClaims: stage.supportedClaims,
-          issues: stage.issues,
-          downstreamRisks: stage.downstreamRisks,
+          issues: this.redactTraceList(stage.issues),
+          downstreamRisks: this.redactTraceList(stage.downstreamRisks),
         };
         const stageSpan = trace.span({
           name: `agent.production.stage.${stage.role}`,
@@ -355,20 +362,20 @@ export class LangfuseProvider implements OnModuleDestroy {
         sessionId: payload.jobId,
         input: {
           name: payload.name,
-          instruction: payload.instruction,
+          instruction: this.observabilityText(payload.instruction),
           window: payload.window,
           dataScopes: payload.dataScopes,
         },
         output: {
           snapshotCounts: payload.snapshotCounts,
-          report: payload.report,
+          report: this.observabilityText(payload.report),
         },
         metadata: { taskKind: 'analysis', jobId: payload.jobId },
       });
       trace.generation({
         name: 'agent.scheduled.analysis.report',
         input: payload.snapshotCounts,
-        output: payload.report,
+        output: this.observabilityText(payload.report),
         model: 'scheduled-analysis',
         metadata: { window: payload.window, dataScopes: payload.dataScopes },
       });
@@ -429,6 +436,7 @@ export class LangfuseProvider implements OnModuleDestroy {
       inputCostUsd,
       outputCostUsd,
       totalCostUsd,
+      source: payload.usageSource ?? 'estimated',
     };
   }
 
@@ -494,9 +502,27 @@ export class LangfuseProvider implements OnModuleDestroy {
       );
     }
     if (typeof data === 'string') {
-      return data.length > 500 ? `${data.slice(0, 500)}...` : data;
+      const compacted = data.length > 500 ? `${data.slice(0, 500)}...` : data;
+      return this.observabilityText(compacted);
     }
-    return data;
+    return this.shouldRedactContent() ? redactAuditValue(data) : data;
+  }
+
+  private observabilityText(value: string): string {
+    return this.shouldRedactContent() ? redactAuditText(value) : value;
+  }
+
+  private redactTraceList(values: string[]): string[] {
+    if (!this.shouldRedactContent()) return values;
+    return values.map((value) => redactAuditText(value));
+  }
+
+  private shouldRedactContent(): boolean {
+    return (
+      this.config.get<boolean>('langfuse.redactContent') === true ||
+      (this.config.get<boolean>('langfuse.redactContent') === undefined &&
+        this.config.get<string>('nodeEnv') === 'production')
+    );
   }
 
   async onModuleDestroy(): Promise<void> {

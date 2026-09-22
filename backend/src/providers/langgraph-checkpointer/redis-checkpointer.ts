@@ -32,6 +32,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     private readonly redisProvider: RedisProvider,
     ttlSeconds = 86400 * 7, // 默认 7 天 TTL
     serde?: SerializerProtocol,
+    private readonly required = false,
   ) {
     super(serde);
     this.ttl = ttlSeconds;
@@ -43,6 +44,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
    */
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
     if (!this.redisProvider.isEnabled()) {
+      this.assertRedisAvailable();
       return this.fallbackSaver.getTuple(config);
     }
 
@@ -60,7 +62,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
       // 如果没有指定 checkpoint_id，获取最新的
       if (!targetId) {
-        const latestKey = await this.redisProvider.get(
+        const latestKey = await this.read(
           `checkpoint:latest:${threadId}`,
         );
         if (!latestKey) {
@@ -69,7 +71,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
         targetId = latestKey;
       }
 
-      const checkpointJson = await this.redisProvider.get(
+      const checkpointJson = await this.read(
         `checkpoint:${threadId}:${targetId}`,
       );
       if (!checkpointJson) {
@@ -77,7 +79,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       }
 
       const checkpoint = JSON.parse(checkpointJson) as Checkpoint;
-      const metadataJson = await this.redisProvider.get(
+      const metadataJson = await this.read(
         `checkpoint:metadata:${threadId}:${targetId}`,
       );
       const metadata = metadataJson
@@ -111,6 +113,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       };
     } catch (err) {
       this.logger.warn(`getTuple failed: ${(err as Error).message}`);
+      if (this.required) throw err;
       return undefined;
     }
   }
@@ -123,6 +126,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     options?: CheckpointListOptions,
   ): AsyncGenerator<CheckpointTuple> {
     if (!this.redisProvider.isEnabled()) {
+      this.assertRedisAvailable();
       yield* this.fallbackSaver.list(config, options);
       return;
     }
@@ -134,7 +138,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
     try {
       // 使用 sorted set 获取 checkpoint 列表（按时间倒序）
-      const keys = await this.redisProvider.zrange(
+      const keys = await this.zrange(
         `thread:${threadId}`,
         0,
         -1,
@@ -172,6 +176,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       }
     } catch (err) {
       this.logger.warn(`list failed: ${(err as Error).message}`);
+      if (this.required) throw err;
     }
   }
 
@@ -184,6 +189,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     metadata: CheckpointMetadata,
   ): Promise<RunnableConfig> {
     if (!this.redisProvider.isEnabled()) {
+      this.assertRedisAvailable();
       return this.fallbackSaver.put(config, checkpoint, metadata);
     }
 
@@ -196,7 +202,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
     try {
       // 保存 checkpoint
-      await this.redisProvider.set(
+      await this.write(
         `checkpoint:${threadId}:${checkpointId}`,
         JSON.stringify(checkpoint),
         this.ttl,
@@ -204,7 +210,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
       // 保存 metadata
       if (metadata) {
-        await this.redisProvider.set(
+        await this.write(
           `checkpoint:metadata:${threadId}:${checkpointId}`,
           JSON.stringify(metadata),
           this.ttl,
@@ -212,7 +218,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       }
 
       // 更新 latest pointer
-      await this.redisProvider.set(
+      await this.write(
         `checkpoint:latest:${threadId}`,
         checkpointId,
         this.ttl,
@@ -220,7 +226,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
       // 添加到 thread sorted set（按时间戳排序）
       const score = new Date(checkpoint.ts).getTime();
-      await this.redisProvider.zadd(`thread:${threadId}`, score, checkpointId);
+      await this.zadd(`thread:${threadId}`, score, checkpointId);
 
       return {
         configurable: { thread_id: threadId, checkpoint_id: checkpointId },
@@ -240,6 +246,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     taskId: string,
   ): Promise<void> {
     if (!this.redisProvider.isEnabled()) {
+      this.assertRedisAvailable();
       return this.fallbackSaver.putWrites(config, writes, taskId);
     }
 
@@ -254,7 +261,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       // 保存每个 write
       for (const [idx, write] of writes.entries()) {
         const pendingWrite = [taskId, ...write];
-        await this.redisProvider.set(
+        await this.write(
           `writes:${threadId}:${checkpointId}:${taskId}:${idx}`,
           JSON.stringify(pendingWrite),
           this.ttl,
@@ -262,6 +269,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       }
     } catch (err) {
       this.logger.warn(`putWrites failed: ${(err as Error).message}`);
+      if (this.required) throw err;
     }
   }
 
@@ -270,13 +278,14 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
    */
   async deleteThread(threadId: string): Promise<void> {
     if (!this.redisProvider.isEnabled()) {
+      this.assertRedisAvailable();
       await this.fallbackSaver.deleteThread(threadId);
       return;
     }
 
     try {
       // 获取所有 checkpoint IDs
-      const checkpointIds = await this.redisProvider.zrange(
+      const checkpointIds = await this.zrange(
         `thread:${threadId}`,
         0,
         -1,
@@ -284,21 +293,22 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
       // 删除每个 checkpoint 的数据
       for (const checkpointId of checkpointIds) {
-        await this.redisProvider.del(`checkpoint:${threadId}:${checkpointId}`);
-        await this.redisProvider.del(
+        await this.del(`checkpoint:${threadId}:${checkpointId}`);
+        await this.del(
           `checkpoint:metadata:${threadId}:${checkpointId}`,
         );
       }
 
       // 删除 thread sorted set
-      await this.redisProvider.del(`thread:${threadId}`);
+      await this.del(`thread:${threadId}`);
 
       // 删除 latest pointer
-      await this.redisProvider.del(`checkpoint:latest:${threadId}`);
+      await this.del(`checkpoint:latest:${threadId}`);
 
       this.logger.log(`Deleted thread: ${threadId}`);
     } catch (err) {
       this.logger.warn(`deleteThread failed: ${(err as Error).message}`);
+      if (this.required) throw err;
     }
   }
 
@@ -312,11 +322,11 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     try {
       // 使用 pattern 查找所有 writes
       const pattern = `writes:${threadId}:${checkpointId}:*`;
-      const keys = await this.redisProvider.keys(pattern);
+      const keys = await this.keys(pattern);
 
       const writes: Array<[string, string, unknown]> = [];
       for (const key of keys) {
-        const json = await this.redisProvider.get(key);
+        const json = await this.read(key);
         if (json) {
           writes.push(JSON.parse(json) as [string, string, unknown]);
         }
@@ -325,7 +335,61 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       return writes;
     } catch (err) {
       this.logger.warn(`getPendingWrites failed: ${(err as Error).message}`);
+      if (this.required) throw err;
       return [];
     }
+  }
+
+  private assertRedisAvailable(): void {
+    if (this.required) {
+      throw new Error(
+        'LangGraph checkpoint persistence requires Redis in production; refusing in-process MemorySaver fallback.',
+      );
+    }
+  }
+
+  private read(key: string): Promise<string | null> {
+    return this.required
+      ? this.redisProvider.getRequired(key)
+      : this.redisProvider.get(key);
+  }
+
+  private write(
+    key: string,
+    value: string,
+    ttlSeconds = this.ttl,
+  ): Promise<void> {
+    return this.required
+      ? this.redisProvider.setRequiredOrThrow(key, value, ttlSeconds)
+      : this.redisProvider.set(key, value, ttlSeconds);
+  }
+
+  private zrange(
+    key: string,
+    start: number,
+    stop: number,
+    direction?: 'REV',
+  ): Promise<string[]> {
+    return this.required
+      ? this.redisProvider.zrangeRequired(key, start, stop, direction)
+      : this.redisProvider.zrange(key, start, stop, direction);
+  }
+
+  private zadd(key: string, score: number, member: string): Promise<void> {
+    return this.required
+      ? this.redisProvider.zaddRequired(key, score, member)
+      : this.redisProvider.zadd(key, score, member);
+  }
+
+  private del(key: string): Promise<void> {
+    return this.required
+      ? this.redisProvider.delRequired(key)
+      : this.redisProvider.del(key);
+  }
+
+  private keys(pattern: string): Promise<string[]> {
+    return this.required
+      ? this.redisProvider.keysRequired(pattern)
+      : this.redisProvider.keys(pattern);
   }
 }

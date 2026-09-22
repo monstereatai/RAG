@@ -41,6 +41,7 @@ import {
   GameDocumentMetadata,
   GameDocumentType,
 } from './document-profile.util';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
 type DocumentUploadBody = Partial<
   Record<
@@ -62,6 +63,7 @@ type DocumentUploadBody = Partial<
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
+@ApiScopes('rag:documents')
 export class DocumentController {
   private readonly logger = new Logger(DocumentController.name);
 
@@ -83,6 +85,7 @@ export class DocumentController {
         job.userId,
         job.taskId,
         job.businessMetadata,
+        job.tenantId,
       );
     });
   }
@@ -112,6 +115,7 @@ export class DocumentController {
       title: file.originalname,
       content,
       userId: user.userId,
+      tenantId: user.tenantId,
       filename: file.originalname,
       sourceType: 'document',
       contentType: file.mimetype,
@@ -137,14 +141,27 @@ export class DocumentController {
     );
 
     if (this.documentQueue.enabled) {
-      await this.documentQueue.enqueue({
-        taskId: task.id,
-        userId: user.userId,
-        filename: file.originalname,
-        originalBufferBase64: file.buffer.toString('base64'),
-        contentType: file.mimetype,
-        businessMetadata: this.parseBusinessMetadata(body),
-      });
+      try {
+        await this.documentQueue.enqueue({
+          taskId: task.id,
+          userId: user.userId,
+          tenantId: user.tenantId,
+          filename: file.originalname,
+          originalBufferBase64: file.buffer.toString('base64'),
+          contentType: file.mimetype,
+          businessMetadata: this.parseBusinessMetadata(body),
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'document queue unavailable';
+        await this.documentService.markTaskFailed(task.id, message);
+        throw error;
+      }
+    } else if (this.documentQueue.required) {
+      const message =
+        '生产文档处理要求使用 Redis 持久队列，当前队列未初始化，任务未执行。';
+      await this.documentService.markTaskFailed(task.id, message);
+      throw new BadRequestException(message);
     } else {
       setImmediate(() => {
         void this.processAsyncUpload(
@@ -152,6 +169,7 @@ export class DocumentController {
           user.userId,
           task.id,
           this.parseBusinessMetadata(body),
+          user.tenantId,
         );
       });
     }
@@ -184,6 +202,7 @@ export class DocumentController {
       url,
       extracted,
       userId: user.userId,
+      tenantId: user.tenantId,
       filename: this.getUrlSnapshotFilename(extracted.finalUrl),
       businessMetadata: this.parseBusinessMetadata(body),
     });
@@ -208,6 +227,7 @@ export class DocumentController {
       title: normalizedTitle,
       content: normalizedContent,
       userId: user.userId,
+      tenantId: user.tenantId,
       filename,
       sourceType: 'manual',
       contentType: 'text/markdown',
@@ -244,6 +264,7 @@ export class DocumentController {
     userId: string,
     taskId: string,
     businessMetadata?: DocumentBusinessMetadata,
+    tenantId?: string,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
     const content = (
@@ -260,6 +281,7 @@ export class DocumentController {
       title: file.originalname,
       content,
       userId,
+      tenantId,
       filename: file.originalname,
       sourceType: 'document',
       contentType: file.mimetype,

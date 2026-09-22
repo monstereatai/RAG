@@ -646,6 +646,88 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
+  it('extracts the salary date from current evidence instead of a fixed demo value', () => {
+    const { service } = createService();
+    const answer = service.buildEvidenceFirstAnswer(
+      '薪资什么时候发放？',
+      [
+        {
+          id: 'payroll-current',
+          content: '基本工资按月发放，每月 15 日发放。',
+          docId: 'payroll-policy',
+          chunkIndex: 0,
+          bm25Score: 1,
+          cosineScore: 1,
+          totalScore: 1,
+        },
+      ],
+    );
+
+    expect(answer).toContain('每月 15 日发放');
+    expect(answer).toContain('[片段1]');
+    expect(answer).not.toContain('10 日');
+  });
+
+  it('does not turn an unrelated payroll schedule into a tax answer', () => {
+    const { service } = createService();
+    const answer = service.buildEvidenceFirstAnswer(
+      '工资需要缴纳哪些税？',
+      [
+        {
+          id: 'payroll-schedule-only',
+          content: '基本工资按月发放，每月 15 日发放。',
+          docId: 'payroll-policy',
+          chunkIndex: 0,
+          bm25Score: 1,
+          cosineScore: 1,
+          totalScore: 1,
+        },
+      ],
+    );
+
+    expect(answer).toBeNull();
+  });
+
+  it('does not mark a multi-question answer sufficient when one sub-question is missing', () => {
+    const { service } = createService();
+    const answer = service.buildEvidenceFirstAnswer(
+      '工资什么时候发放？工资需要缴纳哪些税？',
+      [
+        {
+          id: 'payroll-schedule-only',
+          content: '基本工资按月发放，每月 15 日发放。',
+          docId: 'payroll-policy',
+          chunkIndex: 0,
+          bm25Score: 1,
+          cosineScore: 1,
+          totalScore: 1,
+        },
+      ],
+    );
+
+    expect(answer).toBeNull();
+  });
+
+  it('does not turn a positive schedule sentence into a conditional answer', () => {
+    const { service } = createService();
+    const answer = service.buildEvidenceFirstAnswer(
+      '工资不发放的条件是什么？',
+      [
+        {
+          id: 'payroll-schedule-only',
+          content: '基本工资按月发放，每月 15 日发放。',
+          docId: 'payroll-policy',
+          chunkIndex: 0,
+          bm25Score: 1,
+          cosineScore: 1,
+          totalScore: 1,
+        },
+      ],
+    );
+
+    expect(answer).toBeNull();
+  });
+
   it('repairs a missing citation when the generated claim is supported', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('引用来源可以降低幻觉风险。');
@@ -800,7 +882,7 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    expect(result.answer).toContain('应按 2026 版优先生效');
+    expect(result.answer).toContain('2026 版优先生效');
     expect(result.answer).toContain('[片段1]');
   });
 
@@ -1034,7 +1116,7 @@ describe('KarpathyRagService exception scenarios', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    expect(result.answer).toContain('应按 2026 版优先生效');
+    expect(result.answer).toContain('2026 版优先生效');
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 

@@ -4,7 +4,16 @@ import { ModulePage, agentOpsNav } from "@/components/AdminShell";
 import { history, useParams } from "@umijs/max";
 import { Alert, Button, Card, Collapse, Descriptions, Result, Spin, Table, Tag, message } from "antd";
 import React from "react";
-import { getAgentRunDetail, getAgentRunDetailArtifacts, retryAgentRunRecord, unwrapData } from "../service";
+import {
+  getAgentRunDetail,
+  getAgentRunDetailArtifacts,
+  retryAgentRunRecord,
+  type AgentRunArtifactSummary,
+  type AgentRunAction,
+  type AgentRunDetail,
+  type AgentRunEvent,
+  unwrapData,
+} from "../service";
 
 const EVENT_LABELS: Record<string, string> = {
   "run.started": "运行开始",
@@ -20,6 +29,7 @@ const EVENT_LABELS: Record<string, string> = {
   "tool.result": "工具结果",
   "tool.failed": "工具失败",
   "tool.blocked": "工具拦截",
+  "tool.unknown": "工具结果未知",
   "approval.asked": "请求审批",
   "approval.decided": "审批决定",
   "approval.required": "需要审批",
@@ -56,41 +66,51 @@ const formatJson = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
 export default function AgentRunDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
-  const [run, setRun] = React.useState<any>(null);
-  const [artifactSummary, setArtifactSummary] = React.useState<any>(null);
+  const [run, setRun] = React.useState<AgentRunDetail | null>(null);
+  const [artifactSummary, setArtifactSummary] = React.useState<AgentRunArtifactSummary | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [retrying, setRetrying] = React.useState(false);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (signal?: AbortSignal, silent = false) => {
     if (!id) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
-      const result = await getAgentRunDetail(decodeURIComponent(id));
-      const detail = unwrapData<any>(result);
+      const result = await getAgentRunDetail(decodeURIComponent(id), signal);
+      const detail = unwrapData<AgentRunDetail>(result);
       if (!detail?.id) throw new Error("运行记录不存在");
       setRun(detail);
       try {
-        const artifactResult = await getAgentRunDetailArtifacts(decodeURIComponent(id));
-        setArtifactSummary(unwrapData<any>(artifactResult) ?? { files: [], structuredArtifacts: [] });
+        const artifactResult = await getAgentRunDetailArtifacts(decodeURIComponent(id), signal);
+        setArtifactSummary(unwrapData<AgentRunArtifactSummary>(artifactResult) ?? { files: [], structuredArtifacts: [] });
       } catch (artifactError) {
+        if (signal?.aborted) return;
         setArtifactSummary({ files: [], structuredArtifacts: [] });
         message.warning(artifactError instanceof Error ? `关联 Artifact 加载失败：${artifactError.message}` : "关联 Artifact 加载失败");
       }
     } catch (error) {
+      if (signal?.aborted) return;
       setRun(null);
       setArtifactSummary(null);
       message.error(error instanceof Error ? error.message : "运行详情加载失败");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && !silent) setLoading(false);
     }
   }, [id]);
 
-  React.useEffect(() => { void load(); }, [load]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   React.useEffect(() => {
     if (run?.status !== "running") return;
-    const timer = window.setTimeout(() => void load(), 2_000);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal, true), 2_000);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [load, run?.status]);
 
   const retry = async () => {
@@ -110,11 +130,17 @@ export default function AgentRunDetailPage() {
   const generatedArtifacts = artifactSummary?.files ?? [];
   const structuredArtifacts = artifactSummary?.structuredArtifacts ?? [];
   const artifactCount = generatedArtifacts.length + structuredArtifacts.length;
-  const runtimePlanEvent = (run?.events ?? []).find((event: any) => event.eventType === "agent.plan.created");
-  const runtimePlan = runtimePlanEvent?.payload;
+  const runtimePlanEvent = (run?.events ?? []).find((event: AgentRunEvent) => event.eventType === "agent.plan.created");
+  const runtimePlan = runtimePlanEvent?.payload as {
+    planId?: string;
+    mode?: string;
+    selectedSkills?: string[];
+    contextPolicy?: { maxHistoryTurns?: number; maxContextCharacters?: number; compressionThreshold?: number; isolatedByThread?: boolean };
+    stages?: Array<Record<string, unknown>>;
+  } | undefined;
   const failureOnset = run?.failureOnset;
-  const loopEvents = (run?.events ?? []).filter((event: any) => String(event.eventType).startsWith("agent.loop."));
-  const loopFinalEvent = [...loopEvents].reverse().find((event: any) => /agent\.loop\.(completed|blocked|failed|budget_exceeded)/.test(event.eventType));
+  const loopEvents = (run?.events ?? []).filter((event: AgentRunEvent) => String(event.eventType).startsWith("agent.loop."));
+  const loopFinalEvent = [...loopEvents].reverse().find((event: AgentRunEvent) => /agent\.loop\.(completed|blocked|failed|budget_exceeded)/.test(event.eventType));
   const scrollToArtifacts = () => {
     document.getElementById("run-artifacts")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -148,7 +174,7 @@ export default function AgentRunDetailPage() {
           <Descriptions bordered column={4} size="small" items={[
             { key: "starts", label: "循环实例", children: run.metrics?.loopStarts ?? 0 },
             { key: "rounds", label: "完成轮次", children: run.metrics?.loopRounds ?? 0 },
-            { key: "checkpoints", label: "Redis 快照", children: loopEvents.filter((event: any) => event.eventType === "agent.loop.checkpoint.saved").length },
+            { key: "checkpoints", label: "Redis 快照", children: loopEvents.filter((event: AgentRunEvent) => event.eventType === "agent.loop.checkpoint.saved").length },
             { key: "status", label: "终止状态", children: loopFinalEvent ? <Tag color={tagColor(loopFinalEvent.eventType)}>{EVENT_LABELS[loopFinalEvent.eventType] ?? loopFinalEvent.eventType}</Tag> : "运行中" },
             { key: "reason", label: "终止原因", span: 4, children: loopFinalEvent?.payload?.terminationReason || "尚未产生终止事件" },
           ]} />
@@ -182,7 +208,7 @@ export default function AgentRunDetailPage() {
           size="small"
           pagination={{ pageSize: 12 }}
           dataSource={run.events ?? []}
-          expandable={{ expandedRowRender: (record: any) => <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{formatJson(record.payload)}</pre> }}
+          expandable={{ expandedRowRender: (record: AgentRunEvent) => <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{formatJson(record.payload)}</pre> }}
           columns={[
             { title: "序号", dataIndex: "sequence", width: 70 },
             { title: "事件", dataIndex: "eventType", render: (value) => <Tag color={tagColor(String(value))}>{EVENT_LABELS[String(value)] ?? value}</Tag> },
@@ -195,7 +221,7 @@ export default function AgentRunDetailPage() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 16, marginTop: 16 }}>
         <Card title={`工具／动作审计（${run.actions?.length ?? 0}）`} size="small">
-          <Table rowKey="id" size="small" pagination={{ pageSize: 6 }} dataSource={run.actions ?? []} expandable={{ expandedRowRender: (record: any) => <Collapse items={[{ key: "input", label: "输入", children: <pre>{record.input || "-"}</pre> }, { key: "output", label: "输出", children: <pre>{record.output || "-"}</pre> }]} /> }} columns={[
+          <Table rowKey="id" size="small" pagination={{ pageSize: 6 }} dataSource={run.actions ?? []} expandable={{ expandedRowRender: (record: AgentRunAction) => <Collapse items={[{ key: "input", label: "输入", children: <pre>{record.input || "-"}</pre> }, { key: "output", label: "输出", children: <pre>{record.output || "-"}</pre> }]} /> }} columns={[
             { title: "动作", dataIndex: "name" },
             { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "success" ? "success" : value === "failed" ? "error" : "warning"}>{value}</Tag> },
             { title: "风险", dataIndex: "riskLevel" },
@@ -220,12 +246,12 @@ export default function AgentRunDetailPage() {
           <Alert showIcon type="info" title="本次 Run 没有可审计产物" description="当前记录只包含运行开始与完成事件，没有生成文件、结构化交接物或 Redis Checkpoint。这是历史运行数据的真实状态，不是页面加载失败。" />
         ) : (
           <Collapse items={[
-            ...generatedArtifacts.map((artifact: any) => ({
+            ...generatedArtifacts.map((artifact) => ({
               key: `file-${artifact.id}`,
               label: `文件产物：${artifact.title}（${artifact.kind}／${artifact.status}）`,
               children: artifact.sourceText ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{artifact.sourceText}</pre> : <Alert showIcon type="warning" title="文件内容不可预览" description={artifact.errorMessage || "该产物尚未生成完成或没有可预览的文本内容。"} />,
             })),
-            ...structuredArtifacts.map((artifact: any) => ({
+            ...structuredArtifacts.map((artifact) => ({
               key: `structured-${artifact.id}`,
               label: `结构化交接物：${artifact.type}（${artifact.producer}）`,
               children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{formatJson(artifact.payload)}</pre>,

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { In, Repository } from 'typeorm';
@@ -32,28 +32,45 @@ export class DocumentPermissionService {
     await this.setPermissions(docId, [{ type: 'user', id: userId }]);
   }
 
+  /** 写入侧也校验租户上下文，避免异步 Worker 被篡改 userId 后跨租户落库。 */
+  async assertTenant(
+    userId: string,
+    requestedTenantId?: string,
+  ): Promise<void> {
+    const tenantId = requestedTenantId?.trim();
+    if (!tenantId) return;
+    const principal = await this.userRepo.findOne({
+      select: ['tenantId'],
+      where: { id: userId },
+    });
+    const principalTenantId = principal?.tenantId?.trim();
+    if (principalTenantId && principalTenantId !== tenantId) {
+      throw new ForbiddenException('tenant scope does not match current user');
+    }
+  }
+
   /** 用完整授权列表替换旧记录，避免增量写入留下已撤销主体的历史 read 权限。 */
   async setPermissions(
     docId: string,
     subjects: PermissionSubject[],
   ): Promise<void> {
-    await this.permissionRepo.delete({ docId });
-    if (subjects.length === 0) {
-      await this.invalidateAllPermissionCache();
-      return;
-    }
-
-    await this.permissionRepo.save(
-      subjects.map((subject) =>
-        this.permissionRepo.create({
-          id: randomUUID(),
-          docId,
-          subjectType: subject.type,
-          subjectId: subject.id,
-          action: 'read',
-        }),
-      ),
-    );
+    // ACL 替换必须原子完成，避免“先删旧权限、后写新权限”期间的并发检索
+    // 看到空集合。缓存只在事务提交后失效，确保读请求不会拿到半成品状态。
+    await this.permissionRepo.manager.transaction(async (manager) => {
+      await manager.delete(DocumentPermissionEntity, { docId });
+      if (subjects.length > 0) {
+        await manager.save(
+          DocumentPermissionEntity,
+          subjects.map((subject) => ({
+            id: randomUUID(),
+            docId,
+            subjectType: subject.type,
+            subjectId: subject.id,
+            action: 'read' as const,
+          })),
+        );
+      }
+    });
     await this.invalidateAllPermissionCache();
   }
 
@@ -65,9 +82,32 @@ export class DocumentPermissionService {
     userId: string,
     roles: string[] = [],
     departmentIds: string[] = [],
+    requestedTenantId?: string,
   ): Promise<Set<string>> {
-    const resolvedRoles = await this.resolveRoles(userId, roles);
-    const cacheKey = this.cacheKey(userId, resolvedRoles, departmentIds);
+    const principal = await this.userRepo.findOne({
+      select: ['role', 'tenantId'],
+      where: { id: userId },
+    });
+    const resolvedRoles = roles.length
+      ? [...new Set(roles)].sort()
+      : principal?.role
+        ? [principal.role]
+        : [];
+    const principalTenantId = principal?.tenantId?.trim() || undefined;
+    const tenantId = requestedTenantId?.trim() || principalTenantId || null;
+    if (
+      requestedTenantId?.trim() &&
+      principalTenantId &&
+      requestedTenantId.trim() !== principalTenantId
+    ) {
+      throw new ForbiddenException('tenant scope does not match current user');
+    }
+    const cacheKey = this.cacheKey(
+      userId,
+      resolvedRoles,
+      departmentIds,
+      tenantId,
+    );
     const cached = await this.redisProvider.get(cacheKey);
     if (cached) {
       return new Set(JSON.parse(cached) as string[]);
@@ -107,41 +147,75 @@ export class DocumentPermissionService {
         ...owned.map((item) => item.docId),
       ]),
     ];
-    await this.redisProvider.set(cacheKey, JSON.stringify(ids), 300);
-    return new Set(ids);
+    const tenantScopedIds = tenantId
+      ? await this.filterDocumentsToTenant(ids, tenantId)
+      : ids;
+    await this.redisProvider.set(
+      cacheKey,
+      JSON.stringify(tenantScopedIds),
+      300,
+    );
+    return new Set(tenantScopedIds);
   }
 
   async canRead(
     docId: string,
     userId: string,
     roles: string[] = [],
+    requestedTenantId?: string,
   ): Promise<boolean> {
-    const allowed = await this.getAllowedDocIds(userId, roles);
+    const allowed = await this.getAllowedDocIds(
+      userId,
+      roles,
+      [],
+      requestedTenantId,
+    );
     return allowed.has(docId);
   }
 
-  private async resolveRoles(
-    userId: string,
-    roles: string[],
+  private async filterDocumentsToTenant(
+    docIds: string[],
+    tenantId: string,
   ): Promise<string[]> {
-    if (roles.length > 0) return [...new Set(roles)].sort();
-    const user = await this.userRepo.findOne({
-      select: ['role'],
-      where: { id: userId },
+    if (docIds.length === 0) return [];
+    const docs = await this.documentMetaRepo.find({
+      select: ['docId', 'userId'],
+      where: { docId: In(docIds) },
     });
-    return user?.role ? [user.role] : [];
+    const ownerIds = [
+      ...new Set(
+        docs
+          .map((doc) => doc.userId)
+          .filter((ownerId): ownerId is string => Boolean(ownerId)),
+      ),
+    ];
+    if (ownerIds.length === 0) return [];
+    const tenantOwners = await this.userRepo.find({
+      select: ['id'],
+      where: { id: In(ownerIds), tenantId },
+    });
+    const allowedOwners = new Set(tenantOwners.map((user) => user.id));
+    return docs
+      .filter((doc) => doc.userId && allowedOwners.has(doc.userId))
+      .map((doc) => doc.docId);
   }
 
   private cacheKey(
     userId: string,
     roles: string[],
     departmentIds: string[],
+    tenantId: string | null = null,
   ): string {
-    return `doc-acl:${userId}:${roles.sort().join(',')}:${departmentIds.sort().join(',')}`;
+    return `doc-acl:${tenantId ?? 'legacy'}:${userId}:${roles.sort().join(',')}:${departmentIds.sort().join(',')}`;
   }
 
   private async invalidateAllPermissionCache(): Promise<void> {
-    const keys = await this.redisProvider.keys('doc-acl:*');
+    const redis = this.redisProvider as RedisProvider & {
+      scan?: (pattern: string) => Promise<string[]>;
+    };
+    const keys = redis.scan
+      ? await redis.scan('doc-acl:*')
+      : await redis.keys('doc-acl:*');
     await Promise.all(keys.map((key) => this.redisProvider.del(key)));
   }
 }
