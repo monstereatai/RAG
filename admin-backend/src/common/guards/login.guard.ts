@@ -44,6 +44,9 @@ export class LoginGuard implements CanActivate {
 
     try {
       const data = this.jwtService.verify(token);
+      if (data.type !== 'access') {
+        throw new UnauthorizedException('token 类型无效');
+      }
 
       (request as any).user = {
         userId: data.sub || data.userId,

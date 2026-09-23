@@ -462,8 +462,18 @@ export class AgentOpsAdminController {
   runtimeEventsList(
     @Query('threadId') threadId?: string,
     @Query('runId') runId?: string,
+    @Query('beforeSequence') beforeSequence?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.runtimeEvents.list(threadId, runId);
+    const cursor = Number(beforeSequence);
+    const pageSize = Number(limit);
+    return this.runtimeEvents.list(
+      threadId,
+      runId,
+      'legacy',
+      Number.isFinite(cursor) && cursor > 0 ? cursor : undefined,
+      Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 200,
+    );
   }
 
   @Get('runtime-events/metrics')

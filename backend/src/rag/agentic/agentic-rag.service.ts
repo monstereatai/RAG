@@ -43,6 +43,7 @@ import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { ToolExecutionService } from '../../tools/tool-execution.service';
+import { DocumentPermissionService } from '../../modules/document/document-permission.service';
 import {
   Command,
   interrupt,
@@ -121,6 +122,7 @@ export class AgenticRagService {
     @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
+    @Optional() private readonly documentPermissions?: DocumentPermissionService,
     @Optional()
     @InjectRepository(AgenticStructuredArtifactEntity)
     private readonly structuredArtifactRepository?: Repository<AgenticStructuredArtifactEntity>,
@@ -1647,18 +1649,19 @@ export class AgenticRagService {
       };
     } catch (err) {
       this.logger.warn(
-        `Reflection failed, assume passed: ${(err as Error).message}`,
+        `Reflection failed, treat confidence as unknown and retry safely: ${(err as Error).message}`,
       );
       const retryCount = state.retryCount + 1;
       onEvent?.({
         type: 'reflection',
         data: {
-          confidence: 1,
-          passed: true,
+          confidence: 0,
+          passed: false,
           retryCount,
+          reason: '反思评估失败，不能确认答案可信度',
         },
       });
-      return { confidence: 1, passed: true, retryCount };
+      return { confidence: 0, passed: false, retryCount };
     }
   }
 
@@ -1671,15 +1674,35 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     await Promise.resolve();
-    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const enableInterrupt = config?.configurable?.enableInterrupt as
       | boolean
       | undefined;
+    if (!enableInterrupt) return { humanApproval: 'approved' };
 
-    // 不启用中断时直接跳过
-    if (!enableInterrupt) {
-      return { humanApproval: 'approved' };
+    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    let retrievedChunks = state.retrievedChunks;
+    let permissionChanged = false;
+    const userId = config?.configurable?.userId as string | undefined;
+    const retrieveOptions = config?.configurable?.retrieveOptions as
+      | RetrieveOptions
+      | undefined;
+    if (retrievedChunks.length > 0) {
+      if (userId && this.documentPermissions) {
+        const allowedDocIds = await this.documentPermissions.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          retrieveOptions?.tenantId,
+        );
+        retrievedChunks = retrievedChunks.filter((chunk) =>
+          allowedDocIds.has(chunk.docId),
+        );
+      } else {
+        retrievedChunks = [];
+      }
+      permissionChanged = retrievedChunks.length !== state.retrievedChunks.length;
     }
+    const answer = permissionChanged ? '' : state.answer;
 
     // LangGraph 原生中断会持久化当前图状态；恢复时该节点从开头重跑，
     // 因此中断前只发送只读事件，绝不执行外部副作用。
@@ -1689,8 +1712,8 @@ export class AgenticRagService {
       type: 'interrupt',
       data: {
         reason,
-        answer: state.answer,
-        references: state.retrievedChunks,
+        answer,
+        references: retrievedChunks,
         threadId: (config?.configurable?.thread_id as string) ?? '',
       },
     });
@@ -1704,12 +1727,23 @@ export class AgenticRagService {
       { approval: 'approved' | 'rejected'; feedback?: string }
     >({
       reason,
-      answer: state.answer,
-      references: state.retrievedChunks,
+      answer,
+      references: retrievedChunks,
       threadId: (config?.configurable?.thread_id as string) ?? '',
     });
     return {
       humanApproval: review.approval,
+      retrievedChunks,
+      ...(permissionChanged
+        ? {
+            answer: '',
+            retrievalSufficient: false,
+            retrievalReason: '审批期间资料权限发生变化，需要重新检索',
+            artifacts: state.artifacts.filter(
+              (artifact) => artifact.type !== 'answer_contract',
+            ),
+          }
+        : {}),
       interruptReason: review.feedback ?? '',
       executionState: {
         ...state.executionState,

@@ -33,6 +33,7 @@ describe('LoginGuard', () => {
 
   it('accepts query token for EventSource requests', async () => {
     jwtService.verify.mockReturnValue({
+      type: 'access',
       sub: 'user-1',
       username: 'admin',
       role: 'admin',
@@ -58,5 +59,18 @@ describe('LoginGuard', () => {
       role: 'admin',
       permissions: ['admin:qa-ops:read'],
     });
+  });
+
+  it('rejects refresh tokens on protected routes', async () => {
+    jwtService.verify.mockReturnValue({ type: 'refresh', sub: 1, username: 'admin' });
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { authorization: 'Bearer refresh.jwt.token' }, query: {} }),
+      }),
+      getClass: () => LoginGuard,
+      getHandler: () => undefined,
+    } as unknown as ExecutionContext;
+
+    await expect(guard.canActivate(context)).rejects.toThrow('token 失效，请重新登录');
   });
 });

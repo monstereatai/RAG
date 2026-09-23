@@ -46,6 +46,10 @@ export class TencentSpeechProvider implements ISpeechProvider {
     }
   }
 
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
   /**
    * 生成腾讯云 API v3 签名
    */

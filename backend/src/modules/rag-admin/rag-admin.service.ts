@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, LessThan } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DocumentService } from '../document/document.service';
 import { GraphService } from '../graph/graph.service';
@@ -42,6 +42,7 @@ import type { DocumentBusinessMetadata } from '../document/document-profile.util
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
+import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -94,7 +95,12 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
-type IndexAuditStatus = 'ok' | 'mismatch' | 'unavailable' | 'skipped' | 'unverified';
+type IndexAuditStatus =
+  | 'ok'
+  | 'mismatch'
+  | 'unavailable'
+  | 'skipped'
+  | 'unverified';
 
 type IndexAuditCheck = {
   status: IndexAuditStatus;
@@ -159,6 +165,7 @@ export class RagAdminService implements OnModuleInit {
     @InjectRepository(DocumentPermissionEntity)
     private readonly permissionRepo: Repository<DocumentPermissionEntity>,
     private readonly domainEvents: DomainEventsService,
+    private readonly embeddingProvider: EmbeddingProvider,
     // 图片检索（以图搜图/文搜图）可选依赖：未注册（模块未导入）时保持降级
     @Optional() private readonly imageIndexService?: ImageIndexService,
     @Optional()
@@ -636,9 +643,11 @@ export class RagAdminService implements OnModuleInit {
 
     const items = await Promise.all(
       pageDocs.map(async (doc) => {
-        const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(
-          doc.docId,
-        );
+        const obsidianPath = doc.userId
+          ? await this.obsidianKnowledge.findNoteByRagDocId(doc.docId, {
+              userId: doc.userId,
+            })
+          : null;
         return {
           docId: doc.docId,
           filename: doc.filename,
@@ -714,7 +723,12 @@ export class RagAdminService implements OnModuleInit {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc || !doc.userId) return null;
 
-    const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(docId);
+    const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(
+      docId,
+      {
+        userId: doc.userId,
+      },
+    );
     return {
       docId: doc.docId,
       filename: doc.filename,
@@ -1194,10 +1208,23 @@ export class RagAdminService implements OnModuleInit {
     return this.documentService.getFailedTasks(limit);
   }
 
-  async auditDocumentIndexes(limit = 200) {
+  async auditDocumentIndexes(
+    limit = 200,
+    cursor?: { createdAt: string; docId: string },
+  ) {
+    const pageSize = Math.min(Math.max(limit, 1), 1000);
+    const after = cursor ? new Date(cursor.createdAt) : undefined;
     const docs = await this.docMetaRepo.find({
-      order: { createdAt: 'DESC' },
-      take: Math.min(Math.max(limit, 1), 1000),
+      ...(after && Number.isFinite(after.getTime()) && cursor
+        ? {
+            where: [
+              { createdAt: LessThan(after) },
+              { createdAt: after, docId: LessThan(cursor.docId) },
+            ],
+          }
+        : {}),
+      order: { createdAt: 'DESC', docId: 'DESC' },
+      take: pageSize,
     });
     const chunks = docs.length
       ? await this.chunkRepo.find({
@@ -1226,7 +1253,9 @@ export class RagAdminService implements OnModuleInit {
       docs.map(async (doc) => {
         const expected = dbChunkCounts.get(doc.docId) ?? 0;
         const expectedHashes = [...(dbChunkHashes.get(doc.docId) ?? new Set())];
-        const expectedGenerations = [...(dbGenerations.get(doc.docId) ?? new Set())];
+        const expectedGenerations = [
+          ...(dbGenerations.get(doc.docId) ?? new Set()),
+        ];
         const bm25 = this.karpathyRagService.getIndexedChunkCount(
           doc.docId,
           doc.userId ?? undefined,
@@ -1246,10 +1275,22 @@ export class RagAdminService implements OnModuleInit {
           expectedHashes.length > 0 &&
           (bm25Hashes.hashes.length !== expectedHashes.length ||
             !expectedHashes.every((hash) => bm25Hashes.hashes.includes(hash)));
+        const bm25GenerationMismatch =
+          expectedGenerations.length > 0 &&
+          (bm25Hashes.generations.length !== expectedGenerations.length ||
+            !expectedGenerations.every((generation) =>
+              bm25Hashes.generations.includes(generation),
+            ));
         const esHashMismatch =
           expectedHashes.length > 0 &&
           (es.contentHashes?.length !== expectedHashes.length ||
             !expectedHashes.every((hash) => es.contentHashes?.includes(hash)));
+        const esGenerationMismatch =
+          expectedGenerations.length > 0 &&
+          (es.indexGenerations?.length !== expectedGenerations.length ||
+            !expectedGenerations.every((generation) =>
+              es.indexGenerations?.includes(generation),
+            ));
         const vectorRuntime = this.vectorStoreProvider.getRuntimeStatus();
         const milvus = await this.readIndexCheck(
           vectorRuntime.available,
@@ -1278,23 +1319,36 @@ export class RagAdminService implements OnModuleInit {
             expectedIndexGeneration: doc.indexGeneration ?? undefined,
           },
           bm25: {
-            status: bm25 === expected && !bm25HashMismatch ? 'ok' : 'mismatch',
+            status:
+              bm25 === expected && !bm25HashMismatch && !bm25GenerationMismatch
+                ? 'ok'
+                : 'mismatch',
             expected,
             actual: bm25,
             expectedContentHash: expectedHashes.join(','),
             actualContentHashes: bm25Hashes.hashes,
             expectedIndexGeneration: expectedGenerations.join(','),
             actualIndexGenerations: bm25Hashes.generations,
-            ...(bm25 === expected && !bm25HashMismatch
+            ...(bm25 === expected &&
+            !bm25HashMismatch &&
+            !bm25GenerationMismatch
               ? {}
-              : { reason: bm25 !== expected ? 'bm25_chunk_count_mismatch' : 'bm25_content_hash_mismatch' }),
+              : {
+                  reason:
+                    bm25 !== expected
+                      ? 'bm25_chunk_count_mismatch'
+                      : bm25HashMismatch
+                        ? 'bm25_content_hash_mismatch'
+                        : 'bm25_generation_mismatch',
+                }),
           },
           elasticsearch: es.available
             ? {
                 status:
                   es.chunkCount === expected &&
                   (expected === 0 || es.documentCount === 1) &&
-                  !esHashMismatch
+                  !esHashMismatch &&
+                  !esGenerationMismatch
                     ? 'ok'
                     : 'mismatch',
                 expected,
@@ -1306,13 +1360,16 @@ export class RagAdminService implements OnModuleInit {
                 actualIndexGenerations: es.indexGenerations,
                 ...(es.chunkCount === expected &&
                 (expected === 0 || es.documentCount === 1) &&
-                !esHashMismatch
+                !esHashMismatch &&
+                !esGenerationMismatch
                   ? {}
                   : {
                       reason:
                         es.chunkCount !== expected || es.documentCount !== 1
                           ? 'elasticsearch_index_count_mismatch'
-                          : 'elasticsearch_content_hash_mismatch',
+                          : esHashMismatch
+                            ? 'elasticsearch_content_hash_mismatch'
+                            : 'elasticsearch_generation_mismatch',
                     }),
               }
             : {
@@ -1327,17 +1384,11 @@ export class RagAdminService implements OnModuleInit {
         if (indexChecks.postgres.status === 'mismatch')
           reasons.push('metadata_chunk_count_mismatch');
         if (indexChecks.bm25.status === 'mismatch')
-          reasons.push(
-            indexChecks.bm25.reason === 'bm25_content_hash_mismatch'
-              ? 'bm25_content_hash_mismatch'
-              : 'bm25_chunk_count_mismatch',
-          );
+          reasons.push(indexChecks.bm25.reason ?? 'bm25_chunk_count_mismatch');
         if (indexChecks.elasticsearch.status === 'mismatch')
           reasons.push(
-            indexChecks.elasticsearch.reason ===
-            'elasticsearch_content_hash_mismatch'
-              ? 'elasticsearch_content_hash_mismatch'
-              : 'elasticsearch_index_count_mismatch',
+            indexChecks.elasticsearch.reason ??
+              'elasticsearch_index_count_mismatch',
           );
         if (indexChecks.milvus.status === 'mismatch')
           reasons.push('milvus_chunk_count_mismatch');
@@ -1378,6 +1429,13 @@ export class RagAdminService implements OnModuleInit {
     return {
       available: true,
       scanned: docs.length,
+      nextCursor:
+        docs.length === pageSize
+          ? {
+              createdAt: docs[docs.length - 1].createdAt.toISOString(),
+              docId: docs[docs.length - 1].docId,
+            }
+          : null,
       issueCount: issues.length,
       counts: {
         missingChunks: count('missing_chunks'),
@@ -1394,6 +1452,10 @@ export class RagAdminService implements OnModuleInit {
         bm25ContentHashMismatch: count('bm25_content_hash_mismatch'),
         elasticsearchContentHashMismatch: count(
           'elasticsearch_content_hash_mismatch',
+        ),
+        bm25GenerationMismatch: count('bm25_generation_mismatch'),
+        elasticsearchGenerationMismatch: count(
+          'elasticsearch_generation_mismatch',
         ),
         milvusUnavailable: count('milvus_unavailable'),
         graphIndexMissing: count('graph_index_missing'),
@@ -1486,12 +1548,15 @@ export class RagAdminService implements OnModuleInit {
       const jobs = [];
       for (const issue of targets) {
         const job = {
-          id: IndexRepairQueueService.jobId(issue.docId),
+          id: IndexRepairQueueService.jobId(
+            issue.docId,
+            JSON.stringify({ reasons: issue.reasons, checks: issue.checks }),
+          ),
           docId: issue.docId,
           requestedBy: 'rag-admin',
           reason: issue.reasons.join(','),
         };
-        const queued = await this.indexRepairQueue!.enqueue(job);
+        const queued = await this.indexRepairQueue.enqueue(job);
         jobs.push({ ...job, queued });
       }
       return {
@@ -1499,7 +1564,7 @@ export class RagAdminService implements OnModuleInit {
         queued: true,
         requested: targets.length,
         jobs,
-        queue: await this.indexRepairQueue!.getStatus(),
+        queue: await this.indexRepairQueue.getStatus(),
       };
     }
     const results = await Promise.all(
@@ -1632,8 +1697,6 @@ export class RagAdminService implements OnModuleInit {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc) return null;
 
-    // Trigger reindex: delete then re-upload. We need the original content.
-    // For now, reconstruct from chunks and re-index.
     const chunks = await this.chunkRepo.find({
       where: { docId },
       order: { chunkIndex: 'ASC' },
@@ -1643,70 +1706,149 @@ export class RagAdminService implements OnModuleInit {
       return { docId, reindexed: false, reason: 'no chunks found' };
     }
 
-    const content = chunks.map((chunk) => chunk.content).join('\n\n');
     const userId = doc.userId ?? 'system';
-    const permissions = await this.permissionRepo.find({ where: { docId } });
-    const businessMetadata = {
-      projectId: doc.projectId,
-      activityId: doc.activityId,
-      region: doc.region,
-      locale: doc.locale,
-      channel: doc.channel,
-      roleScope: doc.roleScope ? JSON.parse(doc.roleScope) : [],
-      documentType: doc.documentType,
-      lifecycleStatus: doc.lifecycleStatus,
-      supersedesDocId: doc.supersedesDocId,
-      docVersion: doc.docVersion,
-      effectiveAt: doc.effectiveAt?.toISOString() ?? null,
-      expiredAt: doc.expiredAt?.toISOString() ?? null,
-    };
+    const content = chunks.map((chunk) => chunk.content).join('\n\n');
 
     try {
-      // Delete existing vectors/BM25/ES
-      await this.documentService.delete(docId, userId);
-      // Re-upload
-      const result = await this.documentService.upload(
-        doc.filename,
-        content,
-        userId,
-        { docId, businessMetadata: businessMetadata as any },
+      const vectors = await this.embeddingProvider.embedDocuments(
+        chunks.map((chunk) => chunk.content),
       );
-      await this.docMetaRepo.update(
-        { docId },
-        {
-          sourceAuthority: doc.sourceAuthority,
-          lifecycleStatus: doc.lifecycleStatus,
-          reviewStatus: doc.reviewStatus,
-          reviewedBy: doc.reviewedBy,
-          reviewedAt: doc.reviewedAt,
-          reviewComment: doc.reviewComment,
-          title: doc.title,
-          author: doc.author,
+      if (vectors.length !== chunks.length) {
+        throw new Error('embedding count does not match stored chunks');
+      }
+
+      // PostgreSQL remains the source of truth. Rebuild only derived indexes;
+      // a failed repair can be retried without deleting the document or its ACL.
+      await this.vectorStoreProvider.deleteByDocId(docId);
+      await this.vectorStoreProvider.insert(
+        chunks.map((chunk, index) => ({
+          id: chunk.id,
+          vector: vectors[index],
+          content: chunk.content,
+          docId,
+          chunkIndex: chunk.chunkIndex,
+          userId,
+        })),
+      );
+
+      const parseArray = (value: string | null | undefined): string[] => {
+        if (!value) return [];
+        try {
+          const parsed: unknown = JSON.parse(value);
+          return Array.isArray(parsed)
+            ? parsed.filter((item): item is string => typeof item === 'string')
+            : [];
+        } catch {
+          return [];
+        }
+      };
+      const indexedChunks = chunks.map((chunk) => ({
+        ...chunk,
+        userId: chunk.userId ?? userId,
+        tenantId: chunk.tenantId ?? doc.tenantId ?? 'legacy',
+        headingPath: parseArray(chunk.headingPath),
+        roleScope: parseArray(chunk.roleScope),
+        hypotheticalQuestions: parseArray(chunk.hypotheticalQuestions),
+      }));
+      this.karpathyRagService.removeDocChunks(docId, userId);
+      this.karpathyRagService.indexChunks(indexedChunks, userId);
+
+      if (this.elasticsearchProvider.isEnabled()) {
+        await this.elasticsearchProvider.deleteByDocId(docId, userId);
+        await this.elasticsearchProvider.indexChunks(
+          indexedChunks,
+          userId,
+          vectors,
+        );
+        await this.elasticsearchProvider.indexDocument({
+          docId,
+          filename: doc.filename,
+          content,
+          userId,
+          tenantId: doc.tenantId ?? 'legacy',
+          title: doc.title ?? doc.filename,
           summary: doc.summary,
-          keywords: doc.keywords,
-          language: doc.language,
-          category: doc.category,
-        },
-      );
-      await this.permissionRepo.delete({ docId });
-      if (permissions.length > 0) {
-        await this.permissionRepo.save(
-          permissions.map((permission) => ({
-            ...permission,
-            id: randomUUID(),
-            docId,
-          })),
+          sourceAuthority: doc.sourceAuthority,
+          projectId: doc.projectId,
+          activityId: doc.activityId,
+          region: doc.region,
+          locale: doc.locale,
+          channel: doc.channel,
+          roleScope: parseArray(doc.roleScope),
+          documentType: doc.documentType,
+          lifecycleStatus: doc.lifecycleStatus,
+          docVersion: doc.docVersion,
+          contentHash: doc.contentHash,
+          indexGeneration: doc.indexGeneration,
+          effectiveAt: doc.effectiveAt,
+          expiredAt: doc.expiredAt,
+        });
+        const es = await this.elasticsearchProvider.getIndexCountsByDocId(
+          docId,
+          userId,
+        );
+        const expectedHashes = [
+          ...new Set(
+            chunks
+              .map((chunk) => chunk.contentHash)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ];
+        const expectedGenerations = [
+          ...new Set(
+            chunks
+              .map((chunk) => chunk.indexGeneration)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ];
+        const hasExpectedHashes =
+          expectedHashes.length === 0 ||
+          (es.contentHashes?.length === expectedHashes.length &&
+            expectedHashes.every((hash) => es.contentHashes?.includes(hash)));
+        const hasExpectedGenerations =
+          expectedGenerations.length === 0 ||
+          (es.indexGenerations?.length === expectedGenerations.length &&
+            expectedGenerations.every((generation) =>
+              es.indexGenerations?.includes(generation),
+            ));
+        if (
+          !es.available ||
+          es.chunkCount !== chunks.length ||
+          es.documentCount !== 1 ||
+          !hasExpectedHashes ||
+          !hasExpectedGenerations
+        ) {
+          throw new Error(
+            es.reason ??
+              'elasticsearch reindex count, content hash, or generation verification failed',
+          );
+        }
+      }
+
+      if (this.graphService.isEnabled()) {
+        const graph = await this.graphService.importText(
+          content,
+          userId,
+          docId,
+        );
+        await this.docMetaRepo.update(
+          { docId },
+          {
+            graphIndexStatus: 'indexed',
+            graphIndexedAt: new Date(),
+            graphIndexError: null,
+          },
+        );
+        this.logger.log(
+          `Graph index repaired: docId=${docId}, nodes=${graph.nodeCount}, relationships=${graph.relationshipCount}`,
         );
       }
+
       return {
         docId,
         reindexed: true,
-        chunkCount: result.chunkCount,
-        preserved: {
-          lifecycleStatus: businessMetadata.lifecycleStatus,
-          docVersion: businessMetadata.docVersion,
-          permissionCount: permissions.length,
-        },
+        chunkCount: chunks.length,
+        preserved: { tenantId: doc.tenantId ?? 'legacy', permissions: true },
       };
     } catch (err) {
       this.logger.error(

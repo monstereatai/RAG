@@ -76,6 +76,14 @@ export class RagClientService {
     );
   }
 
+  issueSpeechTicket(ownerUserId: string, ownerRole: 'admin' | 'user', tenantId: string) {
+    return this.postJson<Record<string, unknown>>('/auth/internal/speech-ticket', {
+      ownerUserId,
+      ownerRole,
+      tenantId,
+    });
+  }
+
   getCapabilities() {
     return this.getJson<Record<string, unknown>>("/rag/admin/capabilities");
   }

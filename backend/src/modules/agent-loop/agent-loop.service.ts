@@ -126,17 +126,23 @@ export class AgentLoopService {
       let decision: AgentLoopDecision<TState, TOutput>;
       try {
         decision = await this.withTimeout(
-          Promise.resolve(input.decide(state, { step, toolCalls, remainingMs })),
+          (signal) =>
+            Promise.resolve(
+              input.decide(state, { step, toolCalls, remainingMs, signal }),
+            ),
           remainingMs,
           'Agent Loop decision',
+          input,
         );
       } catch (error) {
+        const cancelled =
+          input.signal?.aborted || (await this.isCancellationRequested(input));
         return this.finish(
           input,
           state,
           step,
           toolCalls,
-          'failed',
+          cancelled ? 'cancelled' : 'failed',
           error instanceof Error ? error.message : String(error),
         );
       }
@@ -193,6 +199,19 @@ export class AgentLoopService {
           decision,
           actionRemainingMs,
         );
+        if (
+          input.signal?.aborted ||
+          (await this.isCancellationRequested(input))
+        ) {
+          return this.finish(
+            input,
+            state,
+            step,
+            toolCalls,
+            'cancelled',
+            'Agent Loop 已被用户取消',
+          );
+        }
         if (execution.status === 'blocked') {
           return this.finish(
             input,
@@ -222,9 +241,10 @@ export class AgentLoopService {
         });
         try {
           const result = await this.withTimeout(
-            decision.execute(),
+            (signal) => decision.execute(signal),
             actionRemainingMs,
             decision.name,
+            input,
           );
           state = decision.reduce(state, result);
           await this.emit(input, 'agent.loop.model.completed', {
@@ -233,18 +253,27 @@ export class AgentLoopService {
             durationMs: Date.now() - actionStartedAt,
           });
         } catch (error) {
+          const cancelled =
+            input.signal?.aborted ||
+            (await this.isCancellationRequested(input));
           return this.finish(
             input,
             state,
             step,
             toolCalls,
-            'failed',
+            cancelled ? 'cancelled' : 'failed',
             error instanceof Error ? error.message : String(error),
           );
         }
       }
 
-      await this.checkpoint(input, state, step, toolCalls, Date.now() - startedAt);
+      await this.checkpoint(
+        input,
+        state,
+        step,
+        toolCalls,
+        Date.now() - startedAt,
+      );
       await this.emit(input, 'agent.loop.round.completed', { step, toolCalls });
     }
 
@@ -263,24 +292,30 @@ export class AgentLoopService {
     action: AgentLoopToolAction<TState, unknown>,
     remainingMs: number,
   ) {
-    return this.tools.execute({
-      toolName: action.name,
-      threadId: input.threadId,
-      runId: input.runId,
-      actor: input.actor,
-      ownerUserId: action.ownerUserId,
-      mode: action.mode,
-      role: action.role,
-      pluginKeys: action.pluginKeys,
-      allowedToolNames: action.allowedToolNames,
-      input: action.input,
-      approvalPolicy: action.approvalPolicy,
-      approvalGranted: action.approvalGranted,
-      idempotencyKey: action.idempotencyKey,
-      sideEffect: action.sideEffect,
-      execute: () =>
-        this.withTimeout(action.execute(), remainingMs, action.name),
-    });
+    return this.withTimeout(
+      (signal) =>
+        this.tools.execute({
+          toolName: action.name,
+          threadId: input.threadId,
+          runId: input.runId,
+          actor: input.actor,
+          ownerUserId: action.ownerUserId,
+          mode: action.mode,
+          role: action.role,
+          pluginKeys: action.pluginKeys,
+          allowedToolNames: action.allowedToolNames,
+          input: action.input,
+          approvalPolicy: action.approvalPolicy,
+          approvalGranted: action.approvalGranted,
+          idempotencyKey: action.idempotencyKey,
+          sideEffect: action.sideEffect,
+          signal,
+          execute: (toolSignal) => action.execute(toolSignal),
+        }),
+      remainingMs,
+      action.name,
+      input,
+    );
   }
 
   private async checkpoint<TState, TOutput>(
@@ -327,7 +362,10 @@ export class AgentLoopService {
   }
 
   private async isCancellationRequested<TState, TOutput>(
-    input: AgentLoopInput<TState, TOutput>,
+    input: Pick<
+      AgentLoopInput<TState, TOutput>,
+      'threadId' | 'runId' | 'signal'
+    >,
   ): Promise<boolean> {
     const runId = input.runId ?? 'anonymous';
     const value = await this.redis.get(
@@ -389,23 +427,55 @@ export class AgentLoopService {
   }
 
   private async withTimeout<T>(
-    promise: Promise<T>,
+    operation: (signal: AbortSignal) => Promise<T>,
     timeoutMs: number,
     label: string,
+    input: Pick<
+      AgentLoopInput<unknown, unknown>,
+      'threadId' | 'runId' | 'signal'
+    >,
   ): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
+    let poll: NodeJS.Timeout | undefined;
+    let onParentAbort: (() => void) | undefined;
+    const controller = new AbortController();
     try {
+      if (input.signal?.aborted) {
+        throw new Error('Agent Loop 已被用户取消');
+      }
       return await Promise.race([
-        promise,
+        Promise.resolve().then(() => operation(controller.signal)),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`${label} timeout after ${timeoutMs}ms`)),
-            timeoutMs,
-          );
+          timer = setTimeout(() => {
+            controller.abort(new Error(`${label} timeout`));
+            reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+        new Promise<never>((_, reject) => {
+          poll = setInterval(() => {
+            void this.isCancellationRequested(input)
+              .then((cancelled) => {
+                if (!cancelled || controller.signal.aborted) return;
+                controller.abort(new Error('Agent Loop 已被用户取消'));
+                reject(new Error('Agent Loop 已被用户取消'));
+              })
+              .catch(() => undefined);
+          }, 250);
+          poll.unref?.();
+          onParentAbort = () => {
+            controller.abort(input.signal?.reason);
+            reject(new Error('Agent Loop 已被用户取消'));
+          };
+          input.signal?.addEventListener('abort', onParentAbort, {
+            once: true,
+          });
         }),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
+      if (onParentAbort)
+        input.signal?.removeEventListener('abort', onParentAbort);
     }
   }
 }

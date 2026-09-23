@@ -11,7 +11,9 @@
 #   - milvus + etcd + minio
 #   - neo4j（GraphRAG，可选 profile=graphrag）
 #
-# 密钥：从 backend/.env 读取（QWEN_API_KEY 等），不进 git
+# 密钥：模型密钥从 backend/.env 读取；POSTGRES_USER、POSTGRES_PASSWORD、
+# REDIS_PASSWORD、MINIO_ROOT_USER、MINIO_ROOT_PASSWORD、NEO4J_PASSWORD 通过部署环境提供。
+# 若密码用于 *_URL，需先做 URL 编码。基础设施端口仅暴露在 Compose 网络内。
 # ============================================================
 
 services:
@@ -27,15 +29,15 @@ services:
     container_name: rag-backend
     restart: unless-stopped
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     environment:
       NODE_ENV: production
       PORT: 3000
       # 基础设施连接（docker 网络内服务名）
       MILVUS_HOST: milvus
       MILVUS_PORT: '19530'
-      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/rag
-      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/rag
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
       NEO4J_URL: bolt://neo4j:7687
       # 密钥类从 .env 读取
     env_file:
@@ -93,15 +95,13 @@ services:
     container_name: rag-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: rag
-    ports:
-      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d rag']
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -119,12 +119,13 @@ services:
     image: redis:7.4.9-alpine
     container_name: rag-redis
     restart: unless-stopped
-    ports:
-      - '6379:6379'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:
       - redis_data:/data
+    command: ['sh', '-c', 'exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"']
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -169,10 +170,8 @@ services:
     container_name: rag-milvus-minio
     restart: unless-stopped
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    ports:
-      - '9001:9001'
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -198,9 +197,6 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-    ports:
-      - '19530:19530'
-      - '9091:9091'
     volumes:
       - milvus_data:/var/lib/milvus
     depends_on:
@@ -230,11 +226,8 @@ services:
     profiles:
       - graphrag
     environment:
-      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-neo4jpassword}
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
       NEO4J_PLUGINS: '["apoc"]'
-    ports:
-      - '7474:7474'   # HTTP Browser
-      - '7687:7687'   # Bolt
     volumes:
       - neo4j_data:/data
     healthcheck:

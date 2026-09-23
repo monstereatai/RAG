@@ -456,15 +456,30 @@ export async function streamAguiAnswer(
   return controller;
 }
 
-export function createTtsWebSocket(text: string): WebSocket {
+export async function createTtsWebSocket(text: string): Promise<WebSocket> {
   const configured = process.env.REACT_APP_RAG_WS_BASE_URL;
   const fallback =
     typeof window !== 'undefined' && window.location.protocol === 'https:'
       ? `wss://${window.location.hostname}:3000`
       : `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3000`;
   const baseUrl = (configured || fallback).replace(/\/$/, '');
+  const token = localStorage.getItem('access_token');
+  if (!token) throw new Error('登录已过期，请重新登录');
+  const ticketResponse = await fetch('/api/speech/tts-ticket', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!ticketResponse.ok) {
+    throw new Error(`语音授权失败（HTTP ${ticketResponse.status}）`);
+  }
+  const ticketPayload = (await ticketResponse.json()) as {
+    data?: { ticket?: string };
+  };
+  const ticket = ticketPayload.data?.ticket;
+  if (!ticket) throw new Error('语音授权票据无效');
   const url = new URL(`${baseUrl}/api/v1/speech/tts/ws`);
   url.searchParams.set('text', text);
+  url.searchParams.set('ticket', ticket);
   return new WebSocket(url.toString());
 }
 

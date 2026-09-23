@@ -1,12 +1,23 @@
-import { Controller, Logger } from '@nestjs/common';
+import {
+  Controller,
+  ForbiddenException,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { GrpcMethod } from '@nestjs/microservices';
+import { Metadata } from '@grpc/grpc-js';
+import { AuthService } from '../auth/auth.service';
+import { ApiTokenService } from '../auth/api-token.service';
+import { IamService } from '../iam/iam.service';
+import type { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { DocumentService } from '../document/document.service';
 
 // gRPC 使用 proto 中的 snake_case 字段名（keepCase: true）
 interface VectorSearchRequest {
   query: string;
-  user_id: string;
+  user_id?: string;
   top_k: number;
   mode: string;
 }
@@ -25,11 +36,11 @@ interface ChunkResult {
 
 interface GetDocumentRequest {
   doc_id: string;
-  user_id: string;
+  user_id?: string;
 }
 
 interface ListDocumentsRequest {
-  user_id: string;
+  user_id?: string;
   page: number;
   page_size: number;
   query: string;
@@ -43,12 +54,17 @@ export class RagGrpcController {
   constructor(
     private readonly karpathyRagService: KarpathyRagService,
     private readonly documentService: DocumentService,
+    private readonly authService: AuthService,
+    private readonly apiTokenService: ApiTokenService,
+    private readonly configService: ConfigService,
+    private readonly iamService: IamService,
   ) {}
 
   @GrpcMethod('RagService', 'VectorSearch')
-  async vectorSearch(data: VectorSearchRequest) {
+  async vectorSearch(data: VectorSearchRequest, metadata: Metadata) {
+    const user = await this.authenticate(metadata, 'rag:search');
     const query = data.query;
-    const userId = data.user_id;
+    const userId = user.userId;
     const topK = data.top_k || 5;
     this.logger.log(
       `gRPC VectorSearch: query="${query.slice(0, 50)}", userId=${userId}, topK=${topK}`,
@@ -82,9 +98,10 @@ export class RagGrpcController {
   }
 
   @GrpcMethod('RagService', 'GetDocument')
-  async getDocument(data: GetDocumentRequest) {
+  async getDocument(data: GetDocumentRequest, metadata: Metadata) {
+    const user = await this.authenticate(metadata, 'rag:documents');
     const docId = data.doc_id;
-    const userId = data.user_id;
+    const userId = user.userId;
     const doc = await this.documentService.getDocMeta(
       docId,
       userId || 'default',
@@ -114,8 +131,9 @@ export class RagGrpcController {
   }
 
   @GrpcMethod('RagService', 'ListDocuments')
-  async listDocuments(data: ListDocumentsRequest) {
-    const userId = data.user_id;
+  async listDocuments(data: ListDocumentsRequest, metadata: Metadata) {
+    const user = await this.authenticate(metadata, 'rag:documents');
+    const userId = user.userId;
     const page = data.page || 1;
     const pageSize = data.page_size || 20;
     const query = data.query || '';
@@ -157,5 +175,73 @@ export class RagGrpcController {
       status: 'SERVING',
       uptime_seconds: Math.floor((Date.now() - this.startTime) / 1000),
     };
+  }
+
+  private async authenticate(
+    metadata: Metadata,
+    requiredScope: string,
+  ): Promise<JwtPayload> {
+    const rawAuthorization = metadata.get('authorization')[0];
+    const authorization = Buffer.isBuffer(rawAuthorization)
+      ? rawAuthorization.toString('utf8')
+      : rawAuthorization;
+    const match =
+      typeof authorization === 'string'
+        ? /^Bearer\s+(.+)$/i.exec(authorization)
+        : null;
+    const token = match?.[1]?.trim();
+    if (!token) throw new UnauthorizedException('missing bearer token');
+
+    let user: JwtPayload;
+    try {
+      user = await this.authService.verifyToken(token);
+    } catch {
+      user = await this.apiTokenService.verifyApiToken(token);
+    }
+    if (
+      !user.userId ||
+      !user.username ||
+      !user.role ||
+      user.type === 'refresh'
+    ) {
+      throw new UnauthorizedException('invalid user access token');
+    }
+
+    const tenantId = user.tenantId?.trim();
+    if (
+      this.configService.get<boolean>('auth.requireTenantContext') === true &&
+      !tenantId
+    ) {
+      throw new ForbiddenException('tenant context is required');
+    }
+    if (
+      this.configService.get<boolean>('auth.enforceIam') === true &&
+      (!tenantId ||
+        !(await this.iamService.hasPermission(
+          user.userId,
+          'platform.read',
+          tenantId,
+        )))
+    ) {
+      throw new ForbiddenException('IAM permission is insufficient');
+    }
+    if (
+      user.authType === 'api-token' &&
+      !(user.scopes ?? []).some((scope) =>
+        this.scopeMatches(scope, requiredScope),
+      )
+    ) {
+      throw new ForbiddenException('api token scope is insufficient');
+    }
+    return user;
+  }
+
+  private scopeMatches(granted: string, required: string): boolean {
+    const normalized = granted.trim();
+    return (
+      normalized === '*' ||
+      normalized === required ||
+      (normalized.endsWith('*') && required.startsWith(normalized.slice(0, -1)))
+    );
   }
 }

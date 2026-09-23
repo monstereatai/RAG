@@ -33,6 +33,7 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
   private lastRunAt: string | null = null;
   private lastResult: ReconcileResult | null = null;
   private lastError: string | null = null;
+  private cursor: { createdAt: string; docId: string } | undefined;
 
   constructor(
     private readonly config: ConfigService,
@@ -109,7 +110,11 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
     this.lastRunAt = new Date().toISOString();
     this.lastError = null;
     try {
-      const audit = await this.ragAdmin.auditDocumentIndexes(this.batchSize);
+      const audit = await this.ragAdmin.auditDocumentIndexes(
+        this.batchSize,
+        this.cursor,
+      );
+      this.cursor = audit.nextCursor ?? undefined;
       const repairable = audit.issues.filter((issue) =>
         issue.reasons.some(
           (reason) =>
@@ -124,7 +129,10 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
       let queued = 0;
       for (const issue of repairable) {
         await this.repairQueue.enqueue({
-          id: IndexRepairQueueService.jobId(issue.docId),
+          id: IndexRepairQueueService.jobId(
+            issue.docId,
+            JSON.stringify({ reasons: issue.reasons, checks: issue.checks }),
+          ),
           docId: issue.docId,
           requestedBy: 'index-reconciler',
           reason: issue.reasons.join(','),

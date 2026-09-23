@@ -13,8 +13,12 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueEvents, Worker } from 'bullmq';
 import type { DocumentBusinessMetadata } from './document-profile.util';
+import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
+const DOCUMENT_SOURCE_CLEANUP_QUEUE = 'document-processing-source-cleanup';
+const DOCUMENT_PROCESSING_ATTEMPTS = 3;
+const FAILED_SOURCE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export interface DocumentProcessingJob {
   taskId: string;
@@ -45,11 +49,16 @@ export class DocumentQueueService implements OnModuleDestroy {
   private readonly queue: Queue<DocumentProcessingJob>;
   private readonly queueEvents: QueueEvents;
   private readonly worker: Worker<DocumentProcessingJob>;
+  private readonly cleanupQueue: Queue<{ objectKey: string }>;
+  private readonly cleanupWorker: Worker<{ objectKey: string }>;
   private processor: DocumentProcessingProcessor | null = null;
   readonly enabled: boolean;
   readonly required: boolean;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly objectStorage: ObjectStorageProvider,
+  ) {
     const nodeEnv =
       config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
     this.required =
@@ -68,6 +77,8 @@ export class DocumentQueueService implements OnModuleDestroy {
       this.queue = null!;
       this.queueEvents = null!;
       this.worker = null!;
+      this.cleanupQueue = null!;
+      this.cleanupWorker = null!;
       return;
     }
 
@@ -76,7 +87,7 @@ export class DocumentQueueService implements OnModuleDestroy {
     this.queue = new Queue<DocumentProcessingJob>(DOCUMENT_PROCESSING_QUEUE, {
       connection,
       defaultJobOptions: {
-        attempts: 3,
+        attempts: DOCUMENT_PROCESSING_ATTEMPTS,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { age: 3600 * 24 }, // 保留 24 小时
         removeOnFail: { age: 3600 * 24 },
@@ -116,13 +127,35 @@ export class DocumentQueueService implements OnModuleDestroy {
       this.logger.log(
         `Document processed: ${job.data.filename} (task=${job.data.taskId})`,
       );
+      void this.cleanupSourceObject(job.data.objectKey, job.data.taskId);
     });
 
     this.worker.on('failed', (job, err) => {
       this.logger.error(
         `Document processing failed: ${job?.data?.filename}: ${err.message}`,
       );
+      if (job && job.attemptsMade >= Number(job.opts.attempts ?? 1)) {
+        void this.scheduleSourceObjectCleanup(job.data);
+      }
     });
+
+    this.cleanupQueue = new Queue<{ objectKey: string }>(
+      DOCUMENT_SOURCE_CLEANUP_QUEUE,
+      {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: true,
+          removeOnFail: { age: 3600 * 24 * 7 },
+        },
+      },
+    );
+    this.cleanupWorker = new Worker<{ objectKey: string }>(
+      DOCUMENT_SOURCE_CLEANUP_QUEUE,
+      async (job) => this.objectStorage.deleteObject(job.data.objectKey),
+      { connection, concurrency: 2 },
+    );
 
     this.logger.log('Document processing queue initialized');
   }
@@ -248,14 +281,64 @@ export class DocumentQueueService implements OnModuleDestroy {
     const state = await job.getState();
     if (state !== 'failed')
       return { taskId, retried: false, reason: `job state is ${state}` };
+    await this.cancelSourceObjectCleanup(taskId);
     await job.retry();
     return { taskId, retried: true };
   }
 
   async onModuleDestroy() {
     if (!this.enabled) return;
+    await this.cleanupWorker.close();
+    await this.cleanupQueue.close();
     await this.worker.close();
     await this.queueEvents.close();
     await this.queue.close();
+  }
+
+  private async scheduleSourceObjectCleanup(
+    job: DocumentProcessingJob,
+  ): Promise<void> {
+    await this.enqueueSourceObjectCleanup(
+      job.taskId,
+      job.objectKey,
+      FAILED_SOURCE_RETENTION_MS,
+    );
+  }
+
+  private async enqueueSourceObjectCleanup(
+    taskId: string,
+    objectKey: string,
+    delay: number,
+  ): Promise<void> {
+    try {
+      await this.cleanupQueue.add(
+        taskId,
+        { objectKey },
+        { jobId: taskId, delay },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `queued upload cleanup scheduling failed for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async cleanupSourceObject(
+    objectKey: string,
+    taskId: string,
+  ): Promise<void> {
+    try {
+      await this.cancelSourceObjectCleanup(taskId);
+      await this.enqueueSourceObjectCleanup(taskId, objectKey, 0);
+    } catch (error) {
+      this.logger.warn(
+        `queued upload cleanup failed for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async cancelSourceObjectCleanup(taskId: string): Promise<void> {
+    const cleanupJob = await this.cleanupQueue.getJob(taskId);
+    if (cleanupJob) await cleanupJob.remove();
   }
 }

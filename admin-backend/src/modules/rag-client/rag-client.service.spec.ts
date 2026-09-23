@@ -69,6 +69,32 @@ describe('RagClientService', () => {
       expect(result.status).toBe(200);
     });
 
+    it('requests an internal speech ticket using the trusted service token and verified owner context', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ data: { ticket: 'speech-ticket' } }),
+      });
+
+      await service.issueSpeechTicket('owner-1', 'user', 'tenant-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/auth/internal/speech-ticket',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test-token',
+            'content-type': 'application/json',
+          }),
+          body: JSON.stringify({
+            ownerUserId: 'owner-1',
+            ownerRole: 'user',
+            tenantId: 'tenant-1',
+          }),
+        }),
+      );
+    });
+
     it('should handle 401 error', async () => {
       mockFetch.mockResolvedValue({
         ok: false,

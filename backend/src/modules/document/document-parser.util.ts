@@ -489,18 +489,8 @@ async function renderDynamicUrl(url: string): Promise<{
     await page.route('**/*', async (route) => {
       try {
         const requestUrl = new URL(route.request().url());
-        const host = requestUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-        const localHost =
-          host === 'localhost' ||
-          host.endsWith('.localhost') ||
-          host.endsWith('.local') ||
-          host.endsWith('.internal') ||
-          host.endsWith('.home.arpa') ||
-          host.endsWith('.test');
-        if (localHost || isBlockedIp(host)) {
-          await route.abort('blockedbyclient');
-          return;
-        }
+        // 子资源和跳转也必须解析 DNS 并拒绝私网目标，不能只检查 URL 中的主机名。
+        await assertSafeExternalUrl(requestUrl);
         await route.continue();
       } catch {
         await route.abort('blockedbyclient');

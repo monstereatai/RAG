@@ -1,9 +1,10 @@
 import { NestFactory } from '@nestjs/core';
+import { ServerCredentials } from '@grpc/grpc-js';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { join } from 'path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { Logger } from 'nestjs-pino';
 import type { Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -13,6 +14,7 @@ import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TencentSpeechProvider } from './providers/speech/tencent-speech.provider';
+import { SpeechTicketService } from './modules/auth/speech-ticket.service';
 
 const SWAGGER_PATH_LABELS: Record<string, string> = {
   api: 'API',
@@ -116,9 +118,26 @@ async function bootstrap() {
     swaggerOptions: { persistAuthorization: true },
   });
 
-  // gRPC 微服务（可选，通过 GRPC_ENABLED=true 开启）
-  const grpcEnabled = process.env.GRPC_ENABLED !== 'false';
+  // gRPC uses the configured JWT/API-token verifier and is disabled unless explicitly enabled.
+  const grpcRequested = process.env.GRPC_ENABLED === 'true';
+  const grpcTlsCertFile = process.env.GRPC_TLS_CERT_FILE?.trim();
+  const grpcTlsKeyFile = process.env.GRPC_TLS_KEY_FILE?.trim();
+  const grpcEnabled =
+    grpcRequested &&
+    Boolean(process.env.JWT_SECRET?.trim()) &&
+    Boolean(grpcTlsCertFile && grpcTlsKeyFile);
+  if (grpcRequested && !grpcEnabled) {
+    console.warn(
+      'gRPC disabled: JWT_SECRET, GRPC_TLS_CERT_FILE, and GRPC_TLS_KEY_FILE are required',
+    );
+  }
   if (grpcEnabled) {
+    const credentials = ServerCredentials.createSsl(null, [
+      {
+        private_key: readFileSync(grpcTlsKeyFile!),
+        cert_chain: readFileSync(grpcTlsCertFile!),
+      },
+    ]);
     const compiledProtoPath = join(__dirname, 'modules/grpc/rag.proto');
     const protoPath = existsSync(compiledProtoPath)
       ? compiledProtoPath
@@ -128,7 +147,8 @@ async function bootstrap() {
       options: {
         package: 'rag',
         protoPath,
-        url: process.env.GRPC_URL ?? '0.0.0.0:50051',
+        url: process.env.GRPC_URL ?? '127.0.0.1:50051',
+        credentials,
         loader: {
           keepCase: true,
           longs: String,
@@ -138,7 +158,7 @@ async function bootstrap() {
     });
     await app.startAllMicroservices();
     console.log(
-      `gRPC server listening on ${process.env.GRPC_URL ?? '0.0.0.0:50051'}`,
+      `gRPC server listening on ${process.env.GRPC_URL ?? '127.0.0.1:50051'}`,
     );
   }
 
@@ -146,24 +166,52 @@ async function bootstrap() {
   attachSpeechWebSocket(
     app.getHttpServer() as Server,
     app.get(TencentSpeechProvider),
+    app.get(SpeechTicketService),
   );
 }
 
 function attachSpeechWebSocket(
   server: Server,
   speechProvider: TencentSpeechProvider,
+  speechTicketService: SpeechTicketService,
 ): void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on(
     'upgrade',
     (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (!request.url?.startsWith('/api/v1/speech/tts/ws')) {
+      const url = new URL(request.url ?? '/', 'http://localhost');
+      if (url.pathname !== '/api/v1/speech/tts/ws') {
         return;
       }
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
+      if (!speechProvider.isEnabled()) {
+        socket.write(
+          'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n',
+        );
+        socket.destroy();
+        return;
+      }
+      const ticket = url.searchParams.get('ticket') ?? '';
+      void speechTicketService
+        .consume(ticket)
+        .then((user) => {
+          if (!user || !user.userId) {
+            socket.write(
+              'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n',
+            );
+            socket.destroy();
+            return;
+          }
+          wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request);
+          });
+        })
+        .catch(() => {
+          socket.write(
+            'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n',
+          );
+          socket.destroy();
+        });
     },
   );
 
@@ -172,8 +220,13 @@ function attachSpeechWebSocket(
     const text = url.searchParams.get('text') ?? '';
     const voiceType = Number(url.searchParams.get('voiceType') ?? '101001');
 
-    if (!text.trim()) {
-      ws.send(JSON.stringify({ type: 'error', message: 'text is required' }));
+    if (!text.trim() || text.length > 8000) {
+      ws.send(
+        JSON.stringify({
+          type: 'error',
+          message: 'text must be between 1 and 8000 characters',
+        }),
+      );
       ws.close();
       return;
     }

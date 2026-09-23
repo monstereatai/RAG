@@ -49,10 +49,20 @@ export class PublicArtifactsController {
       'external',
       this.context(req),
     );
-    res.setHeader(
-      'Content-Type',
-      file.artifact.contentType ?? 'application/octet-stream',
-    );
+    const contentType = file.artifact.contentType ?? 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    if (
+      ['text/html', 'image/svg+xml'].includes(
+        contentType.split(';')[0].trim().toLowerCase(),
+      )
+    ) {
+      res.setHeader(
+        'Content-Security-Policy',
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'",
+      );
+    }
     res.setHeader(
       'Content-Disposition',
       `inline; filename*=UTF-8''${encodeURIComponent(file.artifact.filename)}`,

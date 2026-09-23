@@ -2343,6 +2343,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (!this.runtimeEvents) return;
     try {
       await this.runtimeEvents.emit({
+        tenantId: state.tenantId,
         threadId: state.threadId,
         runId: state.runId || undefined,
         eventType,
@@ -2364,6 +2365,7 @@ export class ProductionWorkflowService implements OnModuleInit {
   ): Promise<void> {
     try {
       await this.domainEvents?.emit({
+        tenantId: state.tenantId,
         eventType,
         aggregateType: 'production_workflow',
         aggregateId: state.threadId,

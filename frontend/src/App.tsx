@@ -34,6 +34,7 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('chatThreadId');
     setToken(null);
     setUser(null);
   };

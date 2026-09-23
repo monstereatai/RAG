@@ -20,6 +20,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { MemoryModule } from '../memory/memory.module';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { IndexReconcilerService } from './index-reconciler.service';
+import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { IndexReconcilerService } from './index-reconciler.service';
     ObsidianKnowledgeModule,
     DomainEventsModule,
     MemoryModule,
+    EmbeddingModule,
   ],
   controllers: [RagAdminController],
   providers: [

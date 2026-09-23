@@ -194,9 +194,11 @@ export class RagOpsApiService {
     const start = (page - 1) * pageSize;
     const items = await Promise.all(
       filtered.slice(start, start + pageSize).map(async (doc) => {
-        const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(
-          doc.docId,
-        );
+        const obsidianPath = doc.userId
+          ? await this.obsidianKnowledge.findNoteByRagDocId(doc.docId, {
+              userId: doc.userId,
+            })
+          : null;
         return {
           docId: doc.docId,
           filename: doc.filename,
@@ -222,7 +224,11 @@ export class RagOpsApiService {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc) return null;
 
-    const obsidianPath = await this.obsidianKnowledge.findNoteByRagDocId(docId);
+    const obsidianPath = doc.userId
+      ? await this.obsidianKnowledge.findNoteByRagDocId(docId, {
+          userId: doc.userId,
+        })
+      : null;
     return {
       docId: doc.docId,
       filename: doc.filename,

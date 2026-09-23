@@ -9,9 +9,11 @@ import {
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
 @ApiTags('payments')
 @ApiBearerAuth()
+@RequirePermission('admin:role:read')
 @Controller('payments')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
@@ -43,6 +45,7 @@ export class PaymentController {
   }
 
   @Post()
+  @RequirePermission('admin:role:update')
   @ApiOperation({ summary: '创建支付', description: '需要登录' })
   @ApiResponse({ status: 201, description: '成功创建支付' })
   @ApiResponse({ status: 400, description: '参数校验失败' })
@@ -52,6 +55,7 @@ export class PaymentController {
   }
 
   @Put(':id/status')
+  @RequirePermission('admin:role:update')
   @ApiOperation({ summary: '更新支付状态', description: '需要登录' })
   @ApiParam({ name: 'id', type: String, description: '支付 ID' })
   @ApiResponse({ status: 200, description: '成功更新支付状态' })
@@ -61,6 +65,7 @@ export class PaymentController {
   }
 
   @Put(':id/cancel')
+  @RequirePermission('admin:role:update')
   @ApiOperation({ summary: '取消支付', description: '需要登录' })
   @ApiParam({ name: 'id', type: String, description: '支付 ID' })
   @ApiResponse({ status: 200, description: '成功取消支付' })

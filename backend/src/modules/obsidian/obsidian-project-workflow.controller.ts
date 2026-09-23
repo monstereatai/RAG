@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { JwtPayload } from '../../common/interfaces/api-response.interface';
 import {
   ObsidianKnowledgeService,
   ProjectWorkflowType,
@@ -38,6 +40,7 @@ export class ObsidianProjectWorkflowController {
   async generate(
     @Param('type') type: string,
     @Body() body: ProjectWorkflowBody,
+    @CurrentUser() user: JwtPayload,
   ) {
     if (!WORKFLOW_TYPES.includes(type as ProjectWorkflowType)) {
       throw new BadRequestException(
@@ -49,14 +52,21 @@ export class ObsidianProjectWorkflowController {
       throw new BadRequestException('question is required');
     }
 
-    return this.obsidianKnowledge.generateProjectWorkflow({
-      type: type as ProjectWorkflowType,
-      title: body.title?.trim() || question,
-      question,
-      context: body.context?.trim(),
-      constraints: this.cleanStringArray(body.constraints),
-      options: this.cleanStringArray(body.options),
-    });
+    return this.obsidianKnowledge.generateProjectWorkflow(
+      {
+        type: type as ProjectWorkflowType,
+        title: body.title?.trim() || question,
+        question,
+        context: body.context?.trim(),
+        constraints: this.cleanStringArray(body.constraints),
+        options: this.cleanStringArray(body.options),
+      },
+      {
+        userId: user.userId,
+        roles: [user.role],
+        tenantId: user.tenantId,
+      },
+    );
   }
 
   private cleanStringArray(value: unknown): string[] {

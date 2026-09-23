@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository } from 'typeorm';
 import { AgentRuntimeEventEntity } from '../../providers/db/entities/agent-runtime-event.entity';
-import { AgentRuntimeEventSequenceEntity } from '../../providers/db/entities/agent-runtime-event-sequence.entity';
 
 @Injectable()
 export class AgentRuntimeEventsService {
@@ -12,8 +11,6 @@ export class AgentRuntimeEventsService {
   constructor(
     @InjectRepository(AgentRuntimeEventEntity)
     private readonly events: Repository<AgentRuntimeEventEntity>,
-    @InjectRepository(AgentRuntimeEventSequenceEntity)
-    private readonly sequences: Repository<AgentRuntimeEventSequenceEntity>,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -32,11 +29,15 @@ export class AgentRuntimeEventsService {
       .catch(() => undefined)
       .then(() => this.persist(input));
     this.threadQueues.set(input.threadId, write);
-    void write.finally(() => {
-      if (this.threadQueues.get(input.threadId) === write) {
-        this.threadQueues.delete(input.threadId);
-      }
-    });
+    // finally 会创建新的 Promise；不能让它把 write 已被调用方处理的拒绝
+    // 再次变成进程级 unhandled rejection。
+    void write
+      .finally(() => {
+        if (this.threadQueues.get(input.threadId) === write) {
+          this.threadQueues.delete(input.threadId);
+        }
+      })
+      .catch(() => undefined);
     return write;
   }
 
@@ -68,46 +69,92 @@ export class AgentRuntimeEventsService {
     );
   }
 
-  private async nextSequence(tenantId: string, threadId: string): Promise<number> {
+  private async nextSequence(
+    tenantId: string,
+    threadId: string,
+  ): Promise<number> {
     if (this.dataSource.options.type === 'postgres') {
-      const rows = await this.dataSource.query(
+      const rawRows: unknown = await this.dataSource.query(
         `INSERT INTO "agent_runtime_event_sequences" ("id", "tenantId", "threadId", "nextSequence") VALUES ($1, $2, $3, 1)
          ON CONFLICT ("tenantId", "threadId") DO UPDATE SET "nextSequence" = "agent_runtime_event_sequences"."nextSequence" + 1, "updatedAt" = CURRENT_TIMESTAMP
          RETURNING "nextSequence"`,
         [randomUUID(), tenantId, threadId],
       );
+      const rows = rawRows as Array<{ nextSequence?: number | string }>;
       return Number(rows[0]?.nextSequence ?? 1);
     }
 
-    // MySQL fallback：唯一键保证每个租户/线程只有一条序号行，更新后再读取。
-    await this.dataSource.query(
-      `INSERT INTO agent_runtime_event_sequences (id, tenantId, threadId, nextSequence) VALUES (?, ?, ?, 1)
-       ON DUPLICATE KEY UPDATE nextSequence = nextSequence + 1, updatedAt = CURRENT_TIMESTAMP`,
-      [randomUUID(), tenantId, threadId],
-    );
-    const rows = await this.sequences.findOne({ where: { tenantId, threadId } });
-    return rows?.nextSequence ?? 1;
+    // MySQL LAST_INSERT_ID(expr) is connection-local, so allocate and read
+    // the sequence through one runner to avoid cross-instance read races.
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    try {
+      await runner.query(
+        `INSERT INTO agent_runtime_event_sequences (id, tenantId, threadId, nextSequence) VALUES (?, ?, ?, LAST_INSERT_ID(1))
+         ON DUPLICATE KEY UPDATE nextSequence = LAST_INSERT_ID(nextSequence + 1), updatedAt = CURRENT_TIMESTAMP`,
+        [randomUUID(), tenantId, threadId],
+      );
+      const rows = (await runner.query(
+        'SELECT LAST_INSERT_ID() AS nextSequence',
+      )) as Array<{ nextSequence?: number | string }>;
+      return Number(rows[0]?.nextSequence ?? 1);
+    } finally {
+      await runner.release();
+    }
   }
 
-  async list(threadId?: string, runId?: string, tenantId = 'legacy') {
+  async list(
+    threadId?: string,
+    runId?: string,
+    tenantId = 'legacy',
+    beforeSequence?: number,
+    requestedLimit = 200,
+  ) {
+    const limit = Math.min(Math.max(Math.trunc(requestedLimit) || 200, 1), 500);
     const rows = await this.events.find({
       where: {
         tenantId,
         ...(threadId ? { threadId } : {}),
         ...(runId ? { runId } : {}),
+        ...(Number.isFinite(beforeSequence) && beforeSequence! > 0
+          ? { sequence: LessThan(beforeSequence!) }
+          : {}),
       },
-      order: { sequence: 'ASC' },
-      take: 2000,
+      order: { sequence: 'DESC' },
+      take: limit,
     });
-    return rows.map((row) => ({ ...row, payload: this.parse(row.payload) }));
+    return rows
+      .reverse()
+      .map((row) => ({ ...row, payload: this.parse(row.payload) }));
   }
 
   async metrics(threadId?: string, runId?: string, tenantId = 'legacy') {
-    const events = await this.list(threadId, runId, tenantId);
-    const count = (type: string) =>
-      events.filter((event) => event.eventType === type).length;
+    const query = this.events
+      .createQueryBuilder('event')
+      .where('event.tenantId = :tenantId', { tenantId });
+    if (threadId) query.andWhere('event.threadId = :threadId', { threadId });
+    if (runId) query.andWhere('event.runId = :runId', { runId });
+    const groups = await query
+      .clone()
+      .select('event.eventType', 'eventType')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('event.eventType')
+      .getRawMany<{ eventType: string; count: string }>();
+    const counts = new Map(
+      groups.map((row) => [row.eventType, Number(row.count)]),
+    );
+    const count = (type: string) => counts.get(type) ?? 0;
+    const recoveredToolCalls = Number(
+      await query
+        .clone()
+        .andWhere('event.eventType = :eventType', { eventType: 'tool.result' })
+        .andWhere('event.payload LIKE :recovered', {
+          recovered: '%"recovered":true%',
+        })
+        .getCount(),
+    );
     return {
-      total: events.length,
+      total: groups.reduce((total, row) => total + Number(row.count), 0),
       tasksCreated: count('task.created'),
       tasksCompleted: count('task.completed'),
       tasksFailed: count('task.failed'),
@@ -127,11 +174,7 @@ export class AgentRuntimeEventsService {
       toolBlocked: count('tool.blocked'),
       approvalAsked: count('approval.asked'),
       approvalDecided: count('approval.decided'),
-      recoveredToolCalls: events.filter(
-        (event) =>
-          event.eventType === 'tool.result' &&
-          Boolean((event.payload as { recovered?: boolean }).recovered),
-      ).length,
+      recoveredToolCalls,
       loopStarts: count('agent.loop.started'),
       loopRounds: count('agent.loop.round.completed'),
       loopCompletions: count('agent.loop.completed'),
@@ -141,9 +184,10 @@ export class AgentRuntimeEventsService {
     };
   }
 
-  private parse(value: string) {
+  private parse(value: string): unknown {
     try {
-      return JSON.parse(value);
+      const parsed: unknown = JSON.parse(value);
+      return parsed;
     } catch {
       return {};
     }

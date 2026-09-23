@@ -20,7 +20,7 @@ service RagService {
 
 message VectorSearchRequest {
   string query = 1;
-  string user_id = 2;
+  string user_id = 2 [deprecated = true]; // ignored; identity comes from gRPC bearer metadata
   int32 top_k = 3;    // 返回结果数，默认 5
   string mode = 4;     // simple / agentic，默认 simple
 }
@@ -47,7 +47,7 @@ message ChunkResult {
 
 message GetDocumentRequest {
   string doc_id = 1;
-  string user_id = 2;
+  string user_id = 2 [deprecated = true]; // ignored; identity comes from gRPC bearer metadata
 }
 
 message GetDocumentResponse {
@@ -62,7 +62,7 @@ message GetDocumentResponse {
 }
 
 message ListDocumentsRequest {
-  string user_id = 1;
+  string user_id = 1 [deprecated = true]; // ignored; identity comes from gRPC bearer metadata
   int32 page = 2;
   int32 page_size = 3;
   string query = 4;

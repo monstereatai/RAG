@@ -200,6 +200,41 @@ describe('AgentLoopService', () => {
     expect(result.terminationReason).toContain('timeout');
   });
 
+  it('aborts an active action when the run is cancelled', async () => {
+    const service = new AgentLoopService(
+      tools as never,
+      events as never,
+      redis as never,
+    );
+    let actionAborted = false;
+    redis.get.mockResolvedValueOnce(null).mockResolvedValue('cancelled');
+
+    const result = await service.run({
+      threadId: 'active-cancel',
+      runId: 'run-1',
+      actor: 'test-agent',
+      initialState: {},
+      maxSteps: 1,
+      maxToolCalls: 0,
+      timeoutMs: 2_000,
+      decide: () => ({
+        type: 'model' as const,
+        name: 'slow-model',
+        execute: (signal) =>
+          new Promise<string>((resolve) => {
+            signal?.addEventListener('abort', () => {
+              actionAborted = true;
+              resolve('cancelled');
+            });
+          }),
+        reduce: (state: object) => state,
+      }),
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(actionAborted).toBe(true);
+  });
+
   it('rejects a checkpoint from another run', async () => {
     const service = new AgentLoopService(
       tools as never,

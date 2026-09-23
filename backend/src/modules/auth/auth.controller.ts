@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -30,6 +31,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { SseTicketService } from './sse-ticket.service';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
+import { SpeechTicketService } from './speech-ticket.service';
+import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -37,6 +40,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly apiTokenService: ApiTokenService,
     private readonly sseTicketService: SseTicketService,
+    private readonly speechTicketService: SpeechTicketService,
   ) {}
 
   @Post('login')
@@ -99,6 +103,37 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   issueSseTicket(@CurrentUser() user: JwtPayload) {
     return this.sseTicketService.issue(user);
+  }
+
+  @Post('speech-ticket')
+  @UseGuards(JwtAuthGuard)
+  @ApiScopes('rag:speech')
+  issueSpeechTicket(@CurrentUser() user: JwtPayload) {
+    return this.speechTicketService.issue(user);
+  }
+
+  @Post('internal/speech-ticket')
+  @UseGuards(ServiceTokenGuard)
+  issueProxySpeechTicket(
+    @Body()
+    body: {
+      ownerUserId?: string;
+      ownerRole?: 'admin' | 'user';
+      tenantId?: string;
+    },
+  ) {
+    if (!body.ownerUserId?.trim()) {
+      throw new BadRequestException('verified owner user id is required');
+    }
+    return this.speechTicketService.issue({
+      userId: body.ownerUserId.trim(),
+      username: body.ownerUserId.trim(),
+      role: body.ownerRole === 'admin' ? 'admin' : 'user',
+      tenantId: body.tenantId?.trim() || 'legacy',
+      authType: 'service',
+      scopes: ['rag:speech'],
+      type: 'access',
+    });
   }
 
   @Get('api-tokens')

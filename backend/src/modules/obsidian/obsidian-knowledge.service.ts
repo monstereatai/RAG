@@ -1,9 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, relative, resolve } from 'node:path';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+
+export interface ObsidianAccessContext {
+  userId?: string;
+  roles?: string[];
+  tenantId?: string;
+}
 
 export interface ObsidianNoteDraft {
   summary: string[];
@@ -19,6 +25,7 @@ export interface ObsidianNoteDraft {
 }
 
 export interface ObsidianSourceInput {
+  userId: string;
   title: string;
   sourceUrl?: string;
   content: string;
@@ -109,13 +116,16 @@ export class ObsidianKnowledgeService {
   ) {}
 
   async writeSource(input: ObsidianSourceInput): Promise<ObsidianWriteResult> {
+    this.assertAccessContext({ userId: input.userId });
     const content = input.content.trim();
     const contentHash = this.hash(content);
     const title = this.normalizeTitle(input.title);
 
     try {
       await this.ensureVault();
-      const duplicate = await this.findNoteByHash(contentHash);
+      const duplicate = await this.findNoteByHash(contentHash, {
+        userId: input.userId,
+      });
       if (duplicate) {
         const content = await readFile(duplicate, 'utf8');
         const frontmatter = this.parseFrontmatter(content);
@@ -173,16 +183,12 @@ export class ObsidianKnowledgeService {
   async search(
     query: string,
     limit = 5,
-    access?: { userId?: string; roles?: string[] },
+    access: ObsidianAccessContext,
   ): Promise<ObsidianSearchHit[]> {
+    this.assertAccessContext(access);
     await this.ensureVault();
-    // 三个目录相互独立；并发枚举可缩短 Obsidian 检索的准备时间。
-    const [compiledFiles, indexFiles, noteFiles] = await Promise.all([
-      this.listMarkdownFiles(this.compiledDir(), 'compiled'),
-      this.listMarkdownFiles(this.indexDir(), 'index'),
-      this.listMarkdownFiles(this.notesDir(), 'note'),
-    ]);
-    const files = [...compiledFiles, ...indexFiles, ...noteFiles];
+    // 旧版 compiled/index 文件可能混入受限笔记，无法可靠还原来源 ACL；只检索逐篇校验的源笔记。
+    const files = await this.listMarkdownFiles(this.notesDir(), 'note');
     const tokens = this.extractTokens(query);
     // 文件内容彼此独立，按固定小批次并发读取，避免大知识库一次打开过多文件。
     const readConcurrency = 8;
@@ -236,13 +242,16 @@ export class ObsidianKnowledgeService {
   /** Obsidian 是文件型知识源，未声明 ACL 的历史笔记视为公开；声明后必须命中用户或角色。 */
   private canReadFrontmatter(
     frontmatter: Record<string, unknown>,
-    access?: { userId?: string; roles?: string[] },
+    access: ObsidianAccessContext,
   ): boolean {
-    if (!access?.userId && !(access?.roles ?? []).length) return true;
-    const userId = access?.userId;
+    const userId = access.userId;
     const roles = access?.roles ?? [];
-    const users = this.frontmatterTags(frontmatter.allowed_users ?? frontmatter.allowedUsers);
-    const allowedRoles = this.frontmatterTags(frontmatter.allowed_roles ?? frontmatter.allowedRoles);
+    const users = this.frontmatterTags(
+      frontmatter.allowed_users ?? frontmatter.allowedUsers,
+    );
+    const allowedRoles = this.frontmatterTags(
+      frontmatter.allowed_roles ?? frontmatter.allowedRoles,
+    );
     if (users.length === 0 && allowedRoles.length === 0) return true;
     return Boolean(
       (userId && users.includes(userId)) ||
@@ -250,12 +259,27 @@ export class ObsidianKnowledgeService {
     );
   }
 
-  async findNoteByRagDocId(docId: string): Promise<string | null> {
+  private assertAccessContext(
+    access: ObsidianAccessContext,
+  ): asserts access is ObsidianAccessContext & { userId: string } {
+    if (!access?.userId?.trim()) {
+      throw new ForbiddenException('Obsidian access context is required');
+    }
+  }
+
+  async findNoteByRagDocId(
+    docId: string,
+    access: ObsidianAccessContext,
+  ): Promise<string | null> {
+    this.assertAccessContext(access);
     if (!docId.trim()) return null;
     for (const file of await this.listMarkdownFiles(this.notesDir(), 'note')) {
       try {
         const content = await readFile(file.path, 'utf8');
-        if (content.includes(`rag_doc_id: "${docId}"`)) {
+        if (
+          content.includes(`rag_doc_id: "${docId}"`) &&
+          this.canReadFrontmatter(this.parseFrontmatter(content), access)
+        ) {
           return file.path;
         }
       } catch {
@@ -267,11 +291,13 @@ export class ObsidianKnowledgeService {
 
   async findSourceByContentHash(
     contentOrHash: string,
+    access: ObsidianAccessContext,
   ): Promise<ObsidianSourceLookup | null> {
+    this.assertAccessContext(access);
     const contentHash = /^[a-f0-9]{64}$/i.test(contentOrHash.trim())
       ? contentOrHash.trim()
       : this.hash(contentOrHash.trim());
-    const notePath = await this.findNoteByHash(contentHash);
+    const notePath = await this.findNoteByHash(contentHash, access);
     if (!notePath) return null;
     const content = await readFile(notePath, 'utf8');
     const frontmatter = this.parseFrontmatter(content);
@@ -288,8 +314,19 @@ export class ObsidianKnowledgeService {
     };
   }
 
-  async exportGraphSeed(): Promise<ObsidianGraphSeed> {
-    const notes = await this.readAllNotes();
+  async exportGraphSeed(
+    access: ObsidianAccessContext,
+  ): Promise<ObsidianGraphSeed> {
+    this.assertAccessContext(access);
+    const notes = (await this.readAllNotes()).filter((note) =>
+      this.canReadFrontmatter(this.parseFrontmatter(note.content), access),
+    );
+    return this.buildGraphSeed(notes);
+  }
+
+  private buildGraphSeed(
+    notes: Array<{ path: string; content: string }>,
+  ): ObsidianGraphSeed {
     const nodes = new Map<string, ObsidianGraphSeed['nodes'][number]>();
     const relationships = new Map<
       string,
@@ -363,7 +400,9 @@ export class ObsidianKnowledgeService {
 
   async generateProjectWorkflow(
     input: ProjectWorkflowInput,
+    access: ObsidianAccessContext,
   ): Promise<ProjectWorkflowResult> {
+    this.assertAccessContext(access);
     await this.ensureVault();
     const title = this.normalizeTitle(input.title || input.question);
     const query = [
@@ -373,7 +412,7 @@ export class ObsidianKnowledgeService {
     ]
       .join('\n')
       .trim();
-    const hits = await this.search(query, 8);
+    const hits = await this.search(query, 8, access);
     const evidence = this.formatHitsForPrompt(hits);
     const body = await this.buildProjectWorkflowMarkdown(input, evidence);
     const date = this.today();
@@ -390,6 +429,7 @@ export class ObsidianKnowledgeService {
       `type: ${this.yamlString(`project_${input.type}`)}`,
       `workflow_type: ${this.yamlString(input.type)}`,
       `date: ${this.yamlString(date)}`,
+      `allowed_users: [${this.yamlString(access.userId)}]`,
       `source_paths: [${hits.map((hit) => this.yamlString(this.vaultRelative(hit.path))).join(', ')}]`,
       `tags: [${this.yamlString('项目决策')}, ${this.yamlString(this.workflowLabel(input.type))}]`,
       '---',
@@ -471,7 +511,7 @@ export class ObsidianKnowledgeService {
     }
     return {
       sufficient: true,
-      reason: 'Obsidian compiled/index 或 source note 命中',
+      reason: 'Obsidian source note 命中',
     };
   }
 
@@ -559,6 +599,7 @@ export class ObsidianKnowledgeService {
       `topics: [${params.draft.topics.map((item) => this.yamlString(item)).join(', ')}]`,
       `entities: [${params.draft.entities.map((item) => this.yamlString(item)).join(', ')}]`,
       `date: ${this.yamlString(params.date)}`,
+      `allowed_users: [${this.yamlString(params.userId)}]`,
       params.ragDocId
         ? `rag_doc_id: ${this.yamlString(params.ragDocId)}`
         : null,
@@ -643,7 +684,9 @@ export class ObsidianKnowledgeService {
   }
 
   private async refreshIndexesOnce(): Promise<void> {
-    const notes = await this.readAllNotes();
+    const notes = (await this.readAllNotes()).filter((note) =>
+      this.isPublicFrontmatter(this.parseFrontmatter(note.content)),
+    );
     await Promise.all([
       mkdir(this.indexDir(), { recursive: true }),
       mkdir(this.compiledDir(), { recursive: true }),
@@ -1082,7 +1125,10 @@ export class ObsidianKnowledgeService {
   }
 
   private async writeGraphSeedIndex(): Promise<void> {
-    const seed = await this.exportGraphSeed();
+    const publicNotes = (await this.readAllNotes()).filter((note) =>
+      this.isPublicFrontmatter(this.parseFrontmatter(note.content)),
+    );
+    const seed = this.buildGraphSeed(publicNotes);
     const dir = resolve(this.indexDir(), 'graph');
     await mkdir(dir, { recursive: true });
     await writeFile(
@@ -1317,6 +1363,7 @@ export class ObsidianKnowledgeService {
     for (const file of files) {
       const content = await readFile(file.path, 'utf8');
       const frontmatter = this.parseFrontmatter(content);
+      if (!this.isPublicFrontmatter(frontmatter)) continue;
       const title = String(
         frontmatter.title ||
           this.titleFromMarkdown(content) ||
@@ -1350,11 +1397,28 @@ export class ObsidianKnowledgeService {
     return notes;
   }
 
-  private async findNoteByHash(contentHash: string): Promise<string | null> {
+  private isPublicFrontmatter(frontmatter: Record<string, unknown>): boolean {
+    return (
+      this.frontmatterTags(
+        frontmatter.allowed_users ?? frontmatter.allowedUsers,
+      ).length === 0 &&
+      this.frontmatterTags(
+        frontmatter.allowed_roles ?? frontmatter.allowedRoles,
+      ).length === 0
+    );
+  }
+
+  private async findNoteByHash(
+    contentHash: string,
+    access: ObsidianAccessContext,
+  ): Promise<string | null> {
     for (const file of await this.listMarkdownFiles(this.notesDir(), 'note')) {
       try {
         const content = await readFile(file.path, 'utf8');
-        if (content.includes(`content_hash: "${contentHash}"`)) {
+        if (
+          content.includes(`content_hash: "${contentHash}"`) &&
+          this.canReadFrontmatter(this.parseFrontmatter(content), access)
+        ) {
           return file.path;
         }
       } catch {

@@ -84,27 +84,17 @@ export class DocumentController {
   ) {
     this.documentQueue.registerProcessor(async (job) => {
       const buffer = await this.objectStorageProvider.getObject(job.objectKey);
-      try {
-        return await this.processAsyncUpload(
-          {
-            originalname: job.filename,
-            mimetype: job.contentType ?? 'application/octet-stream',
-            buffer,
-          } as Express.Multer.File,
-          job.userId,
-          job.taskId,
-          job.businessMetadata,
-          job.tenantId,
-        );
-      } finally {
-        await this.objectStorageProvider
-          .deleteObject(job.objectKey)
-          .catch((error: unknown) =>
-            this.logger.warn(
-              `queued upload cleanup failed for ${job.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-            ),
-          );
-      }
+      return this.processAsyncUpload(
+        {
+          originalname: job.filename,
+          mimetype: job.contentType ?? 'application/octet-stream',
+          buffer,
+        } as Express.Multer.File,
+        job.userId,
+        job.taskId,
+        job.businessMetadata,
+        job.tenantId,
+      );
     });
   }
 

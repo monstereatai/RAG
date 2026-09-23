@@ -37,4 +37,4 @@ RUN mkdir -p /app/workspace
 EXPOSE 3000
 
 # 使用 node 直接运行编译产物（不用 nest start，更轻量）
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]

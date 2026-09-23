@@ -23,6 +23,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { RequireLogin } from '../../common/decorators/require-login.decorator';
 import { AuditLog } from '../../common/decorators/audit-log.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -39,7 +40,8 @@ export class UserController {
   @ApiResponse({ status: 201, description: '用户创建成功' })
   @ApiResponse({ status: 400, description: '参数校验失败' })
   async create(@Body() createUserDto: CreateUserDto) {
-    const user = await this.userService.create(createUserDto);
+    // Public registration may never choose a privileged legacy role.
+    const user = await this.userService.create({ ...createUserDto, role: 'user' });
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _pwd, ...safeUser } = user as any;
     return safeUser;
@@ -68,25 +70,36 @@ export class UserController {
   }
 
   @Get()
+  @RequirePermission('admin:role:read')
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取所有用户列表', description: '需要登录' })
   @ApiResponse({ status: 200, description: '成功返回用户列表' })
   @ApiResponse({ status: 401, description: '未认证' })
   async findAll() {
-    return this.userService.findAll();
+    return (await this.userService.findAll()).map((user: any) => {
+      const safeUser = { ...user };
+      delete safeUser.password;
+      return safeUser;
+    });
   }
 
   @Get(':id')
+  @RequirePermission('admin:role:read')
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取单个用户', description: '需要登录' })
   @ApiParam({ name: 'id', type: Number, description: '用户 ID' })
   @ApiResponse({ status: 200, description: '成功返回用户信息' })
   @ApiResponse({ status: 401, description: '未认证' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.userService.findOne(id);
+    const user = await this.userService.findOne(id);
+    if (!user) return null;
+    const safeUser = { ...user };
+    delete (safeUser as any).password;
+    return safeUser;
   }
 
   @Put(':id')
+  @RequirePermission('admin:role:update')
   @AuditLog('users', 'update')
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新用户信息', description: '需要登录' })
@@ -97,10 +110,15 @@ export class UserController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    return this.userService.update(id, updateUserDto);
+    const user = await this.userService.update(id, updateUserDto);
+    if (!user) return null;
+    const safeUser = { ...user };
+    delete (safeUser as any).password;
+    return safeUser;
   }
 
   @Delete(':id')
+  @RequirePermission('admin:role:delete')
   @AuditLog('users', 'delete')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)

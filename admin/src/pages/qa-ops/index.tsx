@@ -644,7 +644,7 @@ const QaOps: React.FC = () => {
     return '播放';
   };
 
-  const handlePlayTts = (messageId: string, text: string) => {
+  const handlePlayTts = async (messageId: string, text: string) => {
     const content = text.trim();
     if (!content) return;
 
@@ -652,7 +652,13 @@ const QaOps: React.FC = () => {
     setTtsStatusByMessageId({});
     setTtsStatus(messageId, 'connecting');
     const chunks: BlobPart[] = [];
-    const ws = createTtsWebSocket(content.slice(0, 800));
+    let ws: WebSocket;
+    try {
+      ws = await createTtsWebSocket(content.slice(0, 800));
+    } catch {
+      setTtsStatus(messageId, 'error');
+      return;
+    }
     ttsRef.current = ws;
     ws.onopen = () => {
       setTtsStatus(messageId, 'synthesizing');

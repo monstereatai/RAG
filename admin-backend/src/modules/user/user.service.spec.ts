@@ -62,6 +62,17 @@ describe('UserService (in-memory mode)', () => {
     });
   });
 
+  it('refuses in-memory demo users in production', () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => new UserService(undefined)).toThrow('Database is required in production');
+    } finally {
+      if (previousEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousEnv;
+    }
+  });
+
   describe('getPermissionCodes', () => {
     it('能从用户角色中展开权限代码', async () => {
       const user = await service.create({ username: 'grace', password: 'Password@1', email: 'grace@test.com' });

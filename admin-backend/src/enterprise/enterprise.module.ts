@@ -27,6 +27,7 @@ import { SearchOpsModule } from '../modules/search-ops/search-ops.module';
 import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
 import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
 import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
+import { SpeechTicketModule } from '../modules/speech/speech-ticket.module';
 // import { GrpcModule } from '../modules/grpc/grpc.module';
 
 @Module({
@@ -59,6 +60,7 @@ import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
     QaOpsModule,
     GraphOpsModule,
     AgentOpsModule,
+    SpeechTicketModule,
     // GrpcModule, // disabled: proto file missing, use HTTP rag-client instead
   ],
   exports: [
@@ -90,6 +92,7 @@ import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
     QaOpsModule,
     GraphOpsModule,
     AgentOpsModule,
+    SpeechTicketModule,
     // GrpcModule,
   ],
 })

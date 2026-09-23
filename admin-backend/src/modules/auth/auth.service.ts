@@ -19,7 +19,7 @@ export class AuthService {
    */
   async validateUser(username: string, password: string): Promise<Omit<any, 'password'> | null> {
     const user = await this.userService.validateUser(username, password);
-    if (!user) {
+    if (!user || user.isActive === false) {
       return null;
     }
     // 不向 passport 透传 password 字段
@@ -41,6 +41,7 @@ export class AuthService {
       : await this.permissionService.resolveUserPermissionCodes(user.id);
 
     const payload = {
+      type: 'access',
       sub: user.id,
       username: user.username,
       role: user.role ?? 'user',
@@ -49,7 +50,7 @@ export class AuthService {
 
     const access_token = this.jwtService.sign(payload);
     const refresh_token = this.jwtService.sign(
-      { sub: user.id, username: user.username },
+      { type: 'refresh', sub: user.id, username: user.username },
       { expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d') as any },
     );
 
@@ -66,10 +67,13 @@ export class AuthService {
   async refreshToken(refreshToken: string) {
     try {
       const data = this.jwtService.verify(refreshToken);
+      if (data.type !== 'refresh') {
+        throw new UnauthorizedException('token 失效，请重新登录');
+      }
       const id = data.sub || data.userId;
       const user = id ? await this.userService.findOne(Number(id)) : await this.userService.findByUsername(data.username);
 
-      if (!user) {
+      if (!user || user.isActive === false) {
         throw new UnauthorizedException('token 失效，请重新登录');
       }
 

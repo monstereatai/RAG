@@ -79,13 +79,14 @@ describe('AuthService', () => {
         token_type: 'Bearer',
       });
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(1, {
+        type: 'access',
         sub: 1,
         username: 'john',
         role: 'admin',
         permissions: [],
       });
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(2, 
-        { sub: 1, username: 'john' },
+        { type: 'refresh', sub: 1, username: 'john' },
         { expiresIn: '7d' }
       );
     });
@@ -95,14 +96,14 @@ describe('AuthService', () => {
       await service.login(user as any);
 
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(1,
-        expect.objectContaining({ role: 'user' }),
+        expect.objectContaining({ type: 'access', role: 'user' }),
       );
     });
   });
 
   describe('refreshToken', () => {
     it('刷新 token 时保留 username 和权限（角色权限 ∪ 用户直赋权限的并集）', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 1, username: 'john' });
+      mockJwtService.verify.mockReturnValue({ type: 'refresh', sub: 1, username: 'john' });
       mockUserService.findOne.mockResolvedValue({ id: 1, username: 'john', role: 'admin' });
       mockPermissionService.resolveUserPermissionCodes.mockResolvedValue(['admin:role:read']);
 
@@ -110,11 +111,33 @@ describe('AuthService', () => {
 
       expect(mockPermissionService.resolveUserPermissionCodes).toHaveBeenCalledWith(1);
       expect(mockJwtService.sign).toHaveBeenNthCalledWith(1, {
+        type: 'access',
         sub: 1,
         username: 'john',
         role: 'admin',
         permissions: ['admin:role:read'],
       });
     });
+
+    it('rejects an access token presented for refresh', async () => {
+      mockJwtService.verify.mockReturnValue({ type: 'access', sub: 1, username: 'john' });
+
+      await expect(service.refreshToken('access.jwt.token')).rejects.toThrow('token 失效，请重新登录');
+      expect(mockUserService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects refresh for an inactive account', async () => {
+      mockJwtService.verify.mockReturnValue({ type: 'refresh', sub: 1, username: 'john' });
+      mockUserService.findOne.mockResolvedValue({ id: 1, username: 'john', role: 'admin', isActive: false });
+
+      await expect(service.refreshToken('refresh.jwt.token')).rejects.toThrow('token 失效，请重新登录');
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rejects password authentication for an inactive account', async () => {
+    mockUserService.validateUser.mockResolvedValue({ id: 1, username: 'disabled', password: 'hash', isActive: false });
+
+    await expect(service.validateUser('disabled', 'correct-password')).resolves.toBeNull();
   });
 });

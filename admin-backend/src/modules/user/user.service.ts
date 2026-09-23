@@ -15,6 +15,9 @@ export class UserService {
     private readonly userRepository?: Repository<User>,
   ) {
     // 内存模式下初始化默认测试用户
+    if (!this.userRepository && process.env.NODE_ENV === 'production') {
+      throw new Error('Database is required in production; in-memory demo users are disabled');
+    }
     if (!this.userRepository && process.env.NODE_ENV !== 'test') {
       this.initDefaultUsers();
     }

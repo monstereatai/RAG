@@ -79,6 +79,7 @@
 
 ## 最近验证
 
+- 2026-09-23：管理接口授权与认证边界加固：公开注册固定普通角色；用户、订单、支付管理接口按现有角色权限码限制并过滤用户密码字段；JWT 增加 access/refresh 类型区分，登录和刷新拒绝停用账号，生产环境无数据库时拒绝启用内存演示用户。验证：`npm run verify` 通过（build、lint、unit 11 suites / 100 tests、e2e 2 suites / 19 tests、migration check）；lint 保留 3 条既有 warning。
 - 2026-06-30：**组织权限联调基础接口完成**
   - 新增 `AdminOrganizationsController`，`GET /api/admin/organizations` 返回 4 个部门、4 个岗位和树形结构。
   - admin Documents 权限弹窗已接入该接口，部门主体从下拉选择，不再只手输 ID。

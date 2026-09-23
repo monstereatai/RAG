@@ -62,11 +62,13 @@ export async function chat(
   query: string,
   mode: ChatMode,
   rolePresetId: string,
+  threadId?: string,
 ): Promise<ChatResponse> {
   const res = await api.post<ApiResponse<ChatResponse>>('/chat', {
     query,
     mode,
     rolePresetId,
+    threadId,
   });
   return res.data.data;
 }
@@ -137,13 +139,19 @@ export function aguiStream(
   onEvent: (event: AguiEvent) => void,
   onError: (err: Error) => void,
   onClose: () => void,
-): void {
+  threadId?: string,
+): () => void {
   const roleParam = `&rolePresetId=${encodeURIComponent(rolePresetId)}`;
+  let eventSource: EventSource | undefined;
+  let disposed = false;
+  let finished = false;
+
   void issueStreamTicket()
     .then((ticket) => {
-      const url = `/api/v1/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${roleParam}&ticket=${encodeURIComponent(ticket)}`;
-      const eventSource = new EventSource(url);
-      let finished = false;
+      if (disposed) return;
+      const threadParam = threadId ? `&threadId=${encodeURIComponent(threadId)}` : '';
+      const url = `/api/v1/agui/stream?query=${encodeURIComponent(query)}&mode=${mode}${roleParam}${threadParam}&ticket=${encodeURIComponent(ticket)}`;
+      eventSource = new EventSource(url);
 
       eventSource.onmessage = (e) => {
         try {
@@ -151,7 +159,7 @@ export function aguiStream(
           onEvent(event);
           if (event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR') {
             finished = true;
-            eventSource.close();
+            eventSource?.close();
             onClose();
           }
         } catch {
@@ -161,13 +169,20 @@ export function aguiStream(
 
       eventSource.onerror = () => {
         if (finished) return;
+        finished = true;
         onError(new Error('AG-UI SSE connection error'));
-        eventSource.close();
+        eventSource?.close();
       };
     })
     .catch((error: unknown) => {
+      if (disposed) return;
       onError(error instanceof Error ? error : new Error(String(error)));
     });
+
+  return () => {
+    disposed = true;
+    eventSource?.close();
+  };
 }
 
 // TTS SSE：接收 base64 音频块，完成后返回可播放 Blob

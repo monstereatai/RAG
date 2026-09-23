@@ -17,9 +17,11 @@ import {
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
 @ApiTags('orders')
 @ApiBearerAuth()
+@RequirePermission('admin:role:read')
 @Controller('orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
@@ -42,6 +44,7 @@ export class OrderController {
   }
 
   @Post()
+  @RequirePermission('admin:role:update')
   @ApiOperation({ summary: '创建订单', description: '需要登录' })
   @ApiResponse({ status: 201, description: '成功创建订单' })
   @ApiResponse({ status: 400, description: '参数校验失败' })
@@ -51,6 +54,7 @@ export class OrderController {
   }
 
   @Put(':id/status')
+  @RequirePermission('admin:role:update')
   @ApiOperation({ summary: '更新订单状态', description: '需要登录' })
   @ApiParam({ name: 'id', type: String, description: '订单 ID' })
   @ApiResponse({ status: 200, description: '成功更新订单状态' })
@@ -60,6 +64,7 @@ export class OrderController {
   }
 
   @Delete(':id')
+  @RequirePermission('admin:role:delete')
   @ApiOperation({ summary: '删除订单', description: '需要登录' })
   @ApiParam({ name: 'id', type: String, description: '订单 ID' })
   @ApiResponse({ status: 200, description: '成功删除订单' })

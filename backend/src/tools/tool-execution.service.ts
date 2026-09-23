@@ -28,7 +28,8 @@ export interface ExecuteRegisteredToolInput<T> extends ToolExecutionContext {
   approvalGranted?: boolean;
   idempotencyKey?: string;
   sideEffect?: boolean;
-  execute: () => Promise<T>;
+  execute: (signal?: AbortSignal) => Promise<T>;
+  signal?: AbortSignal;
 }
 
 export interface RegisteredToolExecution<T> {
@@ -178,7 +179,8 @@ export class ToolExecutionService {
     }
 
     try {
-      const output = await input.execute();
+      if (input.signal?.aborted) throw new Error('工具执行已取消');
+      const output = await input.execute(input.signal);
       if (redisKey) {
         const markerWritten = await this.redis.setRequired(
           redisKey,

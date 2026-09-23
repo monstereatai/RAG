@@ -152,7 +152,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         deliveredAt: null,
         lastError: null,
       })
-      .where('eventId = :eventId', { eventId: id })
+      .where('eventId = :eventId AND status = :status', {
+        eventId: id,
+        status: 'failed',
+      })
       .execute();
     return this.outbox.save(row);
   }
@@ -208,11 +211,15 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         );
         return;
       }
-      const rows = await this.outbox.find({
-        where: { status: 'pending' },
-        order: { createdAt: 'ASC' },
-        take: 20,
-      });
+      const rows = await this.outbox
+        .createQueryBuilder('event')
+        .where('event.status = :status', { status: 'pending' })
+        .andWhere('(event.availableAt IS NULL OR event.availableAt <= :now)', {
+          now: new Date(),
+        })
+        .orderBy('event.createdAt', 'ASC')
+        .take(20)
+        .getMany();
       for (const row of rows) {
         if (lockAcquired) {
           const renewed = await this.redisProvider.renewLock(
@@ -227,8 +234,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
             return;
           }
         }
-        if (!row.availableAt || row.availableAt <= new Date())
-          await this.deliver(row);
+        await this.deliver(row);
       }
     } catch (error) {
       this.logger.warn(`Outbox dispatch skipped: ${this.message(error)}`);
@@ -294,6 +300,12 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         }
       }
       if (delivery.status === 'delivered') {
+        states.push(delivery);
+        continue;
+      }
+      // Failed is terminal for this subscriber until an explicit retry resets
+      // that delivery row. Other subscribers can continue independently.
+      if (delivery.status === 'failed') {
         states.push(delivery);
         continue;
       }

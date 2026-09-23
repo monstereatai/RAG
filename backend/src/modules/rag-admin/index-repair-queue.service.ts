@@ -98,8 +98,11 @@ export class IndexRepairQueueService implements OnModuleDestroy {
     return this.required;
   }
 
-  static jobId(docId: string): string {
-    return `index-repair-${createHash('sha256').update(docId).digest('hex').slice(0, 32)}`;
+  static jobId(docId: string, fingerprint = ''): string {
+    return `index-repair-${createHash('sha256')
+      .update(`${docId}:${fingerprint}`)
+      .digest('hex')
+      .slice(0, 32)}`;
   }
 
   async enqueue(job: IndexRepairJob): Promise<boolean> {

@@ -11,6 +11,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
 import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
+import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
       ArtifactDependencyEntity,
     ]),
     AgentLoopModule,
+    DocumentPermissionModule,
   ],
   providers: [AgenticRagService],
   exports: [AgenticRagService],

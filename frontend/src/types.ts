@@ -51,6 +51,7 @@ export interface ReferenceChunk {
 export interface ChatResponse {
   answer: string;
   references: ReferenceChunk[];
+  threadId?: string;
   route?: string;
   confidence?: number;
   retryCount?: number;

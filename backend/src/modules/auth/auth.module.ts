@@ -11,6 +11,7 @@ import { SseTicketService } from './sse-ticket.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard';
+import { SpeechTicketService } from './speech-ticket.service';
 
 @Global()
 @Module({
@@ -36,6 +37,7 @@ import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard'
     AuthUserStore,
     TokenStoreService,
     SseTicketService,
+    SpeechTicketService,
     JwtAuthGuard,
     ServiceTokenGuard,
     ApiTokenAccessGuard,
@@ -45,6 +47,7 @@ import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard'
     ApiTokenService,
     AuthUserStore,
     SseTicketService,
+    SpeechTicketService,
     JwtAuthGuard,
     ServiceTokenGuard,
     ApiTokenAccessGuard,

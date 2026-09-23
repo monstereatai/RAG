@@ -10,7 +10,7 @@ export type AgentLoopStatus =
 interface AgentLoopActionBase<TState, TResult> {
   name: string;
   input?: unknown;
-  execute: () => Promise<TResult>;
+  execute: (signal?: AbortSignal) => Promise<TResult>;
   reduce: (state: TState, result: TResult) => TState;
 }
 
@@ -52,9 +52,15 @@ export interface AgentLoopInput<TState, TOutput> {
   maxToolCalls: number;
   timeoutMs: number;
   checkpointTtlSeconds?: number;
+  signal?: AbortSignal;
   decide: (
     state: TState,
-    context: { step: number; toolCalls: number; remainingMs: number },
+    context: {
+      step: number;
+      toolCalls: number;
+      remainingMs: number;
+      signal: AbortSignal;
+    },
   ) =>
     | Promise<AgentLoopDecision<TState, TOutput>>
     | AgentLoopDecision<TState, TOutput>;

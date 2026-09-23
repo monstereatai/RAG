@@ -123,6 +123,8 @@ export class IamService {
     userId: string,
     tenantId = 'legacy',
   ): Promise<string[]> {
+    const tenant = await this.tenants.findOneBy({ id: tenantId });
+    if (!tenant || tenant.status !== 'active') return [];
     const membership = await this.memberships.findOneBy({
       tenantId,
       userId,

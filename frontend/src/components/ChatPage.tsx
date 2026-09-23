@@ -69,6 +69,9 @@ function ChatPage() {
    * 不能在前端根据模型文本推断检索是否可靠。
    */
   const [messages, setMessages] = useState<Message[]>([]);
+  const [threadId, setThreadId] = useState<string | undefined>(
+    () => localStorage.getItem('chatThreadId') ?? undefined,
+  );
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<ChatMode>('auto');
   const [roles, setRoles] = useState<RolePreset[]>([]);
@@ -83,6 +86,11 @@ function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseInputRef = useRef('');
+  const activeStreamRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (threadId) localStorage.setItem('chatThreadId', threadId);
+  }, [threadId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,6 +113,8 @@ function ChatPage() {
 
   useEffect(() => {
     return () => {
+      activeStreamRef.current?.();
+      activeStreamRef.current = null;
       recognitionRef.current?.stop();
     };
   }, []);
@@ -161,7 +171,8 @@ function ChatPage() {
   // 非流式（simple 模式）
   const sendNonStream = async (query: string, m: ChatMode) => {
     try {
-      const res = await chat(query, m, rolePresetId);
+      const res = await chat(query, m, rolePresetId, threadId);
+      if (res.threadId) setThreadId(res.threadId);
       setMessages((prev) => [
         ...prev,
         {
@@ -216,7 +227,7 @@ function ChatPage() {
         });
       };
 
-      aguiStream(
+      activeStreamRef.current = aguiStream(
         query,
         m,
         rolePresetId,
@@ -230,6 +241,10 @@ function ChatPage() {
           switch (type) {
             case 'RUN_STARTED': {
               const input = event.data?.input as { mode?: ChatMode } | undefined;
+              const startedThreadId = event.data?.threadId;
+              if (typeof startedThreadId === 'string' && startedThreadId) {
+                setThreadId(startedThreadId);
+              }
               updateMsg((msg) => ({
                 ...msg,
                 route: input?.mode,
@@ -287,6 +302,7 @@ function ChatPage() {
           }
         },
         (err) => {
+          activeStreamRef.current = null;
           updateMsg((msg) => ({
             ...msg,
             content: msg.content || `错误: ${err.message}`,
@@ -295,12 +311,14 @@ function ChatPage() {
           resolve();
         },
         () => {
+          activeStreamRef.current = null;
           updateMsg((msg) => ({
             ...msg,
             status: msg.status === 'streaming' ? 'done' : msg.status,
           }));
           resolve();
         },
+        threadId,
       );
     });
   };

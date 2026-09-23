@@ -124,6 +124,7 @@ export class SupervisorService {
    * Supervisor 入口：自动路由到合适领域 → 执行对应 Agent 管线
    */
   async query(task: string, signal?: AbortSignal): Promise<SupervisorResult> {
+    signal?.throwIfAborted();
     const start = Date.now();
     const timeoutMs = Math.min(
       Math.max(
@@ -134,41 +135,66 @@ export class SupervisorService {
     );
     const controller = new AbortController();
     const timeout = setTimeout(
-      () => controller.abort(new Error(`Supervisor timed out after ${timeoutMs}ms`)),
+      () =>
+        controller.abort(
+          new Error(`Supervisor timed out after ${timeoutMs}ms`),
+        ),
       timeoutMs,
     );
     const forwardAbort = () => controller.abort(signal?.reason);
     if (signal) {
-      signal.throwIfAborted();
       signal.addEventListener('abort', forwardAbort, { once: true });
     }
+    let rejectOnAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectOnAbort = () =>
+        reject(
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error('Supervisor 已取消'),
+        );
+      if (controller.signal.aborted) rejectOnAbort();
+      else
+        controller.signal.addEventListener('abort', rejectOnAbort, {
+          once: true,
+        });
+    });
 
     try {
       // 1. 领域路由
-      const domain = await this.routeToDomain(task, controller.signal);
-      this.logger.log(`Routed to domain: ${domain.name} (${domain.description})`);
+      return await Promise.race([
+        (async () => {
+          const domain = await this.routeToDomain(task, controller.signal);
+          this.logger.log(
+            `Routed to domain: ${domain.name} (${domain.description})`,
+          );
 
-      // 2. 执行该领域的 Agent 管线
-      const pipelineResult = await this.agentPipeline.runPartial(
-        task,
-        domain.pipeline,
-        undefined,
-        controller.signal,
-      );
+          // 2. 执行该领域的 Agent 管线
+          const pipelineResult = await this.agentPipeline.runPartial(
+            task,
+            domain.pipeline,
+            undefined,
+            controller.signal,
+          );
 
-      return {
-        domain: domain.name,
-        answer: pipelineResult.finalOutput ?? '',
-        confidence: pipelineResult.overallConfidence,
-        stages: pipelineResult.stages.map((s) => ({
-          agent: s.agent,
-          durationMs: s.durationMs,
-          confidence: s.confidence,
-        })),
-        totalDurationMs: Date.now() - start,
-      };
+          return {
+            domain: domain.name,
+            answer: pipelineResult.finalOutput ?? '',
+            confidence: pipelineResult.overallConfidence,
+            stages: pipelineResult.stages.map((s) => ({
+              agent: s.agent,
+              durationMs: s.durationMs,
+              confidence: s.confidence,
+            })),
+            totalDurationMs: Date.now() - start,
+          };
+        })(),
+        aborted,
+      ]);
     } finally {
       clearTimeout(timeout);
+      if (rejectOnAbort)
+        controller.signal.removeEventListener('abort', rejectOnAbort);
       signal?.removeEventListener('abort', forwardAbort);
     }
   }
@@ -176,7 +202,10 @@ export class SupervisorService {
   /**
    * 领域路由：先用关键词快速匹配，再用 LLM 分类
    */
-  private async routeToDomain(task: string, signal?: AbortSignal): Promise<DomainConfig> {
+  private async routeToDomain(
+    task: string,
+    signal?: AbortSignal,
+  ): Promise<DomainConfig> {
     signal?.throwIfAborted();
     // 关键词快速匹配
     const keywordMatch = this.matchByKeywords(task);
@@ -207,7 +236,10 @@ export class SupervisorService {
     return bestScore >= 2 ? bestMatch : null;
   }
 
-  private async classifyByLlm(task: string, signal?: AbortSignal): Promise<DomainConfig> {
+  private async classifyByLlm(
+    task: string,
+    signal?: AbortSignal,
+  ): Promise<DomainConfig> {
     const model = this.llmProvider.getModel();
     const domainNames = this.domains.map((d) => d.name);
 
@@ -220,15 +252,18 @@ export class SupervisorService {
 
     try {
       const structured = model.withStructuredOutput(schema);
-      const result = await structured.invoke([
-        {
-          role: 'system',
-          content: `你是一个智能路由器。根据用户问题判断它属于哪个领域。
+      const result = await structured.invoke(
+        [
+          {
+            role: 'system',
+            content: `你是一个智能路由器。根据用户问题判断它属于哪个领域。
 可选领域：
 ${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
-        },
-        { role: 'user', content: task },
-      ], { signal });
+          },
+          { role: 'user', content: task },
+        ],
+        { signal },
+      );
 
       const matched = this.domains.find((d) => d.name === result.domain);
       if (matched) {

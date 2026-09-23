@@ -68,6 +68,7 @@ describe('App E2E', () => {
       username: 'e2e_user',
       password: 'Password@E2E1',
       email: 'e2e@test.com',
+      role: 'admin',
     };
 
     let accessToken: string;
@@ -80,6 +81,7 @@ describe('App E2E', () => {
         .expect(201);
 
       expect(res.body).toMatchObject({ username: testUser.username });
+      expect(res.body.role).toBe('user');
       expect(res.body).not.toHaveProperty('password');
     });
 
@@ -117,14 +119,30 @@ describe('App E2E', () => {
       await request(app.getHttpServer()).get('/users').expect(401);
     });
 
-    it('GET /users — 带有效 token 返回 200 和用户列表', async () => {
+    it('GET /users/me — 带有效 token 返回当前用户且用户不能读取管理用户列表', async () => {
       const res = await request(app.getHttpServer())
-        .get('/users')
+        .get('/users/me')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.username).toBe(testUser.username);
+      await request(app.getHttpServer())
+        .get('/users')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(401);
+      await request(app.getHttpServer())
+        .put('/users/1')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ password: 'Changed@Password1' })
+        .expect(401);
+      await request(app.getHttpServer())
+        .get('/orders')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(401);
+      await request(app.getHttpServer())
+        .get('/payments')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(401);
     });
 
     it('GET /permissions — 无权限码时拒绝访问', async () => {

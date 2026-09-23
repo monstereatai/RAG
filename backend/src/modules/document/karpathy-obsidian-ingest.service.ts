@@ -33,8 +33,12 @@ export class KarpathyObsidianIngestService {
         this.extractTitleFromMarkdown(content) ||
         params.url,
     );
-    const duplicate =
-      await this.obsidianKnowledge.findSourceByContentHash(content);
+    const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
+      content,
+      {
+        userId: params.userId,
+      },
+    );
     if (
       duplicate?.ragDocId &&
       !this.hasBusinessMetadata(params.businessMetadata)
@@ -96,6 +100,7 @@ export class KarpathyObsidianIngestService {
         businessMetadata: params.businessMetadata,
         onQualityAccepted: async (docId) => {
           obsidian = await this.obsidianKnowledge.writeSource({
+            userId: params.userId,
             title,
             sourceUrl: params.extracted.finalUrl || params.url,
             content,
@@ -127,6 +132,7 @@ export class KarpathyObsidianIngestService {
   }): Promise<KarpathyObsidianIngestResult> {
     const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
       params.content,
+      { userId: params.userId },
     );
     if (
       duplicate?.ragDocId &&
@@ -194,6 +200,7 @@ export class KarpathyObsidianIngestService {
         businessMetadata: params.businessMetadata,
         onQualityAccepted: async (docId) => {
           obsidian = await this.obsidianKnowledge.writeSource({
+            userId: params.userId,
             title: params.title,
             sourceUrl: params.sourceUrl,
             content: params.content,

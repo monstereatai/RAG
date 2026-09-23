@@ -16,7 +16,13 @@ describe('DomainEventsService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((value) => value),
       save: jest.fn().mockResolvedValue(undefined),
-      find: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
     } as any;
     const subscriptions = { find: jest.fn().mockResolvedValue([]) } as any;
     const redis = {
@@ -93,6 +99,43 @@ describe('DomainEventsService', () => {
     expect(first.idempotencyKey).not.toBe(second.idempotencyKey);
   });
 
+  it('retries only failed subscription deliveries', async () => {
+    const { outbox, redis, subscriptions } = (() => {
+      const outbox = {
+        findOneBy: jest.fn().mockResolvedValue({ id: 'event-1' }),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      return {
+        outbox,
+        subscriptions: {} as any,
+        redis: {} as any,
+      };
+    })();
+    const where = jest.fn().mockReturnThis();
+    const deliveries = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where,
+        execute: jest.fn().mockResolvedValue(undefined),
+      }),
+    };
+    const service = new DomainEventsService(
+      config,
+      outbox as never,
+      subscriptions,
+      redis,
+      deliveries as never,
+    );
+
+    await service.retry('event-1');
+
+    expect(where).toHaveBeenCalledWith(
+      'eventId = :eventId AND status = :status',
+      { eventId: 'event-1', status: 'failed' },
+    );
+  });
+
   it('redacts sensitive fields nested inside event payloads', async () => {
     const { service, outbox } = createService();
 
@@ -114,7 +157,7 @@ describe('DomainEventsService', () => {
   it('does not dispatch without the required distributed lock', async () => {
     const { service, outbox } = createService();
     await (service as any).dispatchPending();
-    expect(outbox.find).not.toHaveBeenCalled();
+    expect(outbox.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it('releases the dispatch lock after processing a batch', async () => {
@@ -123,10 +166,54 @@ describe('DomainEventsService', () => {
       setIfAbsent: jest.fn().mockResolvedValue(true),
     });
     await (service as any).dispatchPending();
-    expect(outbox.find).toHaveBeenCalled();
+    expect(outbox.createQueryBuilder).toHaveBeenCalled();
     expect(redis.releaseLock).toHaveBeenCalledWith(
       'rag:domain-events:dispatch-lock',
       expect.any(String),
     );
+  });
+
+  it('does not redeliver a subscriber delivery already marked failed', async () => {
+    const subscription = {
+      id: 'sub-1',
+      tenantId: 'tenant-1',
+      eventTypes: '["document.created"]',
+    };
+    const delivery = {
+      id: 'delivery-1',
+      eventId: 'event-1',
+      subscriptionId: 'sub-1',
+      status: 'failed',
+      attempts: 5,
+      maxAttempts: 5,
+    };
+    const deliveries = {
+      findOne: jest.fn().mockResolvedValue(delivery),
+      save: jest.fn(),
+    };
+    const outbox = { save: jest.fn().mockResolvedValue(undefined) };
+    const subscriptions = { find: jest.fn().mockResolvedValue([subscription]) };
+    const service = new DomainEventsService(
+      config,
+      outbox as never,
+      subscriptions as never,
+      { isEnabled: jest.fn().mockReturnValue(false) } as never,
+      deliveries as never,
+    );
+    const post = jest
+      .spyOn(service as any, 'post')
+      .mockResolvedValue(undefined);
+
+    await (service as any).deliver({
+      id: 'event-1',
+      tenantId: 'tenant-1',
+      eventType: 'document.created',
+      aggregateType: 'document',
+      aggregateId: 'doc-1',
+      attempts: 5,
+    });
+
+    expect(post).not.toHaveBeenCalled();
+    expect(deliveries.save).not.toHaveBeenCalled();
   });
 });

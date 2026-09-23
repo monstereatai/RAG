@@ -238,8 +238,38 @@ describe('ProductionWorkflowService', () => {
       ),
     ).rejects.toThrow('workflow not found');
 
-    await expect(service.status(state.threadId, 'user-1', 'tenant-b')).rejects.toThrow(
-      'workflow not found',
+    await expect(
+      service.status(state.threadId, 'user-1', 'tenant-b'),
+    ).rejects.toThrow('workflow not found');
+  });
+
+  it('keeps workflow runtime and domain events in the workflow tenant', async () => {
+    const runtimeEvents = { emit: jest.fn().mockResolvedValue(undefined) };
+    const domainEvents = { emit: jest.fn().mockResolvedValue(undefined) };
+    const service = Object.create(
+      ProductionWorkflowService.prototype,
+    ) as ProductionWorkflowService;
+    (service as any).runtimeEvents = runtimeEvents;
+    (service as any).domainEvents = domainEvents;
+    const state = {
+      tenantId: 'tenant-a',
+      threadId: 'thread-a',
+      runId: 'run-a',
+      projectId: 'project-a',
+    };
+
+    await (service as any).emitRuntimeEvent(state, 'run.started', 'workflow', {
+      source: 'test',
+    });
+    await (service as any).emitDomainEvent('workflow.started', state, {
+      source: 'test',
+    });
+
+    expect(runtimeEvents.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-a' }),
+    );
+    expect(domainEvents.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-a' }),
     );
   });
 
