@@ -99,13 +99,13 @@ sequenceDiagram
 
   U->>F: Upload file
   F->>B: POST /api/v1/documents/upload
-  B->>B: JWT auth + userId
+  B->>B: JWT auth + tenantId + userId
   B->>P: Parse file
   P->>B: Text content
   B->>B: Detect type + quality gate
   B->>B: Strategy routing + structure-aware chunking
   B->>E: Generate embeddings
-  E->>V: Insert chunks by userId/docId
+  E->>V: Insert chunks by tenantId/userId/docId
   B->>S: Index text chunks
   B->>D: Save document metadata
   B-->>F: docId / chunkCount
@@ -187,13 +187,12 @@ NEO4J_URL=bolt://localhost:7687
 
 ## 6. 数据与隔离设计
 
-系统以 `userId` 作为多租户隔离边界：
+系统以 `tenantId` 作为租户隔离边界，并以 `userId` 表示用户身份和资源所有权。认证上下文应贯穿 API、异步任务、检查点与检索；资源 ACL 进一步限定租户内可见范围。生产需启用 `AUTH_REQUIRE_TENANT_CONTEXT` 与 `AUTH_ENFORCE_IAM`，旧索引和历史无租户数据按迁移／对账结果收紧，不把兼容默认值视为隔离已完成。
 
-- PostgreSQL 查询按 `userId` 过滤。
-- Redis key 包含用户或会话隔离维度。
-- Milvus chunk metadata 包含 `userId`、`docId`，检索时过滤。
-- BM25 索引按用户文档有效集合过滤。
-- GraphRAG 查询按 `userId` 过滤图谱数据。
+- PostgreSQL 资源查询同时使用租户条件与所有权／ACL 条件。
+- Redis key 和队列／检查点上下文包含租户及用户／会话隔离维度。
+- Milvus、Elasticsearch、BM25 和 Neo4j 检索／对账按租户与文档权限过滤。
+- 租户字段回填、非空收紧、旧索引重建和跨租户故障演练必须有独立验收证据。
 - SSE token 支持 query 参数鉴权，兼容浏览器原生 EventSource。
 
 ## 7. Provider 设计

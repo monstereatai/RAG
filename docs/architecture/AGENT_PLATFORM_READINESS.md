@@ -125,7 +125,7 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 ## 2026-09-22 六项生产治理改造
 
 - **资源租户字段迁移**：迁移 `1788100000000-AddTenantIamRuntimeGovernance` 为资源表补齐 `tenantId`、租户索引，并将历史记录回填到 `legacy`；迁移 `1788200000000-DefaultLegacyTenantScope` 为旧调用方设置安全默认值。字段暂时保持可空，应用层可渐进收紧，避免历史任务在升级时丢失。
-- **关系型 IAM**：新增 `iam_tenants`、`iam_memberships`、`iam_roles`、`iam_permissions`、`iam_role_permissions`、`iam_membership_roles`，内置 legacy 管理员／只读角色和 `platform.read` 权限；`IamService` 提供租户、成员、角色和权限查询，认证存储仍可独立运行，后续可按租户逐步切换正式授权。
+- **关系型 IAM**：新增 `iam_tenants`、`iam_memberships`、`iam_roles`、`iam_permissions`、`iam_role_permissions`、`iam_membership_roles`，内置 legacy 管理员／只读角色；`platform.read` 保留为平台基础读取权限，`ApiScopes` 目录中的每个接口 scope 也会登记为 IAM 权限。认证用户仍使用 Redis JSON 存储，身份主数据切换到 PostgreSQL 仍待完成。
 - **跨实例运行事件序号**：`agent_runtime_event_sequences` 以 `(tenantId, threadId)` 唯一键和 PostgreSQL 原子 upsert 分配序号；`agent_runtime_events` 另加 `(tenantId, threadId, sequence)` 唯一索引，运行事件不再依赖单实例内存队列，跨实例追加事件不会产生重复序号。
 - **订阅级 Outbox 账本**：`domain_event_deliveries` 以 `(eventId, subscriptionId)` 唯一键记录每个订阅的尝试次数、退避、成功和失败；某个 webhook 失败不会重复投递已经成功的其他订阅，人工 retry 会重置对应账本。
 - **Supervisor 全链路取消**：Supervisor 自带可配置总超时，并把 `AbortSignal` 传入领域路由、Agent 管线和每个模型调用；取消或超时会中断后续阶段，不再把取消误报成普通低置信度结果。
@@ -135,7 +135,7 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 
 ## 2026-09-22 剩余生产大项收口
 
-- **IAM 正式接管用户入口**：登录／刷新会为用户补齐租户成员、`reader`／`admin` 系统角色和 `platform.read` 权限；生产开启 `AUTH_ENFORCE_IAM` 时，所有带 `ApiScopes` 的用户接口除 API Token scope 外，还必须通过当前租户的 IAM 成员权限检查，服务令牌仍由独立 `ServiceTokenGuard` 处理。成员、角色和权限初始化具备并发幂等保护。
+- **IAM API 权限门禁**：登录／刷新会为用户补齐租户成员及 `reader`／`admin` 系统角色；生产启用 `AUTH_ENFORCE_IAM` 时，带 `ApiScopes` 的用户接口逐项检查当前租户对应的 IAM permission code，API Token 还需满足自身 scope；未登记的 API scope 在启动期失败，避免新增路由绕开 IAM 权限目录。服务令牌仍由独立 `ServiceTokenGuard` 处理。认证用户仍在 Redis JSON，迁移 PostgreSQL 用户主表需补邮箱／激活字段和迁移。
 - **问答会话租户隔离**：Conversation 的创建、读取、列表、删除、消息写入、历史缓存和审批恢复均携带租户条件；同一用户跨租户时不会复用另一租户的会话缓存或向其中写入消息。
 - **运行中心租户隔离**：Chat／AG-UI 创建 Agent Run 时写入租户，运行事件、客户端断流取消、审批恢复和按线程查找活动 Run 都复用同一租户条件，避免只凭 `threadId` 或 `runId` 跨租户读取或取消。
 - **索引自动修复闭环**：`bm25_content_hash_mismatch`、`elasticsearch_content_hash_mismatch` 及 generation 不一致现在会进入 Index Reconciler 的持久修复队列，不再只被审计报告发现而不自动修复。

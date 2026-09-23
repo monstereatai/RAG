@@ -3,7 +3,6 @@ import {
   Injectable,
   Logger,
   OnModuleInit,
-  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -23,7 +22,6 @@ import { DocumentReviewEntity } from '../../providers/db/entities/document-revie
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { requiresKnowledgeRetrieval } from '../../rag/prompts/query-intent-router';
 import { randomUUID } from 'node:crypto';
-import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
 import { KarpathyObsidianIngestService } from '../document/karpathy-obsidian-ingest.service';
@@ -160,8 +158,6 @@ export class RagAdminService implements OnModuleInit {
     private readonly docMetaRepo: Repository<DocumentMetaEntity>,
     @InjectRepository(DocumentReviewEntity)
     private readonly documentReviewRepo: Repository<DocumentReviewEntity>,
-    @InjectRepository(FactConflictEntity)
-    private readonly factConflictRepo: Repository<FactConflictEntity>,
     @InjectRepository(DocumentPermissionEntity)
     private readonly permissionRepo: Repository<DocumentPermissionEntity>,
     private readonly domainEvents: DomainEventsService,
@@ -2046,217 +2042,5 @@ export class RagAdminService implements OnModuleInit {
   async getQaCostSummary() {
     const summary = await this.queryLogService.getCostSummary();
     return { available: true, data: summary };
-  }
-
-  // ─── Graph Operations ─────────────────────────────────────────
-
-  async getGraphSchema() {
-    if (!this.graphService.isEnabled()) {
-      return {
-        available: false,
-        data: {
-          enabled: false,
-          nodeCount: 0,
-          relationshipCount: 0,
-          labels: [],
-          relationshipTypes: [],
-        },
-        error: 'GraphRAG is disabled',
-      };
-    }
-    const schema = await this.graphService.getSchema('admin');
-    return {
-      available: true,
-      data: schema,
-    };
-  }
-
-  async getGraphEntities(
-    query: { keyword?: string; type?: string; limit?: number } = {},
-  ) {
-    if (!this.graphService.isEnabled()) {
-      return {
-        available: false,
-        data: [],
-        total: 0,
-        error: 'GraphRAG is disabled',
-      };
-    }
-    const items = await this.graphService.listEntities('admin', query);
-    return {
-      available: true,
-      data: items,
-      total: items.length,
-    };
-  }
-
-  async getGraphEntityDetail(id: string) {
-    if (!this.graphService.isEnabled()) {
-      return { available: false, data: null, error: 'GraphRAG is disabled' };
-    }
-    const data = await this.graphService.getEntityDetail('admin', id);
-    return {
-      available: true,
-      data,
-    };
-  }
-
-  async updateGraphEntity(
-    id: string,
-    input: {
-      type?: string;
-      aliases?: string[];
-      sourceId?: string;
-      properties?: Record<string, unknown>;
-    },
-  ) {
-    if (!this.graphService.isEnabled()) {
-      return { available: false, data: null, error: 'GraphRAG is disabled' };
-    }
-    const data = await this.graphService.updateEntity('admin', id, input);
-    if (!data) {
-      throw new NotFoundException(`graph entity ${id} not found`);
-    }
-    return {
-      available: true,
-      data,
-    };
-  }
-
-  async getGraphRelationships(
-    query: {
-      query?: string;
-      relationType?: string;
-      conflictOnly?: boolean;
-      limit?: number;
-    } = {},
-  ) {
-    if (!this.graphService.isEnabled()) {
-      return {
-        available: false,
-        data: [],
-        total: 0,
-        error: 'GraphRAG is disabled',
-      };
-    }
-    const items = await this.graphService.listRelationships('admin', query);
-    return {
-      available: true,
-      data: items,
-      total: items.length,
-    };
-  }
-
-  async searchGraph(
-    query: {
-      query?: string;
-      relationType?: string;
-      conflictOnly?: boolean;
-      limit?: number;
-    } = {},
-  ) {
-    if (!this.graphService.isEnabled()) {
-      return {
-        available: false,
-        data: { nodes: [], edges: [] },
-        error: 'GraphRAG is disabled',
-      };
-    }
-
-    const [nodes, edges] = await Promise.all([
-      // 管理后台使用服务令牌访问，不绑定普通会话用户；图谱数据仍由 GraphService
-      // 对普通用户按 userId 隔离，管理查询使用 '*' 表示当前租户可见的全部图谱。
-      this.graphService.listEntities('*', {
-        keyword: query.query,
-        limit: query.limit ?? 100,
-      }),
-      this.graphService.listRelationships('*', query),
-    ]);
-
-    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-    for (const edge of edges) {
-      if (!nodeMap.has(edge.source)) {
-        nodeMap.set(edge.source, {
-          id: edge.source,
-          label: edge.sourceLabel,
-          type: edge.sourceType,
-          aliases: [],
-          sourceId: edge.sourceId,
-          relationshipCount: 1,
-          confidence: edge.confidence,
-          updatedAt: edge.updatedAt,
-          properties: {},
-        });
-      }
-      if (!nodeMap.has(edge.target)) {
-        nodeMap.set(edge.target, {
-          id: edge.target,
-          label: edge.targetLabel,
-          type: edge.targetType,
-          aliases: [],
-          sourceId: edge.sourceId,
-          relationshipCount: 1,
-          confidence: edge.confidence,
-          updatedAt: edge.updatedAt,
-          properties: {},
-        });
-      }
-    }
-
-    return {
-      available: true,
-      data: {
-        nodes: Array.from(nodeMap.values()),
-        edges,
-      },
-    };
-  }
-
-  async getGraphOrphans() {
-    if (!this.graphService.isEnabled()) {
-      return {
-        available: false,
-        data: [],
-        total: 0,
-        error: 'GraphRAG is disabled',
-      };
-    }
-    const items = await this.graphService.getOrphanEntities('admin');
-    return {
-      available: true,
-      data: items,
-      total: items.length,
-    };
-  }
-
-  async getGraphConflicts() {
-    const conflicts = await this.factConflictRepo.find({
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
-
-    return {
-      available: true,
-      total: conflicts.length,
-      data: conflicts.map((c) => ({
-        id: c.id,
-        source: c.subject,
-        sourceLabel: c.subject,
-        target: c.conflictingValue,
-        targetLabel: c.conflictingValue,
-        label: c.predicate,
-        confidence: 1,
-        docId: c.docId,
-        subject: c.subject,
-        predicate: c.predicate,
-        currentValue: c.currentValue,
-        conflictingValue: c.conflictingValue,
-        currentVersion: c.currentVersion,
-        conflictingVersion: c.conflictingVersion,
-        status: c.status,
-        sourceAuthority: c.sourceAuthority,
-        createdAt: c.createdAt.toISOString(),
-      })),
-    };
   }
 }

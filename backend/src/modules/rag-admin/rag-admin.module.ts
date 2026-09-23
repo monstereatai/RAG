@@ -21,6 +21,7 @@ import { MemoryModule } from '../memory/memory.module';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { IndexReconcilerService } from './index-reconciler.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
+import { RagAdminGraphService } from './rag-admin-graph.service';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { EmbeddingModule } from '../../providers/embedding/embedding.module';
     QueryLogService,
     IndexRepairQueueService,
     IndexReconcilerService,
+    RagAdminGraphService,
   ],
   exports: [QueryLogService],
 })

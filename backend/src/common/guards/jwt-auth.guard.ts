@@ -97,13 +97,17 @@ export class JwtAuthGuard implements CanActivate {
       if (!tenantId || !this.iamService) {
         throw new ForbiddenException('IAM tenant membership is required');
       }
-      const allowed = await this.iamService.hasPermission(
-        authenticatedPayload.userId,
-        'platform.read',
-        tenantId,
-      );
-      if (!allowed) {
-        throw new ForbiddenException('IAM permission is insufficient');
+      for (const permission of requiredScopes) {
+        const allowed = await this.iamService.hasPermission(
+          authenticatedPayload.userId,
+          permission,
+          tenantId,
+        );
+        if (!allowed) {
+          throw new ForbiddenException(
+            `IAM permission is insufficient: ${permission}`,
+          );
+        }
       }
     }
 

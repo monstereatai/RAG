@@ -49,6 +49,10 @@
 
 ## 当前结论
 
+- **本轮 IAM 门禁与就绪报告收口（2026-09-23）**：`AUTH_ENFORCE_IAM` 不再用通用 `platform.read` 放行全部带 `ApiScopes` 的接口，而是逐项核验接口声明的 scope；API scope 与 IAM 权限共用目录，未登记的新 scope 会在启动期失败。默认 `admin` 拥有目录内全部 API 权限，`reader` 仅获普通用户业务权限，不含评测、运维、MCP 和 Token 管理权限；缺省租户身份签发为 `legacy` 时，JWT 与 IAM 成员租户保持一致。`enterprise:readiness` 现在显式输出本地检查状态与 `productionReady`，避免把本地资产齐备误读为生产验收完成。CLAUDE、README、架构文档与部署清单统一 `tenantId` 隔离口径，并将 IAM scope 门禁和跨租户矩阵加入发布验收。Backend 定向 12 项、目标文件 lint、build、文档一致性检查通过。认证用户仍在 Redis JSON 存储；迁移到 PostgreSQL 需要新增用户字段及迁移，当前等待单独授权；真实业务集与生产多实例验收未执行。
+
+- **本轮 RagAdmin 图谱域拆分（2026-09-23）**：将图谱 schema、实体／关系查询、图谱搜索、孤立实体和事实冲突映射从超大 `RagAdminService` 移至 `RagAdminGraphService`，HTTP 路由、调用参数和返回结构保持不变；新增服务定向用例。图谱服务／控制器／RagAdmin 原有测试 29 项、Backend build、目标文件 ESLint 与 `git diff --check` 通过；未改变数据库 schema。
+
 - **本轮全项目运行边界修复（2026-09-23）**：后台用户权限与 access／refresh token 类型已收紧；文档源文件改为成功处理后清理，失败自动重试耗尽后保留 24 小时供人工重放；gRPC 默认关闭并要求 TLS/JWT，语音 WebSocket 改用 30 秒单次票据，Obsidian 检索／图谱读取按调用者 ACL 过滤；人工审批恢复会重新校验引用权限，Agent Loop 与 Supervisor 将取消信号传入模型／工具并在取消或超时时尽快结束；索引修复只重建派生索引并校验 hash／generation，审计增加游标轮巡；运行事件序号改为数据库原子分配并支持有界分页，Outbox 只扫描到期任务且跳过终态失败订阅；用户端复用会话 threadId 并在卸载时关闭 SSE；共享 HTML／SVG Artifact 预览加 sandbox CSP 与 MIME 防嗅探；生产 Compose 移除基础设施公网端口、去除默认凭据并要求部署环境显式提供密码，Backend 镜像入口修正为 `dist/src/main.js`。验证：Backend 全量 Jest 90 套／438 项、build、文档一致性检查通过；admin-backend build 与目标测试、admin 和 frontend build 通过；Backend 核心 Agent Loop／运行事件／Supervisor 文件定向 lint 通过；生产 Compose `config --quiet` 和 `git diff --check` 通过。真实 PostgreSQL／Redis／Milvus／ES／Neo4j 多实例并发和生产网络环境未执行演练；未运行生产服务、未执行迁移或真实数据删除、未提交。
 
 - **本轮高风险生产治理（2026-09-22）**：生产环境不再因认证存储为空自动创建 `admin／user` 已知凭据；新建 API Token 默认仅授予 `rag:chat`，高风险 scope 必须显式申请。文档同步上传增加 Multer 文件大小上限；异步入库先写入对象存储，BullMQ 只传 `objectKey`，Worker 完成或失败后清理临时对象，避免把完整 Base64 文件塞进 Redis。Domain Event Outbox 的隐式幂等键改为事件内容摘要，后续生命周期事件不会被同一聚合的旧事件吞掉；事件 payload 改为递归移除 prompt、凭据、Cookie 等敏感字段。定时任务恢复、启动、刷新和停止会等待 BullMQ Scheduler 成功或显式失败，数据库不会在注册失败时标记为 running。Backend 全量 Jest 83 套／416 项、Backend lint、Backend build 与 `git diff --check` 通过。关系型资源 `tenant_id`／IAM 主数据、跨实例运行事件序号、按订阅投递账本、真实模型超时取消和索引内容 hash 对账仍需 schema／目标环境授权与验证。

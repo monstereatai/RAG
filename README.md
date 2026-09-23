@@ -12,7 +12,7 @@
 - **M2 Agentic RAG 已完成**：整合 deepAgent 检索规划、Query 扩展、充分性评估、Bocha 联网搜索兜底、DashScope Rerank 重排序、大模型流式生成、置信度自我评估与重试，支持 SSE 全链路事件流式推送，并通过 `AGENTIC_*` 环境变量限制重试、查询扩展、检索、联网和重排预算。
 - **M3 工程化与多租户隔离已完成**：
   - **JWT 鉴权防护**：对除 `/auth/login` 外的所有 REST 与 SSE 接口覆盖 JWT 验证；
-  - **数据硬隔离**：在 PostgreSQL 关系库、Redis 缓存、Milvus 向量存储及内存 BM25 分词索引四大组件中深度引入 `userId` 条件，彻底阻断跨租户的数据交互或隐私泄露。
+  - **数据隔离**：资源以 `tenantId` 作为租户边界，并结合 `userId` 所有权、文档 ACL 和外部索引过滤；生产还需启用租户上下文与 IAM 门禁。完整隔离效果应以目标环境的跨租户回归和故障演练为准，不以本地测试宣称绝对无泄漏。
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
 - **本地企业级成熟度门禁已完成**：`npm run eval:rag:quality` 已集成 RAG smoke、120 条业务回归集、项目级仿真实业务评测和 `eval:rag:maturity`，当前本地工程成熟度为 93/100，超过 90 分门槛；强制真实项目评测 `PROJECT_EVAL_REQUIRE_LIVE=true npm run eval:rag:project` 已在真实后端跑到 28/28 通过。真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
@@ -99,7 +99,7 @@ npm run dev
 2. 使用右下角快速通道点击 **管理员 (admin)** 登录，上传一份特有文件 A，并在聊天页面针对 A 的核心秘密进行提问。RAG 能成功匹配知识库并回复。
 3. 点击顶部右侧 **注销**，切换为 **普通用户 (user)** 登录。
 4. 切换到文档页面，您将**看不到**管理员上传的文档 A。
-5. 切换到对话页面并进行相同隐私问题的提问，系统检索为空并返回 *“未找到相关内容”*，验证表明 Milvus 及 BM25 过滤均对未授权用户完全不可见，证明物理/逻辑硬隔离已 100% 生效！
+5. 切换到对话页面并对相同隐私问题提问，验证文档列表、检索引用和会话记录均无法跨用户／租户读取。该本地冒烟只覆盖样例路径，不替代生产环境的全资源权限矩阵验收。
 
 ---
 
@@ -110,12 +110,12 @@ npm run dev
 * **认证模块**
   * `POST /api/auth/login`：用户登录获取 JWT 访问 Token
   * `GET /api/auth/profile`：获取当前登录用户的 Profile 详情
-* **文档管理（按 userId 隔离）**
+* **文档管理（按租户与资源 ACL 隔离）**
   * `POST /api/documents/upload`：上传并解析文档，字段名 `file`，支持 `.md/.txt/.pdf/.docx`
   * `GET /api/documents`：列出当前用户的所有文档
   * `GET /api/documents/:docId`：查询当前用户拥有的单篇文档详情
   * `DELETE /api/documents/:docId`：同步删除文档元数据、Milvus 分片及内存 BM25 索引
-* **聊天与检索（按 userId 隔离）**
+* **聊天与检索（按租户、会话所有权与证据 ACL 隔离）**
   * `POST /api/chat`：非流式聊天（常用于 simple 模式）
   * `GET /api/chat/stream?query=...&mode=...&threadId=...`：流式 SSE 聊天推送事件链
   * `GET /api/agui/stream?query=...&mode=...&threadId=...`：AG-UI 协议流式问答（用户端）

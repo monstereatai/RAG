@@ -137,8 +137,8 @@ describe('JwtAuthGuard API Token scopes', () => {
     await expect(guard.canActivate(context(request, []))).resolves.toBe(true);
   });
 
-  it('requires an active IAM read permission for production user routes', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:chat']);
+  it('requires each declared IAM permission for production user routes', async () => {
+    reflector.getAllAndOverride.mockReturnValue(['rag:chat', 'rag:documents']);
     const iamService = { hasPermission: jest.fn().mockResolvedValue(true) };
     const request = {
       headers: { authorization: 'Bearer access-token' },
@@ -158,11 +158,46 @@ describe('JwtAuthGuard API Token scopes', () => {
     );
 
     await expect(
-      guard.canActivate(context(request, ['rag:chat'])),
+      guard.canActivate(context(request, ['rag:chat', 'rag:documents'])),
     ).resolves.toBe(true);
     expect(iamService.hasPermission).toHaveBeenCalledWith(
       'user-1',
-      'platform.read',
+      'rag:chat',
+      'tenant-a',
+    );
+    expect(iamService.hasPermission).toHaveBeenCalledWith(
+      'user-1',
+      'rag:documents',
+      'tenant-a',
+    );
+  });
+
+  it('rejects a production user missing one of the declared IAM permissions', async () => {
+    reflector.getAllAndOverride.mockReturnValue(['rag:token:manage']);
+    const iamService = { hasPermission: jest.fn().mockResolvedValue(false) };
+    const request = {
+      headers: { authorization: 'Bearer access-token' },
+      query: {},
+    };
+    const guard = createGuard(
+      {
+        userId: 'user-1',
+        username: 'user-1',
+        role: 'user',
+        authType: 'jwt',
+        tenantId: 'tenant-a',
+      },
+      true,
+      true,
+      iamService,
+    );
+
+    await expect(
+      guard.canActivate(context(request, ['rag:token:manage'])),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(iamService.hasPermission).toHaveBeenCalledWith(
+      'user-1',
+      'rag:token:manage',
       'tenant-a',
     );
   });

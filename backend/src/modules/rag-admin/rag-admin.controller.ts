@@ -25,6 +25,7 @@ import { MemoryService } from '../memory/memory.service';
 import { DEFAULT_ROLE_PRESET_ID, listRolePresets } from '../chat/role-presets';
 import { listSafetyPolicies } from '../../rag/prompts/prompt-injection.guard';
 import { IndexReconcilerService } from './index-reconciler.service';
+import { RagAdminGraphService } from './rag-admin-graph.service';
 
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
@@ -40,6 +41,7 @@ export class RagAdminController {
     private readonly ragFeedbackService: RagFeedbackService,
     private readonly domainEvents: DomainEventsService,
     private readonly memoryService: MemoryService,
+    private readonly graphAdminService: RagAdminGraphService,
     @Optional() private readonly indexReconciler?: IndexReconcilerService,
   ) {}
 
@@ -698,19 +700,19 @@ export class RagAdminController {
 
   @Get('graph/schema')
   getGraphSchema() {
-    return this.ragAdminService.getGraphSchema();
+    return this.graphAdminService.getGraphSchema();
   }
 
   @Get('graph/entities')
   getGraphEntities(
     @Query() query: { keyword?: string; type?: string; limit?: number },
   ) {
-    return this.ragAdminService.getGraphEntities(query);
+    return this.graphAdminService.getGraphEntities(query);
   }
 
   @Get('graph/entities/:id')
   getGraphEntityDetail(@Param('id') id: string) {
-    return this.ragAdminService.getGraphEntityDetail(id);
+    return this.graphAdminService.getGraphEntityDetail(id);
   }
 
   @Patch('graph/entities/:id')
@@ -724,7 +726,7 @@ export class RagAdminController {
       properties?: Record<string, unknown>;
     },
   ) {
-    return this.ragAdminService.updateGraphEntity(id, body);
+    return this.graphAdminService.updateGraphEntity(id, body);
   }
 
   @Get('graph/relationships')
@@ -737,7 +739,7 @@ export class RagAdminController {
       limit?: number;
     },
   ) {
-    return this.ragAdminService.getGraphRelationships(query);
+    return this.graphAdminService.getGraphRelationships(query);
   }
 
   @Get('graph/search')
@@ -750,16 +752,16 @@ export class RagAdminController {
       limit?: number;
     },
   ) {
-    return this.ragAdminService.searchGraph(query);
+    return this.graphAdminService.searchGraph(query);
   }
 
   @Get('graph/orphans')
   getGraphOrphans() {
-    return this.ragAdminService.getGraphOrphans();
+    return this.graphAdminService.getGraphOrphans();
   }
 
   @Get('graph/conflicts')
   getGraphConflicts() {
-    return this.ragAdminService.getGraphConflicts();
+    return this.graphAdminService.getGraphConflicts();
   }
 }

@@ -160,7 +160,7 @@ cd backend && npm run smoke:redis-checkpointer
 - M0 项目骨架：NestJS 后端、React/Vite 前端目录、Docker 基础设施、配置体系。
 - M1 simple RAG：上传 Markdown/PDF/TXT/DOCX、切分、Embedding、写入 Milvus、BM25 内存索引、Karpathy-style 检索回答。
 - M2 Agentic RAG：deepAgent 检索规划、Query 扩展、检索充分性评估、流式生成、置信度自我评估重试。
-- M3 工程化与多租户隔离：JWT 认证保护、EventSource 流式 Token 兼容、统一响应/全局异常/日志，以及基于 `userId` 在数据库、Redis 缓存、Milvus 向量及内存 BM25 中的物理/逻辑硬隔离。
+- M3 工程化与多租户隔离：JWT 认证保护、EventSource 流式 Token 兼容、统一响应/全局异常/日志；资源隔离以 `tenantId` 为边界，并结合 `userId` 所有权、资源 ACL 及 Redis／Milvus／Elasticsearch／BM25 的租户过滤。生产环境需启用租户上下文与 IAM 门禁；不得宣称仅凭单测或历史 userId 过滤已证明全资源隔离。
 - M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、simple/agentic/auto 模式、流式事件追踪、Debug 属性面板、Web 语音输入、TTS 朗读按钮。
 - M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 代理。
 - P1 Prompt 工程体系：SemanticExampleSelector（Milvus 语义相似度挑选示例）+ LCEL 工具链（RunnableBranch/RunnableWithMessageHistory）+ 集成到 Agentic RAG 查询扩展。

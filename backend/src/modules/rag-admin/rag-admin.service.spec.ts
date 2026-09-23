@@ -33,7 +33,6 @@ describe('RagAdminService document versions', () => {
     {} as never,
     docMetaRepo as never,
     documentReviewRepo as never,
-    {} as never,
     permissionRepo as never,
     { emit: jest.fn() } as never,
   );
@@ -169,7 +168,6 @@ describe('RagAdminService document listing and archive', () => {
     {} as never,
     docMetaRepo as never,
     documentReviewRepo as never,
-    {} as never,
     permissionRepo as never,
     domainEvents as never,
   );

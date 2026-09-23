@@ -59,8 +59,20 @@ const externalInputs = [
 const passed = checks.filter((item) => item.ok).length;
 const missing = checks.filter((item) => !item.ok);
 const unresolvedExternal = externalInputs.filter((item) => !item.ready);
+const localReady = missing.length === 0;
+const externalReady = unresolvedExternal.length === 0;
 const report = {
-  ok: missing.length === 0,
+  // `ok` remains the repository-only check for existing callers. Use
+  // productionReady/status when deciding whether the system is production-ready.
+  ok: localReady,
+  status: !localReady
+    ? 'blocked_local_checks'
+    : externalReady
+      ? 'ready'
+      : 'pending_external_validation',
+  localReady,
+  externalReady,
+  productionReady: localReady && externalReady,
   repoRoot,
   localChecks: {
     passed,

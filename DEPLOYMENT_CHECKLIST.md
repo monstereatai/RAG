@@ -20,6 +20,8 @@
 
 ## RAG 与安全
 
+- [ ] 生产启用租户上下文与 IAM scope 门禁：`AUTH_REQUIRE_TENANT_CONTEXT=true`、`AUTH_ENFORCE_IAM=true`
+- [ ] 跨租户权限矩阵覆盖 PostgreSQL、Redis、Milvus、Elasticsearch、BM25、Neo4j、会话／检查点及队列任务；未知 API scope 在启动期失败
 - [ ] RAG 质量门禁通过：`pnpm --dir backend run eval:rag:quality`
 - [ ] Prompt 注入和危险操作回归集通过
 - [ ] 文档权限、版本生效时间和废弃状态完成抽样验证

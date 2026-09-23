@@ -8,6 +8,21 @@ import { IamRoleEntity } from '../../providers/db/entities/iam-role.entity';
 import { IamPermissionEntity } from '../../providers/db/entities/iam-permission.entity';
 import { IamMembershipRoleEntity } from '../../providers/db/entities/iam-membership-role.entity';
 import { IamRolePermissionEntity } from '../../providers/db/entities/iam-role-permission.entity';
+import { API_SCOPE_CODES } from '../../common/decorators/api-scopes.decorator';
+
+const READER_PERMISSION_CODES = [
+  'rag:agent',
+  'rag:chat',
+  'rag:documents',
+  'rag:graph',
+  'rag:memory',
+  'rag:obsidian',
+  'rag:search',
+  'rag:speech',
+  'rag:structured',
+  'rag:summary',
+  'rag:workflow',
+] as const;
 
 @Injectable()
 export class IamService {
@@ -51,22 +66,34 @@ export class IamService {
 
     // 新租户不能因为没有迁移时种子角色而“登录成功但没有权限”。
     // 默认只授予 platform.read，管理员角色也必须显式再绑定其他权限。
-    const permission = await this.ensurePermission(
+    const platformRead = await this.ensurePermission(
       'platform.read',
       'Read platform resources',
+    );
+    const apiPermissions = await Promise.all(
+      API_SCOPE_CODES.map((code) =>
+        this.ensurePermission(code, `Access ${code} API`),
+      ),
     );
     const reader = await this.ensureRole(
       tenantId,
       'reader',
       'Tenant read-only role',
     );
-    await this.ensureRolePermission(reader, permission);
+    await this.ensureRolePermission(reader, platformRead);
+    for (const code of READER_PERMISSION_CODES) {
+      const permission = apiPermissions.find((item) => item.code === code);
+      if (permission) await this.ensureRolePermission(reader, permission);
+    }
     const admin = await this.ensureRole(
       tenantId,
       'admin',
       'Tenant administrator role',
     );
-    await this.ensureRolePermission(admin, permission);
+    await this.ensureRolePermission(admin, platformRead);
+    for (const permission of apiPermissions) {
+      await this.ensureRolePermission(admin, permission);
+    }
     return tenant;
   }
 

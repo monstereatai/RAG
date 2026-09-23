@@ -298,7 +298,9 @@ export class AuthService {
       userId: user.id,
       username: user.username,
       role: user.role,
-      tenantId: user.tenantId,
+      // Membership provisioning falls back to `legacy`; the JWT must use the
+      // same tenant or AUTH_REQUIRE_TENANT_CONTEXT will reject the new token.
+      tenantId: user.tenantId?.trim() || 'legacy',
     };
   }
 

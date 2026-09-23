@@ -26,7 +26,7 @@ export const configuration = () => ({
     requireTenantContext:
       process.env.AUTH_REQUIRE_TENANT_CONTEXT === 'true' ||
       process.env.NODE_ENV === 'production',
-    // 生产用户请求必须有 IAM 成员和 platform.read 权限；服务令牌走独立守卫。
+    // 生产用户请求必须拥有路由声明的 IAM scope 权限；服务令牌走独立守卫。
     enforceIam:
       process.env.AUTH_ENFORCE_IAM === 'true' ||
       (process.env.AUTH_ENFORCE_IAM !== 'false' &&
