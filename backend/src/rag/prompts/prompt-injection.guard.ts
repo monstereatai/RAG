@@ -97,6 +97,7 @@ export function listSafetyPolicies(): SafetyPolicyDescriptor[] {
  * 检测用户问题中的破坏性操作意图。仅拦截带有执行意图的请求，
  * 允许「什么是 DROP TABLE」「如何防止删库」等安全讨论继续进入 RAG。
  */
+// cd：正则表达式匹配用户问题中的破坏性操作意图
 export function detectDangerousQuery(query: string): DangerousQueryFinding[] {
   if (!query?.trim()) return [];
   const normalized = query.replace(/[\u200b\u200c\u200d]/g, '').trim();
@@ -181,6 +182,7 @@ const injectionPatterns: Array<{
 /**
  * 返回可审计命中，而不是直接修改原文；调用方据 severity 决定隔离、告警或继续处理。
  */
+// cd 关键词匹配
 export function detectPromptInjection(text: string): PromptInjectionFinding[] {
   const findings: PromptInjectionFinding[] = [];
 

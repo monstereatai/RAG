@@ -188,6 +188,7 @@ export class AgenticRagService {
    * 初始化 LangGraph 状态图
    */
   private initGraph() {
+    // 主路径是扩展问题→检索→充分性判断；不足时联网补证，之后重排、生成和反思，未通过时回到检索。
     const workflow = new StateGraph(AgenticRagState)
       .addNode(
         'queryAugment',
@@ -475,6 +476,7 @@ export class AgenticRagService {
       Math.min(subQuestionLimit, this.maxRetrievalQueries),
     );
 
+    // 子问题 Hybrid 检索、已审核纠错证据和 Obsidian 读取并发；Auto 预取结果能复用的部分不再重查。
     this.logger.log(
       `Retrieving ${boundedSubQuestions.length}/${plannedSubQuestions.length} sub-questions with hybrid search for userId=${userId ?? 'none'}`,
     );
@@ -1279,6 +1281,7 @@ export class AgenticRagService {
       answer: string;
       citationGate?: { sufficient: boolean; reason: string };
     };
+    // 有界生成循环固定为“生成草稿→引用校验→完成”；引用门禁是工具步骤，不由模型自行宣告通过。
     const loop = await this.agentLoop.run<
       GenerationLoopState,
       GenerationLoopState

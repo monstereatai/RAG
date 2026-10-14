@@ -143,6 +143,7 @@ export class QueryIntentRouter {
 
   constructor(private readonly llmProvider: LlmProvider) {}
 
+  /** 分类结果经 JSON 解析、Schema 校验和策略归一后才交给下游；异常统一走保守检索兜底。 */
   async classify(
     query: string,
     recentContext: Array<{ role: 'human' | 'ai'; content: string }> = [],
@@ -157,6 +158,7 @@ export class QueryIntentRouter {
             `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
         )
         .join('\n');
+        // cd 做意图识别：意图定义、判定边界、输出 JSON 格式要求，还带了 few-shot 示例
       const content = await this.withTimeout(
         this.llmProvider.invoke(
           `${ROUTER_PROMPT}\n\n当前会话上下文（仅用于识别临时设定和指代，不可当作外部事实）：${contextText || '无'}\n当前用户问题：${query.trim()}\n只输出一个合法 JSON 对象。`,

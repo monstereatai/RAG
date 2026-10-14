@@ -265,6 +265,7 @@ export class DocumentService implements OnModuleInit {
         content,
       );
       const governance: DocumentGovernanceMetadata = {
+        // 自动识别结果提供默认值；调用方传入的业务字段优先，并单独解析版本有效期。
         ...extractedGovernance,
         ...business,
         docVersion: business.docVersion ?? extractedGovernance.docVersion,
@@ -279,6 +280,7 @@ export class DocumentService implements OnModuleInit {
         throw new Error('document failed ingestion quality gate');
       }
       this.logger.log(`Split into ${chunks.length} chunks`);
+      // 入库阶段统一先写 draft；若治理元数据指定了其它状态，主索引完成后再切换。
       const indexingGovernance: DocumentGovernanceMetadata = {
         ...governance,
         lifecycleStatus: 'draft',
@@ -326,6 +328,7 @@ export class DocumentService implements OnModuleInit {
         supersedesDocId: indexingGovernance.supersedesDocId,
         hypotheticalQuestions: hypotheticalQuestions[idx],
       }));
+      // 标题、摘要等 LLM 元数据是增强信息；失败记为缺失，不阻断正文索引。
       const metadataPromise = this.metadataExtractor
         .extract(content)
         .catch((err) => {

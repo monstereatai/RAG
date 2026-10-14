@@ -198,8 +198,10 @@ export class ChatService {
     ]);
     // 先准备本轮可见历史，再做唯一一次语义分类。这样路由器看到的上下文
     // 与后续生成阶段一致，避免先按空历史分类、再按完整历史重新分类。
+    // cd：拿历史记录和摘要（redis或postgre拿）
     const shortTermContext = await this.shortTermMemory.getContext(threadId);
     let history = req.history ?? [];
+    // cd 没传入历史，没有从redis拿，从postgre拿
     if (!req.history) {
       history =
         shortTermContext.recentTurns.length > 0
@@ -217,11 +219,13 @@ export class ChatService {
               executionOptions?.tenantId,
             );
     }
+    // cd 做意图识别：意图定义、判定边界、输出 JSON 格式要求，还带了 few-shot 示例
     if (this.queryIntentRouter) {
       queryIntent = await this.queryIntentRouter.classify(req.query, history, {
         onUsage: collectUsage,
       });
     }
+    // 意图只分类一次；长期记忆、相关历史、运行计划和检索配置彼此独立，可并行准备。
     const shouldSearchHistory = Boolean(req.threadId);
     // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
     const objectiveFactQuery =
@@ -240,6 +244,7 @@ export class ChatService {
             })
           : this.memoryService.searchMemory(req.query, userId, threadId),
         // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
+        // cd：跨会话历史记录检索
         shouldSearchHistory && !objectiveFactQuery
           ? this.conversationEmbeddingService.searchHistory(
               req.query,
@@ -260,7 +265,9 @@ export class ChatService {
     const unfilteredHistory = history;
     if (
       unfilteredHistory.length > 0 &&
+      // cd：简单判断是否是客观事实查询
       isObjectiveFactQuery(req.query) &&
+      // cd：简单判断是否存在可补充历史（前面已经查出来了，这里的话正则匹配下）
       hasRelatedSessionSetting(req.query, unfilteredHistory)
     ) {
       queryIntent = {
@@ -272,24 +279,29 @@ export class ChatService {
         reason: '同一实体存在冲突会话设定，先回答客观事实再补充历史',
       };
     }
+    // cd：根据意图选择上下文策略（事实的话留5条相关发言，其他去掉）
     history = selectHistoryForQuery(req.query, unfilteredHistory, {
       preserveConflicts:
         queryIntent.contextMode === 'factual_verification' ||
         queryIntent.contextMode === 'mixed',
     });
+    // cd：设定还没持久化，先手动塞历史里面
     if (queryIntent.contextMode === 'conversation_setting') {
       // 当前这条临时设定尚未持久化，先作为状态投影的最后一条有效陈述，
       // 确保“鸡”更新为“南瓜”时不会仍回答上一轮状态。
       history = [...history, { role: 'human', content: req.query }];
     }
+    //cd: 判断是不是玩设定游戏
     const conversationStateUpdate =
       history.length > 0 &&
       ['conversation_setting', 'context_follow_up'].includes(
         queryIntent.contextMode,
       );
     const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
+    // cd：最多能调用24次工具
     const maxToolCalls =
       this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
+    // 将意图、权限范围、来源策略和执行预算固定在同一请求上下文，供后续执行引擎复用。
     const requestContext: RequestContext = {
       requestId: randomUUID(),
       userId,
@@ -312,10 +324,13 @@ export class ChatService {
         remainingToolCalls: maxToolCalls,
       },
     };
+    // cd：后端产生的threadId前端没传的时候，requestId：后端产生的（用于识别请求来源）
+    // cd：告诉前端会话id和请求id
     onEvent?.({
       type: 'thread',
       data: { threadId, requestId: requestContext.requestId },
     });
+    // cd： 告诉前端路由
     onEvent?.({
       type: 'routing',
       data: {
@@ -324,7 +339,9 @@ export class ChatService {
         requestId: requestContext.requestId,
       },
     });
+    // 执行器产生的正文 token 先暂存，拿到经过引用／证据校验的最终答案后再统一发布。
     const bufferedTokens: string[] = [];
+    // cd：缓存回答token，
     const publishEvent: ChatEventCallback = (event) => {
       if (event.type === 'token') {
         const token =
@@ -338,6 +355,7 @@ export class ChatService {
       }
       onEvent?.(event);
     };
+    // cd：发布缓存内容
     const flushBufferedTokens = (finalAnswer?: string) => {
       const streamedAnswer = bufferedTokens.join('');
       const tokens =
@@ -349,6 +367,7 @@ export class ChatService {
       }
       bufferedTokens.length = 0;
     };
+    // cd：把会话补全在去搜索（上下文策略）用历史对话把当前问题里的“它/那个”补成完整问题。字符串拼接
     const contextualRetrievalQuery = buildContextualRetrievalQuery(
       req.query,
       history,
@@ -367,6 +386,7 @@ export class ChatService {
       ...req.scope,
       role: roleContext.role,
     };
+    // cd：约束执行计划的上下文策略
     const retrievalOptions = {
       scope: retrievalScope,
       requestContext,
@@ -389,6 +409,7 @@ export class ChatService {
         : {}),
     };
     // 运行审计先于模型调用创建，确保失败、降级和中断也能在运行中心回放。
+    // cd：创建运行记录（用于查看回放）
     const run = await this.agentRuns?.start({
       threadId,
       userId,
@@ -580,7 +601,8 @@ export class ChatService {
       });
     }
 
-    // agentic / auto 模式走 AgenticRagService
+    // Auto 在 AgenticRagService 内决定复用轻量路径还是继续状态图；此处只交接同一份上下文。
+    // 显式 Agentic 也从该入口进入，不在 ChatService 里另建一套检索／生成流程。
     const traceEvents: RagTraceEvent[] = [];
     let result;
     try {
@@ -657,6 +679,7 @@ export class ChatService {
     actualUsage?: AggregatedLlmUsage;
     tenantId?: string;
   }): Promise<ChatResponse> {
+    // Simple 和 Agentic 在此汇合：同一最终答案与引用用于会话、Query Log、运行审计和完成事件。
     const result = input.result;
     if (result.interrupted) {
       return this.finalizeInterruptedChat(input);

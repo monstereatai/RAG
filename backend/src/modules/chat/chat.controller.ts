@@ -55,6 +55,7 @@ export class ChatController {
     @Body() body: ChatDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<ChatResponse> {
+    // 控制器只补入认证身份；问答编排统一由 ChatService 完成。
     return this.chatService.chat(body, user.userId, undefined, {
       tenantId: user.tenantId,
     });

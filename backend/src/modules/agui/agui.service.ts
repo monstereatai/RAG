@@ -21,6 +21,7 @@ export class AguiService {
     @Optional() private readonly agentRuns?: AgentRunsService,
   ) {}
 
+  /** 管理后台的 AG-UI 适配层：复用 ChatService 的问答与持久化，映射事件，并在结果确定后处理 Artifact。 */
   stream(options: AguiStreamOptions): Observable<AguiEvent> {
     const query = options.query.trim();
     if (!query) {
@@ -29,7 +30,10 @@ export class AguiService {
 
     let activeThreadId: string | undefined = options.threadId;
     let settled = false;
+    // cd：创建可持续推送数据流
     return new Observable<AguiEvent>((subscriber) => {
+      // cd：创建可取消控制器
+      // 用于在订阅者取消订阅时，取消异步操作
       const abortController = new AbortController();
       void (async () => {
         const runId = randomUUID();
@@ -55,7 +59,10 @@ export class AguiService {
           const selectedModel = options.model ?? 'qwen';
           runState.mode = options.mode;
           runState.model = selectedModel;
+          // cd 用户选择岗位,获取角色对应提示词和能力上下文
+          // 返回对象，包括业务提示词+系统提示词
           const roleContext = resolveRoleContext(options.rolePresetId);
+          // cd：分析用户问题，将生成markdown，world，excel
           const artifactIntent = parseArtifactIntent(query);
           activeThreadId =
             options.threadId ??

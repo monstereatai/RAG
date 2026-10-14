@@ -60,6 +60,7 @@ export class MarkdownChunker {
   }
 
   async splitStructured(text: string): Promise<StructuredChunk[]> {
+    // 先保住表格语义，再按标题形成 Section；叶子块同时携带父章节和原文位置，供检索扩展与引用定位。
     const normalized = this.normalizeTables(text.trim());
     if (!normalized) {
       return [];

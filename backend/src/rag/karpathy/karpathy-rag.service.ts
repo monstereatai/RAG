@@ -631,6 +631,10 @@ export class KarpathyRagService implements OnModuleInit {
     return result.chunks;
   }
 
+  /**
+   * 统一混合召回入口：合并关键词与向量候选，应用权限／生命周期约束，
+   * 再做排序、章节扩展和上下文预算治理，同时返回各阶段诊断信息。
+   */
   async retrieveDetailed(
     query: string,
     options: RetrieveOptions = {},
@@ -1233,8 +1237,8 @@ export class KarpathyRagService implements OnModuleInit {
   }
 
   /**
-   * Fast Path（快速路径）的完整 RAG：并发取得正式知识、审核过的 Base Case（基础案例）
-   * 与 Obsidian 本地笔记，统一做证据充分性判断后再生成带引用的回答。
+   * 固定线性问答链：可选精确直答后并发取正式 RAG、已审核纠错和 Obsidian 证据，
+   * 再经过充分性判断、上下文构建、受证据约束的生成与引用校验。
    * @param history 多轮对话历史（按时间顺序）
    */
   async answer(
@@ -1245,7 +1249,9 @@ export class KarpathyRagService implements OnModuleInit {
     onToken?: (token: string) => void,
     retrieveOptions: RetrieveOptions = {},
   ): Promise<KarpathyRagResult> {
+    // cd：格式化输入，空格去掉
     const normalizedQuery = this.normalizeQuery(query);
+    // cd：判断是否为结构化算式
     const arithmeticAnswer = this.buildArithmeticAnswer(
       normalizedQuery,
       history,
@@ -1925,6 +1931,10 @@ ${memoryText || '无'}
     return this.persistedEntries.some((entry) => entry.userId === userId);
   }
 
+  /**
+   * Auto 的前置取证：并发准备纠错案例、Hybrid 检索和 Obsidian，
+   * 把原问题的证据及判断打包供后续复用，避免升级 Agentic 后重复查询。
+   */
   async assessFastPath(
     query: string,
     userId?: string,

@@ -56,6 +56,7 @@ export class QwenLlmProvider implements ILLMProvider {
     });
   }
 
+  /** 合并请求取消与 Provider 超时，统一统计用量，并把底层异常包装成可识别的调用错误。 */
   async invoke(
     messages: string | BaseMessageLike[],
     options: LlmInvokeOptions = {},
@@ -70,7 +71,9 @@ export class QwenLlmProvider implements ILLMProvider {
       const signal = options.signal
         ? AbortSignal.any([options.signal, timeoutSignal])
         : timeoutSignal;
+        // cd： 调用langchain new ChatOpenAI的 invoke 方法
       const response = await this.model.invoke(messages, { signal });
+      // cd：统计token用量
       const usage = readLlmUsage(response);
       if (usage) {
         // 经由 LlmProvider.runWithUsage 时，模型回调已采集真实 usage；避免重复计数。

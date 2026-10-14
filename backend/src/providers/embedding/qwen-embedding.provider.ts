@@ -34,6 +34,7 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
     });
   }
 
+  // 查询和文档必须使用同一模型与维度，保证向量可以在同一索引空间比较。
   async embedQuery(text: string): Promise<number[]> {
     try {
       const promise = this.embeddings.embedQuery(text);
@@ -53,6 +54,7 @@ export class QwenEmbeddingProvider implements IEmbeddingProvider {
   }
 
   async embedDocuments(texts: string[]): Promise<number[][]> {
+    // 入库向量按固定批次调用服务，返回顺序与输入 chunk 顺序一一对应。
     const batchSize = 10;
     const vectors: number[][] = [];
     try {

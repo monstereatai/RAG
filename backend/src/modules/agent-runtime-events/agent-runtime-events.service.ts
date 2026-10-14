@@ -53,6 +53,7 @@ export class AgentRuntimeEventsService {
   }) {
     const tenantId = input.tenantId ?? 'legacy';
     const sequence = await this.nextSequence(tenantId, input.threadId);
+    // cd:运行日志保存
     return this.events.save(
       this.events.create({
         id: randomUUID(),

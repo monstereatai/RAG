@@ -63,6 +63,8 @@ docker compose up -d
 docker compose ps
 ```
 
+本地基础设施不会随 Docker Desktop 自动恢复；每次需要时手动执行上述 `docker compose up -d` 即可。生产和 Staging 编排仍保留各自的高可用重启策略。
+
 ### 2. 启动后端服务
 ```bash
 cd backend

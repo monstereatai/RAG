@@ -98,6 +98,7 @@ export class DocumentController {
     });
   }
 
+  // 同步入口：先把文件或媒体转换成可检索正文，再交给统一入库服务写入知识索引。
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
   async upload(
@@ -133,6 +134,7 @@ export class DocumentController {
     return { ...result.rag, obsidian: result.obsidian };
   }
 
+  // 异步入口：原文件先落对象存储，队列只传 objectKey；无持久队列时开发环境才走进程内任务。
   @Post('upload/async')
   @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
   async uploadAsync(

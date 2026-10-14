@@ -83,6 +83,7 @@ export function detectRetrievalProfile(query: string): RetrievalProfile {
 }
 
 export class ContextBuilder {
+  /** 去重并限制单文档占比后，再按相关性、多样性和字符预算挑选生成上下文。 */
   build(
     chunks: RetrievedChunk[],
     profile: RetrievalProfile,

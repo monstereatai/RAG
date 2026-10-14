@@ -108,14 +108,16 @@ export class ShortTermMemoryService {
     truncatedHistory: boolean;
   }> {
     if (!this.redis.isEnabled()) {
+      // cd 拿摘要
       const summary = await this.resolvePersistentSummary(conversationId);
       return {
+        // cd 包装成langchain系统消息对象
         systemMessage: summary ? this.toSummarySystemMessage(summary) : null,
         recentTurns: [],
         truncatedHistory: Boolean(summary),
       };
     }
-
+    // cd 拿历史轮次
     const key = this.turnsKey(conversationId);
     const raw = await this.redis.zrange(key, 0, -1);
     const summaryLookupStartedAt = process.hrtime.bigint();
@@ -129,6 +131,7 @@ export class ShortTermMemoryService {
       'short_term_summary',
       Boolean(summary),
     );
+    // 摘要没有 redis拿，没有从postgre拿，回写redis
     if (!summary) {
       summary = await this.resolvePersistentSummary(conversationId);
       if (summary) {
@@ -150,6 +153,7 @@ export class ShortTermMemoryService {
 
     // 保留最近 maxTurns 条
     const truncated = turns.length > maxTurns;
+    // cd：拿历史记录
     const recentTurns = turns.slice(-maxTurns);
 
     // 构建 systemMessage
@@ -191,6 +195,7 @@ export class ShortTermMemoryService {
       all.length > DEFAULT_MAX_TURNS * 1.5 ||
       estimatedTokens > COMPRESSION_TRIGGER_TOKENS
     ) {
+      // 压缩摘要
       return this.trimAndSummarize(
         conversationId,
         DEFAULT_MAX_TURNS,
@@ -247,6 +252,7 @@ export class ShortTermMemoryService {
     let summary: StructuredMemorySummary;
     let summaryMode: ContextCompactionAudit['summaryMode'] = 'llm';
     try {
+      // cd 调用LLM压缩对话历史
       const raw = await this.llmProvider.invoke([
         new SystemMessage(
           `你是产研运上下文压缩器。只输出 JSON，必须符合：

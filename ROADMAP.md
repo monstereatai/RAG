@@ -49,6 +49,10 @@
 
 ## 当前结论
 
+- **本轮核心 RAG 链路注释补齐（2026-10-13）**：为文档上传、解析切块、多索引写入，Chat HTTP／SSE／AG-UI 入口、意图与上下文、三模式分流、混合召回、Agentic 工作流、证据治理和 Provider 边界补充流程说明；未改运行逻辑。Backend build 通过，定向 7 个 Jest 套件／93 项通过，本次目标源码 `git diff --check` 通过。真实管理后台三模式操作未执行（本机 `localhost:3000` 未启动）；模式集成测试使用 mocks。目标文件 ESLint 有 25 条既有实现／格式问题；全工作区 diff 检查另报用户原有 admin 文件尾随空白，均未顺手修改。
+
+- **本轮本机 Docker 项目手动启动收口（2026-09-25）**：RAG 基础／开发／监控编排、Dify 主／Middleware／模板／TiDB 编排、knowledge-hub-backend 和 fee-docker 所有可找到的自动重启策略统一设为 `no`；Docker 中现存 80 个容器的 restart policy 全部核验为 `no`，因此 Docker Desktop 启动时不会恢复这些容器。生产／Staging 编排仍保留原策略。RAG 本地 Compose、Dify Middleware／TiDB、knowledge-hub-backend 配置校验通过；Dify 主编排／模板使用仓库原版时也会因 `env_file` 格式在当前 Compose 版本报错；fee-docker 容器标注的 Compose 文件不存在，现有容器策略已改但重建后的策略无法保证。
+
 - **本轮 IAM 门禁与就绪报告收口（2026-09-23）**：`AUTH_ENFORCE_IAM` 不再用通用 `platform.read` 放行全部带 `ApiScopes` 的接口，而是逐项核验接口声明的 scope；API scope 与 IAM 权限共用目录，未登记的新 scope 会在启动期失败。默认 `admin` 拥有目录内全部 API 权限，`reader` 仅获普通用户业务权限，不含评测、运维、MCP 和 Token 管理权限；缺省租户身份签发为 `legacy` 时，JWT 与 IAM 成员租户保持一致。`enterprise:readiness` 现在显式输出本地检查状态与 `productionReady`，避免把本地资产齐备误读为生产验收完成。CLAUDE、README、架构文档与部署清单统一 `tenantId` 隔离口径，并将 IAM scope 门禁和跨租户矩阵加入发布验收。Backend 定向 12 项、目标文件 lint、build、文档一致性检查通过。认证用户仍在 Redis JSON 存储；迁移到 PostgreSQL 需要新增用户字段及迁移，当前等待单独授权；真实业务集与生产多实例验收未执行。
 
 - **本轮 RagAdmin 图谱域拆分（2026-09-23）**：将图谱 schema、实体／关系查询、图谱搜索、孤立实体和事实冲突映射从超大 `RagAdminService` 移至 `RagAdminGraphService`，HTTP 路由、调用参数和返回结构保持不变；新增服务定向用例。图谱服务／控制器／RagAdmin 原有测试 29 项、Backend build、目标文件 ESLint 与 `git diff --check` 通过；未改变数据库 schema。

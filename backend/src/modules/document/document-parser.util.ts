@@ -276,6 +276,7 @@ export async function extractDocumentText(
   images?: DocumentImageExtractionOptions,
   video?: DocumentVideoExtractionOptions,
 ): Promise<string> {
+  // 不同格式在这里归一成正文 Markdown；下游切块和索引无需感知原始文件格式。
   switch (kind) {
     case 'markdown':
     case 'text':

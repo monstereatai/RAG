@@ -51,6 +51,7 @@ export interface EvidenceBundle {
 }
 
 export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
+  // 将不同召回来源收敛成同一请求快照，去重后保留原问题上的充分性结论供各模式复用。
   return {
     ...input,
     query: input.query.trim(),

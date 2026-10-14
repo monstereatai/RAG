@@ -68,6 +68,7 @@ export class AgentRuntimeService {
       objective,
       stages,
       selectedSkills: matchedSkills.map((skill) => skill.name),
+      // cd：约束执行计划的上下文策略
       contextPolicy: this.contextPolicy(input.mode),
       limits: this.limits(input.mode),
     };

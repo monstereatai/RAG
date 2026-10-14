@@ -3,6 +3,7 @@
 # 包含：PostgreSQL + Redis + Milvus + Elasticsearch
 # 使用：cd docker && docker compose -f docker-compose.dev.yml up -d
 # 热重载：后端 npm run start:dev / 前端 npm run dev（宿主机运行）
+# 本地容器只由上述命令手动启动；Docker Desktop 重启后不会自动恢复。
 #
 # ⚠️ 注意：本文件与 docker-compose.yml 同目录，compose 项目名都取目录名 `docker`，
 #    且两份文件的服务名完全相同（postgres / redis / etcd / minio / milvus / ...），
@@ -21,7 +22,7 @@ services:
   postgres:
     image: pgvector/pgvector:0.8.1-pg16
     container_name: rag-dev-postgres
-    restart: unless-stopped
+    restart: "no"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -41,7 +42,7 @@ services:
   redis:
     image: redis:7.4.9-alpine
     container_name: rag-dev-redis
-    restart: unless-stopped
+    restart: "no"
     ports:
       - '6379:6379'
     volumes:
@@ -57,7 +58,7 @@ services:
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
     container_name: rag-dev-etcd
-    restart: unless-stopped
+    restart: "no"
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -77,7 +78,7 @@ services:
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     container_name: rag-dev-minio
-    restart: unless-stopped
+    restart: "no"
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -97,7 +98,7 @@ services:
   milvus:
     image: milvusdb/milvus:v2.4.4
     container_name: rag-dev-milvus
-    restart: unless-stopped
+    restart: "no"
     command: ['milvus', 'run', 'standalone']
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -123,7 +124,7 @@ services:
   elasticsearch:
     image: elasticsearch:8.13.0
     container_name: rag-dev-es
-    restart: unless-stopped
+    restart: "no"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -149,7 +150,7 @@ services:
   neo4j:
     image: neo4j:5.26.27-community
     container_name: rag-dev-neo4j
-    restart: unless-stopped
+    restart: "no"
     profiles:
       - graphrag
     environment:

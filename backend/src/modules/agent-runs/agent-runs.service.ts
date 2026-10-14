@@ -35,6 +35,7 @@ export class AgentRunsService {
     maxToolCalls?: number;
     maxDelegations?: number;
   }) {
+    // cd：创建运行记录
     const run = await this.runRepo.save(
       this.runRepo.create({
         id: randomUUID(),
@@ -54,6 +55,7 @@ export class AgentRunsService {
         requiresApproval: false,
       }),
     );
+    // cd：发布运行开始事件
     await this.events.emit({
       threadId: run.threadId,
       tenantId: run.tenantId ?? 'legacy',

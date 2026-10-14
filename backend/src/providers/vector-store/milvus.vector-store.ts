@@ -241,6 +241,7 @@ export class MilvusVectorStoreProvider
 
   async insert(records: VectorRecord[]): Promise<void> {
     if (records.length === 0) return;
+    // 向量由入库服务预先生成；此处只持久化 Milvus 检索所需字段并等待 flush 完成。
     const data = records.map((r) => ({
       id: r.id,
       vector: r.vector,
@@ -262,6 +263,7 @@ export class MilvusVectorStoreProvider
     k: number,
     userId?: string,
   ): Promise<VectorSearchHit[]> {
+    // Milvus 提供 dense 候选；融合排序和其它来源的权限／生命周期治理由 RAG 服务负责。
     if (this.isCircuitOpen()) {
       throw new Error('Milvus similarity search circuit is open');
     }

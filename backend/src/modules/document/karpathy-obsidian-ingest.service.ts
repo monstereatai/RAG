@@ -130,6 +130,7 @@ export class KarpathyObsidianIngestService {
     taskId?: string;
     businessMetadata?: DocumentBusinessMetadata;
   }): Promise<KarpathyObsidianIngestResult> {
+    // 文本已由入口完成解析；这里处理内容去重，并把 RAG 文档索引与 Obsidian 来源记录关联起来。
     const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
       params.content,
       { userId: params.userId },
