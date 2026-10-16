@@ -1,6 +1,6 @@
 # RAG MCP Server
 
-`rag-mcp-server` 是给 Codex、Trae、Claude Code、Cursor 等 AI 编程工具使用的 MCP stdio 服务。它把项目里的 RAG/Karpathy/Obsidian/GraphRAG 能力暴露成工具，让 Agent 编码前先自动查内部知识、组件用法、活动/官网营销方案和上线 checklist。
+`rag-mcp-server` 是给 Codex、Trae、Claude Code、Cursor 等 AI 编程工具使用的 MCP 服务，支持本地 stdio 和受控的 Streamable HTTP。它把项目里的 RAG/Karpathy/Obsidian/GraphRAG 能力暴露成工具，让 Agent 编码前先自动查内部知识、组件用法、活动/官网营销方案和上线 checklist。
 
 ## CLI 和 MCP 的分工
 
@@ -8,6 +8,23 @@
 - MCP：给 Agent / AI 编程工具使用，让 Codex/DeepSeek/Claude Code 在写代码前自动取上下文。
 
 两者都只通过 RAG 后端 API 工作，不直接访问数据库、向量库或 `.env`。
+
+## 团队 HTTP MCP
+
+HTTP transport 采用无会话模式，地址为 `POST/GET/DELETE /mcp`。每个请求都必须带当前调用者的 RAG JWT 或 API Token：服务先向 RAG 后端验证 `/auth/profile`，再将原 Bearer Token 逐请求透传；租户、IAM 与 API scope 仍由 RAG 后端校验。服务不使用本机 CLI token、环境中的静态 MCP token 或用户名密码作为远程调用身份。
+
+默认只监听 `127.0.0.1:3100`。团队网络使用时，将服务放在 TLS 反向代理之后，并显式设置监听地址：
+
+```bash
+cd /Users/monster/Documents/GitHub/code/RAG/tools/rag-mcp-server
+RAG_MCP_HTTP_HOST=0.0.0.0 RAG_MCP_HTTP_PORT=3100 pnpm run start:http
+```
+
+客户端连接 `https://<your-domain>/mcp`，每次请求在 `Authorization` Header 中携带为该用户签发的最小权限 API Token。通过 Admin 中的 API Token 管理能力创建和撤销 Token；不要把 Token 放进 URL、日志、仓库或共享的 MCP 服务环境变量。
+
+HTTP transport 只注册 `HTTP_ALLOWED_TOOLS` 中的只读/问答工具，未开放工作流写操作和多 Agent 执行工具。每个已验证的 tenant/user 在单个 MCP 进程内默认每分钟最多 120 个 HTTP 请求，可用 `RAG_MCP_HTTP_RATE_LIMIT` 和 `RAG_MCP_HTTP_RATE_WINDOW_MS` 调整。多实例部署时该限流按实例生效，RAG 后端的租户配额和 API scope 校验仍会继续生效。
+
+健康探针为 `GET /healthz`，不依赖调用者 Token；它只报告 MCP 进程状态，不代表 RAG 后端已健康。
 
 ## 配置
 
@@ -214,4 +231,5 @@ pnpm install --ignore-scripts
 pnpm run build
 pnpm test
 node dist/src/server.js --help
+pnpm run start:http
 ```

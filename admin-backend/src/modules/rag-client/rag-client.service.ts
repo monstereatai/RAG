@@ -15,6 +15,7 @@ export interface RagAguiStreamQuery {
   threadId?: string;
   rolePresetId?: string;
   pluginKeys?: string[];
+  attachmentIds?: string[];
 }
 
 export interface RagArtifactCreateInput {
@@ -86,6 +87,128 @@ export class RagClientService {
 
   getCapabilities() {
     return this.getJson<Record<string, unknown>>("/rag/admin/capabilities");
+  }
+
+  searchImages(userId: string, tenantId: string | undefined, role: string | undefined, query: string, limit = 20) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/images/search${this.toQueryString({ userId, tenantId, role, q: query, limit })}`,
+    );
+  }
+
+  searchImagesByImage(
+    userId: string,
+    tenantId: string | undefined,
+    role: string | undefined,
+    file: Express.Multer.File,
+    limit = 20,
+  ) {
+    const formData = new FormData();
+    const imageBytes = new Uint8Array(file.buffer.byteLength);
+    imageBytes.set(file.buffer);
+    formData.append(
+      'file',
+      new Blob([imageBytes.buffer], { type: file.mimetype }),
+      file.originalname,
+    );
+    formData.append('userId', userId);
+    if (tenantId) formData.append('tenantId', tenantId);
+    if (role) formData.append('role', role);
+    formData.append('limit', String(limit));
+    return this.request<Record<string, unknown>>(
+      '/rag/admin/images/search',
+      { method: 'POST', body: formData },
+      true,
+      60_000,
+    );
+  }
+
+  getImageAsset(
+    userId: string,
+    tenantId: string | undefined,
+    role: string | undefined,
+    docId: string,
+    key: string,
+  ) {
+    return this.requestRaw(
+      `/rag/admin/images/asset${this.toQueryString({ userId, tenantId, role, docId, key })}`,
+      true,
+    );
+  }
+
+  listTeamWikiPages(ownerUserId: string, query?: string, limit = 100) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId, q: query, limit })}`,
+    );
+  }
+
+  getTeamWikiPage(ownerUserId: string, pageId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+    );
+  }
+
+  createTeamWikiPage(ownerUserId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId })}`,
+      body,
+    );
+  }
+
+  updateTeamWikiPage(ownerUserId: string, pageId: string, body: unknown) {
+    return this.patchJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+      body,
+    );
+  }
+
+  deleteTeamWikiPage(ownerUserId: string, pageId: string) {
+    return this.deleteJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+    );
+  }
+
+  getTeamWikiRevisions(ownerUserId: string, pageId: string) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/revisions${this.toQueryString({ ownerUserId })}`,
+    );
+  }
+
+  compareTeamWikiRevisions(
+    ownerUserId: string,
+    pageId: string,
+    fromRevisionId: string,
+    toRevisionId: string,
+  ) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/compare${this.toQueryString({ ownerUserId, from: fromRevisionId, to: toRevisionId })}`,
+    );
+  }
+
+  rollbackTeamWikiPage(ownerUserId: string, pageId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/rollback${this.toQueryString({ ownerUserId })}`,
+      body,
+    );
+  }
+
+  publishTeamWikiPage(ownerUserId: string, pageId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/publish${this.toQueryString({ ownerUserId })}`,
+      {},
+    );
+  }
+
+  syncFeishuWiki(ownerUserId: string, spaceId: string, shareWithinTenant?: boolean) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/integrations/feishu/wiki/sync${this.toQueryString({ ownerUserId })}`,
+      { spaceId, shareWithinTenant },
+    );
+  }
+
+  getFeishuWikiStatus(ownerUserId: string, spaceId: string) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/integrations/feishu/wiki/status${this.toQueryString({ ownerUserId, spaceId })}`,
+    );
   }
 
   getRolePresets() {
@@ -332,6 +455,48 @@ export class RagClientService {
 
   repairDocumentIndexes(body: { docIds?: string[]; limit?: number }) {
     return this.postJson<Record<string, unknown>>('/rag/admin/documents/index-audit/repair', body);
+  }
+
+  getDocumentQueueStatus() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/documents/queue/status');
+  }
+
+  getPendingDocumentTasks(limit = 50) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/documents/tasks/pending${this.toQueryString({ limit })}`,
+    );
+  }
+
+  cancelQueuedDocumentTask(taskId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/tasks/${encodeURIComponent(taskId)}/cancel`,
+      {},
+    );
+  }
+
+  getIndexRepairQueueStatus() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/documents/index-repair/status');
+  }
+
+  getFailedIndexRepairs(limit = 50) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/documents/index-repair/failed${this.toQueryString({ limit })}`,
+    );
+  }
+
+  retryIndexRepair(jobId: string) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/index-repair/${encodeURIComponent(jobId)}/retry`,
+      {},
+    );
+  }
+
+  getIndexReconcilerStatus() {
+    return this.getJson<Record<string, unknown>>('/rag/admin/documents/index-reconciler/status');
+  }
+
+  runIndexReconciler() {
+    return this.postJson<Record<string, unknown>>('/rag/admin/documents/index-reconciler/run', {});
   }
 
   parseScheduledAnalysisJob(body: unknown) {
@@ -583,8 +748,10 @@ export class RagClientService {
     );
   }
 
-  getFailedDocumentTasks() {
-    return this.getJson<Record<string, unknown>[]>('/rag/admin/documents/tasks/failed');
+  getFailedDocumentTasks(limit = 50) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/rag/admin/documents/tasks/failed${this.toQueryString({ limit })}`,
+    );
   }
 
   retryFailedDocumentTask(taskId: string) {
@@ -727,6 +894,9 @@ export class RagClientService {
     if (query.pluginKeys?.length) {
       params.set("pluginKeys", query.pluginKeys.join(","));
     }
+    if (query.attachmentIds?.length) {
+      params.set("attachmentIds", query.attachmentIds.join(","));
+    }
     const headers: Record<string, string> = {};
     if (this.serviceToken) {
       headers.Authorization = `Bearer ${this.serviceToken}`;
@@ -735,6 +905,51 @@ export class RagClientService {
       headers,
       signal,
     });
+  }
+
+  uploadQaConversationAttachment(
+    file: Express.Multer.File,
+    userId: string,
+    threadId: string,
+  ) {
+    const formData = new FormData();
+    const fileBytes = new Uint8Array(file.buffer.byteLength);
+    fileBytes.set(file.buffer);
+    formData.append(
+      "file",
+      new Blob([fileBytes.buffer], { type: file.mimetype }),
+      file.originalname,
+    );
+    formData.append("userId", userId);
+    formData.append("threadId", threadId);
+    return this.request<Record<string, unknown>>(
+      "/agui/admin/attachments",
+      { method: "POST", body: formData },
+      true,
+      120_000,
+    );
+  }
+
+  listQaConversationAttachments(userId: string, threadId: string) {
+    return this.getJson<Record<string, unknown>[]>(
+      `/agui/admin/attachments${this.toQueryString({ userId, threadId })}`,
+    );
+  }
+
+  deleteQaConversationAttachment(
+    attachmentId: string,
+    userId: string,
+    threadId: string,
+  ) {
+    return this.deleteJson<Record<string, unknown>>(
+      `/agui/admin/attachments/${encodeURIComponent(attachmentId)}${this.toQueryString({ userId, threadId })}`,
+    );
+  }
+
+  deleteQaConversationAttachments(userId: string, threadId: string) {
+    return this.deleteJson<Record<string, unknown>>(
+      `/agui/admin/attachments${this.toQueryString({ userId, threadId })}`,
+    );
   }
 
   // ─── Graph Operations ───────────────────────────────────────

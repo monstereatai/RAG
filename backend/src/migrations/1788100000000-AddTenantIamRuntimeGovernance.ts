@@ -398,6 +398,18 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
   }
 
   private async backfillTenantColumns(q: QueryRunner): Promise<void> {
+    // 先暂时移除租户 + 线程 + 序号唯一索引。旧事件的 tenantId 为空时，
+    // PostgreSQL 允许相同线程出现重复序号；回填为 legacy 后需要在重建索引前修复。
+    if (await q.hasTable('agent_runtime_events')) {
+      const table = await q.getTable('agent_runtime_events');
+      const sequenceIndex = table?.indices.find(
+        (index) => index.name === 'UQ_agent_runtime_events_tenant_thread_sequence',
+      );
+      if (sequenceIndex) {
+        await q.dropIndex('agent_runtime_events', sequenceIndex);
+      }
+    }
+
     for (const tableName of this.resourceTables) {
       if (!(await q.hasTable(tableName))) continue;
       await q.query(
@@ -409,6 +421,9 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
         `UPDATE ${this.id('users')} SET ${this.id('tenantId')} = 'legacy' WHERE ${this.id('tenantId')} IS NULL`,
       );
     }
+
+    await this.repairDuplicateRuntimeEventSequences(q);
+
     if (await q.hasTable('agent_runtime_events')) {
       const table = await q.getTable('agent_runtime_events');
       if (
@@ -424,6 +439,56 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
             columnNames: ['tenantId', 'threadId', 'sequence'],
             isUnique: true,
           }),
+        );
+      }
+    }
+  }
+
+  /**
+   * 旧事件允许 tenantId 为空，因此不同写入可能留下相同的线程序号。
+   * 回填租户后，为冲突线程按原序号、创建时间和 ID 稳定排序并重新编号；
+   * 保持线程事件顺序，且尽量保留原最大序号，避免后续序号计数器倒退。
+   */
+  private async repairDuplicateRuntimeEventSequences(
+    q: QueryRunner,
+  ): Promise<void> {
+    if (!(await q.hasTable('agent_runtime_events'))) return;
+
+    const isMysql = q.connection.options.type === 'mysql';
+    const id = (name: string) =>
+      isMysql ? `\`${name}\`` : `"${name}"`;
+    const parameter = (index: number) => (isMysql ? '?' : `$${index}`);
+    const tableName = id('agent_runtime_events');
+    const tenantId = id('tenantId');
+    const threadId = id('threadId');
+    const sequence = id('sequence');
+    const eventId = id('id');
+
+    const duplicateThreads = (await q.query(
+      `SELECT ${tenantId}, ${threadId}
+       FROM ${tableName}
+       GROUP BY ${tenantId}, ${threadId}
+       HAVING COUNT(*) > COUNT(DISTINCT ${sequence})`,
+    )) as Array<{ tenantId: string; threadId: string }>;
+
+    for (const group of duplicateThreads) {
+      const rows = (await q.query(
+        `SELECT ${eventId}, ${sequence}
+         FROM ${tableName}
+         WHERE ${tenantId} = ${parameter(1)} AND ${threadId} = ${parameter(2)}
+         ORDER BY ${sequence} ASC, ${id('createdAt')} ASC, ${eventId} ASC`,
+        [group.tenantId, group.threadId],
+      )) as Array<{ id: string; sequence: number | string }>;
+      if (rows.length < 2) continue;
+
+      const previousMax = Math.max(...rows.map((row) => Number(row.sequence)));
+      const firstSequence = Math.max(0, previousMax - rows.length + 1);
+      for (const [index, row] of rows.entries()) {
+        const nextSequence = firstSequence + index;
+        if (Number(row.sequence) === nextSequence) continue;
+        await q.query(
+          `UPDATE ${tableName} SET ${sequence} = ${parameter(1)} WHERE ${eventId} = ${parameter(2)}`,
+          [nextSequence, row.id],
         );
       }
     }

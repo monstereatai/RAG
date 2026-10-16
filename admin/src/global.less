@@ -1013,6 +1013,49 @@ canvas {
   box-shadow: none;
 }
 
+.chat-input > .qa-attachment-list {
+  display: flex;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 4px 2px;
+}
+
+.qa-attachment-item {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid #d9e1ec;
+  border-radius: 6px;
+  color: #344054;
+  font-size: 12px;
+}
+
+.qa-attachment-item.error {
+  border-color: #ffccc7;
+  color: #cf1322;
+}
+
+.qa-attachment-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-attachment-status,
+.qa-attachment-note {
+  color: #667085;
+  white-space: nowrap;
+}
+
+.qa-attachment-note {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+
 .chat-input > div {
   display: flex;
   justify-content: flex-end;

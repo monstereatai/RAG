@@ -10,6 +10,7 @@ import { PromptModule } from '../prompts/prompt.module';
 import { ToolsModule } from '../../tools/tools.module';
 import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
 import { ImageIndexModule } from '../../modules/image-index/image-index.module';
+import { DocumentRetrievalDescriptionModule } from '../../modules/document/document-retrieval-description.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ImageIndexModule } from '../../modules/image-index/image-index.module';
     ToolsModule,
     DocumentPermissionModule,
     ImageIndexModule,
+    DocumentRetrievalDescriptionModule,
   ],
   providers: [KarpathyRagService],
   exports: [KarpathyRagService],

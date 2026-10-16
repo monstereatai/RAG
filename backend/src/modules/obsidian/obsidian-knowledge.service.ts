@@ -29,6 +29,8 @@ export interface ObsidianSourceInput {
   title: string;
   sourceUrl?: string;
   content: string;
+  /** 原始输入正文的 SHA-256；异步从数据库重建正文时仍用它稳定去重。 */
+  contentHash?: string;
   ragDocId?: string;
   sourceType: 'url' | 'document' | 'official-docs' | 'manual';
   contentType?: string;
@@ -49,6 +51,7 @@ export interface ObsidianWriteResult {
 export interface ObsidianSearchHit {
   path: string;
   type: 'compiled' | 'index' | 'note';
+  isSourceNote?: boolean;
   title: string;
   content: string;
   score: number;
@@ -118,7 +121,13 @@ export class ObsidianKnowledgeService {
   async writeSource(input: ObsidianSourceInput): Promise<ObsidianWriteResult> {
     this.assertAccessContext({ userId: input.userId });
     const content = input.content.trim();
-    const contentHash = this.hash(content);
+    if (
+      input.contentHash !== undefined &&
+      !/^[a-f0-9]{64}$/i.test(input.contentHash)
+    ) {
+      throw new Error('contentHash must be a 64-character SHA-256 hex string');
+    }
+    const contentHash = input.contentHash?.toLowerCase() ?? this.hash(content);
     const title = this.normalizeTitle(input.title);
 
     try {
@@ -219,6 +228,9 @@ export class ObsidianKnowledgeService {
                 basename(file.path, '.md'),
             ),
             content: this.snippet(body, tokens),
+            ...(this.frontmatterString(frontmatter.type) === 'source_note'
+              ? { isSourceNote: true }
+              : {}),
             score:
               file.type === 'compiled'
                 ? score + 3

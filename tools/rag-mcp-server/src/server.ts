@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { RagMcpError, toRagMcpError } from './errors.js';
@@ -9,19 +10,49 @@ import { RagApiClient, type ChatMode, type SearchResult } from './rag-api-client
 
 const chatModeSchema = z.enum(['simple', 'agentic', 'auto']);
 
-export async function createServer(): Promise<McpServer> {
+export const HTTP_ALLOWED_TOOLS = new Set([
+  'rag_health',
+  'rag_search',
+  'rag_context',
+  'rag_ask',
+  'rag_graph_query',
+  'rag_agent_domains',
+  'rag_production_workflow_context',
+  'rag_production_workflow_activities',
+  'rag_production_workflow_status',
+  'rag_document_governance_list',
+  'rag_document_governance_status',
+  'rag_document_task_status',
+  'rag_scheduled_analysis_jobs',
+  'rag_scheduled_analysis_executions',
+  'rag_game_plan',
+  'rag_game_checklist',
+  'rag_game_tracking',
+  'rag_game_region_check',
+]);
+
+export interface CreateServerOptions {
+  httpMode?: boolean;
+  tokenProvider?: () => string | undefined;
+}
+
+export async function createServer(options: CreateServerOptions = {}): Promise<McpServer> {
   const config = await loadConfig();
   const client = new RagApiClient({
     baseUrl: config.baseUrl,
-    token: config.token,
-    username: config.username,
-    password: config.password,
+    token: options.httpMode ? undefined : config.token,
+    username: options.httpMode ? undefined : config.username,
+    password: options.httpMode ? undefined : config.password,
+    tokenProvider: options.tokenProvider,
     timeoutMs: config.timeoutMs,
   });
-  const server = new McpServer({
+  const baseServer = new McpServer({
     name: 'rag-mcp-server',
     version: '0.1.0',
   });
+  const server = options.httpMode
+    ? withToolAllowlist(baseServer, HTTP_ALLOWED_TOOLS)
+    : baseServer;
 
   server.registerTool(
     'rag_health',
@@ -275,6 +306,24 @@ async function main(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
+function withToolAllowlist(server: McpServer, allowed: Set<string>): McpServer {
+  return new Proxy(server, {
+    get(target, property) {
+      if (property === 'registerTool') {
+        return ((...args: unknown[]) => {
+          const name = args[0];
+          if (typeof name !== 'string' || !allowed.has(name)) {
+            return target;
+          }
+          return Reflect.apply(target.registerTool, target, args);
+        }) as McpServer['registerTool'];
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 function registerGameTool(
   server: McpServer,
   client: RagApiClient,
@@ -455,8 +504,10 @@ function helpText(): string {
   ].join('\n');
 }
 
-main().catch((error: unknown) => {
-  const err = error instanceof Error ? error : new Error('unknown startup error');
-  process.stderr.write(`rag-mcp-server failed: ${err.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    const err = error instanceof Error ? error : new Error('unknown startup error');
+    process.stderr.write(`rag-mcp-server failed: ${err.message}\n`);
+    process.exitCode = 1;
+  });
+}

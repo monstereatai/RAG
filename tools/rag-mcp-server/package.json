@@ -1,7 +1,7 @@
 {
   "name": "rag-mcp-server",
   "version": "0.1.0",
-  "description": "MCP stdio server that exposes RAG knowledge tools for AI coding agents.",
+  "description": "MCP stdio and authenticated Streamable HTTP server for RAG knowledge tools.",
   "type": "module",
   "private": true,
   "packageManager": "pnpm@10.17.1",
@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "pnpm run build && node --test dist/test/*.test.js",
-    "start": "node dist/src/server.js"
+    "start": "node dist/src/server.js",
+    "start:http": "node dist/src/http-server.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

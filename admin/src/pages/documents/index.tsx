@@ -17,11 +17,12 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { ModulePage, documentNav } from '@/components/AdminShell';
-import { Button, Checkbox, Form, Input, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, Upload, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, Modal, Row, Select, Skeleton, Space, Statistic, Table, Tag, Tooltip, Upload, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   getDocuments,
+  getDocumentOperations,
   getOrganizations,
   getRoles,
   getUsers,
@@ -34,8 +35,10 @@ import {
   submitDocumentReview,
   approveDocumentReview,
   rejectDocumentReview,
-  getFailedDocumentTasks,
   retryFailedDocumentTask,
+  cancelQueuedDocumentTask,
+  retryIndexRepair,
+  runIndexReconciler,
   uploadDocument,
   getDocumentTask,
   archiveDocument,
@@ -43,6 +46,10 @@ import {
   type DocumentItem,
   type DocumentVersionItem,
   type DocumentPermissionInput,
+  type DocumentOperations,
+  type FailedDocumentTask,
+  type PendingDocumentTask,
+  type FailedIndexRepair,
 } from './service';
 
 type PageState = 'loading' | 'data' | 'error' | 'empty';
@@ -80,6 +87,22 @@ const graphStatusMap: Record<string, { color: string; text: string }> = {
   skipped: { color: 'default', text: '未启用' },
 };
 
+const queueStatusLabels: Record<PendingDocumentTask['queueStatus'], string> = {
+  waiting: '等待中',
+  delayed: '延迟等待',
+  paused: '已暂停',
+  'waiting-children': '等待子任务',
+};
+
+const unwrapResponseData = (value: any) => {
+  let payload = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!payload || typeof payload !== 'object' || !('data' in payload)) break;
+    payload = payload.data;
+  }
+  return payload;
+};
+
 export interface DocumentListPageProps {
   /** 按权限主体过滤：public=公共文档，department=部门文档；不传为全部（我的文档） */
   scope?: 'public' | 'department';
@@ -103,6 +126,7 @@ const Documents: React.FC<DocumentListPageProps> = ({
    * 因此数据加载必须同时刷新权限候选项，避免用上一视图的组织或角色数据提交授权。
    */
   const isArchivePage = lifecycleStatus === 'archived';
+  const showOperationsPanel = !scope && !lifecycleStatus;
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [pageState, setPageState] = useState<PageState>('loading');
   const [total, setTotal] = useState(0);
@@ -121,6 +145,13 @@ const Documents: React.FC<DocumentListPageProps> = ({
     { label: string; value: string }[]
   >([]);
   const [uploading, setUploading] = useState(false);
+  const [operations, setOperations] = useState<DocumentOperations | null>(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
+  const [operationsError, setOperationsError] = useState<string>();
+  const [retryingTaskId, setRetryingTaskId] = useState<string>();
+  const [cancellingTaskId, setCancellingTaskId] = useState<string>();
+  const [retryingRepairId, setRetryingRepairId] = useState<string>();
+  const [reconciling, setReconciling] = useState(false);
 
   const handleBeforeUpload = async (file: File) => {
     setUploading(true);
@@ -139,6 +170,10 @@ const Documents: React.FC<DocumentListPageProps> = ({
           }
           if (task?.status === 'failed') {
             throw new Error(task.errorMessage || 'document processing failed');
+          }
+          if (task?.status === 'cancelled') {
+            message.info(`${file.name} 的排队任务已取消`);
+            break;
           }
         }
       } else {
@@ -274,9 +309,29 @@ const Documents: React.FC<DocumentListPageProps> = ({
       });
   };
 
+  const fetchOperations = useCallback(async () => {
+    if (!showOperationsPanel) return;
+    setOperationsLoading(true);
+    setOperationsError(undefined);
+    try {
+      const response: any = await getDocumentOperations();
+      const raw = response?.data ?? response;
+      const payload = raw?.data ?? raw;
+      setOperations(payload as DocumentOperations);
+    } catch (error) {
+      setOperationsError(error instanceof Error ? error.message : '运维状态加载失败');
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, [showOperationsPanel]);
+
   useEffect(() => {
     fetchDocs();
   }, []);
+
+  useEffect(() => {
+    void fetchOperations();
+  }, [fetchOperations]);
 
   const openPermissionModal = (record: DocumentItem) => {
     const category = record.metadata?.category;
@@ -377,21 +432,94 @@ const Documents: React.FC<DocumentListPageProps> = ({
     }
   };
 
-  const handleRetryFailedTasks = async () => {
+  const handleRetryDocumentTask = async (task: FailedDocumentTask) => {
+    setRetryingTaskId(task.id);
     try {
-      const result: any = await getFailedDocumentTasks();
-      const tasks = result?.data ?? result ?? [];
-      if (!Array.isArray(tasks) || tasks.length === 0) {
-        message.info('当前没有可重放的失败任务');
-        return;
+      const result = unwrapResponseData(await retryFailedDocumentTask(task.id));
+      if (result?.retried) {
+        message.success(`${task.filename} 已重新进入入库队列`);
+      } else {
+        message.warning(result?.reason || '该任务当前不可重试');
       }
-      const failed = await Promise.all(tasks.map((task: any) => retryFailedDocumentTask(task.id)));
-      const retried = failed.filter((item: any) => (item?.data ?? item)?.retried).length;
-      message.success(`已提交 ${retried} 个失败任务重放`);
-      fetchDocs();
+      await fetchOperations();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '失败任务加载失败');
+      message.error(error instanceof Error ? error.message : '文档任务重试失败');
+    } finally {
+      setRetryingTaskId(undefined);
     }
+  };
+
+  const handleCancelQueuedTask = (task: PendingDocumentTask) => {
+    Modal.confirm({
+      title: `取消 ${task.filename} 的排队任务？`,
+      content: '仅可取消仍在等待中的任务，处理中任务无法中断。取消后会将原文件加入清理队列。',
+      okText: '取消排队任务',
+      cancelText: '继续等待',
+      onOk: async () => {
+        setCancellingTaskId(task.id);
+        try {
+          const result = unwrapResponseData(await cancelQueuedDocumentTask(task.id));
+          if (result?.cancelled) {
+            if (result.cleanupCompleted) {
+              message.warning('原文件清理队列不可用，已直接删除原文件');
+            } else if (result.cleanupScheduled === false) {
+              message.warning(result.reason || '任务已取消，但原文件清理未能入队');
+            } else {
+              message.success(`${task.filename} 已取消并加入原文件清理队列`);
+            }
+          } else {
+            message.warning(result?.reason || '任务当前不可取消');
+          }
+          await fetchOperations();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '取消排队任务失败');
+        } finally {
+          setCancellingTaskId(undefined);
+        }
+      },
+    });
+  };
+
+  const handleRetryIndexRepair = async (repair: FailedIndexRepair) => {
+    setRetryingRepairId(repair.id);
+    try {
+      const result = unwrapResponseData(await retryIndexRepair(repair.id));
+      if (result?.retried) {
+        message.success(`文档 ${repair.docId} 的索引修复已重新入队`);
+      } else {
+        message.warning(result?.reason || '该索引修复任务当前不可重试');
+      }
+      await fetchOperations();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '索引修复重试失败');
+    } finally {
+      setRetryingRepairId(undefined);
+    }
+  };
+
+  const handleRunReconciler = () => {
+    Modal.confirm({
+      title: '立即运行索引对账？',
+      content: `最多扫描 ${operations?.indexReconciler.batchSize ?? 100} 份文档，并将可修复的不一致任务加入索引修复队列。`,
+      okText: '运行对账',
+      cancelText: '取消',
+      onOk: async () => {
+        setReconciling(true);
+        try {
+          const result = unwrapResponseData(await runIndexReconciler());
+          if (result?.available === false) {
+            message.warning(result.reason || '对账暂不可用');
+          } else {
+            message.success(`对账完成：扫描 ${result.scanned ?? 0} 份，排入修复队列 ${result.queued ?? 0} 项`);
+          }
+          await fetchOperations();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '索引对账失败');
+        } finally {
+          setReconciling(false);
+        }
+      },
+    });
   };
 
   const handleDeprecate = async (item: DocumentVersionItem) => {
@@ -643,7 +771,6 @@ const Documents: React.FC<DocumentListPageProps> = ({
             >
               <Button icon={<UploadOutlined />} loading={uploading} type="primary">批量上传</Button>
             </Upload>
-            <Button onClick={handleRetryFailedTasks}>重放失败任务</Button>
             <Button>新建文件夹</Button>
             <Select defaultValue="文件类型" options={[{ value: '文件类型' }]} />
             <Select defaultValue="解析状态" options={[{ value: '解析状态' }]} />
@@ -671,6 +798,228 @@ const Documents: React.FC<DocumentListPageProps> = ({
         )}
         <Button icon={<ReloadOutlined />} onClick={() => fetchDocs()} type="text" />
       </div>
+      {showOperationsPanel && (
+        <Card
+          className="rag-panel"
+          extra={
+            <Button icon={<ReloadOutlined />} loading={operationsLoading} onClick={() => void fetchOperations()}>
+              刷新状态
+            </Button>
+          }
+          title="入库与索引运维"
+        >
+          {operationsError && (
+            <Alert
+              message="运维状态暂不可用"
+              description={operationsError}
+              showIcon
+              style={{ marginBottom: 16 }}
+              type="error"
+            />
+          )}
+          {operationsLoading && !operations && <Skeleton active paragraph={{ rows: 4 }} />}
+          {operations && (
+            <>
+              <Row gutter={[16, 16]}>
+                <Col xs={24} sm={12} lg={6}>
+                  <Statistic
+                    title="文档处理队列"
+                    value={operations.documentQueue.enabled ? '运行中' : '未启用'}
+                    valueStyle={{ color: operations.documentQueue.enabled ? '#389e0d' : '#8c8c8c' }}
+                  />
+                  <Space size={4} wrap>
+                    <Tag>等待 {operations.documentQueue.waiting}</Tag>
+                    <Tag color="processing">处理中 {operations.documentQueue.active}</Tag>
+                    <Tag color="success">完成 {operations.documentQueue.completed}</Tag>
+                    <Tag color="error">失败 {operations.documentQueue.failed}</Tag>
+                  </Space>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Statistic
+                    title="索引修复队列"
+                    value={operations.indexRepairQueue.enabled ? '运行中' : '未启用'}
+                    valueStyle={{ color: operations.indexRepairQueue.enabled ? '#389e0d' : '#8c8c8c' }}
+                  />
+                  <Space size={4} wrap>
+                    <Tag>等待 {operations.indexRepairQueue.waiting}</Tag>
+                    <Tag color="processing">处理中 {operations.indexRepairQueue.active}</Tag>
+                    <Tag color="success">完成 {operations.indexRepairQueue.completed}</Tag>
+                    <Tag color="error">失败 {operations.indexRepairQueue.failed}</Tag>
+                  </Space>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Statistic
+                    title="自动对账器"
+                    value={operations.indexReconciler.enabled ? '已启用' : '未启用'}
+                    valueStyle={{ color: operations.indexReconciler.enabled ? '#389e0d' : '#8c8c8c' }}
+                  />
+                  <div style={{ color: '#8c8c8c', marginTop: 4 }}>
+                    {operations.indexReconciler.running
+                      ? '正在对账'
+                      : operations.indexReconciler.lastRunAt
+                        ? `最近运行：${new Date(operations.indexReconciler.lastRunAt).toLocaleString()}`
+                        : '尚未运行'}
+                  </div>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Statistic
+                    title="失败待处理"
+                    value={operations.failedDocumentTasks.length + operations.failedIndexRepairs.length}
+                    valueStyle={{ color: operations.failedDocumentTasks.length + operations.failedIndexRepairs.length ? '#cf1322' : '#389e0d' }}
+                  />
+                  <Button
+                    disabled={!operations.indexReconciler.queueEnabled || operations.indexReconciler.running}
+                    loading={reconciling}
+                    onClick={handleRunReconciler}
+                    style={{ marginTop: 4 }}
+                    type="primary"
+                  >
+                    立即运行索引对账
+                  </Button>
+                </Col>
+              </Row>
+              {operations.indexReconciler.lastError && (
+                <Alert
+                  message="最近一次对账失败"
+                  description={operations.indexReconciler.lastError}
+                  showIcon
+                  style={{ marginTop: 16 }}
+                  type="warning"
+                />
+              )}
+              <Row gutter={[16, 16]} style={{ marginTop: 12 }}>
+                <Col xs={24}>
+                  <h4>待处理的入库任务</h4>
+                  <Alert
+                    message="仅可取消尚未开始的任务；处理中任务无法中断。"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    type="info"
+                  />
+                  <Table<PendingDocumentTask>
+                    columns={[
+                      { title: '文件', dataIndex: 'filename', ellipsis: true },
+                      {
+                        title: '队列状态',
+                        dataIndex: 'queueStatus',
+                        width: 140,
+                        render: (value: PendingDocumentTask['queueStatus']) =>
+                          queueStatusLabels[value] ?? value,
+                      },
+                      {
+                        title: '创建时间',
+                        dataIndex: 'createdAt',
+                        width: 180,
+                        render: (value: string) => value ? new Date(value).toLocaleString() : '—',
+                      },
+                      {
+                        title: '操作',
+                        width: 100,
+                        render: (_, task) => (
+                          <Button
+                            danger
+                            disabled={!operations.documentQueue.enabled}
+                            loading={cancellingTaskId === task.id}
+                            onClick={() => handleCancelQueuedTask(task)}
+                            size="small"
+                          >
+                            取消任务
+                          </Button>
+                        ),
+                      },
+                    ] as ColumnsType<PendingDocumentTask>}
+                    dataSource={operations.pendingDocumentTasks ?? []}
+                    locale={{
+                      emptyText: (
+                        <Empty
+                          description={operations.documentQueue.enabled ? '没有待处理的入库任务' : '文档队列未启用'}
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      ),
+                    }}
+                    pagination={{ pageSize: 5, hideOnSinglePage: true }}
+                    rowKey="id"
+                    size="small"
+                  />
+                </Col>
+                <Col xs={24} xl={12}>
+                  <h4>失败的入库任务</h4>
+                  <Table<FailedDocumentTask>
+                    columns={[
+                      { title: '文件', dataIndex: 'filename', ellipsis: true },
+                      {
+                        title: '失败原因',
+                        dataIndex: 'errorMessage',
+                        ellipsis: true,
+                        render: (value?: string | null) => value || '未提供原因',
+                      },
+                      {
+                        title: '更新时间',
+                        dataIndex: 'updatedAt',
+                        width: 160,
+                        render: (value?: string) => value ? new Date(value).toLocaleString() : '—',
+                      },
+                      {
+                        title: '操作',
+                        width: 90,
+                        render: (_, task) => (
+                          <Button
+                            disabled={!operations.documentQueue.enabled}
+                            loading={retryingTaskId === task.id}
+                            onClick={() => void handleRetryDocumentTask(task)}
+                            size="small"
+                          >
+                            重试
+                          </Button>
+                        ),
+                      },
+                    ] as ColumnsType<FailedDocumentTask>}
+                    dataSource={operations.failedDocumentTasks}
+                    locale={{ emptyText: <Empty description="没有失败的入库任务" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                    pagination={{ pageSize: 5, hideOnSinglePage: true }}
+                    rowKey="id"
+                    size="small"
+                  />
+                </Col>
+                <Col xs={24} xl={12}>
+                  <h4>失败的索引修复</h4>
+                  <Table<FailedIndexRepair>
+                    columns={[
+                      { title: '文档 ID', dataIndex: 'docId', ellipsis: true },
+                      {
+                        title: '失败原因',
+                        dataIndex: 'failedReason',
+                        ellipsis: true,
+                        render: (value?: string | null) => value || '未提供原因',
+                      },
+                      { title: '尝试次数', dataIndex: 'attemptsMade', width: 90 },
+                      {
+                        title: '操作',
+                        width: 90,
+                        render: (_, repair) => (
+                          <Button
+                            disabled={!operations.indexRepairQueue.enabled}
+                            loading={retryingRepairId === repair.id}
+                            onClick={() => void handleRetryIndexRepair(repair)}
+                            size="small"
+                          >
+                            重试
+                          </Button>
+                        ),
+                      },
+                    ] as ColumnsType<FailedIndexRepair>}
+                    dataSource={operations.failedIndexRepairs}
+                    locale={{ emptyText: <Empty description="没有失败的索引修复" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                    pagination={{ pageSize: 5, hideOnSinglePage: true }}
+                    rowKey="id"
+                    size="small"
+                  />
+                </Col>
+              </Row>
+            </>
+          )}
+        </Card>
+      )}
       <div className="view-switch">
         <Button icon={<TableOutlined />} type="primary" />
         <Button icon={<AppstoreOutlined />} />

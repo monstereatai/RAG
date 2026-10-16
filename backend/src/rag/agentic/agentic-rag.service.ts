@@ -24,7 +24,11 @@ import {
   type AgenticArtifact,
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
-import { isObjectiveFactQuery } from '../prompts/context-policy';
+import {
+  isObjectiveKnowledgeIntent,
+  resolveStandaloneRetrievalQuery,
+  shouldClarifyQueryIntent,
+} from '../prompts/query-intent-router';
 import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
 import {
   queryAugmentPrompt,
@@ -475,6 +479,12 @@ export class AgenticRagService {
       0,
       Math.min(subQuestionLimit, this.maxRetrievalQueries),
     );
+    const standaloneQuery = resolveStandaloneRetrievalQuery(
+      state.query,
+      retrieveOptions.queryIntent,
+    );
+    const contextualQueries =
+      standaloneQuery !== state.query.trim() ? [standaloneQuery] : [];
 
     // 子问题 Hybrid 检索、已审核纠错证据和 Obsidian 读取并发；Auto 预取结果能复用的部分不再重查。
     this.logger.log(
@@ -492,7 +502,9 @@ export class AgenticRagService {
               const retrievalQueries = this.buildRetrievalQueries(
                 q,
                 state.query,
-                fastPathChunks.length > 0 ? [] : state.augmentedQueries,
+                fastPathChunks.length > 0
+                  ? []
+                  : [...contextualQueries, ...(state.augmentedQueries ?? [])],
                 index,
               );
               const resultGroups = await Promise.all(
@@ -508,6 +520,7 @@ export class AgenticRagService {
                           retrievalQuery,
                           {
                             ...retrieveOptions,
+                            rankingQuery: state.query,
                             // Auto 升级时原问题已由 Fast Path 完成图谱探测；
                             // 显式 Agentic 的原问题在这里按结构化计划探测一次。
                             // 子问题只补文本证据，不能隐式重复探测图谱。
@@ -589,8 +602,18 @@ export class AgenticRagService {
               )
               .catch(() => ({ hits: [], context: '' })),
       ]);
+    const sourceResolution =
+      await this.karpathyRagService.resolveObsidianSourceEvidence(
+        state.query,
+        obsidianContext.hits,
+        userId,
+        retrieveOptions,
+      );
+    const obsidianEvidenceHits = obsidianContext.hits.filter(
+      (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
+    );
     const obsidianChunks = this.karpathyRagService.toObsidianChunks(
-      obsidianContext.hits,
+      obsidianEvidenceHits,
     );
     const allResults = retrievedSubQuestions.map((item) => item.results);
     const updatedSubQuestions: AgenticSubQuestion[] = retrievedSubQuestions.map(
@@ -599,18 +622,55 @@ export class AgenticRagService {
         return subQuestion;
       },
     );
+    if (sourceResolution.chunks.length > 0 && updatedSubQuestions.length > 0) {
+      const queryIndex = updatedSubQuestions.findIndex(
+        (item) => item.question === state.query,
+      );
+      const primaryIndex = queryIndex >= 0 ? queryIndex : 0;
+      const primaryQuestion = updatedSubQuestions[primaryIndex];
+      const sourceIds = sourceResolution.chunks.map((chunk) => chunk.id);
+      updatedSubQuestions[primaryIndex] = {
+        ...primaryQuestion,
+        evidenceIds: [
+          ...new Set([...sourceIds, ...primaryQuestion.evidenceIds]),
+        ],
+        status: 'retrieved',
+      };
+    }
 
-    const formalChunks = allResults.flat();
+    const formalChunkMap = new Map<string, RetrievedChunk>();
+    for (const chunk of [...allResults.flat(), ...sourceResolution.chunks]) {
+      const existing = formalChunkMap.get(chunk.id);
+      if (
+        !existing ||
+        this.rankEvidenceChunks([existing, chunk])[0] === chunk
+      ) {
+        formalChunkMap.set(chunk.id, chunk);
+      }
+    }
+    const formalChunks = Array.from(formalChunkMap.values());
     const formalEvidenceSufficient =
       formalChunks.length > 0 &&
       this.assessRetrievedChunks(state.query, formalChunks).sufficient;
     // 与 Simple/Auto 的统一证据策略保持一致：正式 RAG 已足够时，Obsidian
     // 只能作为可观测补充，不能挤占正式片段；正式 RAG 不足时才纳入长期笔记兜底。
-    const baselineChunks = [
+    const baselineCandidates = [
       ...fastPathChunks,
       ...reviewedBaseCaseChunks,
+      ...sourceResolution.chunks,
       ...(formalEvidenceSufficient ? [] : obsidianChunks),
     ];
+    const baselineMap = new Map<string, RetrievedChunk>();
+    for (const chunk of baselineCandidates) {
+      const existing = baselineMap.get(chunk.id);
+      if (
+        !existing ||
+        this.rankEvidenceChunks([existing, chunk])[0] === chunk
+      ) {
+        baselineMap.set(chunk.id, chunk);
+      }
+    }
+    const baselineChunks = Array.from(baselineMap.values());
     const resultIds = new Set(
       [...allResults.flat(), ...baselineChunks].map((chunk) => chunk.id),
     );
@@ -1508,7 +1568,7 @@ export class AgenticRagService {
           `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
       )
       .join('\n\n');
-    const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
+    const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。若问题包含多个并列事项，必须逐项回答并分别引用对应片段；某一项缺证据时只对该项说明“片段中未提及”，不能只回答其中最相关的一项。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
     try {
       const answer = await this.withTimeout(
         this.llmProvider.invoke(prompt, {
@@ -2180,7 +2240,7 @@ export class AgenticRagService {
         },
       } satisfies RequestContext;
     }
-    if (ambiguity?.detected && ambiguity.confidence < 0.75) {
+    if (shouldClarifyQueryIntent(queryIntent)) {
       const answer =
         ambiguity.clarificationQuestion ??
         '这个问题存在多种可能含义。请补充具体对象、项目或业务场景。';
@@ -2299,13 +2359,6 @@ export class AgenticRagService {
         retryCount: 0,
       };
     }
-    if (
-      !multiIntent &&
-      queryIntent.standaloneQuery &&
-      queryIntent.confidence >= 0.75
-    ) {
-      query = queryIntent.standaloneQuery;
-    }
     // Auto 的 Fast Path 只用于选择执行引擎和向升级后的 Agentic 复用首轮证据。
     // 用户显式选择 Agentic 时直接进入状态机，由 Query Augment 规划后按需取证。
     const fastPathGate =
@@ -2325,7 +2378,7 @@ export class AgenticRagService {
             ? 'simple'
             : retrieveOptions.queryIntent?.contextMode === 'mixed'
               ? 'simple'
-              : isObjectiveFactQuery(query)
+              : isObjectiveKnowledgeIntent(queryIntent)
                 ? 'simple'
                 : multiIntent
                   ? 'agentic'

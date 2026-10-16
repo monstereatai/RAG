@@ -16,9 +16,29 @@ import type { DocumentBusinessMetadata } from './document-profile.util';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
+export const OBSIDIAN_NOTE_INGEST_QUEUE = 'obsidian-note-ingest';
 const DOCUMENT_SOURCE_CLEANUP_QUEUE = 'document-processing-source-cleanup';
 const DOCUMENT_PROCESSING_ATTEMPTS = 3;
 const FAILED_SOURCE_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+export interface ObsidianNoteIngestJob {
+  taskId: string;
+  docId: string;
+  userId: string;
+  title: string;
+  /** 原始正文的 SHA-256；用它保持 Obsidian 去重稳定，不传正文。 */
+  contentHash: string;
+  sourceUrl?: string;
+  sourceType: 'url' | 'document' | 'official-docs' | 'manual';
+  contentType?: string;
+  filename?: string;
+}
+
+export type ObsidianNoteIngestInput = Omit<ObsidianNoteIngestJob, 'taskId'>;
+
+export type ObsidianNoteIngestProcessor = (
+  job: ObsidianNoteIngestJob,
+) => Promise<void>;
 
 export interface DocumentProcessingJob {
   taskId: string;
@@ -43,15 +63,25 @@ export type DocumentProcessingProcessor = (
   job: DocumentProcessingJob,
 ) => Promise<{ chunkCount?: number } | void>;
 
+export interface PendingDocumentQueueTask {
+  taskId: string;
+  filename: string;
+  status: 'waiting' | 'delayed' | 'paused' | 'waiting-children';
+  createdAt: number;
+}
+
 @Injectable()
 export class DocumentQueueService implements OnModuleDestroy {
   private readonly logger = new Logger(DocumentQueueService.name);
   private readonly queue: Queue<DocumentProcessingJob>;
   private readonly queueEvents: QueueEvents;
   private readonly worker: Worker<DocumentProcessingJob>;
+  private readonly obsidianQueue: Queue<ObsidianNoteIngestJob>;
+  private readonly obsidianWorker: Worker<ObsidianNoteIngestJob>;
   private readonly cleanupQueue: Queue<{ objectKey: string }>;
   private readonly cleanupWorker: Worker<{ objectKey: string }>;
   private processor: DocumentProcessingProcessor | null = null;
+  private obsidianProcessor: ObsidianNoteIngestProcessor | null = null;
   readonly enabled: boolean;
   readonly required: boolean;
 
@@ -77,6 +107,8 @@ export class DocumentQueueService implements OnModuleDestroy {
       this.queue = null!;
       this.queueEvents = null!;
       this.worker = null!;
+      this.obsidianQueue = null!;
+      this.obsidianWorker = null!;
       this.cleanupQueue = null!;
       this.cleanupWorker = null!;
       return;
@@ -97,6 +129,19 @@ export class DocumentQueueService implements OnModuleDestroy {
     this.queueEvents = new QueueEvents(DOCUMENT_PROCESSING_QUEUE, {
       connection,
     });
+
+    this.obsidianQueue = new Queue<ObsidianNoteIngestJob>(
+      OBSIDIAN_NOTE_INGEST_QUEUE,
+      {
+        connection,
+        defaultJobOptions: {
+          attempts: DOCUMENT_PROCESSING_ATTEMPTS,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: { age: 3600 * 24 },
+          removeOnFail: { age: 3600 * 24 },
+        },
+      },
+    );
 
     this.worker = new Worker<DocumentProcessingJob>(
       DOCUMENT_PROCESSING_QUEUE,
@@ -122,6 +167,29 @@ export class DocumentQueueService implements OnModuleDestroy {
         ),
       },
     );
+
+    this.obsidianWorker = new Worker<ObsidianNoteIngestJob>(
+      OBSIDIAN_NOTE_INGEST_QUEUE,
+      async (job) => {
+        if (!this.obsidianProcessor) {
+          throw new Error('Obsidian note queue processor is not registered.');
+        }
+        await this.obsidianProcessor(job.data);
+      },
+      {
+        connection,
+        concurrency: Math.max(
+          1,
+          Number(process.env.OBSIDIAN_NOTE_QUEUE_CONCURRENCY ?? 1),
+        ),
+      },
+    );
+
+    this.obsidianWorker.on('failed', (job, err) => {
+      this.logger.error(
+        `Obsidian note ingest failed for doc=${job?.data?.docId}: ${err.message}`,
+      );
+    });
 
     this.worker.on('completed', (job) => {
       this.logger.log(
@@ -162,6 +230,53 @@ export class DocumentQueueService implements OnModuleDestroy {
 
   registerProcessor(processor: DocumentProcessingProcessor): void {
     this.processor = processor;
+  }
+
+  registerObsidianNoteProcessor(processor: ObsidianNoteIngestProcessor): void {
+    this.obsidianProcessor = processor;
+  }
+
+  /**
+   * 笔记整理是可选任务。队列不可用时返回 skipped，不影响已完成的 RAG 入库。
+   * BullMQ 只保存文档 ID 和少量元信息，Worker 再从 PostgreSQL 读取已入库原文。
+   */
+  async enqueueObsidianNote(input: ObsidianNoteIngestInput): Promise<{
+    status: 'queued' | 'skipped';
+    taskId?: string;
+    reason?: string;
+  }> {
+    if (!this.enabled) {
+      return { status: 'skipped', reason: 'Redis/BullMQ is unavailable' };
+    }
+
+    const taskId = `obsidian-${input.docId}`;
+    const configuredTimeout = Number(
+      process.env.OBSIDIAN_NOTE_ENQUEUE_TIMEOUT_MS ?? 1000,
+    );
+    const timeoutMs = Number.isFinite(configuredTimeout)
+      ? Math.max(100, configuredTimeout)
+      : 1000;
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.obsidianQueue.add(taskId, { ...input, taskId }, { jobId: taskId }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Obsidian note queue enqueue timed out')),
+            timeoutMs,
+          );
+        }),
+      ]);
+      return { status: 'queued', taskId };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Obsidian note task skipped for doc=${input.docId}: ${reason}`,
+      );
+      return { status: 'skipped', reason };
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   /**
@@ -270,6 +385,117 @@ export class DocumentQueueService implements OnModuleDestroy {
     }));
   }
 
+  async listPending(limit = 50): Promise<{
+    enabled: boolean;
+    tasks: PendingDocumentQueueTask[];
+  }> {
+    if (!this.enabled) return { enabled: false, tasks: [] };
+    const jobs = await this.queue.getJobs(
+      ['waiting', 'delayed', 'paused', 'waiting-children'],
+      0,
+      Math.max(0, Math.min(limit, 100) - 1),
+    );
+    return {
+      enabled: true,
+      tasks: await Promise.all(
+        jobs.map(async (job) => ({
+          taskId: job.data.taskId,
+          filename: job.data.filename,
+          status: (await job.getState()) as PendingDocumentQueueTask['status'],
+          createdAt: job.timestamp,
+        })),
+      ),
+    };
+  }
+
+  async cancelPending(taskId: string): Promise<{
+    taskId: string;
+    cancelled: boolean;
+    cleanupScheduled?: boolean;
+    cleanupCompleted?: boolean;
+    reason?: string;
+  }> {
+    if (!this.enabled) {
+      return {
+        taskId,
+        cancelled: false,
+        reason: 'Redis/BullMQ 不可用，无法取消排队任务。',
+      };
+    }
+    const job = await this.queue.getJob(taskId);
+    if (!job) {
+      return { taskId, cancelled: false, reason: '队列任务不存在或已过期。' };
+    }
+
+    const state = await job.getState();
+    if (!this.isPendingState(state)) {
+      return {
+        taskId,
+        cancelled: false,
+        reason:
+          state === 'active'
+            ? '任务已处理中，无法中断。'
+            : `任务状态为 ${state}，无法取消。`,
+      };
+    }
+
+    try {
+      await job.remove();
+    } catch (error) {
+      // Worker 可能在检查状态后立即领取任务。BullMQ 会拒绝移除已锁定任务；
+      // 重新读取状态以给操作者明确说明，不把竞态误报成成功。
+      const currentState = await job.getState().catch(() => 'unknown');
+      return {
+        taskId,
+        cancelled: false,
+        reason:
+          currentState === 'active'
+            ? '任务已处理中，无法中断。'
+            : `队列任务未能移除：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+
+    const cleanupScheduled = await this.enqueueSourceObjectCleanup(
+      taskId,
+      job.data.objectKey,
+      0,
+    );
+    let cleanupCompleted = false;
+    if (!cleanupScheduled) {
+      try {
+        await this.objectStorage.deleteObject(job.data.objectKey);
+        cleanupCompleted = true;
+      } catch (error) {
+        this.logger.error(
+          `cancelled upload cleanup failed for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return {
+      taskId,
+      cancelled: true,
+      cleanupScheduled,
+      cleanupCompleted,
+      ...(cleanupScheduled || cleanupCompleted
+        ? {}
+        : {
+            reason:
+              '任务已取消，但原文件清理任务未能入队，请检查队列连接后手动清理。',
+          }),
+    };
+  }
+
+  private isPendingState(
+    state: string,
+  ): state is PendingDocumentQueueTask['status'] {
+    return (
+      state === 'waiting' ||
+      state === 'delayed' ||
+      state === 'paused' ||
+      state === 'waiting-children'
+    );
+  }
+
   async retryFailed(
     taskId: string,
   ): Promise<{ taskId: string; retried: boolean; reason?: string }> {
@@ -290,6 +516,8 @@ export class DocumentQueueService implements OnModuleDestroy {
     if (!this.enabled) return;
     await this.cleanupWorker.close();
     await this.cleanupQueue.close();
+    await this.obsidianWorker.close();
+    await this.obsidianQueue.close();
     await this.worker.close();
     await this.queueEvents.close();
     await this.queue.close();
@@ -309,17 +537,19 @@ export class DocumentQueueService implements OnModuleDestroy {
     taskId: string,
     objectKey: string,
     delay: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.cleanupQueue.add(
         taskId,
         { objectKey },
         { jobId: taskId, delay },
       );
+      return true;
     } catch (error) {
       this.logger.warn(
         `queued upload cleanup scheduling failed for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return false;
     }
   }
 

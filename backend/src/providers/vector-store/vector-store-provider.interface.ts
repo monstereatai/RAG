@@ -19,6 +19,24 @@ export interface VectorSearchHit {
   score: number;
 }
 
+export interface RetrievalDescriptionVectorRecord {
+  id: string;
+  vector: number[];
+  docId: string;
+  tenantId: string;
+  userId?: string | null;
+  content: string;
+}
+
+export interface RetrievalDescriptionVectorHit {
+  id: string;
+  docId: string;
+  tenantId: string;
+  userId: string;
+  content: string;
+  score: number;
+}
+
 export interface VectorIndexInfo {
   provider: string;
   collection: string;
@@ -116,16 +134,35 @@ export interface IVectorStoreProvider {
   insertImages(records: ImageVectorRecord[]): Promise<void>;
 
   /**
-   * 按向量相似度检索图片 topK（可按 user_id 过滤）
+   * 按向量相似度检索图片 topK（可按 user_id 或允许文档集合过滤）
    */
   searchImages(
     queryVector: number[],
     k: number,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<ImageSearchHit[]>;
 
   /**
    * 按 docId 删除图片向量（可叠加 user_id 过滤）
    */
   deleteImagesByDocId(docId: string, userId?: string): Promise<void>;
+
+  /** 初始化检索描述专用集合，不改动 rag_chunks。 */
+  ensureDescriptionCollection(): Promise<void>;
+
+  /** 按描述 ID upsert 向量记录。 */
+  upsertDescriptions(records: RetrievalDescriptionVectorRecord[]): Promise<void>;
+
+  /** 仅按 tenantId 限定候选；文档 ACL 由上层复核。 */
+  searchDescriptions(
+    queryVector: number[],
+    options: { tenantId: string; topK: number },
+  ): Promise<RetrievalDescriptionVectorHit[]>;
+
+  /** 返回租户下某文档已存在的描述向量 ID，用于索引对账。 */
+  listDescriptionIds(tenantId: string, docId: string): Promise<string[]>;
+
+  /** 删除指定租户下某文档的描述向量。 */
+  deleteDescriptionsByDocId(tenantId: string, docId: string): Promise<void>;
 }

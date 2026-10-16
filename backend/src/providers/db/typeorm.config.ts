@@ -59,6 +59,14 @@ import { IamRolePermissionEntity } from './entities/iam-role-permission.entity';
 import { IamMembershipRoleEntity } from './entities/iam-membership-role.entity';
 import { AgentRuntimeEventSequenceEntity } from './entities/agent-runtime-event-sequence.entity';
 import { DomainEventDeliveryEntity } from './entities/domain-event-delivery.entity';
+import { DocumentRetrievalDescriptionEntity } from './entities/document-retrieval-description.entity';
+import { DocumentRetrievalDescriptionChunkEntity } from './entities/document-retrieval-description-chunk.entity';
+import { TeamWikiPageEntity } from './entities/team-wiki-page.entity';
+import { TeamWikiRevisionEntity } from './entities/team-wiki-revision.entity';
+import {
+  FeishuWikiConnectorEntity,
+  FeishuWikiItemEntity,
+} from './entities/feishu-wiki-connector.entity';
 
 const provider = process.env.RELATIONAL_DB_PROVIDER ?? 'postgres';
 const isPostgres = provider !== 'mysql';
@@ -115,6 +123,12 @@ export default new DataSource({
     IamMembershipRoleEntity,
     AgentRuntimeEventSequenceEntity,
     DomainEventDeliveryEntity,
+    DocumentRetrievalDescriptionEntity,
+    DocumentRetrievalDescriptionChunkEntity,
+    TeamWikiPageEntity,
+    TeamWikiRevisionEntity,
+    FeishuWikiConnectorEntity,
+    FeishuWikiItemEntity,
   ],
   migrations: ['src/migrations/*.ts'],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run

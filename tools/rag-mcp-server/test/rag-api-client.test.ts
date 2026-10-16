@@ -184,6 +184,51 @@ test('RagApiClient calls governance, workflow and scheduled-job read endpoints',
   ]);
 });
 
+test('RagApiClient uses the current HTTP bearer for each request', async () => {
+  let activeToken = 'tenant-a-token';
+  const seen: Array<{ path: string; authorization: string | undefined }> = [];
+  const client = new RagApiClient({
+    baseUrl: 'http://rag.test/api/v1',
+    tokenProvider: () => activeToken,
+    fetchImpl: async (url, init) => {
+      seen.push({
+        path: new URL(String(url)).pathname,
+        authorization: (init?.headers as Record<string, string>).Authorization,
+      });
+      return new Response(JSON.stringify({ code: 0, data: { userId: 'user-1', tenantId: 'tenant-1' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  await client.profile();
+  activeToken = 'tenant-b-token';
+  await client.profile();
+
+  assert.deepEqual(seen, [
+    { path: '/api/v1/auth/profile', authorization: 'Bearer tenant-a-token' },
+    { path: '/api/v1/auth/profile', authorization: 'Bearer tenant-b-token' },
+  ]);
+});
+
+test('RagApiClient does not fall back to configured credentials in HTTP bearer mode', async () => {
+  let fetchCount = 0;
+  const client = new RagApiClient({
+    baseUrl: 'http://rag.test/api/v1',
+    tokenProvider: () => undefined,
+    username: 'must-not-be-used',
+    password: 'must-not-be-used',
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return new Response('{}', { status: 200 });
+    },
+  });
+
+  await assert.rejects(client.profile(), { code: 'unauthorized' });
+  assert.equal(fetchCount, 0);
+});
+
 test('buildProductionWorkflowHandoff keeps Markdown, Schemas and RAG citations together', () => {
   const handoff = buildProductionWorkflowHandoff({
     threadId: 'thread-1',

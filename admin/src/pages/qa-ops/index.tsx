@@ -1,4 +1,5 @@
 import {
+  CloseOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EllipsisOutlined,
@@ -39,21 +40,26 @@ import {
   type ConversationSummary,
   type ArtifactKind,
   type GeneratedArtifact,
+  type ConversationAttachment,
   type ReferenceChunk,
   type RolePreset,
   createTtsWebSocket,
   createArtifact,
   createArtifactShare,
+  deleteConversationAttachment,
+  deleteConversationAttachments,
   deleteConversation,
   downloadArtifact,
   getEnabledQaModelOptions,
   getQaModelConfig,
   getConversation,
+  getConversationAttachments,
   getConversations,
   getArtifacts,
   getRolePresets,
   getQaPlugins,
   streamAguiAnswer,
+  uploadConversationAttachment,
   submitConversationBadCase,
 } from './service';
 
@@ -219,6 +225,8 @@ const formatEventTrace = (events: EventTraceItem[]) =>
 
 const isExternalReference = (item: ReferenceChunk) =>
   item.retrievalSource === 'web' || item.id.startsWith('web:');
+const isConversationAttachmentReference = (item: ReferenceChunk) =>
+  item.retrievalSource === 'attachment';
 
 const referenceLabel = (item: ReferenceChunk) => {
   if (!/^https?:\/\//i.test(item.docId)) return item.docId || item.id;
@@ -278,6 +286,9 @@ const QaOps: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [threadId, setThreadId] = React.useState<string | undefined>(undefined);
   const threadIdRef = React.useRef<string | undefined>(undefined);
+  const [attachments, setAttachments] = React.useState<ConversationAttachment[]>([]);
+  const [attachmentUploading, setAttachmentUploading] = React.useState(false);
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
   const [conversations, setConversations] = React.useState<
     ConversationSummary[]
   >([]);
@@ -368,10 +379,21 @@ const QaOps: React.FC = () => {
     const lastAnswer = [...messages]
       .reverse()
       .find((item) => item.role === 'assistant' && item.content)?.content;
+    const recentConversation = messages
+      .slice(-10)
+      .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
+      .filter((item) => item.trim())
+      .join('\n\n');
+    const attachmentSource = attachments
+      .filter((item) => item.status === 'ready')
+      .map((item) => `[附件：${item.filename}]\n${item.content}`)
+      .join('\n\n');
     artifactForm.setFieldsValue({
       title: activeTitle || 'AI 问答产物',
       kind,
-      sourceText: lastAnswer || input,
+      sourceText: [recentConversation, attachmentSource, lastAnswer || input]
+        .filter(Boolean)
+        .join('\n\n'),
       prompt: kind === 'image' ? input : undefined,
     });
     setArtifactModalOpen(true);
@@ -533,22 +555,27 @@ const QaOps: React.FC = () => {
   };
 
   const handleNewConversation = () => {
+    if (attachmentUploading) return;
     abortRef.current?.abort();
     abortRef.current = null;
     ttsRef.current?.close();
     setTtsStatusByMessageId({});
     setMessages([]);
     setThreadId(undefined);
+    threadIdRef.current = undefined;
+    setAttachments([]);
     setActiveTitle('');
   };
 
   const handleClearConversation = async () => {
+    if (attachmentUploading) return;
     abortRef.current?.abort();
     abortRef.current = null;
     ttsRef.current?.close();
     setTtsStatusByMessageId({});
     if (threadId) {
       try {
+        await deleteConversationAttachments(threadId);
         await deleteConversation(threadId);
         await loadConversations();
       } catch {
@@ -557,10 +584,13 @@ const QaOps: React.FC = () => {
     }
     setMessages([]);
     setThreadId(undefined);
+    threadIdRef.current = undefined;
+    setAttachments([]);
     setActiveTitle('');
   };
 
   const handleSelectConversation = async (item: ConversationSummary) => {
+    if (attachmentUploading) return;
     abortRef.current?.abort();
     abortRef.current = null;
     ttsRef.current?.close();
@@ -572,7 +602,19 @@ const QaOps: React.FC = () => {
       if (!detail) return;
 
       setThreadId(detail.threadId);
+      threadIdRef.current = detail.threadId;
       setActiveTitle(detail.title);
+      try {
+        const attachmentResult = await getConversationAttachments(detail.threadId);
+        setAttachments(
+          (attachmentResult.data ?? []).map((attachment) => ({
+            ...attachment,
+            status: 'ready',
+          })),
+        );
+      } catch {
+        setAttachments([]);
+      }
 
       // 将后端的消息列表转为前端 ChatMessage 格式
       const chatMessages: ChatMessage[] = detail.messages.map((m, i) => {
@@ -704,8 +746,9 @@ const QaOps: React.FC = () => {
   };
 
   const handleSend = () => {
-    const query = input.trim();
-    if (!query || loading) return;
+    const hasReadyAttachment = attachments.some((item) => item.status === 'ready');
+    const query = input.trim() || (hasReadyAttachment ? '请基于当前会话附件回答。' : '');
+    if (!query || loading || attachmentUploading) return;
 
     abortRef.current?.abort();
     abortRef.current = null;
@@ -759,9 +802,89 @@ const QaOps: React.FC = () => {
       threadId,
       rolePresetId,
       pluginKeys,
+      attachments
+        .filter((item) => item.status === 'ready')
+        .map((item) => item.id),
     ).then((controller) => {
       abortRef.current = controller;
     });
+  };
+
+  const handleAttachmentSelection = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (!files.length) return;
+    if (attachments.length + files.length > 5) {
+      antdMessage.error('一个会话最多上传 5 个附件');
+      return;
+    }
+
+    let activeThreadId = threadIdRef.current;
+    if (!activeThreadId) {
+      activeThreadId = window.crypto.randomUUID();
+      threadIdRef.current = activeThreadId;
+      setThreadId(activeThreadId);
+    }
+
+    setAttachmentUploading(true);
+    for (const file of files) {
+      const localId = `uploading-${window.crypto.randomUUID()}`;
+      setAttachments((current) => [
+        ...current,
+        {
+          id: localId,
+          filename: file.name,
+          mimeType: file.type,
+          size: file.size,
+          content: '',
+          truncated: false,
+          createdAt: new Date().toISOString(),
+          status: 'uploading',
+        },
+      ]);
+      try {
+        const result = await uploadConversationAttachment(file, activeThreadId);
+        setAttachments((current) =>
+          current.map((item) =>
+            item.id === localId ? { ...result.data, status: 'ready' } : item,
+          ),
+        );
+        if (result.data.truncated) {
+          antdMessage.warning(`${file.name} 内容较长，超出部分未加入会话`);
+        }
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : `${file.name} 解析失败`;
+        setAttachments((current) =>
+          current.map((item) =>
+            item.id === localId
+              ? { ...item, status: 'error', errorMessage }
+              : item,
+          ),
+        );
+        antdMessage.error(`${file.name}：${errorMessage}`);
+      }
+    }
+    setAttachmentUploading(false);
+  };
+
+  const handleRemoveAttachment = async (attachment: ConversationAttachment) => {
+    if (attachment.status === 'uploading') return;
+    if (attachment.status === 'ready' && threadIdRef.current) {
+      try {
+        await deleteConversationAttachment(attachment.id, threadIdRef.current);
+      } catch (error) {
+        antdMessage.error(
+          error instanceof Error ? error.message : '移除附件失败',
+        );
+        return;
+      }
+    }
+    setAttachments((current) =>
+      current.filter((item) => item.id !== attachment.id),
+    );
   };
 
   const applyAguiEvent = (event: AguiEvent, messageId: string) => {
@@ -1047,6 +1170,7 @@ const QaOps: React.FC = () => {
                       onClick: async ({ domEvent }) => {
                         domEvent.stopPropagation();
                         try {
+                            await deleteConversationAttachments(item.threadId);
                           await deleteConversation(item.threadId);
                           setConversations((prev) =>
                             prev.filter((c) => c.threadId !== item.threadId),
@@ -1054,6 +1178,8 @@ const QaOps: React.FC = () => {
                           if (threadId === item.threadId) {
                             setMessages([]);
                             setThreadId(undefined);
+                            threadIdRef.current = undefined;
+                            setAttachments([]);
                             setActiveTitle('');
                           }
                         } catch {
@@ -1364,33 +1490,37 @@ const QaOps: React.FC = () => {
                             <article key={`${item.id}-${item.chunkIndex}`}>
                               <FileWordOutlined className="file-icon word" />
                               <div>
-                                <a
-                                  href={isExternalReference(item) ? item.docId : undefined}
-                                  target={
-                                    isExternalReference(item)
-                                      ? '_blank'
-                                      : undefined
-                                  }
-                                  rel={
-                                    isExternalReference(item)
-                                      ? 'noreferrer'
-                                      : undefined
-                                  }
-                                  onClick={(event) => {
-                                    if (!isExternalReference(item)) {
-                                      event.preventDefault();
-                                      history.push(
-                                        `/documents/${encodeURIComponent(item.docId)}`,
-                                      );
+                                {isConversationAttachmentReference(item) ? (
+                                  <strong>{referenceLabel(item)}</strong>
+                                ) : (
+                                  <a
+                                    href={isExternalReference(item) ? item.docId : undefined}
+                                    target={
+                                      isExternalReference(item)
+                                        ? '_blank'
+                                        : undefined
                                     }
-                                  }}
-                                >
-                                  {referenceLabel(item)}
-                                </a>
+                                    rel={
+                                      isExternalReference(item)
+                                        ? 'noreferrer'
+                                        : undefined
+                                    }
+                                    onClick={(event) => {
+                                      if (!isExternalReference(item)) {
+                                        event.preventDefault();
+                                        history.push(
+                                          `/documents/${encodeURIComponent(item.docId)}`,
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    {referenceLabel(item)}
+                                  </a>
+                                )}
                                 <span>
-                                  {isExternalReference(item) ? '外部网页' : '本地知识库'} ·{' '}
-                                  chunk #{item.chunkIndex} · score{' '}
-                                  {(item.totalScore ?? 0).toFixed(2)}
+                                  {isConversationAttachmentReference(item)
+                                    ? `当前会话附件 · ${item.citationLabel ?? `片段 ${item.chunkIndex}`}`
+                                    : `${isExternalReference(item) ? '外部网页' : '本地知识库'} · chunk #${item.chunkIndex} · score ${(item.totalScore ?? 0).toFixed(2)}`}
                                 </span>
                               </div>
                             </article>
@@ -1446,6 +1576,15 @@ const QaOps: React.FC = () => {
             </div>
           )}
           <div className="chat-input">
+            <input
+              ref={attachmentInputRef}
+              accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.md,.markdown,.docx,.pdf"
+              aria-label="上传对话附件"
+              hidden
+              multiple
+              onChange={(event) => void handleAttachmentSelection(event)}
+              type="file"
+            />
             <Input.TextArea
               autoSize={{ minRows: 2, maxRows: 3 }}
               maxLength={2000}
@@ -1459,6 +1598,38 @@ const QaOps: React.FC = () => {
               placeholder="请输入问题，Shift + Enter 换行"
               value={input}
             />
+            {attachments.length > 0 && (
+              <div className="qa-attachment-list" aria-live="polite">
+                {attachments.map((attachment) => (
+                  <div
+                    className={`qa-attachment-item ${attachment.status ?? 'ready'}`}
+                    key={attachment.id}
+                    title={attachment.errorMessage ?? attachment.filename}
+                  >
+                    <FileWordOutlined />
+                    <span className="qa-attachment-name">{attachment.filename}</span>
+                    <span className="qa-attachment-status">
+                      {attachment.status === 'uploading'
+                        ? '解析中…'
+                        : attachment.status === 'error'
+                          ? '解析失败'
+                          : `${Math.ceil(attachment.size / 1024)} KB`}
+                    </span>
+                    <Button
+                      aria-label={`移除 ${attachment.filename}`}
+                      disabled={attachment.status === 'uploading'}
+                      icon={<CloseOutlined />}
+                      onClick={() => void handleRemoveAttachment(attachment)}
+                      size="small"
+                      type="text"
+                    />
+                  </div>
+                ))}
+                <span className="qa-attachment-note">
+                  附件只用于当前会话，不会进入长期知识库
+                </span>
+              </div>
+            )}
             <div>
               <select
                 aria-label="问答模式"
@@ -1502,16 +1673,26 @@ const QaOps: React.FC = () => {
                 onChange={(values) => setPluginKeys(values)}
               />
               <span>{input.length} / 2000</span>
-              <Button disabled={loading} icon={<PaperClipOutlined />} />
               <Button
-                disabled={loading || (!input.trim() && !messages.length)}
+                disabled={loading || attachmentUploading || attachments.length >= 5}
+                icon={<PaperClipOutlined />}
+                onClick={() => attachmentInputRef.current?.click()}
+              >
+                附件
+              </Button>
+              <Button
+                disabled={loading || (!input.trim() && !messages.length && !attachments.some((item) => item.status === 'ready'))}
                 icon={<FileAddOutlined />}
                 onClick={() => openArtifactModal()}
               >
                 生成文件
               </Button>
               <Button
-                disabled={!input.trim() || loading}
+                disabled={
+                  (!input.trim() && !attachments.some((item) => item.status === 'ready')) ||
+                  loading ||
+                  attachmentUploading
+                }
                 icon={<SendOutlined />}
                 loading={loading}
                 onClick={handleSend}
@@ -1662,6 +1843,7 @@ const QaOps: React.FC = () => {
       </Drawer>
       <Modal
         open={artifactModalOpen}
+        zIndex={1100}
         title="生成可传播文件"
         okText="开始生成"
         cancelText="取消"

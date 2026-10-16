@@ -45,6 +45,14 @@ import { IamRolePermissionEntity } from './entities/iam-role-permission.entity';
 import { IamMembershipRoleEntity } from './entities/iam-membership-role.entity';
 import { AgentRuntimeEventSequenceEntity } from './entities/agent-runtime-event-sequence.entity';
 import { DomainEventDeliveryEntity } from './entities/domain-event-delivery.entity';
+import { DocumentRetrievalDescriptionEntity } from './entities/document-retrieval-description.entity';
+import { DocumentRetrievalDescriptionChunkEntity } from './entities/document-retrieval-description-chunk.entity';
+import { TeamWikiPageEntity } from './entities/team-wiki-page.entity';
+import { TeamWikiRevisionEntity } from './entities/team-wiki-revision.entity';
+import {
+  FeishuWikiConnectorEntity,
+  FeishuWikiItemEntity,
+} from './entities/feishu-wiki-connector.entity';
 
 /**
  * 关系型数据库模块（TypeORM，可插拔 postgres/mysql）
@@ -125,6 +133,12 @@ import { DomainEventDeliveryEntity } from './entities/domain-event-delivery.enti
             IamMembershipRoleEntity,
             AgentRuntimeEventSequenceEntity,
             DomainEventDeliveryEntity,
+            DocumentRetrievalDescriptionEntity,
+            DocumentRetrievalDescriptionChunkEntity,
+            TeamWikiPageEntity,
+            TeamWikiRevisionEntity,
+            FeishuWikiConnectorEntity,
+            FeishuWikiItemEntity,
           ],
           synchronize,
           logging: nodeEnv === 'development',
@@ -180,6 +194,12 @@ import { DomainEventDeliveryEntity } from './entities/domain-event-delivery.enti
       IamMembershipRoleEntity,
       AgentRuntimeEventSequenceEntity,
       DomainEventDeliveryEntity,
+      DocumentRetrievalDescriptionEntity,
+      DocumentRetrievalDescriptionChunkEntity,
+      TeamWikiPageEntity,
+      TeamWikiRevisionEntity,
+      FeishuWikiConnectorEntity,
+      FeishuWikiItemEntity,
     ]),
   ],
   exports: [TypeOrmModule],

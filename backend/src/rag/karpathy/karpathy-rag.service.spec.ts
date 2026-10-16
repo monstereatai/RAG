@@ -13,6 +13,9 @@ describe('KarpathyRagService exception scenarios', () => {
   function createService(overrides?: {
     embeddingProvider?: Partial<EmbeddingProvider>;
     vectorStoreProvider?: Partial<VectorStoreProvider>;
+    retrievalDescriptionService?: {
+      searchByVector: jest.Mock;
+    };
     config?: Record<string, unknown>;
   }) {
     const embeddingProvider = {
@@ -78,6 +81,10 @@ describe('KarpathyRagService exception scenarios', () => {
       isEnabled: jest.fn().mockReturnValue(false),
       rerank: jest.fn(async (_query: string, chunks: unknown[]) => chunks),
     };
+    const retrievalDescriptionService =
+      overrides?.retrievalDescriptionService ?? {
+        searchByVector: jest.fn().mockResolvedValue([]),
+      };
 
     const service = new KarpathyRagService(
       embeddingProvider,
@@ -92,6 +99,10 @@ describe('KarpathyRagService exception scenarios', () => {
       toolPolicy,
       documentPermissionService as unknown as DocumentPermissionService,
       dashscopeRerankService as unknown as import('../../tools/dashscope-rerank.service').DashScopeRerankService,
+      undefined,
+      undefined,
+      undefined,
+      retrievalDescriptionService as unknown as import('../../modules/document/document-retrieval-description.service').DocumentRetrievalDescriptionService,
     );
     (service as unknown as { bm25Store: { save: jest.Mock } }).bm25Store = {
       save: jest.fn(),
@@ -99,14 +110,17 @@ describe('KarpathyRagService exception scenarios', () => {
 
     return {
       service,
+      embeddingProvider,
       llmInvoke,
       vectorStoreProvider,
       metricsService,
       observeRetrievalHits,
       obsidianKnowledge,
+      documentPermissionService,
       retrieveBadCaseMatches,
       bochaSearchService,
       dashscopeRerankService,
+      retrievalDescriptionService,
     };
   }
 
@@ -229,6 +243,211 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(result.reason).toContain('Base Case:');
   });
 
+  it('resolves source-note hits to permitted, active, in-scope original chunks', async () => {
+    const { service, documentPermissionService } = createService();
+    documentPermissionService.getAllowedDocIds.mockResolvedValue(
+      new Set(['source-doc']),
+    );
+    service.indexChunks(
+      [
+        {
+          id: 'raw-allowed',
+          content: '发布审批需要业务负责人复核。',
+          docId: 'source-doc',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+          effectiveAt: new Date('2020-01-01T00:00:00.000Z'),
+          expiredAt: new Date('2099-01-01T00:00:00.000Z'),
+        },
+        {
+          id: 'raw-wrong-scope',
+          content: '发布审批需要业务负责人复核。',
+          docId: 'source-doc',
+          chunkIndex: 1,
+          projectId: 'game-b',
+        },
+        {
+          id: 'raw-expired',
+          content: '发布审批需要业务负责人复核。',
+          docId: 'source-doc',
+          chunkIndex: 2,
+          projectId: 'game-a',
+          expiredAt: new Date('2020-01-01T00:00:00.000Z'),
+        },
+        {
+          id: 'raw-draft',
+          content: '发布审批需要业务负责人复核。',
+          docId: 'source-doc',
+          chunkIndex: 3,
+          projectId: 'game-a',
+          lifecycleStatus: 'draft',
+        },
+        {
+          id: 'raw-blocked-doc',
+          content: '发布审批需要业务负责人复核。',
+          docId: 'blocked-doc',
+          chunkIndex: 0,
+          projectId: 'game-a',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.resolveObsidianSourceEvidence(
+      '发布审批需要谁复核？',
+      [
+        {
+          path: 'notes/source.md',
+          type: 'note',
+          title: '来源摘要',
+          content: '摘要中的结论不作为回答证据。',
+          score: 3,
+          ragDocId: 'source-doc',
+          tags: [],
+        },
+        {
+          path: 'notes/blocked.md',
+          type: 'note',
+          title: '受限来源',
+          content: '另一份摘要。',
+          score: 2,
+          ragDocId: 'blocked-doc',
+          tags: [],
+        },
+      ],
+      'user-1',
+      { tenantId: 'tenant-1', scope: { projectId: 'game-a' } },
+    );
+
+    expect(documentPermissionService.getAllowedDocIds).toHaveBeenCalledWith(
+      'user-1',
+      [],
+      [],
+      'tenant-1',
+    );
+    expect(result.mappedDocIds).toEqual(new Set(['source-doc', 'blocked-doc']));
+    expect(result.sourceNotePaths).toEqual(
+      new Set(['notes/source.md', 'notes/blocked.md']),
+    );
+    expect(result.chunks).toHaveLength(1);
+    expect(result.chunks[0]).toMatchObject({
+      id: 'raw-allowed',
+      docId: 'source-doc',
+      content: '发布审批需要业务负责人复核。',
+      projectId: 'game-a',
+      lifecycleStatus: 'effective',
+    });
+    expect(result.chunks[0].content).not.toContain('摘要');
+  });
+
+  it('uses permission-service grants for shared documents regardless of owner', async () => {
+    const { service, documentPermissionService } = createService();
+    documentPermissionService.getAllowedDocIds.mockResolvedValue(
+      new Set(['shared-doc']),
+    );
+    service.indexChunks(
+      [
+        {
+          id: 'shared-raw',
+          content: '共享文档原文包含发布审批要求。',
+          docId: 'shared-doc',
+          chunkIndex: 0,
+        },
+      ],
+      'document-owner',
+    );
+
+    const result = await service.resolveObsidianSourceEvidence(
+      '发布审批要求是什么？',
+      [
+        {
+          path: 'notes/shared-source.md',
+          type: 'note',
+          title: '共享文档摘要',
+          content: '摘要仅用于定位原文。',
+          score: 3,
+          ragDocId: 'shared-doc',
+          tags: [],
+        },
+      ],
+      'viewer-user',
+    );
+
+    expect(result.chunks.map((chunk) => chunk.id)).toContain('shared-raw');
+  });
+
+  it('excludes source notes without a ragDocId instead of treating their summary as evidence', async () => {
+    const { service } = createService();
+    const result = await service.resolveObsidianSourceEvidence(
+      '发布审批要求是什么？',
+      [
+        {
+          path: 'notes/legacy-source.md',
+          type: 'note',
+          isSourceNote: true,
+          title: '旧来源摘要',
+          content: '摘要不能当作原文证据。',
+          score: 3,
+          tags: [],
+        },
+      ],
+      'user-1',
+    );
+
+    expect(result.chunks).toEqual([]);
+    expect(result.mappedDocIds).toEqual(new Set());
+    expect(result.sourceNotePaths).toEqual(new Set(['notes/legacy-source.md']));
+  });
+
+  it('puts resolved original chunks into the Auto Fast Path and removes their note hits', async () => {
+    const { service, obsidianKnowledge } = createService();
+    const raw = {
+      id: 'raw-source',
+      content: '发布审批需要业务负责人复核。',
+      docId: 'source-doc',
+      chunkIndex: 0,
+    };
+    service.indexChunks([raw], 'user-1');
+    (obsidianKnowledge.search as jest.Mock).mockResolvedValue([
+      {
+        path: 'notes/source.md',
+        type: 'note',
+        title: '来源摘要',
+        content: '摘要写着发布由负责人复核。',
+        score: 3,
+        ragDocId: 'source-doc',
+        tags: [],
+      },
+    ]);
+    jest.spyOn(service, 'retrieveDetailed').mockResolvedValue({
+      chunks: [],
+      diagnostics: {} as never,
+      profile: {} as never,
+    });
+    jest
+      .spyOn(
+        service as unknown as {
+          assessRetrievalQuality: (...args: unknown[]) => unknown;
+        },
+        'assessRetrievalQuality',
+      )
+      .mockReturnValue({ sufficient: true, reason: 'test' });
+
+    const result = await service.assessFastPath('发布审批需要谁复核？', 'user-1');
+
+    expect(result.chunks).toContainEqual(
+      expect.objectContaining({
+        id: 'raw-source',
+        content: '发布审批需要业务负责人复核。',
+      }),
+    );
+    expect(result.obsidianHits).toEqual([]);
+    expect(result.prefetchedFastPath.retrieval.chunks).toContainEqual(
+      expect.objectContaining({ id: 'raw-source' }),
+    );
+  });
+
   it('refuses when the knowledge base and web search have no evidence', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('今天是星期三。');
@@ -242,6 +461,140 @@ describe('KarpathyRagService exception scenarios', () => {
         '没有检索到候选片段；Obsidian 未命中；联网搜索和模型回答均不可用，已进入安全降级',
     });
     expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
+  it('does not use a source-note summary when its raw document has no accessible chunks', async () => {
+    const { service, obsidianKnowledge, llmInvoke } = createService();
+    (obsidianKnowledge.search as jest.Mock).mockResolvedValue([
+      {
+        path: 'notes/restricted-source.md',
+        type: 'note',
+        title: '来源摘要',
+        content: '摘要内容：发布前必须经过业务负责人审批。',
+        score: 3,
+        ragDocId: 'restricted-doc',
+        tags: [],
+      },
+      {
+        path: 'notes/legacy-source.md',
+        type: 'note',
+        isSourceNote: true,
+        title: '旧来源摘要',
+        content: '摘要内容：发布前必须由负责人审批。',
+        score: 2,
+        tags: [],
+      },
+    ]);
+
+    const result = await service.answer(
+      '发布前需要谁审批？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { vectorSearch: false, knowledgeOnly: true },
+    );
+
+    expect(result.retrievalSufficient).toBe(false);
+    expect(result.references).toEqual([]);
+    expect(result.obsidianHits).toEqual([]);
+    expect(obsidianKnowledge.assessHits).toHaveBeenCalledWith(
+      expect.any(String),
+      [],
+    );
+    expect(llmInvoke).not.toHaveBeenCalled();
+  });
+
+  it('answers from the resolved raw chunk and cites its original chunk ID', async () => {
+    const { service, obsidianKnowledge, llmInvoke } = createService();
+    const rawContent = '发布前必须由业务负责人复核。';
+    service.indexChunks(
+      [
+        {
+          id: 'raw-source-chunk',
+          content: rawContent,
+          docId: 'source-doc',
+          chunkIndex: 7,
+          headingPath: ['发布规范', '审批'],
+          sourceStart: 120,
+          sourceEnd: 145,
+        },
+      ],
+      'user-1',
+    );
+    (obsidianKnowledge.search as jest.Mock).mockResolvedValue([
+      {
+        path: 'notes/source.md',
+        type: 'note',
+        title: '发布规范摘要',
+        content: '摘要内容：负责人审核即可。',
+        score: 3,
+        ragDocId: 'source-doc',
+        tags: [],
+      },
+    ]);
+    jest.spyOn(service, 'retrieveDetailed').mockResolvedValue({
+      chunks: [],
+      diagnostics: {
+        intent: 'lookup',
+        candidateDepth: 8,
+        expandedChunks: 0,
+        duplicateChunksRemoved: 0,
+        documentLimitRemoved: 0,
+        budgetRemoved: 0,
+        contextCharacters: 0,
+      },
+      profile: {
+        intent: 'lookup',
+        candidateDepth: 8,
+        finalTopK: 4,
+        neighborWindow: 0,
+        sameSectionLimit: 0,
+        contextCharacterBudget: 3500,
+        maxChunksPerDocument: 2,
+      },
+    });
+    jest
+      .spyOn(
+        service as unknown as {
+          assessRetrievalQuality: (...args: unknown[]) => unknown;
+        },
+        'assessRetrievalQuality',
+      )
+      .mockReturnValue({ sufficient: true, reason: 'test' });
+    jest
+      .spyOn(
+        service as unknown as {
+          assessCitationSupport: (...args: unknown[]) => unknown;
+        },
+        'assessCitationSupport',
+      )
+      .mockReturnValue({ sufficient: true, reason: 'test' });
+    llmInvoke.mockResolvedValueOnce(`${rawContent}[片段1]`);
+
+    const result = await service.answer(
+      '发布前必须由谁复核？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      { vectorSearch: false, knowledgeOnly: true },
+    );
+
+    const prompt = JSON.stringify(llmInvoke.mock.calls[0]?.[0]);
+    expect(prompt).toContain(rawContent);
+    expect(prompt).not.toContain('负责人审核即可');
+    expect(result.references).toContainEqual(
+      expect.objectContaining({
+        id: 'raw-source-chunk',
+        docId: 'source-doc',
+        chunkIndex: 7,
+        headingPath: ['发布规范', '审批'],
+        sourceStart: 120,
+        sourceEnd: 145,
+      }),
+    );
+    expect(result.obsidianHits).toEqual([]);
   });
 
   it('uses the general model for objective questions when routing has no usable intent', async () => {
@@ -852,6 +1205,9 @@ describe('KarpathyRagService exception scenarios', () => {
           docId: 'doc-1',
           chunkIndex: 0,
           content: '模块 A 负责处理请求。',
+          bm25Score: 0,
+          cosineScore: 0,
+          totalScore: 0,
         },
       ],
     );
@@ -1038,7 +1394,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(results[0].cosineScore).toBeGreaterThan(0);
   });
 
-  it('normalizes known Chinese typo terms before retrieval', async () => {
+  it('normalizes Unicode spacing before retrieval', async () => {
     const { service } = createService({
       embeddingProvider: {
         embedQuery: jest.fn().mockRejectedValue(new Error('embedding down')),
@@ -1057,7 +1413,7 @@ describe('KarpathyRagService exception scenarios', () => {
       'user-1',
     );
 
-    const results = await service.retrieve('企业知识哭 是什么？', {}, 'user-1');
+    const results = await service.retrieve('企业知识库　是什么？', {}, 'user-1');
 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
@@ -1066,7 +1422,7 @@ describe('KarpathyRagService exception scenarios', () => {
     });
   });
 
-  it('uses the typo-corrected query when generating an answer', async () => {
+  it('keeps the user's query wording in the generated answer prompt', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       '企业知识库是知识库系统的内部别名之一，正式名称为 Atlas Knowledge Base。[片段1]',
@@ -1084,14 +1440,14 @@ describe('KarpathyRagService exception scenarios', () => {
       'user-1',
     );
 
-    const result = await service.answer('企业知识哭 是什么？', [], 'user-1');
+    const result = await service.answer('企业知识库 是什么？', [], 'user-1');
 
     expect(result.retrievalSufficient).toBe(true);
     const firstPrompt = llmInvoke.mock.calls.at(0)?.at(0);
     expect(JSON.stringify(firstPrompt)).toContain('企业知识库 是什么');
   });
 
-  it('expands versioned reimbursement queries with policy anchors', async () => {
+  it('retrieves versioned policy using the user's complete question', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       '2026 年一线城市住宿报销上限为 650 元；如果 2025 版写的是 500 元，应以 2026 版优先生效。[片段1]',
@@ -1258,7 +1614,6 @@ describe('KarpathyRagService exception scenarios', () => {
       ],
       'user-1',
     );
-
     const result = await service.retrieveDetailed(
       '如何配置抽奖流程？',
       { vectorSearch: false, scope: { projectId: 'game-a' } },
@@ -1273,6 +1628,163 @@ describe('KarpathyRagService exception scenarios', () => {
     ).toBe(true);
     expect(result.diagnostics.intent).toBe('procedure');
     expect(result.diagnostics.expandedChunks).toBeGreaterThan(0);
+  });
+
+  it('uses a description hit to return its original chunk without embedding the query twice', async () => {
+    const searchByVector = jest.fn().mockResolvedValue([
+      {
+        id: 'description-1',
+        tenantId: 'tenant-1',
+        docId: 'doc-1',
+        userId: 'user-1',
+        descriptionType: 'document_summary',
+        indexGeneration: 'generation-1',
+        docVersion: 'v1',
+        content: '描述里的内容不应进入最终回答。',
+        sourceChunkIds: ['source-1'],
+        score: 0.91,
+      },
+    ]);
+    const { service, embeddingProvider } = createService({
+      retrievalDescriptionService: { searchByVector },
+    });
+    service.indexChunks(
+      [
+        {
+          id: 'source-1',
+          content: '原文写明，员工需要在出差前提交审批。',
+          docId: 'doc-1',
+          chunkIndex: 0,
+          docVersion: 'v1',
+          indexGeneration: 'generation-1',
+          lifecycleStatus: 'effective',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.retrieveDetailed(
+      '出差前需要做什么',
+      { tenantId: 'tenant-1' },
+      'user-1',
+    );
+
+    expect(embeddingProvider.embedQuery).toHaveBeenCalledTimes(1);
+    expect(searchByVector).toHaveBeenCalledWith([1, 0, 0], {
+      tenantId: 'tenant-1',
+      topK: expect.any(Number),
+    });
+    expect(result.chunks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'source-1',
+          content: '原文写明，员工需要在出差前提交审批。',
+        }),
+      ]),
+    );
+    expect(result.chunks.some((chunk) => chunk.content.includes('描述里的内容'))).toBe(
+      false,
+    );
+    expect(result.diagnostics.stages).toEqual(
+      expect.objectContaining({
+        descriptionCandidates: 1,
+        descriptionSourceChunks: 1,
+      }),
+    );
+  });
+
+  it('drops description hits with stale versions, expired sources, or denied document ACLs', async () => {
+    const searchByVector = jest.fn().mockResolvedValue([
+      {
+        id: 'description-stale',
+        tenantId: 'tenant-1',
+        docId: 'stale-doc',
+        userId: 'user-1',
+        descriptionType: 'document_summary',
+        indexGeneration: 'old-generation',
+        docVersion: 'v1',
+        content: '舊版本摘要',
+        sourceChunkIds: ['stale-source'],
+        score: 0.99,
+      },
+      {
+        id: 'description-expired',
+        tenantId: 'tenant-1',
+        docId: 'expired-doc',
+        userId: 'user-1',
+        descriptionType: 'document_summary',
+        indexGeneration: 'generation-1',
+        docVersion: 'v1',
+        content: '已过期摘要',
+        sourceChunkIds: ['expired-source'],
+        score: 0.98,
+      },
+      {
+        id: 'description-private',
+        tenantId: 'tenant-1',
+        docId: 'private-doc',
+        userId: 'user-2',
+        descriptionType: 'document_summary',
+        indexGeneration: 'generation-1',
+        docVersion: 'v1',
+        content: '无权摘要',
+        sourceChunkIds: ['private-source'],
+        score: 0.97,
+      },
+    ]);
+    const { service, documentPermissionService } = createService({
+      retrievalDescriptionService: { searchByVector },
+    });
+    documentPermissionService.getAllowedDocIds.mockResolvedValue(
+      new Set(['stale-doc', 'expired-doc']),
+    );
+    service.indexChunks(
+      [
+        {
+          id: 'stale-source',
+          content: '这是当前版本原文。',
+          docId: 'stale-doc',
+          chunkIndex: 0,
+          docVersion: 'v2',
+          indexGeneration: 'generation-2',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'expired-source',
+          content: '这是已经过期的原文。',
+          docId: 'expired-doc',
+          chunkIndex: 0,
+          docVersion: 'v1',
+          indexGeneration: 'generation-1',
+          lifecycleStatus: 'effective',
+          expiredAt: new Date(Date.now() - 60_000),
+        },
+        {
+          id: 'private-source',
+          content: '这是没有权限的原文。',
+          docId: 'private-doc',
+          chunkIndex: 0,
+          docVersion: 'v1',
+          indexGeneration: 'generation-1',
+          lifecycleStatus: 'effective',
+        },
+      ],
+      'user-1',
+    );
+    jest
+      .spyOn(
+        service as unknown as { searchLocalBm25: jest.Mock },
+        'searchLocalBm25',
+      )
+      .mockReturnValue([]);
+
+    const result = await service.retrieveDetailed(
+      '查找相关原文',
+      { tenantId: 'tenant-1' },
+      'user-1',
+    );
+
+    expect(result.chunks).toHaveLength(0);
   });
 
   it('removes a superseded document from default retrieval', async () => {
@@ -1314,6 +1826,8 @@ describe('KarpathyRagService exception scenarios', () => {
           docId: 'doc-1',
           chunkIndex: 0,
           content: '李逵在江州因抢鱼与渔人冲突，后加入梁山。',
+          bm25Score: 0,
+          cosineScore: 0,
           totalScore: 0.55,
           rerankScore: 0.78,
         },

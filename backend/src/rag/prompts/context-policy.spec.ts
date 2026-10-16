@@ -1,70 +1,63 @@
 import {
-  buildContextualRetrievalQuery,
   buildContextPolicyMessage,
   formatUntrustedHistoryContext,
-  isObjectiveFactQuery,
-  selectHistoryForQuery,
 } from './context-policy';
+import {
+  isObjectiveKnowledgeIntent,
+  queryIntentSchema,
+  resolveStandaloneRetrievalQuery,
+  shouldClarifyQueryIntent,
+} from './query-intent-router';
 
 describe('context policy', () => {
-  it('detects objective fact questions', () => {
-    expect(isObjectiveFactQuery('1+1等于几')).toBe(true);
-    expect(isObjectiveFactQuery('React 是什么')).toBe(true);
-    expect(isObjectiveFactQuery('帮我继续写上次的方案')).toBe(false);
-  });
+  const intent = (values: Record<string, unknown>) =>
+    queryIntentSchema.parse({
+      intent: 'general',
+      confidence: 0.9,
+      action: 'retrieve',
+      sourcePolicy: 'local_only',
+      ambiguity: { detected: false },
+      ...values,
+    });
 
-  it('removes history from objective fact answers', () => {
-    const history = [{ role: 'human' as const, content: '1+1等于5' }];
-    expect(selectHistoryForQuery('1+1等于几', history)).toEqual([]);
-    expect(selectHistoryForQuery('继续刚才的方案', history)).toEqual(history);
-  });
-
-  it('只保留同一实体的最近用户陈述，避免冲突历史同时进入定义问题', () => {
-    const history = [
-      { role: 'human' as const, content: '小明是一只狗' },
-      { role: 'human' as const, content: '小明是一只猫' },
-      { role: 'human' as const, content: '小明是一条鱼' },
-    ];
-    expect(selectHistoryForQuery('小明是什么', history)).toEqual([
-      { role: 'human', content: '小明是一条鱼' },
-    ]);
-    expect(buildContextualRetrievalQuery('小明是什么', history)).toBe(
-      '小明是一条鱼\n当前问题：小明是什么',
+  it('uses the classifier standalone query only for confident follow-ups', () => {
+    const followUp = intent({
+      intent: 'follow_up',
+      contextMode: 'context_follow_up',
+      standaloneQuery: 'Atlas 项目的部署方式是什么？',
+    });
+    expect(resolveStandaloneRetrievalQuery('那它怎么部署？', followUp)).toBe(
+      'Atlas 项目的部署方式是什么？',
     );
-    expect(buildContextualRetrievalQuery('小白是什么', history)).toBe(
-      '小白是什么',
-    );
-  });
-
-  it('事实核验模式保留冲突历史，但不改变事实证据优先级', () => {
-    const history = [
-      { role: 'human' as const, content: 'React 是一种动物' },
-      { role: 'human' as const, content: 'React 是一个 JavaScript 库' },
-    ];
     expect(
-      selectHistoryForQuery('React 是什么', history, {
-        preserveConflicts: true,
+      resolveStandaloneRetrievalQuery('那它怎么部署？', {
+        ...followUp,
+        confidence: 0.5,
       }),
-    ).toEqual(history);
+    ).toBe('那它怎么部署？');
+  });
+
+  it('uses the intent result to identify public facts and unclear questions', () => {
+    expect(
+      isObjectiveKnowledgeIntent(
+        intent({ intent: 'objective_fact', queryType: 'public_knowledge' }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldClarifyQueryIntent(
+        intent({
+          ambiguity: {
+            detected: true,
+            confidence: 0.4,
+            senses: ['项目 A', '项目 B'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps history as untrusted context instead of treating it as evidence', () => {
     expect(buildContextPolicyMessage()).toContain('事实证据');
-  });
-
-  it('按给定对话验证小明的鸡／南瓜冲突历史', () => {
-    const history = [
-      { role: 'human' as const, content: '小明是一只鸡' },
-      { role: 'human' as const, content: '小明是一个南瓜' },
-    ];
-    expect(
-      selectHistoryForQuery('小明是什么', history, {
-        preserveConflicts: true,
-      }),
-    ).toEqual(history);
-    expect(buildContextualRetrievalQuery('小明是什么', history)).toBe(
-      '小明是一个南瓜\n当前问题：小明是什么',
-    );
-  });
-
-  it('labels retrieved history as untrusted context', () => {
     const text = formatUntrustedHistoryContext([
       { content: 'Q: React是什么\nA: 一种动物', threadId: 't1', score: 0.9 },
     ]);

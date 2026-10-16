@@ -11,7 +11,10 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request, Response } from "express";
 import { RequirePermission } from "../../common/decorators/require-permission.decorator";
@@ -24,6 +27,74 @@ export class QaOpsController {
   private readonly logger = new Logger(QaOpsController.name);
 
   constructor(private readonly ragClient: RagClientService) {}
+
+  @Post("attachments")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @RequirePermission("admin:qa-ops:write")
+  async uploadConversationAttachment(
+    @UploadedFile() file: Express.Multer.File,
+    @Body("threadId") threadId: string,
+    @Req() req: Request,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new HttpException("请选择有效文件", 400);
+    }
+    if (!threadId) throw new HttpException("threadId is required", 400);
+    const result = await this.ragClient.uploadQaConversationAttachment(
+      file,
+      this.getUserId(req),
+      threadId,
+    );
+    this.requireAvailable(result);
+    return { data: this.unwrapObject(result.data), available: result.available };
+  }
+
+  @Get("attachments")
+  @RequirePermission("admin:qa-ops:read")
+  async listConversationAttachments(
+    @Query("threadId") threadId: string,
+    @Req() req: Request,
+  ) {
+    if (!threadId) throw new HttpException("threadId is required", 400);
+    const result = await this.ragClient.listQaConversationAttachments(
+      this.getUserId(req),
+      threadId,
+    );
+    this.requireAvailable(result);
+    return { data: this.unwrapList(result.data), available: result.available };
+  }
+
+  @Delete("attachments")
+  @RequirePermission("admin:qa-ops:write")
+  async deleteConversationAttachments(
+    @Query("threadId") threadId: string,
+    @Req() req: Request,
+  ) {
+    if (!threadId) throw new HttpException("threadId is required", 400);
+    const result = await this.ragClient.deleteQaConversationAttachments(
+      this.getUserId(req),
+      threadId,
+    );
+    this.requireAvailable(result);
+    return { data: this.unwrapObject(result.data), available: result.available };
+  }
+
+  @Delete("attachments/:attachmentId")
+  @RequirePermission("admin:qa-ops:write")
+  async deleteConversationAttachment(
+    @Param("attachmentId") attachmentId: string,
+    @Query("threadId") threadId: string,
+    @Req() req: Request,
+  ) {
+    if (!threadId) throw new HttpException("threadId is required", 400);
+    const result = await this.ragClient.deleteQaConversationAttachment(
+      attachmentId,
+      this.getUserId(req),
+      threadId,
+    );
+    this.requireAvailable(result);
+    return { data: this.unwrapObject(result.data), available: result.available };
+  }
 
   @Post("artifacts")
   @ApiOperation({ summary: "生成可传播文件" })
@@ -273,6 +344,7 @@ export class QaOpsController {
     @Res() res: Response,
     @Query("rolePresetId") rolePresetId?: string,
     @Query("pluginKeys") pluginKeys?: string,
+    @Query("attachmentIds") attachmentIds?: string,
   ) {
     if (!query?.trim()) {
       res.status(400).json({ message: "query is required" });
@@ -296,6 +368,7 @@ export class QaOpsController {
           threadId,
           rolePresetId,
           pluginKeys: pluginKeys?.split(",").map((item) => item.trim()).filter(Boolean),
+          attachmentIds: attachmentIds?.split(",").map((item) => item.trim()).filter(Boolean),
           userId: this.getUserId(req),
         },
         controller.signal

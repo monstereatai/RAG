@@ -16,6 +16,8 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
       ? 180_000
       : this.isDocumentUpload(request)
         ? 10 * 60 * 1000
+        : this.isConversationAttachmentUpload(request)
+          ? 120_000
         : 5_000;
 
     if (this.isSseRequest(request)) {
@@ -51,5 +53,10 @@ export class CircuitBreakerInterceptor implements NestInterceptor {
   private isDocumentUpload(request: { method?: string; path?: string; originalUrl?: string }): boolean {
     const path = request.path ?? request.originalUrl ?? '';
     return request.method === 'POST' && path.includes('/documents/upload');
+  }
+
+  private isConversationAttachmentUpload(request: { method?: string; path?: string; originalUrl?: string }): boolean {
+    const path = request.path ?? request.originalUrl ?? '';
+    return request.method === 'POST' && path.includes('/qa-ops/attachments');
   }
 }

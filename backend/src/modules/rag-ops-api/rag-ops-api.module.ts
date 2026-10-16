@@ -14,6 +14,7 @@ import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.en
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
+import { RagAdminModule } from '../rag-admin/rag-admin.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.enti
       RagFeedbackEntity,
     ]),
     DocumentModule,
+    RagAdminModule,
     GraphModule,
     ChatModule,
     KarpathyRagModule,

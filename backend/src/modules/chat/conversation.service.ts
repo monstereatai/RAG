@@ -81,8 +81,8 @@ export class ConversationService {
     mode = 'auto',
     userId?: string,
     tenantId?: string,
+    threadId: string = randomUUID(),
   ): Promise<string> {
-    const threadId = randomUUID();
     const title = firstQuery.slice(0, 50);
     const conv = this.conversationRepo.create({
       id: threadId,

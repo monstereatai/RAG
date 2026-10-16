@@ -122,7 +122,11 @@ services:
 
   # ---- Elasticsearch 8（全文检索，IK 中文分词）----
   elasticsearch:
-    image: elasticsearch:8.13.0
+    image: rag-dev-elasticsearch:8.13.0
+    build:
+      context: ./elasticsearch
+      args:
+        ELASTICSEARCH_VERSION: 8.13.0
     container_name: rag-dev-es
     restart: "no"
     environment:
@@ -176,4 +180,3 @@ volumes:
   dev_milvus_data:
   dev_es_data:
   dev_neo4j_data:
-

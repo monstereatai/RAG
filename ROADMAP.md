@@ -36,7 +36,7 @@
 | `docs/interview/jd/jd-requirements-project-mapping.md` | 一线大厂 AI 应用 / Agent JD 与项目实现对照 |
 | `docs/interview/jd/jd-gap-implementation-status.md` | JD 差距本地补齐状态 |
 | `docs/interview/interview-docs-usage.md` | 面试文档使用说明 |
-| `docs/interview/开源项目参考能力归档.md` | Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 参考能力、融合实现和生产边界归档 |
+| `docs/interview/开源项目参考能力归档.md` | Dify、RAGFlow、WeKnora、Agent 框架参考能力、融合实现和生产边界归档 |
 | `docs/plans/karpathy-obsidian-dual-ingest-plan.md` | Karpathy + Obsidian 统一知识链路方案 |
 | `tools/rag-mcp-server/README.md` | RAG MCP Server 接入说明，给 Codex/Trae/Claude Code/Cursor 自动取上下文 |
 | `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md` | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 |
@@ -48,6 +48,22 @@
 | `docs/architecture/AGENT_PLATFORM_READINESS.md` | 高级 Agent 平台运行时、审批恢复、三链路评测、可观测性和生产边界 |
 
 ## 当前结论
+
+- **QA Ops 对话附件验收闭环（2026-10-16）**：沿用 10 月 15 日已完成的图片、MD、DOCX、PDF 上传、问答、连续追问、权限隔离和文件生成验收，补齐最后两项失败。Agentic 追问曾把“第 1 页审批编号”带入附件排序，并因 PDF 标题空格和中文页码匹配失败而丢掉第 2 页；现在从最近 8 条用户问题识别所指附件，只按当前问题给附件分块打分，并去除检索文本中的空白和标点后匹配。真实 QA Ops 页面实测返回 Finance Risk Team、2026-11-30，引用为 `sample.pdf · 第 2 页`。数据图表改为确定性 SVG：页面生成文件人工检查确认 JAN 10、FEB 20、MAR 35，整数刻度 0–40；文件状态 ready，下载入口可用。复查后新标签首屏曾出现一次会话列表空白和 500 提示，刷新后历史会话、四个附件和验收结果均恢复并可重新打开；未再复现。Backend build ✅；未跑单元测试、未改数据库 schema；仅使用合成附件，不触碰 `.env`。图片视觉描述偶尔补出图片未明确提供的“第一季度”等推断，仍作为既有边界记录。实现入口：`backend/src/modules/agui/conversation-attachment.service.ts`、`backend/src/modules/artifacts/artifact-generator.service.ts`。
+
+- **恢复本地 Elasticsearch 与 Neo4j 检索依赖（2026-10-15）**：开发环境 Elasticsearch 镜像固定安装与 ES 8.13.0 匹配的 analysis-ik 插件；启动后原有 `rag_chunks`（4,788 条）与 `kh_document`（7 条）索引恢复，IK 中文分析、ES 连接均通过。Neo4j 复用原数据卷，后端连接通过，当前图谱有 182 个节点、304 条关系。RAG 后端健康检查、Admin API 文档和 Admin 页面均返回 200；ES 单节点集群为 yellow（主分片正常，副本待分配）。未改 `.env`，未执行数据库迁移。验证：Docker Compose 配置、镜像构建、IK 分析、后端连接日志和健康检查通过。
+
+- **追问检索保留原问题兜底（2026-10-15）**：Simple、Auto Fast Path 与 Agentic 保留用户原问题；意图模型仅在高置信追问时生成补全检索问题，补全检索失败继续使用原问题结果。多路结果按 chunk 去重、统一以原问题重排，权限与资料版本过滤仍在各自检索中执行。Backend build、意图路由文件 ESLint、目标文件 `git diff --check` 通过；完整目标模块 ESLint 仍报已有脏文件中的格式与类型问题；未运行单元测试。
+
+- **Langfuse 指标数据报告（2026-10-15）**：通过 Langfuse Metrics API v2 汇总 2026-09-15 至 2026-10-15 UTC 数据：669 条根 Observation、79,787 Generation token；模型名仅记录到 DeepSeek 11 次和 Qwen 4 次，其余 654 次未标注；已记录成本为 $0，不能据此判断实际费用。流量集中于 9 月 21 日，10 月 11 日后无记录；报告列明待核实项，未读取或保存原始问答内容。详见 `docs/LANGFUSE_METRICS_REPORT_2026-10-15.md`。
+
+- **图片以图搜图 MVP 验收更新（2026-10-15）**：发现并修复 ACL 过滤前只取全局 Top 50 导致合法图片被无权结果挤掉的问题；Milvus 查询现在按允许访问的 `docId` 每 100 个分批过滤，再合并全局 Top K，并保留二次 ACL 检查。ImageIndexService／RAG 图片定向 13/13、Milvus 分批检索 1/1、Admin 图片代理 6/6、离线 smoke、Backend build、新增代码 ESLint 均通过；Admin build 通过。已对照本地 `@zilliz/milvus2-sdk-node` 2.4.10 类型与序列化实现，并在真实本地 Milvus 使用临时向量验证 `filter + exprValues` 命中；测试行随后经查询确认不可见。Backend `.env` 已将现有 `QWEN_API_KEY` 复用为 `MULTIMODAL_EMBEDDING_API_KEY`（值未输出），重启后 DashScope `multimodal-embedding-v1` 的真实文本、图片调用均返回 1024 维，文本向量到 Milvus 的真实搜索请求通过但当前无业务图片命中。真实业务素材召回、浏览器登录态与 simple／auto／agentic 用户链路仍未验收。
+
+- **WeKnora 借鉴的 P1/P2 验收更新（2026-10-15）**：五项代码实现均已定向验证，并修复验收发现的三处缺陷：Team Wiki 退役旧发布文档失败时不再返回成功、审批提升后页面读取当前文档生命周期；飞书共享开关未明确修改时沿用连接器现值；HTTP MCP 每个无会话请求独立创建 transport，连续 initialize／tools/list／tools/call 与不同 Bearer 回归通过。Team Wiki service 11/11，Feishu Admin Backend 6/6，图片 ACL/RAG 13/13、Milvus 205 个允许文档分批合并 1/1、Admin 图片代理 6/6，队列定向 3 套件／38 项，HTTP MCP 13/13；隔离 Redis DB15 的 waiting 列表、取消、job 移除和源对象清理联调通过。Team Wiki 与 Feishu Wiki 两条迁移已在当前本地 PostgreSQL 执行，TypeORM 报告原有 28 条已应用、新增 2 条执行成功；`migration:show` 中所有 30 条迁移均为已应用。Backend、Admin Backend、Admin build 均通过。当前本地 Backend、Admin Backend、Admin UI、HTTP MCP 与 Milvus 已启动；Admin 入口及 Team Wiki、Feishu Wiki、图片检索页面均返回 200，HTTP MCP `/healthz` 返回 200、无 Bearer 请求返回 401。Backend `/api/v1/health/ready` 显示 DB／Redis ready；飞书应用 ID／密钥／tenant allowlist 未配置，`rag_images` 暂无业务图片数据，Neo4j／Elasticsearch 不可用；现有 `QWEN_API_KEY` 已在本地 `.env` 复用给多模态 embedding，真实 DashScope 文本／图片向量调用与 Milvus 搜索请求通过。仍未验收：真实 Feishu Wiki 空间同步、业务图片素材的真实召回、登录态页面操作、真实 RAG Bearer MCP 授权调用，以及 simple／auto／agentic 三种真实用户检索链路；部署 TLS、多实例限流与审计仍需目标环境联调。健康检查会写 trace span 运行记录，本轮未清理。功能对比及边界见 `docs/interview/开源项目参考能力归档.md`「WeKnora」章节。
+
+- **检索描述索引与旧数据修复（2026-10-15）**：全量审计 263 份资料，最终 0 项索引差异；1,228 个 PostgreSQL 原文片段与 Milvus、BM25 和检索描述索引数量一致。修复了 8 份长片段因 Milvus 字段 8 KB 上限而漏写向量的问题；向量库只存限长检索副本，RAG 融合时使用完整原文片段，并校验 Milvus 写入数量和实际落库数量。另从对象存储原件恢复 2 份缺失的 PostgreSQL 分块，保留原权限和业务治理信息。PostgreSQL 迁移 `migration:show` 为 34/34 已应用，旧运行事件的重复序号已稳定重排；修复队列 0 失败。在线检索抽查命中恢复后的资料，Milvus 向量、检索描述回原文、BM25 与重排链路均有结果；后端健康检查返回 200，Milvus 状态 healthy；Backend build 通过，本轮未跑单元测试。真实 PDF／表格／图片样本效果与成本验证仍待做。
+
+- **本轮 Obsidian 来源笔记回到原文取证（2026-10-15）**：带 `rag_doc_id` 的来源笔记只用于定位资料；Simple、Auto Fast Path 和 Agentic 都按 ACL、生命周期、有效期和业务范围筛选原文分块，最终引用原文 chunk。来源摘要无原文或无权限时不会降级成回答证据；普通人工笔记仍可在正式 RAG 不足时补充。未改数据库 schema 或向量集合。Backend 定向 3 个 Jest 套件／71 项通过，build 通过；新增代码行无 ESLint 报错，完整 Backend lint 仍有既有 423 个错误、27 个警告。真实管理后台三模式操作未执行。
 
 - **本轮核心 RAG 链路注释补齐（2026-10-13）**：为文档上传、解析切块、多索引写入，Chat HTTP／SSE／AG-UI 入口、意图与上下文、三模式分流、混合召回、Agentic 工作流、证据治理和 Provider 边界补充流程说明；未改运行逻辑。Backend build 通过，定向 7 个 Jest 套件／93 项通过，本次目标源码 `git diff --check` 通过。真实管理后台三模式操作未执行（本机 `localhost:3000` 未启动）；模式集成测试使用 mocks。目标文件 ESLint 有 25 条既有实现／格式问题；全工作区 diff 检查另报用户原有 admin 文件尾随空白，均未顺手修改。
 

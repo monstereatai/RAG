@@ -186,7 +186,7 @@ export const configuration = () => ({
     baseUrl:
       process.env.VISION_BASE_URL ??
       'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: process.env.VISION_MODEL ?? 'qwen-vl-max',
+    model: process.env.VISION_MODEL ?? 'qwen3-vl-plus',
     apiKey: process.env.VISION_API_KEY ?? '',
     qwenVlApiKey: process.env.QWEN_VL_API_KEY ?? '',
   },

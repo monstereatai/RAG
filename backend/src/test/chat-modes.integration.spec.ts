@@ -231,6 +231,9 @@ describe('ChatModes Integration', () => {
       chunkIndex: 0,
       content: '内部流程证据',
       score: 0.91,
+      totalScore: 0.91,
+      bm25Score: 0.91,
+      cosineScore: 0,
     };
     for (const mode of ['simple', 'auto', 'agentic'] as const) {
       karpathyRagService.answer.mockResolvedValueOnce({

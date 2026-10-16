@@ -97,10 +97,13 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runOnce(trigger: 'manual' | 'interval' = 'manual') {
-    if (!this.enabled || !this.repairQueue.isEnabled()) {
+    if (trigger === 'interval' && !this.enabled) {
+      return { available: false, reason: 'disabled' } as const;
+    }
+    if (!this.repairQueue.isEnabled()) {
       return {
         available: false,
-        reason: !this.enabled ? 'disabled' : 'repair_queue_unavailable',
+        reason: 'repair_queue_unavailable',
       } as const;
     }
     if (this.running)

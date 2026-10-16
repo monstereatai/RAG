@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'node:crypto';
+import type { Repository } from 'typeorm';
 import {
   ObsidianKnowledgeService,
   ObsidianWriteResult,
@@ -6,18 +9,65 @@ import {
 import { UrlExtractionResult } from './document-parser.util';
 import { DocumentService, UploadResult } from './document.service';
 import type { DocumentBusinessMetadata } from './document-profile.util';
+import { DocumentQueueService } from './document-queue.service';
+import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
+
+export type KarpathyObsidianWriteStatus =
+  | ObsidianWriteResult['status']
+  | 'queued'
+  | 'skipped';
+
+export interface KarpathyObsidianWriteResult extends Omit<
+  ObsidianWriteResult,
+  'status'
+> {
+  status: KarpathyObsidianWriteStatus;
+  taskId?: string;
+}
 
 export interface KarpathyObsidianIngestResult {
   rag: UploadResult;
-  obsidian: ObsidianWriteResult;
+  obsidian: KarpathyObsidianWriteResult;
 }
 
 @Injectable()
 export class KarpathyObsidianIngestService {
+  private readonly logger = new Logger(KarpathyObsidianIngestService.name);
+
   constructor(
     private readonly documentService: DocumentService,
     private readonly obsidianKnowledge: ObsidianKnowledgeService,
-  ) {}
+    private readonly documentQueue: DocumentQueueService,
+    @InjectRepository(DocumentChunkEntity)
+    private readonly documentChunkRepo: Repository<DocumentChunkEntity>,
+  ) {
+    this.documentQueue.registerObsidianNoteProcessor(async (job) => {
+      const chunks = await this.documentChunkRepo.find({
+        where: { docId: job.docId, userId: job.userId },
+        order: { chunkIndex: 'ASC' },
+      });
+      if (chunks.length === 0) {
+        this.logger.warn(
+          `Skipping Obsidian note task because source chunks are unavailable: doc=${job.docId}`,
+        );
+        return;
+      }
+      const result = await this.obsidianKnowledge.writeSource({
+        userId: job.userId,
+        title: job.title,
+        sourceUrl: job.sourceUrl,
+        content: this.rebuildContentFromChunks(chunks),
+        contentHash: job.contentHash,
+        ragDocId: job.docId,
+        sourceType: job.sourceType,
+        contentType: job.contentType,
+        filename: job.filename,
+      });
+      if (result.status === 'failed') {
+        throw new Error(result.error || 'Obsidian note write failed');
+      }
+    });
+  }
 
   async ingestUrl(params: {
     url: string;
@@ -33,12 +83,7 @@ export class KarpathyObsidianIngestService {
         this.extractTitleFromMarkdown(content) ||
         params.url,
     );
-    const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
-      content,
-      {
-        userId: params.userId,
-      },
-    );
+    const duplicate = await this.findDuplicate(content, params.userId);
     if (
       duplicate?.ragDocId &&
       !this.hasBusinessMetadata(params.businessMetadata)
@@ -88,7 +133,6 @@ export class KarpathyObsidianIngestService {
       };
     }
 
-    let obsidian: ObsidianWriteResult | null = null;
     const rag = await this.documentService.upload(
       params.filename,
       content,
@@ -98,21 +142,18 @@ export class KarpathyObsidianIngestService {
         originalBuffer: params.extracted.snapshot,
         contentType: params.extracted.contentType || 'text/plain',
         businessMetadata: params.businessMetadata,
-        onQualityAccepted: async (docId) => {
-          obsidian = await this.obsidianKnowledge.writeSource({
-            userId: params.userId,
-            title,
-            sourceUrl: params.extracted.finalUrl || params.url,
-            content,
-            ragDocId: docId,
-            sourceType: 'url',
-            contentType: params.extracted.contentType || 'text/plain',
-            filename: params.filename,
-          });
-        },
       },
     );
-    if (!obsidian) throw new Error('Obsidian source write did not complete');
+    const obsidian = await this.enqueueNote({
+      docId: rag.docId,
+      userId: params.userId,
+      title,
+      sourceUrl: params.extracted.finalUrl || params.url,
+      content,
+      sourceType: 'url',
+      contentType: params.extracted.contentType || 'text/plain',
+      filename: params.filename,
+    });
 
     return { rag, obsidian };
   }
@@ -131,10 +172,7 @@ export class KarpathyObsidianIngestService {
     businessMetadata?: DocumentBusinessMetadata;
   }): Promise<KarpathyObsidianIngestResult> {
     // 文本已由入口完成解析；这里处理内容去重，并把 RAG 文档索引与 Obsidian 来源记录关联起来。
-    const duplicate = await this.obsidianKnowledge.findSourceByContentHash(
-      params.content,
-      { userId: params.userId },
-    );
+    const duplicate = await this.findDuplicate(params.content, params.userId);
     if (
       duplicate?.ragDocId &&
       !this.hasBusinessMetadata(params.businessMetadata)
@@ -187,7 +225,6 @@ export class KarpathyObsidianIngestService {
       };
     }
 
-    let obsidian: ObsidianWriteResult | null = null;
     const rag = await this.documentService.upload(
       params.filename,
       params.content,
@@ -199,23 +236,118 @@ export class KarpathyObsidianIngestService {
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',
         businessMetadata: params.businessMetadata,
-        onQualityAccepted: async (docId) => {
-          obsidian = await this.obsidianKnowledge.writeSource({
-            userId: params.userId,
-            title: params.title,
-            sourceUrl: params.sourceUrl,
-            content: params.content,
-            ragDocId: docId,
-            sourceType: params.sourceType,
-            contentType: params.contentType,
-            filename: params.filename,
-          });
-        },
       },
     );
-    if (!obsidian) throw new Error('Obsidian source write did not complete');
+    const obsidian = await this.enqueueNote({
+      docId: rag.docId,
+      userId: params.userId,
+      title: params.title,
+      sourceUrl: params.sourceUrl,
+      content: params.content,
+      sourceType: params.sourceType,
+      contentType: params.contentType,
+      filename: params.filename,
+    });
 
     return { rag, obsidian };
+  }
+
+  private async findDuplicate(content: string, userId: string) {
+    try {
+      return await this.obsidianKnowledge.findSourceByContentHash(content, {
+        userId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Obsidian duplicate lookup failed; continuing RAG ingest: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  private async enqueueNote(input: {
+    docId: string;
+    userId: string;
+    title: string;
+    sourceUrl?: string;
+    content: string;
+    sourceType: 'url' | 'document' | 'official-docs' | 'manual';
+    contentType?: string;
+    filename?: string;
+  }): Promise<KarpathyObsidianWriteResult> {
+    const queued = await this.documentQueue.enqueueObsidianNote({
+      docId: input.docId,
+      userId: input.userId,
+      title: input.title,
+      contentHash: createHash('sha256')
+        .update(input.content.trim())
+        .digest('hex'),
+      sourceUrl: input.sourceUrl,
+      sourceType: input.sourceType,
+      contentType: input.contentType,
+      filename: input.filename,
+    });
+    return {
+      status: queued.status,
+      ...(queued.taskId ? { taskId: queued.taskId } : {}),
+      ...(queued.reason ? { error: queued.reason } : {}),
+      title: input.title,
+      tags: [],
+      contentHash: createHash('sha256').update(input.content).digest('hex'),
+      ragDocId: input.docId,
+    };
+  }
+
+  private rebuildContentFromChunks(chunks: DocumentChunkEntity[]): string {
+    let content = '';
+    let previousSection = '';
+    let previousChunk = '';
+
+    for (const chunk of chunks) {
+      const next = chunk.content.trim();
+      if (!next) continue;
+      const section = `${chunk.sectionId ?? ''}:${chunk.sourceStart ?? ''}:${chunk.sourceEnd ?? ''}`;
+      if (!content) {
+        content = next;
+      } else if (section !== previousSection) {
+        content += `\n\n${next}`;
+      } else {
+        const overlap = this.findChunkOverlap(previousChunk, next);
+        content += overlap > 0 ? next.slice(overlap) : `\n${next}`;
+      }
+      previousSection = section;
+      previousChunk = next;
+    }
+
+    return content;
+  }
+
+  private findChunkOverlap(current: string, next: string): number {
+    const maxOverlap = Math.min(current.length, next.length, 4096);
+    if (maxOverlap === 0) return 0;
+
+    const prefix = new Array<number>(maxOverlap).fill(0);
+    for (let index = 1, length = 0; index < maxOverlap; index += 1) {
+      while (length > 0 && next[index] !== next[length]) {
+        length = prefix[length - 1];
+      }
+      if (next[index] === next[length]) length += 1;
+      prefix[index] = length;
+    }
+
+    let matched = 0;
+    const suffix = current.slice(-maxOverlap);
+    for (let index = 0; index < suffix.length; index += 1) {
+      const char = suffix[index];
+      while (matched > 0 && char !== next[matched]) {
+        matched = prefix[matched - 1];
+      }
+      if (char === next[matched]) matched += 1;
+      if (matched === maxOverlap && index < suffix.length - 1) {
+        matched = prefix[matched - 1];
+      }
+    }
+    return matched;
   }
 
   private hasBusinessMetadata(metadata?: DocumentBusinessMetadata): boolean {

@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleInit,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThan } from 'typeorm';
@@ -41,6 +44,10 @@ import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
+import {
+  DocumentRetrievalDescriptionService,
+  type DocumentRetrievalDescriptionAudit,
+} from '../document/document-retrieval-description.service';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -110,6 +117,22 @@ type IndexAuditCheck = {
   actualContentHashes?: string[];
   expectedIndexGeneration?: string;
   actualIndexGenerations?: string[];
+  pgCount?: number;
+  milvusCount?: number;
+  missingCount?: number;
+  staleCount?: number;
+  missingPgCount?: number;
+  stalePgCount?: number;
+  missingMilvusCount?: number;
+  staleMilvusCount?: number;
+  contentMismatchCount?: number;
+  sourceMappingMismatchCount?: number;
+  docVersion?: string | null;
+  indexGeneration?: string | null;
+  lifecycleStatus?: string | null;
+  reviewStatus?: string | null;
+  effectiveAt?: Date | null;
+  expiredAt?: Date | null;
   reason?: string;
 };
 
@@ -162,6 +185,7 @@ export class RagAdminService implements OnModuleInit {
     private readonly permissionRepo: Repository<DocumentPermissionEntity>,
     private readonly domainEvents: DomainEventsService,
     private readonly embeddingProvider: EmbeddingProvider,
+    private readonly retrievalDescriptionService: DocumentRetrievalDescriptionService,
     // 图片检索（以图搜图/文搜图）可选依赖：未注册（模块未导入）时保持降级
     @Optional() private readonly imageIndexService?: ImageIndexService,
     @Optional()
@@ -174,7 +198,9 @@ export class RagAdminService implements OnModuleInit {
 
   onModuleInit(): void {
     this.indexRepairQueue?.registerProcessor(async (job) => {
-      const result = await this.reindexDocument(job.docId);
+      const result = this.isDescriptionOnlyRepairReason(job.reason)
+        ? await this.repairRetrievalDescriptions(job.docId)
+        : await this.reindexDocument(job.docId);
       if (!result?.reindexed) {
         throw new Error(
           result?.reason ?? `document ${job.docId} reindex failed`,
@@ -350,6 +376,10 @@ export class RagAdminService implements OnModuleInit {
 
   getIndexCompensationStatus() {
     return this.documentService.getIndexCompensationStatus();
+  }
+
+  getDocumentQueueStatus() {
+    return this.documentQueue.getStatus();
   }
 
   // ─── Documents ───────────────────────────────────────────────
@@ -875,7 +905,13 @@ export class RagAdminService implements OnModuleInit {
    * 文搜图（rag_images 独立图片集合）。
    * 嵌入 Key 未配置或 Milvus 异常时不抛 500：返回空列表 + reason 降级字段。
    */
-  async searchImages(query: string, limit = 20, userId?: string) {
+  async searchImages(
+    query: string,
+    limit = 20,
+    userId?: string,
+    tenantId?: string,
+    role?: string,
+  ) {
     const normalized = query.trim();
     const capped = Math.min(Math.max(limit, 1), 50);
     if (!normalized) {
@@ -883,7 +919,18 @@ export class RagAdminService implements OnModuleInit {
         query,
         limit: capped,
         userId: userId ?? null,
+        tenantId: tenantId ?? null,
         reason: '查询词为空',
+        results: [],
+      };
+    }
+    if (!userId) {
+      return {
+        query,
+        limit: capped,
+        userId: null,
+        tenantId: tenantId ?? null,
+        reason: '缺少图片检索用户范围',
         results: [],
       };
     }
@@ -892,20 +939,28 @@ export class RagAdminService implements OnModuleInit {
         query,
         limit: capped,
         userId: userId ?? null,
+        tenantId: tenantId ?? null,
         reason:
           '图片检索未启用：缺少 MULTIMODAL_EMBEDDING_API_KEY（或 DASHSCOPE_API_KEY）',
         results: [],
       };
     }
     try {
+      const allowedDocIds = await this.getActiveAllowedImageDocIds(
+        userId,
+        tenantId,
+        role,
+      );
       const results = await this.imageIndexService.searchText(normalized, {
         topK: capped,
         userId,
+        allowedDocIds,
       });
       return {
         query,
         limit: capped,
         userId: userId ?? null,
+        tenantId: tenantId ?? null,
         reason: null,
         results,
       };
@@ -915,10 +970,203 @@ export class RagAdminService implements OnModuleInit {
         query,
         limit: capped,
         userId: userId ?? null,
+        tenantId: tenantId ?? null,
         reason: `图片检索降级：${(err as Error).message}`,
         results: [],
       };
     }
+  }
+
+  /** 以图搜图；查询图片仅用于本次嵌入，不写入图片索引。 */
+  async searchImagesByImage(
+    base64: string,
+    mimeType: string,
+    limit = 20,
+    userId?: string,
+    tenantId?: string,
+    role?: string,
+  ) {
+    const capped = Math.min(Math.max(limit, 1), 50);
+    const query = '上传图片';
+    if (!base64.trim()) {
+      return {
+        query,
+        limit: capped,
+        userId: userId ?? null,
+        tenantId: tenantId ?? null,
+        reason: '查询图片为空',
+        results: [],
+      };
+    }
+    if (!userId) {
+      return {
+        query,
+        limit: capped,
+        userId: null,
+        tenantId: tenantId ?? null,
+        reason: '缺少图片检索用户范围',
+        results: [],
+      };
+    }
+    if (!this.imageIndexService?.isEnabled()) {
+      return {
+        query,
+        limit: capped,
+        userId,
+        tenantId: tenantId ?? null,
+        reason:
+          '图片检索未启用：缺少 MULTIMODAL_EMBEDDING_API_KEY（或 DASHSCOPE_API_KEY）',
+        results: [],
+      };
+    }
+    try {
+      const allowedDocIds = await this.getActiveAllowedImageDocIds(
+        userId,
+        tenantId,
+        role,
+      );
+      const results = await this.imageIndexService.searchImage(
+        base64,
+        mimeType,
+        { topK: capped, userId, allowedDocIds },
+      );
+      return {
+        query,
+        limit: capped,
+        userId,
+        tenantId: tenantId ?? null,
+        reason: null,
+        results,
+      };
+    } catch (err) {
+      this.logger.warn(`Image search degraded: ${(err as Error).message}`);
+      return {
+        query,
+        limit: capped,
+        userId,
+        tenantId: tenantId ?? null,
+        reason: `图片检索降级：${(err as Error).message}`,
+        results: [],
+      };
+    }
+  }
+
+  async getImageAsset(params: {
+    userId: string;
+    tenantId?: string;
+    role?: string;
+    docId: string;
+    key: string;
+  }): Promise<{ buffer: Buffer; contentType: string }> {
+    const userId = params.userId?.trim();
+    const docId = params.docId?.trim();
+    const key = params.key?.replace(/^\/+/, '').trim();
+    if (
+      !userId ||
+      !docId ||
+      !key ||
+      key.includes('\\') ||
+      key.split('/').includes('..')
+    ) {
+      throw new BadRequestException(
+        'userId, docId and a safe image key are required',
+      );
+    }
+    if (!this.objectStorageProvider) {
+      throw new ServiceUnavailableException('image storage is unavailable');
+    }
+
+    const activeDocuments = await this.getActiveAllowedImageDocuments(
+      userId,
+      params.tenantId,
+      params.role,
+    );
+    const document = activeDocuments.get(docId);
+    if (!document?.userId) {
+      throw new ForbiddenException('image asset is not accessible');
+    }
+    const ownerPrefix = `documents/${this.sanitizeObjectKeyPart(document.userId)}/${docId}/`;
+    if (!key.startsWith(ownerPrefix)) {
+      throw new ForbiddenException(
+        'image key does not belong to the requested document',
+      );
+    }
+
+    const contentType = imageAssetContentType(key);
+    if (!contentType) {
+      throw new BadRequestException('unsupported image asset type');
+    }
+    return {
+      buffer: await this.objectStorageProvider.getObject(key),
+      contentType,
+    };
+  }
+
+  private async getActiveAllowedImageDocIds(
+    userId: string,
+    tenantId?: string,
+    role?: string,
+  ): Promise<Set<string>> {
+    return new Set(
+      (
+        await this.getActiveAllowedImageDocuments(userId, tenantId, role)
+      ).keys(),
+    );
+  }
+
+  private async getActiveAllowedImageDocuments(
+    userId: string,
+    tenantId?: string,
+    role?: string,
+  ): Promise<Map<string, DocumentMetaEntity>> {
+    const allowedDocIds = await this.documentService.getAllowedDocIdsForUser(
+      userId,
+      tenantId,
+      role?.trim() ? [role.trim()] : [],
+    );
+    const ids = [...allowedDocIds];
+    const documents: DocumentMetaEntity[] = [];
+    for (let index = 0; index < ids.length; index += 500) {
+      documents.push(
+        ...(await this.docMetaRepo.find({
+          select: [
+            'docId',
+            'userId',
+            'lifecycleStatus',
+            'reviewStatus',
+            'effectiveAt',
+            'expiredAt',
+          ],
+          where: { docId: In(ids.slice(index, index + 500)) },
+        })),
+      );
+    }
+    const now = Date.now();
+    return new Map(
+      documents
+        .filter((document) => this.isCurrentEffectiveDocument(document, now))
+        .map((document) => [document.docId, document]),
+    );
+  }
+
+  private isCurrentEffectiveDocument(
+    document: DocumentMetaEntity,
+    now: number,
+  ): boolean {
+    if (
+      document.lifecycleStatus !== 'effective' ||
+      document.reviewStatus !== 'approved'
+    ) {
+      return false;
+    }
+    const effectiveAt = document.effectiveAt?.getTime();
+    const expiredAt = document.expiredAt?.getTime();
+    return (
+      (effectiveAt === undefined || Number.isFinite(effectiveAt)) &&
+      (expiredAt === undefined || Number.isFinite(expiredAt)) &&
+      (effectiveAt === undefined || effectiveAt <= now) &&
+      (expiredAt === undefined || expiredAt > now)
+    );
   }
 
   async reindexDocumentSearch(limit = 1000) {
@@ -1204,6 +1452,10 @@ export class RagAdminService implements OnModuleInit {
     return this.documentService.getFailedTasks(limit);
   }
 
+  getPendingDocumentTasks(limit?: number) {
+    return this.documentService.getPendingTasks(limit);
+  }
+
   async auditDocumentIndexes(
     limit = 200,
     cursor?: { createdAt: string; docId: string },
@@ -1245,8 +1497,10 @@ export class RagAdminService implements OnModuleInit {
       }
     }
     const now = Date.now();
-    const checks = await Promise.all(
-      docs.map(async (doc) => {
+    const checks = [];
+    for (let offset = 0; offset < docs.length; offset += 10) {
+      const batchChecks = await Promise.all(
+        docs.slice(offset, offset + 10).map(async (doc) => {
         const expected = dbChunkCounts.get(doc.docId) ?? 0;
         const expectedHashes = [...(dbChunkHashes.get(doc.docId) ?? new Set())];
         const expectedGenerations = [
@@ -1303,6 +1557,97 @@ export class RagAdminService implements OnModuleInit {
           doc.docId,
           doc.userId ?? 'system',
         );
+        let descriptionAudit: DocumentRetrievalDescriptionAudit | null = null;
+        try {
+          descriptionAudit =
+            await this.retrievalDescriptionService.auditForDocument({
+              tenantId: doc.tenantId ?? 'legacy',
+              docId: doc.docId,
+            });
+        } catch (err) {
+          this.logger.warn(
+            `Retrieval description audit failed for docId=${doc.docId}: ${(err as Error).message}`,
+          );
+        }
+        const descriptionReasons: string[] = [];
+        if (!descriptionAudit) {
+          descriptionReasons.push('retrieval_description_audit_unavailable');
+        } else {
+          if (!descriptionAudit.documentFound) {
+            descriptionReasons.push('retrieval_description_document_missing');
+          }
+          if (descriptionAudit.missingPgCount > 0) {
+            descriptionReasons.push('retrieval_description_missing_pg');
+          }
+          if (descriptionAudit.stalePgCount > 0) {
+            descriptionReasons.push('retrieval_description_stale_pg');
+          }
+          if (descriptionAudit.missingMilvusCount > 0) {
+            descriptionReasons.push('retrieval_description_missing_milvus');
+          }
+          if (descriptionAudit.staleMilvusCount > 0) {
+            descriptionReasons.push('retrieval_description_stale_milvus');
+          }
+          if (descriptionAudit.contentMismatchCount > 0) {
+            descriptionReasons.push('retrieval_description_content_mismatch');
+          }
+          if (descriptionAudit.sourceMappingMismatchCount > 0) {
+            descriptionReasons.push(
+              'retrieval_description_source_mapping_mismatch',
+            );
+          }
+          if (
+            descriptionAudit.missingCount > 0 &&
+            descriptionAudit.missingPgCount === 0 &&
+            descriptionAudit.missingMilvusCount === 0
+          ) {
+            descriptionReasons.push('retrieval_description_missing');
+          }
+          if (
+            descriptionAudit.staleCount > 0 &&
+            descriptionAudit.stalePgCount === 0 &&
+            descriptionAudit.staleMilvusCount === 0
+          ) {
+            descriptionReasons.push('retrieval_description_stale');
+          }
+          if (
+            descriptionAudit.expectedCount !== descriptionAudit.pgCount ||
+            descriptionAudit.expectedCount !== descriptionAudit.milvusCount
+          ) {
+            descriptionReasons.push('retrieval_description_count_mismatch');
+          }
+        }
+        const descriptionsMismatch = descriptionReasons.length > 0;
+        const retrievalDescriptions: IndexAuditCheck = descriptionAudit
+          ? {
+              status: descriptionsMismatch ? 'mismatch' : 'ok',
+              expected: descriptionAudit.expectedCount,
+              actual: descriptionAudit.pgCount,
+              docVersion: descriptionAudit.docVersion,
+              indexGeneration: descriptionAudit.indexGeneration,
+              lifecycleStatus: descriptionAudit.lifecycleStatus,
+              reviewStatus: descriptionAudit.reviewStatus,
+              effectiveAt: descriptionAudit.effectiveAt,
+              expiredAt: descriptionAudit.expiredAt,
+              pgCount: descriptionAudit.pgCount,
+              milvusCount: descriptionAudit.milvusCount,
+              missingCount: descriptionAudit.missingCount,
+              staleCount: descriptionAudit.staleCount,
+              missingPgCount: descriptionAudit.missingPgCount,
+              stalePgCount: descriptionAudit.stalePgCount,
+              missingMilvusCount: descriptionAudit.missingMilvusCount,
+              staleMilvusCount: descriptionAudit.staleMilvusCount,
+              contentMismatchCount: descriptionAudit.contentMismatchCount,
+              sourceMappingMismatchCount:
+                descriptionAudit.sourceMappingMismatchCount,
+              ...(descriptionsMismatch
+                ? { reason: descriptionReasons[0] }
+                : {}),
+            }
+          : {
+              status: 'unavailable',
+              reason: 'retrieval_description_audit_unavailable',
+            };
         const indexChecks: Record<string, IndexAuditCheck> = {
           postgres: {
             status: doc.chunkCount === expected ? 'ok' : 'mismatch',
@@ -1374,6 +1719,7 @@ export class RagAdminService implements OnModuleInit {
               },
           milvus,
           graph,
+          retrievalDescriptions,
         };
         const reasons: string[] = [];
         if (expected <= 0) reasons.push('missing_chunks');
@@ -1392,6 +1738,12 @@ export class RagAdminService implements OnModuleInit {
           reasons.push('milvus_unavailable');
         if (indexChecks.graph.status === 'mismatch')
           reasons.push('graph_index_missing');
+        if (indexChecks.retrievalDescriptions.status === 'mismatch') {
+          reasons.push(...descriptionReasons);
+        }
+        if (indexChecks.retrievalDescriptions.status === 'unavailable') {
+          reasons.push('retrieval_description_audit_unavailable');
+        }
         if (doc.graphIndexStatus === 'failed')
           reasons.push('graph_index_failed');
         if (doc.graphIndexStatus === 'pending')
@@ -1417,8 +1769,10 @@ export class RagAdminService implements OnModuleInit {
           checks: indexChecks,
           reasons: [...new Set(reasons)],
         };
-      }),
-    );
+        }),
+      );
+      checks.push(...batchChecks);
+    }
     const issues = checks.filter((item) => item.reasons.length > 0);
     const count = (reason: string) =>
       issues.filter((item) => item.reasons.includes(reason)).length;
@@ -1455,6 +1809,11 @@ export class RagAdminService implements OnModuleInit {
         ),
         milvusUnavailable: count('milvus_unavailable'),
         graphIndexMissing: count('graph_index_missing'),
+        retrievalDescriptionMismatch: issues.filter((item) =>
+          item.reasons.some((reason) =>
+            reason.startsWith('retrieval_description_'),
+          ),
+        ).length,
       },
       issues,
       checks,
@@ -1564,9 +1923,45 @@ export class RagAdminService implements OnModuleInit {
       };
     }
     const results = await Promise.all(
-      targets.map((issue) => this.reindexDocument(issue.docId)),
+      targets.map((issue) =>
+        this.isDescriptionOnlyRepairReason(issue.reasons.join(','))
+          ? this.repairRetrievalDescriptions(issue.docId)
+          : this.reindexDocument(issue.docId),
+      ),
     );
     return { available: true, requested: targets.length, results };
+  }
+
+  private isDescriptionOnlyRepairReason(reason?: string): boolean {
+    const reasons = reason
+      ?.split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return Boolean(
+      reasons?.length &&
+      reasons.every((item) => item.startsWith('retrieval_description_')),
+    );
+  }
+
+  private async repairRetrievalDescriptions(docId: string) {
+    const document = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!document) return null;
+    try {
+      const retrievalDescriptions =
+        await this.rebuildAndAuditRetrievalDescriptions(document);
+      return {
+        docId,
+        reindexed: true,
+        descriptionOnly: true,
+        retrievalDescriptions,
+      };
+    } catch (err) {
+      const reason = (err as Error).message;
+      this.logger.error(
+        `Retrieval description repair failed for docId=${docId}: ${reason}`,
+      );
+      return { docId, reindexed: false, reason };
+    }
   }
 
   getIndexRepairQueueStatus() {
@@ -1606,6 +2001,10 @@ export class RagAdminService implements OnModuleInit {
 
   retryFailedDocumentTask(taskId: string) {
     return this.documentService.retryFailedTask(taskId);
+  }
+
+  cancelQueuedDocumentTask(taskId: string) {
+    return this.documentService.cancelQueuedTask(taskId);
   }
 
   private async updateDocumentReview(
@@ -1699,7 +2098,19 @@ export class RagAdminService implements OnModuleInit {
     });
 
     if (chunks.length === 0) {
-      return { docId, reindexed: false, reason: 'no chunks found' };
+      try {
+        const restored =
+          await this.documentService.restoreDocumentFromOriginal(docId);
+        return restored
+          ? { ...restored, reindexed: true, restoredFromOriginal: true }
+          : { docId, reindexed: false, reason: 'document not found' };
+      } catch (err) {
+        const reason = (err as Error).message;
+        this.logger.error(
+          `Document restore failed for docId=${docId}: ${reason}`,
+        );
+        return { docId, reindexed: false, reason };
+      }
     }
 
     const userId = doc.userId ?? 'system';
@@ -1726,6 +2137,15 @@ export class RagAdminService implements OnModuleInit {
           userId,
         })),
       );
+      const indexedVectorCount = await this.vectorStoreProvider.countByDocId(
+        docId,
+        userId,
+      );
+      if (indexedVectorCount !== chunks.length) {
+        throw new Error(
+          `Milvus reindex count mismatch: expected ${chunks.length}, received ${indexedVectorCount}`,
+        );
+      }
 
       const parseArray = (value: string | null | undefined): string[] => {
         if (!value) return [];
@@ -1840,11 +2260,18 @@ export class RagAdminService implements OnModuleInit {
         );
       }
 
+      const retrievalDescriptions =
+        await this.rebuildAndAuditRetrievalDescriptions(doc);
+      const imageIndex =
+        await this.documentService.rebuildImageIndexFromOriginal(docId);
+
       return {
         docId,
         reindexed: true,
         chunkCount: chunks.length,
         preserved: { tenantId: doc.tenantId ?? 'legacy', permissions: true },
+        retrievalDescriptions,
+        imageIndex,
       };
     } catch (err) {
       this.logger.error(
@@ -1856,6 +2283,34 @@ export class RagAdminService implements OnModuleInit {
         reason: (err as Error).message,
       };
     }
+  }
+
+  private async rebuildAndAuditRetrievalDescriptions(
+    document: Pick<DocumentMetaEntity, 'tenantId' | 'docId'>,
+  ) {
+    const tenantId = document.tenantId ?? 'legacy';
+    const rebuild = await this.retrievalDescriptionService.rebuild({
+      tenantId,
+      docId: document.docId,
+    });
+    const audit = await this.retrievalDescriptionService.auditForDocument({
+      tenantId,
+      docId: document.docId,
+    });
+    if (
+      !audit.documentFound ||
+      audit.expectedCount !== audit.pgCount ||
+      audit.expectedCount !== audit.milvusCount ||
+      audit.missingCount > 0 ||
+      audit.staleCount > 0 ||
+      audit.contentMismatchCount > 0 ||
+      audit.sourceMappingMismatchCount > 0
+    ) {
+      throw new Error(
+        `retrieval description verification failed: ${JSON.stringify(audit)}`,
+      );
+    }
+    return { ...rebuild, audit };
   }
 
   async updateDocumentPermissions(
@@ -2043,4 +2498,17 @@ export class RagAdminService implements OnModuleInit {
     const summary = await this.queryLogService.getCostSummary();
     return { available: true, data: summary };
   }
+}
+
+function imageAssetContentType(key: string): string | null {
+  const extension = key.split('.').at(-1)?.toLowerCase();
+  const contentTypes: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+  };
+  return extension ? contentTypes[extension] ?? null : null;
 }

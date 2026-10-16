@@ -3,7 +3,7 @@ import { IndexReconcilerService } from './index-reconciler.service';
 
 describe('IndexReconcilerService', () => {
   function create(overrides: Record<string, unknown> = {}) {
-    const values = {
+    const values: Record<string, unknown> = {
       nodeEnv: 'production',
       'ragIndexReconciler.enabled': true,
       'ragIndexReconciler.intervalMs': 60_000,
@@ -83,10 +83,28 @@ describe('IndexReconcilerService', () => {
       'ragIndexReconciler.enabled': undefined,
     });
 
-    await expect(service.runOnce()).resolves.toEqual({
+    await expect(service.runOnce('interval')).resolves.toEqual({
       available: false,
       reason: 'disabled',
     });
     expect(ragAdmin.auditDocumentIndexes).not.toHaveBeenCalled();
+  });
+
+  it('allows a manual run when scheduling is disabled but the persistent queue is available', async () => {
+    const { service, ragAdmin, repairQueue } = create({
+      nodeEnv: 'development',
+      'ragIndexReconciler.enabled': undefined,
+    });
+    ragAdmin.auditDocumentIndexes.mockResolvedValue({ scanned: 0, issues: [] });
+
+    await expect(service.runOnce('manual')).resolves.toEqual({
+      available: true,
+      scanned: 0,
+      mismatched: 0,
+      queued: 0,
+      skipped: 0,
+    });
+    expect(ragAdmin.auditDocumentIndexes).toHaveBeenCalledTimes(1);
+    expect(repairQueue.enqueue).not.toHaveBeenCalled();
   });
 });

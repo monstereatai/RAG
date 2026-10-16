@@ -54,6 +54,8 @@ import { AgentRuntimeEventsModule } from './modules/agent-runtime-events/agent-r
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
 import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 import { IamModule } from './modules/iam/iam.module';
+import { TeamWikiModule } from './modules/team-wiki/team-wiki.module';
+import { FeishuWikiSyncModule } from './modules/feishu/feishu-wiki-sync.module';
 
 @Module({
   imports: [
@@ -119,6 +121,8 @@ import { IamModule } from './modules/iam/iam.module';
     AgentRuntimeModule,
     DomainEventsModule,
     IamModule,
+    TeamWikiModule,
+    FeishuWikiSyncModule,
   ],
   providers: [
     {

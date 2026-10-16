@@ -5,7 +5,7 @@ export interface DocumentItem {
   filename: string;
   fileType: string;
   fileSize: number;
-  status?: 'pending' | 'processing' | 'completed' | 'failed';
+  status?: 'pending' | 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
   chunkCount: number;
   uploadedBy: string;
   createdAt: string;
@@ -65,6 +65,69 @@ export interface DocumentPermissionInput {
   subjectType: 'user' | 'role' | 'department' | 'public';
   subjectId?: string;
   scope?: 'read';
+}
+
+export interface DocumentOperations {
+  documentQueue: QueueStatus;
+  pendingDocumentTasks: PendingDocumentTask[];
+  failedDocumentTasks: FailedDocumentTask[];
+  indexRepairQueue: QueueStatus;
+  failedIndexRepairs: FailedIndexRepair[];
+  indexReconciler: ReconcilerStatus;
+}
+
+export interface PendingDocumentTask {
+  id: string;
+  filename: string;
+  status: 'queued';
+  queueStatus: 'waiting' | 'delayed' | 'paused' | 'waiting-children';
+  createdAt: string;
+}
+
+export interface QueueStatus {
+  enabled: boolean;
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+}
+
+export interface FailedDocumentTask {
+  id: string;
+  filename: string;
+  status: string;
+  stage: string;
+  progress: number;
+  errorMessage?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  finishedAt?: string | null;
+}
+
+export interface FailedIndexRepair {
+  id: string;
+  docId: string;
+  requestedBy: string;
+  attemptsMade: number;
+  failedReason?: string | null;
+  failedAt?: number | null;
+}
+
+export interface ReconcilerStatus {
+  enabled: boolean;
+  configured: boolean;
+  queueEnabled: boolean;
+  running: boolean;
+  intervalMs: number;
+  batchSize: number;
+  lastRunAt: string | null;
+  lastResult?: {
+    scanned: number;
+    mismatched: number;
+    queued: number;
+    skipped: number;
+  } | null;
+  lastError: string | null;
 }
 
 export async function getDocuments(params?: {
@@ -197,8 +260,33 @@ export async function getFailedDocumentTasks() {
   return authRequest<any[]>('/api/admin/documents/tasks/failed');
 }
 
+export async function getDocumentOperations() {
+  return authRequest<DocumentOperations>('/api/admin/documents/operations');
+}
+
 export async function retryFailedDocumentTask(taskId: string) {
-  return authRequest(`/api/admin/documents/tasks/${taskId}/retry`, { method: 'POST' });
+  return authRequest(`/api/admin/documents/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
+}
+
+export async function cancelQueuedDocumentTask(taskId: string) {
+  return authRequest<{
+    taskId: string;
+    cancelled: boolean;
+    cleanupScheduled?: boolean;
+    cleanupCompleted?: boolean;
+    reason?: string;
+  }>(
+    `/api/admin/documents/tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: 'POST' },
+  );
+}
+
+export async function retryIndexRepair(jobId: string) {
+  return authRequest(`/api/admin/documents/index-repair/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+}
+
+export async function runIndexReconciler() {
+  return authRequest<Record<string, unknown>>('/api/admin/documents/index-reconciler/run', { method: 'POST' });
 }
 
 export async function rollbackDocumentVersion(id: string) {

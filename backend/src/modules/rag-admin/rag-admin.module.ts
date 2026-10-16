@@ -22,6 +22,7 @@ import { IndexRepairQueueService } from './index-repair-queue.service';
 import { IndexReconcilerService } from './index-reconciler.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { RagAdminGraphService } from './rag-admin-graph.service';
+import { DocumentRetrievalDescriptionModule } from '../document/document-retrieval-description.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { RagAdminGraphService } from './rag-admin-graph.service';
       DocumentPermissionEntity,
     ]),
     DocumentModule,
+    DocumentRetrievalDescriptionModule,
     GraphModule,
     ChatModule,
     KarpathyRagModule,
@@ -52,6 +54,6 @@ import { RagAdminGraphService } from './rag-admin-graph.service';
     IndexReconcilerService,
     RagAdminGraphService,
   ],
-  exports: [QueryLogService],
+  exports: [QueryLogService, RagAdminService],
 })
 export class RagAdminModule {}

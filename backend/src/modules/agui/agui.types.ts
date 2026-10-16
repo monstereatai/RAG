@@ -58,4 +58,5 @@ export interface AguiStreamOptions {
   rolePresetId?: string;
   pluginKeys?: string[];
   approvalRequired?: boolean;
+  attachmentIds?: string[];
 }

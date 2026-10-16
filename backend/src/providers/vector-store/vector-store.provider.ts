@@ -4,6 +4,8 @@ import {
   IVectorStoreProvider,
   ImageSearchHit,
   ImageVectorRecord,
+  RetrievalDescriptionVectorHit,
+  RetrievalDescriptionVectorRecord,
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
@@ -80,11 +82,35 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
     queryVector: number[],
     k: number,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<ImageSearchHit[]> {
-    return this.provider.searchImages(queryVector, k, userId);
+    return this.provider.searchImages(queryVector, k, userId, allowedDocIds);
   }
 
   deleteImagesByDocId(docId: string, userId?: string): Promise<void> {
     return this.provider.deleteImagesByDocId(docId, userId);
+  }
+
+  ensureDescriptionCollection(): Promise<void> {
+    return this.provider.ensureDescriptionCollection();
+  }
+
+  upsertDescriptions(records: RetrievalDescriptionVectorRecord[]): Promise<void> {
+    return this.provider.upsertDescriptions(records);
+  }
+
+  searchDescriptions(
+    queryVector: number[],
+    options: { tenantId: string; topK: number },
+  ): Promise<RetrievalDescriptionVectorHit[]> {
+    return this.provider.searchDescriptions(queryVector, options);
+  }
+
+  listDescriptionIds(tenantId: string, docId: string): Promise<string[]> {
+    return this.provider.listDescriptionIds(tenantId, docId);
+  }
+
+  deleteDescriptionsByDocId(tenantId: string, docId: string): Promise<void> {
+    return this.provider.deleteDescriptionsByDocId(tenantId, docId);
   }
 }

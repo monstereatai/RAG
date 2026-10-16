@@ -148,6 +148,46 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async saddRequired(key: string, ...members: string[]): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      if (members.length) await this.client.sadd(key, ...members);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async smembersRequired(key: string): Promise<string[]> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return await this.client.smembers(key);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async sremRequired(key: string, ...members: string[]): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      if (members.length) await this.client.srem(key, ...members);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async expireRequired(key: string, seconds: number): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      await this.client.expire(key, seconds);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
   async keysRequired(pattern: string): Promise<string[]> {
     if (!this.enabled) throw new Error('Redis is unavailable');
     try {

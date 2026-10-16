@@ -7,7 +7,10 @@ import { EmbeddingProvider } from '../../providers/embedding/embedding.provider'
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { generateAnswerPrompt } from '../prompts/rag.prompts';
-import { isObjectiveFactQuery } from '../prompts/context-policy';
+import {
+  isObjectiveKnowledgeIntent,
+  resolveStandaloneRetrievalQuery,
+} from '../prompts/query-intent-router';
 import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
 import { canonicalizeRole } from '../../modules/chat/role-presets';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
@@ -32,6 +35,7 @@ import {
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
+import { DocumentRetrievalDescriptionService } from '../../modules/document/document-retrieval-description.service';
 import {
   GraphService,
   type GraphFact,
@@ -88,8 +92,11 @@ export interface RetrievedChunk {
     | 'hybrid'
     | 'expansion'
     | 'obsidian'
-    | 'web';
+    | 'web'
+    | 'attachment';
   contextRole?: 'hit' | 'neighbor' | 'section' | 'obsidian';
+  /** 附件内的页码、标题或片段位置，用于回答引用展示。 */
+  citationLabel?: string;
 }
 
 export interface KarpathyRagResult {
@@ -129,6 +136,7 @@ export interface KarpathyRagResult {
     supersedesDocId?: string | null;
     retrievalSource?: RetrievedChunk['retrievalSource'];
     contextRole?: RetrievedChunk['contextRole'];
+    citationLabel?: string;
   }>;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
@@ -175,12 +183,16 @@ export interface RetrievalDiagnostics {
   stages?: {
     keywordCandidates: number;
     vectorCandidates: number;
+    descriptionCandidates?: number;
+    descriptionSourceChunks?: number;
     fusedCandidates: number;
     scopedCandidates: number;
     finalCandidates: number;
     filteredByScope: number;
     filteredByBudget: number;
   };
+  /** 本轮是否因高置信追问执行了补全问题检索。 */
+  contextualQueryUsed?: boolean;
   /** 供检索实验台使用的各阶段候选快照，限制为前 50 条避免泄漏完整语料。 */
   candidates?: {
     keyword: RetrievalCandidateSnapshot[];
@@ -227,8 +239,10 @@ export interface RetrieveOptions {
   signal?: AbortSignal;
   /** 认证上下文中的租户；优先于旧的单租户兼容路径参与 ACL 过滤。 */
   tenantId?: string;
-  /** 用于召回的上下文查询；生成阶段仍使用原始用户问题。 */
-  retrievalQuery?: string;
+  /** 合并多路检索时统一按原始用户问题重排。 */
+  rankingQuery?: string;
+  /** 多路检索先各自取候选，合并后只重排一次。 */
+  skipRerank?: boolean;
   /** 无权威片段时，允许使用本轮同实体的最近用户陈述回答状态确认。 */
   allowConversationStateAnswer?: boolean;
   /** 当前问题只允许使用本地知识库，不调用联网兜底。 */
@@ -244,6 +258,8 @@ export interface RetrieveOptions {
   adaptiveVectorSearch?: boolean;
   /** Simple 链路启用受治理 Karpathy 知识卡直答。 */
   karpathyDirectAnswer?: boolean;
+  /** 当前会话附件经所有者和会话校验后的临时证据。 */
+  supplementalEvidence?: RetrievedChunk[];
   /** Auto 通过充分性门禁后复用 Base Case、正式检索与 Obsidian 快照，避免重复检索。 */
   prefetchedFastPath?: PrefetchedFastPath;
   /** 语义路由认为需要综合多个片段做整体总结/综述/介绍。 */
@@ -288,6 +304,10 @@ type RankedRetrievalHit = {
   lifecycleStatus?: string;
   supersedesDocId?: string | null;
 };
+
+type RetrievalDescriptionHit = Awaited<
+  ReturnType<DocumentRetrievalDescriptionService['searchByVector']>
+>[number];
 
 /**
  * Karpathy-Style RAG：BM25 + Cosine 混合检索 + LLM 生成
@@ -373,6 +393,8 @@ export class KarpathyRagService implements OnModuleInit {
     @Optional() private readonly graphService?: GraphService,
     @Optional() private readonly imageIndexService?: ImageIndexService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
+    @Optional()
+    private readonly retrievalDescriptionService?: DocumentRetrievalDescriptionService,
   ) {}
 
   /**
@@ -641,9 +663,7 @@ export class KarpathyRagService implements OnModuleInit {
     userId?: string,
   ): Promise<DetailedRetrievalResult> {
     const vectorSearch = options.vectorSearch ?? true;
-    const normalizedQuery = this.expandRetrievalQuery(
-      this.normalizeQuery(query),
-    );
+    const normalizedQuery = this.normalizeQuery(query);
     const profile = options.profile ?? detectRetrievalProfile(normalizedQuery);
     const graphProbeStartedAt = Date.now();
     // Chat 请求一律遵从一次结构化计划；没有 RequestContext 的历史内部调用
@@ -662,8 +682,6 @@ export class KarpathyRagService implements OnModuleInit {
           facts: [],
           skippedReason: 'not_requested_by_retrieval_plan',
         });
-    const imageProbePromise = this.probeImages(normalizedQuery, userId);
-
     // 权限集合在召回前放大候选深度、在融合后再次强制过滤，避免受限文档挤占可见结果。
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(
@@ -673,6 +691,11 @@ export class KarpathyRagService implements OnModuleInit {
           options.tenantId,
         )
       : null;
+    const imageProbePromise = this.probeImages(
+      normalizedQuery,
+      userId,
+      allowedDocIds ?? undefined,
+    );
     const candidateDepth = allowedDocIds
       ? profile.candidateDepth * 3
       : profile.candidateDepth;
@@ -727,6 +750,9 @@ export class KarpathyRagService implements OnModuleInit {
     let cosineHits: Awaited<
       ReturnType<VectorStoreProvider['similaritySearch']>
     > = [];
+    let descriptionCandidateCount = 0;
+    let descriptionSourceChunkCount = 0;
+    let descriptionUsed = false;
     let vectorSource: RagVectorSource = 'none';
     if (vectorSearch) {
       let milvusUsed = false;
@@ -793,7 +819,36 @@ export class KarpathyRagService implements OnModuleInit {
           );
         }
       }
-      vectorSource = milvusUsed
+      if (queryVector && this.retrievalDescriptionService) {
+        try {
+          const descriptionHits =
+            await this.retrievalDescriptionService.searchByVector(queryVector, {
+              tenantId: options.tenantId ?? 'legacy',
+              topK: candidateDepth,
+            });
+          descriptionCandidateCount = descriptionHits.length;
+          descriptionUsed = descriptionHits.length > 0;
+          const sourceHits = this.mapDescriptionHitsToSourceChunks(
+            descriptionHits,
+            normalizedQuery,
+            allowedDocIds,
+            userId,
+            options.scope,
+          );
+          descriptionSourceChunkCount = sourceHits.length;
+          cosineHits = this.mergeVectorCandidates(
+            cosineHits,
+            sourceHits,
+            candidateDepth,
+          );
+        } catch (err) {
+          // 描述索引是补充召回通道；它故障时仍保留原文向量与 BM25 检索。
+          this.logger.warn(
+            `Retrieval description search failed; keeping raw retrieval channels: ${(err as Error).message}`,
+          );
+        }
+      }
+      vectorSource = milvusUsed || descriptionUsed
         ? 'milvus'
         : queryVector && esKnnReady
           ? 'elasticsearch'
@@ -829,11 +884,13 @@ export class KarpathyRagService implements OnModuleInit {
     const rerankStartedAt = process.hrtime.bigint();
     let rerankOutcome: { chunks: typeof scoped; applied: boolean };
     try {
-      rerankOutcome = await this.applyRerank(
-        normalizedQuery,
-        scoped,
-        options.signal,
-      );
+      rerankOutcome = options.skipRerank
+        ? { chunks: scoped, applied: false }
+        : await this.applyRerank(
+            options.rankingQuery ?? normalizedQuery,
+            scoped,
+            options.signal,
+          );
     } catch (error) {
       this.metricsService.observeRetrievalStage(
         'rerank',
@@ -884,13 +941,12 @@ export class KarpathyRagService implements OnModuleInit {
       options.scope,
     );
     const built = this.contextBuilder.build(
-      shouldMergeGraph || shouldMergeImages
-        ? [
-            ...(shouldMergeGraph ? graphChunks : []),
-            ...(shouldMergeImages ? imageChunks : []),
-            ...expanded,
-          ]
-        : expanded,
+      [
+        ...(shouldMergeGraph ? graphChunks : []),
+        ...(shouldMergeImages ? imageChunks : []),
+        ...expanded,
+        ...(options.supplementalEvidence ?? []),
+      ],
       profile,
       normalizedQuery,
     );
@@ -916,6 +972,8 @@ export class KarpathyRagService implements OnModuleInit {
       stages: {
         keywordCandidates: bm25Hits.length,
         vectorCandidates: cosineHits.length,
+        descriptionCandidates: descriptionCandidateCount,
+        descriptionSourceChunks: descriptionSourceChunkCount,
         fusedCandidates: fusedCandidateCount,
         scopedCandidates: scoped.length,
         finalCandidates: built.chunks.length,
@@ -943,6 +1001,133 @@ export class KarpathyRagService implements OnModuleInit {
       profile,
       vectorSource,
       rerankApplied: rerankOutcome.applied,
+    };
+  }
+
+  /** 原问题始终检索；只有高置信追问才加一条补全问题，并统一按原问题重排。 */
+  private async retrieveWithContextualQuery(
+    query: string,
+    options: RetrieveOptions,
+    userId?: string,
+  ): Promise<DetailedRetrievalResult> {
+    const originalQuery = this.normalizeQuery(query);
+    const contextualQuery = this.normalizeQuery(
+      resolveStandaloneRetrievalQuery(query, options.queryIntent),
+    );
+    if (contextualQuery === originalQuery) {
+      return this.retrieveDetailed(originalQuery, options, userId);
+    }
+
+    // 两路先各自召回候选，避免重复调用重排服务；合并后只按原问题重排一次。
+    const candidateOptions = {
+      ...options,
+      skipRerank: true,
+      rankingQuery: originalQuery,
+    };
+    const contextualIntent = options.queryIntent
+      ? { ...options.queryIntent, requiresGraph: false }
+      : undefined;
+    const [original, contextual] = await Promise.all([
+      this.retrieveDetailed(originalQuery, candidateOptions, userId),
+      this.retrieveDetailed(
+        contextualQuery,
+        { ...candidateOptions, queryIntent: contextualIntent },
+        userId,
+      ).catch((error) => {
+        this.logger.warn(
+          `Contextual retrieval failed; keeping original-query results: ${(error as Error).message}`,
+        );
+        return undefined;
+      }),
+    ]);
+
+    const candidates = new Map<string, RetrievedChunk>();
+    for (const chunk of [...original.chunks, ...(contextual?.chunks ?? [])]) {
+      const current = candidates.get(chunk.id);
+      if (!current || chunk.totalScore > current.totalScore) {
+        candidates.set(chunk.id, chunk);
+      }
+    }
+    const rerankStartedAt = process.hrtime.bigint();
+    const reranked = await this.applyRerank(
+      originalQuery,
+      [...candidates.values()],
+      options.signal,
+    );
+    if (reranked.applied) {
+      this.metricsService.observeRetrievalStage(
+        'rerank',
+        'success',
+        Number(process.hrtime.bigint() - rerankStartedAt) / 1e9,
+      );
+      this.metricsService.observeRetrievalRecalled(
+        'rerank',
+        'rerank',
+        reranked.chunks.length,
+      );
+    }
+    const built = this.contextBuilder.build(
+      reranked.chunks,
+      original.profile,
+      originalQuery,
+    );
+    const primaryStages = original.diagnostics.stages;
+    const contextualStages = contextual?.diagnostics.stages;
+    const diagnostics: RetrievalDiagnostics = {
+      ...original.diagnostics,
+      contextualQueryUsed: true,
+      expandedChunks:
+        original.diagnostics.expandedChunks +
+        (contextual?.diagnostics.expandedChunks ?? 0),
+      duplicateChunksRemoved:
+        original.chunks.length +
+        (contextual?.chunks.length ?? 0) -
+        candidates.size +
+        built.stats.duplicateChunksRemoved,
+      documentLimitRemoved: built.stats.documentLimitRemoved,
+      budgetRemoved: built.stats.budgetRemoved,
+      contextCharacters: built.stats.contextCharacters,
+      stages:
+        primaryStages
+          ? {
+              ...primaryStages,
+              keywordCandidates:
+                primaryStages.keywordCandidates +
+                (contextualStages?.keywordCandidates ?? 0),
+              vectorCandidates:
+                primaryStages.vectorCandidates +
+                (contextualStages?.vectorCandidates ?? 0),
+              descriptionCandidates:
+                (primaryStages.descriptionCandidates ?? 0) +
+                (contextualStages?.descriptionCandidates ?? 0),
+              descriptionSourceChunks:
+                (primaryStages.descriptionSourceChunks ?? 0) +
+                (contextualStages?.descriptionSourceChunks ?? 0),
+              fusedCandidates:
+                primaryStages.fusedCandidates +
+                (contextualStages?.fusedCandidates ?? 0),
+              scopedCandidates:
+                primaryStages.scopedCandidates +
+                (contextualStages?.scopedCandidates ?? 0),
+              finalCandidates: built.chunks.length,
+              filteredByScope:
+                primaryStages.filteredByScope +
+                (contextualStages?.filteredByScope ?? 0),
+              filteredByBudget: built.stats.budgetRemoved,
+            }
+          : undefined,
+      // 两路候选的中间快照结构不同，避免把原问题那一路误报成完整快照。
+      candidates: undefined,
+    };
+    return {
+      ...original,
+      chunks: built.chunks,
+      diagnostics,
+      vectorSource:
+        original.vectorSource === 'none'
+          ? (contextual?.vectorSource ?? 'none')
+          : original.vectorSource,
+      rerankApplied: reranked.applied,
     };
   }
 
@@ -1023,6 +1208,7 @@ export class KarpathyRagService implements OnModuleInit {
   private async probeImages(
     query: string,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<{
     attempted: boolean;
     enabled: boolean;
@@ -1044,7 +1230,7 @@ export class KarpathyRagService implements OnModuleInit {
         skippedReason: 'disabled',
       };
     }
-    if (!userId || !this.shouldMergeImageEvidence(query)) {
+    if (!userId || !allowedDocIds || !this.shouldMergeImageEvidence(query)) {
       return {
         attempted: false,
         enabled: true,
@@ -1052,12 +1238,17 @@ export class KarpathyRagService implements OnModuleInit {
         hitCount: 0,
         elapsedMs: 0,
         hits: [],
-        skippedReason: userId ? 'not_image_query' : 'missing_user',
+        skippedReason:
+          !userId || !allowedDocIds ? 'missing_user_acl' : 'not_image_query',
       };
     }
     try {
       const hits = await Promise.race([
-        this.imageIndexService.searchText(query, { topK: 6, userId }),
+        this.imageIndexService.searchText(query, {
+          topK: 6,
+          userId,
+          allowedDocIds,
+        }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('timeout')), 1200),
         ),
@@ -1152,9 +1343,7 @@ export class KarpathyRagService implements OnModuleInit {
     includeElasticsearch = true,
     tenantId?: string,
   ): Promise<RetrievedChunk[]> {
-    const normalizedQuery = this.expandRetrievalQuery(
-      this.normalizeQuery(query),
-    );
+    const normalizedQuery = this.normalizeQuery(query);
     const profile = detectRetrievalProfile(normalizedQuery);
     const allowedDocIds = userId
       ? await this.documentPermissionService.getAllowedDocIds(
@@ -1276,9 +1465,7 @@ export class KarpathyRagService implements OnModuleInit {
         },
       };
     }
-    const retrievalQuery = this.expandRetrievalQuery(
-      this.normalizeQuery(retrieveOptions.retrievalQuery ?? query),
-    );
+    const retrievalQuery = normalizedQuery;
     const profile =
       retrieveOptions.profile ?? detectRetrievalProfile(retrievalQuery);
     const canUseVector = retrieveOptions.vectorSearch !== false;
@@ -1295,7 +1482,11 @@ export class KarpathyRagService implements OnModuleInit {
     const retrieveFormalKnowledge = () =>
       prefetchedFastPath
         ? Promise.resolve(prefetchedFastPath.retrieval)
-        : this.retrieveDetailed(retrievalQuery, initialRetrieveOptions, userId);
+        : this.retrieveWithContextualQuery(
+            retrievalQuery,
+            initialRetrieveOptions,
+            userId,
+          );
     const retrieveBaseCaseKnowledge = () =>
       prefetchedFastPath?.badCaseMatches
         ? Promise.resolve(prefetchedFastPath.badCaseMatches)
@@ -1322,6 +1513,7 @@ export class KarpathyRagService implements OnModuleInit {
     let obsidianHits: ObsidianSearchHit[];
     if (
       retrieveOptions.karpathyDirectAnswer &&
+      !retrieveOptions.supplementalEvidence?.length &&
       !retrieveOptions.needsSynthesis &&
       !prefetchedFastPath
     ) {
@@ -1376,6 +1568,23 @@ export class KarpathyRagService implements OnModuleInit {
       }
     }
     const retrieval = initialRetrieval;
+    const sourceResolution = await this.resolveObsidianSourceEvidence(
+      retrievalQuery,
+      obsidianHits,
+      userId,
+      retrieveOptions,
+    );
+    obsidianHits = obsidianHits.filter(
+      (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
+    );
+    const formalChunkMap = new Map<string, RetrievedChunk>();
+    for (const chunk of [...retrieval.chunks, ...sourceResolution.chunks]) {
+      const existing = formalChunkMap.get(chunk.id);
+      if (!existing || chunk.totalScore > existing.totalScore) {
+        formalChunkMap.set(chunk.id, chunk);
+      }
+    }
+    const formalChunks = Array.from(formalChunkMap.values());
     const reviewedBaseCaseChunks =
       this.toReviewedEvidenceChunks(badCaseMatches);
     const baseCaseGate = this.assessReviewedBaseCaseEvidence(
@@ -1385,15 +1594,25 @@ export class KarpathyRagService implements OnModuleInit {
     const prefetchedBundle = prefetchedFastPath?.evidenceBundle;
     // Fast Path 与正式回答对同一原问题只能有一份充分性结论。此前这里再次
     // 用改写后的文本判定，导致搜索命中后仍可能在问答链路被误报资料不足。
+    const attachmentEvidenceCount = formalChunks.filter(
+      (chunk) => chunk.retrievalSource === 'attachment',
+    ).length;
     const formalRetrievalGate =
-      prefetchedBundle && appliesToQuery(prefetchedBundle, query)
+      attachmentEvidenceCount > 0
+        ? {
+            sufficient: true,
+            reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
+          }
+        : sourceResolution.chunks.length === 0 &&
+      prefetchedBundle &&
+      appliesToQuery(prefetchedBundle, query)
         ? prefetchedBundle.assessment
-        : retrieval.chunks.length === 0
+        : formalChunks.length === 0
           ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-          : this.assessRetrievalQuality(retrievalQuery, retrieval.chunks);
+          : this.assessRetrievalQuality(retrievalQuery, formalChunks);
     const chunks = formalRetrievalGate.sufficient
-      ? [...retrieval.chunks, ...reviewedBaseCaseChunks]
-      : [...reviewedBaseCaseChunks, ...retrieval.chunks];
+      ? [...formalChunks, ...reviewedBaseCaseChunks]
+      : [...reviewedBaseCaseChunks, ...formalChunks];
     const retrievalGate = {
       sufficient: baseCaseGate.sufficient || formalRetrievalGate.sufficient,
       reason: baseCaseGate.sufficient
@@ -1454,9 +1673,13 @@ export class KarpathyRagService implements OnModuleInit {
       normalizedQuery,
     );
     const evidenceChunks = evidenceBuild.chunks;
+    const hasAttachmentEvidence = evidenceChunks.some(
+      (chunk) => chunk.retrievalSource === 'attachment',
+    );
     const shouldPreferConversationState =
       retrieveOptions.allowConversationStateAnswer &&
       history.length > 0 &&
+      !hasAttachmentEvidence &&
       !this.hasConversationEntityEvidence(
         evidenceChunks,
         retrieveOptions.entities ?? retrieveOptions.queryIntent?.entities,
@@ -1946,9 +2169,7 @@ ${memoryText || '无'}
     obsidianHits: ObsidianSearchHit[];
     prefetchedFastPath: PrefetchedFastPath;
   }> {
-    const normalizedQuery = this.expandRetrievalQuery(
-      this.normalizeQuery(options.retrievalQuery ?? query),
-    );
+    const normalizedQuery = this.normalizeQuery(query);
     let badCaseFailure: string | undefined;
     let retrievalFailure: string | undefined;
     let obsidianFailure: string | undefined;
@@ -1962,7 +2183,7 @@ ${memoryText || '无'}
           );
           return [] as BadCaseMatch[];
         }),
-      this.retrieveDetailed(normalizedQuery, options, userId).catch((error) => {
+      this.retrieveWithContextualQuery(normalizedQuery, options, userId).catch((error) => {
         retrievalFailure = (error as Error).message;
         this.logger.warn(
           `Fast path RAG retrieval failed: ${(error as Error).message}`,
@@ -1994,20 +2215,51 @@ ${memoryText || '无'}
           return [] as ObsidianSearchHit[];
         }),
     ]);
+    const sourceResolution = await this.resolveObsidianSourceEvidence(
+      normalizedQuery,
+      obsidianHits,
+      userId,
+      options,
+    );
+    const evidenceObsidianHits = obsidianHits.filter(
+      (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
+    );
+    const retrievalChunkMap = new Map<string, RetrievedChunk>();
+    for (const chunk of [...retrieval.chunks, ...sourceResolution.chunks]) {
+      const existing = retrievalChunkMap.get(chunk.id);
+      if (!existing || chunk.totalScore > existing.totalScore) {
+        retrievalChunkMap.set(chunk.id, chunk);
+      }
+    }
+    const retrievalWithSources: DetailedRetrievalResult = {
+      ...retrieval,
+      chunks: Array.from(retrievalChunkMap.values()),
+    };
     const reviewedBaseCaseChunks =
       this.toReviewedEvidenceChunks(badCaseMatches);
-    const chunks = [...reviewedBaseCaseChunks, ...retrieval.chunks];
+    const chunks = [...reviewedBaseCaseChunks, ...retrievalWithSources.chunks];
     const baseCaseGate = this.assessReviewedBaseCaseEvidence(
       badCaseMatches,
       reviewedBaseCaseChunks,
     );
+    const attachmentEvidenceCount = retrievalWithSources.chunks.filter(
+      (chunk) => chunk.retrievalSource === 'attachment',
+    ).length;
     const ragGate =
-      retrieval.chunks.length === 0
+      attachmentEvidenceCount > 0
+        ? {
+            sufficient: true,
+            reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
+          }
+        : retrievalWithSources.chunks.length === 0
         ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-        : this.assessRetrievalQuality(normalizedQuery, retrieval.chunks);
+        : this.assessRetrievalQuality(
+            normalizedQuery,
+            retrievalWithSources.chunks,
+          );
     const obsidianGate = this.obsidianKnowledge.assessHits(
       normalizedQuery,
-      obsidianHits,
+      evidenceObsidianHits,
     );
 
     const assessment = {
@@ -2023,11 +2275,11 @@ ${memoryText || '无'}
       chunks,
       assessment,
       sourcePolicy: options.sourcePolicy ?? 'web_allowed',
-      diagnostics: retrieval.diagnostics,
+      diagnostics: retrievalWithSources.diagnostics,
       sourceStatuses: this.buildEvidenceSourceStatuses({
         badCaseMatches,
-        retrieval,
-        obsidianHits,
+        retrieval: retrievalWithSources,
+        obsidianHits: evidenceObsidianHits,
         sourcePolicy: options.sourcePolicy ?? 'web_allowed',
         failures: { badCaseFailure, retrievalFailure, obsidianFailure },
       }),
@@ -2037,10 +2289,10 @@ ${memoryText || '无'}
       sufficient: evidenceBundle.assessment.sufficient,
       reason: evidenceBundle.assessment.reason,
       chunks: evidenceBundle.chunks,
-      obsidianHits,
+      obsidianHits: evidenceObsidianHits,
       prefetchedFastPath: {
-        retrieval,
-        obsidianHits,
+        retrieval: retrievalWithSources,
+        obsidianHits: evidenceObsidianHits,
         badCaseMatches,
         evidenceBundle,
       },
@@ -2171,6 +2423,15 @@ ${memoryText || '无'}
     query: string,
     chunks: RetrievedChunk[],
   ): { sufficient: boolean; reason: string } {
+    const attachmentEvidenceCount = chunks.filter(
+      (chunk) => chunk.retrievalSource === 'attachment',
+    ).length;
+    if (attachmentEvidenceCount > 0) {
+      return {
+        sufficient: true,
+        reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
+      };
+    }
     return this.assessRetrievalQuality(query, chunks);
   }
 
@@ -3068,12 +3329,7 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     options: RetrieveOptions,
   ): Promise<{ answer: string } | null> {
     const intent = options.queryIntent;
-    const canUseGeneralModel =
-      isObjectiveFactQuery(query) ||
-      intent?.intent === 'objective_fact' ||
-      intent?.intent === 'system_capability' ||
-      intent?.queryType === 'public_knowledge' ||
-      intent?.sourcePolicy === 'direct_answer';
+    const canUseGeneralModel = isObjectiveKnowledgeIntent(intent);
     if (
       !canUseGeneralModel ||
       options.queryIntent?.contextMode === 'conversation_setting'
@@ -3481,6 +3737,7 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       supersedesDocId: c.supersedesDocId,
       retrievalSource: c.retrievalSource,
       contextRole: c.contextRole,
+      citationLabel: c.citationLabel,
     }));
   }
 
@@ -3506,6 +3763,91 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
       retrievalSource: 'obsidian',
       contextRole: 'obsidian',
     }));
+  }
+
+  /** Obsidian source note 只定位原文；回答证据始终来自已索引的原始 chunk。 */
+  async resolveObsidianSourceEvidence(
+    query: string,
+    hits: ObsidianSearchHit[],
+    userId?: string,
+    options: Pick<RetrieveOptions, 'tenantId' | 'scope'> = {},
+  ): Promise<{
+    chunks: RetrievedChunk[];
+    mappedDocIds: Set<string>;
+    sourceNotePaths: Set<string>;
+  }> {
+    const sourceNoteHits = hits.filter(
+      (hit) => hit.isSourceNote || (hit.type === 'note' && hit.ragDocId),
+    );
+    const sourceNotePaths = new Set(sourceNoteHits.map((hit) => hit.path));
+    const mappedDocIds = new Set(
+      sourceNoteHits.flatMap((hit) => (hit.ragDocId ? [hit.ragDocId] : [])),
+    );
+    if (mappedDocIds.size === 0) {
+      return { chunks: [], mappedDocIds, sourceNotePaths };
+    }
+
+    const allowedDocIds = userId
+      ? await this.documentPermissionService.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          options.tenantId,
+        )
+      : null;
+    const eligibleEntries = new Map<string, Bm25PersistedEntry>();
+    const now = Date.now();
+    for (const entry of this.persistedEntries) {
+      if (
+        !mappedDocIds.has(entry.docId) ||
+        (allowedDocIds
+          ? !allowedDocIds.has(entry.docId)
+          : entry.userId !== userId) ||
+        entry.lifecycleStatus === 'draft' ||
+        entry.lifecycleStatus === 'archived' ||
+        !this.matchesScope(entry, options.scope)
+      ) {
+        continue;
+      }
+      if (entry.effectiveAt && Date.parse(entry.effectiveAt) > now) continue;
+      if (entry.expiredAt && Date.parse(entry.expiredAt) <= now) continue;
+      eligibleEntries.set(entry.id, entry);
+    }
+    if (eligibleEntries.size === 0) {
+      return { chunks: [], mappedDocIds, sourceNotePaths };
+    }
+
+    const normalizedQuery = this.normalizeQuery(query);
+    const bm25 = new BM25();
+    bm25.addDocs(
+      [...eligibleEntries.values()].map((entry) => ({
+        id: entry.id,
+        content: entry.content,
+        searchText: `${entry.content}\n${(entry.hypotheticalQuestions ?? []).join('\n')}`,
+      })),
+    );
+    const profile = detectRetrievalProfile(normalizedQuery);
+    const ranked = bm25.search(normalizedQuery, profile.candidateDepth);
+    const maxScore = Math.max(...ranked.map((hit) => hit.score), 1);
+    const chunks = ranked.flatMap((hit, index) => {
+      const entry = eligibleEntries.get(hit.id);
+      if (!entry) return [];
+      return [
+        this.applySourceAuthorityToChunk({
+          id: entry.id,
+          content: entry.content,
+          docId: entry.docId,
+          chunkIndex: entry.chunkIndex,
+          ...this.pickChunkMetadata(entry),
+          bm25Score: hit.score / maxScore,
+          cosineScore: 0,
+          totalScore: this.rankScore(index) * this.bm25Weight,
+          retrievalSource: 'bm25',
+          contextRole: 'hit',
+        }),
+      ];
+    });
+    return { chunks, mappedDocIds, sourceNotePaths };
   }
 
   private pickChunkMetadata(
@@ -3561,6 +3903,128 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     return chunks.map((chunk) => this.applySourceAuthorityToChunk(chunk));
   }
 
+  /** 描述只负责找到原文位置，进入候选列表和最终引用的始终是原文 chunk。 */
+  private mapDescriptionHitsToSourceChunks(
+    descriptionHits: RetrievalDescriptionHit[],
+    query: string,
+    allowedDocIds: Set<string> | null,
+    userId?: string,
+    scope?: RetrievalScope,
+  ): Awaited<ReturnType<VectorStoreProvider['similaritySearch']>> {
+    const entriesById = new Map(
+      this.persistedEntries.map((entry) => [entry.id, entry]),
+    );
+    const byChunkId = new Map<
+      string,
+      Awaited<ReturnType<VectorStoreProvider['similaritySearch']>>[number]
+    >();
+    const now = Date.now();
+
+    for (const description of descriptionHits) {
+      const isAllowed = allowedDocIds
+        ? allowedDocIds.has(description.docId)
+        : !userId || description.userId === userId;
+      if (!isAllowed) continue;
+
+      const entries = description.sourceChunkIds.flatMap((id) => {
+        const entry = entriesById.get(id);
+        if (
+          !entry ||
+          entry.docId !== description.docId ||
+          (entry.indexGeneration ?? null) !== description.indexGeneration ||
+          (entry.docVersion ?? null) !== description.docVersion ||
+          (description.userId && entry.userId !== description.userId) ||
+          entry.lifecycleStatus === 'draft' ||
+          entry.lifecycleStatus === 'archived' ||
+          (entry.effectiveAt && Date.parse(entry.effectiveAt) > now) ||
+          (entry.expiredAt && Date.parse(entry.expiredAt) <= now) ||
+          !this.matchesScope(entry, scope)
+        ) {
+          return [];
+        }
+        return [entry];
+      });
+      if (entries.length === 0) continue;
+
+      // 摘要可能关联整篇文档。先在命中的原文块里按问题做 BM25，避免把整篇塞进上下文。
+      const localBm25 = new BM25();
+      localBm25.addDocs(
+        entries.map((entry) => ({
+          id: entry.id,
+          content: entry.content,
+          searchText: `${entry.content}\n${(entry.hypotheticalQuestions ?? []).join('\n')}`,
+        })),
+      );
+      const localHits = localBm25.search(query, entries.length);
+      const rankById = new Map(localHits.map((hit, index) => [hit.id, index]));
+      const orderedEntries = [...entries].sort((left, right) => {
+        const leftRank = rankById.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = rankById.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+        return leftRank - rightRank || left.chunkIndex - right.chunkIndex;
+      });
+      const maxPerDescription = Math.max(
+        2,
+        Math.min(8, Math.ceil(entries.length / 4)),
+      );
+
+      orderedEntries.slice(0, maxPerDescription).forEach((entry, index) => {
+        const score = description.score + (maxPerDescription - index) * 1e-6;
+        const existing = byChunkId.get(entry.id);
+        if (!existing || score > existing.score) {
+          byChunkId.set(entry.id, {
+            id: entry.id,
+            content: entry.content,
+            docId: entry.docId,
+            chunkIndex: entry.chunkIndex,
+            score,
+          });
+        }
+      });
+    }
+
+    return [...byChunkId.values()].sort((left, right) => right.score - left.score);
+  }
+
+  /** 在原文向量结果与描述命中的原文之间做一次排名融合，并按 chunk ID 去重。 */
+  private mergeVectorCandidates(
+    originalHits: Awaited<
+      ReturnType<VectorStoreProvider['similaritySearch']>
+    >,
+    descriptionHits: Awaited<
+      ReturnType<VectorStoreProvider['similaritySearch']>
+    >,
+    limit: number,
+  ): Awaited<ReturnType<VectorStoreProvider['similaritySearch']>> {
+    const candidates = new Map<
+      string,
+      {
+        hit: Awaited<
+          ReturnType<VectorStoreProvider['similaritySearch']>
+        >[number];
+        score: number;
+      }
+    >();
+    for (const [hits, weight] of [
+      [originalHits, 1] as const,
+      [descriptionHits, 1] as const,
+    ]) {
+      hits.forEach((hit, index) => {
+        const current = candidates.get(hit.id);
+        const score = this.rankScore(index) * weight;
+        if (current) {
+          current.score += score;
+          if (hit.score > current.hit.score) current.hit = hit;
+        } else {
+          candidates.set(hit.id, { hit, score });
+        }
+      });
+    }
+    return [...candidates.values()]
+      .sort((left, right) => right.score - left.score)
+      .slice(0, limit)
+      .map(({ hit, score }) => ({ ...hit, score }));
+  }
+
   private fuseByRrf(
     bm25Hits: RankedRetrievalHit[],
     cosineHits: Awaited<ReturnType<VectorStoreProvider['similaritySearch']>>,
@@ -3585,7 +4049,9 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 
     cosineHits.forEach((hit, index) => {
       const normalizedCosine = hit.score / cosineMaxScore;
-      const metadata = this.pickChunkMetadata(this.chunkMeta.get(hit.id) ?? {});
+      // Milvus 的 content 可能是限长副本；回答和引用使用本地索引中的完整来源片段。
+      const sourceChunk = this.chunkMeta.get(hit.id);
+      const metadata = this.pickChunkMetadata(sourceChunk ?? {});
       const rrfScore = this.rankScore(index) * this.cosineWeight;
       const existing = fusedMap.get(hit.id);
 
@@ -3597,9 +4063,9 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 
       fusedMap.set(hit.id, {
         id: hit.id,
-        content: hit.content,
-        docId: hit.docId,
-        chunkIndex: hit.chunkIndex,
+        content: sourceChunk?.content ?? hit.content,
+        docId: sourceChunk?.docId ?? hit.docId,
+        chunkIndex: sourceChunk?.chunkIndex ?? hit.chunkIndex,
         ...metadata,
         bm25Score: 0,
         cosineScore: normalizedCosine,
@@ -3675,9 +4141,25 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
         .map((entry) => entry.docId),
     );
 
-    return hits.filter(
-      (hit) => activeDocIds.has(hit.docId) && !excludedDocIds.has(hit.docId),
-    );
+    return hits.flatMap((hit) => {
+      const sourceChunk = this.chunkMeta.get(hit.id);
+      if (
+        !sourceChunk ||
+        sourceChunk.userId !== userId ||
+        !activeDocIds.has(sourceChunk.docId) ||
+        excludedDocIds.has(sourceChunk.docId)
+      ) {
+        return [];
+      }
+      return [
+        {
+          ...hit,
+          content: sourceChunk.content,
+          docId: sourceChunk.docId,
+          chunkIndex: sourceChunk.chunkIndex,
+        },
+      ];
+    });
   }
 
   /**
@@ -3929,57 +4411,8 @@ ${statements.map((item, index) => `${index + 1}. ${item}`).join('\n')}
     return this.normalizePromptQuery(query).toLowerCase();
   }
 
-  /**
-   * 只扩展稳定的同义词、缩写和已确认错别字，不改写用户原问题。
-   * 扩展词只进入检索通道，生成与引用仍使用原始语义，避免答案被检索提示污染。
-   */
-  private expandRetrievalQuery(query: string): string {
-    const normalized = query.trim();
-    const aliases = new Set<string>();
-    const add = (...terms: string[]) =>
-      terms.forEach((term) => aliases.add(term));
-
-    if (/薪资|薪酬|工资|收入/.test(normalized)) {
-      add('薪资', '薪酬', '工资', '收入');
-    }
-    if (/okr/i.test(normalized) || /绩效奖金|季度评估/.test(normalized)) {
-      add('OKR', '绩效奖金', '季度评估', '绩效');
-    }
-    if (
-      /akb/i.test(normalized) ||
-      /企业知识库|知识库|知识中台/.test(normalized)
-    ) {
-      add('AKB', 'Atlas Knowledge Base', '企业知识库', '知识中台');
-    }
-    if (/service\s*hub|\bsh\b/i.test(normalized)) {
-      add('Service Hub', 'SH', '客服工单系统');
-    }
-
-    return aliases.size > 0
-      ? `${normalized} ${[...aliases].join(' ')}`
-      : normalized;
-  }
-
   private normalizePromptQuery(query: string): string {
-    const normalized = query
-      .normalize('NFKC')
-      .replace(/知识哭/g, '知识库')
-      .replace(/React\.js|ReactJS/gi, 'React')
-      .replace(/Vue\.js|VueJS/gi, 'Vue')
-      .replace(/Node\.js|NodeJS/gi, 'Node')
-      .replace(/大语言模型|大型语言模型/g, 'LLM')
-      .replace(/检索增强生成/g, 'RAG')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (
-      /住宿报销上限|报销上限/.test(normalized) &&
-      /20\d{2}|历史|版本|优先|生效/.test(normalized)
-    ) {
-      return `${normalized} 差旅制度 住宿标准 优先生效 历史版本`;
-    }
-
-    return normalized;
+    return query.normalize('NFKC').replace(/\s+/g, ' ').trim();
   }
 
   private assessRetrievalQuality(

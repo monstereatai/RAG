@@ -91,7 +91,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
       await this.withTimeout(
         this.client.deleteEntities({
           collection_name: this.collectionName,
-          filter: 'thread_id == $threadId && query_key == $queryKey',
+          filter: 'thread_id == {threadId} && query_key == {queryKey}',
           exprValues: { threadId, queryKey },
           timeout: this.deleteTimeoutMs,
         }),
@@ -241,7 +241,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
       await this.withTimeout(
         this.client.deleteEntities({
           collection_name: this.collectionName,
-          filter: 'thread_id == $threadId',
+          filter: 'thread_id == {threadId}',
           exprValues: { threadId },
           timeout: this.deleteTimeoutMs,
         }),

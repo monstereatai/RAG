@@ -28,7 +28,7 @@ export class DocumentTaskEntity {
   filename!: string;
 
   @Column({ type: 'varchar', length: 32, default: 'queued' })
-  status!: 'queued' | 'processing' | 'completed' | 'failed';
+  status!: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
   @Column({ type: 'varchar', length: 64, default: 'queued' })
   stage!: string;

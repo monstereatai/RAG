@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DocumentController } from './document.controller';
 import { DocumentService } from './document.service';
 import { DocumentMetadataExtractor } from './document-metadata.extractor';
+import { DocumentRetrievalDescriptionModule } from './document-retrieval-description.module';
 import { DocumentQueueService } from './document-queue.service';
 import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
@@ -42,6 +43,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     DocumentPermissionModule,
     ImageIndexModule,
     DomainEventsModule,
+    DocumentRetrievalDescriptionModule,
   ],
   controllers: [DocumentController],
   providers: [

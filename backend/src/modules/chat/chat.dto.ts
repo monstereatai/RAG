@@ -122,9 +122,23 @@ export interface ChatReference {
   roleScope?: string[];
   documentType?: string;
   lifecycleStatus?: string;
-  retrievalSource?: string;
+  retrievalSource?:
+    | 'bm25'
+    | 'vector'
+    | 'hybrid'
+    | 'expansion'
+    | 'obsidian'
+    | 'web'
+    | 'attachment';
   contextRole?: string;
+  citationLabel?: string;
 }
+
+export type ChatAttachmentReference = ChatReference & {
+  score: number;
+  retrievalSource: 'attachment';
+  contextRole: 'hit';
+};
 
 export interface ChatResponse {
   answer: string;

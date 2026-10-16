@@ -30,10 +30,13 @@ flowchart LR
   Parser --> Chunker["MarkdownChunker"]
   Chunker --> Embedding["Qwen Embedding Provider"]
 
-  Embedding --> Milvus["Milvus Vector Store"]
+  Embedding --> Milvus["Milvus Vector Store: raw chunks + retrieval descriptions"]
   Chunker --> BM25["BM25 / Jieba Index"]
   Chunker --> ES["Elasticsearch IK Index"]
   Document --> Postgres["PostgreSQL Metadata"]
+  Chunker --> DescriptionBuilder["Selective Retrieval Descriptions"]
+  DescriptionBuilder --> Postgres
+  DescriptionBuilder --> Embedding
 
   Chat --> SimpleRag["Direct Answer + Unified Hybrid RAG"]
   Chat --> AgenticRag["LangGraph Agentic RAG"]
@@ -55,7 +58,7 @@ flowchart LR
 | Backend | NestJS + TypeScript | API、鉴权、业务编排、RAG 管线、Provider 管理 |
 | PostgreSQL | pgvector/pgvector:pg16 | 用户、会话、消息、文档元数据、任务等关系数据 |
 | Redis | redis:7-alpine | 缓存、短期记忆、LangGraph checkpoint |
-| Milvus | milvusdb/milvus:v2.4.4 | 主向量数据库，存储文档 chunk embedding 和对话 embedding |
+| Milvus | milvusdb/milvus:v2.4.4 | 主向量数据库，独立集合保存原文 chunk 与检索描述向量 |
 | Elasticsearch | 8.13.0 | 全文检索与中文 IK 分词检索 |
 | Neo4j | 5-community | GraphRAG 图谱实体与关系存储 |
 | MinIO / etcd | Milvus 依赖 | Milvus 对象存储和元数据依赖 |
@@ -119,6 +122,8 @@ sequenceDiagram
 - 入库先执行文档类型识别与质量报告，再选择 PRD／API／Design／Test／Config／Postmortem／General 切片策略。
 - 检索采用“自适应候选召回 → RRF／权威排序 → Section／相邻块扩展 → 去重与来源限额 → Token 预算与首尾交错排布”的上下文治理链路。
 - `documents_meta` 与 `document_chunks` 保存 project／activity／region／locale／channel／roleScope／documentType／lifecycle metadata；默认过滤 deprecated，历史对比显式放开。
+- 独立检索描述索引复用文档摘要和已有图片／视频描述，并按表格分组生成有行数上限的描述；描述只召回关联原文 chunk，回答仍使用通过 ACL、版本、生效期和业务范围校验的原文。
+- PostgreSQL 保存描述正文及其到 `document_chunks` 的关联，Milvus 使用单独集合保存描述向量；更新和删除同步清理，索引对账可重建描述，不改原文 chunk 向量集合。
 - `rag_feedback` 保存真实用户反馈、错误归因、召回快照和回归集状态，未经审核不进入 Prompt 或 Few-Shot。
 - `AddGameProductionRagGovernance` migration 为上述业务元数据、生命周期、query log 快照和反馈表提供 schema；本地开发库已执行，生产环境仍需独立审批。
 - `role-presets.ts` 是岗位目录的唯一事实源，静态提供业务负责人、产品、设计、前端、后端、测试、运营和项目管理八个预设；前端通过 `GET /chat/role-presets` 获取，不重复维护角色 Prompt。
@@ -127,7 +132,7 @@ sequenceDiagram
 - Milvus 存储 dense vector，主 collection 默认 HNSW。
 - Elasticsearch 存储全文检索索引。
 - 内存 BM25 索引用于快速关键词召回和降级。
-- 文档删除会删除元数据、BM25 索引、ES 索引和 Milvus 向量；Milvus 删除失败会进入 Redis 持久化退避重试（Redis 不可用时明确暴露为非耐久化状态）。
+- 文档删除会删除元数据、BM25 索引、ES 索引、原文向量、检索描述和描述到原文的关联；Milvus 删除失败会进入 Redis 持久化退避重试（Redis 不可用时明确暴露为非耐久化状态）。
 
 ### 5.2 问答链路
 
@@ -137,7 +142,7 @@ flowchart TD
   Role["Role preset + starter task"] --> Q
   Mode -->|simple／auto| Direct["Direct Answer Gate"]
   Direct -->|hit| Final["Answer + references"]
-  Direct -->|miss| Retrieve["Unified Hybrid: BM25／ES + Milvus + Obsidian"]
+  Direct -->|miss| Retrieve["Hybrid RAG: BM25／ES + Milvus; Obsidian 来源笔记定位原文"]
   Mode -->|agentic| Agentic["Agentic RAG"]
   Retrieve --> Router{"mode + evidence + complexity"}
   Router -->|simple／auto sufficient| Sufficiency["Sufficiency check"]

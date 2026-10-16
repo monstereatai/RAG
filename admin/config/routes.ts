@@ -64,6 +64,24 @@ export default [
     ],
   },
   {
+    path: '/team-wiki',
+    name: 'team-wiki',
+    icon: 'fileText',
+    component: './team-wiki',
+  },
+  {
+    path: '/feishu-wiki',
+    name: 'feishu-wiki',
+    icon: 'cloudSync',
+    component: './feishu-wiki',
+  },
+  {
+    path: '/image-search',
+    name: 'image-search',
+    icon: 'search',
+    component: './image-search',
+  },
+  {
     path: '/search-ops',
     name: 'search-ops',
     icon: 'search',

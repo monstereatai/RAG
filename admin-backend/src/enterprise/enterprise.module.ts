@@ -28,6 +28,9 @@ import { QaOpsModule } from '../modules/qa-ops/qa-ops.module';
 import { GraphOpsModule } from '../modules/graph-ops/graph-ops.module';
 import { AgentOpsModule } from '../modules/agent-ops/agent-ops.module';
 import { SpeechTicketModule } from '../modules/speech/speech-ticket.module';
+import { FeishuWikiModule } from '../modules/feishu-wiki/feishu-wiki.module';
+import { TeamWikiModule } from '../modules/team-wiki/team-wiki.module';
+import { AdminImagesModule } from '../modules/admin-images/admin-images.module';
 // import { GrpcModule } from '../modules/grpc/grpc.module';
 
 @Module({
@@ -61,6 +64,9 @@ import { SpeechTicketModule } from '../modules/speech/speech-ticket.module';
     GraphOpsModule,
     AgentOpsModule,
     SpeechTicketModule,
+    FeishuWikiModule,
+    TeamWikiModule,
+    AdminImagesModule,
     // GrpcModule, // disabled: proto file missing, use HTTP rag-client instead
   ],
   exports: [
@@ -93,6 +99,9 @@ import { SpeechTicketModule } from '../modules/speech/speech-ticket.module';
     GraphOpsModule,
     AgentOpsModule,
     SpeechTicketModule,
+    FeishuWikiModule,
+    TeamWikiModule,
+    AdminImagesModule,
     // GrpcModule,
   ],
 })

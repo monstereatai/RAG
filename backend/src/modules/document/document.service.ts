@@ -26,8 +26,16 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
 import { GraphService } from '../graph/graph.service';
 import { DocumentQueueService } from './document-queue.service';
-import { detectDocumentKind } from './document-parser.util';
-import { ImageIndexService } from '../image-index/image-index.service';
+import { DocumentRetrievalDescriptionService } from './document-retrieval-description.service';
+import {
+  detectDocumentKind,
+  extractDocumentText,
+  type DocumentImageExtractionOptions,
+} from './document-parser.util';
+import {
+  ImageIndexService,
+  type ImageIndexInput,
+} from '../image-index/image-index.service';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import {
   assessIngestionQuality,
@@ -79,6 +87,10 @@ export interface UploadResult {
 export interface UploadOptions {
   docId?: string;
   taskId?: string;
+  /** 修复已有文档时保留当前 ACL 和人工维护的元数据。 */
+  preservePermissions?: boolean;
+  preserveExistingMetadata?: boolean;
+  awaitImageIndex?: boolean;
   /** Worker／跨服务调用携带的租户上下文；持久化租户列仍需后续迁移补齐。 */
   tenantId?: string;
   originalBuffer?: Buffer;
@@ -133,6 +145,7 @@ export class DocumentService implements OnModuleInit {
     private readonly graphService: GraphService,
     private readonly documentQueueService: DocumentQueueService,
     private readonly domainEvents: DomainEventsService,
+    private readonly retrievalDescriptionService: DocumentRetrievalDescriptionService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly imageIndexService: ImageIndexService,
@@ -329,14 +342,14 @@ export class DocumentService implements OnModuleInit {
         hypotheticalQuestions: hypotheticalQuestions[idx],
       }));
       // 标题、摘要等 LLM 元数据是增强信息；失败记为缺失，不阻断正文索引。
-      const metadataPromise = this.metadataExtractor
-        .extract(content)
-        .catch((err) => {
-          this.logger.warn(
-            `Metadata extraction failed: ${(err as Error).message}`,
-          );
-          return null;
-        });
+      const metadataPromise = options.preserveExistingMetadata
+        ? Promise.resolve(null)
+        : this.metadataExtractor.extract(content).catch((err) => {
+            this.logger.warn(
+              `Metadata extraction failed: ${(err as Error).message}`,
+            );
+            return null;
+          });
 
       const docMeta = this.docMetaRepo.create({
         docId,
@@ -423,7 +436,9 @@ export class DocumentService implements OnModuleInit {
         })(),
         (async () => {
           await this.docMetaRepo.save(docMeta);
-          await this.permissionService.grantOwner(docId, userId);
+          if (!options.preservePermissions) {
+            await this.permissionService.grantOwner(docId, userId);
+          }
           await this.saveChunkMetadata(
             docId,
             userId,
@@ -452,22 +467,29 @@ export class DocumentService implements OnModuleInit {
         throw failedIndex.reason;
       }
 
-      if (governance.lifecycleStatus !== 'draft') {
-        await this.updateLifecycle(docId, userId, governance.lifecycleStatus);
-      }
-      // 文搜图：图片文档入库成功后把原图写入图片向量库；失败仅告警，不阻塞入库
+      // 图片检索是可选索引：PDF/PPTX 内嵌图与原始图片统一替换成完整资产集合。
+      const documentKind = detectDocumentKind(filename);
       if (
-        originalUrl &&
-        detectDocumentKind(filename) === 'image' &&
-        this.imageIndexService.isEnabled()
+        this.imageIndexService.isEnabled() &&
+        ['pdf', 'pptx', 'image'].includes(documentKind)
       ) {
-        this.imageIndexService
-          .indexImage({ docId, userId, url: originalUrl, meta: { filename } })
-          .catch((err: Error) =>
-            this.logger.warn(
-              `Image index failed for docId=${docId}: ${err.message}`,
-            ),
+        const imageIndexPromise = this.indexDocumentImages({
+          docId,
+          userId,
+          filename,
+          content,
+          originalUrl,
+          originalBuffer: options.originalBuffer,
+        });
+        const handleImageIndexError = (err: Error) =>
+          this.logger.warn(
+            `Image index failed for docId=${docId}: ${err.message}`,
           );
+        if (options.awaitImageIndex) {
+          await imageIndexPromise.catch(handleImageIndexError);
+        } else {
+          void imageIndexPromise.catch(handleImageIndexError);
+        }
       }
       const graphIndexStatus: GraphIndexStatus = this.graphService.isEnabled()
         ? 'pending'
@@ -495,6 +517,17 @@ export class DocumentService implements OnModuleInit {
         );
         this.logger.log(
           `Metadata saved: docId=${docId}, title="${metadata.title}", category=${metadata.category}`,
+        );
+      }
+
+      // 描述索引依赖 PostgreSQL 中已保存的摘要和原文块，因此必须在元数据落库后构建。
+      // 非 draft 文档由生命周期更新统一重建，避免同一文档重复生成向量。
+      if (governance.lifecycleStatus !== 'draft') {
+        await this.updateLifecycle(docId, userId, governance.lifecycleStatus);
+      } else {
+        await this.rebuildRetrievalDescriptions(
+          options.tenantId ?? 'legacy',
+          docId,
         );
       }
 
@@ -664,6 +697,70 @@ export class DocumentService implements OnModuleInit {
     return this.taskRepo.findOne({ where: { id: taskId, userId } });
   }
 
+  async getPendingTasks(limit = 50) {
+    const queueResult = await this.documentQueueService.listPending(limit);
+    if (!queueResult.enabled || queueResult.tasks.length === 0) {
+      return queueResult;
+    }
+
+    const taskIds = queueResult.tasks.map((task) => task.taskId);
+    const records = await this.taskRepo.find({ where: { id: In(taskIds) } });
+    const tasksById = new Map(records.map((task) => [task.id, task]));
+    return {
+      enabled: true,
+      tasks: queueResult.tasks.flatMap((queuedTask) => {
+        const task = tasksById.get(queuedTask.taskId);
+        if (!task || task.status !== 'queued') return [];
+        return [
+          {
+            id: task.id,
+            filename: task.filename,
+            status: task.status,
+            queueStatus: queuedTask.status,
+            createdAt:
+              task.createdAt?.toISOString() ??
+              new Date(queuedTask.createdAt).toISOString(),
+          },
+        ];
+      }),
+    };
+  }
+
+  async cancelQueuedTask(taskId: string) {
+    const task = await this.taskRepo.findOne({ where: { id: taskId } });
+    if (!task) {
+      return { taskId, cancelled: false, reason: '任务记录不存在。' };
+    }
+    if (task.status !== 'queued') {
+      return {
+        taskId,
+        cancelled: false,
+        reason:
+          task.status === 'processing'
+            ? '任务已处理中，无法中断。'
+            : `任务状态为 ${task.status}，无法取消。`,
+      };
+    }
+
+    const result = await this.documentQueueService.cancelPending(taskId);
+    if (!result.cancelled) return result;
+
+    await this.taskRepo.update(
+      { id: taskId },
+      {
+        status: 'cancelled',
+        stage: 'cancelled',
+        errorMessage:
+          result.cleanupScheduled === false &&
+          result.cleanupCompleted !== true
+            ? result.reason
+            : null,
+        finishedAt: new Date(),
+      },
+    );
+    return result;
+  }
+
   async getFailedTasks(limit = 50): Promise<DocumentTaskEntity[]> {
     return this.taskRepo.find({
       where: { status: 'failed' },
@@ -715,6 +812,81 @@ export class DocumentService implements OnModuleInit {
     return count > 0;
   }
 
+  getAllowedDocIdsForUser(
+    userId: string,
+    tenantId?: string,
+    roles: string[] = [],
+  ): Promise<Set<string>> {
+    return this.permissionService.getAllowedDocIds(userId, roles, [], tenantId);
+  }
+
+  /** Rebuild the optional image index from the saved source without changing document chunks or ACL. */
+  async rebuildImageIndexFromOriginal(docId: string): Promise<{
+    indexed: boolean;
+    assetCount: number;
+    reason?: string;
+  }> {
+    if (!this.imageIndexService.isEnabled()) {
+      return {
+        indexed: false,
+        assetCount: 0,
+        reason: 'image embedding disabled',
+      };
+    }
+    const document = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!document) {
+      return { indexed: false, assetCount: 0, reason: 'document not found' };
+    }
+    const original = await this.resourceRepo.findOne({
+      where: { docId, kind: 'original' },
+      order: { createdAt: 'DESC' },
+    });
+    if (!original) {
+      return {
+        indexed: false,
+        assetCount: 0,
+        reason: 'original document resource not found',
+      };
+    }
+
+    const kind = detectDocumentKind(original.filename);
+    if (!['pdf', 'pptx', 'image'].includes(kind)) {
+      return {
+        indexed: true,
+        assetCount: 0,
+        reason: 'document has no supported image assets',
+      };
+    }
+    try {
+      const buffer = await this.objectStorageProvider.getObject(
+        original.objectKey,
+      );
+      const content = await extractDocumentText(
+        buffer,
+        kind,
+        undefined,
+        kind === 'pdf' || kind === 'pptx'
+          ? this.buildImageExtractionOptions(docId, document.userId ?? 'system')
+          : undefined,
+      );
+      const assetCount = await this.indexDocumentImages({
+        docId,
+        userId: document.userId ?? 'system',
+        filename: original.filename,
+        content,
+        originalUrl: original.url,
+        originalBuffer: buffer,
+      });
+      return { indexed: true, assetCount };
+    } catch (error) {
+      const reason = (error as Error).message;
+      this.logger.warn(
+        `Image index rebuild failed for docId=${docId}: ${reason}`,
+      );
+      return { indexed: false, assetCount: 0, reason };
+    }
+  }
+
   async markTaskFailed(taskId: string, errorMessage: string): Promise<void> {
     await this.updateTask(taskId, {
       status: 'failed',
@@ -741,6 +913,69 @@ export class DocumentService implements OnModuleInit {
     });
   }
 
+  /** PostgreSQL 分块缺失时，从已保存的原件走正常入库链路恢复。 */
+  async restoreDocumentFromOriginal(docId: string): Promise<UploadResult | null> {
+    const document = await this.docMetaRepo.findOne({ where: { docId } });
+    if (!document) return null;
+    const original = await this.resourceRepo.findOne({
+      where: { docId, kind: 'original' },
+      order: { createdAt: 'DESC' },
+    });
+    if (!original) throw new Error('original document resource not found');
+
+    const userId = document.userId ?? 'system';
+    const buffer = await this.objectStorageProvider.getObject(
+      original.objectKey,
+    );
+    const content = (
+      await extractDocumentText(
+        buffer,
+        detectDocumentKind(original.filename),
+        undefined,
+        this.buildImageExtractionOptions(docId, userId),
+      )
+    )
+      .replace(/\0/g, '')
+      .trim();
+    if (!content) throw new Error('original document has no extractable text');
+
+    const roleScope = (() => {
+      try {
+        const parsed: unknown = JSON.parse(document.roleScope ?? '[]');
+        return Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === 'string')
+          : [];
+      } catch {
+        return [];
+      }
+    })();
+    this.karpathyRagService.removeDocChunks(docId, userId);
+
+    const result = await this.upload(original.filename, content, userId, {
+      docId,
+      tenantId: document.tenantId ?? 'legacy',
+      contentType: original.contentType ?? undefined,
+      preservePermissions: true,
+      preserveExistingMetadata: true,
+      awaitImageIndex: true,
+      businessMetadata: {
+        projectId: document.projectId,
+        activityId: document.activityId,
+        region: document.region,
+        locale: document.locale,
+        channel: document.channel,
+        roleScope,
+        documentType: document.documentType as GameDocumentType,
+        lifecycleStatus: document.lifecycleStatus as DocumentLifecycleStatus,
+        supersedesDocId: document.supersedesDocId,
+        docVersion: document.docVersion,
+        effectiveAt: document.effectiveAt?.toISOString() ?? null,
+        expiredAt: document.expiredAt?.toISOString() ?? null,
+      },
+    });
+    return result;
+  }
+
   /**
    * 删除文档：Milvus chunks + BM25 索引 + ES + 数据库元数据
    */
@@ -753,6 +988,12 @@ export class DocumentService implements OnModuleInit {
     this.logger.log(
       `Deleting doc ${docId} (${meta.filename}) for userId=${userId}`,
     );
+
+    // 描述向量清理失败时停止删除原文，避免留下无法追溯的检索入口。
+    await this.retrievalDescriptionService.deleteForDocument({
+      tenantId: meta.tenantId ?? 'legacy',
+      docId,
+    });
 
     // 1. 删除 Milvus 中的 chunks
     try {
@@ -836,6 +1077,136 @@ export class DocumentService implements OnModuleInit {
       stored.url,
       params.contentType,
     );
+  }
+
+  private async indexDocumentImages(params: {
+    docId: string;
+    userId: string;
+    filename: string;
+    content: string;
+    originalUrl: string | null;
+    originalBuffer?: Buffer;
+  }): Promise<number> {
+    const kind = detectDocumentKind(params.filename);
+    let assets: ImageIndexInput[] = [];
+
+    if (kind === 'image' && params.originalBuffer) {
+      const objectKey = this.getImageObjectKey(params.originalUrl);
+      assets = [
+        {
+          docId: params.docId,
+          userId: params.userId,
+          url: params.originalUrl ?? undefined,
+          embeddingBase64: params.originalBuffer.toString('base64'),
+          mimeType: resolveImageMimeType(params.filename),
+          assetHash: createHash('sha256')
+            .update(params.originalBuffer)
+            .digest('hex'),
+          assetKey: params.filename,
+          meta: {
+            filename: params.filename,
+            placement: 'original',
+            assetKey: objectKey?.split('/').at(-1),
+            sourceDocumentId: params.docId,
+          },
+        },
+      ];
+    } else if (['pdf', 'pptx'].includes(kind)) {
+      const matches: Array<{
+        url: string;
+        alt: string;
+        placement: string;
+      }> = [];
+      let placement = 'document';
+      for (const line of params.content.split(/\r?\n/)) {
+        const pageHeading = /^##\s+第\s+(\d+)\s+页/.exec(line);
+        const slideHeading = /^##\s+Slide\s+(\d+)/i.exec(line);
+        const frameHeading = /^##\s+画面要点/.exec(line);
+        if (pageHeading) placement = `page-${pageHeading[1]}`;
+        else if (slideHeading) placement = `slide-${slideHeading[1]}`;
+        else if (frameHeading) placement = 'video-frame';
+
+        const imagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+[^)]*)?\)/g;
+        for (const match of line.matchAll(imagePattern)) {
+          matches.push({
+            alt: match[1].trim(),
+            url: match[2],
+            placement,
+          });
+        }
+      }
+
+      const sanitizedUserId =
+        params.userId.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') ||
+        'unknown';
+      const ownerPrefix = `documents/${sanitizedUserId}/`;
+      for (const [index, match] of matches.entries()) {
+        const objectKey = this.getImageObjectKey(match.url);
+        if (
+          !objectKey ||
+          objectKey.split('/').includes('..') ||
+          !objectKey.startsWith(ownerPrefix)
+        ) {
+          continue;
+        }
+        const buffer = await this.objectStorageProvider.getObject(objectKey);
+        const assetKey = objectKey.split('/images/').at(-1) ?? objectKey;
+        assets.push({
+          docId: params.docId,
+          userId: params.userId,
+          url: match.url,
+          embeddingBase64: buffer.toString('base64'),
+          mimeType: resolveImageMimeType(assetKey),
+          assetHash: createHash('sha256').update(buffer).digest('hex'),
+          assetKey,
+          meta: {
+            description: match.alt,
+            filename: assetKey.split('/').at(-1),
+            placement: match.placement,
+            ...(match.placement.startsWith('page-')
+              ? { pageNumber: Number(match.placement.slice(5)) }
+              : {}),
+            ...(match.placement.startsWith('slide-')
+              ? { slideNumber: Number(match.placement.slice(6)) }
+              : {}),
+            assetKey,
+            assetIndex: index + 1,
+            sourceDocumentId: params.docId,
+          },
+        });
+      }
+    }
+
+    await this.imageIndexService.replaceDocumentImages(
+      params.docId,
+      params.userId,
+      assets,
+    );
+    return assets.length;
+  }
+
+  private getImageObjectKey(url: string | null | undefined): string | null {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname !== '/api/v1/documents/assets/image') return null;
+      return parsed.searchParams.get('key');
+    } catch {
+      return null;
+    }
+  }
+
+  private buildImageExtractionOptions(
+    docId: string,
+    userId: string,
+  ): DocumentImageExtractionOptions {
+    return {
+      storage: this.objectStorageProvider,
+      docId,
+      ownerUserId: userId,
+      urlResolver: (stored) =>
+        `/api/v1/documents/assets/image?key=${encodeURIComponent(stored.key)}`,
+    };
   }
 
   private proxyResourceUrlIfImage(
@@ -1331,8 +1702,8 @@ export class DocumentService implements OnModuleInit {
     lifecycleStatus: DocumentLifecycleStatus,
     event?: DomainEventInput,
   ): Promise<boolean> {
-    const exists = await this.docMetaRepo.exist({ where: { docId, userId } });
-    if (!exists) return false;
+    const document = await this.docMetaRepo.findOne({ where: { docId, userId } });
+    if (!document) return false;
     await this.docMetaRepo.manager.transaction(async (manager) => {
       await Promise.all([
         manager
@@ -1353,6 +1724,10 @@ export class DocumentService implements OnModuleInit {
       docId,
       lifecycleStatus,
       userId,
+    );
+    await this.rebuildRetrievalDescriptions(
+      document.tenantId ?? 'legacy',
+      docId,
     );
     return true;
   }
@@ -1418,7 +1793,43 @@ export class DocumentService implements OnModuleInit {
       userId,
     );
     this.karpathyRagService.updateDocumentLifecycle(docId, 'effective', userId);
+    for (const document of documents) {
+      await this.rebuildRetrievalDescriptions(
+        document.tenantId ?? 'legacy',
+        document.docId,
+      );
+    }
     return true;
+  }
+
+  private async rebuildRetrievalDescriptions(
+    tenantId: string,
+    docId: string,
+  ): Promise<void> {
+    try {
+      await this.retrievalDescriptionService.rebuild({ tenantId, docId });
+    } catch (err) {
+      this.logger.warn(
+        `Retrieval description rebuild failed for docId=${docId}: ${(err as Error).message}`,
+      );
+    }
+  }
+}
+
+function resolveImageMimeType(filename: string): string {
+  const extension = filename.toLowerCase().split('.').at(-1);
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'bmp':
+      return 'image/bmp';
+    default:
+      return 'image/png';
   }
 }
 

@@ -275,6 +275,7 @@ export async function extractDocumentText(
   ocr?: DocumentOcrDelegate,
   images?: DocumentImageExtractionOptions,
   video?: DocumentVideoExtractionOptions,
+  options: { preservePdfPages?: boolean } = {},
 ): Promise<string> {
   // 不同格式在这里归一成正文 Markdown；下游切块和索引无需感知原始文件格式。
   switch (kind) {
@@ -282,7 +283,7 @@ export async function extractDocumentText(
     case 'text':
       return buffer.toString('utf-8');
     case 'pdf':
-      return extractPdfText(buffer, ocr, images);
+      return extractPdfText(buffer, ocr, images, options.preservePdfPages);
     case 'docx':
       return extractDocxText(buffer);
     case 'doc':
@@ -621,6 +622,7 @@ async function extractPdfText(
   buffer: Buffer,
   ocr?: DocumentOcrDelegate,
   images?: DocumentImageExtractionOptions,
+  preservePages = false,
 ): Promise<string> {
   // pdf-parse 会在模块加载时初始化 @napi-rs/canvas 的 native GC 句柄。
   // 延迟到真正解析 PDF 时再加载，避免普通文本/Office 入库和 Jest 启动阶段泄漏句柄。
@@ -639,11 +641,19 @@ async function extractPdfText(
   }
 
   const text = textResult.text;
+  const paginatedText = preservePages
+    ? composePdfMarkdownWithPages(textResult, new Map())
+    : text;
   if (!images || !isImageExtractionEnabled() || !hasImageStorage(images)) {
-    return text;
+    return paginatedText;
   }
   try {
-    return await composeTextPdfWithImages(buffer, textResult, images);
+    return await composeTextPdfWithImages(
+      buffer,
+      textResult,
+      images,
+      preservePages,
+    );
   } catch (err) {
     // 内嵌图片提取属于增强能力：对象存储不可用等任何异常都静默降级为纯文本，绝不阻塞入库
     console.warn(
@@ -651,7 +661,7 @@ async function extractPdfText(
         (err as Error).message
       }`,
     );
-    return text;
+    return paginatedText;
   }
 }
 
@@ -689,6 +699,7 @@ async function composeTextPdfWithImages(
     total: number;
   },
   images: DocumentImageExtractionOptions,
+  preservePages = false,
 ): Promise<string> {
   // 页数上限跟随扫描件渲染页数（PDF_OCR_MAX_PAGES），可用 PDF_IMAGE_MAX_PAGES 单独覆盖
   const maxPages = Math.min(
@@ -709,7 +720,9 @@ async function composeTextPdfWithImages(
     );
   }
   if (assets.length === 0) {
-    return textResult.text;
+    return preservePages
+      ? composePdfMarkdownWithPages(textResult, new Map())
+      : textResult.text;
   }
   const uploaded = await uploadEmbeddedImages(assets, images);
   return composePdfMarkdownWithPages(

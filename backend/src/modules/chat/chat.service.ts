@@ -8,14 +8,20 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import {
+  KarpathyRagService,
+  type RetrievedChunk,
+} from '../../rag/karpathy/karpathy-rag.service';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
 import { MemoryService } from '../memory/memory.service';
 import { ShortTermMemoryService } from '../memory/short-term-memory.service';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
-import { ChatDto, type ChatMode } from './chat.dto';
+import {
+  ChatDto,
+  type ChatMode,
+} from './chat.dto';
 import type { ChatResponse } from './chat.dto';
 import {
   LangfuseProvider,
@@ -40,13 +46,12 @@ import { MetricsService } from '../metrics/metrics.service';
 import { SecurityAuditService } from '../metrics/security-audit.service';
 import {
   buildContextPolicyMessage,
-  buildContextualRetrievalQuery,
   formatUntrustedHistoryContext,
-  hasRelatedSessionSetting,
-  isObjectiveFactQuery,
-  selectHistoryForQuery,
 } from '../../rag/prompts/context-policy';
-import { QueryIntentRouter } from '../../rag/prompts/query-intent-router';
+import {
+  isObjectiveKnowledgeIntent,
+  QueryIntentRouter,
+} from '../../rag/prompts/query-intent-router';
 import type { QueryIntent } from '../../rag/prompts/query-intent-router';
 import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
@@ -71,6 +76,7 @@ type ChatExecutionOptions = {
   model?: string;
   signal?: AbortSignal;
   tenantId?: string;
+  supplementalEvidence?: RetrievedChunk[];
 };
 
 type AggregatedLlmUsage = LlmUsage & { calls: number };
@@ -227,12 +233,7 @@ export class ChatService {
     }
     // 意图只分类一次；长期记忆、相关历史、运行计划和检索配置彼此独立，可并行准备。
     const shouldSearchHistory = Boolean(req.threadId);
-    // 事实／定义问题不应携带会话中的用户断言；以语义路由为主，词法判断只作路由失败时的保守兜底。
-    const objectiveFactQuery =
-      queryIntent.intent === 'objective_fact' ||
-      queryIntent.intent === 'system_capability' ||
-      queryIntent.queryType === 'public_knowledge' ||
-      isObjectiveFactQuery(req.query);
+    const objectiveFactQuery = isObjectiveKnowledgeIntent(queryIntent);
     const [memoryResult, historySearch, runtimePlan, retrievalProfile] =
       await Promise.all([
         // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
@@ -262,29 +263,15 @@ export class ChatService {
             req.scope?.documentType,
         ),
       ]);
-    const unfilteredHistory = history;
     if (
-      unfilteredHistory.length > 0 &&
-      // cd：简单判断是否是客观事实查询
-      isObjectiveFactQuery(req.query) &&
-      // cd：简单判断是否存在可补充历史（前面已经查出来了，这里的话正则匹配下）
-      hasRelatedSessionSetting(req.query, unfilteredHistory)
+      queryIntent.contextMode === 'factual_verification' ||
+      (objectiveFactQuery &&
+        !['context_follow_up', 'mixed'].includes(queryIntent.contextMode)) ||
+      (queryIntent.historyPolicy === 'factual_priority' &&
+        queryIntent.contextMode !== 'mixed')
     ) {
-      queryIntent = {
-        ...queryIntent,
-        contextMode: 'mixed',
-        action: 'retrieve',
-        sourcePolicy: 'local_only',
-        queryType: 'private_entity',
-        reason: '同一实体存在冲突会话设定，先回答客观事实再补充历史',
-      };
+      history = [];
     }
-    // cd：根据意图选择上下文策略（事实的话留5条相关发言，其他去掉）
-    history = selectHistoryForQuery(req.query, unfilteredHistory, {
-      preserveConflicts:
-        queryIntent.contextMode === 'factual_verification' ||
-        queryIntent.contextMode === 'mixed',
-    });
     // cd：设定还没持久化，先手动塞历史里面
     if (queryIntent.contextMode === 'conversation_setting') {
       // 当前这条临时设定尚未持久化，先作为状态投影的最后一条有效陈述，
@@ -367,11 +354,6 @@ export class ChatService {
       }
       bufferedTokens.length = 0;
     };
-    // cd：把会话补全在去搜索（上下文策略）用历史对话把当前问题里的“它/那个”补成完整问题。字符串拼接
-    const contextualRetrievalQuery = buildContextualRetrievalQuery(
-      req.query,
-      history,
-    );
     const memoryMessages: Array<{ role: string; content: string }> = [];
     memoryMessages.push({
       role: 'system',
@@ -401,6 +383,9 @@ export class ChatService {
       needsSynthesis: queryIntent.needsSynthesis,
       entities: queryIntent.entities,
       ...(retrievalProfile ? { profile: retrievalProfile } : {}),
+      ...(executionOptions?.supplementalEvidence?.length
+        ? { supplementalEvidence: executionOptions.supplementalEvidence }
+        : {}),
       ...(pluginComposition
         ? {
             pluginKeys: pluginComposition.pluginKeys,
@@ -517,7 +502,6 @@ export class ChatService {
         const answerOptions = {
           ...retrievalOptions,
           signal: executionOptions?.signal,
-          retrievalQuery: contextualRetrievalQuery,
           adaptiveVectorSearch: true,
           karpathyDirectAnswer: true,
         };
@@ -624,7 +608,6 @@ export class ChatService {
           req.approvalRequired === true,
           {
             ...retrievalOptions,
-            retrievalQuery: contextualRetrievalQuery,
             runtimeRunId: run?.id,
           },
           ...(agenticExecutionOptions ? [agenticExecutionOptions] : []),
@@ -660,6 +643,8 @@ export class ChatService {
       tenantId: executionOptions?.tenantId,
     });
   }
+
+
 
   private async finalizeChatResult(input: {
     result: FinalizableChatResult;

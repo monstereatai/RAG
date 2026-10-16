@@ -14,8 +14,11 @@ import {
   UseInterceptors,
   UploadedFile,
   Optional,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { RagAdminService } from './rag-admin.service';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
@@ -24,6 +27,8 @@ import { DomainEventsService } from '../domain-events/domain-events.service';
 import { MemoryService } from '../memory/memory.service';
 import { DEFAULT_ROLE_PRESET_ID, listRolePresets } from '../chat/role-presets';
 import { listSafetyPolicies } from '../../rag/prompts/prompt-injection.guard';
+
+const MAX_IMAGE_SEARCH_UPLOAD_BYTES = 5 * 1024 * 1024;
 import { IndexReconcilerService } from './index-reconciler.service';
 import { RagAdminGraphService } from './rag-admin-graph.service';
 
@@ -55,6 +60,11 @@ export class RagAdminController {
   @Get('documents/index-compensation')
   getIndexCompensationStatus() {
     return this.ragAdminService.getIndexCompensationStatus();
+  }
+
+  @Get('documents/queue/status')
+  getDocumentQueueStatus() {
+    return this.ragAdminService.getDocumentQueueStatus();
   }
 
   @Get('documents/index-reconciler/status')
@@ -235,12 +245,81 @@ export class RagAdminController {
     @Query('q') query: string,
     @Query('limit') limit?: string,
     @Query('userId') userId?: string,
+    @Query('tenantId') tenantId?: string,
+    @Query('role') role?: string,
   ) {
     return this.ragAdminService.searchImages(
       query ?? '',
       Number(limit) || 20,
       userId || undefined,
+      tenantId || undefined,
+      role || undefined,
     );
+  }
+
+  @Post('images/search')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_IMAGE_SEARCH_UPLOAD_BYTES },
+    }),
+  )
+  @ApiOperation({ summary: '上传图片并检索相似图片' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        limit: { type: 'string' },
+        userId: { type: 'string' },
+        tenantId: { type: 'string' },
+        role: { type: 'string' },
+      },
+      required: ['file', 'userId'],
+    },
+  })
+  searchImagesByImage(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('limit') limit?: string,
+    @Body('userId') userId?: string,
+    @Body('tenantId') tenantId?: string,
+    @Body('role') role?: string,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('图片文件不能为空');
+    }
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException('只支持图片文件');
+    }
+    return this.ragAdminService.searchImagesByImage(
+      file.buffer.toString('base64'),
+      file.mimetype,
+      Number(limit) || 20,
+      userId || undefined,
+      tenantId || undefined,
+      role || undefined,
+    );
+  }
+
+  @Get('images/asset')
+  async getImageAsset(
+    @Query('userId') userId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('role') role: string | undefined,
+    @Query('docId') docId: string,
+    @Query('key') key: string,
+    @Res() response: Response,
+  ) {
+    const asset = await this.ragAdminService.getImageAsset({
+      userId,
+      tenantId,
+      role,
+      docId,
+      key,
+    });
+    response.setHeader('Content-Type', asset.contentType);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(asset.buffer);
   }
 
   @Get('documents/stats')
@@ -249,9 +328,19 @@ export class RagAdminController {
   }
 
   // 具体文档参数路由之前必须先注册这些固定路径，避免被 :docId 吞掉。
+  @Get('documents/tasks/pending')
+  getPendingDocumentTasks(@Query('limit') limit?: string) {
+    return this.ragAdminService.getPendingDocumentTasks(Number(limit) || 50);
+  }
+
   @Get('documents/tasks/failed')
   getFailedDocumentTasks(@Query('limit') limit?: string) {
     return this.ragAdminService.getFailedDocumentTasks(Number(limit) || 50);
+  }
+
+  @Post('documents/tasks/:taskId/cancel')
+  cancelQueuedDocumentTask(@Param('taskId') taskId: string) {
+    return this.ragAdminService.cancelQueuedDocumentTask(taskId);
   }
 
   @Get('documents/tasks/:taskId')

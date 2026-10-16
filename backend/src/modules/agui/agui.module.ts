@@ -10,6 +10,7 @@ import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { AguiController } from './agui.controller';
 import { AguiService } from './agui.service';
 import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
+import { ConversationAttachmentService } from './conversation-attachment.service';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
     TenantQuotaModule,
   ],
   controllers: [AguiController],
-  providers: [AguiService],
+  providers: [AguiService, ConversationAttachmentService],
   exports: [AguiService],
 })
 export class AguiModule {}

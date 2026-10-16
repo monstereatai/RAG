@@ -18,6 +18,7 @@ import {
   RagEvaluationRunDto,
 } from './dto/rag-ops-api.dto';
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
+import { RagAdminService } from '../rag-admin/rag-admin.service';
 
 export interface CapabilitiesResponse {
   vectorStore: { provider: string; available: boolean };
@@ -89,6 +90,7 @@ export class RagOpsApiService {
   constructor(
     private readonly configService: ConfigService,
     private readonly documentService: DocumentService,
+    private readonly ragAdminService: RagAdminService,
     private readonly graphService: GraphService,
     private readonly conversationService: ConversationService,
     private readonly karpathyRagService: KarpathyRagService,
@@ -279,43 +281,7 @@ export class RagOpsApiService {
   }
 
   async reindexDocument(docId: string) {
-    const doc = await this.docMetaRepo.findOne({ where: { docId } });
-    if (!doc) return null;
-
-    const chunks = await this.chunkRepo.find({
-      where: { docId },
-      order: { chunkIndex: 'ASC' },
-    });
-
-    if (chunks.length === 0) {
-      return { docId, reindexed: false, reason: 'no chunks found' };
-    }
-
-    const content = chunks.map((chunk) => chunk.content).join('\n\n');
-    const userId = doc.userId ?? 'system';
-
-    try {
-      await this.documentService.delete(docId, userId);
-      const result = await this.documentService.upload(
-        doc.filename,
-        content,
-        userId,
-      );
-      return {
-        docId: result.docId,
-        reindexed: true,
-        chunkCount: result.chunkCount,
-      };
-    } catch (err) {
-      this.logger.error(
-        `Reindex failed for docId=${docId}: ${(err as Error).message}`,
-      );
-      return {
-        docId,
-        reindexed: false,
-        reason: (err as Error).message,
-      };
-    }
+    return this.ragAdminService.reindexDocument(docId);
   }
 
   async updateDocumentPermissions(

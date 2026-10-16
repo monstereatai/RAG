@@ -177,6 +177,19 @@ export interface ReferenceChunk {
   bm25Score?: number;
   cosineScore?: number;
   retrievalSource?: string;
+  citationLabel?: string;
+}
+
+export interface ConversationAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  content: string;
+  truncated: boolean;
+  createdAt: string;
+  status?: 'uploading' | 'ready' | 'error';
+  errorMessage?: string;
 }
 
 export type AguiEventType =
@@ -363,6 +376,7 @@ export async function streamAguiAnswer(
   threadId?: string,
   rolePresetId?: string,
   pluginKeys?: string[],
+  attachmentIds?: string[],
 ): Promise<AbortController> {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
@@ -376,6 +390,9 @@ export async function streamAguiAnswer(
   if (pluginKeys?.length) {
     url += `&pluginKeys=${encodeURIComponent(pluginKeys.join(','))}`;
   }
+  if (attachmentIds?.length) {
+    url += `&attachmentIds=${encodeURIComponent(attachmentIds.join(','))}`;
+  }
 
   (async () => {
     try {
@@ -387,6 +404,7 @@ export async function streamAguiAnswer(
         },
         signal: controller.signal,
       });
+
 
       if (!response.ok) {
         const status = response.status;
@@ -454,6 +472,43 @@ export async function streamAguiAnswer(
   })();
 
   return controller;
+}
+
+export async function uploadConversationAttachment(file: File, threadId: string) {
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('单个附件不能超过 10 MB');
+  }
+  const data = new FormData();
+  data.append('file', file);
+  data.append('threadId', threadId);
+  return authRequest<{ data: ConversationAttachment; available: boolean }>(
+    '/api/admin/qa-ops/attachments',
+    { method: 'POST', data },
+  );
+}
+
+export async function getConversationAttachments(threadId: string) {
+  return authRequest<{ data: ConversationAttachment[]; available: boolean }>(
+    '/api/admin/qa-ops/attachments',
+    { params: { threadId } },
+  );
+}
+
+export async function deleteConversationAttachment(
+  attachmentId: string,
+  threadId: string,
+) {
+  return authRequest<{ data: { deleted: boolean }; available: boolean }>(
+    `/api/admin/qa-ops/attachments/${encodeURIComponent(attachmentId)}`,
+    { method: 'DELETE', params: { threadId } },
+  );
+}
+
+export async function deleteConversationAttachments(threadId: string) {
+  return authRequest<{ data: { deleted: number }; available: boolean }>(
+    '/api/admin/qa-ops/attachments',
+    { method: 'DELETE', params: { threadId } },
+  );
 }
 
 export async function createTtsWebSocket(text: string): Promise<WebSocket> {

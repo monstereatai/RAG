@@ -35,10 +35,71 @@ export class AdminDocumentsController {
     return this.ragClient.auditDocumentIndexes(Number(limit) || 200);
   }
 
+  @Get('operations')
+  @ApiOperation({ summary: '文档入库与索引运维状态' })
+  @RequirePermission('admin:documents:read')
+  async operations() {
+    const [
+      documentQueue,
+      pendingDocumentTasks,
+      failedDocumentTasks,
+      indexRepairQueue,
+      failedIndexRepairs,
+      indexReconciler,
+    ] = await Promise.all([
+      this.ragClient.getDocumentQueueStatus(),
+      this.ragClient.getPendingDocumentTasks(50),
+      this.ragClient.getFailedDocumentTasks(50),
+      this.ragClient.getIndexRepairQueueStatus(),
+      this.ragClient.getFailedIndexRepairs(50),
+      this.ragClient.getIndexReconcilerStatus(),
+    ]);
+
+    const results = [
+      documentQueue,
+      pendingDocumentTasks,
+      failedDocumentTasks,
+      indexRepairQueue,
+      failedIndexRepairs,
+      indexReconciler,
+    ];
+    results.forEach((result) => this.requireAvailable(result));
+
+    const pendingQueue = unwrapRagResponse<{ tasks?: unknown[] }>(
+      pendingDocumentTasks.data,
+    );
+
+    return {
+      documentQueue: unwrapRagResponse(documentQueue.data),
+      pendingDocumentTasks: pendingQueue.tasks ?? [],
+      failedDocumentTasks: unwrapRagResponse(failedDocumentTasks.data),
+      indexRepairQueue: unwrapRagResponse(indexRepairQueue.data),
+      failedIndexRepairs: unwrapRagResponse(failedIndexRepairs.data),
+      indexReconciler: unwrapRagResponse(indexReconciler.data),
+    };
+  }
+
   @Post('index-audit/repair')
+  @AuditLog('documents', 'index-audit-repair')
   @RequirePermission('admin:documents:write')
   repairIndexes(@Body() body: { docIds?: string[]; limit?: number }) {
     return this.ragClient.repairDocumentIndexes(body ?? {});
+  }
+
+  @Post('index-repair/:jobId/retry')
+  @AuditLog('documents', 'retry-index-repair')
+  @ApiOperation({ summary: '重试失败的索引修复任务' })
+  @RequirePermission('admin:documents:write')
+  retryIndexRepair(@Param('jobId') jobId: string) {
+    return this.ragClient.retryIndexRepair(jobId);
+  }
+
+  @Post('index-reconciler/run')
+  @AuditLog('documents', 'run-index-reconciler')
+  @ApiOperation({ summary: '手动运行索引一致性对账' })
+  @RequirePermission('admin:documents:write')
+  runIndexReconciler() {
+    return this.ragClient.runIndexReconciler();
   }
 
   @Get(':docId')
@@ -120,6 +181,12 @@ export class AdminDocumentsController {
     return this.ragClient.getDocumentReviews(docId);
   }
 
+  @Get('tasks/pending')
+  @RequirePermission('admin:documents:read')
+  pendingTasks() {
+    return this.ragClient.getPendingDocumentTasks();
+  }
+
   @Get('tasks/failed')
   @RequirePermission('admin:documents:read')
   failedTasks() {
@@ -137,6 +204,16 @@ export class AdminDocumentsController {
   @RequirePermission('admin:documents:write')
   retryFailedTask(@Param('taskId') taskId: string) {
     return this.ragClient.retryFailedDocumentTask(taskId);
+  }
+
+  @Post('tasks/:taskId/cancel')
+  @AuditLog('documents', 'cancel-queued-task')
+  @ApiOperation({ summary: '取消尚未开始的文档处理任务' })
+  @RequirePermission('admin:documents:write')
+  async cancelQueuedTask(@Param('taskId') taskId: string) {
+    const result = await this.ragClient.cancelQueuedDocumentTask(taskId);
+    this.requireAvailable(result);
+    return unwrapRagResponse(result.data);
   }
 
   @Post(':docId/rollback')

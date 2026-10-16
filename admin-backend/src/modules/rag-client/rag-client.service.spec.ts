@@ -69,6 +69,146 @@ describe('RagClientService', () => {
       expect(result.status).toBe(200);
     });
 
+    it('uses the caller-derived identity for image search and authenticated image reads', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ code: 200, data: { results: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+      await service.searchImages('user-1', 'tenant-a', 'editor', 'chart', 12);
+      const imageResponse = new Response(Buffer.from('png-data'), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+      mockFetch.mockResolvedValueOnce(imageResponse);
+      await service.getImageAsset(
+        'user-1',
+        'tenant-a',
+        'editor',
+        'doc-1',
+        'documents/owner-1/doc-1/images/page-1.png',
+      );
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'http://localhost:3000/api/v1/rag/admin/images/search?userId=user-1&tenantId=tenant-a&role=editor&q=chart&limit=12',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        }),
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/api/v1/rag/admin/images/asset?userId=user-1&tenantId=tenant-a&role=editor&docId=doc-1&key=documents%2Fowner-1%2Fdoc-1%2Fimages%2Fpage-1.png',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        }),
+      );
+    });
+
+    it('forwards image search uploads with the internal token and caller scope', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ code: 200, data: { results: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      const file = {
+        buffer: Buffer.from('image-bytes'),
+        mimetype: 'image/png',
+        originalname: 'query.png',
+      } as Express.Multer.File;
+
+      await service.searchImagesByImage('user-1', 'tenant-a', 'editor', file, 12);
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('http://localhost:3000/api/v1/rag/admin/images/search');
+      expect(init.method).toBe('POST');
+      expect(init.headers).toEqual(
+        expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      );
+      expect((init.body as FormData).get('userId')).toBe('user-1');
+      expect((init.body as FormData).get('tenantId')).toBe('tenant-a');
+      expect((init.body as FormData).get('role')).toBe('editor');
+      expect((init.body as FormData).get('limit')).toBe('12');
+      expect((init.body as FormData).get('file')).toMatchObject({
+        name: 'query.png',
+        type: 'image/png',
+      });
+    });
+
+    it('uses the internal admin contract for queue status and guarded repair actions', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { available: true } }),
+      });
+
+      await service.getDocumentQueueStatus();
+      await service.getPendingDocumentTasks(25);
+      await service.cancelQueuedDocumentTask('task/id');
+      await service.getIndexRepairQueueStatus();
+      await service.getFailedIndexRepairs(25);
+      await service.retryIndexRepair('repair/id');
+      await service.getIndexReconcilerStatus();
+      await service.runIndexReconciler();
+
+      const calls = mockFetch.mock.calls;
+      expect(calls.map(([url]) => url)).toEqual([
+        'http://localhost:3000/api/v1/rag/admin/documents/queue/status',
+        'http://localhost:3000/api/v1/rag/admin/documents/tasks/pending?limit=25',
+        'http://localhost:3000/api/v1/rag/admin/documents/tasks/task%2Fid/cancel',
+        'http://localhost:3000/api/v1/rag/admin/documents/index-repair/status',
+        'http://localhost:3000/api/v1/rag/admin/documents/index-repair/failed?limit=25',
+        'http://localhost:3000/api/v1/rag/admin/documents/index-repair/repair%2Fid/retry',
+        'http://localhost:3000/api/v1/rag/admin/documents/index-reconciler/status',
+        'http://localhost:3000/api/v1/rag/admin/documents/index-reconciler/run',
+      ]);
+      for (const [, init] of calls) {
+        expect((init as RequestInit).headers).toEqual(
+          expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        );
+      }
+      expect((calls[2][1] as RequestInit).method).toBe('POST');
+      expect((calls[5][1] as RequestInit).method).toBe('POST');
+      expect((calls[7][1] as RequestInit).method).toBe('POST');
+    });
+
+    it('uses the internal Feishu Wiki admin contract without forwarding browser credentials', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 200, data: { status: 'completed' } }),
+      });
+
+      await service.syncFeishuWiki('admin-1', 'spc-123', true);
+      await service.getFeishuWikiStatus('admin-1', 'spc-123');
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'http://localhost:3000/api/v1/rag/admin/integrations/feishu/wiki/sync?ownerUserId=admin-1',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test-token',
+            'content-type': 'application/json',
+          }),
+          body: JSON.stringify({ spaceId: 'spc-123', shareWithinTenant: true }),
+        }),
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/api/v1/rag/admin/integrations/feishu/wiki/status?ownerUserId=admin-1&spaceId=spc-123',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect((mockFetch.mock.calls[1][1] as RequestInit).headers).toEqual(
+        expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      );
+    });
+
     it('requests an internal speech ticket using the trusted service token and verified owner context', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

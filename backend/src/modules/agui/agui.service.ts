@@ -10,6 +10,7 @@ import { resolveRoleContext } from '../chat/role-presets';
 import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
+import { ConversationAttachmentService } from './conversation-attachment.service';
 
 @Injectable()
 export class AguiService {
@@ -19,6 +20,7 @@ export class AguiService {
     private readonly llmProvider: LlmProvider,
     private readonly artifactsService: ArtifactsService,
     @Optional() private readonly agentRuns?: AgentRunsService,
+    @Optional() private readonly attachments?: ConversationAttachmentService,
   ) {}
 
   /** 管理后台的 AG-UI 适配层：复用 ChatService 的问答与持久化，映射事件，并在结果确定后处理 Artifact。 */
@@ -40,6 +42,7 @@ export class AguiService {
         const messageId = randomUUID();
         const runState: AguiRunState = { phase: 'routing' };
         let streamedContent = false;
+        let previousUserQueries: string[] = [];
         const emit = (
           type: AguiEvent['type'],
           data?: Record<string, unknown>,
@@ -72,6 +75,36 @@ export class AguiService {
               options.userId,
               options.tenantId,
             ));
+          if (options.threadId) {
+            const existing = await this.conversationService.get(
+              options.threadId,
+              options.userId,
+              options.tenantId,
+            );
+            if (!existing) {
+              await this.conversationService.create(
+                query,
+                options.mode,
+                options.userId,
+                options.tenantId,
+                options.threadId,
+              );
+            } else {
+              previousUserQueries = existing.messages
+                .filter((message) => message.role === 'human')
+                .slice(-8)
+                .map((message) => message.content);
+            }
+          }
+          const attachmentContext = this.attachments
+            ? await this.attachments.retrieve(
+                options.userId,
+                activeThreadId,
+                options.attachmentIds,
+                query,
+                previousUserQueries,
+              )
+            : { content: '', evidence: [] };
           emit('RUN_STARTED', {
             threadId: activeThreadId,
             input: {
@@ -116,6 +149,7 @@ export class AguiService {
                   model: selectedModel,
                   signal: abortController.signal,
                   tenantId: options.tenantId,
+                  supplementalEvidence: attachmentContext.evidence,
                 },
               ),
           );
@@ -164,7 +198,9 @@ export class AguiService {
                 threadId: activeThreadId,
                 title: artifactIntent.title,
                 kind: artifactIntent.kind,
-                sourceText: answer,
+                sourceText: [attachmentContext.content, answer]
+                  .filter(Boolean)
+                  .join('\n\n'),
                 prompt: artifactIntent.kind === 'image' ? query : undefined,
               });
               generatedArtifacts = [artifact];

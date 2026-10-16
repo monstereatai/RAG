@@ -5,6 +5,7 @@ export type ChatMode = 'simple' | 'agentic' | 'auto';
 export interface ApiClientOptions {
   baseUrl: string;
   token?: string;
+  tokenProvider?: () => string | undefined;
   username?: string;
   password?: string;
   timeoutMs?: number;
@@ -127,6 +128,10 @@ export class RagApiClient {
 
   async health(): Promise<unknown> {
     return this.request<unknown>('/health', { auth: false });
+  }
+
+  async profile(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/auth/profile');
   }
 
   async debugChunks(query: string, limit: number): Promise<SearchResult> {
@@ -258,10 +263,10 @@ export class RagApiClient {
     } = {},
   ): Promise<T> {
     const auth = options.auth ?? true;
-    if (auth && !this.token) {
+    if (auth && !this.currentToken() && !this.options.tokenProvider) {
       await this.loginWithConfiguredCredentials();
     }
-    if (auth && !this.token) {
+    if (auth && !this.currentToken()) {
       throw new RagMcpError(
         'unauthorized',
         'missing token, set RAG_MCP_TOKEN/RAG_TOKEN, set RAG_MCP_USERNAME/RAG_MCP_PASSWORD, or run rag auth login',
@@ -274,7 +279,13 @@ export class RagApiClient {
     try {
       return await this.requestOnce<T>(path, options);
     } catch (error) {
-      if (auth && error instanceof RagMcpError && error.code === 'unauthorized' && this.hasLoginCredentials()) {
+      if (
+        auth &&
+        !this.options.tokenProvider &&
+        error instanceof RagMcpError &&
+        error.code === 'unauthorized' &&
+        this.hasLoginCredentials()
+      ) {
         this.token = undefined;
         await this.loginWithConfiguredCredentials();
         return this.requestOnce<T>(path, options);
@@ -300,8 +311,9 @@ export class RagApiClient {
     if (options.body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    if (auth && this.token) {
-      headers.Authorization = `Bearer ${this.token}`;
+    const token = this.currentToken();
+    if (auth && token) {
+      headers.Authorization = `Bearer ${token}`;
     }
 
     try {
@@ -338,6 +350,10 @@ export class RagApiClient {
 
   private hasLoginCredentials(): boolean {
     return Boolean(this.options.username && this.options.password);
+  }
+
+  private currentToken(): string | undefined {
+    return this.options.tokenProvider?.() ?? this.token;
   }
 
   private async loginWithConfiguredCredentials(): Promise<void> {

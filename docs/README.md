@@ -25,12 +25,20 @@
 | ----------------------- | -------------------------------------------------------------------------------------------------------- |
 | `PROJECT_BACKGROUND.md` | 游戏官网／活动产研一体化 RAG 与 Agent 工作台的业务背景、目标用户、协作流程、方案来源、成功标准和项目边界 |
 
+## 运行数据报告
+
+| 文档 | 用途 |
+| --- | --- |
+| `LANGFUSE_METRICS_REPORT_2026-10-15.md` | Langfuse 2026-09-15 至 2026-10-15 UTC 的 RAG 请求、模型标注、token、成本与数据缺口分析 |
+
 ## 使用指南
 
 | 文档                           | 用途                                                          |
 | ------------------------------ | ------------------------------------------------------------- |
 | `PRODUCTION_WORKFLOW_USAGE.md` | 六岗位单独使用、多岗位协作、审批策略、管理后台操作和 API 示例 |
 | `architecture/DOMAIN_EVENT_OUTBOX_USAGE.md` | 内部 Hook、领域事件 Outbox、企业微信／Webhook 订阅、重试与安全边界 |
+| `architecture/TEAM_WIKI.md` | Team Wiki 页面、修订、来源引用、回滚、发布和租户边界 |
+| `architecture/FEISHU_WIKI_SYNC.md` | 飞书 Wiki 知识空间同步、凭据边界、租户共享选项和迁移说明 |
 | `architecture/MONITORING_PROMETHEUS_GRAFANA.md` | Prometheus + Grafana 监控体系：指标契约、埋点、抓取配置、23 条告警规则、17 条记录规则、Alertmanager 通知、看板面板、分桶与 rate 窗口依据 |
 | `architecture/DOCKER_SERVICES_INVENTORY.md` | Docker 服务清单：三套 compose 栈、容器命名规范、端口、数据卷、冲突风险与安全操作约定 |
 
@@ -64,6 +72,10 @@
 | `plans/karpathy-obsidian-dual-ingest-plan.md`       | Karpathy + Obsidian 统一知识链路方案                                                      |
 | `plans/游戏运营营销公开资料与Karpathy方案.md`       | PC／页游 Top100 公开资料抓取、入库、Simple Karpathy Fast Path 和最终验收口径                  |
 | `plans/official-docs-sync.md`                       | 官方文档夜间同步策略                                                                      |
+| `plans/image-to-image-search-spec.md`               | 图片以图搜图功能 Spec                                                                     |
+| `plans/image-to-image-search-plan.md`               | 图片以图搜图实施方案和验证计划                                                            |
+| `plans/image-to-image-search-tasks.md`              | 图片以图搜图任务拆分和完成证据                                                            |
+| `plans/image-to-image-search-verify.md`             | 图片以图搜图验收标准追踪与验证限制                                                        |
 | `architecture-decisions/README.md`                  | Workflow First、混合检索、证据门禁、分层记忆和降级恢复五项 ADR 索引                       |
 | `evidence/EVIDENCE_COLLECTION_TEMPLATES.md`         | 跨团队交付、事故复盘和架构决策口述模板                                                    |
 
@@ -73,6 +85,7 @@
 | --- | --- |
 | `reference/SUMMARY.md` | 本仓库课程参考代码能力总览 |
 | `reference/企业级知识库课程与v1-v9对照优化建议.md` | 对照 11 份课程 PDF、knowledge-hub-backend v1～v9 与当前项目，区分已有能力、真实缺口、推荐优化和不建议照搬项 |
+| `interview/开源项目参考能力归档.md` | Dify、RAGFlow、Agent 框架和 WeKnora 的能力对照、当前项目融合结果与生产边界 |
 
 ## 文档治理补强
 

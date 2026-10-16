@@ -8,11 +8,12 @@ describe('QueryIntentRouter', () => {
     expect(requiresKnowledgeRetrieval('1+1 等于多少')).toBe(false);
   });
 
-  it('recognizes Chinese arithmetic assertions as session settings', async () => {
+  it('uses the classifier context mode for temporary session settings', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
           intent: 'objective_fact',
+          contextMode: 'conversation_setting',
           confidence: 0.99,
           action: 'retrieve',
           sourcePolicy: 'local_only',
@@ -29,14 +30,16 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('forces internal business and engineering questions into the local KB', async () => {
+  it('uses the classifier local-knowledge decision for project questions', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'general',
+          intent: 'project_knowledge',
           confidence: 0.95,
-          action: 'direct_answer',
-          sourcePolicy: 'direct_answer',
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          queryType: 'project_knowledge',
+          targetKbs: ['company', 'project', 'documents'],
           entities: [],
           standaloneQuery: '内部业务链路有哪些',
           ambiguity: { detected: false },
@@ -60,6 +63,7 @@ describe('QueryIntentRouter', () => {
           confidence: 0.99,
           action: 'retrieve',
           sourcePolicy: 'local_only',
+          queryType: 'private_entity',
           entities: ['李四'],
           standaloneQuery: '李四是谁',
           ambiguity: { detected: false },
@@ -76,15 +80,16 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('converges an entity-free definition question to public direct answer', async () => {
+  it('uses the classifier public-knowledge decision for direct answers', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'general',
+          intent: 'objective_fact',
           confidence: 0.88,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          queryType: 'private_entity',
+          action: 'direct_answer',
+          sourcePolicy: 'direct_answer',
+          queryType: 'public_knowledge',
+          targetKbs: ['general'],
           entities: [],
           ambiguity: { detected: false },
         }),
@@ -99,15 +104,16 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('converges an entity-free bare topic to public direct answer', async () => {
+  it('preserves a structured direct-answer decision for a bare public topic', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
           intent: 'general',
           confidence: 0.88,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          queryType: 'private_entity',
+          action: 'direct_answer',
+          sourcePolicy: 'direct_answer',
+          queryType: 'public_knowledge',
+          targetKbs: ['general'],
           entities: [],
           ambiguity: { detected: false },
         }),
@@ -122,15 +128,17 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('forces company and engineering process questions to local retrieval', async () => {
+  it('keeps project queries local when the classifier identifies project knowledge', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'general',
+          intent: 'project_knowledge',
           confidence: 0.95,
-          action: 'direct_answer',
-          sourcePolicy: 'direct_answer',
-          queryType: 'public_knowledge',
+          action: 'retrieve',
+          sourcePolicy: 'local_only',
+          queryType: 'project_knowledge',
+          needsSynthesis: true,
+          targetKbs: ['company', 'project', 'documents'],
           entities: [],
           ambiguity: { detected: false },
         }),
@@ -211,13 +219,14 @@ describe('QueryIntentRouter', () => {
     });
   });
 
-  it('preserves explicit question boundaries when the model omits multiIntent', async () => {
+  it('does not infer multiIntent from punctuation after classification', async () => {
     const router = new QueryIntentRouter({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
           intent: 'general',
           confidence: 0.9,
           standaloneQuery: 'React 是什么？1+1 等于多少？',
+          multiIntent: false,
           ambiguity: { detected: false },
         }),
       ),
@@ -226,8 +235,8 @@ describe('QueryIntentRouter', () => {
     await expect(
       router.classify('React 是什么？1+1 等于多少？'),
     ).resolves.toMatchObject({
-      multiIntent: true,
-      subQueries: ['React 是什么？', '1+1 等于多少？'],
+      multiIntent: false,
+      subQueries: [],
     });
   });
 
@@ -269,6 +278,7 @@ describe('QueryIntentRouter', () => {
           sourcePolicy: 'local_only',
           standaloneQuery: '小猫吃什么？',
           entities: ['小猫'],
+          historyPolicy: 'hypothesis_only',
           ambiguity: { detected: false },
         }),
       ),

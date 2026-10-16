@@ -7,6 +7,8 @@ import type { DashScopeRerankService } from '../../tools/dashscope-rerank.servic
 import type { SemanticExampleSelector } from '../prompts/semantic-example.selector';
 import type { RedisProvider } from '../../providers/redis/redis.provider';
 import type { AgenticRagStateType } from './agentic-rag.state';
+import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.service';
+import type { PrefetchedFastPath } from '../karpathy/karpathy-rag.service';
 
 describe('AgenticRagService budget boundaries', () => {
   function createService(overrides: Record<string, unknown> = {}) {
@@ -43,6 +45,11 @@ describe('AgenticRagService budget boundaries', () => {
       getObsidianContext: jest
         .fn()
         .mockResolvedValue({ hits: [], context: '' }),
+      resolveObsidianSourceEvidence: jest.fn().mockResolvedValue({
+        chunks: [],
+        mappedDocIds: new Set<string>(),
+        sourceNotePaths: new Set<string>(),
+      }),
       toReviewedEvidenceChunks: jest.fn().mockReturnValue([]),
       toObsidianChunks: jest.fn().mockReturnValue([]),
       hasIndexedChunks: jest.fn().mockReturnValue(true),
@@ -73,6 +80,7 @@ describe('AgenticRagService budget boundaries', () => {
       recordAgentNode: jest.fn().mockReturnValue({}),
     };
     const redisProvider = {} as RedisProvider;
+    const agentLoop = { run: jest.fn() };
 
     const service = new AgenticRagService(
       config,
@@ -86,6 +94,7 @@ describe('AgenticRagService budget boundaries', () => {
       metricsService as never,
       tracingService as never,
       redisProvider,
+      agentLoop as never,
     );
 
     return {
@@ -476,7 +485,16 @@ describe('AgenticRagService budget boundaries', () => {
     karpathyRagService.retrieve.mockResolvedValue([chunk('formal', 0.9)]);
     karpathyRagService.toReviewedEvidenceChunks.mockReturnValue([reviewed]);
     karpathyRagService.getObsidianContext.mockResolvedValue({
-      hits: [{ path: 'notes/rag.md' }],
+      hits: [
+        {
+          path: 'notes/rag.md',
+          type: 'note',
+          title: '人工笔记',
+          content: '人工补充内容',
+          score: 0.8,
+          tags: [],
+        },
+      ],
       context: 'Obsidian context',
     });
     karpathyRagService.toObsidianChunks.mockReturnValue([obsidian]);
@@ -504,11 +522,90 @@ describe('AgenticRagService budget boundaries', () => {
       undefined,
     );
     expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith([
-      { path: 'notes/rag.md' },
+      expect.objectContaining({ path: 'notes/rag.md', type: 'note' }),
     ]);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual(
       expect.arrayContaining(['reviewed', 'formal']),
     );
+  });
+
+  it('uses source-note hits to retrieve original chunks without keeping their summaries as evidence', async () => {
+    const { service, karpathyRagService } = createService();
+    const sourceHit: ObsidianSearchHit = {
+      path: 'notes/source.md',
+      type: 'note',
+      isSourceNote: true,
+      ragDocId: 'source-doc',
+      title: '来源摘要',
+      content: '摘要里有结论，但原文才是证据。',
+      score: 0.9,
+      tags: [],
+    };
+    const legacySourceHit: ObsidianSearchHit = {
+      path: 'notes/legacy-source.md',
+      type: 'note',
+      isSourceNote: true,
+      title: '旧来源摘要',
+      content: '旧摘要没有 rag_doc_id，也不能作为证据。',
+      score: 0.8,
+      tags: [],
+    };
+    const manualHit: ObsidianSearchHit = {
+      path: 'notes/manual.md',
+      type: 'note',
+      title: '人工补充',
+      content: '人工维护的补充内容。',
+      score: 0.7,
+      tags: [],
+    };
+    const raw = {
+      ...chunk('source-raw', 0.9),
+      docId: 'source-doc',
+      content: '原文：发布前必须由业务负责人复核。',
+    };
+    karpathyRagService.retrieve.mockResolvedValue([]);
+    karpathyRagService.retrieveBm25Only.mockResolvedValue([]);
+    karpathyRagService.getObsidianContext.mockResolvedValue({
+      hits: [sourceHit, legacySourceHit, manualHit],
+      context: 'source and manual notes',
+    });
+    karpathyRagService.resolveObsidianSourceEvidence.mockResolvedValue({
+      chunks: [raw],
+      mappedDocIds: new Set(['source-doc']),
+      sourceNotePaths: new Set(['notes/source.md', 'notes/legacy-source.md']),
+    });
+    karpathyRagService.toObsidianChunks.mockImplementation((hits) =>
+      hits.map((hit) => chunk(`obsidian:${hit.path}`, 0.3)),
+    );
+
+    const result = await service.retrievalNode(
+      {
+        query: '发布前必须由谁复核？',
+        augmentedQueries: [],
+      } as unknown as AgenticRagStateType,
+      { configurable: { userId: 'user-1' } },
+    );
+
+    expect(
+      karpathyRagService.resolveObsidianSourceEvidence,
+    ).toHaveBeenCalledWith(
+      '发布前必须由谁复核？',
+      [sourceHit, legacySourceHit, manualHit],
+      'user-1',
+      {},
+    );
+    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith([
+      manualHit,
+    ]);
+    expect(result.retrievedChunks).toContainEqual(raw);
+    expect(result.retrievedChunks?.map((item) => item.id)).not.toContain(
+      'obsidian:notes/source.md',
+    );
+    expect(result.subQuestions?.[0].evidenceIds).toContain('source-raw');
+    expect(
+      result.artifacts?.find((artifact) => artifact.type === 'evidence_bundle')
+        ?.payload,
+    ).toMatchObject({ chunkIds: expect.arrayContaining(['source-raw']) });
   });
 
   it('reuses fast-path evidence when agentic retrieval starts', async () => {
@@ -516,7 +613,16 @@ describe('AgenticRagService budget boundaries', () => {
     karpathyRagService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
-      obsidianHits: [{ path: 'notes/fast-path.md' }],
+      obsidianHits: [
+        {
+          path: 'notes/fast-path.md',
+          type: 'note',
+          title: '快速路径补充',
+          content: '快速路径中的人工补充。',
+          score: 0.8,
+          tags: [],
+        },
+      ],
       badCaseMatches: [
         {
           id: 'feedback-1',
@@ -526,7 +632,7 @@ describe('AgenticRagService budget boundaries', () => {
           mode: 'correction',
         },
       ],
-    } as never;
+    } as unknown as PrefetchedFastPath;
     karpathyRagService.toObsidianChunks.mockReturnValue([
       chunk('obsidian:notes/fast-path.md', 0.8),
     ]);
@@ -596,7 +702,7 @@ describe('AgenticRagService budget boundaries', () => {
           mode: 'correction',
         },
       ],
-    } as never;
+    } as unknown as PrefetchedFastPath;
 
     const result = await service.queryAugmentNode(
       {
@@ -614,7 +720,9 @@ describe('AgenticRagService budget boundaries', () => {
     );
 
     expect(badCaseFlywheel.retrieveMatches).not.toHaveBeenCalled();
-    expect(result.badCaseMatches).toBe(prefetchedFastPath.badCaseMatches);
+    expect(
+      (result as unknown as { badCaseMatches?: unknown[] }).badCaseMatches,
+    ).toBe(prefetchedFastPath.badCaseMatches);
   });
 
   it('does not reject a sufficient original evidence bundle after planning one subquestion', async () => {
@@ -681,7 +789,7 @@ describe('AgenticRagService budget boundaries', () => {
           },
         },
       ],
-    } as AgenticRagStateType);
+    } as unknown as AgenticRagStateType);
 
     expect(result).toMatchObject({
       confidence: 0,
@@ -700,6 +808,7 @@ describe('AgenticRagService budget boundaries', () => {
       bm25Score: totalScore,
       cosineScore: 0,
       totalScore,
+      score: totalScore,
     };
   }
 });

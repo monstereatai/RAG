@@ -119,18 +119,44 @@ export class ContextBuilder {
     const mmrOrdered = query
       ? applyLexicalMmr(diversified, query)
       : diversified;
+    const attachmentPrimaries = new Map<string, RetrievedChunk>();
+    for (const chunk of diversified) {
+      if (
+        chunk.retrievalSource === 'attachment' &&
+        !attachmentPrimaries.has(chunk.docId)
+      ) {
+        attachmentPrimaries.set(chunk.docId, chunk);
+      }
+    }
+    const attachmentIds = new Set(
+      [...attachmentPrimaries.values()].map((chunk) => chunk.id),
+    );
+    const ordered = [
+      ...attachmentPrimaries.values(),
+      ...mmrOrdered.filter((chunk) => !attachmentIds.has(chunk.id)),
+    ];
+    const selectionLimit = Math.min(
+      profile.candidateDepth,
+      Math.max(profile.finalTopK, attachmentPrimaries.size + 2),
+    );
+    const contextCharacterBudget = attachmentPrimaries.size
+      ? Math.max(
+          profile.contextCharacterBudget,
+          Math.min(10_000, profile.contextCharacterBudget + attachmentPrimaries.size * 1_900),
+        )
+      : profile.contextCharacterBudget;
     const selected: RetrievedChunk[] = [];
     let usedCharacters = 0;
     let budgetRemoved = 0;
-    for (const chunk of mmrOrdered) {
-      if (selected.length >= profile.finalTopK) {
+    for (const chunk of ordered) {
+      if (selected.length >= selectionLimit) {
         budgetRemoved += 1;
         continue;
       }
       const estimated = chunk.content.length + 32;
       if (
         selected.length > 0 &&
-        usedCharacters + estimated > profile.contextCharacterBudget
+        usedCharacters + estimated > contextCharacterBudget
       ) {
         budgetRemoved += 1;
         continue;

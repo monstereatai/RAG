@@ -11,7 +11,8 @@
  *   3. indexImage → searchText → deleteByDoc 全链路（内存版向量存取）：
  *      - 文本查询能召回对应图片（docId/url/score）；
  *      - topK 截断与 userId 多租户过滤生效；
- *      - 同 docId 重复索引先删后写（幂等，不产生重复记录）；
+ *      - 同 docId 多资产批量索引，asset ID 稳定且重建完整替换；
+ *      - DocumentPermission ACL 候选过滤生效；
  *      - deleteByDoc 后不再召回；
  *      - 向量库异常时 searchText 明确抛错（由上层 REST 降级）。
  *
@@ -289,7 +290,10 @@ const service = new ImageIndexService(provider, store);
     url: 'https://cdn.example.com/sunset-beach.png',
     meta: { filename: 'sunset-beach.png', scene: '自然风光' },
   });
-  check(indexA.docId === 'doc-a' && indexA.id === 'img_doc-a', 'indexImage 返回 docId 与确定性 id');
+  check(
+    indexA.docId === 'doc-a' && indexA.id.startsWith('img_') && indexA.id.length === 64,
+    'indexImage 返回文档 ID 与固定长度的 hash asset ID',
+  );
   check(indexA.dimension === DIM, '写入向量维度与配置一致');
 
   await service.indexImage({
@@ -334,6 +338,21 @@ const service = new ImageIndexService(provider, store);
     'user-a 搜不到 user-b 的图片（doc-b 不在结果中）',
   );
 
+  const aclScoped = await service.searchText('sunset beach', {
+    topK: 1,
+    userId: 'user-a',
+    allowedDocIds: new Set(['doc-b']),
+  });
+  check(
+    aclScoped.length === 1 && aclScoped[0].docId === 'doc-b',
+    'DocumentPermission 允许集合会在向量召回后过滤，并支持共享文档',
+  );
+  const aclEmpty = await service.searchText('sunset beach', {
+    userId: 'user-a',
+    allowedDocIds: new Set(),
+  });
+  check(aclEmpty.length === 0, 'ACL 允许文档为空时不返回图片结果');
+
   const top1 = await service.searchText('sunset beach', { topK: 1, userId: 'user-a' });
   check(top1.length === 1, 'topK=1 只返回 1 条');
 
@@ -347,6 +366,43 @@ const service = new ImageIndexService(provider, store);
   check(
     docARows.length === 1 && docARows[0].url === 'https://cdn.example.com/sunset-v2.png',
     '同 docId 重复索引幂等（先删后写，保留最新 url）',
+  );
+
+  const multiAssets = [
+    {
+      docId: 'doc-multi',
+      userId: 'user-a',
+      url: '/assets/page-1.png',
+      base64: 'chart page 1',
+      assetHash: 'hash-page-1',
+      assetKey: 'page-1-1.png',
+      meta: { pageNumber: 1, placement: 'page-1' },
+    },
+    {
+      docId: 'doc-multi',
+      userId: 'user-a',
+      url: '/assets/page-2.png',
+      base64: 'chart page 2',
+      assetHash: 'hash-page-2',
+      assetKey: 'page-2-1.png',
+      meta: { pageNumber: 2, placement: 'page-2' },
+    },
+  ];
+  const multiFirst = await service.replaceDocumentImages('doc-multi', 'user-a', multiAssets);
+  const multiSecond = await service.replaceDocumentImages('doc-multi', 'user-a', multiAssets);
+  const multiRows = [...store.rows.values()].filter((row) => row.docId === 'doc-multi');
+  check(
+    multiRows.length === 2 && new Set(multiFirst.map((item) => item.id)).size === 2,
+    '同一文档的多个图片资产均入库且 ID 各不相同',
+  );
+  check(
+    multiSecond.map((item) => item.id).join(',') === multiFirst.map((item) => item.id).join(','),
+    '同一资产集合重建后 ID 稳定',
+  );
+  await service.replaceDocumentImages('doc-multi', 'user-a', []);
+  check(
+    ![...store.rows.values()].some((row) => row.docId === 'doc-multi'),
+    '空资产集合重建会清理文档下全部旧图片',
   );
 
   const emptyQuery = await service.searchText('   ', { topK: 5 });

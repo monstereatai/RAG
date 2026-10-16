@@ -9,7 +9,10 @@ describe('RagAdminService document versions', () => {
   const documentService = {
     activateVersion: jest.fn(),
     updateLifecycle: jest.fn(),
+    getPendingTasks: jest.fn(),
+    cancelQueuedTask: jest.fn(),
   };
+  const documentQueue = { getStatus: jest.fn() };
   const ingest = { ingestText: jest.fn() };
   const documentReviewRepo = {
     save: jest.fn(),
@@ -21,7 +24,7 @@ describe('RagAdminService document versions', () => {
   const service = new RagAdminService(
     {} as never,
     documentService as never,
-    {} as never,
+    documentQueue as never,
     ingest as never,
     {} as never,
     {} as never,
@@ -35,10 +38,37 @@ describe('RagAdminService document versions', () => {
     documentReviewRepo as never,
     permissionRepo as never,
     { emit: jest.fn() } as never,
+    {} as never,
+    {} as never,
   );
 
   beforeEach(() => {
     jest.resetAllMocks();
+  });
+
+  it('delegates document queue status to the existing BullMQ service', async () => {
+    const status = { enabled: true, waiting: 2, active: 1, completed: 8, failed: 3 };
+    documentQueue.getStatus.mockResolvedValue(status);
+
+    await expect(service.getDocumentQueueStatus()).resolves.toEqual(status);
+    expect(documentQueue.getStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates pending document operations to DocumentService', async () => {
+    const pending = { enabled: true, tasks: [] };
+    documentService.getPendingTasks.mockResolvedValue(pending);
+    documentService.cancelQueuedTask.mockResolvedValue({
+      taskId: 'task-1',
+      cancelled: true,
+    });
+
+    await expect(service.getPendingDocumentTasks(20)).resolves.toEqual(pending);
+    await expect(service.cancelQueuedDocumentTask('task-1')).resolves.toEqual({
+      taskId: 'task-1',
+      cancelled: true,
+    });
+    expect(documentService.getPendingTasks).toHaveBeenCalledWith(20);
+    expect(documentService.cancelQueuedTask).toHaveBeenCalledWith('task-1');
   });
 
   it('creates replacement versions as drafts', async () => {
@@ -130,6 +160,83 @@ describe('RagAdminService document versions', () => {
   });
 });
 
+describe('RagAdminService image-to-image search', () => {
+  const docMetaRepo = { find: jest.fn() };
+  const documentService = { getAllowedDocIdsForUser: jest.fn() };
+  const imageIndexService = {
+    isEnabled: jest.fn(() => true),
+    searchImage: jest.fn(),
+  };
+  const service = new RagAdminService(
+    {} as never,
+    documentService as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    docMetaRepo as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    imageIndexService as never,
+  );
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    imageIndexService.isEnabled.mockReturnValue(true);
+  });
+
+  it('embeds image queries only after resolving the active document ACL', async () => {
+    documentService.getAllowedDocIdsForUser.mockResolvedValue(
+      new Set(['doc-1']),
+    );
+    docMetaRepo.find.mockResolvedValue([
+      {
+        docId: 'doc-1',
+        lifecycleStatus: 'effective',
+        reviewStatus: 'approved',
+      },
+    ]);
+    imageIndexService.searchImage.mockResolvedValue([
+      { docId: 'doc-1', url: '/asset.png', score: 0.9 },
+    ]);
+
+    await expect(
+      service.searchImagesByImage(
+        'query-image',
+        'image/png',
+        12,
+        'user-1',
+        'tenant-a',
+        'editor',
+      ),
+    ).resolves.toMatchObject({
+      query: '上传图片',
+      limit: 12,
+      reason: null,
+      results: [{ docId: 'doc-1' }],
+    });
+    expect(documentService.getAllowedDocIdsForUser).toHaveBeenCalledWith(
+      'user-1',
+      'tenant-a',
+      ['editor'],
+    );
+    expect(imageIndexService.searchImage).toHaveBeenCalledWith(
+      'query-image',
+      'image/png',
+      { topK: 12, userId: 'user-1', allowedDocIds: new Set(['doc-1']) },
+    );
+  });
+});
+
 describe('RagAdminService document listing and archive', () => {
   const transactionDocMetaRepo = { update: jest.fn() };
   const transactionReviewRepo = { save: jest.fn() };
@@ -170,6 +277,8 @@ describe('RagAdminService document listing and archive', () => {
     documentReviewRepo as never,
     permissionRepo as never,
     domainEvents as never,
+    {} as never,
+    {} as never,
   );
 
   beforeEach(() => {
