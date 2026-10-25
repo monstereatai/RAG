@@ -1,293 +1,179 @@
-import {
-  QueryIntentRouter,
-  requiresKnowledgeRetrieval,
-} from './query-intent-router';
+import { QueryPlannerService } from '../planning/query-planner.service';
+import { RetrievalPolicyService } from '../planning/retrieval-policy.service';
+import { adaptStoredQueryPlan } from '../planning/query-plan';
 
-describe('QueryIntentRouter', () => {
-  it('keeps public arithmetic eligible for direct answering', () => {
-    expect(requiresKnowledgeRetrieval('1+1 等于多少')).toBe(false);
-  });
-
-  it('uses the classifier context mode for temporary session settings', async () => {
-    const router = new QueryIntentRouter({
+describe('QueryPlannerService', () => {
+  it('returns the compact structured plan without permission fields', async () => {
+    const planner = new QueryPlannerService({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'objective_fact',
-          contextMode: 'conversation_setting',
-          confidence: 0.99,
           action: 'retrieve',
-          sourcePolicy: 'local_only',
+          domain: 'internal',
+          contextMode: 'independent',
+          standaloneQuery: '公司的研发流程是什么',
+          subQueries: [],
+          taskType: 'procedure',
+          needsGraph: false,
           entities: [],
-          standaloneQuery: '1+1等于5',
-          ambiguity: { detected: false },
+          filters: {},
         }),
       ),
     } as never);
 
-    await expect(router.classify('1+1等于5')).resolves.toMatchObject({
-      contextMode: 'conversation_setting',
-      sourcePolicy: 'local_only',
-    });
-  });
-
-  it('uses the classifier local-knowledge decision for project questions', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'project_knowledge',
-          confidence: 0.95,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          queryType: 'project_knowledge',
-          targetKbs: ['company', 'project', 'documents'],
-          entities: [],
-          standaloneQuery: '内部业务链路有哪些',
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(router.classify('内部业务链路有哪些')).resolves.toMatchObject({
+    const plan = await planner.plan('公司的研发流程是什么');
+    expect(plan).toMatchObject({
       action: 'retrieve',
-      sourcePolicy: 'local_only',
-      queryType: 'project_knowledge',
-      targetKbs: expect.arrayContaining(['company', 'project', 'documents']),
+      domain: 'internal',
+      taskType: 'procedure',
     });
+    expect(plan).not.toHaveProperty('sourcePolicy');
+    expect(plan).not.toHaveProperty('targetKbs');
+    expect(plan).not.toHaveProperty('rewriteQueries');
   });
 
-  it('normalizes a semantic private-entity decision without keyword extraction', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'project_knowledge',
-          confidence: 0.99,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          queryType: 'private_entity',
-          entities: ['李四'],
-          standaloneQuery: '李四是谁',
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(router.classify('李四是谁')).resolves.toMatchObject({
-      action: 'retrieve',
-      queryType: 'private_entity',
-      targetKbs: expect.arrayContaining(['documents', 'company']),
-      entities: ['李四'],
-      rewriteQueries: expect.arrayContaining(['李四是谁']),
-    });
-  });
-
-  it('uses the classifier public-knowledge decision for direct answers', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'objective_fact',
-          confidence: 0.88,
-          action: 'direct_answer',
-          sourcePolicy: 'direct_answer',
-          queryType: 'public_knowledge',
-          targetKbs: ['general'],
-          entities: [],
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(router.classify('小红书是什么')).resolves.toMatchObject({
-      action: 'direct_answer',
-      sourcePolicy: 'direct_answer',
-      queryType: 'public_knowledge',
-      targetKbs: ['general'],
-    });
-  });
-
-  it('preserves a structured direct-answer decision for a bare public topic', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'general',
-          confidence: 0.88,
-          action: 'direct_answer',
-          sourcePolicy: 'direct_answer',
-          queryType: 'public_knowledge',
-          targetKbs: ['general'],
-          entities: [],
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(router.classify('小红书')).resolves.toMatchObject({
-      action: 'direct_answer',
-      sourcePolicy: 'direct_answer',
-      queryType: 'public_knowledge',
-      targetKbs: ['general'],
-    });
-  });
-
-  it('keeps project queries local when the classifier identifies project knowledge', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'project_knowledge',
-          confidence: 0.95,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          queryType: 'project_knowledge',
-          needsSynthesis: true,
-          targetKbs: ['company', 'project', 'documents'],
-          entities: [],
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(
-      router.classify('公司的研发流程是什么'),
-    ).resolves.toMatchObject({
-      action: 'retrieve',
-      sourcePolicy: 'local_only',
-      needsSynthesis: true,
-      queryType: 'project_knowledge',
-      targetKbs: ['company', 'project', 'documents'],
-    });
-  });
-
-  it('keeps graph probing opt-in to the structured retrieval plan', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'project_knowledge',
-          confidence: 0.96,
-          action: 'retrieve',
-          sourcePolicy: 'local_only',
-          requiresGraph: true,
-          entities: ['活动页', '奖品规则'],
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(router.classify('活动页和奖品规则之间有什么依赖关系？')).resolves.toMatchObject({
-      requiresGraph: true,
-      sourcePolicy: 'local_only',
-    });
-  });
-
-  it('does not retain a hidden keyword router in the legacy helper', () => {
-    expect(requiresKnowledgeRetrieval('李四是谁')).toBe(false);
-    expect(requiresKnowledgeRetrieval('公司绩效制度是什么')).toBe(false);
-  });
-
-  it('preserves semantic multi-question classification', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'general',
-          confidence: 0.94,
-          standaloneQuery: 'React 是什么？1+1 等于多少？',
-          multiIntent: true,
-          subQueries: ['React 是什么？', '1+1 等于多少？'],
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(
-      router.classify('React 是什么？1+1 等于多少？'),
-    ).resolves.toMatchObject({
-      multiIntent: true,
-      subQueries: ['React 是什么？', '1+1 等于多少？'],
-    });
-  });
-
-  it('uses the conservative general route when semantic routing fails', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockRejectedValue(new Error('provider failed')),
-    } as never);
-
-    await expect(router.classify('1+1 等于多少？')).resolves.toMatchObject({
-      intent: 'general',
-      confidence: 0,
-      sourcePolicy: 'local_only',
-      action: 'retrieve',
-      multiIntent: false,
-      subQueries: [],
-    });
-  });
-
-  it('does not infer multiIntent from punctuation after classification', async () => {
-    const router = new QueryIntentRouter({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          intent: 'general',
-          confidence: 0.9,
-          standaloneQuery: 'React 是什么？1+1 等于多少？',
-          multiIntent: false,
-          ambiguity: { detected: false },
-        }),
-      ),
-    } as never);
-
-    await expect(
-      router.classify('React 是什么？1+1 等于多少？'),
-    ).resolves.toMatchObject({
-      multiIntent: false,
-      subQueries: [],
-    });
-  });
-
-  it('rewrites a follow-up using only the historical entity, never its answer', async () => {
+  it('keeps the original query and adds only a contextual follow-up query', async () => {
     const invoke = jest.fn().mockResolvedValue(
       JSON.stringify({
-        intent: 'follow_up',
-        confidence: 0.96,
         action: 'retrieve',
-        sourcePolicy: 'local_only',
+        domain: 'internal',
+        contextMode: 'follow_up',
         standaloneQuery: 'React 吃什么？',
+        subQueries: [],
+        taskType: 'lookup',
+        needsGraph: false,
         entities: ['React'],
-        rewriteQueries: ['React 吃什么？'],
-        historyPolicy: 'context_only',
-        ambiguity: { detected: false },
+        filters: {},
       }),
     );
-    const router = new QueryIntentRouter({ invoke } as never);
+    const planner = new QueryPlannerService({ invoke } as never);
+    const plan = await planner.plan('那它吃什么？', [
+      { role: 'human', content: 'React 是一种动物' },
+    ]);
+    const execution = new RetrievalPolicyService().build('那它吃什么？', plan);
 
-    await expect(
-      router.classify('那它吃什么？', [
-        { role: 'human', content: 'React 是一种动物' },
-      ]),
-    ).resolves.toMatchObject({
-      intent: 'follow_up',
-      standaloneQuery: 'React 吃什么？',
-      historyPolicy: 'context_only',
-    });
+    expect(execution.queries).toEqual([
+      { text: '那它吃什么？', kind: 'original', weight: 1 },
+      { text: 'React 吃什么？', kind: 'standalone', weight: 0.85 },
+    ]);
     expect(invoke.mock.calls[0][0]).toContain('React 是一种动物');
   });
 
-  it('marks explicitly temporary history as hypothesis-only', async () => {
-    const router = new QueryIntentRouter({
+  it('uses a conservative local retrieval fallback on planner failure', async () => {
+    const planner = new QueryPlannerService({
+      invoke: jest.fn().mockRejectedValue(new Error('provider failed')),
+    } as never);
+    const plan = await planner.plan('1+1 等于多少？');
+    const execution = new RetrievalPolicyService().build(
+      '1+1 等于多少？',
+      plan,
+    );
+
+    expect(plan).toMatchObject({
+      action: 'retrieve',
+      domain: 'internal',
+      standaloneQuery: '1+1 等于多少？',
+    });
+    expect(execution.sourcePolicy).toBe('local_only');
+  });
+
+  it('derives multi-intent from subQueries and caps them at three', async () => {
+    const planner = new QueryPlannerService({
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
-          intent: 'follow_up',
-          confidence: 0.9,
           action: 'retrieve',
-          sourcePolicy: 'local_only',
-          standaloneQuery: '小猫吃什么？',
-          entities: ['小猫'],
-          historyPolicy: 'hypothesis_only',
-          ambiguity: { detected: false },
+          domain: 'public',
+          contextMode: 'independent',
+          standaloneQuery: '比较四种方案',
+          subQueries: ['方案 A', '方案 B', '方案 C', '方案 D'],
+          taskType: 'comparison',
+          needsGraph: false,
+          entities: [],
+          filters: {},
         }),
       ),
     } as never);
+    const plan = await planner.plan('比较四种方案');
+    expect(plan.subQueries).toEqual(['方案 A', '方案 B', '方案 C']);
+  });
 
-    await expect(
-      router.classify('那它吃什么？', [
-        { role: 'human', content: '假设这只小猫会说话，仅用于本轮推演' },
-      ]),
-    ).resolves.toMatchObject({ historyPolicy: 'hypothesis_only' });
+  it('adapts legacy mixed plans before the new schema can apply defaults', () => {
+    const plan = adaptStoredQueryPlan(
+      {
+        intent: 'knowledge_qa',
+        queryType: 'multi_intent',
+        contextMode: 'mixed',
+        standaloneQuery: '比较两个方案',
+        subQueries: ['方案 A', '方案 B'],
+        needsSynthesis: true,
+        requiresGraph: true,
+        entities: [],
+        filters: {},
+      },
+      '比较一下',
+      1,
+    );
+
+    expect(plan).toMatchObject({
+      contextMode: 'mixed',
+      taskType: 'synthesis',
+      needsGraph: true,
+      subQueries: ['方案 A', '方案 B'],
+    });
+  });
+
+  it('forces explicit scopes local and only narrows their existing boundary', () => {
+    const execution = new RetrievalPolicyService().build(
+      'React 是什么？',
+      {
+        action: 'direct',
+        domain: 'public',
+        contextMode: 'independent',
+        standaloneQuery: 'React 是什么？',
+        subQueries: [],
+        taskType: 'lookup',
+        needsGraph: false,
+        entities: [],
+        filters: {
+          project: 'model-project',
+          documentType: 'policy',
+          department: '研发部',
+          timeRange: '今年',
+        },
+      },
+      { projectId: 'authorized-project' },
+      undefined,
+      { forceLocal: true },
+    );
+
+    expect(execution).toMatchObject({
+      sourcePolicy: 'local_only',
+      scopeRestricted: true,
+      scope: {
+        projectId: 'authorized-project',
+      },
+    });
+    expect(execution.scope).not.toHaveProperty('projectId', 'model-project');
+    expect(execution.scope).not.toHaveProperty('department');
+    expect(execution.scope).not.toHaveProperty('timeRange');
+  });
+
+  it('uses the local QueryPlan fast path for a short simple lookup', async () => {
+    const invoke = jest.fn();
+    const planner = new QueryPlannerService({ invoke } as never);
+
+    const plan = await planner.plan(
+      '生产系统权限默认有效期是多久？',
+      [],
+      { preferLocalFastPath: true },
+    );
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(plan).toMatchObject({
+      action: 'retrieve',
+      domain: 'internal',
+      contextMode: 'independent',
+      standaloneQuery: '生产系统权限默认有效期是多久？',
+      taskType: 'lookup',
+    });
   });
 });

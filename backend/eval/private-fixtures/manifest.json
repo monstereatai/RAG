@@ -1,0 +1,39 @@
+{
+  "version": "private-fixture-manifest-1",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "scripts/prepare-private-fixtures.mjs",
+    "containsRealBusinessData": false
+  },
+  "outputs": [
+    "eval/private-business-regression.dataset.json",
+    "eval/private-multimodal.dataset.json",
+    "eval/private-graph-business.seed.json",
+    "eval/private-organization.fixture.json",
+    "eval/private-fixtures/documents/hr-travel-policy-2026.md",
+    "eval/private-fixtures/documents/hr-annual-leave.md",
+    "eval/private-fixtures/documents/finance-expense-sop.md",
+    "eval/private-fixtures/documents/finance-budget-policy.md",
+    "eval/private-fixtures/documents/legal-contract-workflow.md",
+    "eval/private-fixtures/documents/legal-data-privacy-policy.md",
+    "eval/private-fixtures/documents/it-access-control.md",
+    "eval/private-fixtures/documents/security-incident-response.md",
+    "eval/private-fixtures/documents/sales-deal-desk-playbook.md",
+    "eval/private-fixtures/documents/ops-incident-runbook.md",
+    "eval/private-fixtures/documents/product-release-process.md",
+    "eval/private-fixtures/documents/customer-success-sla-v2.md",
+    "eval/private-fixtures/documents/procurement-supplier-policy.md",
+    "eval/private-fixtures/documents/data-governance-metrics.md",
+    "eval/private-fixtures/documents/engineering-api-standard.md",
+    "eval/private-fixtures/documents/engineering-frontend-quality-gate.md",
+    "eval/private-fixtures/documents/security-permission-matrix.md",
+    "eval/private-fixtures/documents/finance-revenue-recognition.md",
+    "eval/private-fixtures/documents/ops-change-management.md",
+    "eval/private-fixtures/documents/customer-renewal-playbook.md",
+    "eval/private-fixtures/documents/dashboard-screenshot-ocr.md",
+    "eval/private-fixtures/media/meeting-action-items.wav",
+    "eval/private-fixtures/media/dashboard-screenshot.png",
+    "eval/private-fixtures/media/approval-training.mp4"
+  ]
+}

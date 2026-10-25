@@ -133,7 +133,7 @@ describe('QaOpsController — SSE Streaming', () => {
         error: 'fetch failed: ECONNREFUSED',
       } as any);
 
-      await expect(controller.listConversations()).resolves.toEqual({
+      await expect(controller.listConversations(mockReq as any)).resolves.toEqual({
         data: [],
         available: false,
         status: null,

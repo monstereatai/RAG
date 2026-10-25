@@ -21,6 +21,9 @@ export class JwtPayload {
   /** 多租户迁移完成前保持可选；新签发 token 应携带该字段。 */
   tenantId?: string;
 
+  /** 可选部门列表，用于 department ACL。 */
+  departmentIds?: string[];
+
   /**
    * token 类型：
    * - access：业务访问 token，可通过 JwtAuthGuard 访问业务接口
@@ -31,4 +34,7 @@ export class JwtPayload {
    * 因此声明为可选属性。
    */
   type?: 'access' | 'refresh';
+
+  /** refresh token rotation id, used for one-time rotation and revocation. */
+  jti?: string;
 }

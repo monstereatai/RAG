@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  ForbiddenException,
   Param,
   Post,
   Query,
@@ -25,6 +26,7 @@ import type { AguiEvent } from './agui.types';
 import { TenantQuotaGuard } from '../../common/guards/tenant-quota.guard';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 import { ConversationAttachmentService } from './conversation-attachment.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 @Controller('agui')
 export class AguiController {
@@ -34,6 +36,7 @@ export class AguiController {
   ) {}
 
   @Post('admin/attachments')
+  @Public()
   @UseGuards(ServiceTokenGuard)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   uploadAdminAttachment(
@@ -50,6 +53,7 @@ export class AguiController {
   }
 
   @Get('admin/attachments')
+  @Public()
   @UseGuards(ServiceTokenGuard)
   listAdminAttachments(
     @Query('userId') userId?: string,
@@ -63,6 +67,7 @@ export class AguiController {
   }
 
   @Delete('admin/attachments')
+  @Public()
   @UseGuards(ServiceTokenGuard)
   removeAllAdminAttachments(
     @Query('userId') userId?: string,
@@ -76,6 +81,7 @@ export class AguiController {
   }
 
   @Delete('admin/attachments/:attachmentId')
+  @Public()
   @UseGuards(ServiceTokenGuard)
   removeAdminAttachment(
     @Param('attachmentId') attachmentId: string,
@@ -119,6 +125,7 @@ export class AguiController {
       threadId,
       userId: user.userId,
       tenantId: user.tenantId,
+      departmentIds: user.departmentIds,
       model: chatModel,
       rolePresetId,
       pluginKeys: pluginKeys
@@ -131,6 +138,7 @@ export class AguiController {
   }
 
   @Sse('admin/stream')
+  @Public()
   @UseGuards(ServiceTokenGuard)
   adminStream(
     @Query('query') query: string,
@@ -150,13 +158,22 @@ export class AguiController {
       );
     }
     const chatModel = this.parseModel(model);
+    const adminUserId = userId?.trim();
+    if (!adminUserId || !/^admin:[a-f0-9]{58}$/.test(adminUserId)) {
+      throw new ForbiddenException('管理后台缺少有效的管理员身份映射。');
+    }
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!tenantId) {
+      throw new ForbiddenException('必须配置 RAG_ADMIN_TENANT_ID。');
+    }
     return this.aguiService.stream({
       query,
       mode: chatMode,
       threadId,
-      // 管理后台没有浏览器用户 JWT 时使用管理员知识库身份。历史上的
-      // `admin-backend` 是服务调用方标识，不是文档所有者，不能拿它做检索隔离。
-      userId: userId?.trim() || process.env.RAG_ADMIN_USER_ID || '1',
+      // Admin Backend 通过服务令牌进入此路由，并传入由 Admin 会话派生的稳定身份。
+      userId: adminUserId,
+      tenantId: tenantId || 'legacy',
+      trustedAdminPrincipal: true,
       model: chatModel,
       rolePresetId,
       pluginKeys: pluginKeys

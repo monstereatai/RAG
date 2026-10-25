@@ -49,12 +49,12 @@ export class AgentRuntimeService {
     objective: string;
     mode: AgentRuntimeMode;
     skillLimit?: number;
+    skipSkillMatching?: boolean;
   }): Promise<AgentRuntimePlan> {
     const objective = input.objective.trim();
-    const matchedSkills = await this.skills.match(
-      objective,
-      input.skillLimit ?? 3,
-    );
+    const matchedSkills = input.skipSkillMatching
+      ? []
+      : await this.skills.match(objective, input.skillLimit ?? 3);
     const isCodeTask =
       /代码|实现|开发|修复|重构|接口|组件|工程|bug|code|implement|fix/i.test(
         objective,
@@ -68,8 +68,11 @@ export class AgentRuntimeService {
       objective,
       stages,
       selectedSkills: matchedSkills.map((skill) => skill.name),
-      // cd：约束执行计划的上下文策略
-      contextPolicy: this.contextPolicy(input.mode),
+      skillMatching: input.skipSkillMatching ? 'skipped_simple' : 'matched',
+      contextPolicy: {
+        isolatedByThread: true,
+        allowCrossThreadMemory: false,
+      },
       limits: this.limits(input.mode),
     };
   }
@@ -241,36 +244,6 @@ export class AgentRuntimeService {
       execution: 'checkpointed' as const,
     });
     return stages;
-  }
-
-  private contextPolicy(mode: AgentRuntimeMode) {
-    const policies = {
-      simple: {
-        maxHistoryTurns: 5,
-        maxContextCharacters: 12000,
-        compressionThreshold: 10000,
-        isolatedByThread: true,
-      },
-      auto: {
-        maxHistoryTurns: 5,
-        maxContextCharacters: 18000,
-        compressionThreshold: 14000,
-        isolatedByThread: true,
-      },
-      agentic: {
-        maxHistoryTurns: 8,
-        maxContextCharacters: 30000,
-        compressionThreshold: 24000,
-        isolatedByThread: true,
-      },
-      production: {
-        maxHistoryTurns: 3,
-        maxContextCharacters: 24000,
-        compressionThreshold: 18000,
-        isolatedByThread: true,
-      },
-    };
-    return policies[mode];
   }
 
   private limits(mode: AgentRuntimeMode) {

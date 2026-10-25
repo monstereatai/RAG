@@ -16,14 +16,14 @@ export class AdminController {
   @ApiOperation({ summary: '管理后台首页大盘' })
   @Roles('admin')
   @UseGuards(RolesGuard)
-  getDashboard() {
-    return this.dashboardService.overview();
+  getDashboard(@UserInfo() user: unknown) {
+    return this.dashboardService.overview(user);
   }
 
   @Get('dashboard/overview')
   @ApiOperation({ summary: '大盘概览数据（前端 dashboard service）' })
-  getDashboardOverview() {
-    return this.dashboardService.overview();
+  getDashboardOverview(@UserInfo() user: unknown) {
+    return this.dashboardService.overview(user);
   }
 
   @Get('dashboard/trend')

@@ -11,6 +11,10 @@ import { parseArtifactIntent } from '../artifacts/artifact-intent';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { ConversationAttachmentService } from './conversation-attachment.service';
+import type {
+  SupplementalEvidenceContext,
+  SupplementalEvidenceLoaderInput,
+} from '../chat/chat-runtime.types';
 
 @Injectable()
 export class AguiService {
@@ -96,15 +100,25 @@ export class AguiService {
                 .map((message) => message.content);
             }
           }
-          const attachmentContext = this.attachments
-            ? await this.attachments.retrieve(
-                options.userId,
-                activeThreadId,
-                options.attachmentIds,
-                query,
-                previousUserQueries,
-              )
-            : { content: '', evidence: [] };
+          let attachmentContextPromise:
+            | Promise<SupplementalEvidenceContext>
+            | undefined;
+          const loadAttachmentContext = (
+            input: SupplementalEvidenceLoaderInput,
+          ) => {
+            attachmentContextPromise ??= this.attachments
+              ? this.attachments.retrieve(
+                  options.userId,
+                  activeThreadId as string,
+                  options.attachmentIds,
+                  input.executionPlan.queries,
+                  previousUserQueries,
+                  input.queryPlan.contextMode,
+                  Boolean(artifactIntent),
+                )
+              : Promise.resolve({ content: '', evidence: [] });
+            return attachmentContextPromise;
+          };
           emit('RUN_STARTED', {
             threadId: activeThreadId,
             input: {
@@ -149,7 +163,9 @@ export class AguiService {
                   model: selectedModel,
                   signal: abortController.signal,
                   tenantId: options.tenantId,
-                  supplementalEvidence: attachmentContext.evidence,
+                  trustedAdminPrincipal: options.trustedAdminPrincipal,
+                  departmentIds: options.departmentIds,
+                  loadSupplementalEvidence: loadAttachmentContext,
                 },
               ),
           );
@@ -181,6 +197,9 @@ export class AguiService {
           let generatedArtifacts: unknown[] = [];
           if (artifactIntent) {
             const toolCallId = randomUUID();
+            const attachmentContext = attachmentContextPromise
+              ? await attachmentContextPromise
+              : { content: '', evidence: [] };
             emit('TOOL_CALL_START', {
               toolCallId,
               toolCallName: 'artifact_generate',
@@ -291,6 +310,15 @@ export class AguiService {
       });
       emit('TOOL_CALL_END', {
         toolCallId: this.getToolCallId(event.data),
+      });
+      return;
+    }
+
+    if (event.type === 'answer_replace') {
+      emit('CUSTOM', {
+        name: 'rag.answer_replace',
+        value: typeof event.data === 'string' ? event.data : String(event.data),
+        rawEvent: event,
       });
       return;
     }

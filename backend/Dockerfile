@@ -5,7 +5,7 @@
 # ============================================================
 
 # ---- 构建阶段 ----
-FROM docker.m.daocloud.io/library/node:20.20.2-alpine AS builder
+FROM docker.m.daocloud.io/library/node:22-alpine AS builder
 WORKDIR /app
 
 # 先拷贝 package 文件，利用 docker 层缓存
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # ---- 运行阶段 ----
-FROM docker.m.daocloud.io/library/node:20.20.2-alpine
+FROM docker.m.daocloud.io/library/node:22-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 

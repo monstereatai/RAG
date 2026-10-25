@@ -90,7 +90,7 @@ export function createAgenticArtifact<TPayload>(
  *
  * 节点流转：
  *   router → (simple|agentic)
- *   agentic: query_augment → retrieval → generate → reflection → (retry|end)
+ *   agentic: prepare queries → retrieval → generate → reflection → (retry|end)
  */
 export const AgenticRagState = Annotation.Root({
   /** 用户原始问题 */
@@ -175,6 +175,12 @@ export const AgenticRagState = Annotation.Root({
   retryCount: Annotation<number>({
     reducer: (_prev, next) => next,
     default: () => 0,
+  }),
+
+  /** 上次答案评估未通过的原因，供下一轮生成修正；旧 checkpoint 缺失时为空。 */
+  reflectionFeedback: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
   }),
 
   /** 是否通过 reflection */

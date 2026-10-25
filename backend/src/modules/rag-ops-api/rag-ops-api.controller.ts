@@ -15,7 +15,9 @@ import {
   RagEvaluationRunDto,
 } from './dto/rag-ops-api.dto';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('rag/ops-api')
 @UseGuards(ServiceTokenGuard)
 export class RagOpsApiController {

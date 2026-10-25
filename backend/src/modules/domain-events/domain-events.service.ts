@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -13,6 +14,15 @@ import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-even
 import { DomainEventSubscriptionEntity } from '../../providers/db/entities/domain-event-subscription.entity';
 import { DomainEventDeliveryEntity } from '../../providers/db/entities/domain-event-delivery.entity';
 import { RedisProvider } from '../../providers/redis/redis.provider';
+
+const CONVERSATION_CACHE_INVALIDATE_EVENT = 'conversation.cache_invalidate';
+const CONVERSATION_TURN_COMPLETED_EVENT = 'conversation.turn.completed';
+const CONVERSATION_MEMORY_PERSIST_EVENT = 'conversation.memory.persist';
+const CONVERSATION_DELETED_EVENT = 'conversation.deleted';
+
+type InternalDomainEventHandler = (
+  event: DomainEventOutboxEntity,
+) => Promise<void>;
 
 export type DomainEventInput = {
   tenantId?: string;
@@ -31,6 +41,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   private readonly dispatchLockKey = 'rag:domain-events:dispatch-lock';
   private readonly lockTtlSeconds: number;
   private readonly requireDistributedLock: boolean;
+  private readonly internalHandlers = new Map<
+    string,
+    InternalDomainEventHandler
+  >();
 
   constructor(
     private readonly config: ConfigService,
@@ -80,6 +94,16 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     await this.persist(manager.getRepository(DomainEventOutboxEntity), input);
   }
 
+  registerInternalHandler(
+    eventType: string,
+    handler: InternalDomainEventHandler,
+  ): void {
+    if (this.internalHandlers.has(eventType)) {
+      throw new Error(`Internal domain event handler already registered: ${eventType}`);
+    }
+    this.internalHandlers.set(eventType, handler);
+  }
+
   private async persist(
     outbox: Repository<DomainEventOutboxEntity>,
     input: DomainEventInput,
@@ -104,19 +128,25 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     const existing = await outbox.findOne({ where: { idempotencyKey } });
     if (existing) return;
     try {
-      await outbox.save(
-        outbox.create({
-          id: randomUUID(),
-          idempotencyKey,
-          eventType: input.eventType,
-          tenantId,
-          aggregateType: input.aggregateType,
-          aggregateId: input.aggregateId,
-          payload: JSON.stringify(safePayload),
-          status: 'pending',
-          availableAt: new Date(),
-        }),
-      );
+      const event = outbox.create({
+        id: randomUUID(),
+        idempotencyKey,
+        eventType: input.eventType,
+        tenantId,
+        aggregateType: input.aggregateType,
+        aggregateId: input.aggregateId,
+        payload: JSON.stringify(safePayload),
+        status: 'pending',
+        availableAt: new Date(),
+      });
+      if (
+        input.eventType === CONVERSATION_TURN_COMPLETED_EVENT ||
+        input.eventType === CONVERSATION_MEMORY_PERSIST_EVENT ||
+        input.eventType === CONVERSATION_DELETED_EVENT
+      ) {
+        event.maxAttempts = 8;
+      }
+      await outbox.save(event);
     } catch (error) {
       // 多实例并发 emit 时由数据库唯一约束完成最终幂等；并发撞车应视为已存在，
       // 其他数据库错误仍然向上抛出，不能静默丢掉事件。
@@ -135,29 +165,51 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async retry(id: string) {
-    const row = await this.outbox.findOneBy({ id });
-    if (!row) return null;
-    row.status = 'pending';
-    row.attempts = 0;
-    row.lastError = null;
-    row.availableAt = new Date();
-    row.deliveredAt = null;
-    await this.deliveries
-      ?.createQueryBuilder()
-      .update(DomainEventDeliveryEntity)
-      .set({
-        status: 'pending',
-        attempts: 0,
-        availableAt: new Date(),
-        deliveredAt: null,
-        lastError: null,
-      })
-      .where('eventId = :eventId AND status = :status', {
-        eventId: id,
-        status: 'failed',
-      })
-      .execute();
-    return this.outbox.save(row);
+    return this.outbox.manager.transaction(async (manager) => {
+      const outbox = manager.getRepository(DomainEventOutboxEntity);
+      const now = new Date();
+      const result = await outbox
+        .createQueryBuilder()
+        .update(DomainEventOutboxEntity)
+        .set({
+          status: 'pending',
+          attempts: 0,
+          lastError: null,
+          availableAt: now,
+          deliveredAt: null,
+        })
+        .where('id = :id AND status = :status', { id, status: 'failed' })
+        .execute();
+
+      if (result.affected !== 1) {
+        const row = await outbox.findOneBy({ id });
+        if (!row) return null;
+        throw new ConflictException(
+          'Only failed outbox events can be retried',
+        );
+      }
+
+      if (this.deliveries) {
+        await manager
+          .getRepository(DomainEventDeliveryEntity)
+          .createQueryBuilder()
+          .update(DomainEventDeliveryEntity)
+          .set({
+            status: 'pending',
+            attempts: 0,
+            availableAt: now,
+            deliveredAt: null,
+            lastError: null,
+          })
+          .where('eventId = :eventId AND status = :status', {
+            eventId: id,
+            status: 'failed',
+          })
+          .execute();
+      }
+
+      return outbox.findOneBy({ id });
+    });
   }
 
   async listSubscriptions() {
@@ -204,11 +256,17 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
           lockToken,
           this.lockTtlSeconds,
         );
-        if (!lockAcquired) return;
+        if (!lockAcquired) {
+          if (this.requireDistributedLock) {
+            await this.dispatchInternalCacheInvalidations();
+          }
+          return;
+        }
       } else if (this.requireDistributedLock) {
         this.logger.error(
           'Domain event dispatch skipped: distributed Redis lock is required but unavailable.',
         );
+        await this.dispatchInternalCacheInvalidations();
         return;
       }
       const rows = await this.outbox
@@ -231,6 +289,12 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn(
               'Outbox dispatch lease was lost; stopping this batch to avoid duplicate delivery.',
             );
+            if (
+              row.eventType === CONVERSATION_CACHE_INVALIDATE_EVENT &&
+              this.requireDistributedLock
+            ) {
+              await this.deliver(row);
+            }
             return;
           }
         }
@@ -245,7 +309,46 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Cache DEL is idempotent, so internal invalidations can progress without a
+   * Redis lease. External subscriptions remain blocked until the shared lock
+   * is available.
+   */
+  private async dispatchInternalCacheInvalidations(): Promise<void> {
+    const rows = await this.outbox
+      .createQueryBuilder('event')
+      .where('event.status = :status', { status: 'pending' })
+      .andWhere('event.eventType = :eventType', {
+        eventType: CONVERSATION_CACHE_INVALIDATE_EVENT,
+      })
+      .andWhere('(event.availableAt IS NULL OR event.availableAt <= :now)', {
+        now: new Date(),
+      })
+      .orderBy('event.createdAt', 'ASC')
+      .take(20)
+      .getMany();
+    for (const row of rows) await this.deliver(row);
+  }
+
   private async deliver(row: DomainEventOutboxEntity): Promise<void> {
+    // Internal events never enter the configurable Webhook／企微 subscription path.
+    if (row.eventType === CONVERSATION_CACHE_INVALIDATE_EVENT) {
+      await this.deliverConversationCacheInvalidation(row);
+      return;
+    }
+    if (row.eventType === CONVERSATION_TURN_COMPLETED_EVENT) {
+      await this.deliverConversationTurnCompleted(row);
+      return;
+    }
+    if (row.eventType === CONVERSATION_MEMORY_PERSIST_EVENT) {
+      await this.deliverConversationMemoryPersist(row);
+      return;
+    }
+    if (row.eventType === CONVERSATION_DELETED_EVENT) {
+      await this.deliverConversationDeleted(row);
+      return;
+    }
+
     const subscribers = (
       await this.subscriptions.find({ where: { enabled: true } })
     ).filter(
@@ -313,22 +416,48 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         states.push(delivery);
         continue;
       }
-      try {
-        await this.post(subscription, row, delivery.id);
-        delivery.status = 'delivered';
-        delivery.deliveredAt = new Date();
-        delivery.lastError = null;
-      } catch (error) {
-        delivery.attempts += 1;
-        delivery.lastError = this.message(error).slice(0, 1000);
-        delivery.status =
-          delivery.attempts >= delivery.maxAttempts ? 'failed' : 'pending';
-        delivery.availableAt = new Date(
-          Date.now() + 1000 * 2 ** delivery.attempts,
-        );
-        row.lastError = delivery.lastError;
+      const deliveryLockKey = `rag:domain-events:delivery:${delivery.id}`;
+      const deliveryLockToken = randomUUID();
+      const deliveryLeaseRequired = this.redisProvider.isEnabled();
+      if (
+        deliveryLeaseRequired &&
+        !(await this.redisProvider.setIfAbsent(
+          deliveryLockKey,
+          deliveryLockToken,
+          this.lockTtlSeconds,
+        ))
+      ) {
+        // The global batch lease may expire during a slow subscriber call.
+        // A per-delivery lease keeps another instance from posting it twice.
+        states.push(delivery);
+        continue;
       }
-      await this.deliveries.save(delivery);
+      try {
+        try {
+          await this.post(subscription, row, delivery.id);
+          delivery.status = 'delivered';
+          delivery.deliveredAt = new Date();
+          delivery.lastError = null;
+        } catch (error) {
+          delivery.attempts += 1;
+          delivery.lastError = this.message(error).slice(0, 1000);
+          delivery.status =
+            delivery.attempts >= delivery.maxAttempts ? 'failed' : 'pending';
+          delivery.availableAt = new Date(
+            Date.now() + 1000 * 2 ** delivery.attempts,
+          );
+          row.lastError = delivery.lastError;
+        }
+        await this.deliveries.save(delivery);
+      }
+      finally {
+        if (deliveryLeaseRequired) {
+          await this.redisProvider.releaseLock(
+            deliveryLockKey,
+            deliveryLockToken,
+          );
+        }
+      }
       states.push(delivery);
     }
     const hasPending = states.some((state) => state.status === 'pending');
@@ -347,6 +476,154 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       row.status = 'pending';
       row.availableAt = new Date(
         Date.now() + 1000 * 2 ** Math.min(row.attempts, 8),
+      );
+    }
+    await this.outbox.save(row);
+  }
+
+  private async deliverConversationTurnCompleted(
+    row: DomainEventOutboxEntity,
+  ): Promise<void> {
+    try {
+      const handler = this.internalHandlers.get(row.eventType);
+      if (!handler) {
+        throw new Error(
+          `Internal domain event handler is unavailable: ${row.eventType}`,
+        );
+      }
+      await handler(row);
+      row.status = 'delivered';
+      row.deliveredAt = new Date();
+      row.lastError = null;
+    } catch (error) {
+      row.attempts += 1;
+      row.lastError = this.message(error).slice(0, 1000);
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'failed';
+      } else {
+        row.status = 'pending';
+        row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      this.logger.warn(
+        `Conversation turn indexing failed: threadId=${row.aggregateId}, attempt=${row.attempts}`,
+      );
+    }
+    await this.outbox.save(row);
+  }
+
+  private async deliverConversationMemoryPersist(
+    row: DomainEventOutboxEntity,
+  ): Promise<void> {
+    try {
+      const handler = this.internalHandlers.get(row.eventType);
+      if (!handler) {
+        throw new Error(
+          `Internal domain event handler is unavailable: ${row.eventType}`,
+        );
+      }
+      await handler(row);
+      row.status = 'delivered';
+      row.deliveredAt = new Date();
+      row.lastError = null;
+    } catch (error) {
+      row.attempts += 1;
+      row.lastError = this.message(error).slice(0, 1000);
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'failed';
+      } else {
+        row.status = 'pending';
+        row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      this.logger.warn(
+        `Conversation memory persistence failed: threadId=${row.aggregateId}, attempt=${row.attempts}`,
+      );
+    }
+    await this.outbox.save(row);
+  }
+
+  private async deliverConversationDeleted(
+    row: DomainEventOutboxEntity,
+  ): Promise<void> {
+    try {
+      const handler = this.internalHandlers.get(row.eventType);
+      if (!handler) {
+        throw new Error(
+          `Internal domain event handler is unavailable: ${row.eventType}`,
+        );
+      }
+      await handler(row);
+      row.status = 'delivered';
+      row.deliveredAt = new Date();
+      row.lastError = null;
+    } catch (error) {
+      row.attempts += 1;
+      row.lastError = this.message(error).slice(0, 1000);
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'failed';
+      } else {
+        row.status = 'pending';
+        row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      this.logger.warn(
+        `Conversation deletion cleanup failed: threadId=${row.aggregateId}, attempt=${row.attempts}`,
+      );
+    }
+    await this.outbox.save(row);
+  }
+
+  private async deliverConversationCacheInvalidation(
+    row: DomainEventOutboxEntity,
+  ): Promise<void> {
+    try {
+      const payload = this.parse(row.payload);
+      if (!Object.prototype.hasOwnProperty.call(payload, 'userId')) {
+        throw new Error('conversation cache invalidation is missing userId');
+      }
+      const userId = payload.userId;
+      if (userId !== null && typeof userId !== 'string') {
+        throw new Error('conversation cache invalidation has invalid userId');
+      }
+      const threadId = row.aggregateId.trim();
+      if (!threadId) {
+        throw new Error('conversation cache invalidation is missing threadId');
+      }
+
+      if (!this.redisProvider.isConfigured()) {
+        row.status = 'skipped';
+        row.deliveredAt = new Date();
+        row.lastError = null;
+        await this.outbox.save(row);
+        return;
+      }
+      if (!this.redisProvider.isEnabled()) {
+        throw new Error('Redis is configured but unavailable');
+      }
+
+      const tenantId = row.tenantId?.trim() || 'legacy';
+      const tenantScopes = new Set([tenantId, 'legacy']);
+      const keys = new Set([`conv:messages:${threadId}`]);
+      for (const scope of tenantScopes) {
+        keys.add(`conv:messages:${scope}:${threadId}`);
+        if (typeof userId === 'string' && userId.trim()) {
+          keys.add(`conv:messages:${scope}:${userId}:${threadId}`);
+        }
+      }
+      await Promise.all([...keys].map((key) => this.redisProvider.delRequired(key)));
+
+      row.status = 'delivered';
+      row.deliveredAt = new Date();
+      row.lastError = null;
+    } catch (error) {
+      row.attempts += 1;
+      row.lastError = this.message(error).slice(0, 1000);
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'failed';
+      } else {
+        row.status = 'pending';
+        row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      this.logger.warn(
+        `Conversation cache invalidation failed: threadId=${row.aggregateId}, attempt=${row.attempts}`,
       );
     }
     await this.outbox.save(row);

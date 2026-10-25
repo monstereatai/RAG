@@ -9,6 +9,7 @@ import {
   Body,
   Logger,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   UseGuards,
   UseInterceptors,
@@ -31,7 +32,9 @@ import { listSafetyPolicies } from '../../rag/prompts/prompt-injection.guard';
 const MAX_IMAGE_SEARCH_UPLOAD_BYTES = 5 * 1024 * 1024;
 import { IndexReconcilerService } from './index-reconciler.service';
 import { RagAdminGraphService } from './rag-admin-graph.service';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
 export class RagAdminController {
@@ -185,8 +188,15 @@ export class RagAdminController {
     @Body() body: Record<string, unknown>,
   ) {
     if (!file) throw new BadRequestException('file is required');
-    const ownerUserId = String(body?.ownerUserId ?? 'admin');
-    return this.ragAdminService.uploadDocumentAsync(file, ownerUserId, body);
+    const principal = this.requireAdminPrincipal(
+      typeof body?.ownerUserId === 'string' ? body.ownerUserId : undefined,
+    );
+    return this.ragAdminService.uploadDocumentAsync(
+      file,
+      principal.userId,
+      { ...body, ownerUserId: principal.userId, tenantId: principal.tenantId },
+      true,
+    );
   }
 
   @Get('documents/search')
@@ -226,9 +236,11 @@ export class RagAdminController {
     @Query('userId') userId?: string,
     @Query('limit') limit?: string,
   ) {
+    const principal = this.requireAdminPrincipal(userId);
     return this.ragAdminService.inspectRetrieval(
       query,
-      userId,
+      principal.userId,
+      principal.tenantId,
       Number(limit) || 50,
     );
   }
@@ -245,15 +257,15 @@ export class RagAdminController {
     @Query('q') query: string,
     @Query('limit') limit?: string,
     @Query('userId') userId?: string,
-    @Query('tenantId') tenantId?: string,
-    @Query('role') role?: string,
   ) {
+    const principal = this.requireAdminPrincipal(userId);
     return this.ragAdminService.searchImages(
       query ?? '',
       Number(limit) || 20,
-      userId || undefined,
-      tenantId || undefined,
-      role || undefined,
+      principal.userId,
+      principal.tenantId,
+      'admin',
+      true,
     );
   }
 
@@ -272,8 +284,6 @@ export class RagAdminController {
         file: { type: 'string', format: 'binary' },
         limit: { type: 'string' },
         userId: { type: 'string' },
-        tenantId: { type: 'string' },
-        role: { type: 'string' },
       },
       required: ['file', 'userId'],
     },
@@ -282,8 +292,6 @@ export class RagAdminController {
     @UploadedFile() file: Express.Multer.File,
     @Body('limit') limit?: string,
     @Body('userId') userId?: string,
-    @Body('tenantId') tenantId?: string,
-    @Body('role') role?: string,
   ) {
     if (!file?.buffer?.length) {
       throw new BadRequestException('图片文件不能为空');
@@ -291,29 +299,30 @@ export class RagAdminController {
     if (!file.mimetype?.startsWith('image/')) {
       throw new BadRequestException('只支持图片文件');
     }
+    const principal = this.requireAdminPrincipal(userId);
     return this.ragAdminService.searchImagesByImage(
       file.buffer.toString('base64'),
       file.mimetype,
       Number(limit) || 20,
-      userId || undefined,
-      tenantId || undefined,
-      role || undefined,
+      principal.userId,
+      principal.tenantId,
+      'admin',
+      true,
     );
   }
 
   @Get('images/asset')
   async getImageAsset(
     @Query('userId') userId: string,
-    @Query('tenantId') tenantId: string | undefined,
-    @Query('role') role: string | undefined,
     @Query('docId') docId: string,
     @Query('key') key: string,
     @Res() response: Response,
   ) {
+    const principal = this.requireAdminPrincipal(userId);
     const asset = await this.ragAdminService.getImageAsset({
-      userId,
-      tenantId,
-      role,
+      ...principal,
+      role: 'admin',
+      trustedAdminPrincipal: true,
       docId,
       key,
     });
@@ -348,9 +357,10 @@ export class RagAdminController {
     @Param('taskId') taskId: string,
     @Query('ownerUserId') ownerUserId?: string,
   ) {
+    const principal = this.requireAdminPrincipal(ownerUserId);
     const task = await this.ragAdminService.getDocumentTask(
       taskId,
-      ownerUserId ?? 'admin',
+      principal.userId,
     );
     if (!task) throw new NotFoundException(`task ${taskId} not found`);
     return task;
@@ -430,6 +440,44 @@ export class RagAdminController {
       documentType: body.documentType as never,
     });
     if (!result) throw new NotFoundException(`doc ${docId} not found`);
+    return result;
+  }
+
+  @Post('documents/:docId/incremental-update')
+  async incrementalUpdateDocument(
+    @Param('docId') docId: string,
+    @Body()
+    body: {
+      content?: string;
+      filename?: string;
+      docVersion?: string;
+      effectiveAt?: string;
+      expiredAt?: string;
+      lifecycleStatus?:
+        | 'draft'
+        | 'confirmed'
+        | 'effective'
+        | 'deprecated'
+        | 'archived';
+      documentType?: string;
+      changeType?:
+        | 'standalone'
+        | 'new'
+        | 'replace'
+        | 'amend'
+        | 'supplement'
+        | 'deprecate';
+      validityMonths?: number;
+    },
+  ) {
+    const result = await this.ragAdminService.incrementalUpdateDocument(
+      docId,
+      {
+        ...body,
+        documentType: body.documentType as never,
+      },
+    );
+    if (result === null) throw new NotFoundException(`doc ${docId} not found`);
     return result;
   }
 
@@ -672,7 +720,11 @@ export class RagAdminController {
 
   @Get('conversations')
   async listConversations(@Query('userId') userId?: string) {
-    return this.ragAdminService.listConversations(userId || undefined);
+    const principal = this.requireAdminPrincipal(userId);
+    return this.ragAdminService.listConversations(
+      principal.userId,
+      principal.tenantId,
+    );
   }
 
   @Get('conversations/:threadId')
@@ -680,9 +732,11 @@ export class RagAdminController {
     @Param('threadId') threadId: string,
     @Query('userId') userId?: string,
   ) {
+    const principal = this.requireAdminPrincipal(userId);
     const conv = await this.ragAdminService.getConversation(
       threadId,
-      userId || undefined,
+      principal.userId,
+      principal.tenantId,
     );
     if (!conv) {
       throw new NotFoundException(`conversation ${threadId} not found`);
@@ -695,9 +749,11 @@ export class RagAdminController {
     @Param('threadId') threadId: string,
     @Query('userId') userId?: string,
   ) {
+    const principal = this.requireAdminPrincipal(userId);
     const deleted = await this.ragAdminService.deleteConversation(
       threadId,
-      userId || undefined,
+      principal.userId,
+      principal.tenantId,
     );
     if (!deleted) {
       throw new NotFoundException(`conversation ${threadId} not found`);
@@ -852,5 +908,17 @@ export class RagAdminController {
   @Get('graph/conflicts')
   getGraphConflicts() {
     return this.graphAdminService.getGraphConflicts();
+  }
+
+  private requireAdminPrincipal(value?: string) {
+    const userId = value?.trim();
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!userId || !/^admin:[a-f0-9]{58}$/.test(userId)) {
+      throw new ForbiddenException('mapped Admin principal is required');
+    }
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
+    return { userId, tenantId };
   }
 }

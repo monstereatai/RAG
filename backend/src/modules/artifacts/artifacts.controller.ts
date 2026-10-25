@@ -14,7 +14,9 @@ import type { Request, Response } from 'express';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { ArtifactsService } from './artifacts.service';
 import { CreateArtifactDto, CreateArtifactShareDto } from './dto/artifact.dto';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('rag/admin/artifacts')
 @UseGuards(ServiceTokenGuard)
 export class ArtifactsController {

@@ -148,7 +148,7 @@ AGENT_PLATFORM_REQUIRE_LIVE=true npm run eval:agent-platform
 - 没有真实生产流量、真实业务评测集和告警接收地址时，不能宣称“生产 SLA 已达标”。
 - CI 默认只做确定性评测；真实三模式接口评测必须在后端、数据库、Redis、Milvus 和模型配置齐全时设置 `AGENT_PLATFORM_REQUIRE_LIVE=true`。
 - 黄金集的离线结构校验通过，不代表 86 条案例在真实模型和真实内部资料上全部答对；真实业务准确率、引用精度和路由准确率必须在 `GOLDEN_EVAL_REQUIRE_LIVE=true` 回放后，再由业务专家复核。
-- `eval:query-routing` 的离线结果是用记录的模型结构化输出执行生产 `QueryIntentRouter` 的契约回放，不等同于真实模型每次推理的准确率；需要真实模型评测时，应提供固定模型、配额和采样窗口后再运行线上回放。
+- `eval:query-routing` 的离线结果是用记录的 QueryPlan 执行 `QueryPlannerService` 契约解析与 `RetrievalPolicyService` 策略回放，不等同于真实模型每次推理的准确率；需要真实模型评测时，应提供固定模型、配额和采样窗口后再运行线上回放。
 - 三模式 Hybrid E2E 在未配置服务时只会报告 `skipped`；设置 `AGENT_PLATFORM_REQUIRE_LIVE=true` 后，服务不可用或任一模式失败会返回非零，不能把“未执行”算作通过。
 - Bad Case 回归现在走标准 `/api/v1/chat`，并校验引用、检索充分性、纠正内容、禁词和可选路由；每次报告带 `datasetHash` 便于跨时间窗口对账；无审核样本时是 `skipped`，不能作为质量通过证据。
 - 新增迁移需要在目标环境执行 `npm run migration:run`，本地构建通过不代表生产数据库已经升级。

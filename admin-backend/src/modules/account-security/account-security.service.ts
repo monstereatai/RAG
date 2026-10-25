@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  NotImplementedException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 interface LoginAttemptState {
   failedCount: number;
@@ -104,25 +108,30 @@ export class AccountSecurityService {
   /** 前端 account-security 页面用的安全信息 */
   getSecurityInfo() {
     return {
+      available: false,
       data: {
-        lastPasswordChange: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
+        lastPasswordChange: null,
         twoFactorEnabled: false,
-        loginHistory: [
-          { ip: '127.0.0.1', device: 'Chrome / macOS', time: new Date().toISOString(), success: true },
-          { ip: '127.0.0.1', device: 'Chrome / macOS', time: new Date(Date.now() - 3600000).toISOString(), success: false },
-        ],
+        loginHistory: [],
       },
+      reason: 'account_security_persistence_not_configured',
     };
   }
 
-  /** 修改密码（内存模式占位） */
+  /** 未接入正式用户库前必须明确失败，不能返回假成功。 */
   changePassword(body: { oldPassword: string; newPassword: string }) {
-    return { success: true, note: '内存模式，密码未实际修改' };
+    void body;
+    throw new NotImplementedException(
+      '修改密码尚未接入正式用户库，当前不执行任何修改',
+    );
   }
 
-  /** 切换两步验证（内存模式占位） */
+  /** 未接入 MFA secret 持久化前必须明确失败。 */
   toggleTwoFactor(enabled: boolean) {
-    return { success: true, enabled, note: '内存模式，MFA 未实际启用' };
+    void enabled;
+    throw new NotImplementedException(
+      'MFA 尚未接入 secret/backup codes 持久化，当前不启用',
+    );
   }
 
   private getState(username: string): LoginAttemptState {

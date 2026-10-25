@@ -472,7 +472,7 @@ export class LangfuseProvider implements OnModuleDestroy {
   private getSpanName(type: string): string {
     const map: Record<string, string> = {
       routing: 'rag.routing',
-      query_augment: 'rag.query_augment',
+      query_augment: 'rag.query_plan',
       retrieval: 'rag.retrieval',
       sufficiency: 'rag.sufficiency',
       web_search: 'rag.web_search',

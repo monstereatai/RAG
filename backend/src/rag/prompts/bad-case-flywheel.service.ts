@@ -126,11 +126,12 @@ export class BadCaseFlywheelService implements OnModuleInit {
     query: string,
     limit = 2,
     userId?: string,
+    tenantId?: string,
   ): Promise<BadCaseMatch[]> {
     // 纠正层与正式 RAG 同时构建候选；这里也把精确命中和语义命中并行，
     // 最终仍优先精确命中，避免把向量检索串行叠加到主问答延迟上。
     const [exactMatches, semanticMatches] = await Promise.all([
-      this.findExactReviewedMatches(query, limit, userId),
+      this.findExactReviewedMatches(query, limit, userId, tenantId),
       // 向量集合目前没有租户字段；带用户身份时只使用带 owner 的数据库精确层，
       // 避免把另一个租户的语义 Bad Case 泄露到当前回答。
       userId ? Promise.resolve([]) : this.findSemanticMatches(query, limit),
@@ -143,8 +144,9 @@ export class BadCaseFlywheelService implements OnModuleInit {
     query: string,
     limit = 2,
     userId?: string,
+    tenantId?: string,
   ): Promise<BadCaseMatch[]> {
-    return this.findExactReviewedMatches(query, limit, userId);
+    return this.findExactReviewedMatches(query, limit, userId, tenantId);
   }
 
   private async findSemanticMatches(
@@ -195,42 +197,51 @@ export class BadCaseFlywheelService implements OnModuleInit {
     query: string,
     limit: number,
     userId?: string,
+    tenantId?: string,
   ): Promise<BadCaseMatch[]> {
-    if (!this.feedbackRepo || !this.queryLogRepo) return [];
+    if (this.feedbackRepo === undefined || this.queryLogRepo === undefined) {
+      return [];
+    }
     try {
-      const queryBuilder = this.feedbackRepo
-        .createQueryBuilder('feedback')
-        .innerJoin(
-          QueryLogEntity,
-          'queryLog',
-          'queryLog.id = feedback."queryLogId"',
-        )
-        .where('feedback.feedback = :feedback', { feedback: 'negative' })
-        .andWhere('feedback.status IN (:...statuses)', {
-          statuses: ['reviewed', 'resolved'],
-        })
-        .andWhere('feedback."knowledgeLayer" = :knowledgeLayer', {
-          knowledgeLayer: 'correction',
-        })
-        .andWhere('feedback."correctedAnswer" IS NOT NULL');
-      if (userId) {
-        queryBuilder.andWhere('queryLog."userId" = :userId', { userId });
+      const params: unknown[] = [
+        'negative',
+        ['reviewed', 'resolved'],
+        'correction',
+        query.trim(),
+      ];
+      let userFilter = '';
+      if (userId !== undefined) {
+        params.push(userId);
+        userFilter += `AND query_log."userId" = $${params.length} `;
       }
-      const rows = await queryBuilder
-        .andWhere('LOWER(queryLog.query) = LOWER(:query)', {
-          query: query.trim(),
-        })
-        .select([
-          'feedback.id AS "feedbackId"',
-          'queryLog.query AS query',
-          'feedback."correctedAnswer" AS "correctedAnswer"',
-        ])
-        .limit(Math.min(Math.max(limit, 1), 2))
-        .getRawMany<{
-          feedbackId: string;
-          query: string;
-          correctedAnswer: string;
-        }>();
+      if (tenantId !== undefined) {
+        params.push(tenantId);
+        userFilter += `AND query_log."tenantId" = $${params.length} `;
+      }
+      params.push(Math.min(Math.max(limit, 1), 2));
+      const limitParam = `$${params.length}`;
+      const rows = (await this.feedbackRepo.query(
+        `SELECT feedback.id AS "feedbackId",
+                query_log.query AS "query",
+                feedback."correctedAnswer" AS "correctedAnswer"
+           FROM rag_feedback feedback
+           INNER JOIN query_logs query_log
+             ON query_log.id = feedback."queryLogId"
+          WHERE feedback.feedback = $1
+            AND feedback.status = ANY($2::text[])
+            AND feedback."knowledgeLayer" = $3
+            AND feedback."correctedAnswer" IS NOT NULL
+            AND regexp_replace(LOWER(query_log.query), '[[:space:] ，。？、,.!?]', '', 'g') =
+                regexp_replace(LOWER($4), '[[:space:] ，。？、,.!?]', '', 'g')
+            ${userFilter}
+          ORDER BY feedback."createdAt" DESC
+          LIMIT ${limitParam}`,
+        params,
+      )) as Array<{
+        feedbackId: string;
+        query: string;
+        correctedAnswer: string;
+      }>;
 
       return rows.map((row) => ({
         id: `db:${row.feedbackId}`,

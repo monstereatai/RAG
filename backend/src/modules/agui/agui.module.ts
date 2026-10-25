@@ -11,6 +11,8 @@ import { AguiController } from './agui.controller';
 import { AguiService } from './agui.service';
 import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
 import { ConversationAttachmentService } from './conversation-attachment.service';
+import { EmbeddingModule } from '../../providers/embedding/embedding.module';
+import { MetricsModule } from '../metrics/metrics.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { ConversationAttachmentService } from './conversation-attachment.service
     PluginRuntimeModule,
     AgentRunsModule,
     TenantQuotaModule,
+    EmbeddingModule,
+    MetricsModule,
   ],
   controllers: [AguiController],
   providers: [AguiService, ConversationAttachmentService],

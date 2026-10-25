@@ -39,10 +39,18 @@ export function buildAnswerSequence(llmProvider: LlmProvider) {
     async (input: {
       context: string;
       query: string;
+      answerRequirements?: string[];
       history: Array<{ role: 'human' | 'ai'; content: string }>;
       memory: Array<{ role: string; content: string }>;
     }) => {
-      return generateAnswerPrompt.formatMessages(input);
+      return generateAnswerPrompt.formatMessages({
+        ...input,
+        answerRequirements: input.answerRequirements?.length
+          ? input.answerRequirements
+              .map((item, index) => `${index + 1}. ${item}`)
+              .join('\n')
+          : '无（请从用户问题中逐项拆分）',
+      });
     },
   );
 

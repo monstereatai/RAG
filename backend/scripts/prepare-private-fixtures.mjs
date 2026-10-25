@@ -55,6 +55,7 @@ const files = {
   multimodalDataset: resolve(rootDir, 'eval/private-multimodal.dataset.json'),
   graphSeed: resolve(rootDir, 'eval/private-graph-business.seed.json'),
   organization: resolve(rootDir, 'eval/private-organization.fixture.json'),
+  manifest: resolve(fixturesDir, 'manifest.json'),
 };
 
 if (checkOnly) {
@@ -84,6 +85,10 @@ async function prepareFixtures() {
   await writeFile(files.multimodalDataset, JSON.stringify(makeMultimodalDataset(), null, 2) + '\n');
   await writeFile(files.graphSeed, JSON.stringify(makeGraphSeed(), null, 2) + '\n');
   await writeFile(files.organization, JSON.stringify(makeOrganizationFixture(), null, 2) + '\n');
+  await writeFile(
+    files.manifest,
+    JSON.stringify(makeFixtureManifest(Object.keys(documentFiles)), null, 2) + '\n',
+  );
 
   await checkFixtures();
 }
@@ -1009,6 +1014,8 @@ function makeBusinessDataset() {
 
   return {
     version: 'private-sanitized-2026-06-30',
+    synthetic: true,
+    provenance: syntheticProvenance(),
     description:
       '脱敏私有企业模拟数据集（增强版）：包含标准 QA、版本冲突检测、拒答场景、跨部门协作、多步推理等测试用例。' +
       '所有数据均为通用行业模拟，不包含任何真实公司私密信息。' +
@@ -1335,6 +1342,8 @@ function buildDomains() {
 function makeMultimodalDataset() {
   return {
     version: 'private-sanitized-2026-06-30',
+    synthetic: true,
+    provenance: syntheticProvenance(),
     description:
       '脱敏多模态样本包（增强版）。包含真实存在的本地文件路径，覆盖文本/表格/结构体/HTML/音频/图片/视频模态。',
     documents: [
@@ -1580,6 +1589,8 @@ function makeMultimodalDataset() {
 function makeGraphSeed() {
   return {
     version: 'private-sanitized-2026-06-30',
+    synthetic: true,
+    provenance: syntheticProvenance(),
     description:
       '脱敏 GraphRAG 业务图谱种子（增强版），包含跨部门实体关系、别名和职责链。可 dry-run 校验或导入本地 Neo4j。',
     schema: {
@@ -1738,6 +1749,8 @@ function makeGraphSeed() {
 function makeOrganizationFixture() {
   return {
     version: 'private-sanitized-2026-06-30',
+    synthetic: true,
+    provenance: syntheticProvenance(),
     departments: [
       // Top level
       { id: 'dept-exec', name: '高管团队', parentId: null },
@@ -1916,6 +1929,34 @@ function makeOrganizationFixture() {
   };
 }
 
+function syntheticProvenance() {
+  return {
+    kind: 'synthetic_fixture',
+    generator: 'scripts/prepare-private-fixtures.mjs',
+    containsRealBusinessData: false,
+  };
+}
+
+function makeFixtureManifest(documentFiles) {
+  const generatedFiles = [
+    'eval/private-business-regression.dataset.json',
+    'eval/private-multimodal.dataset.json',
+    'eval/private-graph-business.seed.json',
+    'eval/private-organization.fixture.json',
+    ...documentFiles.map((filename) => `eval/private-fixtures/documents/${filename}`),
+    'eval/private-fixtures/media/meeting-action-items.wav',
+    'eval/private-fixtures/media/dashboard-screenshot.png',
+    'eval/private-fixtures/media/approval-training.mp4',
+  ];
+
+  return {
+    version: 'private-fixture-manifest-1',
+    synthetic: true,
+    provenance: syntheticProvenance(),
+    outputs: generatedFiles,
+  };
+}
+
 /* ================================================================
  *  Validation
  * ================================================================ */
@@ -1927,6 +1968,7 @@ async function checkFixtures() {
     files.multimodalDataset,
     files.graphSeed,
     files.organization,
+    files.manifest,
     ...docFiles.map((name) => resolve(docsDir, name)),
     resolve(mediaDir, 'meeting-action-items.wav'),
     resolve(mediaDir, 'dashboard-screenshot.png'),
@@ -1946,6 +1988,7 @@ async function checkFixtures() {
   const multimodal = JSON.parse(await readFile(files.multimodalDataset, 'utf8'));
   const graph = JSON.parse(await readFile(files.graphSeed, 'utf8'));
   const organization = JSON.parse(await readFile(files.organization, 'utf8'));
+  const manifest = JSON.parse(await readFile(files.manifest, 'utf8'));
 
   const businessItems = business.items ?? [];
   const multimodalDocs = multimodal.documents ?? [];
@@ -1962,6 +2005,22 @@ async function checkFixtures() {
     organization.inheritanceRules.length >= 4 &&
     Array.isArray(organization.permissionEchoSamples) &&
     organization.permissionEchoSamples.length >= 3;
+  const generatedDatasets = [business, multimodal, graph, organization];
+  const provenanceReady = generatedDatasets.every(
+    (dataset) =>
+      dataset.synthetic === true &&
+      dataset.provenance?.kind === 'synthetic_fixture' &&
+      dataset.provenance?.generator === 'scripts/prepare-private-fixtures.mjs' &&
+      dataset.provenance?.containsRealBusinessData === false,
+  );
+  const expectedManifestOutputs = makeFixtureManifest(docFiles).outputs;
+  const manifestReady =
+    manifest.synthetic === true &&
+    manifest.provenance?.kind === 'synthetic_fixture' &&
+    manifest.provenance?.containsRealBusinessData === false &&
+    Array.isArray(manifest.outputs) &&
+    manifest.outputs.length === expectedManifestOutputs.length &&
+    expectedManifestOutputs.every((path) => manifest.outputs.includes(path));
 
   // Validate enhanced dataset expectations
   const hasConflict = businessItems.some((i) => i.expectConflictHandling);
@@ -1977,6 +2036,8 @@ async function checkFixtures() {
       graphSchemaReady &&
       departments.length >= 18 &&
       organizationRulesReady &&
+      provenanceReady &&
+      manifestReady &&
       hasConflict &&
       hasRefusal &&
       hasCrossDept,
@@ -1988,6 +2049,8 @@ async function checkFixtures() {
     graphSchemaReady,
     departments: departments.length,
     organizationRulesReady,
+    provenanceReady,
+    manifestReady,
     hasConflictScenarios: hasConflict,
     hasRefusalScenarios: hasRefusal,
     hasCrossDepartmentScenarios: hasCrossDept,

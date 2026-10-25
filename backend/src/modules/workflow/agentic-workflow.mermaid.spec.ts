@@ -9,7 +9,7 @@ describe('agentic workflow Mermaid export', () => {
 
     expect(result.highlightedNodes).toEqual([]);
     expect(result.diagram).toContain('flowchart TD');
-    expect(result.diagram).toContain('queryAugment["Query Augment"]');
+    expect(result.diagram).toContain('queryAugment["Prepare Queries"]');
     expect(result.diagram).toContain('reflection -->|retry| retrieval');
     expect(result.diagram).toContain('reflection -->|passed / max retry| end');
   });

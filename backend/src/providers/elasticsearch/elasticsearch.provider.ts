@@ -264,6 +264,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           docVersion: { type: 'keyword' },
           contentHash: { type: 'keyword' },
           indexGeneration: { type: 'keyword' },
+          ruleKey: { type: 'keyword' },
+          changeType: { type: 'keyword' },
+          supersedesChunkId: { type: 'keyword' },
           tenantId: { type: 'keyword' },
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
@@ -348,6 +351,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           docVersion: { type: 'keyword' },
           contentHash: { type: 'keyword' },
           indexGeneration: { type: 'keyword' },
+          ruleKey: { type: 'keyword' },
+          changeType: { type: 'keyword' },
+          supersedesChunkId: { type: 'keyword' },
           tenantId: { type: 'keyword' },
           effectiveAt: { type: 'date' },
           expiredAt: { type: 'date' },
@@ -378,6 +384,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     docVersion?: string | null;
     contentHash?: string | null;
     indexGeneration?: string | null;
+    changeType?: string;
     effectiveAt?: Date | null;
     expiredAt?: Date | null;
   }): Promise<void> {
@@ -424,6 +431,9 @@ export class ElasticsearchProvider implements OnModuleInit {
       docVersion?: string | null;
       contentHash?: string | null;
       indexGeneration?: string | null;
+      ruleKey?: string | null;
+      changeType?: string;
+      supersedesChunkId?: string | null;
       effectiveAt?: Date | null;
       expiredAt?: Date | null;
       sourceAuthority?: string;
@@ -477,6 +487,9 @@ export class ElasticsearchProvider implements OnModuleInit {
             docVersion: c.docVersion,
             contentHash: c.contentHash,
             indexGeneration: c.indexGeneration,
+            ruleKey: c.ruleKey,
+            changeType: c.changeType,
+            supersedesChunkId: c.supersedesChunkId,
             effectiveAt: c.effectiveAt?.toISOString() ?? null,
             expiredAt: c.expiredAt?.toISOString() ?? null,
             sourceAuthority: c.sourceAuthority,
@@ -548,6 +561,56 @@ export class ElasticsearchProvider implements OnModuleInit {
       );
     } catch (err) {
       this.logger.warn(`ES deleteByDocId failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * 按 chunk id 精确删除 ES chunks，用于 chunk 级增量更新。
+   */
+  async deleteChunksByIds(ids: string[]): Promise<void> {
+    if (this.enabled === false) return;
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return;
+    try {
+      await this.client.bulk({
+        operations: uniqueIds.map((id) => ({
+          delete: { _index: this.indexName, _id: id },
+        })),
+        refresh: true,
+      });
+      this.logger.log(`ES deleted ${uniqueIds.length} chunks by id`);
+    } catch (err) {
+      this.logger.warn(
+        `ES deleteChunksByIds failed: ${(err as Error).message}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * 仅更新未变化 chunk 的元数据，不重写 content 和 embedding。
+   */
+  async updateChunkMetadataByIds(
+    ids: string[],
+    patch: Record<string, unknown>,
+  ): Promise<void> {
+    if (this.enabled === false) return;
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return;
+    try {
+      await this.client.bulk({
+        operations: uniqueIds.flatMap((id) => [
+          { update: { _index: this.indexName, _id: id } },
+          { doc: { ...patch, updatedAt: new Date().toISOString() } },
+        ]),
+        refresh: true,
+      });
+      this.logger.log(`ES updated metadata for ${uniqueIds.length} chunks`);
+    } catch (err) {
+      this.logger.warn(
+        `ES updateChunkMetadataByIds failed: ${(err as Error).message}`,
+      );
+      throw err;
     }
   }
 
@@ -656,6 +719,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     topK = 5,
     userId?: string,
     scope: ElasticsearchSearchScope = {},
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<
     Array<{
       id: string;
@@ -685,12 +749,16 @@ export class ElasticsearchProvider implements OnModuleInit {
       supersedesDocId?: string | null;
     }>
   > {
-    if (!this.enabled) return [];
+    if (this.enabled === false) return [];
 
     try {
-      const filter: estypes.QueryDslQueryContainer[] = userId
-        ? [{ term: { userId } }]
-        : [];
+      if (allowedDocIds != null && allowedDocIds.size === 0) return [];
+      const filter: estypes.QueryDslQueryContainer[] = [];
+      if (allowedDocIds != null) {
+        filter.push({ terms: { docId: [...allowedDocIds] } });
+      } else if (userId) {
+        filter.push({ term: { userId } });
+      }
       for (const [field, value] of Object.entries({
         projectId: scope.projectId,
         activityId: scope.activityId,
@@ -809,15 +877,22 @@ export class ElasticsearchProvider implements OnModuleInit {
     vector: number[],
     topK: number,
     userId?: string,
-    opts?: { includeDeprecated?: boolean },
+    opts?: {
+      includeDeprecated?: boolean;
+      allowedDocIds?: ReadonlySet<string>;
+    },
   ): Promise<Array<{ id: string; score: number }>> {
     if (!this.enabled) return [];
-    if (!Array.isArray(vector) || vector.length === 0) return [];
+    if (Array.isArray(vector) === false || vector.length === 0) return [];
 
     try {
-      const filter: estypes.QueryDslQueryContainer[] = userId
-        ? [{ term: { userId } }]
-        : [];
+      if (opts?.allowedDocIds != null && opts.allowedDocIds.size === 0) return [];
+      const filter: estypes.QueryDslQueryContainer[] = [];
+      if (opts?.allowedDocIds != null) {
+        filter.push({ terms: { docId: [...opts.allowedDocIds] } });
+      } else if (userId) {
+        filter.push({ term: { userId } });
+      }
       if (!opts?.includeDeprecated) {
         filter.push({
           bool: {

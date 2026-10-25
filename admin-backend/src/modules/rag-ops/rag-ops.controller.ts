@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UnauthorizedException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { UserInfo } from '../../common/decorators/user-info.decorator';
 import { RagEvaluationRunDto } from '../rag-client/dto/rag-admin.dto';
 import { RagClientService } from '../rag-client/rag-client.service';
 
@@ -34,8 +35,8 @@ export class RagOpsController {
   @Get('conversations')
   @ApiOperation({ summary: '查看 RAG 问答会话记录' })
   @RequirePermission('admin:rag:read')
-  conversations() {
-    return this.ragClient.getConversations();
+  conversations(@UserInfo() user: unknown) {
+    return this.ragClient.getConversations(resolveAdminUserId(user));
   }
 
   @Post('documents/:docId/reindex')
@@ -85,8 +86,8 @@ export class RagOpsAliasController {
   @Get('conversations')
   @ApiOperation({ summary: '查看 RAG 问答会话记录' })
   @RequirePermission('admin:rag:read')
-  conversations() {
-    return this.ragClient.getConversations();
+  conversations(@UserInfo() user: unknown) {
+    return this.ragClient.getConversations(resolveAdminUserId(user));
   }
 
   @Post('documents/:docId/reindex')
@@ -103,4 +104,13 @@ export class RagOpsAliasController {
   runEvaluation(@Body() dto: RagEvaluationRunDto) {
     return this.ragClient.runEvaluation(dto);
   }
+}
+
+function resolveAdminUserId(user: unknown): string {
+  const identity = (user && typeof user === 'object' ? user : {}) as Record<string, unknown>;
+  const userId = identity.userId ?? identity.id ?? identity.sub;
+  if (userId === undefined || userId === null || !String(userId).trim()) {
+    throw new UnauthorizedException('authenticated user is required');
+  }
+  return String(userId).trim();
 }

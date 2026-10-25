@@ -135,6 +135,7 @@ export default function AgentRunDetailPage() {
     planId?: string;
     mode?: string;
     selectedSkills?: string[];
+    skillMatching?: 'matched' | 'skipped_simple';
     contextPolicy?: { maxHistoryTurns?: number; maxContextCharacters?: number; compressionThreshold?: number; isolatedByThread?: boolean };
     stages?: Array<Record<string, unknown>>;
   } | undefined;
@@ -176,7 +177,7 @@ export default function AgentRunDetailPage() {
             { key: "rounds", label: "完成轮次", children: run.metrics?.loopRounds ?? 0 },
             { key: "checkpoints", label: "Redis 快照", children: loopEvents.filter((event: AgentRunEvent) => event.eventType === "agent.loop.checkpoint.saved").length },
             { key: "status", label: "终止状态", children: loopFinalEvent ? <Tag color={tagColor(loopFinalEvent.eventType)}>{EVENT_LABELS[loopFinalEvent.eventType] ?? loopFinalEvent.eventType}</Tag> : "运行中" },
-            { key: "reason", label: "终止原因", span: 4, children: loopFinalEvent?.payload?.terminationReason || "尚未产生终止事件" },
+            { key: "reason", label: "终止原因", span: 4, children: String(loopFinalEvent?.payload?.terminationReason ?? "尚未产生终止事件") },
           ]} />
         )}
       </Card>
@@ -187,7 +188,7 @@ export default function AgentRunDetailPage() {
             <Descriptions bordered column={3} size="small" items={[
               { key: "plan", label: "计划 ID", children: runtimePlan.planId },
               { key: "mode", label: "模式", children: runtimePlan.mode },
-              { key: "skills", label: "已选 Skill", children: runtimePlan.selectedSkills?.join("、") || "未匹配" },
+              { key: "skills", label: "已选 Skill", children: runtimePlan.skillMatching === "skipped_simple" ? "Simple 模式跳过匹配" : runtimePlan.selectedSkills?.join("、") || "未匹配" },
               { key: "context", label: "上下文策略", span: 3, children: `历史 ${runtimePlan.contextPolicy?.maxHistoryTurns ?? "-"} 轮；预算 ${runtimePlan.contextPolicy?.maxContextCharacters ?? "-"} 字符；压缩阈值 ${runtimePlan.contextPolicy?.compressionThreshold ?? "-"} 字符；Thread 隔离：${runtimePlan.contextPolicy?.isolatedByThread ? "是" : "否"}` },
             ]} />
             <Table rowKey="id" size="small" pagination={false} style={{ marginTop: 12 }} dataSource={runtimePlan.stages ?? []} columns={[

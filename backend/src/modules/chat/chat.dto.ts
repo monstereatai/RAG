@@ -104,6 +104,11 @@ export class ChatDto {
   @IsOptional()
   @IsBoolean()
   approvalRequired?: boolean;
+
+  /** 仅控制 Mem0 长期记忆读写；会话历史与向量索引保持原有行为。 */
+  @IsOptional()
+  @IsBoolean()
+  useLongTermMemory?: boolean;
 }
 
 export interface ChatReference {

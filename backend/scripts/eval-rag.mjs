@@ -84,7 +84,9 @@ try {
     JSON.stringify(
       {
         passed,
-        mode: baseUrl ? 'online' : 'offline',
+        mode: baseUrl ? 'online' : 'offline-reference-smoke',
+        skipped: baseUrl ? false : true,
+        qualityMeasured: Boolean(baseUrl),
         minAverageScore,
         averageScore: Number(averageScore.toFixed(3)),
         summary: summarize(results),

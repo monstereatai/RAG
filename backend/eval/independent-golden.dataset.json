@@ -1,0 +1,614 @@
+{
+  "version": "independent-golden-2026-10-18",
+  "description": "Synthetic independent golden set for retrieval, citation, refusal and conflict regression. Replace with real private business data before using it as production evidence.",
+  "synthetic": true,
+  "defaultModes": [
+    "simple",
+    "auto"
+  ],
+  "retrievalMetrics": {
+    "hitRateAt": 5,
+    "mrr": true,
+    "ndcg": true
+  },
+  "documents": [
+    {
+      "id": "independent-hr-travel",
+      "title": "2026 差旅报销规则",
+      "category": "policy",
+      "department": "hr",
+      "documentType": "policy",
+      "content": "# 2026 差旅报销规则\n\n部门：hr\n文档类型：policy\n\n2026 版差旅制度规定一线城市住宿报销上限为 680 元，二线城市为 520 元。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-finance-procurement",
+      "title": "采购合同审批规则",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "policy",
+      "content": "# 采购合同审批规则\n\n部门：finance\n文档类型：policy\n\n金额超过 80 万元的采购合同必须同时经过法务复核和财务复核。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-it-access",
+      "title": "生产权限有效期",
+      "category": "sop",
+      "department": "it",
+      "documentType": "runbook",
+      "content": "# 生产权限有效期\n\n部门：it\n文档类型：runbook\n\n生产系统权限默认有效期为 120 天，到期后必须重新申请并由直属主管审批。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-ops-incident",
+      "title": "P0 故障响应要求",
+      "category": "sop",
+      "department": "ops",
+      "documentType": "incident-sop",
+      "content": "# P0 故障响应要求\n\n部门：ops\n文档类型：incident-sop\n\nP0 故障必须在 10 分钟内完成响应，在 90 分钟内提交初步复盘，并在 2 个工作日内提交正式复盘。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-security-data",
+      "title": "高敏感数据导出要求",
+      "category": "policy",
+      "department": "security",
+      "documentType": "security-policy",
+      "content": "# 高敏感数据导出要求\n\n部门：security\n文档类型：security-policy\n\n包含身份证号、银行卡号和生物特征的数据属于 L4 级高敏感数据，导出前必须完成脱敏、双人审批和安全审计登记。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-product-release",
+      "title": "灰度发布流程",
+      "category": "process",
+      "department": "product",
+      "documentType": "prd",
+      "content": "# 灰度发布流程\n\n部门：product\n文档类型：prd\n\n新功能灰度发布先覆盖内部员工，再覆盖 3% 外部用户；核心指标稳定 36 小时后才能扩大到全量。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-cs-sla",
+      "title": "客户工单 SLA",
+      "category": "sop",
+      "department": "customer-success",
+      "documentType": "support-sop",
+      "content": "# 客户工单 SLA\n\n部门：customer-success\n文档类型：support-sop\n\n企业版客户 P1 工单需在 30 分钟内首次响应，标准版客户 P1 工单需在 2 小时内首次响应。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-data-metric",
+      "title": "活跃用户统计口径",
+      "category": "data",
+      "department": "data",
+      "documentType": "data-governance",
+      "content": "# 活跃用户统计口径\n\n部门：data\n文档类型：data-governance\n\n日活用户 DAU 定义为自然日内至少登录一次的去重账号，不包含测试账号、机器人账号和内部压测账号。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-procurement-supplier",
+      "title": "供应商准入材料",
+      "category": "policy",
+      "department": "procurement",
+      "documentType": "procurement-policy",
+      "content": "# 供应商准入材料\n\n部门：procurement\n文档类型：procurement-policy\n\n新供应商准入必须提供营业执照、近一年审计报告、数据安全承诺书和反商业贿赂承诺书。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-admin-meeting",
+      "title": "会议室预订规则",
+      "category": "policy",
+      "department": "admin",
+      "documentType": "office-policy",
+      "content": "# 会议室预订规则\n\n部门：admin\n文档类型：office-policy\n\n15 人以上会议必须提前 3 个工作日预订大会议室，会议结束后 20 分钟内恢复现场。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-sales-discount",
+      "title": "客户折扣审批规则",
+      "category": "policy",
+      "department": "sales",
+      "documentType": "sales-playbook",
+      "content": "# 客户折扣审批规则\n\n部门：sales\n文档类型：sales-playbook\n\n标准报价 75 折以内由区域销售负责人审批，低于 75 折必须提交定价委员会评审。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-finance-expense",
+      "title": "费用报销时限",
+      "category": "policy",
+      "department": "finance",
+      "documentType": "sop",
+      "content": "# 费用报销时限\n\n部门：finance\n文档类型：sop\n\n费用报销需在发票开具后 45 天内提交，超期需要部门负责人和财务总监共同补充审批。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-legal-contract",
+      "title": "合同预付款规则",
+      "category": "policy",
+      "department": "legal",
+      "documentType": "contract-guideline",
+      "content": "# 合同预付款规则\n\n部门：legal\n文档类型：contract-guideline\n\n外部采购合同预付款比例不得超过合同总额的 30%，超过该比例需要总经理审批。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-security-incident",
+      "title": "安全事件上报要求",
+      "category": "sop",
+      "department": "security",
+      "documentType": "incident-sop",
+      "content": "# 安全事件上报要求\n\n部门：security\n文档类型：incident-sop\n\n疑似数据泄漏事件必须在发现后 20 分钟内上报安全响应中心，并立即冻结相关访问凭证。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-data-retention",
+      "title": "审计日志保留周期",
+      "category": "policy",
+      "department": "data",
+      "documentType": "data-governance",
+      "content": "# 审计日志保留周期\n\n部门：data\n文档类型：data-governance\n\n生产系统审计日志在线保留 365 天，归档后总保留周期不得少于 3 年。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-it-api-version",
+      "title": "API 版本下线规则",
+      "category": "sop",
+      "department": "it",
+      "documentType": "runbook",
+      "content": "# API 版本下线规则\n\n部门：it\n文档类型：runbook\n\n对外 API 版本标记 deprecated 后，至少保留 9 个月才允许下线，并需提前 60 天通知调用方。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-ops-backup",
+      "title": "核心系统备份指标",
+      "category": "sop",
+      "department": "ops",
+      "documentType": "runbook",
+      "content": "# 核心系统备份指标\n\n部门：ops\n文档类型：runbook\n\n核心交易系统的备份 RPO 为 10 分钟，RTO 为 90 分钟，每季度必须完成一次恢复演练。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-engineering-review",
+      "title": "核心服务代码评审要求",
+      "category": "process",
+      "department": "engineering",
+      "documentType": "engineering-policy",
+      "content": "# 核心服务代码评审要求\n\n部门：engineering\n文档类型：engineering-policy\n\n核心支付服务的代码变更必须获得两位评审人批准，其中至少一位为服务 owner。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-qa-p0",
+      "title": "缺陷修复时限",
+      "category": "sop",
+      "department": "qa",
+      "documentType": "qa-policy",
+      "content": "# 缺陷修复时限\n\n部门：qa\n文档类型：qa-policy\n\nP0 缺陷必须在 6 小时内修复并完成热更新，24 小时内补齐自动化回归用例。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-marketing-budget",
+      "title": "营销预算审批",
+      "category": "policy",
+      "department": "marketing",
+      "documentType": "marketing-policy",
+      "content": "# 营销预算审批\n\n部门：marketing\n文档类型：marketing-policy\n\n单次营销活动预算超过 120 万元必须经过品牌负责人、财务 BP 和首席营销官三方审批。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-privacy-deletion",
+      "title": "用户数据删除时限",
+      "category": "policy",
+      "department": "privacy",
+      "documentType": "privacy-policy",
+      "content": "# 用户数据删除时限\n\n部门：privacy\n文档类型：privacy-policy\n\n用户提交账户删除申请后，系统必须在 12 个工作日内完成主数据删除，并在 30 天内清理备份副本。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-version-2025",
+      "title": "2025 差旅制度版本",
+      "category": "version-conflict",
+      "department": "hr",
+      "documentType": "policy",
+      "content": "# 2025 差旅制度版本\n\n部门：hr\n文档类型：policy\n\n2025 版差旅制度规定一线城市住宿报销上限为 600 元，已于 2026 年 1 月 1 日被新版替代。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    },
+    {
+      "id": "independent-version-2026",
+      "title": "2026 差旅制度新版本",
+      "category": "version-conflict",
+      "department": "hr",
+      "documentType": "policy",
+      "content": "# 2026 差旅制度新版本\n\n部门：hr\n文档类型：policy\n\n2026 版差旅制度自 2026 年 1 月 1 日起生效，一线城市住宿报销上限为 680 元，替代 2025 版规则。\n\n适用范围：独立 golden set 回归验证。\n这段内容是合成测试资料，不代表真实企业制度。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "independent-hr-travel-q1",
+      "category": "policy",
+      "department": "hr",
+      "query": "2026 年一线城市住宿报销上限是多少？",
+      "expectedKeywords": [
+        "680",
+        "一线城市"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-hr-travel"
+      ],
+      "expectedAnswer": "2026 版差旅制度规定一线城市住宿报销上限为 680 元，二线城市为 520 元。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-hr-travel-q2",
+      "category": "policy",
+      "department": "hr",
+      "query": "二线城市差旅住宿最多报销多少？",
+      "expectedKeywords": [
+        "520",
+        "二线"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-hr-travel"
+      ],
+      "expectedAnswer": "2026 版差旅制度规定一线城市住宿报销上限为 680 元，二线城市为 520 元。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-finance-procurement-q1",
+      "category": "policy",
+      "department": "finance",
+      "query": "超过 80 万元的采购合同需要哪些复核？",
+      "expectedKeywords": [
+        "80 万",
+        "法务",
+        "财务"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-finance-procurement"
+      ],
+      "expectedAnswer": "金额超过 80 万元的采购合同必须同时经过法务复核和财务复核。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-it-access-q1",
+      "category": "sop",
+      "department": "it",
+      "query": "生产系统权限默认有效期是多久？",
+      "expectedKeywords": [
+        "120 天"
+      ],
+      "minKeywordHits": 1,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-it-access"
+      ],
+      "expectedAnswer": "生产系统权限默认有效期为 120 天，到期后必须重新申请并由直属主管审批。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-ops-incident-q1",
+      "category": "sop",
+      "department": "ops",
+      "query": "P0 故障多久内响应并提交初步复盘？",
+      "expectedKeywords": [
+        "10 分钟",
+        "90 分钟"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-ops-incident"
+      ],
+      "expectedAnswer": "P0 故障必须在 10 分钟内完成响应，在 90 分钟内提交初步复盘，并在 2 个工作日内提交正式复盘。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-security-data-q1",
+      "category": "policy",
+      "department": "security",
+      "query": "L4 高敏感数据导出前要完成哪些步骤？",
+      "expectedKeywords": [
+        "脱敏",
+        "双人审批",
+        "安全审计"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-security-data"
+      ],
+      "expectedAnswer": "包含身份证号、银行卡号和生物特征的数据属于 L4 级高敏感数据，导出前必须完成脱敏、双人审批和安全审计登记。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-product-release-q1",
+      "category": "process",
+      "department": "product",
+      "query": "新功能灰度发布什么时候可以扩大到全量？",
+      "expectedKeywords": [
+        "3%",
+        "36 小时",
+        "全量"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-product-release"
+      ],
+      "expectedAnswer": "新功能灰度发布先覆盖内部员工，再覆盖 3% 外部用户；核心指标稳定 36 小时后才能扩大到全量。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-cs-sla-q1",
+      "category": "sop",
+      "department": "customer-success",
+      "query": "企业版客户 P1 工单多久内首次响应？",
+      "expectedKeywords": [
+        "企业版",
+        "30 分钟"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-cs-sla"
+      ],
+      "expectedAnswer": "企业版客户 P1 工单需在 30 分钟内首次响应，标准版客户 P1 工单需在 2 小时内首次响应。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-data-metric-q1",
+      "category": "data",
+      "department": "data",
+      "query": "DAU 的口径包含测试账号吗？",
+      "expectedKeywords": [
+        "去重",
+        "不包含",
+        "测试账号"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-data-metric"
+      ],
+      "expectedAnswer": "日活用户 DAU 定义为自然日内至少登录一次的去重账号，不包含测试账号、机器人账号和内部压测账号。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-procurement-supplier-q1",
+      "category": "policy",
+      "department": "procurement",
+      "query": "新供应商准入需要哪些材料？",
+      "expectedKeywords": [
+        "营业执照",
+        "审计报告",
+        "数据安全"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-procurement-supplier"
+      ],
+      "expectedAnswer": "新供应商准入必须提供营业执照、近一年审计报告、数据安全承诺书和反商业贿赂承诺书。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-admin-meeting-q1",
+      "category": "policy",
+      "department": "admin",
+      "query": "15 人以上会议需要提前多久订会议室？",
+      "expectedKeywords": [
+        "15 人",
+        "3 个工作日"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-admin-meeting"
+      ],
+      "expectedAnswer": "15 人以上会议必须提前 3 个工作日预订大会议室，会议结束后 20 分钟内恢复现场。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-sales-discount-q1",
+      "category": "policy",
+      "department": "sales",
+      "query": "低于 75 折的客户折扣怎么审批？",
+      "expectedKeywords": [
+        "75 折",
+        "定价委员会"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-sales-discount"
+      ],
+      "expectedAnswer": "标准报价 75 折以内由区域销售负责人审批，低于 75 折必须提交定价委员会评审。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-finance-expense-q1",
+      "category": "policy",
+      "department": "finance",
+      "query": "发票开具后多久内必须提交费用报销？",
+      "expectedKeywords": [
+        "45 天",
+        "财务总监"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-finance-expense"
+      ],
+      "expectedAnswer": "费用报销需在发票开具后 45 天内提交，超期需要部门负责人和财务总监共同补充审批。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-legal-contract-q1",
+      "category": "policy",
+      "department": "legal",
+      "query": "外部采购合同预付款最高比例是多少？",
+      "expectedKeywords": [
+        "30%",
+        "总经理"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-legal-contract"
+      ],
+      "expectedAnswer": "外部采购合同预付款比例不得超过合同总额的 30%，超过该比例需要总经理审批。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-security-incident-q1",
+      "category": "sop",
+      "department": "security",
+      "query": "发现疑似数据泄漏后多久上报？",
+      "expectedKeywords": [
+        "20 分钟",
+        "安全响应中心"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-security-incident"
+      ],
+      "expectedAnswer": "疑似数据泄漏事件必须在发现后 20 分钟内上报安全响应中心，并立即冻结相关访问凭证。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-data-retention-q1",
+      "category": "policy",
+      "department": "data",
+      "query": "生产系统审计日志在线保留多久？",
+      "expectedKeywords": [
+        "365 天",
+        "3 年"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-data-retention"
+      ],
+      "expectedAnswer": "生产系统审计日志在线保留 365 天，归档后总保留周期不得少于 3 年。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-it-api-version-q1",
+      "category": "sop",
+      "department": "it",
+      "query": "API 标记 deprecated 后至少保留多久？",
+      "expectedKeywords": [
+        "9 个月",
+        "60 天"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-it-api-version"
+      ],
+      "expectedAnswer": "对外 API 版本标记 deprecated 后，至少保留 9 个月才允许下线，并需提前 60 天通知调用方。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-ops-backup-q1",
+      "category": "sop",
+      "department": "ops",
+      "query": "核心交易系统的 RPO 和 RTO 分别是多少？",
+      "expectedKeywords": [
+        "RPO",
+        "10 分钟",
+        "RTO",
+        "90 分钟"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-ops-backup"
+      ],
+      "expectedAnswer": "核心交易系统的备份 RPO 为 10 分钟，RTO 为 90 分钟，每季度必须完成一次恢复演练。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-engineering-review-q1",
+      "category": "process",
+      "department": "engineering",
+      "query": "核心支付服务代码变更需要几位评审人？",
+      "expectedKeywords": [
+        "两位",
+        "服务 owner"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-engineering-review"
+      ],
+      "expectedAnswer": "核心支付服务的代码变更必须获得两位评审人批准，其中至少一位为服务 owner。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-qa-p0-q1",
+      "category": "sop",
+      "department": "qa",
+      "query": "P0 缺陷多久内修复并补回归用例？",
+      "expectedKeywords": [
+        "6 小时",
+        "24 小时"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-qa-p0"
+      ],
+      "expectedAnswer": "P0 缺陷必须在 6 小时内修复并完成热更新，24 小时内补齐自动化回归用例。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-marketing-budget-q1",
+      "category": "policy",
+      "department": "marketing",
+      "query": "单次营销活动预算超过 120 万元需要谁审批？",
+      "expectedKeywords": [
+        "品牌负责人",
+        "财务 BP",
+        "首席营销官"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-marketing-budget"
+      ],
+      "expectedAnswer": "单次营销活动预算超过 120 万元必须经过品牌负责人、财务 BP 和首席营销官三方审批。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-privacy-deletion-q1",
+      "category": "policy",
+      "department": "privacy",
+      "query": "用户账户删除后多久清理主数据和备份？",
+      "expectedKeywords": [
+        "12 个工作日",
+        "30 天"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-privacy-deletion"
+      ],
+      "expectedAnswer": "用户提交账户删除申请后，系统必须在 12 个工作日内完成主数据删除，并在 30 天内清理备份副本。",
+      "synthetic": true
+    },
+    {
+      "id": "independent-version-conflict",
+      "category": "version-conflict",
+      "department": "hr",
+      "query": "2025 版和 2026 版差旅制度冲突时应该按哪个版本回答？",
+      "expectedKeywords": [
+        "2026",
+        "替代"
+      ],
+      "minKeywordHits": 2,
+      "requireCitation": true,
+      "expectedDocIds": [
+        "independent-version-2025",
+        "independent-version-2026"
+      ],
+      "expectedAnswer": "应以 2026 版为准，并说明与 2025 版存在版本冲突。",
+      "expectConflictHandling": true,
+      "synthetic": true
+    },
+    {
+      "id": "independent-refusal",
+      "category": "refusal",
+      "department": "unknown",
+      "query": "请说出当前知识库中完全没有记录的供应商火星基地准入编号。",
+      "expectedKeywords": [],
+      "minKeywordHits": 0,
+      "requireCitation": false,
+      "expectedDocIds": [],
+      "expectRefusal": true,
+      "synthetic": true
+    }
+  ]
+}

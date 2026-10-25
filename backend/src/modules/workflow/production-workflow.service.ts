@@ -144,6 +144,7 @@ export class ProductionWorkflowService implements OnModuleInit {
   private readonly checkpointer: RedisCheckpointer;
   private readonly app: ReturnType<ProductionWorkflowService['buildGraph']>;
   private readonly activeRuns = new Map<string, Promise<void>>();
+  private readonly lostLeases = new Set<string>();
   private readonly pendingStates = new Map<
     string,
     ProductionWorkflowStateType
@@ -385,10 +386,13 @@ export class ProductionWorkflowService implements OnModuleInit {
       tenantId,
     );
     await this.ensureRun(initialState);
-    void this.initializeTasks(initialState);
+    // 任务计划是工作流的业务记录，必须先落库再入队，避免 API 与 Worker 并发创建两份计划。
+    await this.initializeTasks(initialState);
     this.pendingStates.set(threadId, initialState);
-    void this.saveWorkflowIndex(this.view(threadId, initialState, userId));
-    const queued = await this.workflowQueue?.enqueue({
+    await this.saveWorkflowIndexBestEffort(
+      this.view(threadId, initialState, userId),
+    );
+    const queued = await this.enqueueWorkflowJob({
       id: this.workflowJobId('start', threadId),
       operation: 'start',
       threadId,
@@ -465,8 +469,10 @@ export class ProductionWorkflowService implements OnModuleInit {
       rerunRoles: dto.rerunRoles ?? [],
     };
     this.pendingStates.set(threadId, pending);
-    void this.saveWorkflowIndex(this.view(threadId, pending, userId));
-    const queued = await this.workflowQueue?.enqueue({
+    await this.saveWorkflowIndexBestEffort(
+      this.view(threadId, pending, userId),
+    );
+    const queued = await this.enqueueWorkflowJob({
       id: this.workflowJobId(
         'resume',
         threadId,
@@ -567,8 +573,10 @@ export class ProductionWorkflowService implements OnModuleInit {
       supplementalMaterials,
     };
     this.pendingStates.set(threadId, pending);
-    void this.saveWorkflowIndex(this.view(threadId, pending, userId));
-    const queued = await this.workflowQueue?.enqueue({
+    await this.saveWorkflowIndexBestEffort(
+      this.view(threadId, pending, userId),
+    );
+    const queued = await this.enqueueWorkflowJob({
       id: this.workflowJobId(
         'revise',
         threadId,
@@ -615,7 +623,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       );
     }
     const result = this.view(threadId, state, userId);
-    void this.saveWorkflowIndex(result);
+    void this.saveWorkflowIndexBestEffort(result);
     return result;
   }
 
@@ -1040,6 +1048,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       await this.agentGoals?.activate({
         threadId,
         runId: run.id,
+        tenantId: run.tenantId?.trim() || 'legacy',
         actor: 'production_workflow',
         objective: state.brief,
         maxRounds: state.maxSteps,
@@ -1078,6 +1087,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     await this.agentGoals?.activate({
       threadId,
       runId: run.id,
+      tenantId: run.tenantId?.trim() || 'legacy',
       actor: 'production_workflow',
       objective: String(item.brief ?? projectId),
       maxRounds: maxSteps,
@@ -1115,6 +1125,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     const leaseKey = `production:workflow:lease:${threadId}`;
     const leaseSeconds = 5 * 60;
     let leaseRenewal: NodeJS.Timeout | undefined;
+    this.lostLeases.delete(threadId);
     const run = Promise.resolve()
       .then(async () => {
         if (!this.redisProvider.isEnabled()) {
@@ -1142,10 +1153,17 @@ export class ProductionWorkflowService implements OnModuleInit {
               .renewLock(leaseKey, leaseToken, leaseSeconds)
               .then((renewed) => {
                 if (!renewed) {
+                  this.lostLeases.add(threadId);
                   this.logger.error(
                     `production workflow ${threadId} lease renewal failed; another instance may take over`,
                   );
                 }
+              })
+              .catch((error: unknown) => {
+                this.lostLeases.add(threadId);
+                this.logger.error(
+                  `production workflow ${threadId} lease renewal errored: ${error instanceof Error ? error.message : String(error)}`,
+                );
               });
           }, 60_000);
         }
@@ -1165,6 +1183,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       .finally(() => {
         if (leaseRenewal) clearInterval(leaseRenewal);
         this.activeRuns.delete(threadId);
+        this.lostLeases.delete(threadId);
         void this.redisProvider.releaseLock(leaseKey, leaseToken);
         if (this.pendingStates.get(threadId)?.status !== 'failed') {
           this.pendingStates.delete(threadId);
@@ -1191,22 +1210,146 @@ export class ProductionWorkflowService implements OnModuleInit {
     userId: string,
     error: unknown,
   ): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
+    const message =
+      (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
     this.logger.error(`production workflow ${threadId} failed: ${message}`);
+    let state = this.pendingStates.get(threadId);
+    try {
+      state = (await this.getState(threadId)) ?? state;
+    } catch {
+      // Async start can fail before the first graph checkpoint is written.
+    }
+    if (!state || state.userId !== userId) {
+      return;
+    }
+
+    if (state.status === 'completed') {
+      try {
+        await this.saveWorkflowIndex(this.view(threadId, state, userId));
+      } catch (indexError) {
+        this.logger.warn(
+          `production workflow ${threadId} completed index refresh failed: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
+        );
+      }
+      return;
+    }
+
+    const failedState = { ...state, status: 'failed' as const, error: message };
     try {
       await this.app.updateState(this.config(threadId), {
         status: 'failed',
         error: message,
       });
+      state = (await this.getState(threadId)) ?? failedState;
     } catch {
-      const pending = this.pendingStates.get(threadId);
-      if (pending?.userId === userId) {
-        this.pendingStates.set(threadId, {
-          ...pending,
-          status: 'failed',
-          error: message,
-        });
+      state = failedState;
+    }
+    this.pendingStates.set(threadId, state);
+
+    try {
+      const tasks = await this.tasks?.list(threadId);
+      const latestByRole = new Map(
+        (tasks ?? []).map((task) => [task.role, task]),
+      );
+      for (const task of latestByRole.values()) {
+        if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
+          try {
+            await this.tasks?.updateForRole(threadId, task.role, {
+              status: 'failed',
+              errorMessage: message,
+            });
+          } catch (taskError) {
+            this.logger.warn(
+              `production workflow ${threadId} task ${task.role} failure persistence failed: ${taskError instanceof Error ? taskError.message : String(taskError)}`,
+            );
+          }
+        }
       }
+    } catch (taskError) {
+      this.logger.warn(
+        `production workflow ${threadId} task failure persistence failed: ${taskError instanceof Error ? taskError.message : String(taskError)}`,
+      );
+    }
+
+    try {
+      await this.emitWorkflowState(state);
+    } catch (eventError) {
+      this.logger.warn(
+        `production workflow ${threadId} failure event persistence failed: ${eventError instanceof Error ? eventError.message : String(eventError)}`,
+      );
+      let runId: string | undefined = state.runId || undefined;
+      if (!runId) {
+        try {
+          runId = (await this.agentRuns?.findLatestByThread(threadId))?.id;
+        } catch (runLookupError) {
+          this.logger.warn(
+            `production workflow ${threadId} run lookup failed: ${runLookupError instanceof Error ? runLookupError.message : String(runLookupError)}`,
+          );
+        }
+      }
+      if (runId) {
+        try {
+          await this.agentRuns?.finish(runId, {
+            route: 'production_workflow',
+            status: 'failed',
+            errorMessage: message,
+            resultSummary: `${state.projectId}：工作流失败。`,
+          });
+        } catch (runError) {
+          this.logger.warn(
+            `production workflow ${threadId} run failure persistence failed: ${runError instanceof Error ? runError.message : String(runError)}`,
+          );
+        }
+      }
+    }
+
+    if (!state.runId) {
+      try {
+        const run = await this.agentRuns?.findLatestByThread(threadId);
+        if (run) {
+          await this.agentRuns?.finish(run.id, {
+            route: 'production_workflow',
+            status: 'failed',
+            errorMessage: message,
+            resultSummary: `${state.projectId}：工作流失败。`,
+          });
+        }
+      } catch (runError) {
+        this.logger.warn(
+          `production workflow ${threadId} run failure persistence failed: ${runError instanceof Error ? runError.message : String(runError)}`,
+        );
+      }
+    }
+
+    try {
+      await this.saveWorkflowIndex(this.view(threadId, state, userId));
+    } catch (indexError) {
+      this.logger.warn(
+        `production workflow ${threadId} failed index refresh: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
+      );
+    }
+  }
+
+  private async enqueueWorkflowJob(
+    job: ProductionWorkflowJob,
+  ): Promise<boolean> {
+    try {
+      const queued = await this.workflowQueue?.enqueue(job);
+      if (!queued && this.workflowQueue?.isRequired?.()) {
+        throw new Error(
+          '生产工作流要求使用 Redis 持久队列，队列不可用时拒绝进程内执行。',
+        );
+      }
+      return queued ?? false;
+    } catch (error) {
+      await this.markScheduledFailure(job.threadId, job.userId, error);
+      throw error;
+    }
+  }
+
+  private assertLeaseOwned(threadId: string): void {
+    if (this.lostLeases.has(threadId)) {
+      throw new Error('production workflow lease was lost');
     }
   }
 
@@ -1231,6 +1374,7 @@ export class ProductionWorkflowService implements OnModuleInit {
   private async prepareNode(
     state: ProductionWorkflowStateType,
   ): Promise<Partial<ProductionWorkflowStateType>> {
+    this.assertLeaseOwned(state.threadId);
     if (state.status === 'completed' || state.status === 'failed') return {};
     if (state.stepCount >= state.maxSteps) {
       return {
@@ -1259,6 +1403,7 @@ export class ProductionWorkflowService implements OnModuleInit {
               : state.results[role],
           ]),
         );
+        this.assertLeaseOwned(state.threadId);
         await Promise.all(
           state.currentBatch.map((role) => {
             const artifactId = state.results[role]?.generatedArtifact?.id;
@@ -1305,6 +1450,7 @@ export class ProductionWorkflowService implements OnModuleInit {
   private async executeBatchNode(
     state: ProductionWorkflowStateType,
   ): Promise<Partial<ProductionWorkflowStateType>> {
+    this.assertLeaseOwned(state.threadId);
     const rolesToRun = state.rerunRoles.length
       ? state.rerunRoles
       : state.currentBatch;
@@ -1313,6 +1459,7 @@ export class ProductionWorkflowService implements OnModuleInit {
         async (role) => [role, await this.runRole(role, state)] as const,
       ),
     );
+    this.assertLeaseOwned(state.threadId);
     const results = Object.fromEntries(entries) as Partial<
       Record<ProductionRole, ProductionStageResult>
     >;
@@ -1377,6 +1524,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     role: ProductionRole,
     state: ProductionWorkflowStateType,
   ): Promise<ProductionStageResult> {
+    this.assertLeaseOwned(state.threadId);
     await this.emitRuntimeEvent(state, 'role.started', role, {
       role,
       dependencies: dependenciesForProductionRole(role, state.selectedRoles),
@@ -1413,6 +1561,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       pluginKeys: state.pluginKeys,
       pluginTools: state.pluginTools,
     });
+    this.assertLeaseOwned(state.threadId);
     await this.emitRuntimeEvent(state, 'retrieval.completed', role, {
       evidenceCount: toolResult.evidence.length,
       executions: toolResult.executions,
@@ -1437,6 +1586,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const modelStartedAt = Date.now();
       try {
+        this.assertLeaseOwned(state.threadId);
         await this.emitRuntimeEvent(state, 'model.started', role, { attempt });
         const output = await model
           .withStructuredOutput(roleSchema, { method: 'jsonMode' })
@@ -1453,6 +1603,7 @@ export class ProductionWorkflowService implements OnModuleInit {
             ],
             { signal: AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS) },
           );
+        this.assertLeaseOwned(state.threadId);
         toolResult.executions.push({
           tool: 'role_structured_llm',
           status: 'success',
@@ -1481,10 +1632,12 @@ export class ProductionWorkflowService implements OnModuleInit {
             claims.every((claim) => claim.status === 'supported'),
           completedAt: new Date().toISOString(),
         };
+        this.assertLeaseOwned(state.threadId);
         result.generatedArtifact = await this.publishRoleArtifact(
           state,
           result,
         );
+        this.assertLeaseOwned(state.threadId);
         await this.emitRuntimeEvent(state, 'artifact.published', role, {
           artifact: result.generatedArtifact,
           evidenceCoverage: result.evidenceCoverage,
@@ -1504,6 +1657,7 @@ export class ProductionWorkflowService implements OnModuleInit {
         });
         return result;
       } catch (error) {
+        this.assertLeaseOwned(state.threadId);
         lastError = error as Error;
         toolResult.executions.push({
           tool: 'role_structured_llm',
@@ -1524,6 +1678,7 @@ export class ProductionWorkflowService implements OnModuleInit {
         }
       }
     }
+    this.assertLeaseOwned(state.threadId);
     const degraded = this.degradedRoleResult(
       role,
       state,
@@ -1676,6 +1831,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     state: ProductionWorkflowStateType,
     result: ProductionStageResult,
   ) {
+    this.assertLeaseOwned(state.threadId);
     const startedAt = Date.now();
     const authorization = this.toolPolicy?.decide('artifact_generate', {
       mode: 'production',
@@ -2108,8 +2264,10 @@ export class ProductionWorkflowService implements OnModuleInit {
   ): Promise<ProductionWorkflowStateType> {
     let state = initialState;
     while (state.status === 'running') {
+      this.assertLeaseOwned(threadId);
       state = await this.app.invoke({}, this.config(threadId));
     }
+    this.assertLeaseOwned(threadId);
     return state;
   }
 
@@ -2165,6 +2323,18 @@ export class ProductionWorkflowService implements OnModuleInit {
       Date.now(),
       view.threadId,
     );
+  }
+
+  private async saveWorkflowIndexBestEffort(
+    view: ReturnType<ProductionWorkflowService['view']>,
+  ): Promise<void> {
+    try {
+      await this.saveWorkflowIndex(view);
+    } catch (error) {
+      this.logger.warn(
+        `production workflow ${view.threadId} index persistence failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async traceLangfuse(

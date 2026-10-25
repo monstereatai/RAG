@@ -36,6 +36,9 @@ export interface Bm25PersistedEntry {
   supersedesDocId?: string | null;
   contentHash?: string | null;
   indexGeneration?: string | null;
+  ruleKey?: string | null;
+  changeType?: string;
+  supersedesChunkId?: string | null;
 }
 
 export interface Bm25PersistedStore {

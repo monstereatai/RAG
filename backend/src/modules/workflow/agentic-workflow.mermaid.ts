@@ -18,7 +18,7 @@ export interface MermaidWorkflowResult {
 
 const nodes: WorkflowNode[] = [
   { id: 'start', label: 'START' },
-  { id: 'queryAugment', label: 'Query Augment' },
+  { id: 'queryAugment', label: 'Prepare Queries' },
   { id: 'retrieval', label: 'Retrieval' },
   { id: 'sufficiency', label: 'Sufficiency Check' },
   { id: 'webSearchFallback', label: 'Web Search Fallback' },

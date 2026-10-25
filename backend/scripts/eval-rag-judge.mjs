@@ -20,7 +20,29 @@ const minSupportedRate = Number(
 );
 const maxClaims = Number(process.env.EVAL_RAG_JUDGE_MAX_CLAIMS ?? '0');
 
-const items = normalizeInput(JSON.parse(await readFile(inputPath, 'utf8')));
+const rawInput =
+  process.env.EVAL_RAG_JUDGE_STDIN === 'true'
+    ? JSON.parse(await readStandardInput())
+    : JSON.parse(await readFile(inputPath, 'utf8'));
+const effectiveInputPath =
+  process.env.EVAL_RAG_JUDGE_STDIN === 'true' ? 'stdin' : inputPath;
+const items = normalizeInput(rawInput);
+
+if (items.length === 0) {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        skipped: false,
+        inputPath: effectiveInputPath,
+        reason: 'Judge input contains no answer/evidence/claim cases.',
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+}
 
 if (!apiKey) {
   console.log(
@@ -29,7 +51,7 @@ if (!apiKey) {
         ok: true,
         skipped: true,
         reason: 'QWEN_API_KEY is not set',
-        inputPath,
+        inputPath: effectiveInputPath,
       },
       null,
       2,
@@ -50,7 +72,13 @@ for (const item of items) {
       evidence: item.evidence,
       claim,
     });
-    results.push({ id: item.id, claim: claim.text, ...judgement });
+    results.push({
+      id: item.id,
+      mode: item.mode,
+      variant: item.variant,
+      claim: claim.text,
+      ...judgement,
+    });
   }
   if (maxClaims > 0 && results.length >= maxClaims) {
     break;
@@ -60,19 +88,26 @@ for (const item of items) {
 const supported = results.filter((item) => item.label === 'supported').length;
 const supportedRate =
   results.length === 0 ? 1 : Number((supported / results.length).toFixed(3));
+const byModeAndVariant = summarizeByModeAndVariant(results);
 const ok =
-  results.every((item) => item.validJson) && supportedRate >= minSupportedRate;
+  results.every((item) => item.validJson) &&
+  Number.isFinite(minSupportedRate) &&
+  supportedRate >= minSupportedRate &&
+  Object.values(byModeAndVariant).every(
+    (item) => item.supportedRate >= minSupportedRate,
+  );
 
 console.log(
   JSON.stringify(
     {
       ok,
       skipped: false,
-      inputPath,
+      inputPath: effectiveInputPath,
       model,
       minSupportedRate,
       maxClaims,
       supportedRate,
+      byModeAndVariant,
       totalClaims: results.length,
       summary: summarize(results),
       results,
@@ -101,6 +136,8 @@ function normalizeInput(raw) {
           : [];
       return {
         id: row.id,
+        mode: row.mode ?? 'default',
+        variant: row.variant ?? 'default',
         answer: row.answer ?? row.referenceAnswer ?? '',
         evidence: row.evidence ?? row.referenceAnswer ?? '',
         claims: claims.map((claim) =>
@@ -109,6 +146,12 @@ function normalizeInput(raw) {
       };
     })
     .filter((row) => row.answer && row.evidence && row.claims.length > 0);
+}
+
+async function readStandardInput() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 async function judgeClaim({ id, answer, evidence, claim }) {
@@ -131,7 +174,7 @@ async function judgeClaim({ id, answer, evidence, claim }) {
         {
           role: 'user',
           content: [
-            '判断 claim 是否能被 evidence 支撑。',
+            '判断 answer 是否表达了 claim，并且 claim 是否能被 evidence 支撑。answer 未表达 claim 或 evidence 不足时，不能标记为 supported。',
             'label 只能是 supported、contradicted、not_mentioned。',
             'JSON schema: {"label":"supported|contradicted|not_mentioned","confidence":0-1}',
             `case_id: ${id}`,
@@ -194,5 +237,40 @@ function summarize(results) {
       return acc;
     },
     { supported: 0, contradicted: 0, not_mentioned: 0 },
+  );
+}
+
+function summarizeByModeAndVariant(results) {
+  const groups = [
+    ...new Set(
+      results.map(
+        (item) => `${item.mode ?? 'default'}:${item.variant ?? 'default'}`,
+      ),
+    ),
+  ];
+  return Object.fromEntries(
+    groups.map((key) => {
+      const [mode, variant] = key.split(':');
+      const groupResults = results.filter(
+        (item) =>
+          (item.mode ?? 'default') === mode &&
+          (item.variant ?? 'default') === variant,
+      );
+      const supportedCount = groupResults.filter(
+        (item) => item.label === 'supported',
+      ).length;
+      return [
+        key,
+        {
+          mode,
+          variant,
+          ...summarize(groupResults),
+          supportedRate: Number(
+            (supportedCount / Math.max(groupResults.length, 1)).toFixed(3),
+          ),
+          totalClaims: groupResults.length,
+        },
+      ];
+    }),
   );
 }

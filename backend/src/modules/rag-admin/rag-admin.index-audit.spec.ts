@@ -403,13 +403,17 @@ describe('RagAdminService index reconciliation', () => {
         update: updateMetadata,
       },
       chunkRepo: { find: jest.fn().mockResolvedValue(chunks) },
-      documentService: { delete: deleteDocument },
+      documentService: {
+        delete: deleteDocument,
+        rebuildImageIndexFromOriginal: jest.fn().mockResolvedValue(undefined),
+      },
       embeddingProvider: {
         embedDocuments,
       },
       vectorStoreProvider: {
         deleteByDocId: jest.fn().mockResolvedValue(undefined),
         insert: jest.fn().mockResolvedValue(undefined),
+        countByDocId: jest.fn().mockResolvedValue(1),
       },
       karpathyRagService: {
         removeDocChunks: jest.fn(),

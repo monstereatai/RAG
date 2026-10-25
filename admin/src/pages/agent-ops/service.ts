@@ -69,6 +69,7 @@ export interface ProductionStageResult {
 export interface ProductionWorkflow {
   threadId: string;
   projectId: string;
+  brief?: string;
   pluginKeys?: string[];
   pluginTools?: string[];
   currentRole: ProductionRole;
@@ -555,7 +556,7 @@ export interface IntentRoutingSummary {
     query: string;
     action: string;
     queryType: string;
-    confidence: number;
+    confidence: number | null;
     createdAt: string;
     mode: string;
     answered: boolean;
@@ -760,6 +761,15 @@ export const debugGovernanceRetrieval = (
       ...(scope ? { scope } : {}),
       ...(knowledgeBaseKey ? { knowledgeBaseKey } : {}),
     },
+  });
+
+export const compareGovernanceRetrieval = (
+  query: string,
+  knowledgeBaseKey: string,
+  compareKnowledgeBaseKey: string,
+) =>
+  authRequest<unknown>('/api/admin/agent-ops/governance/retrieval-debug/compare', {
+    params: { query, knowledgeBaseKey, compareKnowledgeBaseKey },
   });
 
 export function unwrapData<T>(value: unknown): T {

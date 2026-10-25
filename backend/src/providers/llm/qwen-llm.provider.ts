@@ -21,6 +21,7 @@ import {
 export class QwenLlmProvider implements ILLMProvider {
   private readonly logger = new Logger(QwenLlmProvider.name);
   private readonly model: ChatOpenAI;
+  private readonly agenticModel: ChatOpenAI;
   private readonly modelName: string;
 
   constructor(
@@ -31,6 +32,8 @@ export class QwenLlmProvider implements ILLMProvider {
     const baseUrl = this.config.get<string>('llm.qwen.baseUrl');
     const modelName = this.config.get<string>('llm.qwen.model');
     this.modelName = modelName ?? 'unknown';
+    const agenticModelName =
+      this.config.get<string>('llm.qwen.agenticModel') ?? this.modelName;
     const timeoutMs = this.config.get<number>('llm.qwen.timeoutMs') ?? 60000;
     const maxTokens = this.config.get<number>('llm.qwen.maxTokens') ?? 4096;
     const maxRetries = this.config.get<number>('llm.qwen.maxRetries') ?? 2;
@@ -40,20 +43,30 @@ export class QwenLlmProvider implements ILLMProvider {
       throw new Error('QWEN_API_KEY is required');
     }
 
-    this.model = new ChatOpenAI({
-      temperature,
-      model: modelName,
-      apiKey,
-      timeout: timeoutMs,
-      maxTokens,
-      maxRetries,
-      configuration: { baseURL: baseUrl },
-      callbacks: [
-        createLlmUsageCallback((usage) =>
-          this.metricsService.observeLlmUsage('qwen', this.modelName, usage),
-        ),
-      ],
-    });
+    const createModel = (selectedModelName: string) =>
+      new ChatOpenAI({
+        temperature,
+        model: selectedModelName,
+        apiKey,
+        timeout: timeoutMs,
+        maxTokens,
+        maxRetries,
+        configuration: { baseURL: baseUrl },
+        callbacks: [
+          createLlmUsageCallback((usage) =>
+            this.metricsService.observeLlmUsage(
+              'qwen',
+              selectedModelName,
+              usage,
+            ),
+          ),
+        ],
+      });
+    this.model = createModel(this.modelName);
+    this.agenticModel =
+      agenticModelName === this.modelName
+        ? this.model
+        : createModel(agenticModelName);
   }
 
   /** 合并请求取消与 Provider 超时，统一统计用量，并把底层异常包装成可识别的调用错误。 */
@@ -99,6 +112,10 @@ export class QwenLlmProvider implements ILLMProvider {
 
   getModel(): BaseChatModel {
     return this.model;
+  }
+
+  getAgenticModel(): BaseChatModel {
+    return this.agenticModel;
   }
 
   private observeCall(

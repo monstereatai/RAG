@@ -659,6 +659,28 @@ canvas {
   font-size: 15px;
 }
 
+.answer-typing-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 4px;
+  vertical-align: -0.16em;
+  border-radius: 1px;
+  background: #1677ff;
+  animation: qa-answer-caret-blink 0.85s steps(1) infinite;
+}
+
+@keyframes qa-answer-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .answer-markdown > *:first-child {
   margin-top: 0;
 }

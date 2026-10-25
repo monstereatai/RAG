@@ -73,7 +73,11 @@ export class RagGrpcController {
     try {
       const retrieved = await this.karpathyRagService.retrieve(
         query,
-        { vectorSearch: true },
+        {
+          vectorSearch: true,
+          tenantId: user.tenantId,
+          departmentIds: user.departmentIds,
+        },
         userId || 'default',
       );
 
@@ -105,6 +109,7 @@ export class RagGrpcController {
     const doc = await this.documentService.getDocMeta(
       docId,
       userId || 'default',
+      user.tenantId,
     );
     if (!doc) {
       return {
@@ -137,7 +142,10 @@ export class RagGrpcController {
     const page = data.page || 1;
     const pageSize = data.page_size || 20;
     const query = data.query || '';
-    const docs = await this.documentService.listDocs(userId || 'default');
+    const docs = await this.documentService.listDocs(
+      userId || 'default',
+      user.tenantId,
+    );
 
     let filtered = docs;
     if (query) {

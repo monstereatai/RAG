@@ -95,6 +95,9 @@ interface ChatMessage {
   artifacts?: GeneratedArtifact[];
   events?: EventTraceItem[];
   runState?: RunStateView;
+  animate?: boolean;
+  /** 流式草稿只在内存累积，不在最终答案确认前展示。 */
+  streamingDraft?: string;
 }
 
 interface RunStateView {
@@ -117,6 +120,102 @@ interface AnswerMedia {
 interface EventTraceItem {
   type: string;
   count: number;
+}
+
+function getStreamingStatusText(phase?: string): string {
+  switch (phase) {
+    case 'routing':
+      return '正在分析问题...';
+    case 'retrieval':
+      return '正在检索知识库...';
+    case 'evidence':
+      return '正在校验证据...';
+    case 'generation':
+      return '正在生成答案...';
+    case 'citation':
+      return '正在校验引用...';
+    default:
+      return '正在检索知识库并校验引用，最终答案确认后显示...';
+  }
+}
+
+type TypewriterAnswerProps = {
+  content: string;
+  animate: boolean;
+  status?: 'streaming' | 'done';
+};
+
+/**
+ * QA Ops 的答案展示层终端效果。
+ * 后端流可能因为引用门禁在最终事件中一次性给出全文，所以这里不假设
+ * token 一定逐条到达：内容到达后仍按字符逐步揭示，保证输入体验一致。
+ */
+function TypewriterAnswer({
+  content,
+  animate,
+  status,
+}: TypewriterAnswerProps) {
+  const [visibleContent, setVisibleContent] = React.useState(
+    animate ? '' : content,
+  );
+  const [typing, setTyping] = React.useState(false);
+  const visibleRef = React.useRef(visibleContent);
+  const contentRef = React.useRef(content);
+
+  React.useEffect(() => {
+    contentRef.current = content;
+    if (animate === false) {
+      visibleRef.current = content;
+      setVisibleContent(content);
+      setTyping(false);
+      return;
+    }
+    if (content.length === 0) {
+      visibleRef.current = '';
+      setVisibleContent('');
+      setTyping(false);
+      return;
+    }
+    if (content.length <= visibleRef.current.length) {
+      if (content === visibleRef.current) {
+        setTyping(false);
+        return;
+      }
+      visibleRef.current = content;
+      setVisibleContent(content);
+      setTyping(false);
+      return;
+    }
+
+    setTyping(true);
+    let cursor = visibleRef.current.length;
+    const charsPerTick = Math.max(1, Math.ceil(content.length / 220));
+    const timer = window.setInterval(() => {
+      const target = contentRef.current;
+      if (cursor >= target.length) {
+        window.clearInterval(timer);
+        setTyping(false);
+        return;
+      }
+      cursor = Math.min(target.length, cursor + charsPerTick);
+      const next = target.slice(0, cursor);
+      visibleRef.current = next;
+      setVisibleContent(next);
+    }, 16);
+
+    return () => window.clearInterval(timer);
+  }, [animate, content]);
+
+  return (
+    <>
+      <AssistantMarkdown
+        className="answer-markdown"
+        content={visibleContent}
+        status={typing ? 'streaming' : status}
+      />
+      {typing && <span className="answer-typing-caret" />}
+    </>
+  );
 }
 
 type TtsStatus = 'connecting' | 'synthesizing' | 'playing' | 'error';
@@ -778,6 +877,7 @@ const QaOps: React.FC = () => {
         createdAt: now,
         status: 'streaming',
         events: [],
+        animate: true,
       },
     ]);
 
@@ -930,9 +1030,12 @@ const QaOps: React.FC = () => {
     if (event.type === 'TEXT_MESSAGE_CONTENT') {
       const delta =
         typeof event.data?.delta === 'string' ? event.data.delta : '';
+      if (delta.length === 0) return;
+      // 关键：流式 token 是未通过最终引用门禁的草稿，只累计在隐藏字段。
+      // 页面在 RUN_FINISHED 之前不展示它，避免用户先看到草稿再被替换。
       updateMessage(messageId, (message) => ({
         ...message,
-        content: message.content + delta,
+        streamingDraft: (message.streamingDraft ?? '') + delta,
       }));
       return;
     }
@@ -958,7 +1061,8 @@ const QaOps: React.FC = () => {
             : undefined;
         updateMessage(messageId, (message) => ({
           ...message,
-          content: outputAnswer ?? message.content,
+          content: outputAnswer ?? message.streamingDraft ?? message.content,
+          streamingDraft: undefined,
           references: Array.isArray(output.references)
             ? (output.references as ReferenceChunk[])
             : message.references,
@@ -995,6 +1099,13 @@ const QaOps: React.FC = () => {
             : message.runState,
           status: 'done',
         }));
+      } else {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          content: message.streamingDraft ?? message.content,
+          streamingDraft: undefined,
+          status: 'done',
+        }));
       }
       return;
     }
@@ -1003,6 +1114,7 @@ const QaOps: React.FC = () => {
       updateMessage(messageId, (message) => ({
         ...message,
         content: `错误：${String(event.data?.message ?? '流式问答失败')}`,
+        streamingDraft: undefined,
         status: 'error',
       }));
     }
@@ -1059,6 +1171,12 @@ const QaOps: React.FC = () => {
           typeof value.retryCount === 'number'
             ? value.retryCount
             : message.retryCount,
+      }));
+    }
+    if (name === 'rag.answer_replace' && typeof value === 'string') {
+      updateMessage(messageId, (message) => ({
+        ...message,
+        streamingDraft: value,
       }));
     }
     if (name === 'rag.media' || name === 'rag.image' || name === 'rag.images') {
@@ -1269,24 +1387,17 @@ const QaOps: React.FC = () => {
                   <Avatar>AI</Avatar>
                   <div className="answer-card">
                     {message.content ? (
-                      <>
-                        <AssistantMarkdown
-                          className="answer-markdown"
-                          content={message.content}
-                          status={
-                            message.status === 'streaming'
-                              ? 'streaming'
-                              : 'done'
-                          }
-                        />
-                        {message.status === 'streaming' && (
-                          <span className="answer-typing-caret" />
-                        )}
-                      </>
+                      <TypewriterAnswer
+                        animate={message.animate === true}
+                        content={message.content}
+                        status={
+                          message.status === 'streaming' ? 'streaming' : 'done'
+                        }
+                      />
                     ) : (
                       message.status === 'streaming' && (
                         <p className="answer-loading">
-                          正在通过 AG-UI 协议生成回答...
+                          {getStreamingStatusText(message.runState?.phase)}
                         </p>
                       )
                     )}

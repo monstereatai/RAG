@@ -8,12 +8,14 @@ import { MetricsModule } from '../metrics/metrics.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 @Module({
   imports: [
     LlmModule,
     AgentRuntimeEventsModule,
     MetricsModule,
+    DomainEventsModule,
     TypeOrmModule.forFeature([ConversationEntity, MessageEntity]),
   ],
   controllers: [MemoryController],

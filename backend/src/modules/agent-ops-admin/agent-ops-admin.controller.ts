@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { AgentEvalDto } from '../agent-evals/agent-eval.dto';
 import { AgentEvalService } from '../agent-evals/agent-eval.service';
 import { RagFeedbackService } from '../chat/rag-feedback.service';
@@ -37,6 +38,7 @@ import {
   searchPlaywayComponents,
 } from '../workflow/playway-component-registry';
 
+@Public()
 @Controller('rag/admin/agent-ops')
 @UseGuards(ServiceTokenGuard)
 export class AgentOpsAdminController {

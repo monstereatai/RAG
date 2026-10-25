@@ -1,5 +1,11 @@
 {
   "version": "private-sanitized-2026-06-30",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "scripts/prepare-private-fixtures.mjs",
+    "containsRealBusinessData": false
+  },
   "departments": [
     {
       "id": "dept-exec",

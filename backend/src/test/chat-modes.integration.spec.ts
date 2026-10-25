@@ -17,6 +17,9 @@ import { QueryLogEntity } from '../providers/db/entities/query-log.entity';
 import { BadRequestException } from '@nestjs/common';
 import { ShortTermMemoryService } from '../modules/memory/short-term-memory.service';
 import { LangfuseProvider } from '../providers/observability/langfuse.provider';
+import { QueryPlannerService } from '../rag/planning/query-planner.service';
+import { RetrievalPolicyService } from '../rag/planning/retrieval-policy.service';
+import { ChatQueryLogService } from '../modules/chat/chat-query-log.service';
 
 describe('ChatModes Integration', () => {
   let chatService: ChatService;
@@ -36,9 +39,11 @@ describe('ChatModes Integration', () => {
       run: jest.fn(),
     };
     const mockConversationService = {
+      assertAccessible: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue('new-thread-123'),
       getRecentHistory: jest.fn().mockResolvedValue([]),
       addMessage: jest.fn().mockResolvedValue(undefined),
+      addCompletedTurn: jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' }),
     };
     const mockConversationEmbeddingService = {
       searchHistory: jest.fn().mockResolvedValue([]),
@@ -54,6 +59,9 @@ describe('ChatModes Integration', () => {
       classifyAndPersist: jest.fn().mockResolvedValue(undefined),
     };
 
+    const mockChatQueryLogService = {
+      logQuery: jest.fn().mockResolvedValue(undefined),
+    };
     const mockQueryLogRepo = {
       save: jest.fn().mockResolvedValue(undefined),
       create: jest.fn().mockImplementation((data: unknown) => data),
@@ -65,11 +73,45 @@ describe('ChatModes Integration', () => {
         truncatedHistory: false,
       }),
       addTurn: jest.fn().mockResolvedValue(undefined),
+      addTurns: jest.fn().mockResolvedValue(null),
+      getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
+      limitHistoryToTokenBudget: jest.fn((turns) => turns),
     };
     const mockLangfuseProvider = {
       estimateTextTokens: jest.fn().mockReturnValue(1),
       estimateCostUsd: jest.fn().mockReturnValue(0),
       traceRagAnswer: jest.fn(),
+    };
+    const mockQueryPlanner = {
+      plan: jest.fn().mockResolvedValue({
+        action: 'retrieve',
+        domain: 'internal',
+        contextMode: 'independent',
+        standaloneQuery: '',
+        subQueries: [],
+        taskType: 'lookup',
+        needsGraph: false,
+        entities: [],
+        filters: {},
+      }),
+    };
+    const mockRetrievalPolicy = {
+      build: jest.fn().mockReturnValue({
+        planVersion: 2,
+        sourcePolicy: 'local_only',
+        queries: [{ text: 'query', kind: 'original', weight: 1 }],
+        profile: {
+          intent: 'lookup',
+          candidateDepth: 8,
+          finalTopK: 4,
+          neighborWindow: 0,
+          sameSectionLimit: 0,
+          contextCharacterBudget: 3500,
+          maxChunksPerDocument: 2,
+        },
+        useGraph: false,
+        reasonCode: 'internal_evidence_required',
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -85,10 +127,13 @@ describe('ChatModes Integration', () => {
         { provide: MemoryService, useValue: mockMemoryService },
         { provide: ShortTermMemoryService, useValue: mockShortTermMemory },
         { provide: LangfuseProvider, useValue: mockLangfuseProvider },
+        { provide: ChatQueryLogService, useValue: mockChatQueryLogService },
         {
           provide: getRepositoryToken(QueryLogEntity),
           useValue: mockQueryLogRepo,
         },
+        { provide: QueryPlannerService, useValue: mockQueryPlanner },
+        { provide: RetrievalPolicyService, useValue: mockRetrievalPolicy },
       ],
     }).compile();
 
@@ -138,20 +183,14 @@ describe('ChatModes Integration', () => {
     expect(res.route).toBe('simple');
     expect(res.threadId).toBe('new-thread-123');
 
-    // Verify conversation persists
-    expect(conversationService.addMessage).toHaveBeenCalledWith(
-      'new-thread-123',
-      'human',
-      query,
-      'user-1',
-      expect.any(Object),
-    );
-    expect(conversationService.addMessage).toHaveBeenCalledWith(
-      'new-thread-123',
-      'ai',
-      'I am simple RAG',
-      'user-1',
-      expect.any(Object),
+    // Verify conversation persists as one completed turn.
+    expect(conversationService.addCompletedTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'new-thread-123',
+        query,
+        answer: 'I am simple RAG',
+        userId: 'user-1',
+      }),
     );
   });
 
@@ -185,6 +224,7 @@ describe('ChatModes Integration', () => {
         runtimeRunId: undefined,
         scope: { role: undefined },
       }),
+      expect.objectContaining({ signal: expect.anything() }),
     );
     expect(karpathyRagService.answer).not.toHaveBeenCalled();
     expect(res.answer).toBe('Quantum computing is...');
@@ -219,6 +259,7 @@ describe('ChatModes Integration', () => {
       expect.any(Array),
       false,
       expect.objectContaining({ scope: { role: undefined } }),
+      expect.objectContaining({ signal: expect.anything() }),
     );
     expect(res.mode).toBe('auto');
     expect(res.route).toBe('simple');
@@ -280,6 +321,7 @@ describe('ChatModes Integration', () => {
       query,
       2,
       'user-1',
+      undefined,
     );
     expect(karpathyRagService.answer.mock.calls[0]?.[3]).toEqual(
       expect.arrayContaining([

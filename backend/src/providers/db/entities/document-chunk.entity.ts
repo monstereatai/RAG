@@ -12,6 +12,7 @@ import {
 @Index('IDX_document_chunks_effective', ['effectiveAt', 'expiredAt'])
 @Index('IDX_document_chunks_project_activity', ['projectId', 'activityId'])
 @Index('IDX_document_chunks_lifecycle', ['lifecycleStatus'])
+@Index('IDX_document_chunks_rule_key', ['docId', 'ruleKey'])
 export class DocumentChunkEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id!: string;
@@ -43,6 +44,15 @@ export class DocumentChunkEntity {
 
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   indexGeneration!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true, default: null })
+  ruleKey!: string | null;
+
+  @Column({ type: 'varchar', length: 24, default: 'standalone' })
+  changeType!: string;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  supersedesChunkId!: string | null;
 
   @Column({ type: 'text', nullable: true, default: null })
   hypotheticalQuestions!: string | null;

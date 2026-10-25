@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { In, Repository } from 'typeorm';
@@ -6,11 +7,14 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { UserEntity } from '../../providers/db/entities/user.entity';
 import { RedisProvider } from '../../providers/redis/redis.provider';
+import { IamService } from '../iam/iam.service';
 
 export interface PermissionSubject {
   type: 'user' | 'role' | 'department' | 'public';
   id: string;
 }
+
+const ADMIN_PRINCIPAL_PATTERN = /^admin:[a-f0-9]{58}$/;
 
 @Injectable()
 export class DocumentPermissionService {
@@ -26,6 +30,8 @@ export class DocumentPermissionService {
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
     private readonly redisProvider: RedisProvider,
+    @Optional() private readonly iamService?: IamService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   async grantOwner(docId: string, userId: string): Promise<void> {
@@ -36,14 +42,39 @@ export class DocumentPermissionService {
   async assertTenant(
     userId: string,
     requestedTenantId?: string,
+    trustedAdminPrincipal = false,
   ): Promise<void> {
     const tenantId = requestedTenantId?.trim();
-    if (!tenantId) return;
+    if (trustedAdminPrincipal) {
+      const configuredTenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+      if (!ADMIN_PRINCIPAL_PATTERN.test(userId) || !configuredTenantId) {
+        throw new ForbiddenException('trusted Admin principal is invalid');
+      }
+      if (tenantId !== configuredTenantId) {
+        throw new ForbiddenException('tenant scope does not match Admin tenant');
+      }
+      return;
+    }
+    const requireTenantContext =
+      this.configService?.get<boolean>('auth.requireTenantContext') === true;
+    if (!tenantId) {
+      if (requireTenantContext) {
+        throw new ForbiddenException(
+          'tenant context is required for document writes',
+        );
+      }
+      return;
+    }
     const principal = await this.userRepo.findOne({
       select: ['tenantId'],
       where: { id: userId },
     });
     const principalTenantId = principal?.tenantId?.trim();
+    if (requireTenantContext && !principalTenantId) {
+      throw new ForbiddenException(
+        'tenant membership is required for tenant-scoped document writes',
+      );
+    }
     if (principalTenantId && principalTenantId !== tenantId) {
       throw new ForbiddenException('tenant scope does not match current user');
     }
@@ -83,18 +114,42 @@ export class DocumentPermissionService {
     roles: string[] = [],
     departmentIds: string[] = [],
     requestedTenantId?: string,
+    trustedAdminPrincipal = false,
   ): Promise<Set<string>> {
-    const principal = await this.userRepo.findOne({
-      select: ['role', 'tenantId'],
-      where: { id: userId },
-    });
-    const resolvedRoles = roles.length
-      ? [...new Set(roles)].sort()
-      : principal?.role
-        ? [principal.role]
-        : [];
+    const configuredAdminTenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (
+      trustedAdminPrincipal &&
+      (!ADMIN_PRINCIPAL_PATTERN.test(userId) ||
+        !configuredAdminTenantId ||
+        requestedTenantId?.trim() !== configuredAdminTenantId)
+    ) {
+      throw new ForbiddenException('trusted Admin principal is invalid');
+    }
+    if (trustedAdminPrincipal) {
+      // The service-token bridge supplies the already-authorized Admin role,
+      // while the mapped identity still receives only explicit user ACLs and
+      // documents it owns.
+    }
+    const principal = trustedAdminPrincipal
+      ? { role: 'admin', tenantId: configuredAdminTenantId }
+      : await this.userRepo.findOne({
+          select: ['role', 'tenantId'],
+          where: { id: userId },
+        });
     const principalTenantId = principal?.tenantId?.trim() || undefined;
     const tenantId = requestedTenantId?.trim() || principalTenantId || null;
+    const requireTenantContext =
+      this.configService?.get<boolean>('auth.requireTenantContext') === true;
+    if (requireTenantContext && !tenantId) {
+      throw new ForbiddenException(
+        'tenant context is required for document access',
+      );
+    }
+    if (requireTenantContext && !principalTenantId) {
+      throw new ForbiddenException(
+        'tenant membership is required for document access',
+      );
+    }
     if (
       requestedTenantId?.trim() &&
       principalTenantId &&
@@ -102,6 +157,16 @@ export class DocumentPermissionService {
     ) {
       throw new ForbiddenException('tenant scope does not match current user');
     }
+    const iamRoles = tenantId
+      ? ((await this.iamService?.listRoleNames(userId, tenantId)) ?? [])
+      : [];
+    const resolvedRoles = [
+      ...new Set([
+        ...roles,
+        ...(principal?.role ? [principal.role] : []),
+        ...iamRoles,
+      ]),
+    ].sort();
     const cacheKey = this.cacheKey(
       userId,
       resolvedRoles,
@@ -148,7 +213,11 @@ export class DocumentPermissionService {
       ]),
     ];
     const tenantScopedIds = tenantId
-      ? await this.filterDocumentsToTenant(ids, tenantId)
+      ? await this.filterDocumentsToTenant(
+          ids,
+          tenantId,
+          trustedAdminPrincipal ? userId : undefined,
+        )
       : ids;
     await this.redisProvider.set(
       cacheKey,
@@ -163,12 +232,14 @@ export class DocumentPermissionService {
     userId: string,
     roles: string[] = [],
     requestedTenantId?: string,
+    trustedAdminPrincipal = false,
   ): Promise<boolean> {
     const allowed = await this.getAllowedDocIds(
       userId,
       roles,
       [],
       requestedTenantId,
+      trustedAdminPrincipal,
     );
     return allowed.has(docId);
   }
@@ -176,6 +247,7 @@ export class DocumentPermissionService {
   private async filterDocumentsToTenant(
     docIds: string[],
     tenantId: string,
+    trustedAdminOwnerId?: string,
   ): Promise<string[]> {
     if (docIds.length === 0) return [];
     const docs = await this.documentMetaRepo.find({
@@ -184,19 +256,34 @@ export class DocumentPermissionService {
     });
     const ownerIds = [
       ...new Set(
-        docs
+      docs
           .map((doc) => doc.userId)
-          .filter((ownerId): ownerId is string => Boolean(ownerId)),
+        .filter(
+          (ownerId): ownerId is string =>
+            typeof ownerId === 'string' &&
+            ownerId !== trustedAdminOwnerId &&
+            !(trustedAdminOwnerId && ADMIN_PRINCIPAL_PATTERN.test(ownerId)),
+        ),
       ),
     ];
-    if (ownerIds.length === 0) return [];
-    const tenantOwners = await this.userRepo.find({
-      select: ['id'],
-      where: { id: In(ownerIds), tenantId },
-    });
+    const tenantOwners = ownerIds.length
+      ? await this.userRepo.find({
+          select: ['id'],
+          where: { id: In(ownerIds), tenantId },
+        })
+      : [];
     const allowedOwners = new Set(tenantOwners.map((user) => user.id));
     return docs
-      .filter((doc) => doc.userId && allowedOwners.has(doc.userId))
+      .filter(
+        (doc) =>
+          doc.userId &&
+          (allowedOwners.has(doc.userId) ||
+            doc.userId === trustedAdminOwnerId ||
+            Boolean(
+              trustedAdminOwnerId &&
+                ADMIN_PRINCIPAL_PATTERN.test(doc.userId),
+            )),
+      )
       .map((doc) => doc.docId);
   }
 

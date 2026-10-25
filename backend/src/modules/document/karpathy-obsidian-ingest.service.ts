@@ -163,6 +163,7 @@ export class KarpathyObsidianIngestService {
     content: string;
     userId: string;
     tenantId?: string;
+    trustedAdminPrincipal?: boolean;
     filename: string;
     sourceUrl?: string;
     sourceType: 'document' | 'official-docs' | 'manual';
@@ -170,6 +171,8 @@ export class KarpathyObsidianIngestService {
     originalBuffer?: Buffer;
     taskId?: string;
     businessMetadata?: DocumentBusinessMetadata;
+    docId?: string;
+    incrementalUpdate?: boolean;
   }): Promise<KarpathyObsidianIngestResult> {
     // 文本已由入口完成解析；这里处理内容去重，并把 RAG 文档索引与 Obsidian 来源记录关联起来。
     const duplicate = await this.findDuplicate(params.content, params.userId);
@@ -189,6 +192,9 @@ export class KarpathyObsidianIngestService {
           {
             taskId: params.taskId,
             tenantId: params.tenantId,
+            trustedAdminPrincipal: params.trustedAdminPrincipal,
+            docId: params.docId,
+            incrementalUpdate: params.incrementalUpdate,
             originalBuffer:
               params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
             contentType: params.contentType ?? 'text/markdown',
@@ -232,6 +238,9 @@ export class KarpathyObsidianIngestService {
       {
         taskId: params.taskId,
         tenantId: params.tenantId,
+        trustedAdminPrincipal: params.trustedAdminPrincipal,
+        docId: params.docId,
+        incrementalUpdate: params.incrementalUpdate,
         originalBuffer:
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',

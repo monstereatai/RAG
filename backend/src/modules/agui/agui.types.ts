@@ -53,6 +53,9 @@ export interface AguiStreamOptions {
   mode: ChatMode;
   userId: string;
   tenantId?: string;
+  /** Set only by a ServiceTokenGuard-protected Admin controller. */
+  trustedAdminPrincipal?: boolean;
+  departmentIds?: string[];
   threadId?: string;
   model?: LlmModelProvider;
   rolePresetId?: string;

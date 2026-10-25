@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -26,6 +27,7 @@ import type {
 } from './dto/password-reset.dto';
 import { CreateApiTokenDto } from './dto/api-token.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { ApiTokenAccessGuard } from '../../common/guards/api-token-access.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
@@ -43,6 +45,7 @@ export class AuthController {
     private readonly speechTicketService: SpeechTicketService,
   ) {}
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto): Promise<LoginResponse> {
     return this.authService.login(dto);
@@ -51,6 +54,7 @@ export class AuthController {
   /**
    * 注册新用户并发送激活邮件（emailVerified=false，激活后才能登录）
    */
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<RegisterResponse> {
     return this.authService.register(dto);
@@ -60,6 +64,7 @@ export class AuthController {
    * 邮箱激活：消费注册时邮件里的一次性激活 token
    * （链接来自激活邮件，形如 {AUTH_EMAIL_LINK_BASE_URL}/api/v1/auth/verify-email?token=xxx）
    */
+  @Public()
   @Get('verify-email')
   verifyEmail(@Query('token') token: string): Promise<VerifyEmailResponse> {
     return this.authService.verifyEmail(token ?? '');
@@ -69,6 +74,7 @@ export class AuthController {
    * 发送密码重置验证码（6 位数字，10 分钟有效）
    * 邮箱不存在时返回与成功一致的响应，防止枚举注册邮箱
    */
+  @Public()
   @Post('password/reset-code')
   sendPasswordResetCode(
     @Body() dto: PasswordResetCodeDto,
@@ -79,6 +85,7 @@ export class AuthController {
   /**
    * 验证码重置密码：校验通过即更新口令并删除验证码
    */
+  @Public()
   @Post('password/reset')
   resetPassword(@Body() dto: PasswordResetDto): Promise<PasswordResetResponse> {
     return this.authService.resetPassword(dto);
@@ -88,9 +95,16 @@ export class AuthController {
    * 刷新双 token：携带 refresh token 换发新的 access + refresh
    * 注意不挂 JwtAuthGuard——refresh token 会被业务 Guard 以 401 拒绝
    */
+  @Public()
   @Post('refresh')
   refresh(@Body() dto: RefreshTokenDto): Promise<LoginResponse> {
     return this.authService.refresh(dto.refreshToken);
+  }
+
+  @Public()
+  @Post('logout')
+  logout(@Body() dto: RefreshTokenDto) {
+    return this.authService.logout(dto.refreshToken);
   }
 
   @Get('profile')
@@ -112,6 +126,7 @@ export class AuthController {
     return this.speechTicketService.issue(user);
   }
 
+  @Public()
   @Post('internal/speech-ticket')
   @UseGuards(ServiceTokenGuard)
   issueProxySpeechTicket(
@@ -119,23 +134,28 @@ export class AuthController {
     body: {
       ownerUserId?: string;
       ownerRole?: 'admin' | 'user';
-      tenantId?: string;
     },
   ) {
-    if (!body.ownerUserId?.trim()) {
-      throw new BadRequestException('verified owner user id is required');
+    const ownerUserId = body.ownerUserId?.trim();
+    if (!ownerUserId || !/^admin:[a-f0-9]{58}$/.test(ownerUserId)) {
+      throw new ForbiddenException('mapped Admin principal is required');
+    }
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
     }
     return this.speechTicketService.issue({
-      userId: body.ownerUserId.trim(),
-      username: body.ownerUserId.trim(),
+      userId: ownerUserId,
+      username: ownerUserId,
       role: body.ownerRole === 'admin' ? 'admin' : 'user',
-      tenantId: body.tenantId?.trim() || 'legacy',
+      tenantId,
       authType: 'service',
       scopes: ['rag:speech'],
       type: 'access',
     });
   }
 
+  @Public()
   @Get('api-tokens')
   @UseGuards(ApiTokenAccessGuard)
   @ApiScopes('rag:token:manage')
@@ -143,6 +163,7 @@ export class AuthController {
     return this.apiTokenService.listTokens(user);
   }
 
+  @Public()
   @Post('api-tokens')
   @UseGuards(ApiTokenAccessGuard)
   @ApiScopes('rag:token:manage')
@@ -153,6 +174,7 @@ export class AuthController {
     return this.apiTokenService.createToken(dto, user);
   }
 
+  @Public()
   @Delete('api-tokens/:id')
   @UseGuards(ApiTokenAccessGuard)
   @ApiScopes('rag:token:manage')

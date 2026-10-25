@@ -40,33 +40,72 @@ const profileDefaults =
       };
 const thresholds = {
   simpleP50Ms: Number(process.env.PERF_RAG_SIMPLE_P50_MS ?? profileDefaults.simpleP50Ms),
+  autoP50Ms: Number(
+    process.env.PERF_RAG_AUTO_P50_MS ??
+      profileDefaults.autoP50Ms ??
+      (profile === 'local' ? '8000' : '500'),
+  ),
   agenticP50Ms: Number(process.env.PERF_RAG_AGENTIC_P50_MS ?? profileDefaults.agenticP50Ms),
   simpleP95Ms: Number(process.env.PERF_RAG_SIMPLE_P95_MS ?? profileDefaults.simpleP95Ms),
+  autoP95Ms: Number(
+    process.env.PERF_RAG_AUTO_P95_MS ??
+      profileDefaults.autoP95Ms ??
+      (profile === 'local' ? '12000' : '1500'),
+  ),
   agenticP95Ms: Number(process.env.PERF_RAG_AGENTIC_P95_MS ?? profileDefaults.agenticP95Ms),
   maxErrorRate: Number(process.env.PERF_RAG_MAX_ERROR_RATE ?? '0.01'),
   maxCostUsdPerRequest: Number(
     process.env.PERF_RAG_MAX_COST_USD_PER_REQUEST ?? '0.05',
   ),
 };
-const inputCostUsdPer1k = Number(
-  process.env.PERF_RAG_INPUT_COST_USD_PER_1K ??
-    process.env.LANGFUSE_INPUT_COST_USD_PER_1K ??
-    '0',
-);
-const outputCostUsdPer1k = Number(
-  process.env.PERF_RAG_OUTPUT_COST_USD_PER_1K ??
-    process.env.LANGFUSE_OUTPUT_COST_USD_PER_1K ??
-    '0',
-);
+const serviceToken =
+  process.env.PERF_RAG_SERVICE_TOKEN?.trim() ||
+  process.env.RAG_SERVICE_TOKEN?.trim() ||
+  null;
 const costGateRequired = profile === 'strict';
+const minimumCostCoverage = Number(
+  process.env.PERF_RAG_MIN_COST_COVERAGE ?? '0.9',
+);
+if (
+  !Number.isFinite(minimumCostCoverage) ||
+  minimumCostCoverage < 0.9 ||
+  minimumCostCoverage > 1
+) {
+  throw new Error('PERF_RAG_MIN_COST_COVERAGE 必须在 0.9 到 1 之间。');
+}
+const requestedModes = (process.env.PERF_RAG_MODES ?? 'simple,agentic')
+  .split(',')
+  .map((mode) => mode.trim())
+  .filter(Boolean);
+const validModes = new Set(['simple', 'auto', 'agentic']);
+for (const mode of requestedModes) {
+  if (validModes.has(mode) === false) {
+    throw new Error(`PERF_RAG_MODES 包含不支持的 mode: ${mode}`);
+  }
+}
+const modeQueries = {
+  simple:
+    process.env.PERF_RAG_QUERY_SIMPLE ??
+    'RAG 性能基准：用一句话说明 RAG 是什么',
+  auto:
+    process.env.PERF_RAG_QUERY_AUTO ??
+    'RAG 性能基准：RAG 系统有哪些关键组件？',
+  agentic:
+    process.env.PERF_RAG_QUERY_AGENTIC ??
+    'RAG 性能基准：列出 RAG 回答的关键步骤',
+};
+
+const requestTimeoutMs = Number(
+  process.env.PERF_RAG_REQUEST_TIMEOUT_MS ?? '120000',
+);
 
 const token = await getToken();
-const simple = await measure('simple', () =>
-  postChat('RAG 性能基准：用一句话说明 RAG 是什么', 'simple'),
-);
-const agentic = await measure('agentic', () =>
-  postChat('RAG 性能基准：列出 RAG 回答的关键步骤', 'agentic'),
-);
+const measurements = {};
+for (const mode of requestedModes) {
+  measurements[mode] = await measure(mode, () =>
+    postChat(modeQueries[mode], mode),
+  );
+}
 
 const report = {
   schemaVersion: 1,
@@ -77,27 +116,34 @@ const report = {
   concurrency,
   profile,
   enforce,
-  pricing: {
-    inputUsdPer1k: inputCostUsdPer1k,
-    outputUsdPer1k: outputCostUsdPer1k,
-    configured: inputCostUsdPer1k > 0 || outputCostUsdPer1k > 0,
+  costMeasurement: {
+    source: 'agent_runtime_event.cost.estimated',
+    amountSemantics: 'estimated_cost_usd',
+    serviceTokenConfigured: Boolean(serviceToken),
     gateRequired: costGateRequired,
+    minimumCoverage: minimumCostCoverage,
   },
   thresholds,
-  simple,
-  agentic,
-  passed:
-    simple.p50Ms <= thresholds.simpleP50Ms &&
-    agentic.p50Ms <= thresholds.agenticP50Ms &&
-    simple.p95Ms <= thresholds.simpleP95Ms &&
-    agentic.p95Ms <= thresholds.agenticP95Ms &&
-    (!costGateRequired ||
-      (simple.costConfigured &&
-        agentic.costConfigured &&
-        simple.maxCostUsd <= thresholds.maxCostUsdPerRequest &&
-        agentic.maxCostUsd <= thresholds.maxCostUsdPerRequest)) &&
-    simple.errorRate <= thresholds.maxErrorRate &&
-    agentic.errorRate <= thresholds.maxErrorRate,
+  modes: requestedModes,
+  results: measurements,
+  simple: measurements.simple ?? null,
+  auto: measurements.auto ?? null,
+  agentic: measurements.agentic ?? null,
+  passed: requestedModes.every((mode) => {
+    const result = measurements[mode];
+    const p50Limit =
+      thresholds[`${mode}P50Ms`] ?? thresholds.agenticP50Ms;
+    const p95Limit =
+      thresholds[`${mode}P95Ms`] ?? thresholds.agenticP95Ms;
+    return (
+      result.p50Ms <= p50Limit &&
+      result.p95Ms <= p95Limit &&
+      result.errorRate <= thresholds.maxErrorRate &&
+      (costGateRequired === false ||
+        (result.costCoverage >= minimumCostCoverage &&
+          result.maxCostUsd <= thresholds.maxCostUsdPerRequest))
+    );
+  }),
 };
 
 console.log(JSON.stringify(report, null, 2));
@@ -110,8 +156,7 @@ if (enforce && !report.passed) {
 async function measure(name, fn) {
   const durations = [];
   const errors = [];
-  const tokenCounts = [];
-  const costs = [];
+  const successfulResponses = [];
   const wallStarted = performance.now();
   let nextIndex = 0;
   async function worker() {
@@ -122,10 +167,7 @@ async function measure(name, fn) {
       try {
         const result = await fn();
         durations.push(Number((performance.now() - start).toFixed(2)));
-        if (result) {
-          tokenCounts.push(result.inputTokens ?? 0, result.outputTokens ?? 0);
-          costs.push(result.costUsd ?? 0);
-        }
+        successfulResponses.push(result);
       } catch (error) {
         errors.push({ index, error: safeError(error) });
       }
@@ -137,6 +179,12 @@ async function measure(name, fn) {
 
   durations.sort((a, b) => a - b);
   const wallDurationMs = Number((performance.now() - wallStarted).toFixed(2));
+  const usageRecords = await Promise.all(
+    successfulResponses.map((result) => readEstimatedRunUsage(result.runId)),
+  );
+  const costs = usageRecords
+    .filter((usage) => usage.status === 'available')
+    .map((usage) => usage.costUsdEstimated);
   return {
     name,
     attempted: samples,
@@ -152,13 +200,14 @@ async function measure(name, fn) {
     p50Ms: percentile(durations, 0.5),
     p95Ms: percentile(durations, 0.95),
     maxMs: durations[durations.length - 1] ?? 0,
-    inputTokens: tokenCounts
-      .filter((_, index) => index % 2 === 0)
-      .reduce((sum, value) => sum + value, 0),
-    outputTokens: tokenCounts
-      .filter((_, index) => index % 2 === 1)
-      .reduce((sum, value) => sum + value, 0),
-    costConfigured: inputCostUsdPer1k > 0 || outputCostUsdPer1k > 0,
+    inputTokens: usageRecords
+      .filter((usage) => usage.status === 'available')
+      .reduce((sum, usage) => sum + usage.inputTokens, 0),
+    outputTokens: usageRecords
+      .filter((usage) => usage.status === 'available')
+      .reduce((sum, usage) => sum + usage.outputTokens, 0),
+    costAvailableCount: costs.length,
+    costCoverage: rate(costs.length, durations.length),
     avgCostUsd: costs.length
       ? Number(
           (costs.reduce((sum, value) => sum + value, 0) / costs.length).toFixed(
@@ -196,6 +245,7 @@ async function postChat(query, mode) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ query, mode }),
+    signal: AbortSignal.timeout(requestTimeoutMs),
   });
   const body = await res.json();
   if (!res.ok) {
@@ -203,28 +253,76 @@ async function postChat(query, mode) {
       `${mode} chat failed: ${res.status} ${JSON.stringify(body)}`,
     );
   }
-  const answer = unwrap(body).answer;
+  const response = unwrap(body);
+  const answer = response.answer;
   if (!answer) {
     throw new Error(`${mode} chat returned empty answer`);
   }
-  const inputTokens = Math.ceil(queryTokenEstimate(query));
-  const outputTokens = Math.ceil(queryTokenEstimate(answer));
-  return {
-    inputTokens,
-    outputTokens,
-    costUsd: Number(
-      (
-        (inputTokens / 1000) * inputCostUsdPer1k +
-        (outputTokens / 1000) * outputCostUsdPer1k
-      ).toFixed(8),
-    ),
-  };
+  return { runId: response.runId };
 }
 
-function queryTokenEstimate(value) {
-  const text = String(value ?? '');
-  const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
-  return cjk * 0.75 + Math.max(text.length - cjk, 0) / 4;
+async function readEstimatedRunUsage(runId) {
+  if (!serviceToken || typeof runId !== 'string' || !runId.trim()) {
+    return { status: 'unavailable' };
+  }
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/v1/rag/admin/agent-ops/run-center/${encodeURIComponent(runId)}`,
+      {
+        headers: { 'x-service-token': serviceToken },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) return { status: 'unavailable' };
+    const run = unwrap(await response.json());
+    const events = Array.isArray(run?.events) ? run.events : [];
+    const costEvent = events
+      .filter((event) => event?.eventType === 'cost.estimated')
+      .at(-1);
+    const payload = parseEventPayload(costEvent?.payload);
+    const inputTokens = finiteNonNegativeNumber(payload?.inputTokens);
+    const outputTokens = finiteNonNegativeNumber(payload?.outputTokens);
+    const costUsdEstimated = finiteNonNegativeNumber(payload?.costUsd);
+    if (
+      inputTokens === null ||
+      outputTokens === null ||
+      costUsdEstimated === null
+    ) {
+      return { status: 'unavailable' };
+    }
+    return {
+      status: 'available',
+      inputTokens,
+      outputTokens,
+      costUsdEstimated,
+    };
+  } catch {
+    return { status: 'unavailable' };
+  }
+}
+
+function parseEventPayload(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function finiteNonNegativeNumber(value) {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && value.trim() === '')
+  ) {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 function unwrap(body) {
@@ -233,7 +331,7 @@ function unwrap(body) {
 
 function renderMarkdown(report) {
   const row = (item) =>
-    `| ${item.name} | ${item.attempted} | ${item.successRate} | ${item.errorRate} | ${item.p50Ms} | ${item.p95Ms} | ${item.throughputPerSecond} | ${item.avgCostUsd} | ${item.maxCostUsd} |`;
+    `| ${item.name} | ${item.attempted} | ${item.successRate} | ${item.errorRate} | ${item.costCoverage} | ${item.p50Ms} | ${item.p95Ms} | ${item.throughputPerSecond} | ${item.avgCostUsd} | ${item.maxCostUsd} |`;
   return `# RAG 性能证据报告
 
 - 生成时间：${report.generatedAt}
@@ -243,11 +341,10 @@ function renderMarkdown(report) {
 - 门禁 Profile：${report.profile}
 - 门禁：${report.passed ? '通过' : '失败'}
 
-| 模式 | 请求数 | 成功率 | 错误率 | P50(ms) | P95(ms) | 吞吐(req/s) | 平均成本(USD) | 最大成本(USD) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-${row(report.simple)}
-${row(report.agentic)}
+| 模式 | 请求数 | 成功率 | 错误率 | 成本覆盖 | P50(ms) | P95(ms) | 吞吐(req/s) | 平均成本(USD) | 最大成本(USD) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+${report.modes.map((mode) => row(report.results[mode])).join('\n')}
 
-> local Profile 用于当前本地依赖和模型配置的工程回归；strict Profile 才是部署前延迟门禁。成本门禁要求配置输入／输出单价，否则报告会明确标记为未配置；两者都不等同于真实生产 SLA。
+> local Profile 用于当前本地依赖和模型配置的工程回归；strict Profile 才是部署前延迟门禁。成本来自运行记录中的估算事件，不是账单；strict Profile 要求运行记录成本覆盖达标。运行记录查询不计入问答延迟。
 `;
 }

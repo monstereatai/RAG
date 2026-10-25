@@ -38,6 +38,8 @@ export interface AuthUserRecord {
   role: 'admin' | 'user';
   /** 数据库租户迁移完成前可选；新部署应在签发 token 前补齐。 */
   tenantId?: string;
+  /** 可选部门列表，供文档 department ACL 使用。 */
+  departmentIds?: string[];
   /** 邮箱是否已激活（登录是否放行由 AUTH_REQUIRE_EMAIL_VERIFIED 控制） */
   emailVerified: boolean;
   createdAt: string;

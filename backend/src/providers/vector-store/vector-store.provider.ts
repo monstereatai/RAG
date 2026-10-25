@@ -50,12 +50,22 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
     queryVector: number[],
     k: number,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<VectorSearchHit[]> {
-    return this.provider.similaritySearch(queryVector, k, userId);
+    return this.provider.similaritySearch(
+      queryVector,
+      k,
+      userId,
+      allowedDocIds,
+    );
   }
 
   deleteByDocId(docId: string): Promise<void> {
     return this.provider.deleteByDocId(docId);
+  }
+
+  deleteByIds(ids: string[]): Promise<void> {
+    return this.provider.deleteByIds(ids);
   }
 
   countByDocId(docId: string, userId?: string): Promise<number> {
@@ -89,6 +99,10 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
 
   deleteImagesByDocId(docId: string, userId?: string): Promise<void> {
     return this.provider.deleteImagesByDocId(docId, userId);
+  }
+
+  countImagesByDocId(docId: string, userId?: string): Promise<number> {
+    return this.provider.countImagesByDocId(docId, userId);
   }
 
   ensureDescriptionCollection(): Promise<void> {

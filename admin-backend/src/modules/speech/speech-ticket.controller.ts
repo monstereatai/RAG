@@ -25,11 +25,9 @@ export class SpeechTicketController {
     if (user?.userId === undefined || user.userId === null) {
       throw new UnauthorizedException('authenticated user is required');
     }
-
     const result = await this.ragClient.issueSpeechTicket(
       String(user.userId),
       user.role === 'admin' ? 'admin' : 'user',
-      'legacy',
     );
     if (!result.available || !result.data) {
       throw new ServiceUnavailableException(

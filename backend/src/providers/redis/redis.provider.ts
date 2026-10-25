@@ -18,6 +18,7 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisProvider.name);
   private client!: Redis;
   private enabled = false;
+  private configured = false;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -27,6 +28,7 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Redis URL is not configured. Redis cache is disabled.');
       return;
     }
+    this.configured = true;
 
     try {
       this.client = new Redis(url, {
@@ -65,6 +67,10 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  isConfigured(): boolean {
+    return this.configured;
   }
 
   /**
@@ -111,6 +117,35 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async setIfAbsentRequired(key: string, value: string): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return (await this.client.set(key, value, 'NX')) === 'OK';
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async compareAndDeleteRequired(
+    key: string,
+    expectedValue: string,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const deleted = await this.client.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+        1,
+        key,
+        expectedValue,
+      );
+      return Number(deleted) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
   async zrangeRequired(
     key: string,
     start: number,
@@ -132,6 +167,17 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     if (!this.enabled) throw new Error('Redis is unavailable');
     try {
       await this.client.zadd(key, score, member);
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  async zremRequired(key: string, ...members: string[]): Promise<number> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    if (members.length === 0) return 0;
+    try {
+      return await this.client.zrem(key, ...members);
     } catch (err) {
       this.enabled = false;
       throw err;
@@ -333,8 +379,7 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 仅在 key 不存在时写入，用于工具调用的幂等执行锁。
-   * Redis 不可用时返回 false，由调用方按保守的本进程策略继续处理。
+   * 仅在 key 不存在时写入，用于跨实例任务锁；调用方可在未取得锁时跳过本轮非关键任务。
    */
   async setIfAbsent(
     key: string,
@@ -508,6 +553,30 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
         `Redis SCAN failed for pattern=${pattern}: ${(err as Error).message}`,
       );
       return [];
+    }
+  }
+
+  /** 与 scan 相同但保留错误语义，持久化恢复不能把 Redis 故障当成空队列。 */
+  async scanRequired(pattern: string): Promise<string[]> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const matched: string[] = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          500,
+        );
+        cursor = nextCursor;
+        matched.push(...keys);
+      } while (cursor !== '0');
+      return matched;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
     }
   }
 }

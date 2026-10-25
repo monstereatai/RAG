@@ -209,7 +209,9 @@ export default function ProductionWorkflowDetailPage() {
       : stages.flatMap((stage) =>
           Array.isArray(stage.lowCodeSchemas) ? stage.lowCodeSchemas : [],
         );
-    const evidence = Array.isArray(handoff.citations)
+    const evidence: Array<Record<string, unknown>> = Array.isArray(
+      handoff.citations,
+    )
       ? (handoff.citations as Array<Record<string, unknown>>)
       : stages.flatMap((stage) =>
           (Array.isArray(stage.evidence) ? stage.evidence : []).map((item) => ({

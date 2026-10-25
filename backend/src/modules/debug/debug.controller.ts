@@ -1,7 +1,12 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
+import { Public } from '../../common/decorators/public.decorator';
+import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
+import { UseGuards } from '@nestjs/common';
 
+@Public()
+@UseGuards(DevOnlyGuard)
 @Controller('debug')
 export class DebugController {
   constructor(

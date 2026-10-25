@@ -1,7 +1,9 @@
 import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ArtifactsService } from './artifacts.service';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('artifacts/shared')
 export class PublicArtifactsController {
   constructor(private readonly artifacts: ArtifactsService) {}

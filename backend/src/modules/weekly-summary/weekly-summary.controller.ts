@@ -5,7 +5,7 @@ import type { JwtPayload } from '../../common/interfaces/api-response.interface'
 import { WeeklySummaryService } from './weekly-summary.service';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
 
-@Controller('api/v1/weekly-summary')
+@Controller('weekly-summary')
 @ApiScopes('rag:summary')
 export class WeeklySummaryController {
   constructor(private readonly service: WeeklySummaryService) {}

@@ -29,6 +29,7 @@ import {
   updateDocumentPermissions,
   getDocumentVersions,
   createDocumentVersion,
+  incrementalUpdateDocument,
   promoteDocumentVersion,
   updateDocumentLifecycle,
   rollbackDocumentVersion,
@@ -386,13 +387,40 @@ const Documents: React.FC<DocumentListPageProps> = ({
 
   const handleCreateVersion = async () => {
     if (!versionDoc) return;
-    const values = await versionForm.validateFields();
+    const values = (await versionForm.validateFields()) as {
+      content: string;
+      filename?: string;
+      docVersion?: string;
+      effectiveAt?: string;
+      expiredAt?: string;
+      changeType?: 'standalone' | 'new' | 'replace' | 'amend' | 'supplement' | 'deprecate';
+      validityMonths?: number | string;
+      incremental?: boolean;
+    };
     setVersionSaving(true);
     try {
-      await createDocumentVersion(versionDoc.id, {
-        ...values,
-      });
-      message.success('新版本已创建为草稿；索引完成后可设为生效');
+      if (values.incremental === true) {
+        await incrementalUpdateDocument(versionDoc.id, {
+          content: values.content,
+          filename: values.filename,
+          docVersion: values.docVersion,
+          effectiveAt: values.effectiveAt,
+          expiredAt: values.expiredAt,
+          changeType: values.changeType ?? 'amend',
+          validityMonths: values.validityMonths
+            ? Number(values.validityMonths)
+            : undefined,
+        });
+        message.success('增量更新完成：只重算新增/变化 chunk，历史规则保留');
+      } else {
+        await createDocumentVersion(versionDoc.id, {
+          content: values.content,
+          filename: values.filename,
+          docVersion: values.docVersion,
+          effectiveAt: values.effectiveAt,
+        });
+        message.success('新版本已创建为草稿；索引完成后可设为生效');
+      }
       setVersionDoc(null);
       fetchDocs();
     } catch (error) {
@@ -1237,8 +1265,27 @@ const Documents: React.FC<DocumentListPageProps> = ({
           <Form.Item label="生效时间" name="effectiveAt">
             <Input placeholder="例如 2026-08-12" />
           </Form.Item>
+          <Form.Item label="过期时间" name="expiredAt">
+            <Input placeholder="例如 2026-09-30；不填可按正文有效期或默认继承" />
+          </Form.Item>
+          <Form.Item label="规则有效期（月）" name="validityMonths">
+            <Input type="number" min={1} max={120} placeholder="例如 3；留空则使用显式日期或正文有效期" />
+          </Form.Item>
+          <Form.Item label="变更语义" name="changeType" initialValue="amend">
+            <Select
+              options={[
+                { value: 'supplement', label: '补充：旧规则继续有效' },
+                { value: 'amend', label: '修订：截止旧规则并新增版本' },
+                { value: 'replace', label: '替代：整段旧规则退役' },
+                { value: 'deprecate', label: '废止：只截止旧规则' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="增量更新" name="incremental" valuePropName="checked">
+            <Checkbox>同一 docId，只重算新增/变化 chunk；保留历史规则有效期</Checkbox>
+          </Form.Item>
           <Form.Item label="新规范正文" name="content" rules={[{ required: true, message: '请输入新规范正文' }]}>
-            <Input.TextArea rows={8} placeholder="粘贴最新规范内容。提交后会重新切块、向量化并建立新版本索引。" />
+            <Input.TextArea rows={8} placeholder="粘贴最新规范内容。勾选增量更新时只重算新增/变化 chunk。" />
           </Form.Item>
         </Form>
       </Modal>

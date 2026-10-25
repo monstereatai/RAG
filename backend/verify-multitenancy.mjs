@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 
-const BACKEND_URL = 'http://localhost:3000/api';
+const BACKEND_URL = (process.env.RAG_BASE_URL ?? 'http://localhost:3000/api/v1').replace(/\/$/, '');
 
 async function test() {
   console.log('--- Starting Multi-Tenancy Isolation Verification ---');

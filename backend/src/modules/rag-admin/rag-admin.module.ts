@@ -4,6 +4,7 @@ import { RagAdminController } from './rag-admin.controller';
 import { RagAdminService } from './rag-admin.service';
 import { QueryLogService } from './query-log.service';
 import { DocumentModule } from '../document/document.module';
+import { DocumentPermissionModule } from '../document/document-permission.module';
 import { GraphModule } from '../graph/graph.module';
 import { ChatModule } from '../chat/chat.module';
 import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
@@ -35,6 +36,7 @@ import { DocumentRetrievalDescriptionModule } from '../document/document-retriev
       DocumentPermissionEntity,
     ]),
     DocumentModule,
+    DocumentPermissionModule,
     DocumentRetrievalDescriptionModule,
     GraphModule,
     ChatModule,

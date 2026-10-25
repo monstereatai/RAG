@@ -5,6 +5,15 @@ describe('ConversationEmbeddingService', () => {
     const service = new ConversationEmbeddingService(
       { get: jest.fn().mockReturnValue(undefined) } as never,
       { embedQuery: jest.fn().mockResolvedValue([0.1, 0.2]) } as never,
+      {
+        find: jest.fn().mockResolvedValue([{ id: 'thread-1' }]),
+      } as never,
+      {
+        find: jest.fn().mockResolvedValue([]),
+      } as never,
+      {
+        registerInternalHandler: jest.fn(),
+      } as never,
     );
     return service;
   };
@@ -12,9 +21,22 @@ describe('ConversationEmbeddingService', () => {
   it('stores a versioned timestamp and supersedes the same query in a thread', async () => {
     const service = createService();
     const client = {
-      deleteEntities: jest.fn().mockResolvedValue({}),
-      insert: jest.fn().mockResolvedValue({}),
-      flushSync: jest.fn().mockResolvedValue({}),
+      deleteEntities: jest.fn().mockResolvedValue({
+        status: { error_code: 'Success' },
+      }),
+      insert: jest.fn().mockResolvedValue({ status: { error_code: 'Success' } }),
+      query: jest.fn().mockResolvedValue({
+        status: { error_code: 'Success' },
+        data: [],
+      }),
+      upsert: jest.fn().mockResolvedValue({
+        status: { error_code: 'Success' },
+        upsert_cnt: 1,
+      }),
+      flushSync: jest.fn().mockResolvedValue({
+        status: { error_code: 'Success' },
+      }),
+      closeConnection: jest.fn().mockResolvedValue(undefined),
     };
     (service as any).client = client;
     (service as any).initialized = true;
@@ -23,14 +45,16 @@ describe('ConversationEmbeddingService', () => {
 
     expect(client.deleteEntities).toHaveBeenCalledWith(
       expect.objectContaining({
-        filter: 'thread_id == $threadId && query_key == $queryKey',
-        exprValues: {
+        filter: expect.stringContaining(
+          'thread_id == {threadId} && query_key == {queryKey}',
+        ),
+        exprValues: expect.objectContaining({
           threadId: 'thread-1',
           queryKey: '那它吃什么？',
-        },
+        }),
       }),
     );
-    const row = client.insert.mock.calls[0][0].data[0];
+    const row = client.upsert.mock.calls[0][0].data[0];
     expect(row).toEqual(
       expect.objectContaining({
         thread_id: 'thread-1',
@@ -71,7 +95,7 @@ describe('ConversationEmbeddingService', () => {
     expect(result).toHaveLength(1);
     expect(result[0].content).toBe('new answer');
     expect(client.search).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 10, output_fields: expect.arrayContaining(['created_at']) }),
+      expect.objectContaining({ limit: 50, output_fields: expect.arrayContaining(['created_at']) }),
     );
   });
 });

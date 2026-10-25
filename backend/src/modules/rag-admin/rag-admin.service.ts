@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThan } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DocumentService } from '../document/document.service';
+import { DocumentPermissionService } from '../document/document-permission.service';
 import { GraphService } from '../graph/graph.service';
 import { ConversationService } from '../chat/conversation.service';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
@@ -23,12 +24,12 @@ import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentReviewEntity } from '../../providers/db/entities/document-review.entity';
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
-import { requiresKnowledgeRetrieval } from '../../rag/prompts/query-intent-router';
 import { randomUUID } from 'node:crypto';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
 import { KarpathyObsidianIngestService } from '../document/karpathy-obsidian-ingest.service';
 import {
+  DocumentChangeType,
   DocumentLifecycleStatus,
   GameDocumentType,
 } from '../document/document-profile.util';
@@ -39,6 +40,7 @@ import {
   extractDocumentText,
 } from '../document/document-parser.util';
 import { DocumentQueueService } from '../document/document-queue.service';
+import { DocumentImageIngestionService } from '../document/document-image-ingestion.service';
 import type { DocumentBusinessMetadata } from '../document/document-profile.util';
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 import { IndexRepairQueueService } from './index-repair-queue.service';
@@ -87,8 +89,17 @@ export interface EvaluationSummary {
   passed: boolean;
   averageScore: number;
   totalSamples: number;
-  refusalRate: number;
+  refusalRate?: number;
   citationRate: number;
+  available?: boolean;
+  reason?: string;
+  outcome?: 'passed' | 'failed' | 'skipped' | 'unavailable';
+  failedSamples?: number;
+  synthetic?: boolean;
+  retrievalMetrics?: { hitRate: number; mrr: number; ndcg: number };
+  latencyMs?: { average: number; p95: number };
+  estimatedCostByModeAndVariant?: Record<string, unknown>;
+  pairedComparison?: Record<string, unknown>;
 }
 
 export interface ConversationSummary {
@@ -166,6 +177,7 @@ export class RagAdminService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly documentService: DocumentService,
+    private readonly documentPermissionService: DocumentPermissionService,
     private readonly documentQueue: DocumentQueueService,
     private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
     private readonly graphService: GraphService,
@@ -186,6 +198,7 @@ export class RagAdminService implements OnModuleInit {
     private readonly domainEvents: DomainEventsService,
     private readonly embeddingProvider: EmbeddingProvider,
     private readonly retrievalDescriptionService: DocumentRetrievalDescriptionService,
+    private readonly documentImageIngestionService: DocumentImageIngestionService,
     // 图片检索（以图搜图/文搜图）可选依赖：未注册（模块未导入）时保持降级
     @Optional() private readonly imageIndexService?: ImageIndexService,
     @Optional()
@@ -213,15 +226,24 @@ export class RagAdminService implements OnModuleInit {
     file: Express.Multer.File,
     userId: string,
     fields: Record<string, unknown> = {},
+    trustedAdminPrincipal = false,
   ) {
+    const tenantId = await this.validateUploadTenant(
+      userId,
+      fields,
+      trustedAdminPrincipal,
+    );
     const kind = detectDocumentKind(file.originalname);
     const content = (await extractDocumentText(file.buffer, kind)).trim();
     if (!content) throw new BadRequestException('document content is empty');
     const businessMetadata = { ...fields };
     delete businessMetadata.ownerUserId;
+    delete businessMetadata.tenantId;
     return this.documentService.upload(file.originalname, content, userId, {
       originalBuffer: file.buffer,
       contentType: file.mimetype,
+      tenantId,
+      trustedAdminPrincipal,
       businessMetadata: businessMetadata,
     });
   }
@@ -230,21 +252,30 @@ export class RagAdminService implements OnModuleInit {
     file: Express.Multer.File,
     userId: string,
     fields: Record<string, unknown> = {},
+    trustedAdminPrincipal = false,
   ) {
+    const tenantId = await this.validateUploadTenant(
+      userId,
+      fields,
+      trustedAdminPrincipal,
+    );
+
     if (!this.documentQueue.enabled) {
       if (this.documentQueue.required) {
         throw new BadRequestException(
           '生产文档处理要求使用 Redis 持久队列，当前队列未初始化，任务未执行。',
         );
       }
-      return this.uploadDocument(file, userId, fields);
+      return this.uploadDocument(file, userId, fields, trustedAdminPrincipal);
     }
     const task = await this.documentService.createQueuedTask(
       file.originalname,
       userId,
+      tenantId,
     );
     const businessMetadata = { ...fields } as Record<string, unknown>;
     delete businessMetadata.ownerUserId;
+    delete businessMetadata.tenantId;
     if (!this.objectStorageProvider) {
       await this.documentService.markTaskFailed(
         task.id,
@@ -255,24 +286,37 @@ export class RagAdminService implements OnModuleInit {
       );
     }
     const objectKey = `documents/${this.sanitizeObjectKeyPart(userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
+    const job = {
+      taskId: task.id,
+      userId,
+      tenantId,
+      trustedAdminPrincipal,
+      filename: file.originalname,
+      objectKey,
+      contentType: file.mimetype,
+      businessMetadata,
+    };
     try {
+      await this.documentQueue.stageUpload(job);
       await this.objectStorageProvider.putObject({
         key: objectKey,
         body: file.buffer,
         contentType: file.mimetype,
       });
-      await this.documentQueue.enqueue({
-        taskId: task.id,
-        userId,
-        filename: file.originalname,
-        objectKey,
-        contentType: file.mimetype,
-        businessMetadata,
-      });
+      await this.documentQueue.promoteUpload(task.id);
     } catch (error) {
-      await this.objectStorageProvider
-        .deleteObject(objectKey)
-        .catch(() => undefined);
+      await this.documentQueue
+        .removeStagedUpload(task.id)
+        .catch((cleanupError: unknown) =>
+          this.logger.warn(
+            `staged document job cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          ),
+        );
+      await this.objectStorageProvider.deleteObject(objectKey).catch((cleanupError: unknown) =>
+        this.logger.warn(
+          `uploaded object cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        ),
+      );
       await this.documentService.markTaskFailed(
         task.id,
         error instanceof Error ? error.message : 'document queue unavailable',
@@ -286,6 +330,26 @@ export class RagAdminService implements OnModuleInit {
       progress: task.progress,
       queueEnabled: true,
     };
+  }
+
+  private async validateUploadTenant(
+    userId: string,
+    fields: Record<string, unknown>,
+    trustedAdminPrincipal = false,
+  ): Promise<string | undefined> {
+    const requestedTenantId =
+      typeof fields.tenantId === 'string'
+        ? fields.tenantId.trim() || undefined
+        : undefined;
+    const tenantId = trustedAdminPrincipal
+      ? process.env.RAG_ADMIN_TENANT_ID?.trim()
+      : requestedTenantId;
+    await this.documentPermissionService.assertTenant(
+      userId,
+      tenantId,
+      trustedAdminPrincipal,
+    );
+    return tenantId;
   }
 
   private sanitizeObjectKeyPart(value: string): string {
@@ -558,13 +622,13 @@ export class RagAdminService implements OnModuleInit {
         })
       : [];
     const recent = logs.slice(0, 50).map((log) => {
-      const retrieve = requiresKnowledgeRetrieval(log.query);
+      const hasRetrievalEvidence = log.citationCount > 0;
       return {
         id: log.id,
         query: log.query.slice(0, 160),
-        action: retrieve ? 'retrieve' : 'direct_answer',
-        queryType: retrieve ? 'private_or_context' : 'public_knowledge',
-        confidence: retrieve ? 1 : 0.8,
+        action: hasRetrievalEvidence ? 'retrieve' : 'unknown',
+        queryType: hasRetrievalEvidence ? 'evidence_backed' : 'not_recorded',
+        confidence: hasRetrievalEvidence ? 1 : null,
         createdAt: log.createdAt.toISOString(),
         mode: log.mode,
         answered: log.hasAnswer,
@@ -574,19 +638,20 @@ export class RagAdminService implements OnModuleInit {
     const retrieveCount = recent.filter(
       (item) => item.action === 'retrieve',
     ).length;
-    const directCount = recent.length - retrieveCount;
+    const unknownCount = recent.length - retrieveCount;
     return {
       available: true,
       scanned: logs.length,
-      estimated: true,
-      note: '历史问答日志未持久化完整 Router JSON，本页按当前硬门禁规则回放估算；新运行的 routing 事件包含完整决策字段。',
+      estimated: false,
+      note: '旧问答日志没有保存 QueryPlan；仅把带引用的记录计为已检索，其余标为未记录，不猜测当时的路由。新运行计划保存在 Agent Run 事件中。',
       byAction: {
         retrieve: retrieveCount,
-        direct_answer: directCount,
+        direct_answer: 0,
+        unknown: unknownCount,
       },
       byQueryType: {
-        private_or_context: retrieveCount,
-        public_knowledge: directCount,
+        evidence_backed: retrieveCount,
+        not_recorded: unknownCount,
       },
       recent,
     };
@@ -810,11 +875,16 @@ export class RagAdminService implements OnModuleInit {
     };
   }
 
-  async inspectRetrieval(query: string, userId?: string, limit = 50) {
+  async inspectRetrieval(
+    query: string,
+    userId: string,
+    tenantId: string,
+    limit = 50,
+  ) {
     if (!query?.trim()) throw new BadRequestException('query is required');
     const result = await this.karpathyRagService.retrieveDetailed(
       query.trim(),
-      {},
+      { tenantId, roles: ['admin'], trustedAdminPrincipal: true },
       userId,
     );
     const candidates = result.diagnostics.candidates;
@@ -911,6 +981,7 @@ export class RagAdminService implements OnModuleInit {
     userId?: string,
     tenantId?: string,
     role?: string,
+    trustedAdminPrincipal = false,
   ) {
     const normalized = query.trim();
     const capped = Math.min(Math.max(limit, 1), 50);
@@ -950,6 +1021,7 @@ export class RagAdminService implements OnModuleInit {
         userId,
         tenantId,
         role,
+        trustedAdminPrincipal,
       );
       const results = await this.imageIndexService.searchText(normalized, {
         topK: capped,
@@ -985,6 +1057,7 @@ export class RagAdminService implements OnModuleInit {
     userId?: string,
     tenantId?: string,
     role?: string,
+    trustedAdminPrincipal = false,
   ) {
     const capped = Math.min(Math.max(limit, 1), 50);
     const query = '上传图片';
@@ -1024,6 +1097,7 @@ export class RagAdminService implements OnModuleInit {
         userId,
         tenantId,
         role,
+        trustedAdminPrincipal,
       );
       const results = await this.imageIndexService.searchImage(
         base64,
@@ -1055,6 +1129,7 @@ export class RagAdminService implements OnModuleInit {
     userId: string;
     tenantId?: string;
     role?: string;
+    trustedAdminPrincipal?: boolean;
     docId: string;
     key: string;
   }): Promise<{ buffer: Buffer; contentType: string }> {
@@ -1080,6 +1155,7 @@ export class RagAdminService implements OnModuleInit {
       userId,
       params.tenantId,
       params.role,
+      params.trustedAdminPrincipal,
     );
     const document = activeDocuments.get(docId);
     if (!document?.userId) {
@@ -1106,10 +1182,16 @@ export class RagAdminService implements OnModuleInit {
     userId: string,
     tenantId?: string,
     role?: string,
+    trustedAdminPrincipal = false,
   ): Promise<Set<string>> {
     return new Set(
       (
-        await this.getActiveAllowedImageDocuments(userId, tenantId, role)
+        await this.getActiveAllowedImageDocuments(
+          userId,
+          tenantId,
+          role,
+          trustedAdminPrincipal,
+        )
       ).keys(),
     );
   }
@@ -1118,11 +1200,13 @@ export class RagAdminService implements OnModuleInit {
     userId: string,
     tenantId?: string,
     role?: string,
+    trustedAdminPrincipal = false,
   ): Promise<Map<string, DocumentMetaEntity>> {
     const allowedDocIds = await this.documentService.getAllowedDocIdsForUser(
       userId,
       tenantId,
       role?.trim() ? [role.trim()] : [],
+      trustedAdminPrincipal,
     );
     const ids = [...allowedDocIds];
     const documents: DocumentMetaEntity[] = [];
@@ -1305,6 +1389,84 @@ export class RagAdminService implements OnModuleInit {
       },
     });
     return { ...result.rag, obsidian: result.obsidian, previousDocId: docId };
+  }
+
+  /**
+   * 同一 docId 的规则级增量更新：只 embedding 新增/变化 chunk，
+   * unchanged chunk 保留原向量和索引；旧 chunk 通过 expiredAt 保留历史。
+   */
+  async incrementalUpdateDocument(
+    docId: string,
+    body: {
+      content?: string;
+      filename?: string;
+      docVersion?: string;
+      effectiveAt?: string;
+      expiredAt?: string;
+      lifecycleStatus?: DocumentLifecycleStatus;
+      documentType?: GameDocumentType;
+      changeType?: DocumentChangeType;
+      validityMonths?: number;
+    },
+  ) {
+    const previous = await this.docMetaRepo.findOne({ where: { docId } });
+    if (previous === null) return null;
+    if (previous.userId === null || previous.userId === undefined) {
+      throw new BadRequestException('document owner is missing');
+    }
+    const content = body.content?.trim();
+    if (content === undefined || content.length === 0) {
+      throw new BadRequestException('content is required');
+    }
+    let roleScope: string[] = [];
+    try {
+      roleScope = previous.roleScope
+        ? (JSON.parse(previous.roleScope) as string[])
+        : [];
+    } catch {
+      roleScope = [];
+    }
+    const result = await this.karpathyObsidianIngest.ingestText({
+      title: body.filename?.trim() || previous.filename,
+      content,
+      userId: previous.userId,
+      tenantId: previous.tenantId ?? 'legacy',
+      filename: body.filename?.trim() || previous.filename,
+      sourceType: 'document',
+      contentType: 'text/markdown',
+      originalBuffer: Buffer.from(content, 'utf8'),
+      docId,
+      incrementalUpdate: true,
+      businessMetadata: {
+        projectId: previous.projectId,
+        activityId: previous.activityId,
+        region: previous.region,
+        locale: previous.locale,
+        channel: previous.channel,
+        roleScope,
+        documentType:
+          body.documentType ??
+          (previous.documentType as GameDocumentType | undefined),
+        lifecycleStatus:
+          body.lifecycleStatus ??
+          (previous.lifecycleStatus as DocumentLifecycleStatus),
+        supersedesDocId: previous.supersedesDocId,
+        docVersion: body.docVersion ?? previous.docVersion,
+        effectiveAt: body.effectiveAt ?? null,
+        expiredAt:
+          body.expiredAt ??
+          (previous.expiredAt
+            ? previous.expiredAt.toISOString()
+            : null),
+        changeType: body.changeType ?? 'amend',
+        validityMonths: body.validityMonths,
+      },
+    });
+    return {
+      ...result.rag,
+      obsidian: result.obsidian,
+      incrementalUpdate: true,
+    };
   }
 
   async updateDocumentLifecycle(
@@ -1557,6 +1719,36 @@ export class RagAdminService implements OnModuleInit {
           doc.docId,
           doc.userId ?? 'system',
         );
+        let image: IndexAuditCheck = {
+          status: 'skipped',
+          reason: 'image_index_disabled',
+        };
+        if (this.imageIndexService?.isEnabled()) {
+          const imageUserId = doc.userId ?? 'system';
+          try {
+            const expectedImageAssets =
+              await this.documentImageIngestionService.getExpectedIndexAssetCount(
+                doc.docId,
+                doc.filename,
+                imageUserId,
+              );
+            image = await this.readIndexCheck(
+              true,
+              () =>
+                this.imageIndexService!.countByDocId(
+                  doc.docId,
+                  imageUserId,
+                ),
+              expectedImageAssets,
+              'image',
+            );
+          } catch (err) {
+            image = {
+              status: 'unavailable',
+              reason: `image_index_audit_unavailable:${(err as Error).message}`,
+            };
+          }
+        }
         let descriptionAudit: DocumentRetrievalDescriptionAudit | null = null;
         try {
           descriptionAudit =
@@ -1718,6 +1910,7 @@ export class RagAdminService implements OnModuleInit {
                 reason: es.reason ?? 'elasticsearch_disabled',
               },
           milvus,
+          image,
           graph,
           retrievalDescriptions,
         };
@@ -1736,6 +1929,10 @@ export class RagAdminService implements OnModuleInit {
           reasons.push('milvus_chunk_count_mismatch');
         if (indexChecks.milvus.status === 'unavailable')
           reasons.push('milvus_unavailable');
+        if (indexChecks.image.status === 'mismatch')
+          reasons.push('image_index_count_mismatch');
+        if (indexChecks.image.status === 'unavailable')
+          reasons.push('image_index_unavailable');
         if (indexChecks.graph.status === 'mismatch')
           reasons.push('graph_index_missing');
         if (indexChecks.retrievalDescriptions.status === 'mismatch') {
@@ -1808,6 +2005,8 @@ export class RagAdminService implements OnModuleInit {
           'elasticsearch_generation_mismatch',
         ),
         milvusUnavailable: count('milvus_unavailable'),
+        imageIndexCountMismatch: count('image_index_count_mismatch'),
+        imageIndexUnavailable: count('image_index_unavailable'),
         graphIndexMissing: count('graph_index_missing'),
         retrievalDescriptionMismatch: issues.filter((item) =>
           item.reasons.some((reason) =>
@@ -2091,6 +2290,7 @@ export class RagAdminService implements OnModuleInit {
   async reindexDocument(docId: string) {
     const doc = await this.docMetaRepo.findOne({ where: { docId } });
     if (!doc) return null;
+    const imageIndexEnabled = this.imageIndexService?.isEnabled() ?? false;
 
     const chunks = await this.chunkRepo.find({
       where: { docId },
@@ -2101,6 +2301,17 @@ export class RagAdminService implements OnModuleInit {
       try {
         const restored =
           await this.documentService.restoreDocumentFromOriginal(docId);
+        if (
+          restored &&
+          imageIndexEnabled &&
+          restored.imageIndex?.indexed === false
+        ) {
+          return {
+            docId,
+            reindexed: false,
+            reason: `Image index rebuild failed: ${restored.imageIndex.reason ?? 'unknown error'}`,
+          };
+        }
         return restored
           ? { ...restored, reindexed: true, restoredFromOriginal: true }
           : { docId, reindexed: false, reason: 'document not found' };
@@ -2264,6 +2475,11 @@ export class RagAdminService implements OnModuleInit {
         await this.rebuildAndAuditRetrievalDescriptions(doc);
       const imageIndex =
         await this.documentService.rebuildImageIndexFromOriginal(docId);
+      if (imageIndexEnabled && !imageIndex.indexed) {
+        throw new Error(
+          `Image index rebuild failed: ${imageIndex.reason ?? 'unknown error'}`,
+        );
+      }
 
       return {
         docId,
@@ -2409,19 +2625,33 @@ export class RagAdminService implements OnModuleInit {
   runEvaluation(dto: RagEvaluationRunDto) {
     const dataset = dto.dataset ?? 'rag-smoke';
     const mode = dto.mode ?? 'offline';
+    const command =
+      mode === 'live'
+        ? 'pnpm --dir backend eval:rag:e2e'
+        : mode === 'project'
+          ? 'pnpm --dir backend eval:rag:project'
+          : 'pnpm --dir backend eval:rag';
 
     return {
-      triggered: true,
+      triggered: false,
+      status: 'not_started',
       dataset,
       mode,
-      note: 'Evaluation triggered. Run `npm run eval:rag`, `npm run eval:rag:e2e`, or `npm run eval:rag:langsmith` for full results. For automated execution, use the eval scripts in backend/scripts/.',
+      command,
+      note: '此接口目前不会启动评测任务；请在仓库中运行 command 字段给出的命令。',
     };
   }
 
   // ─── Conversations ────────────────────────────────────────────
 
-  async listConversations(userId?: string): Promise<ConversationSummary[]> {
-    const list = await this.conversationService.listConversations(userId);
+  async listConversations(
+    userId: string,
+    tenantId: string,
+  ): Promise<ConversationSummary[]> {
+    const list = await this.conversationService.listConversations(
+      userId,
+      tenantId,
+    );
     return list.map((item) => ({
       threadId: item.threadId,
       title: item.title,
@@ -2432,8 +2662,8 @@ export class RagAdminService implements OnModuleInit {
     }));
   }
 
-  async getConversation(threadId: string, userId?: string) {
-    const conv = await this.conversationService.get(threadId, userId);
+  async getConversation(threadId: string, userId: string, tenantId: string) {
+    const conv = await this.conversationService.get(threadId, userId, tenantId);
     if (!conv) return null;
     return {
       threadId: conv.threadId,
@@ -2446,9 +2676,10 @@ export class RagAdminService implements OnModuleInit {
 
   async deleteConversation(
     threadId: string,
-    userId?: string,
+    userId: string,
+    tenantId: string,
   ): Promise<boolean> {
-    return this.conversationService.delete(threadId, userId);
+    return this.conversationService.delete(threadId, userId, tenantId);
   }
 
   // ─── Search Operations ───────────────────────────────────────

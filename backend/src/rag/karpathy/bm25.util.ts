@@ -50,13 +50,11 @@ export class BM25 {
 
     if (jieba) {
       // jieba 分词结果已经是 token 数组
-      // 合并小写 + 去重，同时过滤空串
-      const tokens = jieba
+      // 文档索引必须保留重复 token，BM25 的 term frequency 才能生效。
+      return jieba
         .cut(text)
         .map((t: string) => t.trim().toLowerCase())
         .filter((t: string) => t.length > 0);
-      // 去重保持顺序
-      return [...new Set(tokens)];
     }
 
     // 降级：纯 JS 分词
@@ -89,7 +87,7 @@ export class BM25 {
   }
 
   search(query: string, k: number): BM25Hit[] {
-    const queryTokens = this.tokenize(query);
+    const queryTokens = [...new Set(this.tokenize(query))];
     const scores: BM25Hit[] = [];
 
     for (let i = 0; i < this.docs.length; i++) {

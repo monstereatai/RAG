@@ -16,6 +16,14 @@ export type DocumentLifecycleStatus =
   | 'deprecated'
   | 'archived';
 
+export type DocumentChangeType =
+  | 'standalone'
+  | 'new'
+  | 'replace'
+  | 'amend'
+  | 'supplement'
+  | 'deprecate';
+
 export interface GameDocumentMetadata {
   projectId: string | null;
   activityId: string | null;
@@ -32,12 +40,16 @@ export type DocumentBusinessMetadata = Partial<GameDocumentMetadata> & {
   docVersion?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;
+  changeType?: DocumentChangeType;
+  validityMonths?: number;
 };
 
 export type ResolvedDocumentBusinessMetadata = GameDocumentMetadata & {
   docVersion: string | null;
   effectiveAt: string | null;
   expiredAt: string | null;
+  changeType?: DocumentChangeType;
+  validityMonths?: number;
 };
 
 export interface ChunkStrategy {
@@ -253,9 +265,20 @@ function detectDocumentType(haystack: string): GameDocumentType {
 }
 
 function detectLifecycleStatus(haystack: string): DocumentLifecycleStatus {
-  if (/(废弃|废止|已失效|deprecated)/i.test(haystack)) return 'deprecated';
-  if (/(草稿|待评审|draft)/i.test(haystack)) return 'draft';
-  if (/(已确认|评审通过|confirmed)/i.test(haystack)) return 'confirmed';
+  // 只有显式生命周期字段才能决定文档是否不可检索。
+  // 正文出现“deprecated / 废弃”可能只是在讨论 API 下线或历史规则，
+  // 不能因此把整篇有效文档标成 deprecated。
+  const explicit = extractField(haystack, [
+    'lifecycleStatus',
+    '生命周期状态',
+    '文档状态',
+    '状态',
+  ])?.toLowerCase();
+  if (explicit) {
+    if (/(废弃|废止|已失效|deprecated)/i.test(explicit)) return 'deprecated';
+    if (/(草稿|待评审|draft)/i.test(explicit)) return 'draft';
+    if (/(已确认|评审通过|confirmed)/i.test(explicit)) return 'confirmed';
+  }
   return 'effective';
 }
 

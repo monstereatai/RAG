@@ -24,15 +24,6 @@ export const promptRegistry: PromptRegistryEntry[] = [
     rollback: '恢复上一版 generateAnswerPrompt 并重新运行绑定评测。',
   },
   {
-    name: 'agentic.query_augment',
-    version: '2026-07-07',
-    owner: 'rag-backend',
-    purpose: '把复杂问题改写为有限数量的互补检索问句。',
-    file: 'src/rag/prompts/agentic.prompts.ts',
-    evals: ['npm run eval:rag:project'],
-    rollback: '恢复上一版 queryAugmentPrompt 并复跑项目级评测。',
-  },
-  {
     name: 'agentic.sufficiency',
     version: '2026-07-07',
     owner: 'rag-backend',

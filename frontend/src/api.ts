@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   ApiResponse,
   UploadResponse,
@@ -21,8 +21,22 @@ const api = axios.create({
  * 用户端 API 边界：普通 HTTP 请求在此统一带 JWT；流式 SSE 先换取一次性短票据，
  * URL 中不再携带长期 JWT，避免代理日志、浏览器历史或 Referer 泄露凭据。
  */
+const API_BASE_URL = '/api/v1';
+const ACCESS_TOKEN_KEY = 'token';
+const REFRESH_TOKEN_KEY = 'refreshToken';
+
+export function clearAuthTokens(): void {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+function persistAuthTokens(accessToken: string, refreshToken: string): void {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -30,6 +44,58 @@ api.interceptors.request.use((config) => {
 }, (error) => {
   return Promise.reject(error);
 });
+
+let refreshPromise: Promise<string> | null = null;
+
+async function refreshAccessToken(): Promise<string> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (refreshToken == null) throw new Error('refresh token is missing');
+  const response = await axios.post<ApiResponse<LoginResponse>>(
+    `${API_BASE_URL}/auth/refresh`,
+    { refreshToken },
+  );
+  const data = response.data.data;
+  persistAuthTokens(data.accessToken, data.refreshToken);
+  return data.accessToken;
+}
+
+type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const config = error.config as RetryableConfig | undefined;
+    const status = error.response?.status;
+    const requestUrl = String(config?.url ?? '');
+    if (status === 401 && config != null) {
+      if (
+        config._retry === true ||
+        requestUrl.includes('/auth/login') ||
+        requestUrl.includes('/auth/refresh') ||
+        requestUrl.includes('/auth/logout')
+      ) {
+        return Promise.reject(error);
+      }
+      config._retry = true;
+      try {
+        refreshPromise ??= refreshAccessToken().finally(() => {
+          refreshPromise = null;
+        });
+        const accessToken = await refreshPromise;
+        config.headers = {
+          ...(config.headers as Record<string, string> | undefined),
+          Authorization: `Bearer ${accessToken}`,
+        } as typeof config.headers;
+        return api.request(config);
+      } catch (refreshError) {
+        clearAuthTokens();
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+        return Promise.reject(refreshError);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 // 文档上传
 export async function uploadDocument(file: File): Promise<UploadResponse> {
@@ -270,7 +336,19 @@ export function synthesizeSpeechStream(
 // 认证：登录
 export async function login(username: string, password: string): Promise<LoginResponse> {
   const res = await api.post<ApiResponse<LoginResponse>>('/auth/login', { username, password });
+  persistAuthTokens(res.data.data.accessToken, res.data.data.refreshToken);
   return res.data.data;
+}
+
+export async function logout(): Promise<void> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  try {
+    if (refreshToken != null) {
+      await api.post('/auth/logout', { refreshToken });
+    }
+  } finally {
+    clearAuthTokens();
+  }
 }
 
 // 认证：获取当前用户信息

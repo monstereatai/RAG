@@ -55,6 +55,7 @@ import {
   getAgentRunCenter,
   retryAgentRunRecord,
   getAgentTraces,
+  compareGovernanceRetrieval,
   debugGovernanceRetrieval,
   getGovernanceEvaluationCases,
   getGovernanceModels,
@@ -136,6 +137,49 @@ const normalizeArtifactMarkdown = (content: string) =>
     .replace(/\r\n/g, "\n")
     .replace(/```([A-Za-z0-9_-]+)\s+(?=\S)/g, "```$1\n");
 
+const parseRetrievalConfig = (value: unknown): Record<string, unknown> => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const retrievalDebugCard = (label: string, result: any) => {
+  const chunks = result?.stages?.final ?? result?.chunks ?? [];
+  const count = result?.stages?.count ?? result?.count ?? chunks.length;
+  return (
+    <Card title={label} size="small">
+      <Descriptions
+        column={2}
+        items={[
+          { key: "count", label: "最终片段", children: count },
+          { key: "duration", label: "检索耗时", children: typeof result?.durationMs === "number" ? `${result.durationMs.toFixed(1)} ms` : "-" },
+          { key: "time", label: "生成时间", children: result?.generatedAt ?? "-" },
+          {
+            key: "profile",
+            label: "实际检索参数",
+            children: <pre>{JSON.stringify(result?.profile ?? {}, null, 2)}</pre>,
+          },
+        ]}
+      />
+      <Collapse
+        items={[
+          { key: "diagnostics", label: "召回与重排诊断", children: <pre>{JSON.stringify(result?.diagnostics, null, 2)}</pre> },
+          { key: "chunks", label: `最终证据片段（${count}）`, children: <pre>{JSON.stringify(chunks, null, 2)}</pre> },
+        ]}
+      />
+    </Card>
+  );
+};
+
 export default function AgentOpsPage() {
   /**
    * Agent 运营工作台聚合多个独立运行面：工作流、评测、Bad Case、运行轨迹、Artifact 与协作。
@@ -180,7 +224,9 @@ export default function AgentOpsPage() {
   const [knowledgeBaseProfiles, setKnowledgeBaseProfiles] = React.useState<any[]>([]);
   const [retrievalQuery, setRetrievalQuery] = React.useState("");
   const [retrievalProfileKey, setRetrievalProfileKey] = React.useState("general");
-  const [retrievalDebug, setRetrievalDebug] = React.useState<any>(null);
+  const [retrievalCompareProfileKey, setRetrievalCompareProfileKey] = React.useState("");
+  const [retrievalDebugVariants, setRetrievalDebugVariants] = React.useState<Array<{ key: string; result: any }> | null>(null);
+  const [retrievalDebugLoading, setRetrievalDebugLoading] = React.useState(false);
   const [governanceLoading, setGovernanceLoading] = React.useState(false);
   const [pluginPreview, setPluginPreview] = React.useState<any>(null);
   const [collaborationSops, setCollaborationSops] = React.useState<any[]>([]);
@@ -384,7 +430,11 @@ export default function AgentOpsPage() {
       setGovernancePlugins(unwrapData<any[]>(plugins) ?? []);
       setGovernanceWorkflows(unwrapData<any[]>(workflows) ?? []);
       setEvaluationCases(unwrapData<any[]>(cases) ?? []);
-      setKnowledgeBaseProfiles(unwrapData<any[]>(profiles) ?? []);
+      const profileList = unwrapData<any[]>(profiles) ?? [];
+      setKnowledgeBaseProfiles(profileList);
+      setRetrievalCompareProfileKey((current) =>
+        current || profileList.find((profile) => profile.key !== "general")?.key || "",
+      );
     } catch {
       message.error("平台治理数据加载失败，请检查 Agent Backend 服务");
     } finally {
@@ -414,6 +464,69 @@ export default function AgentOpsPage() {
       await loadGovernance();
     } finally {
       setGovernanceLoading(false);
+    }
+  };
+
+  const handleCloneKnowledgeBaseProfile = async (record: any) => {
+    const key = window.prompt("请输入调优配置的新 Key", `${record.key}-v2`);
+    if (!key?.trim()) return;
+    const values = {
+      key: key.trim(),
+      name: `${record.name}（调优版）`,
+      workspaceId: record.workspaceId,
+      documentType: record.documentType,
+      chunkSize: record.chunkSize,
+      chunkOverlap: record.chunkOverlap,
+      retrievalConfig: parseRetrievalConfig(record.retrievalConfig),
+      syncConfig: parseRetrievalConfig(record.syncConfig),
+    };
+    try {
+      await registerKnowledgeBaseProfile(values);
+      knowledgeBaseForm.setFieldsValue(values);
+      setRetrievalCompareProfileKey(values.key);
+      message.success("调优配置副本已建立，可修改参数后保存并与原配置对照");
+      await loadGovernance();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "复制配置失败，请确认 Key 是否重复");
+    }
+  };
+
+  const handleRunRetrievalDebug = async () => {
+    const query = retrievalQuery.trim();
+    if (!query) {
+      message.warning("请输入检索问题");
+      return;
+    }
+    if (retrievalCompareProfileKey && retrievalCompareProfileKey === retrievalProfileKey) {
+      message.warning("请选择两个不同的配置");
+      return;
+    }
+    setRetrievalDebugLoading(true);
+    try {
+      if (retrievalCompareProfileKey) {
+        const response = await compareGovernanceRetrieval(
+          query,
+          retrievalProfileKey,
+          retrievalCompareProfileKey,
+        );
+        const comparison = unwrapData<any>(response);
+        setRetrievalDebugVariants(
+          (comparison?.variants ?? []).map((variant: any) => ({
+            key: variant.key,
+            result: unwrapData<any>(variant.result),
+          })),
+        );
+      } else {
+        const response = await debugGovernanceRetrieval(query, undefined, retrievalProfileKey);
+        setRetrievalDebugVariants([
+          { key: retrievalProfileKey, result: unwrapData<any>(response) },
+        ]);
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "检索调试失败");
+      setRetrievalDebugVariants(null);
+    } finally {
+      setRetrievalDebugLoading(false);
     }
   };
 
@@ -638,7 +751,7 @@ export default function AgentOpsPage() {
           {!ragQuality.gate?.passed && <Descriptions.Item label="失败原因" span={3}>{ragQuality.gate?.reasons?.join("；") || "暂无"}</Descriptions.Item>}
         </Descriptions> : <Alert type="info" showIcon message="暂无 RAG 质量汇总数据" />}
       </Card>
-      <Card title="意图路由运营" size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadIntentRouting()}>刷新</Button>}>
+      <Card title="查询路由记录" size="small" style={{ marginBottom: 16 }} extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadIntentRouting()}>刷新</Button>}>
         {intentRouting ? <>
           <Alert
             type={intentRouting.estimated ? "warning" : "info"}
@@ -650,7 +763,7 @@ export default function AgentOpsPage() {
             <Descriptions.Item label="扫描问答">{intentRouting.scanned}</Descriptions.Item>
             <Descriptions.Item label="进入检索">{intentRouting.byAction.retrieve ?? 0}</Descriptions.Item>
             <Descriptions.Item label="直接回答">{intentRouting.byAction.direct_answer ?? 0}</Descriptions.Item>
-            <Descriptions.Item label="私域／上下文">{intentRouting.byQueryType.private_or_context ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="未记录路由">{intentRouting.byAction.unknown ?? 0}</Descriptions.Item>
           </Descriptions>
           <Table
             size="small"
@@ -660,7 +773,7 @@ export default function AgentOpsPage() {
             dataSource={intentRouting.recent}
             columns={[
               { title: "问题", dataIndex: "query", ellipsis: true },
-              { title: "动作", dataIndex: "action", render: (value: string) => <Tag color={value === "retrieve" ? "blue" : "green"}>{value === "retrieve" ? "检索" : "直答"}</Tag> },
+              { title: "动作", dataIndex: "action", render: (value: string) => <Tag color={value === "retrieve" ? "blue" : value === "direct_answer" ? "green" : "default"}>{value === "retrieve" ? "检索" : value === "direct_answer" ? "直答" : "未记录"}</Tag> },
               { title: "类型", dataIndex: "queryType" },
               { title: "模式", dataIndex: "mode" },
               { title: "证据", render: (_: unknown, row: IntentRoutingSummary["recent"][number]) => row.cited ? <Tag color="green">有引用</Tag> : <Tag>无引用</Tag> },
@@ -848,7 +961,7 @@ export default function AgentOpsPage() {
               }))}
             />
             <Descriptions
-              column={2}
+            column={3}
               items={[
                 { key: "status", label: "状态", children: WORKFLOW_STATUS_LABELS[workflow.status] },
                 {
@@ -1196,6 +1309,43 @@ export default function AgentOpsPage() {
           <Form.Item name="chunkOverlap" initialValue={50}>
             <InputNumber min={0} max={1000} addonBefore="Overlap" />
           </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            style={{ width: "100%", marginBottom: 12 }}
+            message="Chunk 大小和重叠量只影响后续按该配置入库的文档；已有文档不会自动重切。下面的检索参数可用同一问题做 A/B 对照。"
+          />
+          <Collapse
+            style={{ width: "100%", marginBottom: 12 }}
+            items={[
+              {
+                key: "retrieval-config",
+                label: "检索调优参数（可选）",
+                children: (
+                  <Space wrap>
+                    <Form.Item name={["retrievalConfig", "candidateDepth"]}>
+                      <InputNumber min={1} max={50} addonBefore="候选深度" placeholder="默认值" />
+                    </Form.Item>
+                    <Form.Item name={["retrievalConfig", "finalTopK"]}>
+                      <InputNumber min={1} max={20} addonBefore="最终片段数" placeholder="默认值" />
+                    </Form.Item>
+                    <Form.Item name={["retrievalConfig", "neighborWindow"]}>
+                      <InputNumber min={0} max={2} addonBefore="邻近片段" placeholder="默认值" />
+                    </Form.Item>
+                    <Form.Item name={["retrievalConfig", "sameSectionLimit"]}>
+                      <InputNumber min={0} max={4} addonBefore="同节上限" placeholder="默认值" />
+                    </Form.Item>
+                    <Form.Item name={["retrievalConfig", "contextCharacterBudget"]}>
+                      <InputNumber min={1000} max={12000} step={500} addonBefore="上下文字符数" placeholder="默认值" />
+                    </Form.Item>
+                    <Form.Item name={["retrievalConfig", "maxChunksPerDocument"]}>
+                      <InputNumber min={1} max={8} addonBefore="单文档片段上限" placeholder="默认值" />
+                    </Form.Item>
+                  </Space>
+                ),
+              },
+            ]}
+          />
           <Button type="primary" loading={governanceLoading} onClick={() => void handleRegisterKnowledgeBase()}>
             保存配置
           </Button>
@@ -1210,7 +1360,28 @@ export default function AgentOpsPage() {
             { title: "Key", dataIndex: "key" },
             { title: "文档类型", dataIndex: "documentType" },
             { title: "Chunk", render: (_, row) => `${row.chunkSize}／${row.chunkOverlap}` },
+            { title: "检索参数", render: (_, row) => JSON.stringify(parseRetrievalConfig(row.retrievalConfig)) },
             { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+            {
+              title: "操作",
+              render: (_, row) => (
+                <Space>
+                  <Button
+                    size="small"
+                    onClick={() => knowledgeBaseForm.setFieldsValue({
+                      ...row,
+                      retrievalConfig: parseRetrievalConfig(row.retrievalConfig),
+                      syncConfig: parseRetrievalConfig(row.syncConfig),
+                    })}
+                  >
+                    编辑
+                  </Button>
+                  <Button size="small" onClick={() => void handleCloneKnowledgeBaseProfile(row)}>
+                    复制调优版
+                  </Button>
+                </Space>
+              ),
+            },
           ]}
         />
       </Card>
@@ -1233,50 +1404,44 @@ export default function AgentOpsPage() {
             value={retrievalProfileKey}
             onChange={setRetrievalProfileKey}
             style={{ width: 180 }}
-            options={knowledgeBaseProfiles.map((profile) => ({ value: profile.key, label: profile.name }))}
+            options={knowledgeBaseProfiles.map((profile) => ({ value: profile.key, label: `A · ${profile.name}` }))}
+          />
+          <Select
+            value={retrievalCompareProfileKey || undefined}
+            onChange={(value) => setRetrievalCompareProfileKey(value ?? "")}
+            allowClear
+            placeholder="B 配置（可选）"
+            style={{ width: 220 }}
+            options={knowledgeBaseProfiles.map((profile) => ({ value: profile.key, label: `B · ${profile.name}` }))}
           />
           <Input
             value={retrievalQuery}
             onChange={(event) => setRetrievalQuery(event.target.value)}
-            onPressEnter={() => {
-              if (retrievalQuery.trim()) {
-                void debugGovernanceRetrieval(retrievalQuery.trim(), undefined, retrievalProfileKey).then((result) =>
-                  setRetrievalDebug(unwrapData<any>(result)),
-                );
-              }
-            }}
+            onPressEnter={() => void handleRunRetrievalDebug()}
             placeholder="输入问题，查看关键词、语义、图谱、融合和重排结果"
           />
           <Button
             type="primary"
             disabled={!retrievalQuery.trim()}
-            onClick={() => {
-              void debugGovernanceRetrieval(retrievalQuery.trim(), undefined, retrievalProfileKey).then((result) =>
-                setRetrievalDebug(unwrapData<any>(result)),
-              );
-            }}
+            loading={retrievalDebugLoading}
+            onClick={() => void handleRunRetrievalDebug()}
           >
-            调试检索
+            {retrievalCompareProfileKey ? "同题对照" : "调试检索"}
           </Button>
         </div>
-        {retrievalDebug && (
-          <>
-            <Descriptions
-              column={3}
-              style={{ marginTop: 16 }}
-              items={[
-                { key: "profile", label: "检索配置", children: retrievalDebug.profile?.name ?? "-" },
-                { key: "count", label: "最终片段", children: retrievalDebug.count ?? 0 },
-                { key: "time", label: "生成时间", children: retrievalDebug.generatedAt ?? "-" },
-              ]}
-            />
-            <Collapse
-              items={[
-                { key: "diagnostics", label: "诊断信息（召回／融合／重排）", children: <pre>{JSON.stringify(retrievalDebug.diagnostics, null, 2)}</pre> },
-                { key: "chunks", label: "最终证据片段", children: <pre>{JSON.stringify(retrievalDebug.chunks, null, 2)}</pre> },
-              ]}
-            />
-          </>
+        <Alert
+          showIcon
+          type="info"
+          style={{ marginTop: 12 }}
+          title="同题对照只切换检索参数；查询、管理服务身份和 RAG 文档权限保持一致。当前只检索管理服务身份可访问的资料；结果为空不代表普通用户也检索不到。它用于观察候选与上下文变化，不代替真实问题集评测。"
+        />
+        {retrievalDebugVariants && (
+          <div className="agent-ops-form-grid" style={{ marginTop: 16 }}>
+            {retrievalDebugVariants.map(({ key, result }) => {
+              const name = knowledgeBaseProfiles.find((profile) => profile.key === key)?.name ?? key;
+              return <div key={key}>{retrievalDebugCard(`${name}（${key}）`, result)}</div>;
+            })}
+          </div>
         )}
       </Card>
     </section>

@@ -1,14 +1,278 @@
 [
-  {"id":"public-arithmetic","query":"1+1 等于多少","expected":{"action":"direct_answer","sourcePolicy":"direct_answer"}},
-  {"id":"public-definition","query":"React 是什么","expected":{"action":"direct_answer","sourcePolicy":"direct_answer"}},
-  {"id":"private-person","query":"李思是谁","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"typo-person","query":"公司有李思，李四是谁","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"private-project","query":"我们项目 X 当前负责人是谁","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"uploaded-document","query":"资料库里面的陈达出现在第几章节，他的花名叫什么","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"follow-up","query":"刚才那个项目的接口怎么改","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"realtime","query":"今天上海天气怎么样","expected":{"action":"retrieve","sourcePolicy":"web_allowed"}},
-  {"id":"multi-intent","query":"React 是什么？1+1 等于多少？","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"public-comparison","query":"Redis 和 Memcached 有什么区别","expected":{"action":"direct_answer","sourcePolicy":"direct_answer"}},
-  {"id":"unknown-identity","query":"元知是谁","expected":{"action":"retrieve","sourcePolicy":"local_only"}},
-  {"id":"ambiguous-source","query":"帮我查一下蓝鲸","expected":{"action":"retrieve","sourcePolicy":"local_only"}}
+  {
+    "id": "public-arithmetic",
+    "query": "1+1 等于多少",
+    "modelOutput": {
+      "action": "direct",
+      "domain": "public",
+      "contextMode": "independent",
+      "standaloneQuery": "1+1 等于多少",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": [],
+      "filters": {}
+    },
+    "expected": {
+      "action": "direct",
+      "sourcePolicy": "direct_answer",
+      "queries": ["1+1 等于多少"],
+      "useGraph": false
+    }
+  },
+  {
+    "id": "public-definition",
+    "query": "React 是什么",
+    "modelOutput": {
+      "action": "direct",
+      "domain": "public",
+      "contextMode": "independent",
+      "standaloneQuery": "React 是什么",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": [],
+      "filters": {}
+    },
+    "expected": {
+      "action": "direct",
+      "sourcePolicy": "direct_answer",
+      "queries": ["React 是什么"],
+      "useGraph": false
+    }
+  },
+  {
+    "id": "private-person",
+    "query": "李思是谁",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "李思是谁",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["李思"],
+      "filters": {},
+      "sourcePolicy": "web_allowed",
+      "targetKbs": ["unauthorized-kb"]
+    },
+    "expected": {
+      "action": "retrieve",
+      "sourcePolicy": "local_only",
+      "queries": ["李思是谁"],
+      "useGraph": false
+    }
+  },
+  {
+    "id": "typo-person",
+    "query": "公司有李思，李四是谁",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "公司有李思，李四是谁",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["李思", "李四"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "local_only",
+      "queries": ["公司有李思，李四是谁"]
+    }
+  },
+  {
+    "id": "private-project",
+    "query": "我们项目 X 当前负责人是谁",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "我们项目 X 当前负责人是谁",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["项目 X"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "local_only",
+      "queries": ["我们项目 X 当前负责人是谁"]
+    }
+  },
+  {
+    "id": "uploaded-document",
+    "query": "资料库里面的陈达出现在第几章节，他的花名叫什么",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "资料库里面的陈达出现在第几章节，他的花名叫什么",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["陈达"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "local_only",
+      "queries": ["资料库里面的陈达出现在第几章节，他的花名叫什么"]
+    }
+  },
+  {
+    "id": "follow-up",
+    "query": "刚才那个项目的接口怎么改",
+    "context": [
+      { "role": "human", "content": "我们在讨论项目 X 的接口。" },
+      { "role": "ai", "content": "可以先检查接口契约和调用方。" }
+    ],
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "follow_up",
+      "standaloneQuery": "项目 X 的接口怎么改",
+      "subQueries": [],
+      "taskType": "procedure",
+      "needsGraph": false,
+      "entities": ["项目 X"],
+      "filters": {}
+    },
+    "expected": {
+      "contextMode": "follow_up",
+      "sourcePolicy": "local_only",
+      "queries": ["刚才那个项目的接口怎么改", "项目 X 的接口怎么改"]
+    }
+  },
+  {
+    "id": "realtime",
+    "query": "今天上海天气怎么样",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "realtime",
+      "contextMode": "independent",
+      "standaloneQuery": "今天上海天气怎么样",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["上海"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "web_allowed",
+      "queries": ["今天上海天气怎么样"]
+    }
+  },
+  {
+    "id": "multi-intent",
+    "query": "React 是什么？1+1 等于多少？",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "React 是什么？1+1 等于多少？",
+      "subQueries": ["React 是什么", "1+1 等于多少"],
+      "taskType": "synthesis",
+      "needsGraph": false,
+      "entities": ["React"],
+      "filters": {}
+    },
+    "expected": {
+      "taskType": "synthesis",
+      "sourcePolicy": "local_only",
+      "queries": [
+        "React 是什么？1+1 等于多少？",
+        "React 是什么",
+        "1+1 等于多少"
+      ]
+    }
+  },
+  {
+    "id": "public-comparison",
+    "query": "Redis 和 Memcached 有什么区别",
+    "modelOutput": {
+      "action": "direct",
+      "domain": "public",
+      "contextMode": "independent",
+      "standaloneQuery": "Redis 和 Memcached 有什么区别",
+      "subQueries": ["Redis 的特点", "Memcached 的特点"],
+      "taskType": "comparison",
+      "needsGraph": false,
+      "entities": ["Redis", "Memcached"],
+      "filters": {}
+    },
+    "expected": {
+      "taskType": "comparison",
+      "sourcePolicy": "direct_answer",
+      "queries": [
+        "Redis 和 Memcached 有什么区别",
+        "Redis 的特点",
+        "Memcached 的特点"
+      ]
+    }
+  },
+  {
+    "id": "unknown-identity",
+    "query": "元知是谁",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "元知是谁",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["元知"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "local_only",
+      "queries": ["元知是谁"]
+    }
+  },
+  {
+    "id": "ambiguous-source",
+    "query": "帮我查一下蓝鲸",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "帮我查一下蓝鲸",
+      "subQueries": [],
+      "taskType": "lookup",
+      "needsGraph": false,
+      "entities": ["蓝鲸"],
+      "filters": {}
+    },
+    "expected": {
+      "sourcePolicy": "local_only",
+      "queries": ["帮我查一下蓝鲸"]
+    }
+  },
+  {
+    "id": "multi-field-attachment-synthesis",
+    "query": "根据附件列出项目负责人、预算、交付日期和风险等级，并标明出处",
+    "modelOutput": {
+      "action": "retrieve",
+      "domain": "internal",
+      "contextMode": "independent",
+      "standaloneQuery": "根据附件列出项目负责人、预算、交付日期和风险等级，并标明出处",
+      "subQueries": ["项目负责人和预算", "项目交付日期和风险等级"],
+      "taskType": "synthesis",
+      "needsGraph": false,
+      "entities": [],
+      "filters": {"documentType": "attachment"}
+    },
+    "expected": {
+      "taskType": "synthesis",
+      "subQueries": ["项目负责人和预算", "项目交付日期和风险等级"],
+      "sourcePolicy": "local_only",
+      "queries": [
+        "根据附件列出项目负责人、预算、交付日期和风险等级，并标明出处",
+        "项目负责人和预算",
+        "项目交付日期和风险等级"
+      ]
+    }
+  }
 ]

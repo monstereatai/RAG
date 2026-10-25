@@ -12,7 +12,7 @@ describe('SpeechTicketController', () => {
     };
     const controller = new SpeechTicketController(ragClient as never);
     const request = {
-      user: { userId: 42, role: 'admin' },
+      user: { userId: 42, role: 'admin', tenantId: 'tenant-a' },
       body: { ownerUserId: 'attacker', tenantId: 'other-tenant' },
     } as unknown as Request;
 
@@ -20,7 +20,11 @@ describe('SpeechTicketController', () => {
       ticket: 'speech-one-time',
       expiresIn: 30,
     });
-    expect(ragClient.issueSpeechTicket).toHaveBeenCalledWith('42', 'admin', 'legacy');
+    expect(ragClient.issueSpeechTicket).toHaveBeenCalledWith(
+      '42',
+      'admin',
+      'tenant-a',
+    );
   });
 
   it('rejects a request without a verified user identity', async () => {

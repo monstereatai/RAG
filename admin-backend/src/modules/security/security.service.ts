@@ -5,7 +5,6 @@ import * as crypto from 'crypto';
 @Injectable()
 export class SecurityService implements OnModuleInit {
   private readonly encryptionAlgorithm = 'aes-256-cbc';
-  private readonly encryptionKey = crypto.randomBytes(32);
 
   constructor() {}
 
@@ -131,7 +130,8 @@ export class SecurityService implements OnModuleInit {
   // 7. 数据加密（AES-256）
   encryptData(text: string): { iv: string; encryptedData: string } {
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(this.encryptionAlgorithm, this.encryptionKey, iv);
+    const key = this.getEncryptionKey();
+    const cipher = crypto.createCipheriv(this.encryptionAlgorithm, key, iv);
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
 
@@ -145,7 +145,7 @@ export class SecurityService implements OnModuleInit {
   decryptData(encryptedData: string, iv: string): string {
     const decipher = crypto.createDecipheriv(
       this.encryptionAlgorithm,
-      this.encryptionKey,
+      this.getEncryptionKey(),
       Buffer.from(iv, 'hex'),
     );
 
@@ -153,6 +153,16 @@ export class SecurityService implements OnModuleInit {
     decrypted += decipher.final('utf8');
 
     return decrypted;
+  }
+
+  private getEncryptionKey(): Buffer {
+    const configured = process.env.APP_ENCRYPTION_KEY ?? '';
+    if (configured.length < 32) {
+      throw new Error(
+        'APP_ENCRYPTION_KEY must contain at least 32 characters before using application encryption',
+      );
+    }
+    return crypto.createHash('sha256').update(configured).digest();
   }
 
   // 9. 密码强度验证

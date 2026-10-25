@@ -1,10 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { AgenticRagService } from './agentic-rag.service';
 import type { LlmProvider } from '../../providers/llm/llm.provider';
-import type { KarpathyRagService } from '../karpathy/karpathy-rag.service';
+import type {
+  KarpathyRagService,
+  RetrieveOptions,
+} from '../karpathy/karpathy-rag.service';
 import type { BochaSearchService } from '../../tools/bocha-search.service';
 import type { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
-import type { SemanticExampleSelector } from '../prompts/semantic-example.selector';
+import { createFallbackQueryPlan } from '../planning/query-plan';
 import type { RedisProvider } from '../../providers/redis/redis.provider';
 import type { AgenticRagStateType } from './agentic-rag.state';
 import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.service';
@@ -64,7 +67,6 @@ describe('AgenticRagService budget boundaries', () => {
       isEnabled: jest.fn().mockReturnValue(false),
     } as unknown as DashScopeRerankService;
     const toolPolicy = { decide: jest.fn().mockReturnValue({ allowed: true }) };
-    const semanticExampleSelector = {} as SemanticExampleSelector;
     const badCaseFlywheel = {
       selectPrompt: jest.fn().mockResolvedValue(''),
       retrieveMatches: jest.fn().mockResolvedValue([]),
@@ -89,7 +91,6 @@ describe('AgenticRagService budget boundaries', () => {
       bochaSearchService,
       dashScopeRerankService,
       toolPolicy,
-      semanticExampleSelector,
       badCaseFlywheel as never,
       metricsService as never,
       tracingService as never,
@@ -106,16 +107,25 @@ describe('AgenticRagService budget boundaries', () => {
     };
   }
 
-  it('caps normalized augmented queries', () => {
+  it('routes Auto from the structured plan and evidence sufficiency', () => {
     const { service } = createService();
-
-    const result = (
+    const resolveAutoRoute = (
       service as unknown as {
-        normalizeQueries(original: string, list: unknown): string[];
+        resolveAutoRoute(
+          plan: ReturnType<typeof createFallbackQueryPlan>,
+          sufficient: boolean,
+        ): 'simple' | 'agentic';
       }
-    ).normalizeQueries('原始问题', ['问题 A', '问题 B', '问题 C']);
+    ).resolveAutoRoute.bind(service);
+    const comparisonPlan = {
+      ...createFallbackQueryPlan('请分析'),
+      taskType: 'comparison' as const,
+    };
+    const lookupPlan = createFallbackQueryPlan('资料里说了什么？');
 
-    expect(result).toEqual(['原始问题', '原始问题']);
+    expect(resolveAutoRoute(comparisonPlan, true)).toBe('agentic');
+    expect(resolveAutoRoute(lookupPlan, true)).toBe('simple');
+    expect(resolveAutoRoute(lookupPlan, false)).toBe('agentic');
   });
 
   it('passes request cancellation into evidence synthesis fallback', async () => {
@@ -140,51 +150,6 @@ describe('AgenticRagService budget boundaries', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     controller.abort();
-  });
-
-  it('does not force overly long complex auto queries to simple mode', () => {
-    const { service } = createService();
-
-    const route = (
-      service as unknown as {
-        classifyRoute(
-          query: string,
-          mode: 'simple' | 'agentic' | 'auto',
-        ): 'simple' | 'agentic';
-      }
-    ).classifyRoute('请分析'.repeat(40), 'auto');
-
-    expect(route).toBe('agentic');
-  });
-
-  it('upgrades complex auto queries even when the fast path has evidence', () => {
-    const { service } = createService({ 'agentic.maxAutoQueryLength': 500 });
-
-    const route = (
-      service as unknown as {
-        resolveAutoRoute(
-          query: string,
-          fastPathSufficient: boolean,
-        ): 'simple' | 'agentic';
-      }
-    ).resolveAutoRoute('请对比周年庆活动在不同地区的玩法差异和上线风险', true);
-
-    expect(route).toBe('agentic');
-  });
-
-  it('keeps simple auto queries on the fast path when evidence is sufficient', () => {
-    const { service } = createService({ 'agentic.maxAutoQueryLength': 500 });
-
-    const route = (
-      service as unknown as {
-        resolveAutoRoute(
-          query: string,
-          fastPathSufficient: boolean,
-        ): 'simple' | 'agentic';
-      }
-    ).resolveAutoRoute('ACT100 的状态是什么？', true);
-
-    expect(route).toBe('simple');
   });
 
   it('keeps an explicitly selected agentic request on the state machine', async () => {
@@ -251,6 +216,391 @@ describe('AgenticRagService budget boundaries', () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it('routes execute plans through Agentic even when the requested mode is simple', async () => {
+    const { service } = createService();
+    const invoke = jest.fn().mockResolvedValue({
+      answer: '任务已执行。',
+      retrievedChunks: [],
+      retrievalSufficient: true,
+      retrievalReason: '状态机已完成',
+      confidence: 1,
+      retryCount: 0,
+      subQuestions: [],
+      artifacts: [],
+      executionState: { remainingSteps: 1, remainingToolCalls: 1 },
+    });
+    (
+      service as unknown as { app: { invoke: jest.Mock; getState: jest.Mock } }
+    ).app = {
+      invoke,
+      getState: jest.fn().mockResolvedValue({ tasks: [] }),
+    };
+    const queryPlan = {
+      ...createFallbackQueryPlan('生成一份报告'),
+      action: 'execute' as const,
+    };
+
+    await expect(
+      service.run(
+        '生成一份报告',
+        'simple',
+        undefined,
+        [],
+        'thread-1',
+        'user-1',
+        [],
+        false,
+        { queryPlan, allowConversationStateAnswer: true },
+      ),
+    ).resolves.toMatchObject({ answer: '任务已执行。', route: 'agentic' });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('forces an explicitly scoped Agentic execution plan to local-only', async () => {
+    const { service } = createService();
+    let capturedRetrieveOptions: RetrieveOptions | undefined;
+    const invoke = jest.fn(
+      (
+        _input: unknown,
+        options: { configurable?: { retrieveOptions?: RetrieveOptions } },
+      ) => {
+        capturedRetrieveOptions = options.configurable?.retrieveOptions;
+        return Promise.resolve({
+          answer: '已按项目范围完成检索。',
+          retrievedChunks: [],
+          retrievalSufficient: true,
+          retrievalReason: '状态机已完成',
+          confidence: 1,
+          retryCount: 0,
+          subQuestions: [],
+          artifacts: [],
+          executionState: { remainingSteps: 1, remainingToolCalls: 1 },
+        });
+      },
+    );
+    (
+      service as unknown as { app: { invoke: jest.Mock; getState: jest.Mock } }
+    ).app = {
+      invoke,
+      getState: jest.fn().mockResolvedValue({ tasks: [] }),
+    };
+    const scope = { projectId: 'project-private' };
+    const queryPlan = {
+      ...createFallbackQueryPlan('查项目资料'),
+      domain: 'realtime' as const,
+    };
+    const executionPlan = {
+      planVersion: 2 as const,
+      sourcePolicy: 'web_allowed' as const,
+      queries: [{ text: '查项目资料', kind: 'original' as const, weight: 1 }],
+      profile: {
+        intent: 'lookup' as const,
+        candidateDepth: 8,
+        finalTopK: 4,
+        neighborWindow: 0,
+        sameSectionLimit: 0,
+        contextCharacterBudget: 3500,
+        maxChunksPerDocument: 2,
+      },
+      useGraph: false,
+      scope,
+      scopeRestricted: false,
+      reasonCode: 'realtime_web_allowed' as const,
+    };
+    const requestContext = {
+      requestId: 'request-1',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      query: '查项目资料',
+      mode: 'agentic' as const,
+      queryPlan,
+      executionPlan,
+      sourcePolicy: 'web_allowed' as const,
+      scope,
+      deadlineAt: Date.now() + 60_000,
+      budget: {
+        maxSteps: 5,
+        maxToolCalls: 2,
+        remainingSteps: 5,
+        remainingToolCalls: 2,
+      },
+    };
+
+    await service.run(
+      '查项目资料',
+      'agentic',
+      undefined,
+      [],
+      'thread-1',
+      'user-1',
+      [],
+      false,
+      {
+        queryPlan,
+        executionPlan,
+        requestContext,
+        scope,
+        sourcePolicy: 'web_allowed',
+      },
+    );
+
+    expect(capturedRetrieveOptions).toBeDefined();
+    expect(capturedRetrieveOptions?.sourcePolicy).toBe('local_only');
+    expect(capturedRetrieveOptions?.knowledgeOnly).toBe(true);
+    expect(capturedRetrieveOptions?.executionPlan).toMatchObject({
+      sourcePolicy: 'local_only',
+      scopeRestricted: true,
+      scope,
+    });
+    expect(capturedRetrieveOptions?.requestContext).toMatchObject({
+      sourcePolicy: 'local_only',
+      executionPlan: {
+        sourcePolicy: 'local_only',
+        scopeRestricted: true,
+      },
+      scope,
+    });
+  });
+
+  it('does not use a direct-answer shortcut when current-turn attachments are evidence', async () => {
+    const { service, karpathyRagService, llmProvider } = createService();
+    const attachment = {
+      ...chunk('attachment:1:1', 0.9),
+      retrievalSource: 'attachment' as const,
+    };
+    const prefetchedFastPath = {
+      retrieval: { chunks: [attachment], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+    } as never;
+    const assessFastPath = jest.fn().mockResolvedValue({
+      sufficient: true,
+      reason: '附件证据充分',
+      chunks: [attachment],
+      obsidianHits: [],
+      prefetchedFastPath,
+    }) as unknown as jest.MockedFunction<KarpathyRagService['assessFastPath']>;
+    const answer = jest.fn().mockResolvedValue({
+      answer: '附件资料给出的结果。',
+      references: [attachment],
+      retrievalSufficient: true,
+    }) as unknown as jest.MockedFunction<KarpathyRagService['answer']>;
+    karpathyRagService.assessFastPath = assessFastPath;
+    karpathyRagService.answer = answer;
+    const invoke = jest.fn();
+    (llmProvider as unknown as { invoke: jest.Mock }).invoke = invoke;
+    const queryPlan = {
+      ...createFallbackQueryPlan('请根据附件核对这个公开事实'),
+      action: 'direct' as const,
+      domain: 'public' as const,
+    };
+    const executionPlan = {
+      planVersion: 2 as const,
+      sourcePolicy: 'direct_answer' as const,
+      queries: [
+        {
+          text: '请根据附件核对这个公开事实',
+          kind: 'original' as const,
+          weight: 1,
+        },
+      ],
+      profile: {
+        intent: 'lookup' as const,
+        candidateDepth: 8,
+        finalTopK: 4,
+        neighborWindow: 0,
+        sameSectionLimit: 0,
+        contextCharacterBudget: 3500,
+        maxChunksPerDocument: 2,
+      },
+      useGraph: false,
+      scopeRestricted: false,
+      reasonCode: 'stable_public_direct' as const,
+    };
+
+    await expect(
+      service.run(
+        '请根据附件核对这个公开事实',
+        'auto',
+        undefined,
+        [],
+        'thread-1',
+        'user-1',
+        [],
+        false,
+        {
+          queryPlan,
+          executionPlan,
+          sourcePolicy: 'direct_answer',
+          supplementalEvidence: [attachment],
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: '附件资料给出的结果。',
+      route: 'simple',
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(assessFastPath).toHaveBeenCalledWith(
+      '请根据附件核对这个公开事实',
+      'user-1',
+      expect.objectContaining({
+        sourcePolicy: 'local_only',
+        knowledgeOnly: true,
+        supplementalEvidence: [attachment],
+      }),
+    );
+    expect(answer).toHaveBeenCalledWith(
+      '请根据附件核对这个公开事实',
+      [],
+      'user-1',
+      [],
+      expect.any(Function),
+      expect.objectContaining({ prefetchedFastPath }),
+    );
+  });
+
+  it('keeps a public QueryPlan on retrieval when a stale execution plan says direct-answer', async () => {
+    const { service, karpathyRagService, llmProvider } = createService();
+    const prefetchedFastPath = {
+      retrieval: { chunks: [], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+    } as never;
+    karpathyRagService.assessFastPath.mockResolvedValue({
+      sufficient: true,
+      reason: '已有本地证据',
+      chunks: [],
+      obsidianHits: [],
+      prefetchedFastPath,
+    });
+    karpathyRagService.answer.mockResolvedValue({
+      answer: '通过本地证据回答。',
+      references: [],
+      retrievalSufficient: true,
+    });
+    const invoke = jest.fn();
+    (llmProvider as unknown as { invoke: jest.Mock }).invoke = invoke;
+    const assessFastPath = serviceMock(karpathyRagService, 'assessFastPath');
+    const answer = serviceMock(karpathyRagService, 'answer');
+    const query = '核对这个公开事实';
+    const queryPlan = {
+      ...createFallbackQueryPlan(query),
+      action: 'retrieve' as const,
+      domain: 'public' as const,
+    };
+    const executionPlan = {
+      planVersion: 2 as const,
+      sourcePolicy: 'direct_answer' as const,
+      queries: [{ text: query, kind: 'original' as const, weight: 1 }],
+      profile: {
+        intent: 'lookup' as const,
+        candidateDepth: 8,
+        finalTopK: 4,
+        neighborWindow: 0,
+        sameSectionLimit: 0,
+        contextCharacterBudget: 3500,
+        maxChunksPerDocument: 2,
+      },
+      useGraph: false,
+      scopeRestricted: false,
+      reasonCode: 'stable_public_direct' as const,
+    };
+
+    await expect(
+      service.run(
+        query,
+        'auto',
+        undefined,
+        [],
+        'thread-1',
+        'user-1',
+        [],
+        false,
+        {
+          queryPlan,
+          executionPlan,
+        },
+      ),
+    ).resolves.toMatchObject({ answer: '通过本地证据回答。', route: 'simple' });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(assessFastPath).toHaveBeenCalledWith(
+      query,
+      'user-1',
+      expect.objectContaining({
+        sourcePolicy: 'local_only',
+        knowledgeOnly: true,
+      }),
+    );
+    expect(answer).toHaveBeenCalled();
+  });
+
+  it('retrieves one shared candidate bundle from every execution-plan query', async () => {
+    const { service, karpathyRagService } = createService();
+    const retrieve = jest
+      .fn()
+      .mockResolvedValue([
+        chunk('candidate-original', 0.9),
+        chunk('candidate-subquery', 0.8),
+      ]);
+    karpathyRagService.retrieve = retrieve;
+    const executionPlan = {
+      planVersion: 2 as const,
+      sourcePolicy: 'local_only' as const,
+      queries: [
+        { text: '原始问题', kind: 'original' as const, weight: 1 },
+        { text: '独立化问题', kind: 'standalone' as const, weight: 0.85 },
+        { text: '计划子问题', kind: 'sub_query' as const, weight: 0.7 },
+      ],
+      profile: {
+        intent: 'lookup' as const,
+        candidateDepth: 8,
+        finalTopK: 4,
+        neighborWindow: 0,
+        sameSectionLimit: 0,
+        contextCharacterBudget: 3500,
+        maxChunksPerDocument: 2,
+      },
+      useGraph: false,
+      scopeRestricted: false,
+      reasonCode: 'internal_evidence_required' as const,
+    };
+    const subQuestions = ['计划子问题 A', '计划子问题 B'].map(
+      (question, index) => ({
+        id: `q${index + 1}`,
+        question,
+        dependsOn: [],
+        status: 'planned' as const,
+        evidenceIds: [],
+        retrievalAttempts: 0,
+        sufficient: false,
+        reason: '',
+      }),
+    );
+
+    const result = await service.retrievalNode(
+      {
+        query: '原始问题',
+        augmentedQueries: [],
+        subQuestions,
+      } as unknown as AgenticRagStateType,
+      {
+        configurable: { retrieveOptions: { executionPlan }, userId: 'user-1' },
+      },
+    );
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(retrieve).toHaveBeenCalledWith(
+      '原始问题',
+      expect.objectContaining({ executionPlan }),
+      'user-1',
+    );
+    expect(result.subQuestions?.map((item) => item.evidenceIds)).toEqual([
+      ['candidate-original', 'candidate-subquery'],
+      ['candidate-original', 'candidate-subquery'],
+    ]);
+  });
+
   it('persists the pending approval state before entering the native interrupt node', async () => {
     const { service } = createService();
 
@@ -277,7 +627,9 @@ describe('AgenticRagService budget boundaries', () => {
 
   it('recognizes a cancellation marker at the run boundary', async () => {
     const { service } = createService();
-    (service as unknown as { redisProvider: { get: jest.Mock } }).redisProvider = {
+    (
+      service as unknown as { redisProvider: { get: jest.Mock } }
+    ).redisProvider = {
       get: jest.fn().mockResolvedValue('cancelled'),
     };
     const isCancellationRequested = (
@@ -296,7 +648,104 @@ describe('AgenticRagService budget boundaries', () => {
     ).resolves.toBe(true);
   });
 
-  it('keeps entity chapter and nickname lookups as one evidence question', () => {
+  it('restores a legacy queryIntent from a checkpoint and passes its plan to retrieval', async () => {
+    const { service, karpathyRagService } = createService();
+    const retrieve = serviceMock(karpathyRagService, 'retrieve');
+    retrieve.mockResolvedValue([]);
+    (karpathyRagService.retrieveBm25Only as jest.Mock).mockResolvedValue([]);
+    const legacyQueryIntent = {
+      intent: 'objective_fact',
+      contextMode: 'factual_verification',
+      standaloneQuery: '核对 Alpha 和 Beta',
+      multiIntent: true,
+      subQueries: ['Alpha 的结论', 'Beta 的结论'],
+      action: 'retrieve',
+      needsSynthesis: true,
+      requiresGraph: true,
+      queryType: 'multi_intent',
+      entities: ['Alpha', 'Beta'],
+      filters: {},
+    };
+    const serviceWithCheckpointer = service as unknown as {
+      checkpointer: { getTuple: jest.Mock };
+      getResumeContext: (
+        threadId: string,
+      ) => Promise<{ retrieveOptions: RetrieveOptions }>;
+      retrievalNode: (
+        state: AgenticRagStateType,
+        config: { configurable: { retrieveOptions: RetrieveOptions } },
+      ) => Promise<unknown>;
+    };
+    serviceWithCheckpointer.checkpointer = {
+      getTuple: jest.fn().mockResolvedValue({
+        checkpoint: {
+          channel_values: {
+            query: '综合比较 Alpha 和 Beta',
+            resumeContext: {
+              history: [],
+              memoryMessages: [],
+              retrieveOptions: { queryIntent: legacyQueryIntent },
+            },
+          },
+        },
+      }),
+    };
+
+    const getResumeContext =
+      serviceWithCheckpointer.getResumeContext.bind(service);
+    const resumeContext = await getResumeContext('thread-legacy');
+    const restoredOptions = resumeContext.retrieveOptions;
+
+    expect(restoredOptions.queryPlan).toMatchObject({
+      taskType: 'synthesis',
+      needsGraph: true,
+      entities: ['Alpha', 'Beta'],
+      subQueries: ['Alpha 的结论', 'Beta 的结论'],
+    });
+    expect(restoredOptions.needsSynthesis).toBe(true);
+    expect(restoredOptions.entities).toEqual(['Alpha', 'Beta']);
+    expect(restoredOptions.executionPlan?.useGraph).toBe(true);
+
+    const retrievalNode = serviceWithCheckpointer.retrievalNode.bind(service);
+    await retrievalNode(
+      {
+        query: '综合比较 Alpha 和 Beta',
+        augmentedQueries: [],
+        subQuestions: [
+          {
+            id: 'q1',
+            question: '综合比较 Alpha 和 Beta',
+            dependsOn: [],
+            status: 'planned',
+            evidenceIds: [],
+            retrievalAttempts: 0,
+            sufficient: false,
+            reason: '',
+          },
+        ],
+        badCaseMatches: [],
+      } as unknown as AgenticRagStateType,
+      {
+        configurable: {
+          retrieveOptions: restoredOptions,
+        },
+      },
+    );
+
+    const [retrievedQuery, retrievedOptions, userId] = retrieve.mock
+      .calls[0] as [string, RetrieveOptions, string | undefined] | [];
+    expect(retrievedQuery).toBe('综合比较 Alpha 和 Beta');
+    expect(retrievedOptions?.queryPlan).toMatchObject({
+      taskType: 'synthesis',
+      entities: ['Alpha', 'Beta'],
+    });
+    expect(retrievedOptions?.needsSynthesis).toBe(true);
+    expect(retrievedOptions?.entities).toEqual(['Alpha', 'Beta']);
+    expect(retrievedOptions?.executionPlan?.useGraph).toBe(true);
+    expect(userId).toBeUndefined();
+  });
+
+  it('uses only explicitly planned sub-questions without keyword inference', () => {
     const { service } = createService();
 
     const questions = (
@@ -313,28 +762,10 @@ describe('AgenticRagService budget boundaries', () => {
       2,
     );
 
-    expect(questions).toHaveLength(1);
-    expect(questions[0].question).toBe(
+    expect(questions.map((item) => item.question)).toEqual([
       '资料库里面的陈达出现在第几章节，他的花名叫什么',
-    );
-  });
-
-  it('marks semantic multi-question input as ineligible for a single-question direct answer', () => {
-    const { service } = createService();
-
-    expect(
-      (
-        service as unknown as {
-          isMultiIntentQuery(intent: {
-            multiIntent: boolean;
-            subQueries: string[];
-          }): boolean;
-        }
-      ).isMultiIntentQuery({
-        multiIntent: true,
-        subQueries: ['React 是什么？', '1+1 等于多少？'],
-      }),
-    ).toBe(true);
+      '陈达第几回出场',
+    ]);
   });
 
   it('keeps explicit multi-question boundaries as independent retrieval units', () => {
@@ -462,7 +893,12 @@ describe('AgenticRagService budget boundaries', () => {
       configurable: { userId: 'user-1' },
     });
 
-    expect(karpathyRagService.retrieve.mock.calls).toHaveLength(2);
+    expect(karpathyRagService.retrieve.mock.calls).toHaveLength(1);
+    expect(
+      karpathyRagService.retrieve.mock.calls[0]?.[1]?.executionPlan?.queries?.map(
+        (item: { text: string }) => item.text,
+      ) ?? [],
+    ).toEqual(['请分析差旅制度']);
     expect(karpathyRagService.retrieveBm25Only.mock.calls).toHaveLength(0);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
       'c1',
@@ -610,6 +1046,19 @@ describe('AgenticRagService budget boundaries', () => {
 
   it('reuses fast-path evidence when agentic retrieval starts', async () => {
     const { service, karpathyRagService } = createService();
+    const retrieve = serviceMock(karpathyRagService, 'retrieve');
+    const getObsidianContext = serviceMock(
+      karpathyRagService,
+      'getObsidianContext',
+    );
+    const toReviewedEvidenceChunks = serviceMock(
+      karpathyRagService,
+      'toReviewedEvidenceChunks',
+    );
+    const toObsidianChunks = serviceMock(
+      karpathyRagService,
+      'toObsidianChunks',
+    );
     karpathyRagService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
@@ -674,18 +1123,15 @@ describe('AgenticRagService budget boundaries', () => {
       },
     );
 
-    expect(karpathyRagService.retrieve.mock.calls).toHaveLength(1);
-    expect(karpathyRagService.getObsidianContext).not.toHaveBeenCalled();
-    expect(karpathyRagService.toReviewedEvidenceChunks).toHaveBeenCalledWith(
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(getObsidianContext).not.toHaveBeenCalled();
+    expect(toReviewedEvidenceChunks).toHaveBeenCalledWith(
       prefetchedFastPath.badCaseMatches,
     );
-    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith(
+    expect(toObsidianChunks).toHaveBeenCalledWith(
       prefetchedFastPath.obsidianHits,
     );
-    expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
-      'c1',
-      'c2',
-    ]);
+    expect(result.retrievedChunks?.map((item) => item.id)).toEqual(['c1']);
   });
 
   it('reuses Fast Path Bad Case candidates during query planning', async () => {
@@ -704,7 +1150,7 @@ describe('AgenticRagService budget boundaries', () => {
       ],
     } as unknown as PrefetchedFastPath;
 
-    const result = await service.queryAugmentNode(
+    const result = await service.prepareQueriesNode(
       {
         query: '原始问题',
         augmentedQueries: ['原始问题'],
@@ -796,6 +1242,7 @@ describe('AgenticRagService budget boundaries', () => {
       passed: false,
       retryCount: 1,
     });
+    expect(result.reflectionFeedback).toContain('答案契约校验未通过');
     expect(getModelMock).not.toHaveBeenCalled();
   });
 
@@ -812,3 +1259,10 @@ describe('AgenticRagService budget boundaries', () => {
     };
   }
 });
+
+function serviceMock<K extends keyof KarpathyRagService>(
+  service: jest.Mocked<KarpathyRagService>,
+  method: K,
+): jest.Mock {
+  return service[method] as unknown as jest.Mock;
+}

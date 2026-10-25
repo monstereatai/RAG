@@ -3,48 +3,43 @@ type: docker
 name: rag-ci
 
 steps:
-  - name: backend-check
-    image: docker.m.daocloud.io/library/node:20-alpine
+  - name: workspace-check
+    image: docker.m.daocloud.io/library/node:22-alpine
     commands:
-      - cd backend
-      - npm config set registry https://registry.npmmirror.com/
-      - npm ci --omit=optional --legacy-peer-deps
-      - npm run build
-      - npx eslint "{src,apps,libs,test}/**/*.ts"
-      - npm run eval:rag
-
-  - name: frontend-check
-    image: docker.m.daocloud.io/library/node:20-alpine
-    commands:
-      - cd frontend
-      - npm config set registry https://registry.npmmirror.com/
-      - npm ci
-      - npm run lint
-      - npm run build
+      - corepack enable
+      - corepack prepare pnpm@10.17.1 --activate
+      - pnpm install --frozen-lockfile
+      - pnpm typecheck
+      - pnpm build
+      - pnpm test
+      - pnpm --filter backend run eval:rag
+      - pnpm --filter backend run eval:golden:check
+      - pnpm --filter backend run eval:langfuse:check
+      - pnpm --filter backend run eval:langfuse:dataset
 
   - name: docker-build-backend
     image: plugins/docker
     settings:
       dry_run: true
       context: backend
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
       repo: rag-backend
       tags:
         - ci
     depends_on:
-      - backend-check
+      - workspace-check
 
   - name: docker-build-frontend
     image: plugins/docker
     settings:
       dry_run: true
       context: frontend
-      dockerfile: frontend/Dockerfile
+      dockerfile: Dockerfile
       repo: rag-frontend
       tags:
         - ci
     depends_on:
-      - frontend-check
+      - workspace-check
 
 trigger:
   event:

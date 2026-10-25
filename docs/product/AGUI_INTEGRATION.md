@@ -69,6 +69,8 @@ pnpm run dev
 
 - 浏览器原生 `EventSource` 不能携带自定义 header，所以管理后台前端使用 `?token=` 把后台 JWT 传给 admin-backend。
 - admin-backend 验证用户 JWT 后，再用 `RAG_SERVICE_TOKEN` 调用 rag-backend；不要让浏览器直接持有 `RAG_SERVICE_TOKEN`。
+- `agui/admin/stream` 不再把缺失用户身份默认成 RAG 用户 `1` 或 `admin-backend`；应传入已登录 Admin 用户 ID，或在单一服务账号场景显式设置 `RAG_ADMIN_USER_ID`。生产的 rag-backend 必须配置 `RAG_ADMIN_TENANT_ID`，缺少时请求会被拒绝；开发环境仍可使用 `legacy`。
+- 当前 Admin 用户 ID 仍直接作为 RAG `userId` 使用，没有跨系统用户映射表。只有两边 ID 的对应关系可信时才能这样部署；多租户 Admin 必须先接入可信用户／租户映射，再开放跨租户查询。
 - `LANGSMITH_TRACING=true` 负责 LangChain/DeepAgents trace；`LANGSMITH_UPLOAD=true` 可让 `backend` 的 `pnpm run eval:rag:langsmith` 额外上传 Dataset / Experiment 数据。CI 严格门禁再开启 `LANGSMITH_UPLOAD_REQUIRED=true`。
 
 ## 验证命令

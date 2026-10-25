@@ -15,40 +15,317 @@
 ## 2. 总体架构
 
 ```mermaid
-flowchart LR
-  User["Web User"] --> Frontend["React + Vite Frontend"]
-  Frontend --> Backend["NestJS API / SSE"]
+flowchart TB
+  subgraph L1["L1 接入、身份与控制面"]
+    direction LR
+    Client["React 用户端 / Admin / API / MCP"]
+    Gateway["NestJS API Gateway<br/>JWT · IAM · tenant ACL · quotas"]
+    RunApi["Chat / Run / Document API<br/>问答 · 任务 · 入库 · SSE / AG-UI"]
+    ConfigPlane["配置与治理<br/>Prompt / Tool Registry · 检索配置 · 发布门禁"]
+    RunSnapshot["Run 配置快照 v1<br/>queryHash · Profile · Prompt 标签<br/>模型 / 策略完整指纹待补"]
+    Client --> Gateway --> RunApi
+    RunApi --> RunSnapshot
+    ConfigPlane --> RunSnapshot
+  end
 
-  Backend --> Auth["Auth / JWT / Tenant Guard"]
-  Backend --> Document["Document Module"]
-  Backend --> Chat["Chat Module"]
-  Backend --> Graph["GraphRAG Module"]
-  Backend --> Memory["Memory Module"]
-  Backend --> Observability["Logs / Metrics / Traces"]
+  subgraph L2["L2 编排与路由"]
+    direction LR
+    ChatRouter["Chat Router<br/>Simple / Auto / Agentic"]
+    FastPath["Simple / Auto Fast Path<br/>直答门禁 + Hybrid RAG"]
+    AgenticFlow["Agentic RAG<br/>LangGraph Planner / QueryPlan"]
+    TaskDag["产研运 Workflow DAG<br/>岗位协作 · 审批 · 修订 · 局部重跑"]
+    ChatRouter --> FastPath
+    ChatRouter --> AgenticFlow
+    FastPath -->|证据不足 / 复杂| AgenticFlow
+  end
 
-  Document --> Parser["TXT / Markdown / PDF / DOCX Parser"]
-  Parser --> Chunker["MarkdownChunker"]
-  Chunker --> Embedding["Qwen Embedding Provider"]
+  subgraph L3["L3 Agent Runtime：模型与工具受控执行"]
+    direction LR
+    AgentLoop["Agent Loop / Workflow Runtime<br/>步数 · 工具数 · deadline · cancel"]
+    ContextManager["Context Manager<br/>证据 · 历史 · Memory · Token 预算"]
+    LlmGateway["LLM Gateway<br/>Provider 路由 · fallback · usage / cost"]
+    ToolRuntime["Tool Runtime<br/>Registry · Schema · ACL · 审批 · 幂等 · MCP"]
+    OutputGate["Output Validator<br/>结构化校验 · 引用 / Claim 证据门禁"]
+    AgentLoop --> ContextManager --> LlmGateway --> OutputGate
+    LlmGateway -->|tool call| ToolRuntime
+    ToolRuntime -.->|工具观察结果回填| ContextManager
+  end
 
-  Embedding --> Milvus["Milvus Vector Store: raw chunks + retrieval descriptions"]
-  Chunker --> BM25["BM25 / Jieba Index"]
-  Chunker --> ES["Elasticsearch IK Index"]
-  Document --> Postgres["PostgreSQL Metadata"]
-  Chunker --> DescriptionBuilder["Selective Retrieval Descriptions"]
-  DescriptionBuilder --> Postgres
-  DescriptionBuilder --> Embedding
+  subgraph L6["L6 知识、记忆与产物"]
+    direction LR
+    Ingest["文档入库<br/>解析 · 质量门禁 · 结构切片 · Embedding"]
+    Retrieval["统一检索<br/>QueryPlan · ACL · Hybrid · 融合 / 扩展"]
+    Evidence["Evidence Bundle<br/>去重 · 来源 / 版本 · Token 排序"]
+    Indexes["检索索引<br/>Milvus · Elasticsearch · BM25"]
+    Graph["GraphRAG<br/>Neo4j"]
+    ExternalSources["可选证据源<br/>Obsidian · Web Search · Rerank"]
+    SessionMemory["会话与长期记忆<br/>PostgreSQL / Redis · Mem0 · 对话向量"]
+    ArtifactStore["Artifact<br/>PostgreSQL 元数据 · 对象存储文件"]
+    Ingest --> Indexes
+    Ingest --> Graph
+    Retrieval --> Indexes
+    Retrieval --> Graph
+    Retrieval --> ExternalSources
+    Retrieval --> Evidence
+  end
 
-  Chat --> SimpleRag["Direct Answer + Unified Hybrid RAG"]
-  Chat --> AgenticRag["LangGraph Agentic RAG"]
-  Chat --> Memory
-  AgenticRag --> Bocha["Bocha Web Search"]
-  AgenticRag --> Rerank["DashScope Rerank"]
-  AgenticRag --> Graph
+  subgraph DURABLE["Durable Execution：状态与恢复"]
+    direction LR
+    Postgres["PostgreSQL<br/>Run / Event / Task / Outbox<br/>文档元数据 · 会话历史"]
+    Redis["Redis<br/>Checkpoint · 短期上下文 · 锁 / 取消标记"]
+    Queue["BullMQ Queue / Scheduler"]
+    Workers["Worker 执行<br/>文档 · Workflow · Artifact"]
+    RunApi --> Postgres
+    RunApi -->|异步任务| Queue --> Workers
+    Workers --> Postgres
+    Workers --> Redis
+    Workers --> ArtifactStore
+  end
 
-  Memory --> Mem0["Mem0 Cloud / Local"]
-  Graph --> Neo4j["Neo4j"]
-  Chat --> Redis["Redis Cache / Checkpoint"]
+  subgraph L7["L7 分布式运行与容量控制"]
+    direction LR
+    RateControl["租户 / 用户配额<br/>请求限流 · 日成本预算"]
+    ModelBudget["模型调用预算<br/>RPM / TPM · 超时 · 有界重试"]
+    ProductionProof["目标环境验收<br/>并发 · 队列积压 · 故障恢复 · P95 / 成本"]
+    OutcomeReconciler["unknown 副作用恢复扫描<br/>租约过期对账 / 人工接管"]
+    RateControl --> ModelBudget
+  end
+
+  subgraph CROSSCUT["横切治理：安全、观测与质量发布"]
+    direction LR
+    Security["Security & Policy<br/>API scope / tenant ACL · Injection 防护 · 脱敏审计"]
+    Observability["Observability<br/>pino · Prometheus / Grafana · Langfuse"]
+    EvalRelease["Evals & Release Gate<br/>三模式回归 · 引用 / 拒答 · 离线 A/B"]
+    Rollout["人工灰度 / 回滚<br/>自动联动待补"]
+  end
+
+  RunApi --> ChatRouter
+  RunApi --> Ingest
+  RunApi --> TaskDag --> AgentLoop
+  FastPath --> ContextManager
+  AgenticFlow --> AgentLoop
+  ContextManager --> Retrieval
+  Evidence --> ContextManager
+  SessionMemory --> ContextManager
+  ContextManager --> SessionMemory
+  ToolRuntime --> ArtifactStore
+  Ingest --> Postgres
+  AgentLoop --> Postgres
+  AgentLoop --> Redis
+  RunSnapshot --> Postgres
+  Gateway --> RateControl
+  ModelBudget --> LlmGateway
+  Security --> Gateway
+  Security --> Retrieval
+  Security --> ToolRuntime
+  AgentLoop --> Observability
+  Postgres --> Observability
+  Observability --> EvalRelease
+  ConfigPlane --> EvalRelease
+  EvalRelease --> Rollout
+  Rollout -.->|审核后的配置版本 / 灰度联动待补| ConfigPlane
+  OutputGate --> RunApi
+  Workers -.->|接管扫描待补| OutcomeReconciler
+  ProductionProof -.->|真实业务数据与目标环境验收待完成| EvalRelease
+
+  classDef implemented fill:#e8f5e9,stroke:#27834a,color:#173b22,stroke-width:1px;
+  classDef partial fill:#fff4d6,stroke:#c58a12,color:#4a3710,stroke-width:1px;
+  classDef pending fill:#fff0f0,stroke:#ce5b5b,color:#542020,stroke-width:1px,stroke-dasharray:5 5;
+  class Client,Gateway,RunApi,ChatRouter,FastPath,AgenticFlow,TaskDag,AgentLoop,ContextManager,LlmGateway,ToolRuntime,OutputGate,Ingest,Retrieval,Evidence,Indexes,Graph,ExternalSources,SessionMemory,ArtifactStore,Postgres,Redis,Queue,Workers,RateControl,ModelBudget implemented;
+  class ConfigPlane,RunSnapshot,Security,Observability,EvalRelease,Rollout partial;
+  class ProductionProof,OutcomeReconciler pending;
 ```
+
+图例：绿色表示已实现的主体能力，黄色表示已有基础但发布治理或生产闭环不完整，红色虚线表示待补能力；虚线箭头表示待完成的恢复或发布连接。该图按当前仓库实现映射 V3 分层，部署验收缺口以 `ROADMAP.md` 为准。
+
+## 2.1 按功能链路拆分的架构图
+
+总图用于看系统边界；下面每张图只展开一条功能链路。实线表示当前主流程，虚线表示可选支路或仍待闭环的能力。它们描述当前代码与已记录边界，不代表目标环境验收已完成。
+
+### 2.1.1 文档上传与索引
+
+同步上传在请求内处理；异步上传先持久化任务和源文件，再由 BullMQ Worker 处理。两条路径在解析和统一入库后汇合。
+
+```mermaid
+flowchart TB
+  User["用户 / 管理端"] --> Upload["POST /documents/upload<br/>或 /documents/upload/async"]
+  Upload --> Preflight["JWT 身份 + tenant / owner 预检"]
+  Preflight --> Mode{"同步还是异步"}
+
+  Mode -->|同步| SyncExtract["读取上传内容 / 媒体抽取"]
+  Mode -->|异步| Task["PostgreSQL 创建 queued 文档任务"]
+  Task --> Stage["BullMQ 暂存延迟任务<br/>只携带 objectKey 与租户上下文"]
+  Stage --> Source["源文件写入对象存储"]
+  Source --> Promote["提升持久队列任务"]
+  Promote --> Worker["Document Worker 读取 objectKey"]
+  Worker --> AsyncExtract["取回源文件并抽取正文"]
+
+  SyncExtract --> Parse["解析 / 类型识别 / 质量报告"]
+  AsyncExtract --> Parse
+  Parse --> Slice["按文档类型路由切片<br/>保留标题、表格、来源与业务元数据"]
+  Slice --> Ingest["统一文档入库服务"]
+  Ingest --> PG["PostgreSQL<br/>文档元数据、chunks、任务状态"]
+  Ingest --> BM25["BM25 索引"]
+  Ingest --> ES["Elasticsearch 全文索引"]
+  Ingest --> Vec["Embedding → Milvus 向量索引"]
+  Ingest -.-> Graph["Neo4j GraphRAG<br/>可选异步投影"]
+  Ingest -.-> Note["Obsidian 来源笔记<br/>按配置启用"]
+
+  PG --> Done["返回 docId / chunkCount<br/>或查询 taskId 状态"]
+  Worker --> Cleanup["处理后清理临时源文件"]
+  Worker -->|成功 / 失败| PG
+  CrashWindow["对象存储写入前进程崩溃<br/>内存中的源文件无法恢复"] -.->|悬挂任务回收| Task
+```
+
+异步生产路径要求 Redis / BullMQ；Redis 未配置时仅开发环境允许进程内处理。索引之间尚非同一数据库事务，当前通过状态记录和索引对账／修复队列发现并修复可识别的不一致。
+
+### 2.1.2 用户提问与回答
+
+`simple`、`auto`、`agentic` 共用认证、请求编排、权限过滤、证据整理和最终引用校验；区别在于是否允许从 Fast Path 升级到多步 Agentic。
+
+```mermaid
+flowchart TB
+  UserQ["用户问题 + 模式 / 角色 / 检索范围"] --> Auth["JWT + tenant quota + department scope"]
+  Auth --> Chat["ChatController → ChatService<br/>会话、请求取消、运行事件"]
+  Chat --> Router{"simple / auto / agentic"}
+
+  Router -->|simple| SimpleGate["精确直答门禁"]
+  SimpleGate -->|命中| Validate["回答与引用校验"]
+  SimpleGate -->|未命中| Retrieve["统一 Hybrid 检索"]
+
+  Router -->|auto| Fast["Simple / Auto Fast Path"]
+  Fast -->|证据充分、问题简单| Validate
+  Fast -->|证据不足或复杂| Plan["Agentic 查询扩展与多问题规划"]
+
+  Router -->|agentic| Plan
+  Plan --> PerQuery["按子问题执行统一检索"]
+  PerQuery --> Retrieve
+
+  Retrieve --> ACL["tenant / owner / ACL / 业务范围过滤"]
+  ACL --> Sources["BM25 + Elasticsearch + Milvus<br/>可选 Graph / Obsidian 来源"]
+  Sources --> Sufficiency{"证据充分？"}
+  Sufficiency -->|否且允许联网| Web["Bocha Web Search"]
+  Sufficiency -->|是| Rank["Rerank / 来源排序"]
+  Web --> Rank
+  Rank --> Expand["章节与相邻块扩展、去重、来源限额"]
+  Expand --> Context["上下文预算与组装<br/>详见 2.1.4"]
+  Context --> Generate["LLM 生成答案"]
+  Validate --> Final["统一输出校验"]
+  Generate --> Validate
+  Final -->|agentic 反思需重试| Plan
+  Final -->|通过或受控降级| Persist["保存会话 / query log / run 事件"]
+  Persist --> Transport{"响应方式"}
+  Transport -->|HTTP| Response["ChatResponse"]
+  Transport -->|SSE| Stream["生命周期事件 + 最终答案"]
+```
+
+`simple` 是固定线性取证与校验，不升级 Agentic；`auto` 可在 Fast Path 后按充分性和复杂度升级；`agentic` 可规划多个查询并反思重试。SSE 只负责事件传输，问答语义和最终持久化仍由 `ChatService` 收敛处理。
+
+### 2.1.3 长任务执行与恢复
+
+这里展开产研工作流的异步执行。文档异步处理见 2.1.1；普通短请求不需要进入这条长任务队列。
+
+```mermaid
+flowchart TB
+  Client["用户启动 / 恢复 / 修订 / 重跑"] --> API["Workflow Controller<br/>身份、owner、tenant 校验"]
+  API --> Init["初始化 Workflow State / Run / 角色任务"]
+  Init --> PG["PostgreSQL<br/>Run、Task、Event、Artifact 元数据"]
+  Init --> Queue["BullMQ production-workflow<br/>稳定 job id 去重"]
+  Queue --> Worker["Workflow Worker<br/>持有并续租执行租约"]
+  Worker --> Checkpoint["读取 / 写入 Redis LangGraph checkpoint"]
+  Checkpoint --> DAG["Workflow DAG<br/>批次、岗位、依赖与当前步骤"]
+  DAG --> Role["岗位 Agent / Agent Loop"]
+  Role --> Policy["工具策略、Schema、权限、幂等与审批"]
+  Policy --> Tools["RAG / MCP / 业务工具"]
+  Tools --> State["结果、证据、claims、错误与事件回填"]
+  State --> Checkpoint
+  State --> PG
+  State --> Artifact["Artifact 文件 + 元数据"]
+  State --> Gate{"需要人工审批？"}
+  Gate -->|是| Wait["pending_approval / 等待用户反馈"]
+  Wait -->|通过 / 修订 / 驳回| Resume["resume / revise 重新入队"]
+  Resume --> Queue
+  Gate -->|否| Finish{"还有待执行任务？"}
+  Finish -->|有| DAG
+  Finish -->|无| Result["completed / failed 结果与产物"]
+  Result --> PG
+  Worker --> Events["运行状态 / SSE 事件"]
+  Reconcile["unknown 副作用接管扫描<br/>待闭环"] -.-> Worker
+```
+
+PostgreSQL 保存业务任务和运行审计，Redis checkpoint 保存图执行恢复位置，BullMQ 负责跨进程派发与重试。带外部副作用且结果未知的工具不能盲目重放；自动扫描与接管仍是待闭环项，需人工确认或按局部任务重跑。
+
+### 2.1.4 上下文如何组织
+
+上下文不是“把所有历史拼进 Prompt”。系统先按请求类型、租户权限和检索范围取候选，再用模型窗口与检索档位预算限制历史和证据；权威事实仍以通过权限检查的知识库原文为准。
+
+```mermaid
+flowchart TB
+  Request["当前问题 + 会话 + tenant / scope"] --> Policy["受信系统策略 + 岗位预设 + QueryPlan"]
+
+  Request --> ShortLoad["读取短期会话上下文"]
+  ShortLoad --> RedisHistory["Redis 最近轮次 + 摘要"]
+  RedisHistory -->|命中| ShortLoad
+  RedisHistory -->|缓存缺失 / 校验失败| PGStore["PostgreSQL 会话消息与 contextSummary"]
+  PGStore --> ShortLoad
+  ShortLoad --> Budget["Context Manager / Token 预算"]
+
+  Request --> Long["长期 / 会话记忆 Mem0<br/>按问题类型可跳过"]
+  Request --> HistorySearch["相关历史对话向量检索<br/>最多返回相关对话片段"]
+  Request --> RAG["当前知识检索证据"]
+  RAG --> Filter["ACL、版本、生效期、业务范围过滤"]
+  Filter --> Evidence["Rerank、章节/邻块扩展<br/>去重与来源限额"]
+  Request --> ToolOutput["本轮工具观察结果 / Artifact 引用"]
+
+  Policy --> Budget
+  Long --> Budget
+  HistorySearch --> Budget
+  Evidence --> Budget
+  ToolOutput --> Budget
+  Budget --> Prompt["组装本轮模型消息<br/>当前问题与安全策略优先"]
+  Prompt --> LLM["LLM / Agent 下一步"]
+  LLM --> Cite["输出引用与 Claim 校验"]
+  Cite --> Save["持久化用户 / 助手消息与运行事件"]
+  Save --> PGStore
+  Save --> RedisWrite["写入本轮消息到 Redis 短期窗口"]
+  RedisWrite --> RedisHistory
+  RedisWrite --> CompactGate{"达到预算 / 条数阈值？"}
+  CompactGate -->|否| RedisHistory
+  CompactGate -->|是| Compact["压缩较早轮次，生成结构摘要"]
+  Compact -->|摘要先持久化| PGStore
+  Compact -->|镜像摘要并裁剪旧轮次| RedisHistory
+```
+
+短期历史以 PostgreSQL 为事实存储，Redis 用于近期窗口；摘要只保留决策和业务事实线索，不替代知识库原文。历史与长期记忆作为补充上下文注入，客观事实类问题可跳过记忆／历史召回。引用校验将最终回答重新绑定到本轮检索证据。
+
+### 2.1.5 评测与发布门禁
+
+评测分为数据集检查、真实服务回放、结果报告和发布门禁。离线结构校验不等于问答效果通过；灰度与回滚当前仍需人工完成。
+
+```mermaid
+flowchart TB
+  Dataset["评测数据集 / Manifest"] --> ValidateSet["样本、来源文档、维度与字段校验"]
+  ValidateSet --> Mode{"离线检查还是 Live 回放？"}
+  Mode -->|离线| Structure["结构校验报告<br/>不代表真实问答通过"]
+  Mode -->|Live| Ready["服务健康检查 + 登录"]
+  Ready --> Upload["上传评测资料并记录 docId"]
+  Upload --> Replay["同一入口 /api/v1/chat<br/>simple、auto、agentic 逐模式回放"]
+  Replay --> Score["评分：目标匹配、冲突事实、拒答、引用、路由"]
+  Score --> Judge["可选 / 门禁要求的 LLM Claim Judge"]
+  Structure --> Report["按模式生成报告<br/>保留 skipped / blocked / failed"]
+  Judge --> Report
+  Report --> Compare{"单次回归或 A/B？"}
+  Compare -->|单次| Gate["质量门槛<br/>分数、引用与支持率等"]
+  Compare -->|A/B| Delta["Profile A / B 配对比较<br/>检索回归、成本与延迟阈值"]
+  Delta --> Gate
+  Gate --> Decision{"门禁结果"}
+  Decision -->|失败| Block["阻止发布 / 输出失败样本"]
+  Decision -->|通过| Manual["人工灰度与回滚决策"]
+  Manual -.-> Config["配置发布联动自动化<br/>待闭环"]
+  Replay --> Cleanup["评测结束清理临时资料"]
+```
+
+发布门禁要求 Live 评测和已审核数据；A/B 阈值需明确提供。仓库内脱敏或模拟数据只能证明可复现基线，不替代真实业务黄金集。评测通过也不自动发布，自动化灰度／回滚联动尚未接入。
 
 ## 3. 运行时组件
 
@@ -198,7 +475,8 @@ NEO4J_URL=bolt://localhost:7687
 - Redis key 和队列／检查点上下文包含租户及用户／会话隔离维度。
 - Milvus、Elasticsearch、BM25 和 Neo4j 检索／对账按租户与文档权限过滤。
 - 租户字段回填、非空收紧、旧索引重建和跨租户故障演练必须有独立验收证据。
-- SSE token 支持 query 参数鉴权，兼容浏览器原生 EventSource。
+- 浏览器原生 EventSource 通过一次性短票据鉴权；长期 JWT 不进入 URL。
+- debug/traces/metrics 仅在非 production 默认可用，production 需显式开关并置于内网。
 
 ## 7. Provider 设计
 
@@ -268,7 +546,7 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - W3C `traceparent` 兼容的 in-memory tracing
 - Agent 节点 trace 与指标：记录 LangGraph 节点耗时、首 token、工具成功率、空召回、循环终止原因；单 trace 超过 15 个节点标记 `span_limit`
 - 产研运 FSM：产品、设计、前端、后端、测试、运营顺序执行，每个岗位结构化输出并人工审批，驳回回退一节点，Redis Checkpointer 支持恢复
-- 结构化短期记忆：压缩时提取角色、模块、变更前后、版本、生效期、证据、决策和开放问题，同时保留最近 6 轮原文
+- 结构化短期记忆：每轮问答结束后按可用历史 Token 预算检查，超预算或超过 40 条消息才压缩；摘要与近期原文共享预算，模型失败时保留 Redis 原文，完整消息留在 PostgreSQL，并用 Redis 锁避免同一会话并发压缩
 - Debug chunks 分数面板
 - Agentic workflow Mermaid 导出
 - RAG eval / E2E / perf 脚本

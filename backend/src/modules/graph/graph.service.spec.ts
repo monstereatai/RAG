@@ -93,4 +93,55 @@ describe('GraphService governance metadata', () => {
     expect(executeWrite.mock.calls[2][0]).toContain('n.sourceIds = remaining');
     expect(executeWrite.mock.calls[3][0]).toContain('DELETE n');
   });
+
+  it('searches graph facts for a QueryPlan-selected query without keyword gating', async () => {
+    const executeRead = jest.fn().mockResolvedValue([
+      {
+        source: 'Atlas Knowledge Base',
+        sourceLabel: 'Product',
+        relationship: 'DEPENDS_ON',
+        target: 'Redis',
+        targetLabel: 'Technology',
+        confidence: 0.82,
+        sourceId: 'source-1',
+      },
+    ]);
+    const neo4jProvider = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      executeRead,
+      executeWrite: jest.fn(),
+    } as unknown as Neo4jProvider;
+    const graphExtractor = {
+      extractFromText: jest.fn(),
+    } as unknown as GraphExtractorService;
+    const llmProvider = {
+      getModel: jest.fn().mockReturnValue({
+        withStructuredOutput: jest.fn().mockReturnValue({
+          invoke: jest.fn().mockResolvedValue({
+            entities: ['Atlas Knowledge Base'],
+          }),
+        }),
+      }),
+      invoke: jest.fn(),
+    } as unknown as LlmProvider;
+    const service = new GraphService(
+      neo4jProvider,
+      graphExtractor,
+      llmProvider,
+    );
+
+    const result = await service.queryGraph('Atlas Knowledge Base', 'user-1', {
+      generateAnswer: false,
+    });
+
+    expect(executeRead).toHaveBeenCalledTimes(1);
+    expect(executeRead).toHaveBeenCalledWith(
+      expect.stringContaining('AS sourceIds'),
+      {
+        entities: ['Atlas Knowledge Base'],
+        userId: 'user-1',
+      },
+    );
+    expect(result.facts).toHaveLength(1);
+  });
 });

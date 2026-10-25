@@ -19,6 +19,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { DocumentService } from './document.service';
+import { DocumentPermissionService } from './document-permission.service';
 import { DocumentQueueService } from './document-queue.service';
 import {
   detectDocumentKind,
@@ -76,6 +77,7 @@ export class DocumentController {
 
   constructor(
     private readonly documentService: DocumentService,
+    private readonly documentPermission: DocumentPermissionService,
     private readonly speechProvider: TencentSpeechProvider,
     private readonly visionProvider: VisionProvider,
     private readonly documentQueue: DocumentQueueService,
@@ -94,7 +96,11 @@ export class DocumentController {
         job.taskId,
         job.businessMetadata,
         job.tenantId,
+        job.trustedAdminPrincipal,
       );
+    });
+    this.documentQueue.registerFailureHandler(async (job, error) => {
+      await this.documentService.markTaskFailed(job.taskId, error.message);
     });
   }
 
@@ -109,6 +115,7 @@ export class DocumentController {
     if (!file) {
       throw new BadRequestException('file is required');
     }
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
     const kind = detectDocumentKind(file.originalname);
     const content = (
       await this.extractUploadContent(file, kind, user.userId)
@@ -145,6 +152,7 @@ export class DocumentController {
     if (!file) {
       throw new BadRequestException('file is required');
     }
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
     const task = await this.documentService.createQueuedTask(
       file.originalname,
       user.userId,
@@ -153,25 +161,36 @@ export class DocumentController {
 
     if (this.documentQueue.enabled) {
       const objectKey = `documents/${this.sanitizeObjectKeyPart(user.userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
+      const job = {
+        taskId: task.id,
+        userId: user.userId,
+        tenantId: user.tenantId,
+        filename: file.originalname,
+        objectKey,
+        contentType: file.mimetype,
+        businessMetadata: this.parseBusinessMetadata(body),
+      };
       try {
+        await this.documentQueue.stageUpload(job);
         await this.objectStorageProvider.putObject({
           key: objectKey,
           body: file.buffer,
           contentType: file.mimetype,
         });
-        await this.documentQueue.enqueue({
-          taskId: task.id,
-          userId: user.userId,
-          tenantId: user.tenantId,
-          filename: file.originalname,
-          objectKey,
-          contentType: file.mimetype,
-          businessMetadata: this.parseBusinessMetadata(body),
-        });
+        await this.documentQueue.promoteUpload(task.id);
       } catch (error) {
-        await this.objectStorageProvider
-          .deleteObject(objectKey)
-          .catch(() => undefined);
+        await this.documentQueue
+          .removeStagedUpload(task.id)
+          .catch((cleanupError: unknown) =>
+            this.logger.warn(
+              `staged document job cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            ),
+          );
+        await this.objectStorageProvider.deleteObject(objectKey).catch((cleanupError: unknown) =>
+          this.logger.warn(
+            `uploaded object cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          ),
+        );
         const message =
           error instanceof Error ? error.message : 'document queue unavailable';
         await this.documentService.markTaskFailed(task.id, message);
@@ -209,6 +228,7 @@ export class DocumentController {
     @Body() body: DocumentUploadBody,
     @CurrentUser() user: JwtPayload,
   ) {
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
     const extracted = await extractUrlContent(url);
     const content = extracted.content.trim();
     if (!content) {
@@ -236,6 +256,7 @@ export class DocumentController {
     @Body() body: DocumentUploadBody,
     @CurrentUser() user: JwtPayload,
   ) {
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
     const normalizedTitle = title?.trim() || 'Manual Note';
     const normalizedContent = content?.trim();
     if (!normalizedContent) {
@@ -285,6 +306,7 @@ export class DocumentController {
     taskId: string,
     businessMetadata?: DocumentBusinessMetadata,
     tenantId?: string,
+    trustedAdminPrincipal = false,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
     const content = (
@@ -302,6 +324,7 @@ export class DocumentController {
       content,
       userId,
       tenantId,
+      trustedAdminPrincipal,
       filename: file.originalname,
       sourceType: 'document',
       contentType: file.mimetype,
@@ -343,12 +366,16 @@ export class DocumentController {
 
   @Get()
   list(@CurrentUser() user: JwtPayload) {
-    return this.documentService.listDocs(user.userId);
+    return this.documentService.listDocs(user.userId, user.tenantId);
   }
 
   @Get(':docId')
   async get(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
-    const meta = await this.documentService.getDocMeta(docId, user.userId);
+    const meta = await this.documentService.getDocMeta(
+      docId,
+      user.userId,
+      user.tenantId,
+    );
     if (!meta) {
       throw new BadRequestException(`doc ${docId} not found`);
     }

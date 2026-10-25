@@ -303,58 +303,104 @@ export class MilvusVectorStoreProvider
     queryVector: number[],
     k: number,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<VectorSearchHit[]> {
-    // Milvus 提供 dense 候选；融合排序和其它来源的权限／生命周期治理由 RAG 服务负责。
+    // ACL 在 Milvus 查询内部完成，避免先取全局 topK 再过滤造成越权或召回损失。
     if (this.isCircuitOpen()) {
       throw new Error('Milvus similarity search circuit is open');
     }
+    if (allowedDocIds != null && allowedDocIds.size === 0) return [];
 
-    // 对齐 agent-course/milvus-test 参考实现：使用 HNSW 参数
-    const searchParams = {
-      collection_name: this.collection,
-      vector: queryVector,
-      limit: k,
-      metric_type: MetricType.COSINE,
-      params: this.getSearchParams(),
-      output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
-      expr: userId ? `user_id == "${userId}"` : undefined,
-      timeout: this.searchTimeoutMs,
-    };
+    const ids = allowedDocIds == null ? undefined : [...allowedDocIds];
+    const batches = ids == null ? [undefined] : chunkArray(ids, 200);
+    const hits: VectorSearchHit[] = [];
 
-    let searchResult: Awaited<ReturnType<MilvusClient['search']>>;
     try {
-      searchResult = await this.withTimeout(
-        this.client.search(searchParams),
-        this.searchTimeoutMs + 200,
-        'Milvus similarity search',
-      );
+      for (const batch of batches) {
+        const expr =
+          batch == null
+            ? userId
+              ? `user_id == "${escapeMilvusString(userId)}"`
+              : undefined
+            : `doc_id in [${batch
+                .map((id) => `"${escapeMilvusString(id)}"`)
+                .join(',')}]`;
+        const searchParams = {
+          collection_name: this.collection,
+          vector: queryVector,
+          limit: k,
+          metric_type: MetricType.COSINE,
+          params: this.getSearchParams(),
+          output_fields: ['id', 'content', 'doc_id', 'chunk_index'],
+          expr,
+          timeout: this.searchTimeoutMs,
+        };
+        const searchResult = await this.withTimeout(
+          this.client.search(searchParams),
+          this.searchTimeoutMs + 200,
+          'Milvus similarity search',
+        );
+        hits.push(
+          ...(searchResult.results as Array<Record<string, unknown>>).map(
+            (hit) => ({
+              id:
+                typeof hit['id'] === 'string' || typeof hit['id'] === 'number'
+                  ? String(hit['id'])
+                  : '',
+              content:
+                typeof hit['content'] === 'string' ? hit['content'] : '',
+              docId:
+                typeof hit['doc_id'] === 'string' ||
+                typeof hit['doc_id'] === 'number'
+                  ? String(hit['doc_id'])
+                  : '',
+              chunkIndex:
+                typeof hit['chunk_index'] === 'number'
+                  ? hit['chunk_index']
+                  : Number(hit['chunk_index'] ?? 0),
+              score:
+                typeof hit['score'] === 'number'
+                  ? hit['score']
+                  : Number(hit['score'] ?? 0),
+            }),
+          ),
+        );
+      }
       this.recordSuccess();
+      return hits.sort((left, right) => right.score - left.score).slice(0, k);
     } catch (err) {
       this.recordFailure(err);
       throw err;
     }
+  }
 
-    return (searchResult.results as Array<Record<string, unknown>>).map(
-      (hit) => ({
-        id:
-          typeof hit['id'] === 'string' || typeof hit['id'] === 'number'
-            ? String(hit['id'])
-            : '',
-        content: typeof hit['content'] === 'string' ? hit['content'] : '',
-        docId:
-          typeof hit['doc_id'] === 'string' || typeof hit['doc_id'] === 'number'
-            ? String(hit['doc_id'])
-            : '',
-        chunkIndex:
-          typeof hit['chunk_index'] === 'number'
-            ? hit['chunk_index']
-            : Number(hit['chunk_index'] ?? 0),
-        score:
-          typeof hit['score'] === 'number'
-            ? hit['score']
-            : Number(hit['score'] ?? 0),
-      }),
-    );
+  async deleteByIds(ids: string[]): Promise<void> {
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return;
+    try {
+      for (const batch of chunkArray(uniqueIds, 200)) {
+        const filter = `id in [${batch
+          .map((id) => `"${escapeMilvusString(id)}"`)
+          .join(',')}]`;
+        await this.withTimeout(
+          this.client.deleteEntities({
+            collection_name: this.collection,
+            filter,
+            timeout: this.deleteTimeoutMs,
+          }),
+          this.deleteTimeoutMs + 200,
+          'Milvus delete by chunk ids',
+        );
+      }
+      this.recordSuccess();
+      this.logger.log(`Deleted ${uniqueIds.length} chunk vectors by id`);
+    } catch (err) {
+      this.recordFailure(err);
+      this.logger.warn(
+        `Milvus delete by ids failed: ${(err as Error).message}`,
+      );
+      throw err;
+    }
   }
 
   async deleteByDocId(docId: string): Promise<void> {
@@ -649,6 +695,36 @@ export class MilvusVectorStoreProvider
       this.logger.warn(
         `Milvus image delete failed for doc_id=${docId}: ${(err as Error).message}`,
       );
+      throw err;
+    }
+  }
+
+  async countImagesByDocId(docId: string, userId?: string): Promise<number> {
+    if (!this.connected || !this.client) {
+      throw new Error('Milvus is unavailable');
+    }
+    const filters = ['doc_id == {docId}'];
+    const exprValues: Record<string, string> = { docId };
+    if (userId !== undefined) {
+      filters.push('user_id == {userId}');
+      exprValues.userId = userId;
+    }
+    try {
+      const result = await this.withTimeout(
+        this.client.query({
+          collection_name: this.imageCollection,
+          filter: filters.join(' && '),
+          exprValues,
+          output_fields: ['id'],
+          limit: 16_384,
+        }),
+        this.searchTimeoutMs + 200,
+        'Milvus count images by docId',
+      );
+      this.recordSuccess();
+      return Array.isArray(result.data) ? result.data.length : 0;
+    } catch (err) {
+      this.recordFailure(err);
       throw err;
     }
   }
@@ -962,6 +1038,18 @@ export class MilvusVectorStoreProvider
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+function chunkArray<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function escapeMilvusString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 function truncateUtf8(value: string, maxBytes: number): string {

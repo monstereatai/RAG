@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -9,7 +10,9 @@ import {
 } from '@nestjs/common';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { PlatformGovernanceService } from './platform-governance.service';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('platform-governance')
 @UseGuards(ServiceTokenGuard)
 export class PlatformGovernanceController {
@@ -93,14 +96,26 @@ export class PlatformGovernanceController {
   }
   @Get('retrieval-debug') debugRetrieval(
     @Query('query') query: string,
+    @Query('userId') userId: string,
     @Query('vectorSearch') vectorSearch: string,
     @Query('scope') scope: string,
     @Query('knowledgeBaseKey') knowledgeBaseKey?: string,
   ) {
-    return this.service.debugRetrieval(query, 'admin-backend', {
+    const mappedUserId = userId?.trim();
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!mappedUserId || !/^admin:[a-f0-9]{58}$/.test(mappedUserId)) {
+      throw new ForbiddenException('mapped Admin principal is required');
+    }
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
+    return this.service.debugRetrieval(query, mappedUserId, {
       vectorSearch: vectorSearch !== 'false',
       scope,
       profile: knowledgeBaseKey,
+      tenantId,
+      roles: ['admin'],
+      trustedAdminPrincipal: true,
     });
   }
 }

@@ -1,5 +1,11 @@
 {
   "version": "private-sanitized-2026-06-30",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "scripts/prepare-private-fixtures.mjs",
+    "containsRealBusinessData": false
+  },
   "description": "脱敏多模态样本包（增强版）。包含真实存在的本地文件路径，覆盖文本/表格/结构体/HTML/音频/图片/视频模态。",
   "documents": [
     {

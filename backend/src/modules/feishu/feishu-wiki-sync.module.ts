@@ -4,7 +4,6 @@ import {
   FeishuWikiConnectorEntity,
   FeishuWikiItemEntity,
 } from '../../providers/db/entities/feishu-wiki-connector.entity';
-import { UserEntity } from '../../providers/db/entities/user.entity';
 import { DocumentModule } from '../document/document.module';
 import { DocumentPermissionModule } from '../document/document-permission.module';
 import { FeishuWikiApiClient } from './feishu-wiki-api.client';
@@ -17,7 +16,6 @@ import { FeishuWikiSyncService } from './feishu-wiki-sync.service';
     TypeOrmModule.forFeature([
       FeishuWikiConnectorEntity,
       FeishuWikiItemEntity,
-      UserEntity,
     ]),
     DocumentModule,
     DocumentPermissionModule,

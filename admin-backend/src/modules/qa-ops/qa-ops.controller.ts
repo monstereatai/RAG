@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  UnauthorizedException,
   Query,
   Req,
   Res,
@@ -182,9 +183,8 @@ export class QaOpsController {
   @Get("conversations")
   @ApiOperation({ summary: "会话列表" })
   @RequirePermission("admin:qa-ops:read")
-  async listConversations() {
-    // admin QA Ops 展示所有会话，不按 userId 过滤
-    const result = await this.ragClient.getConversations();
+  async listConversations(@Req() req: Request) {
+    const result = await this.ragClient.getConversations(this.getUserId(req));
     // 只读运营列表采用稳定契约：上游不可用时返回空列表和可用性信息，
     // 不把 RAG 后端的瞬时不可达转换成页面级 502。
     return {
@@ -206,9 +206,8 @@ export class QaOpsController {
   @Get("conversations/:threadId")
   @ApiOperation({ summary: "会话详情（含消息）" })
   @RequirePermission("admin:qa-ops:read")
-  async getConversation(@Param("threadId") threadId: string) {
-    // admin QA Ops 可查看任意会话，不按 userId 过滤
-    const result = await this.ragClient.getConversation(threadId);
+  async getConversation(@Param("threadId") threadId: string, @Req() req: Request) {
+    const result = await this.ragClient.getConversation(threadId, this.getUserId(req));
     this.requireAvailable(result);
     return { data: this.unwrapObject(result.data) };
   }
@@ -233,9 +232,8 @@ export class QaOpsController {
   @Delete("conversations/:threadId")
   @ApiOperation({ summary: "删除会话" })
   @RequirePermission("admin:qa-ops:read")
-  async deleteConversation(@Param("threadId") threadId: string) {
-    // admin QA Ops 可删除任意会话，不按 userId 过滤
-    await this.ragClient.deleteConversation(threadId);
+  async deleteConversation(@Param("threadId") threadId: string, @Req() req: Request) {
+    await this.ragClient.deleteConversation(threadId, this.getUserId(req));
     return { success: true };
   }
 
@@ -357,7 +355,10 @@ export class QaOpsController {
     res.flushHeaders?.();
 
     const controller = new AbortController();
-    req.on("close", () => controller.abort());
+    const abortUpstreamOnDisconnect = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    res.on("close", abortUpstreamOnDisconnect);
 
     try {
       const upstream = await this.ragClient.streamAgui(
@@ -396,7 +397,7 @@ export class QaOpsController {
 
       await pump();
     } catch (error) {
-      if (!res.writableEnded) {
+      if (!res.destroyed && !res.writableEnded) {
         this.writeAguiFallback(
           res,
           this.toFriendlyProxyMessage(
@@ -405,6 +406,8 @@ export class QaOpsController {
         );
         res.end();
       }
+    } finally {
+      res.off("close", abortUpstreamOnDisconnect);
     }
   }
 
@@ -438,14 +441,14 @@ export class QaOpsController {
   }
 
   private getUserId(req: Request) {
-    const user = (req as Request & { user?: { userId?: string; sub?: string } })
-      .user;
-    return String(
-      user?.userId ??
-        user?.sub ??
-        process.env.RAG_ADMIN_USER_ID ??
-        "1"
-    );
+    const user = (req as Request & {
+      user?: { userId?: string | number; id?: string | number; sub?: string | number };
+    }).user;
+    const id = user?.userId ?? user?.id ?? user?.sub;
+    if (id === undefined || id === null || !String(id).trim()) {
+      throw new UnauthorizedException('authenticated user is required');
+    }
+    return String(id).trim();
   }
 
   private requireAvailable(result: { available: boolean; status: number | null; error?: string }) {
@@ -473,11 +476,6 @@ export class QaOpsController {
     if (!model) return "qwen";
     if (model === "qwen" || model === "deepseek" || model === "zhipu") return model;
     return "qwen";
-  }
-
-  /** 获取管理后台上下文用户标识用于会话隔离 */
-  private getAdminUserId(): string {
-    return "admin-backend";
   }
 
   private writeAguiFallback(res: Response, message: string) {

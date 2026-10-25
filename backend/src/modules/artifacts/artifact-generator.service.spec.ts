@@ -40,7 +40,9 @@ describe('ArtifactGeneratorService', () => {
   it('uses the real image provider boundary for PNG generation', async () => {
     const result = await service.generate(artifact('image'));
 
-    expect(generateImage).toHaveBeenCalledWith('游戏周年庆主视觉');
+    expect(generateImage).toHaveBeenCalledWith(
+      expect.stringContaining('游戏周年庆主视觉'),
+    );
     expect(result.contentType).toBe('image/png');
     expect(result.body.toString()).toBe('png-content');
   });

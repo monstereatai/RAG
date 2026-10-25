@@ -173,6 +173,18 @@ export class IamService {
     return [...new Set(permissionRows.map((permission) => permission.code))];
   }
 
+  async listRoleNames(
+    userId: string,
+    tenantId = "legacy",
+  ): Promise<string[]> {
+    const membership = await this.memberships.findOneBy({ tenantId, userId, status: "active" });
+    if (membership == null) return [];
+    const assignments = await this.membershipRoles.find({ where: { membershipId: membership.id } });
+    if (assignments.length === 0) return [];
+    const roles = await this.roles.find({ where: { id: In(assignments.map((item) => item.roleId)) } });
+    return [...new Set(roles.map((role) => role.name))];
+  }
+
   async hasPermission(
     userId: string,
     permission: string,

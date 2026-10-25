@@ -7,7 +7,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 import { LlmModule } from '../../providers/llm/llm.module';
-import { QueryIntentRouter } from './query-intent-router';
 
 /**
  * Prompt 工程模块
@@ -25,8 +24,7 @@ import { QueryIntentRouter } from './query-intent-router';
   providers: [
     SemanticExampleSelector,
     BadCaseFlywheelService,
-    QueryIntentRouter,
   ],
-  exports: [SemanticExampleSelector, BadCaseFlywheelService, QueryIntentRouter],
+  exports: [SemanticExampleSelector, BadCaseFlywheelService],
 })
 export class PromptModule {}

@@ -216,7 +216,7 @@ describe('RagClientService', () => {
         text: async () => JSON.stringify({ data: { ticket: 'speech-ticket' } }),
       });
 
-      await service.issueSpeechTicket('owner-1', 'user', 'tenant-1');
+      await service.issueSpeechTicket('owner-1', 'user');
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/api/v1/auth/internal/speech-ticket',
@@ -229,7 +229,6 @@ describe('RagClientService', () => {
           body: JSON.stringify({
             ownerUserId: 'owner-1',
             ownerRole: 'user',
-            tenantId: 'tenant-1',
           }),
         }),
       );

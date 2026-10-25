@@ -12,6 +12,8 @@ import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/age
 import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
 import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
 import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
+import { AgenticArtifactStoreService } from './agentic-artifact-store.service';
+import { AgenticAnswerGenerationService } from './agentic-answer-generation.service';
 
 @Module({
   imports: [
@@ -29,7 +31,11 @@ import { DocumentPermissionModule } from '../../modules/document/document-permis
     AgentLoopModule,
     DocumentPermissionModule,
   ],
-  providers: [AgenticRagService],
+  providers: [
+    AgenticArtifactStoreService,
+    AgenticAnswerGenerationService,
+    AgenticRagService,
+  ],
   exports: [AgenticRagService],
 })
 export class AgenticRagModule {}

@@ -12,6 +12,7 @@ import { MultimodalEmbeddingProvider } from '../../providers/multimodal-embeddin
  */
 export interface ImageVectorStorePort {
   insertImages(records: ImageVectorRecord[]): Promise<void>;
+  countImagesByDocId(docId: string, userId?: string): Promise<number>;
   searchImages(
     queryVector: number[],
     k: number,
@@ -233,6 +234,10 @@ export class ImageIndexService {
   async deleteByDoc(docId: string, userId?: string): Promise<void> {
     await this.vectorStore.deleteImagesByDocId(docId, userId);
     this.logger.log(`Deleted image index for doc=${docId}`);
+  }
+
+  countByDocId(docId: string, userId?: string): Promise<number> {
+    return this.vectorStore.countImagesByDocId(docId, userId);
   }
 
   private toSearchItem(hit: ImageSearchHit): ImageSearchItem {

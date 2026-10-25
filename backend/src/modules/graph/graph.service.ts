@@ -36,6 +36,7 @@ export interface GraphFact {
   targetLabel: string;
   confidence: number;
   sourceId: string;
+  sourceIds?: string[];
 }
 
 export interface GraphSchemaSummary {
@@ -102,7 +103,10 @@ export class GraphService {
    * 查询指定文档在图谱中的实际来源数量。
    * 只读对账，不改变图谱；Neo4j 不可用时向上抛出受控错误。
    */
-  async getSourceIndexStatus(sourceId: string, userId: string): Promise<{
+  async getSourceIndexStatus(
+    sourceId: string,
+    userId: string,
+  ): Promise<{
     nodeCount: number;
     relationshipCount: number;
     sourcePresent: boolean;
@@ -130,7 +134,8 @@ export class GraphService {
       if (typeof value === 'number') return value;
       if (value && typeof value === 'object') {
         const candidate = value as { toNumber?: () => number; low?: number };
-        if (typeof candidate.toNumber === 'function') return candidate.toNumber();
+        if (typeof candidate.toNumber === 'function')
+          return candidate.toNumber();
         if (typeof candidate.low === 'number') return candidate.low;
       }
       return Number(value ?? 0) || 0;
@@ -239,15 +244,6 @@ export class GraphService {
   ): Promise<GraphQueryResult> {
     this.assertEnabled();
     const entities = await this.extractQueryEntities(query);
-    if (!this.isGraphQueryCandidate(query, entities)) {
-      return {
-        answer:
-          '该问题未表现出明确的实体关系或多跳查询需求，建议先走普通 RAG 主链路。',
-        entities,
-        facts: [],
-        cypher: this.factSearchCypher(),
-      };
-    }
     const facts = await this.searchFacts(entities, userId);
     const answer =
       options.generateAnswer === false
@@ -749,13 +745,6 @@ export class GraphService {
     return rows;
   }
 
-  private isGraphQueryCandidate(query: string, entities: string[]): boolean {
-    const normalized = query.normalize('NFKC').toLowerCase();
-    const relationPattern =
-      /关系|关联|上下游|依赖|负责|属于|连接|影响|链路|谁|哪些|共同|之间|relation|depend|owner|link|between/;
-    return entities.length >= 2 || relationPattern.test(normalized);
-  }
-
   private factSearchCypher(): string {
     return `
       MATCH (source:GraphEntity {userId: $userId})-[r:GRAPH_RELATION {userId: $userId}]->(target:GraphEntity {userId: $userId})
@@ -772,7 +761,8 @@ export class GraphService {
         target.id AS target,
         target.label AS targetLabel,
         coalesce(r.confidence, 1.0) AS confidence,
-        coalesce(r.sourceId, '') AS sourceId
+        coalesce(r.sourceId, '') AS sourceId,
+        coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) AS sourceIds
       LIMIT 50
     `;
   }

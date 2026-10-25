@@ -5,6 +5,8 @@ import { DocumentService } from './document.service';
 import { DocumentMetadataExtractor } from './document-metadata.extractor';
 import { DocumentRetrievalDescriptionModule } from './document-retrieval-description.module';
 import { DocumentQueueService } from './document-queue.service';
+import { DocumentTaskService } from './document-task.service';
+import { DocumentImageIngestionService } from './document-image-ingestion.service';
 import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
@@ -50,11 +52,15 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     DocumentService,
     DocumentMetadataExtractor,
     DocumentQueueService,
+    DocumentTaskService,
+    DocumentImageIngestionService,
     KarpathyObsidianIngestService,
   ],
   exports: [
     DocumentService,
     DocumentQueueService,
+    DocumentTaskService,
+    DocumentImageIngestionService,
     KarpathyObsidianIngestService,
   ],
 })

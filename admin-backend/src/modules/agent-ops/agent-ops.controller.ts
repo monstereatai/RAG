@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,6 +9,7 @@ import {
   Query,
   Req,
   Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -372,11 +374,51 @@ export class AgentOpsController {
 
   @Get('governance/retrieval-debug')
   @RequirePermission('admin:qa-ops:read')
-  governanceRetrievalDebug(@Query('query') query: string, @Query('scope') scope?: string, @Query('knowledgeBaseKey') knowledgeBaseKey?: string) { return this.ragClient.debugRetrieval(query, scope, knowledgeBaseKey); }
+  governanceRetrievalDebug(
+    @Query('query') query: string,
+    @Req() req: Request,
+    @Query('scope') scope?: string,
+    @Query('knowledgeBaseKey') knowledgeBaseKey?: string,
+  ) {
+    return this.ragClient.debugRetrieval(
+      query,
+      this.userId(req),
+      scope,
+      knowledgeBaseKey,
+    );
+  }
+
+  @Get('governance/retrieval-debug/compare')
+  @RequirePermission('admin:qa-ops:read')
+  compareGovernanceRetrieval(
+    @Query('query') query: string,
+    @Query('scope') scope: string | undefined,
+    @Query('knowledgeBaseKey') knowledgeBaseKey: string,
+    @Query('compareKnowledgeBaseKey') compareKnowledgeBaseKey: string,
+    @Req() req: Request,
+  ) {
+    if (!query?.trim()) throw new BadRequestException('query is required');
+    if (!knowledgeBaseKey?.trim() || !compareKnowledgeBaseKey?.trim())
+      throw new BadRequestException('two knowledge base profiles are required');
+    if (knowledgeBaseKey.trim() === compareKnowledgeBaseKey.trim())
+      throw new BadRequestException('profiles must be different');
+    return this.ragClient.compareRetrievalProfiles(
+      query.trim(),
+      this.userId(req),
+      scope,
+      knowledgeBaseKey.trim(),
+      compareKnowledgeBaseKey.trim(),
+    );
+  }
 
   private userId(req: Request): string {
     const user = (req as Request & { user?: { userId?: string; sub?: string } })
       .user;
-    return String(user?.userId ?? user?.sub ?? 'admin-backend');
+    const userId = user?.userId ?? user?.sub;
+    if (userId === undefined || userId === null || !String(userId).trim()) {
+      throw new UnauthorizedException('authenticated admin is required');
+    }
+    return String(userId).trim();
   }
+
 }

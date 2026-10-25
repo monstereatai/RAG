@@ -13,8 +13,10 @@ import {
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { TeamWikiService } from './team-wiki.service';
 import type { TeamWikiPageInput } from './team-wiki.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 /** Internal bridge used only by Admin Backend after it validates its own session and permissions. */
+@Public()
 @Controller('rag/admin/team-wiki')
 @UseGuards(ServiceTokenGuard)
 export class TeamWikiAdminController {
@@ -44,6 +46,7 @@ export class TeamWikiAdminController {
       await this.teamWiki.resolveTenant(identity),
       identity,
       body,
+      true,
     );
   }
 
@@ -103,6 +106,7 @@ export class TeamWikiAdminController {
       await this.teamWiki.resolveTenant(identity),
       identity,
       pageId,
+      true,
     );
   }
 
@@ -129,6 +133,7 @@ export class TeamWikiAdminController {
       identity,
       pageId,
       body,
+      true,
     );
   }
 

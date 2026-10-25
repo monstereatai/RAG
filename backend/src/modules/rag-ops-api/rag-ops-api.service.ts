@@ -55,8 +55,17 @@ export interface EvaluationSummary {
   passed: boolean;
   averageScore: number;
   totalSamples: number;
-  refusalRate: number;
+  refusalRate?: number;
   citationRate: number;
+  available?: boolean;
+  reason?: string;
+  outcome?: 'passed' | 'failed' | 'skipped' | 'unavailable';
+  failedSamples?: number;
+  synthetic?: boolean;
+  retrievalMetrics?: { hitRate: number; mrr: number; ndcg: number };
+  latencyMs?: { average: number; p95: number };
+  estimatedCostByModeAndVariant?: Record<string, unknown>;
+  pairedComparison?: Record<string, unknown>;
 }
 
 export interface ConversationSummary {
@@ -386,12 +395,20 @@ export class RagOpsApiService {
   runEvaluation(dto: RagEvaluationRunDto) {
     const dataset = dto.dataset ?? 'rag-smoke';
     const mode = dto.mode ?? 'offline';
+    const command =
+      mode === 'live'
+        ? 'pnpm --dir backend eval:rag:e2e'
+        : mode === 'project'
+          ? 'pnpm --dir backend eval:rag:project'
+          : 'pnpm --dir backend eval:rag';
 
     return {
-      triggered: true,
+      triggered: false,
+      status: 'not_started',
       dataset,
       mode,
-      note: 'Evaluation triggered. Run `npm run eval:rag` or `npm run eval:rag:e2e` for full results.',
+      command,
+      note: '此接口目前不会启动评测任务；请在仓库中运行 command 字段给出的命令。',
     };
   }
 

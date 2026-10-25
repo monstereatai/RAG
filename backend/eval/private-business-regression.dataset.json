@@ -1,5 +1,11 @@
 {
   "version": "private-sanitized-2026-06-30",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "scripts/prepare-private-fixtures.mjs",
+    "containsRealBusinessData": false
+  },
   "description": "脱敏私有企业模拟数据集（增强版）：包含标准 QA、版本冲突检测、拒答场景、跨部门协作、多步推理等测试用例。所有数据均为通用行业模拟，不包含任何真实公司私密信息。替换为真实私密样本时保持同一 schema。",
   "total": 193,
   "items": [

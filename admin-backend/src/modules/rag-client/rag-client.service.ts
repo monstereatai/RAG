@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { createHash } from "node:crypto";
 import {
   RagClientResult,
   RagDocumentQueryDto,
@@ -63,6 +64,46 @@ export class RagClientService {
     };
   }
 
+  /**
+   * Admin Backend uses its own numeric user IDs. Derive a namespaced ID within
+   * Milvus's 64-character user_id limit so it cannot match a numeric RAG ID.
+   * The deterministic mapping keeps ownership stable across RAG features.
+   */
+  private mapAdminUserId(
+    userId: string | number | undefined,
+  ): string | undefined {
+    const normalized =
+      typeof userId === 'number' && Number.isSafeInteger(userId)
+        ? String(userId)
+        : typeof userId === 'string'
+          ? userId.trim()
+          : undefined;
+    // Admin Backend's user table has numeric IDs. Preserve nonnumeric RAG,
+    // integration, and service identities such as "admin-backend".
+    if (!normalized || !/^\d+$/.test(normalized)) {
+      return typeof userId === 'string' ? userId : undefined;
+    }
+    const digest = createHash("sha256")
+      .update("rag-admin-user\0")
+      .update(normalized)
+      .digest("hex")
+      .slice(0, 58);
+    return `admin:${digest}`;
+  }
+
+  private mapAdminActorField(body: unknown, field: string): unknown {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+    const payload = body as Record<string, unknown>;
+    const value = payload[field];
+    if (
+      (typeof value !== "string" || !value.trim()) &&
+      !(typeof value === "number" && Number.isSafeInteger(value))
+    ) {
+      return body;
+    }
+    return { ...payload, [field]: this.mapAdminUserId(value) };
+  }
+
   listApiTokens() {
     return this.getJson<Record<string, unknown>>("/auth/api-tokens");
   }
@@ -77,11 +118,10 @@ export class RagClientService {
     );
   }
 
-  issueSpeechTicket(ownerUserId: string, ownerRole: 'admin' | 'user', tenantId: string) {
+  issueSpeechTicket(ownerUserId: string, ownerRole: 'admin' | 'user') {
     return this.postJson<Record<string, unknown>>('/auth/internal/speech-ticket', {
-      ownerUserId,
+      ownerUserId: this.mapAdminUserId(ownerUserId),
       ownerRole,
-      tenantId,
     });
   }
 
@@ -91,7 +131,7 @@ export class RagClientService {
 
   searchImages(userId: string, tenantId: string | undefined, role: string | undefined, query: string, limit = 20) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/images/search${this.toQueryString({ userId, tenantId, role, q: query, limit })}`,
+      `/rag/admin/images/search${this.toQueryString({ userId: this.mapAdminUserId(userId), tenantId, role, q: query, limit })}`,
     );
   }
 
@@ -110,7 +150,7 @@ export class RagClientService {
       new Blob([imageBytes.buffer], { type: file.mimetype }),
       file.originalname,
     );
-    formData.append('userId', userId);
+    formData.append('userId', this.mapAdminUserId(userId) ?? userId);
     if (tenantId) formData.append('tenantId', tenantId);
     if (role) formData.append('role', role);
     formData.append('limit', String(limit));
@@ -130,46 +170,46 @@ export class RagClientService {
     key: string,
   ) {
     return this.requestRaw(
-      `/rag/admin/images/asset${this.toQueryString({ userId, tenantId, role, docId, key })}`,
+      `/rag/admin/images/asset${this.toQueryString({ userId: this.mapAdminUserId(userId), tenantId, role, docId, key })}`,
       true,
     );
   }
 
   listTeamWikiPages(ownerUserId: string, query?: string, limit = 100) {
     return this.getJson<Record<string, unknown>[]>(
-      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId, q: query, limit })}`,
+      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), q: query, limit })}`,
     );
   }
 
   getTeamWikiPage(ownerUserId: string, pageId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
     );
   }
 
   createTeamWikiPage(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body,
     );
   }
 
   updateTeamWikiPage(ownerUserId: string, pageId: string, body: unknown) {
     return this.patchJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body,
     );
   }
 
   deleteTeamWikiPage(ownerUserId: string, pageId: string) {
     return this.deleteJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
     );
   }
 
   getTeamWikiRevisions(ownerUserId: string, pageId: string) {
     return this.getJson<Record<string, unknown>[]>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/revisions${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/revisions${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
     );
   }
 
@@ -180,34 +220,34 @@ export class RagClientService {
     toRevisionId: string,
   ) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/compare${this.toQueryString({ ownerUserId, from: fromRevisionId, to: toRevisionId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/compare${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), from: fromRevisionId, to: toRevisionId })}`,
     );
   }
 
   rollbackTeamWikiPage(ownerUserId: string, pageId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/rollback${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/rollback${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body,
     );
   }
 
   publishTeamWikiPage(ownerUserId: string, pageId: string) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/publish${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/team-wiki/pages/${encodeURIComponent(pageId)}/publish${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       {},
     );
   }
 
   syncFeishuWiki(ownerUserId: string, spaceId: string, shareWithinTenant?: boolean) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/integrations/feishu/wiki/sync${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/integrations/feishu/wiki/sync${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       { spaceId, shareWithinTenant },
     );
   }
 
   getFeishuWikiStatus(ownerUserId: string, spaceId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/integrations/feishu/wiki/status${this.toQueryString({ ownerUserId, spaceId })}`,
+      `/rag/admin/integrations/feishu/wiki/status${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), spaceId })}`,
     );
   }
 
@@ -218,27 +258,27 @@ export class RagClientService {
   /** 以服务身份查询指定已登录用户的长期记忆；ownerUserId 由网关从 JWT 解析，不信任浏览器传值。 */
   getUserMemories(ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/memories${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
     );
   }
 
   /** 清空操作与读取走同一服务边界，避免 Admin JWT 与 RAG JWT 密钥不一致导致 401。 */
   clearUserMemories(ownerUserId: string) {
     return this.deleteJson<Record<string, unknown>>(
-      `/rag/admin/memories${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/memories${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
     );
   }
 
   startProductionWorkflow(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body
     );
   }
 
   listProductionWorkflows(ownerUserId: string) {
     return this.getJson<Record<string, unknown>[]>(
-      `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/agent-ops/workflows${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
@@ -262,7 +302,7 @@ export class RagClientService {
 
   importProductionPlaywayGraph(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/production/playway-graph/import${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows/production/playway-graph/import${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body,
     );
   }
@@ -273,39 +313,39 @@ export class RagClientService {
     body: unknown
   ) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/resume${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/resume${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body
     );
   }
 
   reviseProductionWorkflow(threadId: string, ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/revise${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/revise${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body
     );
   }
 
   getProductionWorkflow(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
   getProductionWorkflowCodingContext(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/coding-context${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
   getProductionPlaywayPreview(threadId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/playway-preview${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/playway-preview${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
   generateProductionWorkflowProject(threadId: string, ownerUserId: string) {
     return this.request<Record<string, unknown>>(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -318,7 +358,7 @@ export class RagClientService {
 
   generateProductionWorkflowProjectZip(threadId: string, ownerUserId: string) {
     return this.requestRaw(
-      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project-zip${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/generate-project-zip${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       true,
       { 'content-type': 'application/json' },
       'POST',
@@ -343,7 +383,7 @@ export class RagClientService {
   reviewAgentBadCase(id: string, body: unknown) {
     return this.patchJson<Record<string, unknown>>(
       `/rag/admin/agent-ops/bad-cases/${encodeURIComponent(id)}`,
-      body
+      this.mapAdminActorField(body, "reviewedBy")
     );
   }
 
@@ -420,9 +460,9 @@ export class RagClientService {
   detectCollaborationConflicts(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/conflicts/${encodeURIComponent(threadId)}`); }
   createDecisionRecord(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/collaboration/decisions', body); }
   getCollaborationReplay(threadId: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/collaboration/replay/${encodeURIComponent(threadId)}`); }
-  listAgentTasks(threadId: string | undefined, ownerUserId: string) { return this.getJson<Record<string, unknown>[]>(`/rag/admin/agent-ops/tasks${this.toQueryString({ threadId, ownerUserId })}`); }
-  retryAgentTask(id: string, ownerUserId: string) { return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry${this.toQueryString({ ownerUserId })}`, {}); }
-  delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', body); }
+  listAgentTasks(threadId: string | undefined, ownerUserId: string) { return this.getJson<Record<string, unknown>[]>(`/rag/admin/agent-ops/tasks${this.toQueryString({ threadId, ownerUserId: this.mapAdminUserId(ownerUserId) })}`); }
+  retryAgentTask(id: string, ownerUserId: string) { return this.postJson<Record<string, unknown>>(`/rag/admin/agent-ops/tasks/${encodeURIComponent(id)}/retry${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`, {}); }
+  delegateAgentTask(body: unknown) { return this.postJson<Record<string, unknown>>('/rag/admin/agent-ops/tasks/delegate', this.mapAdminActorField(body, "ownerUserId")); }
   listRuntimeEvents(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events${this.toQueryString({ threadId, runId })}`); }
   getRuntimeEventMetrics(threadId?: string, runId?: string) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runtime-events/metrics${this.toQueryString({ threadId, runId })}`); }
   getAgentRunSummary(limit = 500) { return this.getJson<Record<string, unknown>>(`/rag/admin/agent-ops/runs/summary${this.toQueryString({ limit })}`); }
@@ -505,7 +545,7 @@ export class RagClientService {
 
   createScheduledAnalysisJob(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/agent-ops/schedules${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/agent-ops/schedules${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body,
     );
   }
@@ -579,49 +619,84 @@ export class RagClientService {
     return this.postJson<Record<string, unknown>>('/platform-governance/knowledge-base-profiles', body);
   }
 
-  debugRetrieval(query: string, scope?: string, knowledgeBaseKey?: string) {
-    return this.getJson<Record<string, unknown>>(`/platform-governance/retrieval-debug${this.toQueryString({ query, scope, knowledgeBaseKey })}`);
+  debugRetrieval(
+    query: string,
+    userId: string,
+    scope?: string,
+    knowledgeBaseKey?: string,
+  ) {
+    return this.getJson<Record<string, unknown>>(
+      `/platform-governance/retrieval-debug${this.toQueryString({ query, userId: this.mapAdminUserId(userId), scope, knowledgeBaseKey })}`,
+    );
+  }
+
+  async compareRetrievalProfiles(
+    query: string,
+    userId: string,
+    scope: string | undefined,
+    knowledgeBaseKey: string,
+    compareKnowledgeBaseKey: string,
+  ) {
+    const [baseline, comparison] = await Promise.all([
+      this.debugRetrieval(query, userId, scope, knowledgeBaseKey),
+      this.debugRetrieval(query, userId, scope, compareKnowledgeBaseKey),
+    ]);
+    if (!baseline.available || !comparison.available)
+      throw new ServiceUnavailableException(
+        'retrieval comparison could not complete for both profiles',
+      );
+    return {
+      query,
+      generatedAt: new Date().toISOString(),
+      variants: [
+        { key: knowledgeBaseKey, result: baseline },
+        { key: compareKnowledgeBaseKey, result: comparison },
+      ],
+    };
   }
 
   createArtifact(body: RagArtifactCreateInput) {
-    return this.postJson<Record<string, unknown>>("/rag/admin/artifacts", body);
+    return this.postJson<Record<string, unknown>>("/rag/admin/artifacts", {
+      ...body,
+      ownerUserId: this.mapAdminUserId(body.ownerUserId),
+    });
   }
 
   listArtifacts(ownerUserId: string, threadId?: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/artifacts${this.toQueryString({ ownerUserId, threadId })}`
+      `/rag/admin/artifacts${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), threadId })}`
     );
   }
 
   getArtifact(id: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/artifacts/${encodeURIComponent(id)}${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/artifacts/${encodeURIComponent(id)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
   downloadArtifact(id: string, ownerUserId: string) {
     return this.requestRaw(
-      `/rag/admin/artifacts/${encodeURIComponent(id)}/download${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/artifacts/${encodeURIComponent(id)}/download${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       true
     );
   }
 
   createArtifactShare(id: string, ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares${this.toQueryString({ ownerUserId })}`,
-      body
+      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
+      this.mapAdminActorField(body, "createdBy")
     );
   }
 
   listArtifactShares(id: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares${this.toQueryString({ ownerUserId })}`
+      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`
     );
   }
 
   revokeArtifactShare(id: string, shareId: string, ownerUserId: string) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares/${encodeURIComponent(shareId)}/revoke${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/artifacts/${encodeURIComponent(id)}/shares/${encodeURIComponent(shareId)}/revoke${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       {}
     );
   }
@@ -629,7 +704,7 @@ export class RagClientService {
   getInternalArtifactShare(token: string, actorUserId: string) {
     return this.request<Record<string, unknown>>(
       `/rag/admin/artifacts/shared/${encodeURIComponent(token)}/internal`,
-      { method: "GET", headers: { "x-actor-user-id": actorUserId } }
+      { method: "GET", headers: { "x-actor-user-id": this.mapAdminUserId(actorUserId) ?? actorUserId } }
     );
   }
 
@@ -637,7 +712,7 @@ export class RagClientService {
     return this.requestRaw(
       `/rag/admin/artifacts/shared/${encodeURIComponent(token)}/internal/download`,
       true,
-      { "x-actor-user-id": actorUserId }
+      { "x-actor-user-id": this.mapAdminUserId(actorUserId) ?? actorUserId }
     );
   }
 
@@ -710,6 +785,13 @@ export class RagClientService {
     );
   }
 
+  incrementalUpdateDocument(docId: string, body: unknown) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/documents/${encodeURIComponent(docId)}/incremental-update`,
+      body
+    );
+  }
+
   updateDocumentLifecycle(docId: string, lifecycleStatus: string) {
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/documents/${encodeURIComponent(docId)}/lifecycle`,
@@ -726,19 +808,19 @@ export class RagClientService {
 
   submitDocumentReview(docId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/documents/${encodeURIComponent(docId)}/review/submit`, body,
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/submit`, this.mapAdminActorField(body, "operatorId"),
     );
   }
 
   approveDocumentReview(docId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/documents/${encodeURIComponent(docId)}/review/approve`, body,
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/approve`, this.mapAdminActorField(body, "operatorId"),
     );
   }
 
   rejectDocumentReview(docId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/documents/${encodeURIComponent(docId)}/review/reject`, body,
+      `/rag/admin/documents/${encodeURIComponent(docId)}/review/reject`, this.mapAdminActorField(body, "operatorId"),
     );
   }
 
@@ -775,23 +857,26 @@ export class RagClientService {
     return this.getJson<Record<string, unknown>>("/rag/admin/evaluations");
   }
 
-  getConversations(userId?: string) {
-    const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  getConversations(userId: string) {
+    const mappedUserId = this.mapAdminUserId(userId);
+    const params = mappedUserId ? `?userId=${encodeURIComponent(mappedUserId)}` : "";
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/conversations${params}`,
       LIST_READ_TIMEOUT_MS,
     );
   }
 
-  getConversation(threadId: string, userId?: string) {
-    const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  getConversation(threadId: string, userId: string) {
+    const mappedUserId = this.mapAdminUserId(userId);
+    const params = mappedUserId ? `?userId=${encodeURIComponent(mappedUserId)}` : "";
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/conversations/${encodeURIComponent(threadId)}${params}`
     );
   }
 
-  deleteConversation(threadId: string, userId?: string) {
-    const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  deleteConversation(threadId: string, userId: string) {
+    const mappedUserId = this.mapAdminUserId(userId);
+    const params = mappedUserId ? `?userId=${encodeURIComponent(mappedUserId)}` : "";
     return this.postJson<Record<string, unknown>>(
       `/rag/admin/conversations/${encodeURIComponent(
         threadId
@@ -856,7 +941,7 @@ export class RagClientService {
 
   submitQaFeedback(ownerUserId: string, body: unknown) {
     return this.postJson<Record<string, unknown>>(
-      `/rag/admin/qa/feedback${this.toQueryString({ ownerUserId })}`,
+      `/rag/admin/qa/feedback${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId) })}`,
       body
     );
   }
@@ -883,7 +968,7 @@ export class RagClientService {
       query: query.query,
       mode: query.mode ?? "agentic",
       model: query.model ?? "qwen",
-      userId: query.userId || "admin-backend",
+      userId: this.mapAdminUserId(query.userId) || "",
     });
     if (query.threadId) {
       params.set("threadId", query.threadId);
@@ -920,7 +1005,7 @@ export class RagClientService {
       new Blob([fileBytes.buffer], { type: file.mimetype }),
       file.originalname,
     );
-    formData.append("userId", userId);
+    formData.append("userId", this.mapAdminUserId(userId) ?? userId);
     formData.append("threadId", threadId);
     return this.request<Record<string, unknown>>(
       "/agui/admin/attachments",
@@ -932,7 +1017,7 @@ export class RagClientService {
 
   listQaConversationAttachments(userId: string, threadId: string) {
     return this.getJson<Record<string, unknown>[]>(
-      `/agui/admin/attachments${this.toQueryString({ userId, threadId })}`,
+      `/agui/admin/attachments${this.toQueryString({ userId: this.mapAdminUserId(userId), threadId })}`,
     );
   }
 
@@ -942,13 +1027,13 @@ export class RagClientService {
     threadId: string,
   ) {
     return this.deleteJson<Record<string, unknown>>(
-      `/agui/admin/attachments/${encodeURIComponent(attachmentId)}${this.toQueryString({ userId, threadId })}`,
+      `/agui/admin/attachments/${encodeURIComponent(attachmentId)}${this.toQueryString({ userId: this.mapAdminUserId(userId), threadId })}`,
     );
   }
 
   deleteQaConversationAttachments(userId: string, threadId: string) {
     return this.deleteJson<Record<string, unknown>>(
-      `/agui/admin/attachments${this.toQueryString({ userId, threadId })}`,
+      `/agui/admin/attachments${this.toQueryString({ userId: this.mapAdminUserId(userId), threadId })}`,
     );
   }
 
@@ -1025,7 +1110,7 @@ export class RagClientService {
 
   inspectRetrieval(query: string, userId?: string, limit = 50) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/search/evidence${this.toQueryString({ q: query, userId, limit })}`,
+      `/rag/admin/search/evidence${this.toQueryString({ q: query, userId: this.mapAdminUserId(userId), limit })}`,
       LIST_READ_TIMEOUT_MS,
     );
   }
@@ -1077,7 +1162,10 @@ export class RagClientService {
     const form = new FormData();
     form.append('file', new Blob([file.buffer as unknown as BlobPart], { type: file.mimetype }), file.originalname);
     for (const [key, value] of Object.entries(fields)) {
-      if (value !== undefined && value !== null) form.append(key, String(value));
+      const forwardedValue = key === 'ownerUserId' && typeof value === 'string'
+        ? this.mapAdminUserId(value)
+        : value;
+      if (forwardedValue !== undefined && forwardedValue !== null) form.append(key, String(forwardedValue));
     }
     return this.request<Record<string, unknown>>(
       '/rag/admin/documents/upload',
@@ -1089,7 +1177,7 @@ export class RagClientService {
 
   getDocumentTask(taskId: string, ownerUserId: string) {
     return this.getJson<Record<string, unknown>>(
-      `/rag/admin/documents/tasks/${encodeURIComponent(taskId)}?ownerUserId=${encodeURIComponent(ownerUserId)}`,
+      `/rag/admin/documents/tasks/${encodeURIComponent(taskId)}?ownerUserId=${encodeURIComponent(this.mapAdminUserId(ownerUserId) ?? ownerUserId)}`,
     );
   }
 

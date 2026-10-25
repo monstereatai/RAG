@@ -14,11 +14,10 @@ export interface AgentRuntimePlan {
   objective: string;
   stages: AgentRuntimeStage[];
   selectedSkills: string[];
+  skillMatching?: 'matched' | 'skipped_simple';
   contextPolicy: {
-    maxHistoryTurns: number;
-    maxContextCharacters: number;
-    compressionThreshold: number;
     isolatedByThread: boolean;
+    allowCrossThreadMemory: boolean;
   };
   limits: {
     maxSteps: number;

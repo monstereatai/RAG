@@ -1,7 +1,14 @@
 import type { ChatMode, ChatReference } from './chat.dto';
-import type { QueryIntent } from '../../rag/prompts/query-intent-router';
-import type { RetrievalScope } from '../../rag/karpathy/karpathy-rag.service';
+import type {
+  RetrievedChunk,
+  RetrievalScope,
+} from '../../rag/karpathy/karpathy-rag.service';
 import type { SseEvent } from '../../rag/agentic/sse-event';
+import type {
+  QueryPlan,
+  QuerySourcePolicy,
+} from '../../rag/planning/query-plan';
+import type { RetrievalExecutionPlan } from '../../rag/planning/retrieval-policy.service';
 
 /** 单次问答请求的不可变语义上下文，所有执行入口共享这一份决策。 */
 export interface RequestContext {
@@ -11,8 +18,9 @@ export interface RequestContext {
   threadId: string;
   query: string;
   mode: ChatMode;
-  queryIntent: QueryIntent;
-  sourcePolicy: QueryIntent['sourcePolicy'];
+  queryPlan: QueryPlan;
+  executionPlan: RetrievalExecutionPlan;
+  sourcePolicy: QuerySourcePolicy;
   scope?: RetrievalScope;
   deadlineAt: number;
   budget: {
@@ -58,3 +66,18 @@ export interface ChatResult {
 }
 
 export type ChatEventCallback = (event: SseEvent) => void;
+
+export interface SupplementalEvidenceContext {
+  content: string;
+  evidence: RetrievedChunk[];
+}
+
+export interface SupplementalEvidenceLoaderInput {
+  queryPlan: QueryPlan;
+  executionPlan: RetrievalExecutionPlan;
+}
+
+/** 在 QueryPlan 和后端执行策略确定后，按最终查询集合懒加载外部证据。 */
+export type SupplementalEvidenceLoader = (
+  input: SupplementalEvidenceLoaderInput,
+) => Promise<SupplementalEvidenceContext>;

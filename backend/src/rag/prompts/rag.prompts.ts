@@ -40,6 +40,9 @@ export const generateAnswerPrompt = ChatPromptTemplate.fromMessages([
     `检索片段：
 {context}
 
+必答事项（如未提供，请从用户问题中逐项拆分）：
+{answerRequirements}
+
 用户问题：{query}
 
 回答：`,

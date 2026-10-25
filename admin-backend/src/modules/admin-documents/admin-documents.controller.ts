@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Post, Query, Req, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -137,6 +137,14 @@ export class AdminDocumentsController {
     return this.ragClient.createDocumentVersion(docId, body);
   }
 
+  @Post(':docId/incremental-update')
+  @AuditLog('documents', 'incremental-update')
+  @ApiOperation({ summary: '按规则/chunk 增量更新文档内容' })
+  @RequirePermission('admin:documents:write')
+  incrementalUpdate(@Param('docId') docId: string, @Body() body: unknown) {
+    return this.ragClient.incrementalUpdateDocument(docId, body);
+  }
+
   @Post(':docId/lifecycle')
   @AuditLog('documents', 'lifecycle')
   @ApiOperation({ summary: '修改文档生命周期状态' })
@@ -196,7 +204,9 @@ export class AdminDocumentsController {
   @Get('tasks/:taskId')
   @RequirePermission('admin:documents:read')
   task(@Param('taskId') taskId: string, @Req() req: { user?: { userId?: string; sub?: string } }) {
-    return this.ragClient.getDocumentTask(taskId, req.user?.userId ?? req.user?.sub ?? 'admin');
+    const ownerUserId = req.user?.userId ?? req.user?.sub;
+    if (!ownerUserId) throw new UnauthorizedException('authenticated admin is required');
+    return this.ragClient.getDocumentTask(taskId, ownerUserId);
   }
 
   @Post('tasks/:taskId/retry')
@@ -278,7 +288,8 @@ export class AdminDocumentsController {
   )
   upload(@UploadedFile() file: Express.Multer.File, @Body() body: Record<string, unknown>, @Req() req: { user?: { userId?: string; sub?: string } }) {
     if (!file) throw new BadRequestException('file is required');
-    const ownerUserId = req.user?.userId ?? req.user?.sub ?? 'admin';
+    const ownerUserId = req.user?.userId ?? req.user?.sub;
+    if (!ownerUserId) throw new UnauthorizedException('authenticated admin is required');
     return this.ragClient.uploadDocument(file, { ...body, ownerUserId });
   }
 

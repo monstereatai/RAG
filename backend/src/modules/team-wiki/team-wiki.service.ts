@@ -11,7 +11,6 @@ import { randomUUID } from 'node:crypto';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { TeamWikiPageEntity } from '../../providers/db/entities/team-wiki-page.entity';
 import { TeamWikiRevisionEntity } from '../../providers/db/entities/team-wiki-revision.entity';
-import { UserEntity } from '../../providers/db/entities/user.entity';
 import { DocumentPermissionService } from '../document/document-permission.service';
 import { DocumentService, UploadResult } from '../document/document.service';
 
@@ -42,19 +41,20 @@ export class TeamWikiService {
     private readonly revisionRepo: Repository<TeamWikiRevisionEntity>,
     @InjectRepository(DocumentMetaEntity)
     private readonly documentMetaRepo: Repository<DocumentMetaEntity>,
-    @InjectRepository(UserEntity)
-    private readonly userRepo: Repository<UserEntity>,
     private readonly documentService: DocumentService,
     private readonly documentPermissionService: DocumentPermissionService,
   ) {}
 
-  /** Resolve the tenant from the authenticated account for internal admin-proxy calls. */
+  /** The ServiceTokenGuard-protected Admin bridge supplies a mapped Admin identity. */
   async resolveTenant(userId: string): Promise<string> {
-    const user = await this.userRepo.findOne({
-      select: ['id', 'tenantId'],
-      where: { id: userId },
-    });
-    return user?.tenantId?.trim() || 'legacy';
+    if (!/^admin:[a-f0-9]{58}$/.test(userId?.trim() ?? '')) {
+      throw new ForbiddenException('mapped Admin principal is required');
+    }
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
+    return tenantId;
   }
 
   async list(tenantId: string, query?: string, limit = 100) {
@@ -125,7 +125,12 @@ export class TeamWikiService {
     return this.toPage(page, revision, lifecycleByDocId);
   }
 
-  async create(tenantId: string, actorId: string, input: TeamWikiPageInput) {
+  async create(
+    tenantId: string,
+    actorId: string,
+    input: TeamWikiPageInput,
+    trustedAdminPrincipal = false,
+  ) {
     const tenant = this.requireTenant(tenantId);
     const title = this.requireTitle(input.title);
     const content = this.requireContent(input.content);
@@ -133,6 +138,7 @@ export class TeamWikiService {
       tenant,
       actorId,
       input.references ?? [],
+      trustedAdminPrincipal,
     );
     const pageId = randomUUID();
     const revisionId = randomUUID();
@@ -177,10 +183,16 @@ export class TeamWikiService {
     actorId: string,
     pageId: string,
     input: TeamWikiPageInput,
+    trustedAdminPrincipal = false,
   ) {
     const tenant = this.requireTenant(tenantId);
     const references = input.references
-      ? await this.normalizeReferences(tenant, actorId, input.references)
+      ? await this.normalizeReferences(
+          tenant,
+          actorId,
+          input.references,
+          trustedAdminPrincipal,
+        )
       : undefined;
     const revisionId = randomUUID();
 
@@ -381,6 +393,7 @@ export class TeamWikiService {
     tenantId: string,
     actorId: string,
     pageId: string,
+    trustedAdminPrincipal = false,
   ): Promise<{
     pageId: string;
     revisionId: string;
@@ -401,6 +414,7 @@ export class TeamWikiService {
       tenant,
       actorId,
       this.parseReferences(revision.referencesJson),
+      trustedAdminPrincipal,
     );
     if (
       revision.publishStatus === 'published' &&
@@ -453,6 +467,7 @@ export class TeamWikiService {
           page.createdBy,
           {
             tenantId: tenant,
+            trustedAdminPrincipal,
             businessMetadata: {
               lifecycleStatus: 'effective',
               documentType: 'general',
@@ -544,6 +559,7 @@ export class TeamWikiService {
     tenantId: string,
     actorId: string,
     references: TeamWikiReference[],
+    trustedAdminPrincipal = false,
   ) {
     if (!Array.isArray(references) || references.length > MAX_REFERENCES) {
       throw new BadRequestException(
@@ -575,7 +591,13 @@ export class TeamWikiService {
     }
     const readable = await Promise.all(
       docIds.map((docId) =>
-        this.documentPermissionService.canRead(docId, actorId, [], tenantId),
+        this.documentPermissionService.canRead(
+          docId,
+          actorId,
+          trustedAdminPrincipal ? ['admin'] : [],
+          tenantId,
+          trustedAdminPrincipal,
+        ),
       ),
     );
     if (readable.some((canRead) => !canRead)) {

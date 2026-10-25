@@ -7,8 +7,8 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
+import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Not } from 'typeorm';
 import type { Repository } from 'typeorm';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
@@ -16,7 +16,6 @@ import {
   FeishuWikiConnectorEntity,
   FeishuWikiItemEntity,
 } from '../../providers/db/entities/feishu-wiki-connector.entity';
-import { UserEntity } from '../../providers/db/entities/user.entity';
 import { DocumentService } from '../document/document.service';
 import { DocumentPermissionService } from '../document/document-permission.service';
 import {
@@ -51,8 +50,6 @@ export class FeishuWikiSyncService {
     private readonly connectorRepo: Repository<FeishuWikiConnectorEntity>,
     @InjectRepository(FeishuWikiItemEntity)
     private readonly itemRepo: Repository<FeishuWikiItemEntity>,
-    @InjectRepository(UserEntity)
-    private readonly userRepo: Repository<UserEntity>,
     private readonly feishu: FeishuWikiApiClient,
     private readonly documents: DocumentService,
     private readonly permissions: DocumentPermissionService,
@@ -63,24 +60,30 @@ export class FeishuWikiSyncService {
     spaceId: string,
     shareWithinTenant?: boolean,
   ): Promise<FeishuWikiSyncSummary> {
-    const principal = await this.resolveAdmin(ownerUserId);
-    return this.sync(spaceId, principal, shareWithinTenant);
+    const principal = this.resolveAdmin(ownerUserId);
+    return this.sync(spaceId, principal, shareWithinTenant, true);
   }
 
   async statusForAdmin(ownerUserId: string, spaceId: string) {
-    return this.status(spaceId, await this.resolveAdmin(ownerUserId));
+    return this.status(spaceId, this.resolveAdmin(ownerUserId), true);
   }
 
   async sync(
     spaceIdInput: string,
     user: SyncPrincipal,
     shareWithinTenant?: boolean,
+    trustedAdminPrincipal = false,
   ): Promise<FeishuWikiSyncSummary> {
     const spaceId = spaceIdInput.trim();
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(spaceId)) {
       throw new BadRequestException('Feishu spaceId is invalid');
     }
-    const tenantId = user.tenantId?.trim() || 'legacy';
+    const tenantId = trustedAdminPrincipal
+      ? process.env.RAG_ADMIN_TENANT_ID?.trim()
+      : user.tenantId?.trim() || 'legacy';
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
     this.assertAllowedTenant(tenantId);
     let connector = await this.connectorRepo.findOne({
       where: { tenantId, spaceId },
@@ -119,7 +122,7 @@ export class FeishuWikiSyncService {
           throw new ConflictException('Feishu Wiki sync is already running');
         throw error;
       }
-    } else if (connector.ownerUserId !== user.userId) {
+    } else if (!trustedAdminPrincipal && connector.ownerUserId !== user.userId) {
       throw new ForbiddenException(
         'Feishu Wiki connector belongs to another sync owner',
       );
@@ -143,7 +146,7 @@ export class FeishuWikiSyncService {
     }
     try {
       if (connector.shareWithinTenant && !desiredSharing) {
-        await this.revokeTenantSharing(connector, user.userId);
+        await this.revokeTenantSharing(connector, connector.ownerUserId);
         const updated = await this.connectorRepo.update(
           { id: connector.id, status: 'syncing' },
           { shareWithinTenant: false },
@@ -166,7 +169,11 @@ export class FeishuWikiSyncService {
         }
         connector.shareWithinTenant = true;
       }
-      const summary = await this.syncConnector(connector, user.userId);
+      const summary = await this.syncConnector(
+        connector,
+        connector.ownerUserId,
+        trustedAdminPrincipal,
+      );
       connector.status = 'idle';
       connector.lastSyncAt = new Date();
       connector.lastError = null;
@@ -180,19 +187,28 @@ export class FeishuWikiSyncService {
     }
   }
 
-  async status(spaceIdInput: string, user: SyncPrincipal) {
+  async status(
+    spaceIdInput: string,
+    user: SyncPrincipal,
+    trustedAdminPrincipal = false,
+  ) {
     const spaceId = spaceIdInput?.trim();
     if (!spaceId || !/^[A-Za-z0-9_-]{1,128}$/.test(spaceId)) {
       throw new BadRequestException('Feishu spaceId is invalid');
     }
-    const tenantId = user.tenantId?.trim() || 'legacy';
+    const tenantId = trustedAdminPrincipal
+      ? process.env.RAG_ADMIN_TENANT_ID?.trim()
+      : user.tenantId?.trim() || 'legacy';
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
     this.assertAllowedTenant(tenantId);
     const connector = await this.connectorRepo.findOne({
       where: { tenantId, spaceId },
     });
     if (!connector)
       throw new NotFoundException('Feishu Wiki connector was not found');
-    if (connector.ownerUserId !== user.userId) {
+    if (!trustedAdminPrincipal && connector.ownerUserId !== user.userId) {
       throw new ForbiddenException(
         'Feishu Wiki connector belongs to another sync owner',
       );
@@ -220,6 +236,7 @@ export class FeishuWikiSyncService {
   private async syncConnector(
     connector: FeishuWikiConnectorEntity,
     userId: string,
+    trustedAdminPrincipal = false,
   ): Promise<Omit<FeishuWikiSyncSummary, 'status'>> {
     const nodes = await this.collectNodes(connector.spaceId);
     const items = await this.itemRepo.find({
@@ -277,6 +294,7 @@ export class FeishuWikiSyncService {
       const filename = `${safeFilename(title)}.md`;
       const upload = await this.documents.upload(filename, content, userId, {
         tenantId: connector.tenantId,
+        trustedAdminPrincipal,
         contentType: 'text/markdown',
         businessMetadata: {
           lifecycleStatus: 'effective',
@@ -458,19 +476,18 @@ export class FeishuWikiSyncService {
     return nodes;
   }
 
-  private async resolveAdmin(ownerUserId: string): Promise<SyncPrincipal> {
-    if (!ownerUserId?.trim())
+  private resolveAdmin(ownerUserId: string): SyncPrincipal {
+    const normalized = ownerUserId?.trim();
+    if (!normalized)
       throw new BadRequestException('ownerUserId is required');
-    const user = await this.userRepo.findOne({
-      select: ['id', 'role', 'tenantId'],
-      where: { id: ownerUserId.trim() },
-    });
-    if (!user || user.role !== 'admin') {
-      throw new ForbiddenException(
-        'Feishu Wiki sync requires a RAG admin user',
-      );
+    if (!/^admin:[a-f0-9]{58}$/.test(normalized)) {
+      throw new BadRequestException('ownerUserId must be a mapped Admin principal');
     }
-    return { userId: user.id, tenantId: user.tenantId ?? undefined };
+    const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
+    if (!tenantId) {
+      throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
+    }
+    return { userId: normalized, tenantId };
   }
 
   private assertAllowedTenant(tenantId: string): void {

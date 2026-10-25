@@ -102,7 +102,7 @@ export class AgentRunsService {
         typeof updateResult.affected === 'number' &&
         updateResult.affected === 0
       ) {
-        return this.get(id);
+        return this.get(id, run.tenantId ?? undefined);
       }
       const refreshed = await this.runRepo.findOne({ where: { id } });
       if (!refreshed) throw new NotFoundException(`agent run ${id} not found`);
@@ -130,7 +130,7 @@ export class AgentRunsService {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
     if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      return this.get(id);
+      return this.get(id, run.tenantId ?? undefined);
     }
 
     const now = new Date();
@@ -149,7 +149,7 @@ export class AgentRunsService {
       typeof updateResult.affected === 'number' &&
       updateResult.affected === 0
     ) {
-      return this.get(id);
+      return this.get(id, run.tenantId ?? undefined);
     }
     const saved = await this.runRepo.findOne({ where: { id } });
     if (!saved) throw new NotFoundException(`agent run ${id} not found`);
@@ -158,19 +158,21 @@ export class AgentRunsService {
       'cancelled',
       24 * 60 * 60,
     );
+    const runTenantId = saved.tenantId?.trim() || 'legacy';
     await this.events.emit({
       threadId: saved.threadId,
-      tenantId: saved.tenantId ?? 'legacy',
+      tenantId: runTenantId,
       runId: saved.id,
       eventType: 'run.cancelled',
       actor: saved.mode,
       payload: { reason: saved.cancelReason },
     });
-    const goal = await this.goals.get(saved.id);
+    const goal = await this.goals.get(saved.id, runTenantId);
     if (goal) {
       await this.goals.update({
         threadId: saved.threadId,
         runId: saved.id,
+        tenantId: runTenantId,
         actor: saved.mode,
         objective: goal.objective,
         maxRounds: goal.maxRounds,
@@ -178,7 +180,7 @@ export class AgentRunsService {
         reason: saved.cancelReason ?? undefined,
       });
     }
-    return this.get(id);
+    return this.get(id, saved.tenantId ?? undefined);
   }
 
   /**
@@ -409,7 +411,10 @@ export class AgentRunsService {
       take: Math.min(Math.max(limit, 1), 200),
     });
     return Promise.all(
-      runs.map(async (run) => ({ ...run, goal: await this.goals.get(run.id) })),
+      runs.map(async (run) => ({
+        ...run,
+        goal: await this.goals.get(run.id, run.tenantId?.trim() || 'legacy'),
+      })),
     );
   }
 
@@ -426,7 +431,13 @@ export class AgentRunsService {
     ).length;
     const terminal = completed + failed + cancelled;
     const runtimeMetrics = await Promise.all(
-      runs.map((run) => this.events.metrics(run.threadId, run.id)),
+      runs.map((run) =>
+        this.events.metrics(
+          run.threadId,
+          run.id,
+          run.tenantId?.trim() || 'legacy',
+        ),
+      ),
     );
     const taskCompleted = runtimeMetrics.reduce(
       (sum, item) => sum + item.tasksCompleted,
@@ -507,17 +518,18 @@ export class AgentRunsService {
       where: { id, ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}) },
     });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);
+    const eventTenantId = run.tenantId?.trim() || 'legacy';
     const actions = await this.actionRepo.find({
       where: { runId: id },
       order: { createdAt: 'ASC' },
     });
-    const events = await this.events.list(run.threadId, id);
+    const events = await this.events.list(run.threadId, id, eventTenantId);
     return {
       ...run,
       actions,
       events,
-      metrics: await this.events.metrics(run.threadId, id),
-      goal: await this.goals.get(id),
+      metrics: await this.events.metrics(run.threadId, id, eventTenantId),
+      goal: await this.goals.get(id, eventTenantId),
       failureOnset: this.runtime.analyzeFailureOnset(
         events.map((event) => ({
           sequence: event.sequence,
@@ -551,13 +563,13 @@ export class AgentRunsService {
     );
     await this.events.emit({
       threadId: run.threadId,
-      tenantId: run.tenantId ?? 'legacy',
+      tenantId: run.tenantId?.trim() || 'legacy',
       runId: id,
       eventType: 'run.retry',
       actor: run.mode,
       payload: { retryCount: run.retryCount + 1 },
     });
-    return this.get(id, tenantId);
+    return this.get(id, run.tenantId ?? undefined);
   }
 
   private stringify(value: unknown): string | null {

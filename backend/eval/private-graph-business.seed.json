@@ -1,5 +1,11 @@
 {
   "version": "private-sanitized-2026-06-30",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "scripts/prepare-private-fixtures.mjs",
+    "containsRealBusinessData": false
+  },
   "description": "脱敏 GraphRAG 业务图谱种子（增强版），包含跨部门实体关系、别名和职责链。可 dry-run 校验或导入本地 Neo4j。",
   "schema": {
     "entityTypes": [

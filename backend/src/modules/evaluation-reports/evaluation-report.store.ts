@@ -7,7 +7,7 @@ export interface EvaluationReportSummary {
   passed: boolean;
   averageScore: number;
   totalSamples: number;
-  refusalRate: number;
+  refusalRate?: number;
   citationRate: number;
   available?: boolean;
   lastRunAt?: string;
@@ -15,6 +15,18 @@ export interface EvaluationReportSummary {
   reason?: string;
   outcome?: 'passed' | 'failed' | 'skipped' | 'unavailable';
   failedSamples?: number;
+  synthetic?: boolean;
+  retrievalMetrics?: {
+    hitRate: number;
+    mrr: number;
+    ndcg: number;
+  };
+  latencyMs?: {
+    average: number;
+    p95: number;
+  };
+  estimatedCostByModeAndVariant?: Record<string, unknown>;
+  pairedComparison?: Record<string, unknown>;
 }
 
 const REPORTS = [
@@ -38,6 +50,11 @@ const REPORTS = [
     mode: 'offline-contract',
     file: 'query-routing-latest.json',
   },
+  {
+    datasetName: 'project-rag-e2e',
+    mode: 'simple/auto/agentic',
+    file: 'project-rag-e2e-latest.json',
+  },
 ] as const;
 
 export function readEvaluationReportSummaries(): EvaluationReportSummary[] {
@@ -56,7 +73,10 @@ export function readEvaluationReportSummaries(): EvaluationReportSummary[] {
         string,
         unknown
       >;
-      const normalized = normalizeReport(definition, report);
+      const normalized =
+        definition.datasetName === 'project-rag-e2e'
+          ? normalizeProjectReport(report)
+          : normalizeReport(definition, report);
       return {
         datasetName: definition.datasetName,
         ...normalized,
@@ -71,6 +91,67 @@ export function readEvaluationReportSummaries(): EvaluationReportSummary[] {
       );
     }
   });
+}
+
+function normalizeProjectReport(
+  report: Record<string, unknown>,
+): Omit<EvaluationReportSummary, 'datasetName' | 'available' | 'lastRunAt' | 'source'> {
+  const summaryByMode = recordOf(recordOf(report.summary).byMode);
+  const modeResults = Object.values(summaryByMode).map(recordOf);
+  const totalSamples = modeResults.reduce(
+    (sum, mode) => sum + numberValue(mode.total),
+    0,
+  );
+  const passedSamples = modeResults.reduce(
+    (sum, mode) => sum + numberValue(mode.passed),
+    0,
+  );
+  const metrics = recordOf(report.metrics);
+  const costByModeAndVariant = recordOf(
+    recordOf(report.costMetrics).byModeAndVariant,
+  );
+  const pairedComparison = recordOf(report.pairedComparison);
+  const qualityMeasured = report.qualityMeasured === true && report.skipped !== true;
+  const synthetic = typeof report.synthetic === 'boolean' ? report.synthetic : undefined;
+  const passed = qualityMeasured && report.ok === true && totalSamples > 0;
+
+  return {
+    mode: Array.isArray(report.modes)
+      ? report.modes.filter((mode): mode is string => typeof mode === 'string').join('/')
+      : 'simple/auto/agentic',
+    passed,
+    averageScore:
+      totalSamples > 0
+        ? passedSamples / totalSamples
+        : numberValue(report.score),
+    totalSamples,
+    citationRate: numberValue(metrics.citationRate),
+    outcome: report.skipped === true ? 'skipped' : passed ? 'passed' : 'failed',
+    failedSamples: Math.max(0, totalSamples - passedSamples),
+    ...(synthetic === undefined ? {} : { synthetic }),
+    ...(qualityMeasured
+      ? {
+          retrievalMetrics: {
+            hitRate: numberValue(metrics.retrievalHitRate),
+            mrr: numberValue(metrics.retrievalMrr),
+            ndcg: numberValue(metrics.retrievalNdcg),
+          },
+          latencyMs: {
+            average: numberValue(metrics.avgLatencyMs),
+            p95: numberValue(metrics.p95LatencyMs),
+          },
+        }
+      : {}),
+    ...(Object.keys(costByModeAndVariant).length > 0
+      ? { estimatedCostByModeAndVariant: costByModeAndVariant }
+      : {}),
+    ...(Object.keys(pairedComparison).length > 0 ? { pairedComparison } : {}),
+    reason:
+      stringValue(report.reason) ??
+      (synthetic === true
+        ? '本次结果来自合成数据集，不能作为真实业务发布门禁证据'
+        : undefined),
+  };
 }
 
 function unavailable(

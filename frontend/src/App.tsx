@@ -3,7 +3,7 @@ import UploadPage from './components/UploadPage';
 import ChatPage from './components/ChatPage';
 import DebugPanel from './components/DebugPanel';
 import Login from './components/Login';
-import { getProfile } from './api';
+import { clearAuthTokens, getProfile, logout } from './api';
 import type { UserInfo } from './types';
 import './App.css';
 
@@ -33,11 +33,23 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    void logout().catch(() => undefined);
+    clearAuthTokens();
     localStorage.removeItem('chatThreadId');
     setToken(null);
     setUser(null);
   };
+
+  useEffect(() => {
+    const onForcedLogout = () => {
+      clearAuthTokens();
+      localStorage.removeItem('chatThreadId');
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener('auth:logout', onForcedLogout);
+    return () => window.removeEventListener('auth:logout', onForcedLogout);
+  }, []);
 
   if (!token) {
     return <Login onLoginSuccess={handleLoginSuccess} />;

@@ -25,7 +25,14 @@ const result = {
   maxScore,
   threshold,
   requireExternal,
-  grade: score >= 90 ? 'local-enterprise-90' : 'below-local-enterprise-90',
+  scoreKind: 'static-engineering-checklist',
+  qualityMeasured: false,
+  grade:
+    score >= threshold
+      ? 'static-structure-check-passed'
+      : 'static-structure-check-failed',
+  disclaimer:
+    'This score checks engineering structure and evidence files only. It is not a retrieval or answer-quality metric.',
   dimensions,
   blockers,
 };

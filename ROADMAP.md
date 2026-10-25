@@ -40,6 +40,7 @@
 | `docs/plans/karpathy-obsidian-dual-ingest-plan.md` | Karpathy + Obsidian 统一知识链路方案 |
 | `tools/rag-mcp-server/README.md` | RAG MCP Server 接入说明，给 Codex/Trae/Claude Code/Cursor 自动取上下文 |
 | `docs/interview/deepseek-AI应用Agent岗-10小时冲刺指南.md` | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 |
+| `docs/interview/3小时AI应用Agent面试突击.md` | AI 应用/Agent 岗 3 小时冲刺安排、项目讲述、核心追问、HR 模板和能力边界 |
 | `docs/interview/deepseek-AI应用Agent岗-模拟问答题库.md` | 高级 AI 应用/Agent 岗 33 道高频模拟题逐题可背答案、追问应对和边界红线，覆盖检索/Agentic/Prompt/安全/多租户/可观测全知识面 |
 | `docs/interview/AI复盘四场面试问题与RAG项目回答.md` | 外部 MHTML 面试复盘材料的 58 个去重问题、当前项目回答、证据索引和表达边界 |
 | `docs/interview/AI复盘四场面试问题与RAG项目回答-面试表达版.md` | 保留 58 题并强化业务价值、架构取舍、工程结果和术语解释的面试背诵版本 |
@@ -49,7 +50,53 @@
 
 ## 当前结论
 
+- **Agent Harness V3 总体架构图（2026-10-25）**：在 `docs/architecture/ARCHITECTURE.md` 更新总体架构图，贯通接入与治理、路由编排、Agent Runtime、知识与记忆、持久化恢复、分布式运行、观测评测发布；用图例区分已实现、部分具备和待闭环能力。Mermaid 结构检查通过（7 层、34 个节点及样式引用），`git diff --check` 通过；未安装 Mermaid 渲染器，未做图像渲染验收。该图为现状映射与优化目标，不代表生产验收已完成。
+
+- **功能链路架构图拆分（2026-10-25）**：在总图下新增文档上传与索引、用户提问与回答、长任务执行与恢复、上下文组织、评测与发布门禁五张独立 Mermaid 图，区分同步／异步、三种问答模式、短期／长期上下文和离线／Live 评测，并标出可选支路与待闭环项。结构检查覆盖五个独立图块、节点连线与 Mermaid 围栏；`git diff --check` 通过。未安装 Mermaid 渲染器，未做图像渲染验收；待确认项仍以各图注和 `AGENT_PLATFORM_READINESS.md` 为准。
+
+- **3 小时 AI 应用／Agent 面试突击文档（2026-10-25）**：新增 `docs/interview/3小时AI应用Agent面试突击.md`，基于项目架构文档与用户提供的 42 题材料，整理 180 分钟复习安排、项目讲述、核心问答、HR 模板和模拟面试；明确参考题库示例不等于项目实现，完整离线评测链路标为规划项。更新面试文档导航；仅文档改动；Markdown 围栏、内部链接和 180 分钟安排检查通过，`git diff --check` 对导航与进度记录通过。
+
+- **检索流程图与代码对齐（2026-10-19）**：修正面试流程文档的检索并行说明：多条计划查询及独立证据源可以并行，每条查询内部先做关键词检索再做向量检索；将检索上下文扩展改称相邻／同章节片段补充。`git diff --check` 通过；仅改文档，未运行测试。
+
+- **图片索引审计补齐（2026-10-19）**：审计图片索引时，以 PostgreSQL chunk 中去重后的本地图片 asset 与 Milvus `rag_images` 按文档／用户统计的数量对账；图片原件按 1 张计数。读取失败标记为 `unavailable`，不会误报为 0；数量不一致进入现有持久修复队列。索引启用时，重建失败会让修复任务失败并触发 BullMQ retry；未启用时仍跳过可选图片索引。Backend build 与 `git diff --check` 通过，未跑单测或 lint。Milvus 计数受单次查询 `limit: 16_384` 限制。
+
+- **异步上传恢复与 QA Ops 会话隔离（2026-10-19）**：上传任务先进入延迟队列，再保存源文件并立即提升任务；最终处理失败会更新任务状态，重启后长期悬挂的 queued task 会被回收为失败，提示重新上传。Admin QA Ops 会话列表、详情与删除均按当前管理员映射出的 RAG user ID 和配置租户过滤；首页及 RAG Ops 会话列表也传递当前管理员身份；QA Ops 身份读取兼容 JWT 中的 `id` 字段；旧 admin 本地 ID 1 的会话已单独恢复，Admin 仍共用配置租户。Backend、Admin Backend、Admin 与 Frontend build、`git diff --check` 通过；未跑单测或 lint，未改 schema、数据或 `.env`。对象存储文件写入前发生进程崩溃时无法恢复未落存储的文件内容，任务会被标记失败。
+
+- **QA Ops 当前 admin 历史会话恢复（2026-10-19）**：将本地 admin ID 1 的 167 条旧会话及其关联运行记录、日志和产物归属迁移到该管理员映射身份；857 条 ID 2 会话及 2 条共享身份会话保持原样。复制 33 个 Redis 附件键到新身份，原键保留。修复 QA Ops JWT 用户 ID 读取遗漏 `id` 字段的问题。Admin Backend build 通过；RAG Backend watch 编译无错误，RAG Backend `/api/v1/health`、Admin Backend `/health` 和 QA Ops 页面均返回 HTTP 200。RAG Backend 当前通过启动命令临时注入 `RAG_ADMIN_TENANT_ID=legacy`，未写入 `.env`，后续重启需持久配置。
+
+- **AGUI 问答认证边界收紧（2026-10-19）**：移除 `AguiController` 整类的 `@Public()`，只给需要服务令牌保护的 Admin bridge 路由标记 `@Public()`；普通 `/agui/stream` 继续执行 JWT 校验。Backend build 通过；无 Bearer Token 的请求实测返回 401，健康检查 200；未跑单测或 lint，未改 schema、数据或 `.env`。
+
+- **RAG 架构优化收尾（2026-10-19，部分闭环）**：
+  - **已完成**：真实业务评测发布门禁规则、标注文档/Claim 的校验与导入；发布评测要求每个可回答问题强制检查引用，并覆盖 Simple／Auto／Agentic 三种模式；每个模式与检索配置至少 90% 的结果需读取到运行中心估算成本事件。配置 A/B 时，配对查询不完整或候选配置的命中率、MRR、nDCG 低于基线会阻断发布（默认不允许退化，可显式配置 0–1 的容差）；release gate 还要求显式提供成本与平均延迟相对增幅上限（0–1），逐模式比较估算成本和配对平均延迟。评测脚本复用上传时的登录态清理资料，任一删除请求失败会返回非零状态。项目评测可对两组检索配置做同题交替对比，统计命中率、MRR、nDCG、答案/引用/拒答、Judge 支撑率、耗时和成对差值。成本采集是估算值，不代表真实账单；当前不是线上随机 A/B。评测请求通过 `useLongTermMemory=false` 隔离 Mem0 读取与写入，普通聊天默认行为不变，审批恢复会保留该设置。检索参数增加白名单和边界校验；答案质量、查询融合、Agentic 规划、证据来源状态及运行观测拆分为独立模块；Simple／Auto／Agentic 共用受 ACL 约束的 BM25 无结果兜底。QueryPlanner 记录快路径、成功、降级、超时耗时；Simple 仅在用户明确给出知识库或检索范围时使用本地快路径；查询日志拆到 `ChatQueryLogService`。Agentic Artifact PostgreSQL 读写拆到 `AgenticArtifactStoreService`，纯输出对象构造拆为独立 helper；会话附件长段落按标点／空白切块，明确提及文件时仅在该文件范围补取片段。大型服务复核找到若干候选边界：`DocumentService` 的任务状态和队列生命周期已抽为 `DocumentTaskService`，图片资产抽取、权限路径校验及索引替换已抽为 `DocumentImageIngestionService`，两处原有文档编排入口继续保留；Karpathy BM25 状态仓储仍涉及多调用方，本轮只完成只读审查，未迁移；Agentic 答案生成已抽为 `AgenticAnswerGenerationService`，LangGraph `generate` 节点及原 state patch、SSE 事件顺序与降级分支保留；Backend build 和 `git diff --check` 通过，未运行测试、lint 或服务。
+  - **异步与租户**：会话消息和 cache invalidation Outbox 在同一 PostgreSQL 事务落库；内部消费者只删除 Redis 键，支持失败重试，不走 Webhook／企微。完成轮次也在同一事务写 `conversation.turn.completed`，消费者按消息 ID 回 PostgreSQL 校验会话与租户；Milvus 每条 assistant message 使用稳定主键追加保存，同一事件重放只 upsert 自身记录。查询先用 ANN 找相关问题组，再强一致分页枚举组内版本、取最新记录并按当前 query 重算相似度；分页前后 count 与遍历条数不一致时本次检索失败关闭。同毫秒版本用 ID 做稳定 tie-break，但不能证明真实先后。新增 `npm run smoke:milvus:conversation-history` 只读 smoke；2026-10-19 在本地 `conversation_chunks_v2` 运行通过：采样 849 条元数据、835 个问题组，找到一个含 2 个版本的问题组，强一致 queryIterator 前后 count 均为 2，最新版本按 ID 取回成功；脚本只输出计数，不读答案内容、不写向量。这验证了当前 SDK 分页和取最新代码路径的一组真实数据，尚非并发／故障压力验收。会话已删除的旧事件直接完成，写入后按全局唯一 threadId 复查并清理竞态产生的向量。Mem0 写入事件除持久化分类外，也在现有 Outbox payload 记录分类决策和已成功的 user／session scope，重试会跳过已确认完成的 scope，减少已知部分失败导致的重复写入；若外部已成功但进程在本地保存 checkpoint 前崩溃，仍存在 at-least-once 重复边界。会话删除仍先同步清理派生数据，失败时保留 PostgreSQL 原记录；成功删除时同事务写 cache invalidation 与内部 `conversation.deleted` 事件，后者最多 8 次重试清理并发期间重写的短期记忆、Mem0、Milvus 与 Redis。生产无分布式锁时只有 cache invalidation 可旁路；其余事件按现有 Outbox 机制重试，超过次数后需管理端重试。生产文档读写和异步上传在缺少可信 RAG 用户／租户上下文时 fail closed；Admin 数字用户 ID 已确定性映射为独立 `admin:<hash>` 身份，Admin bridge 由 ServiceTokenGuard 保护，并使用配置的 `RAG_ADMIN_TENANT_ID`，变量说明已补到 `backend/.env.example`（真实 `.env` 未改）。Feishu 连接器按租户与空间共享，文档 owner 固定为连接器 owner，租户共享仍由显式 ACL 控制。旧记录中的数字 ID 或共享 owner 不会自动迁移。
+  - **验证**：Backend 与 Admin Backend build、三个评测脚本 `node --check`、`git diff --check` 通过；无真实业务数据时 release gate 按预期 fail closed。纯内存构造 100 条 schema-shaped synthetic 样例预检也在启动实时评测前因 `realBusinessValidation=false` 被拒绝。重启本地服务后，在 QA Ops 登录态下 Simple、Auto、Agentic 均完成真实页面问答：简单事实问题返回 650 元并带引用；Agentic 对比问题返回一线／二线标准与审批流程并带两条引用，运行详情显示证据和引用检查通过。2026-10-19 本轮 Backend build（含 `DocumentTaskService`、`DocumentImageIngestionService` 拆分）、`node --check`、可复跑的真实 Milvus 多版本组只读 smoke、`git diff --check` 均通过；未跑单测和 lint，未改 schema 或迁移数据。
+  - **待闭环**：现有 193 条 private business regression 数据被 manifest 明确标为 `synthetic: true`、`containsRealBusinessData: false`，不能代替人工审核的 100+ 条真实业务集；旧记录以数字 ID 或 `admin-backend` 等 owner 保存的逐表核验与回填授权（未迁移）；Milvus 并发写入、服务故障恢复和高基数历史组压力验收；Mem0 Outbox 最多重试 8 次，但外部写入成功而本地 checkpoint 未保存时仍可能重复，删除补偿事件若 8 次失败仍需人工重试；真实资料 ACL、线上随机 A/B、生产延迟和实际成本验收。
+
+- **检索 A/B 对照审查（2026-10-19）**：同一批问题按轮换顺序分别请求两组配置；每次评测生成独立 `projectId`，上传的资料和问答请求都限定到该范围，避免账号已有资料污染结果；成本门禁只比较 A、B 都有估算成本的同题样本，并要求达到配对覆盖率门槛。两个评测脚本 `node --check` 与 `git diff --check` 通过，未跑单测、lint、build 或线上评测。此能力是离线同题对照，不是线上随机 A/B；Auto／Agentic 每次仍会重新规划和生成，模型随机性未被固定，也没有重复试验或置信区间。
+
+- **未闭环边界的后续处理（2026-10-19）**：Admin 数字 ID 到 RAG 的稳定映射、ServiceTokenGuard 内部桥接和租户配置已落代码；旧数字 owner／共享 owner 的数据尚未回填。对话向量已改为按 assistant message 追加保存；可复跑的只读 smoke 已在本地 Milvus 验证一个包含 2 个版本的问题组可完整遍历并取回最新版本，压力和并发边界仍待验收。同毫秒事件以 ID 稳定排序，但无法证明真实先后。Mem0 Outbox 已保存分类和 scope checkpoint，外部成功后本地 checkpoint 前崩溃仍可能重复。现有 193 条私有评测数据是合成样例，不满足真实业务集要求；生产 A/B、成本、延迟数据仍未提供；未改 schema 或迁移数据。
+
+- **评测、异步恢复与 QA Ops 验收补强（2026-10-19）**：发布门禁按 `mode + variant` 分组评分，Judge 不再混合 Simple／Auto／Agentic 计算通过率；拒答需在答案中明确说明资料不足，引用要检查编号对应的返回片段及预期文档，冲突判断按样本版本校验；导入器只接受 JSON 布尔值，项目评测报告补生成时间。Milvus 删除补偿每 30 秒扫描 Redis，使其他实例也能接手新补偿记录；单条坏记录会隔离，不中断整批恢复，补偿无法持久化时会明确报错。工作流入队失败及最终重试失败会关闭未完成任务和运行记录、刷新列表投影；本地进程丢失租约后会停止继续推进工作流副作用。Outbox 为每条外部投递增加 Redis 租约，避免批次锁过期时多个实例同时发送同一条通知；远端已处理但本地超时仍可能重投，Webhook 接收方仍需按 `deliveryId` 幂等，企微机器人没有 exactly-once 保证。QA Ops 流式代理改为只在浏览器响应断开时取消上游请求，避免把已完成的 HTTP 请求误认为用户断线。Backend／Admin Backend build、评测脚本语法检查及 `git diff --check` 通过；QA Ops 三模式页面回放通过；未跑单测或 lint，未改 schema、迁移数据或 `.env`。
+
+- **会话记忆与历史生命周期调整（2026-10-18，待整体验收）**：聊天入口先校验 Thread 的用户／租户归属；PostgreSQL 历史回退改为有界查询；摘要恢复按页和 token 预算分批处理，失败不落降级摘要；删除会话时清理 Redis 热历史、Mem0 会话记忆和 Milvus 历史向量；周总结改按消息时间、UTC 周界和分块摘要处理，并加并发保护；删除 Agent Runtime 中未生效的上下文压缩配置。未改 schema、未跑单测。10 月 18 日目标文件定向 TypeScript 检查与 `git diff --check` 通过；当时完整 Backend build 被工作区其他文件语法错误阻断，10 月 19 日修复后 Backend build 已通过。10 月 19 日 QA Ops 登录态下三模式页面回放已完成，见上方验收记录。
+
+- **发布门禁与异步边界补强（2026-10-19）**：真实业务 release gate 现在要求可回答问题至少 20 条且占数据集至少 20%，并分别检查 Simple／Auto／Agentic 各模式、各检索配置的总体通过率和可回答问题通过率，避免大量拒答项掩盖答案链路退化；Outbox 手动重试用 `status=failed` 条件更新，并在同一事务重置 delivery，避免并发点击造成重复投递；Query Planner 超时会中止底层 LLM 请求，同时保留调用方取消信号；审批暂停时短期记忆 Redis 写入失败会被记录，不再产生未处理 Promise rejection。性能基准改为读取运行中心 `cost.estimated` 事件，不再用问题／答案长度冒充调用成本；运行中心查询发生在问答耗时记录之后。Admin 语音票据代理不再把所有用户映射到 `legacy`，Admin JWT 没有可信租户映射时返回拒绝；RAG 内部票据接口也要求显式租户。Mem0 可恢复写入、旧 Admin owner 回填、真实业务数据评测仍待闭环；当前新请求的 Admin→RAG 身份映射已实现。Backend build、Admin Backend build、评测脚本语法检查、拒答样本占比过高时 release preflight 在启动实时评测前失败、`git diff --check` 通过；未跑单测或 lint，未改 schema、迁移数据或 `.env`。
+
+- **工作流队列初始化竞态修复（2026-10-19）**：`startAsync` 入队前等待 AgentTask 计划写入，避免 API 与 Worker 并发创建重复任务；工作流索引写入仍为 best-effort，但改为等待结束并记录失败，避免未处理的后台 Promise，也避免旧的 pending 索引晚于 Worker 完成状态覆盖。resume／revise 沿用同一索引写入处理。Backend build 与 `git diff --check` 通过；未跑单测或 lint，未改 schema、迁移数据或 `.env`。
+
+- **Milvus 删除补偿写入收口（2026-10-19）**：删除文档时等待 Redis 补偿状态写入；写入失败或 Redis 不可用时停止删除描述索引和 PostgreSQL 元数据，保留文档供重试。补偿状态改为每个 docId 一个 Redis key，避免多实例删除不同文档时互相覆盖；重试成功后只清理对应 key，清理失败会留下可安全重放的记录。启动时用 `SCAN` 恢复，旧 v1 快照迁移到逐文档 key，并用 compare-and-delete 防止迁移期间删掉被并发更新的旧快照；状态接口等待一次恢复完成后再返回，重复恢复不会重复安排同一进程的计时器。开发环境无 Redis 时仍可运行进程内重试，无法跨进程恢复；自动重试最多 5 次。Backend build 与 `git diff --check` 通过；未跑单测或 lint，未改 schema、迁移数据或 `.env`。
+
+- **问答取消与评测结果可见性补强（2026-10-19）**：Chat 的端到端 deadline 从请求准备开始计算，用户断开和总超时信号传给 Query Planner、Simple 与 Agentic 模型调用；总超时新增 `AGENT_RUN_TIMEOUT_MS` 配置。两个评测运行 API 不再错误返回 `triggered:true`，会明确告知任务未启动并给出实际脚本命令；评测列表 API 新增项目级多模式结果，展示 synthetic 标记、检索指标、延迟和已有 A/B 成本／检索对照数据。项目评测报告可通过 API 查询；A/B release gate 现在要求显式提供业务批准的成本和平均延迟相对增幅阈值（0 到 1），与检索命中率／MRR／nDCG 回归门槛一起逐模式比较。阈值具体数值仍由业务预算决定，当前环境未设置；单次非 A/B 评测不受影响。Backend build、两个评测脚本 `node --check` 与 `git diff --check` 通过；未跑单测或 lint，未改 schema、迁移数据或实际 `.env`。
+
+- **文档写入租户预检补齐（2026-10-19）**：同步上传、异步上传、URL 抓取和手工入库现在都在解析、抓取、建任务或存对象前校验认证用户的租户归属；文档服务写入阶段仍保留原有二次校验。这样拒绝请求不会留下孤立任务／对象，也不会为无权请求支付解析和 URL 抓取成本。生产开启必需租户上下文时，自助注册现在 fail closed，直到可信租户成员配置流程接入；Admin 身份按独立映射和配置租户接入，既有 legacy owner 回填及其他治理 API 的真实租户权限仍需验收。Backend build 与 `git diff --check` 通过；未跑单测或 lint。
+
+- **短期历史恢复补强（2026-10-19）**：Redis 缓存未命中或未启用时，从 PostgreSQL 恢复最近消息并按稳定 messageId 回写；摘要 JSON 保存 `compactedThroughMessageId`，缓存对账比较摘要边界之后应保留的消息，避免恢复时撤销压缩，也能发现压缩后窗口中途缺消息。历史恢复排序在同一时间戳内优先按用户消息、助手消息排序；普通缓存写入与恢复使用同一会话锁，争锁失败时本次直接使用 PostgreSQL 历史，不做破坏性缓存更新。审批暂停、拒绝和正常完成的消息共用数据库 ID，避免恢复与后续写入重复。摘要恢复会剥除内部消息元数据，并通过条件写入避免多实例恢复覆盖已存在的摘要；`truncatedHistory` 会反映已附带摘要的历史。有效缓存命中增加一次只读消息 ID／角色的 PostgreSQL 查询，并单独记录耗时与命中率；`maxMessages=0` 时直接返回空上下文。历史摘要格式尚无边界 ID 的旧记录会按完整 PG 窗口恢复一次；多个并发事务若同一时间戳写入多轮消息，现有字段仍无法可靠还原轮次间顺序，绝对保证需独立顺序字段，本次不改 schema。Backend build 与 `git diff --check` 通过；未跑单测或 lint，未改 schema、迁移或 `.env`。
+
+- **短期会话压缩调整（2026-10-17）**：用户问题和助手回复一起写入 Redis 后只判断一次是否压缩；按 `LLM_CONTEXT_WINDOW_TOKENS` 扣除输出预算、系统提示预留、检索上下文、当前问题和已有摘要，计算本轮历史预算，最多 8,000 tokens。超过预算或 40 条消息时压缩较早历史、保留近期原文；同一会话用 Redis 锁避免并发压缩，按原消息精确删除，避免误删压缩期间新写入的内容；LLM 摘要失败时不删原文，完整消息仍由 PostgreSQL 保存。未改数据库 schema 或 `.env`。Backend build ✅；短期记忆 7／7，ChatService 和 Simple／Auto／Agentic 集成定向测试合计通过 3 suites／19 tests。QA Ops 人工验收未闭环：Simple 模式首次查询的资料只存在于附件会话，知识库未命中；第二次 Simple 请求在页面持续生成，之后刷新遇到登录页；尚未完成 Auto／Agentic 页面验证。不得把这次页面尝试算作通过。
+
 - **QA Ops 对话附件验收闭环（2026-10-16）**：沿用 10 月 15 日已完成的图片、MD、DOCX、PDF 上传、问答、连续追问、权限隔离和文件生成验收，补齐最后两项失败。Agentic 追问曾把“第 1 页审批编号”带入附件排序，并因 PDF 标题空格和中文页码匹配失败而丢掉第 2 页；现在从最近 8 条用户问题识别所指附件，只按当前问题给附件分块打分，并去除检索文本中的空白和标点后匹配。真实 QA Ops 页面实测返回 Finance Risk Team、2026-11-30，引用为 `sample.pdf · 第 2 页`。数据图表改为确定性 SVG：页面生成文件人工检查确认 JAN 10、FEB 20、MAR 35，整数刻度 0–40；文件状态 ready，下载入口可用。复查后新标签首屏曾出现一次会话列表空白和 500 提示，刷新后历史会话、四个附件和验收结果均恢复并可重新打开；未再复现。Backend build ✅；未跑单元测试、未改数据库 schema；仅使用合成附件，不触碰 `.env`。图片视觉描述偶尔补出图片未明确提供的“第一季度”等推断，仍作为既有边界记录。实现入口：`backend/src/modules/agui/conversation-attachment.service.ts`、`backend/src/modules/artifacts/artifact-generator.service.ts`。
+
+- **查询规划与统一检索改造（2026-10-17，代码和端到端验收完成）**：已加入精简 QueryPlan 和确定性 RetrievalPolicy，Simple／Auto／Agentic 共用 `retrieveByPlan()` 与多查询融合；移除检索档位语义正则；会话附件使用 BM25 + 向量召回，并保留旧运行记录及 Redis v1 兼容。Backend build、Admin build、Backend 全量 Jest（105 套件／542 项）和查询路由评测（13/13）通过。QA Ops 页面用同一附件和问题分别验证三种模式，结果、附件证据和引用一致；Run Center 核对 QueryPlan、执行策略、子问题及检索充分状态。候选过滤和 ACL／生命周期边界由检索测试覆盖，页面未暴露后端候选计数，因此没有填写臆测数量。未修改数据库 schema、`.env`、密钥或生产部署。方案及 Run ID 见 `docs/plans/query-planning-and-unified-retrieval-refactor.md`。
 
 - **恢复本地 Elasticsearch 与 Neo4j 检索依赖（2026-10-15）**：开发环境 Elasticsearch 镜像固定安装与 ES 8.13.0 匹配的 analysis-ik 插件；启动后原有 `rag_chunks`（4,788 条）与 `kh_document`（7 条）索引恢复，IK 中文分析、ES 连接均通过。Neo4j 复用原数据卷，后端连接通过，当前图谱有 182 个节点、304 条关系。RAG 后端健康检查、Admin API 文档和 Admin 页面均返回 200；ES 单节点集群为 yellow（主分片正常，副本待分配）。未改 `.env`，未执行数据库迁移。验证：Docker Compose 配置、镜像构建、IK 分析、后端连接日志和健康检查通过。
 
@@ -642,10 +689,13 @@
 
 ### P0：真实业务质量
 
+- [x] **查询规划与统一检索真实验收**：2026-10-17 在 QA Ops 用同一会话附件和同一问题分别运行 Simple、Auto、Agentic；三种模式均答对并引用 `rag-queryplan-qa.md`。Run Center 核对了三条 QueryPlan、原问题与两个子问题、`local_only`／`scopeRestricted` 执行策略、同一附件 chunk 命中和检索充分状态；Auto 正确走 Simple Fast Path，Agentic 的引用门禁通过。候选过滤与 ACL／生命周期边界另由检索测试验证。运行详情没有展示各后端候选计数，因此未记录虚构的 BM25／Vector 数量。证据与 Run ID 见 `docs/plans/query-planning-and-unified-retrieval-refactor.md`。
+- [x] **统一检索链路面试讲解同步**：更新 `docs/interview/功能步骤流程.md`，统一 QueryPlan、后端权限策略、`retrieveByPlan()`、附件证据融合及 Simple／Auto／Agentic 的准确说法；修正残留的旧 QueryIntent 和关键词复杂度路由描述。
 - [ ] **真实业务原件替换**：提供可脱敏 PDF／DOCX／XLSX／网页导出及版本、部门、权限标签，替换模拟 fixture 后重新入库
 - [ ] **真实毒题集验收**：真实 API 逐题评测、脱敏报告和门禁脚本已实现；仍需准备至少 100 条非模拟真实问题、标准答案、来源文档和期望引用，重新评测召回、排序、Faithfulness、引用和拒答
 - [ ] **真实游戏官网／活动资料验收**：接入历史 PRD、设计规范、接口、埋点、测试问题单和活动复盘，验证当前 96 条模拟专项问题之外的真实效果
 - [ ] **真实业务结果补数**：按 `docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md` 的统一口径补齐 Recall@K、MRR、nDCG、引用正确率、拒答准确率；完成六岗位任务成功率、P95、降级率、Token／费用统计；采集用户采纳率、返工率、人工接管率和节省工时；至少沉淀 5 个典型失败案例及同数据集、同评分口径的优化前后对比。所有数字必须标注样本量、时间窗口、环境和证据来源
+- [ ] **管理端 A/B 权限验收**：治理页现在把已登录 Admin 映射身份和服务端配置租户传到检索层，并由后端校验 ACL；代码 build 已通过。仍需在有真实授权文档的环境跑对照，确认 A/B 有非零且权限正确的候选；不能放宽 ACL 或信任浏览器传入的 userId。
 
 > 生产化待补闭环总表已同步到 `docs/interview/SEVEN_DIFFICULTIES_CHEATSHEET.md` 和 `docs/interview/jd/jd-gap-implementation-status.md`，包括真实业务数据、生产 SLA、Redis 多实例、LangFuse 生产运营、长期回归、用户采纳、部署高可用以及 IAM／DLP／租户治理。当前不使用本地模拟结果冒充生产验收。
 
@@ -913,7 +963,7 @@
 
 - **1.5 五项技术难点总体架构图补齐**：新增多 Agent 可控协作、复杂度路由、混合检索、回答可信纠错、长流程恢复与可观测五条难点链路的同图总览；底部明确 PostgreSQL、Redis 与 LLM Gateway 的共享状态和治理关系，并为每种颜色补充节点箭头式图例。
 
-- **问答上下文机制文档补齐**：在《功能步骤流程.md》明确记录 Thread 会话隔离、PostgreSQL 完整历史、Redis 短期窗口与结构化摘要、Mem0 长期记忆、历史会话向量召回、约 2,000 tokens／约 30 条消息的自动压缩阈值，以及 Simple／Auto／Agentic 的上下文差异和压缩审计事件。
+- **问答上下文机制文档补齐（当时实现）**：在《功能步骤流程.md》记录 Thread 会话隔离、PostgreSQL 完整历史、Redis 短期窗口与结构化摘要、Mem0 长期记忆、历史会话向量召回和 Simple／Auto／Agentic 的上下文差异。当时记录的约 2,000 tokens／30 条消息压缩阈值已于 2026-10-17 调整，现行策略见本文件顶部。
 
 - **产研运工作流切页恢复修复**：修正 Agent 工作台只把当前工作流保存在 React 内存、切换页面后无法恢复的问题；启动、审批和驳回后持久化当前 `threadId`，重新进入工作台时自动调用后端状态接口恢复项目、岗位、Artifact、审批和运行状态；Thread 已失效时自动清理本地记录。`admin npm run lint` 通过（保留既有 warning）；TypeScript 检查通过。
 

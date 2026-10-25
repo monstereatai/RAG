@@ -164,28 +164,21 @@ export class AdminDashboardService {
   }
 
   async trend(days: number = 7) {
-    // 生成模拟趋势数据，真实数据可从 rag-backend 获取
-    const now = new Date();
-    const items = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      items.push({
-        date: dateStr,
-        searchCount: Math.floor(Math.random() * 50) + 10,
-        qaCount: Math.floor(Math.random() * 30) + 5,
-        documentCount: Math.floor(Math.random() * 5),
-      });
-    }
-    return { data: items };
+    // 趋势数据必须来自真实查询日志或指标存储；上游未接入时返回空数据集。
+    return {
+      available: false,
+      data: [],
+      days,
+      reason: 'trend_data_source_not_configured',
+    };
   }
 
   /**
    * 大盘指标互不依赖，使用并发聚合；每项由 pickTotal 单独安全降级，
    * 避免单个 RAG 能力不可用时让整页统计失败。
    */
-  async overview() {
+  async overview(user: unknown) {
+    const userId = this.resolveUserId(user);
     const [
       documents,
       evaluations,
@@ -196,7 +189,7 @@ export class AdminDashboardService {
     ] = await Promise.all([
       this.ragClient.getDocuments({ page: 1, pageSize: 1 }),
       this.ragClient.getEvaluations(),
-      this.ragClient.getConversations(),
+      this.ragClient.getConversations(userId),
       this.ragClient.getVectorIndex(),
       this.fetchRag('search/queries/popular'),
       this.fetchRag('qa/cost-summary'),

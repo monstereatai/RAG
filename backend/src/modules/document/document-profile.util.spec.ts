@@ -91,4 +91,25 @@ describe('game document profile', () => {
 
     expect(assessIngestionQuality(content, chunks).accepted).toBe(true);
   });
+
+  it('does not treat a topic mention of deprecated as a deprecated document', () => {
+    const metadata = detectGameDocumentMetadata(
+      'api-version-runbook.md',
+      [
+        '# API 版本下线规则',
+        '对外 API 版本标记 deprecated 后，至少保留 9 个月才允许下线。',
+      ].join('\n'),
+    );
+
+    expect(metadata.lifecycleStatus).toBe('effective');
+  });
+
+  it('still honors an explicit lifecycle status field', () => {
+    const metadata = detectGameDocumentMetadata(
+      'old-policy.md',
+      ['# 旧制度', '状态：废弃'].join('\n'),
+    );
+
+    expect(metadata.lifecycleStatus).toBe('deprecated');
+  });
 });

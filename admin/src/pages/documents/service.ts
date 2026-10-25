@@ -233,6 +233,21 @@ export async function createDocumentVersion(id: string, body: {
   return authRequest(`/api/admin/documents/${id}/versions`, { method: 'POST', data: body });
 }
 
+export async function incrementalUpdateDocument(id: string, body: {
+  content: string;
+  filename?: string;
+  docVersion?: string;
+  effectiveAt?: string;
+  expiredAt?: string;
+  changeType?: 'standalone' | 'new' | 'replace' | 'amend' | 'supplement' | 'deprecate';
+  validityMonths?: number;
+}) {
+  return authRequest(`/api/admin/documents/${id}/incremental-update`, {
+    method: 'POST',
+    data: body,
+  });
+}
+
 export async function updateDocumentLifecycle(id: string, lifecycleStatus: string) {
   return authRequest(`/api/admin/documents/${id}/lifecycle`, {
     method: 'POST',

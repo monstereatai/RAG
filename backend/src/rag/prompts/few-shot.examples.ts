@@ -4,119 +4,129 @@ import { FewShotPromptTemplate, PromptTemplate } from '@langchain/core/prompts';
  * Few-shot 示例库
  *
  * 为特定场景提供 few-shot 示例，提升 LLM 输出质量和稳定性。
- * 覆盖：查询扩展、答案生成、反思评估、对比分析。
+ * 覆盖：查询规划、答案生成、反思评估、对比分析。
  *
  * 参考实现：agent-course/prompt-template-test/src/example-selector2.mjs
  */
 
-/** 意图路由边界样本：用于 Router Prompt 与离线路由评测共用。 */
+/** 查询规划边界样本：用于 QueryPlanner Prompt 与离线路由评测共用。 */
 export const queryRoutingExamples = [
   {
     query: '1+1 等于多少',
-    action: 'direct_answer',
-    sourcePolicy: 'direct_answer',
-    needsSynthesis: false,
-    queryType: 'public_knowledge',
-    targetKbs: ['general'],
+    action: 'direct',
+    domain: 'public',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '李思是谁',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: false,
-    queryType: 'private_entity',
-    targetKbs: ['company', 'documents'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: ['李思'],
   },
   {
     query: '公司有李思，李四是谁',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: false,
-    queryType: 'private_entity',
-    targetKbs: ['company', 'documents'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: ['李思', '李四'],
   },
   {
     query: '这个项目上次的接口怎么改',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: false,
-    queryType: 'follow_up',
-    targetKbs: ['project', 'documents'],
+    domain: 'internal',
+    contextMode: 'follow_up',
+    taskType: 'procedure',
+    needsGraph: false,
     entities: [],
   },
   {
     query: 'React 和 Vue 的区别是什么',
-    action: 'direct_answer',
-    sourcePolicy: 'direct_answer',
-    needsSynthesis: false,
-    queryType: 'public_knowledge',
-    targetKbs: ['general'],
+    action: 'direct',
+    domain: 'public',
+    contextMode: 'independent',
+    taskType: 'comparison',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '小红书是什么',
-    action: 'direct_answer',
-    sourcePolicy: 'direct_answer',
-    needsSynthesis: false,
-    queryType: 'public_knowledge',
-    targetKbs: ['general'],
+    action: 'direct',
+    domain: 'public',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '小红书',
-    action: 'direct_answer',
-    sourcePolicy: 'direct_answer',
-    needsSynthesis: false,
-    queryType: 'public_knowledge',
-    targetKbs: ['general'],
+    action: 'direct',
+    domain: 'public',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '公司里的小红书运营规范是什么',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: false,
-    queryType: 'project_knowledge',
-    targetKbs: ['company', 'documents'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'lookup',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '公司的研发流程是什么',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: true,
-    queryType: 'project_knowledge',
-    targetKbs: ['company', 'project', 'documents'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'procedure',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '项目发布流程怎么走',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: true,
-    queryType: 'project_knowledge',
-    targetKbs: ['project', 'documents'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'procedure',
+    needsGraph: false,
     entities: [],
   },
   {
     query: '资料库当中，帮我总结下李逵',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: true,
-    queryType: 'private_entity',
-    targetKbs: ['documents', 'company'],
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'synthesis',
+    needsGraph: false,
     entities: ['李逵'],
+  },
+  {
+    query: '根据附件列出项目负责人、预算、交付日期和风险等级，并标明出处',
+    action: 'retrieve',
+    domain: 'internal',
+    contextMode: 'independent',
+    taskType: 'synthesis',
+    needsGraph: false,
+    entities: [],
+    subQueries: ['项目负责人和预算', '项目交付日期和风险等级'],
   },
   {
     query: '帮我概括一下这个项目的技术方案',
     action: 'retrieve',
-    sourcePolicy: 'local_only',
-    needsSynthesis: true,
-    queryType: 'project_knowledge',
-    targetKbs: ['project', 'documents'],
+    domain: 'internal',
+    contextMode: 'follow_up',
+    taskType: 'synthesis',
+    needsGraph: false,
     entities: [],
   },
 ] as const;
@@ -124,69 +134,11 @@ export const queryRoutingExamples = [
 export function formatQueryRoutingFewShots(): string {
   return queryRoutingExamples
     .map((example, index) => `${index + 1}. ${JSON.stringify(example)}`)
-    .join('\\n');
+    .join('\n');
 }
 
 // ============================================================
-// 1. 查询扩展（Query Augment）few-shot 示例
-// ============================================================
-
-const queryAugmentExamples = [
-  {
-    original: 'Milvus 的索引类型有哪些？',
-    q1: 'Milvus 支持哪些索引类型',
-    q2: 'Milvus 索引选型对比 IVF FLAT HNSW',
-    q3: '向量数据库 Milvus 索引参数配置',
-  },
-  {
-    original: '如何用 LangChain 实现流式响应？',
-    q1: 'LangChain stream 方法使用示例',
-    q2: 'LangChain.js 流式输出 token 实现',
-    q3: 'LangChain LLM streaming response SSE',
-  },
-  {
-    original: 'React 和 Vue 的响应式原理有什么区别？',
-    q1: 'React 响应式原理 fiber reconciler',
-    q2: 'Vue 响应式系统 proxy reactive',
-    q3: 'React vs Vue 数据驱动对比分析',
-  },
-  {
-    original: '这个项目的技术栈是什么？',
-    q1: '项目使用的框架和技术选型',
-    q2: '项目依赖清单 package.json',
-    q3: '项目架构技术栈概览',
-  },
-  {
-    original: 'Docker 容器怎么部署 NestJS 应用？',
-    q1: 'NestJS Docker 多阶段构建 Dockerfile',
-    q2: 'Docker Compose 部署 Node.js 应用',
-    q3: 'NestJS 容器化部署最佳实践',
-  },
-];
-
-const queryAugmentExamplePrompt = PromptTemplate.fromTemplate(
-  `原始问题：{original}
-扩展问句：
-- {q1}
-- {q2}
-- {q3}`,
-);
-
-/**
- * 查询扩展 few-shot prompt
- *
- * 用法：在 queryAugmentPrompt 中作为 system 消息的一部分注入。
- */
-export const queryAugmentFewShotPrompt = new FewShotPromptTemplate({
-  examples: queryAugmentExamples,
-  examplePrompt: queryAugmentExamplePrompt,
-  prefix: '以下是查询扩展的示例，请参考其改写风格：',
-  suffix: '请按照上述风格，为下面的用户问题生成 3 条扩展问句。',
-  inputVariables: [],
-});
-
-// ============================================================
-// 2. 答案生成（Answer Generation）few-shot 示例
+// 1. 答案生成（Answer Generation）few-shot 示例
 //
 // 教 LLM 如何基于检索片段生成带引用的回答。
 // ============================================================
@@ -240,7 +192,7 @@ export const answerFewShotPrompt = new FewShotPromptTemplate({
 });
 
 // ============================================================
-// 3. 反思评估（Reflection）few-shot 示例
+// 2. 反思评估（Reflection）few-shot 示例
 //
 // 教 LLM 如何评估答案的置信度。
 // ============================================================
@@ -270,7 +222,7 @@ export const reflectionExamples = [
 ];
 
 // ============================================================
-// 4. 全量示例索引（用于 SemanticExampleSelector）
+// 3. 全量示例索引（用于 SemanticExampleSelector）
 //
 // 每条示例包含 task（任务类型标签）+ text（示例全文），
 // 存入 Milvus 后按语义相似度检索最相关的示例。
@@ -278,7 +230,7 @@ export const reflectionExamples = [
 
 export interface FewShotExampleEntry {
   id: string;
-  task: 'query_augment' | 'answer_generation' | 'reflection';
+  task: 'answer_generation' | 'reflection';
   text: string;
 }
 
@@ -286,19 +238,10 @@ export interface FewShotExampleEntry {
  * 将各类 few-shot 示例展开为扁平文本，用于语义检索。
  *
  * 在 SemanticExampleSelector 中，先 embed 这些文本存入 Milvus，
- * 查询时按当前 query 检索最相关的 k 条示例注入 prompt。
+ * 查询时按当前 query 检索答案和反思示例。
  */
 export function buildFewShotExampleEntries(): FewShotExampleEntry[] {
   const entries: FewShotExampleEntry[] = [];
-
-  // 查询扩展示例
-  for (const ex of queryAugmentExamples) {
-    entries.push({
-      id: `qa_${ex.original.slice(0, 20)}`,
-      task: 'query_augment',
-      text: `原始问题：${ex.original}\n扩展：${ex.q1} / ${ex.q2} / ${ex.q3}`,
-    });
-  }
 
   // 答案生成示例
   for (const ex of answerGenerationExamples) {

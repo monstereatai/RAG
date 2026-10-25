@@ -1,5 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { API_SCOPES_KEY } from '../decorators/api-scopes.decorator';
 
 describe('JwtAuthGuard API Token scopes', () => {
   const context = (
@@ -7,14 +9,18 @@ describe('JwtAuthGuard API Token scopes', () => {
     requiredScopes: string[],
   ) =>
     ({
+      getType: () => 'http',
       switchToHttp: () => ({ getRequest: () => request }),
       getHandler: () => 'handler',
       getClass: () => 'class',
       requiredScopes,
     }) as never;
 
+  let requiredScopes: string[] | undefined;
   const reflector = {
-    getAllAndOverride: jest.fn(() => undefined as string[] | undefined),
+    getAllAndOverride: jest.fn((key: string) =>
+      key === IS_PUBLIC_KEY ? undefined : requiredScopes,
+    ),
   };
 
   function createGuard(
@@ -40,11 +46,11 @@ describe('JwtAuthGuard API Token scopes', () => {
   }
 
   beforeEach(() => {
-    reflector.getAllAndOverride.mockReset();
+    requiredScopes = undefined;
   });
 
   it('allows an API token with the declared scope', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:chat']);
+    requiredScopes = ['rag:chat'];
     const request = {
       headers: { authorization: 'Bearer access-token' },
       query: {},
@@ -63,7 +69,7 @@ describe('JwtAuthGuard API Token scopes', () => {
   });
 
   it('rejects an API token without the declared scope', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:documents']);
+    requiredScopes = ['rag:documents'];
     const request = {
       headers: { authorization: 'Bearer access-token' },
       query: {},
@@ -82,7 +88,7 @@ describe('JwtAuthGuard API Token scopes', () => {
   });
 
   it('does not restrict a normal JWT with API scope metadata', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:documents']);
+    requiredScopes = ['rag:documents'];
     const request = {
       headers: { authorization: 'Bearer access-token' },
       query: {},
@@ -138,7 +144,7 @@ describe('JwtAuthGuard API Token scopes', () => {
   });
 
   it('requires each declared IAM permission for production user routes', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:chat', 'rag:documents']);
+    requiredScopes = ['rag:chat', 'rag:documents'];
     const iamService = { hasPermission: jest.fn().mockResolvedValue(true) };
     const request = {
       headers: { authorization: 'Bearer access-token' },
@@ -173,7 +179,7 @@ describe('JwtAuthGuard API Token scopes', () => {
   });
 
   it('rejects a production user missing one of the declared IAM permissions', async () => {
-    reflector.getAllAndOverride.mockReturnValue(['rag:token:manage']);
+    requiredScopes = ['rag:token:manage'];
     const iamService = { hasPermission: jest.fn().mockResolvedValue(false) };
     const request = {
       headers: { authorization: 'Bearer access-token' },

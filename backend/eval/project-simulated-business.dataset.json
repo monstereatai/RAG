@@ -1,5 +1,11 @@
 {
   "version": "2026-06-21",
+  "synthetic": true,
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "generator": "hand-authored simulated business scenarios",
+    "containsRealBusinessData": false
+  },
   "description": "仿真实项目级业务评测集（含软件工程）：覆盖 HR/Finance/Legal/IT/Ops/Security/CS/Product/前端/后端/DevOps 等。含版本冲突、跨文档、拒答、缩写别名、技术规范等场景。",
   "documents": [
     {
@@ -72,7 +78,11 @@
       ],
       "minKeywordHits": 3,
       "requireCitation": true,
-      "expectConflictHandling": true
+      "expectConflictHandling": true,
+      "expectedDocIds": [
+        "hr-travel-policy-2026",
+        "hr-travel-policy-2025"
+      ]
     },
     {
       "id": "travel-over-limit-approval",
@@ -84,7 +94,8 @@
         "双重审批"
       ],
       "minKeywordHits": 2,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["hr-travel-policy-2026"]
     },
     {
       "id": "procurement-payment-conditions",
@@ -97,7 +108,8 @@
         "发票"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["finance-procurement-policy"]
     },
     {
       "id": "legal-review-scope",
@@ -110,7 +122,8 @@
         "违约金"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["legal-contract-policy"]
     },
     {
       "id": "akb-alias",
@@ -123,7 +136,8 @@
         "知识中台"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["it-access-policy"]
     },
     {
       "id": "service-hub-sla",
@@ -136,7 +150,8 @@
         "30 分钟"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["customer-success-sla"]
     },
     {
       "id": "alpha-audit",
@@ -150,7 +165,8 @@
         "traceparent"
       ],
       "minKeywordHits": 4,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["it-access-policy"]
     },
     {
       "id": "security-p0-response",
@@ -163,7 +179,8 @@
         "业务负责人"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["security-incident-policy"]
     },
     {
       "id": "data-retention",
@@ -176,7 +193,8 @@
         "财务审计凭证"
       ],
       "minKeywordHits": 3,
-      "requireCitation": true
+      "requireCitation": true,
+      "expectedDocIds": ["data-retention-policy"]
     },
     {
       "id": "no-answer-pet",
@@ -211,7 +229,7 @@
       ],
       "minKeywordHits": 1,
       "requireCitation": true,
-      "sourceDocumentIds": [
+      "expectedDocIds": [
         "web-frontend-react"
       ]
     },
@@ -226,7 +244,7 @@
       ],
       "minKeywordHits": 1,
       "requireCitation": true,
-      "sourceDocumentIds": [
+      "expectedDocIds": [
         "nestjs-backend"
       ]
     },
@@ -241,7 +259,7 @@
       ],
       "minKeywordHits": 1,
       "requireCitation": false,
-      "sourceDocumentIds": [
+      "expectedDocIds": [
         "cicd-workflow"
       ]
     }

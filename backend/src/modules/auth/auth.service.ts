@@ -10,7 +10,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { MailService } from '../mail/mail.service';
 import { AuthUserRecord, AuthUserStore } from './auth-user.store';
@@ -29,6 +29,7 @@ import {
   buildPasswordResetCodeHtml,
 } from './mail-templates';
 import { IamService } from '../iam/iam.service';
+import { AuthIdentitySyncService } from './auth-identity-sync.service';
 
 /** access token 默认有效期（JWT_ACCESS_EXPIRES 未配置时） */
 const DEFAULT_ACCESS_EXPIRES_IN = '2h';
@@ -74,6 +75,7 @@ export class AuthService {
     @Optional() injectedTokenStore?: TokenStoreService,
     @Optional() injectedMailService?: MailService,
     @Optional() private readonly iamService?: IamService,
+    @Optional() private readonly identitySync?: AuthIdentitySyncService,
   ) {
     this.userStoreRef = injectedUserStore;
     this.tokenStoreRef = injectedTokenStore;
@@ -112,6 +114,7 @@ export class AuthService {
     }
 
     await this.syncIamMembership(user);
+    await this.identitySync?.sync(user, { required: true });
     return this.issueTokenPair(this.toPayload(user));
   }
 
@@ -124,6 +127,12 @@ export class AuthService {
    * 不阻塞注册流程；真实 SMTP 发送失败则向上抛出。
    */
   async register(dto: RegisterDto): Promise<RegisterResponse> {
+    if (this.configService.get<boolean>('auth.requireTenantContext') === true) {
+      throw new ForbiddenException(
+        'self-registration is disabled until a trusted tenant provisioning flow is configured',
+      );
+    }
+
     const username = dto.username.trim();
     const email = dto.email.trim().toLowerCase();
 
@@ -140,6 +149,8 @@ export class AuthService {
       passwordHash: AuthUserStore.hashPassword(dto.password),
       realName: dto.realName,
     });
+
+    await this.identitySync?.sync(user, { required: true });
 
     const activationToken = randomBytes(32).toString('base64url');
     await this.tokenStore.set(
@@ -239,10 +250,9 @@ export class AuthService {
       throw new BadRequestException('reset code invalid or expired');
     }
 
-    await this.userStore.updatePassword(
-      user.id,
-      AuthUserStore.hashPassword(dto.newPassword),
-    );
+    const passwordHash = AuthUserStore.hashPassword(dto.newPassword);
+    await this.userStore.updatePassword(user.id, passwordHash);
+    await this.identitySync?.sync({ ...user, passwordHash }, { required: true });
     await this.tokenStore.delete(this.passwordResetCodeKey(email));
     return { reset: true, message: '密码已重置，请使用新密码登录' };
   }
@@ -267,6 +277,8 @@ export class AuthService {
       throw new UnauthorizedException('refresh token type invalid');
     }
 
+    await this.consumeRefreshToken(payload);
+
     // 校验用户仍存在（未来接入禁用状态时在此扩展），且 username 与签发时一致
     const user = await this.userStore.findById(payload.userId);
     if (!user || user.username !== payload.username) {
@@ -274,6 +286,7 @@ export class AuthService {
     }
 
     await this.syncIamMembership(user);
+    await this.identitySync?.sync(user, { required: true });
     return this.issueTokenPair(this.toPayload(user));
   }
 
@@ -301,6 +314,9 @@ export class AuthService {
       // Membership provisioning falls back to `legacy`; the JWT must use the
       // same tenant or AUTH_REQUIRE_TENANT_CONTEXT will reject the new token.
       tenantId: user.tenantId?.trim() || 'legacy',
+      ...(user.departmentIds?.length
+        ? { departmentIds: [...new Set(user.departmentIds)] }
+        : {}),
     };
   }
 
@@ -360,7 +376,12 @@ export class AuthService {
       DEFAULT_REFRESH_EXPIRES_IN;
 
     const accessPayload: JwtPayload = { ...base, type: 'access' };
-    const refreshPayload: JwtPayload = { ...base, type: 'refresh' };
+    const refreshJti = randomUUID();
+    const refreshPayload: JwtPayload = {
+      ...base,
+      type: 'refresh',
+      jti: refreshJti,
+    };
 
     // expiresIn 是环境变量里的自由字符串（如 '2h'/'7d'），与 jsonwebtoken 的
     // StringValue 模板字面量类型不兼容，参照 auth.module.ts 的做法显式断言
@@ -374,6 +395,12 @@ export class AuthService {
       } as unknown as JwtSignOptions),
     ]);
 
+    await this.tokenStore.set(
+      this.refreshTokenKey(refreshJti),
+      base.userId,
+      this.durationToSeconds(refreshExpiresIn),
+    );
+
     return {
       accessToken,
       refreshToken,
@@ -381,6 +408,56 @@ export class AuthService {
       expiresIn: accessExpiresIn,
       refreshTokenExpiresIn: refreshExpiresIn,
     };
+  }
+
+  /** 注销 refresh token；access token 仍按短有效期自然过期。 */
+  async logout(refreshToken: string): Promise<{ revoked: boolean }> {
+    let payload: JwtPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+        secret: this.refreshSecret,
+      });
+    } catch {
+      return { revoked: false };
+    }
+    if (payload.type === 'refresh' && payload.jti != null) {
+      const stored = await this.tokenStore.consume(
+        this.refreshTokenKey(payload.jti),
+      );
+      return { revoked: stored === payload.userId };
+    }
+    return { revoked: false };
+  }
+
+  private async consumeRefreshToken(payload: JwtPayload): Promise<void> {
+    if (payload.jti == null) {
+      throw new UnauthorizedException('refresh token has no rotation id');
+    }
+    const userId = await this.tokenStore.consume(
+      this.refreshTokenKey(payload.jti),
+    );
+    if (userId !== payload.userId) {
+      throw new UnauthorizedException('refresh token already used or revoked');
+    }
+  }
+
+  private refreshTokenKey(jti: string): string {
+    return `auth:refresh:jti:${jti}`;
+  }
+
+  private durationToSeconds(value: string): number {
+    const match = /^(\d+)\s*([smhdw])$/i.exec(value.trim());
+    if (match == null) return 7 * 24 * 3600;
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const multipliers: Record<string, number> = {
+      s: 1,
+      m: 60,
+      h: 3600,
+      d: 86400,
+      w: 604800,
+    };
+    return Math.max(1, amount * (multipliers[unit] ?? 86400));
   }
 
   /** refresh token 签发/验签密钥：JWT_REFRESH_SECRET 未配置时回落 JWT_SECRET */

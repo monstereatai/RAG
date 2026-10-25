@@ -34,4 +34,7 @@ export interface ILLMProvider {
    * 获取底层 ChatModel 实例（用于 withStructuredOutput / stream 等高级能力）
    */
   getModel(): BaseChatModel;
+
+  /** 可选的快速任务模型；未提供时回退到 getModel()。 */
+  getAgenticModel?(): BaseChatModel;
 }

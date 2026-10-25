@@ -100,12 +100,18 @@ export interface IVectorStoreProvider {
     queryVector: number[],
     k: number,
     userId?: string,
+    allowedDocIds?: ReadonlySet<string>,
   ): Promise<VectorSearchHit[]>;
 
   /**
    * 按 docId 删除所有 chunks
    */
   deleteByDocId(docId: string): Promise<void>;
+
+  /**
+   * 按 chunk id 精确删除向量，用于 chunk 级增量更新。
+   */
+  deleteByIds(ids: string[]): Promise<void>;
 
   /**
    * 返回某个文档在向量索引中的分块数量，用于与 PostgreSQL 对账。
@@ -147,6 +153,9 @@ export interface IVectorStoreProvider {
    * 按 docId 删除图片向量（可叠加 user_id 过滤）
    */
   deleteImagesByDocId(docId: string, userId?: string): Promise<void>;
+
+  /** 返回某个文档在图片向量索引中的资产数量。 */
+  countImagesByDocId(docId: string, userId?: string): Promise<number>;
 
   /** 初始化检索描述专用集合，不改动 rag_chunks。 */
   ensureDescriptionCollection(): Promise<void>;

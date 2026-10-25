@@ -17,11 +17,7 @@ import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
 import { MemoryService } from '../memory/memory.service';
 import { ShortTermMemoryService } from '../memory/short-term-memory.service';
-import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
-import {
-  ChatDto,
-  type ChatMode,
-} from './chat.dto';
+import { ChatDto, type ChatMode } from './chat.dto';
 import type { ChatResponse } from './chat.dto';
 import {
   LangfuseProvider,
@@ -30,13 +26,9 @@ import {
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { resolveRoleContext } from './role-presets';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import {
-  detectRetrievalProfile,
-  type RetrievalProfile,
-} from '../../rag/karpathy/context-builder';
+import { type RetrievalProfile } from '../../rag/karpathy/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
-import { createHash } from 'node:crypto';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 import { LlmProvider } from '../../providers/llm/llm.provider';
@@ -49,16 +41,25 @@ import {
   formatUntrustedHistoryContext,
 } from '../../rag/prompts/context-policy';
 import {
-  isObjectiveKnowledgeIntent,
-  QueryIntentRouter,
-} from '../../rag/prompts/query-intent-router';
-import type { QueryIntent } from '../../rag/prompts/query-intent-router';
-import type { ChatEventCallback, RequestContext } from './chat-runtime.types';
-import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
+  adaptStoredQueryPlan,
+  isObjectiveKnowledgePlan,
+  QUERY_PLAN_VERSION,
+  type QueryPlan,
+} from '../../rag/planning/query-plan';
+import { QueryPlannerService } from '../../rag/planning/query-planner.service';
 import {
-  redactAuditText,
-  redactAuditValue,
-} from '../../common/security/audit-redaction';
+  RetrievalPolicyService,
+  type RetrievalExecutionPlan,
+} from '../../rag/planning/retrieval-policy.service';
+import { sanitizeRetrievalProfileConfig } from '../../rag/planning/retrieval-profile-config';
+import type {
+  ChatEventCallback,
+  RequestContext,
+  SupplementalEvidenceLoader,
+} from './chat-runtime.types';
+import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
+import { ChatRunObservabilityService } from './chat-run-observability.service';
+import { ChatQueryLogService } from './chat-query-log.service';
 
 type FinalizableChatResult = {
   answer: string;
@@ -76,7 +77,11 @@ type ChatExecutionOptions = {
   model?: string;
   signal?: AbortSignal;
   tenantId?: string;
+  /** Supplied only by the guarded Admin AG-UI adapter. */
+  trustedAdminPrincipal?: boolean;
+  departmentIds?: string[];
   supplementalEvidence?: RetrievedChunk[];
+  loadSupplementalEvidence?: SupplementalEvidenceLoader;
 };
 
 type AggregatedLlmUsage = LlmUsage & { calls: number };
@@ -88,7 +93,6 @@ export class ChatService {
    * 检索细节下沉到 KarpathyRagService，复杂推理下沉到 AgenticRagService。
    */
   private readonly logger = new Logger(ChatService.name);
-  private lastQueryLogRetentionSweepAt = 0;
 
   constructor(
     private readonly karpathyRagService: KarpathyRagService,
@@ -98,8 +102,9 @@ export class ChatService {
     private readonly memoryService: MemoryService,
     private readonly shortTermMemory: ShortTermMemoryService,
     private readonly langfuseProvider: LangfuseProvider,
-    @InjectRepository(QueryLogEntity)
-    private readonly queryLogRepo: Repository<QueryLogEntity>,
+    private readonly chatQueryLogService: ChatQueryLogService,
+    private readonly queryPlanner: QueryPlannerService,
+    private readonly retrievalPolicy: RetrievalPolicyService,
     @Optional()
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo?: Repository<KnowledgeBaseProfileEntity>,
@@ -110,10 +115,23 @@ export class ChatService {
     @Optional() private readonly runtime?: AgentRuntimeService,
     @Optional() private readonly metrics?: MetricsService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
-    @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
     @Optional() private readonly dingTalk?: DingTalkProvider,
     @Optional() private readonly llmProvider?: LlmProvider,
+    @Optional()
+    private readonly chatRunObservability?: ChatRunObservabilityService,
   ) {}
+
+  /** 兼容现有手动构造；Nest 正常运行时注入专用观测服务。 */
+  private get runObservability(): ChatRunObservabilityService {
+    return (
+      this.chatRunObservability ??
+      new ChatRunObservabilityService(
+        this.langfuseProvider,
+        this.agentRuns,
+        this.dingTalk,
+      )
+    );
+  }
 
   /**
    * 执行一轮问答。
@@ -149,6 +167,17 @@ export class ChatService {
       });
     }
 
+    const configuredTimeoutMs =
+      this.config?.get<number>('agentRun.timeoutMs') ?? 120_000;
+    const timeoutMs = Number.isFinite(configuredTimeoutMs)
+      ? Math.max(1, configuredTimeoutMs)
+      : 120_000;
+    const deadlineAt = Date.now() + timeoutMs;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const requestSignal = executionOptions?.signal
+      ? AbortSignal.any([executionOptions.signal, timeoutSignal])
+      : timeoutSignal;
+
     const startTime = Date.now();
     const actualUsage: AggregatedLlmUsage = {
       inputTokens: 0,
@@ -163,32 +192,14 @@ export class ChatService {
     const runWithUsage = <T>(callback: () => Promise<T>) =>
       this.llmProvider?.runWithUsage?.(collectUsage, callback) ?? callback();
     const mode: ChatMode = req.mode ?? 'auto';
-    let queryIntent: QueryIntent = {
-      intent: 'general' as const,
-      contextMode: 'none' as const,
-      historyPolicy: 'context_only' as const,
-      confidence: 0,
-      standaloneQuery: req.query,
-      multiIntent: false,
-      subQueries: [],
-      action: 'retrieve' as const,
-      sourcePolicy: 'local_only' as const,
-      needsSynthesis: false,
-      requiresGraph: false,
-      targetKbs: ['general'],
-      queryType: 'private_entity' as const,
-      entities: [],
-      filters: {
-        department: null,
-        project: null,
-        timeRange: null,
-        documentType: null,
-      },
-      rewriteQueries: [],
-      reason: '语义路由不可用，保守使用本地检索',
-      ambiguity: { detected: false, confidence: 0, senses: [] },
-    } satisfies QueryIntent;
-    // 插件策略与会话创建互不依赖，先并发完成请求准备。
+    if (req.threadId) {
+      // 会话历史和短期记忆按 threadId 缓存，读取前必须先校验用户与租户归属。
+      await this.conversationService.assertAccessible(
+        req.threadId,
+        userId,
+        executionOptions?.tenantId,
+      );
+    }
     const [pluginComposition, threadId] = await Promise.all([
       req.pluginKeys?.length && this.plugins
         ? this.plugins.resolve(req.pluginKeys, mode)
@@ -202,13 +213,21 @@ export class ChatService {
             executionOptions?.tenantId,
           ),
     ]);
-    // 先准备本轮可见历史，再做唯一一次语义分类。这样路由器看到的上下文
-    // 与后续生成阶段一致，避免先按空历史分类、再按完整历史重新分类。
-    // cd：拿历史记录和摘要（redis或postgre拿）
-    const shortTermContext = await this.shortTermMemory.getContext(threadId);
+    // 规划阶段还不知道最终检索档位，先按最大证据窗口估算，避免历史挤占检索和回答空间。
+    const planningHistoryTokenBudget =
+      this.shortTermMemory.getAvailableHistoryTokenBudget(
+        req.query,
+        10_000,
+        executionOptions?.model,
+      );
+    const messageSafetyCap = this.shortTermMemory.getMessageSafetyCap();
+    const shortTermContext = await this.shortTermMemory.getContext(
+      threadId,
+      messageSafetyCap,
+      planningHistoryTokenBudget,
+    );
     let history = req.history ?? [];
-    // cd 没传入历史，没有从redis拿，从postgre拿
-    if (!req.history) {
+    if (req.threadId || !req.history) {
       history =
         shortTermContext.recentTurns.length > 0
           ? shortTermContext.recentTurns.map((turn) => ({
@@ -225,70 +244,122 @@ export class ChatService {
               executionOptions?.tenantId,
             );
     }
-    // cd 做意图识别：意图定义、判定边界、输出 JSON 格式要求，还带了 few-shot 示例
-    if (this.queryIntentRouter) {
-      queryIntent = await this.queryIntentRouter.classify(req.query, history, {
-        onUsage: collectUsage,
-      });
-    }
-    // 意图只分类一次；长期记忆、相关历史、运行计划和检索配置彼此独立，可并行准备。
+    history = this.shortTermMemory.limitHistoryToTokenBudget(
+      history,
+      planningHistoryTokenBudget,
+    );
+    const hasExplicitRetrievalScope = [
+      req.scope?.projectId,
+      req.scope?.activityId,
+      req.scope?.region,
+      req.scope?.locale,
+      req.scope?.channel,
+      req.scope?.role,
+      req.scope?.documentType,
+    ].some((value) => Boolean(value?.trim()));
+    const queryPlan = await this.queryPlanner.plan(req.query, history, {
+      onUsage: collectUsage,
+      signal: requestSignal,
+      // 用户显式选择 Simple 时优先使用本地 QueryPlan，避免为了规划再调用一次 LLM。
+      // 复杂追问、版本冲突和多问题仍由 QueryPlanner 的保守 fallback 处理。
+      preferLocalFastPath: mode === 'simple',
+    });
     const shouldSearchHistory = Boolean(req.threadId);
-    const objectiveFactQuery = isObjectiveKnowledgeIntent(queryIntent);
-    const [memoryResult, historySearch, runtimePlan, retrievalProfile] =
-      await Promise.all([
-        // Mem0 长期记忆与短期记忆互不依赖，可以并发检索。
-        objectiveFactQuery
-          ? Promise.resolve({
-              userMemories: [],
-              sessionMemories: [],
-              systemMessage: null,
-            })
-          : this.memoryService.searchMemory(req.query, userId, threadId),
-        // 相关历史问答向量检索也不依赖本轮短期窗口，可以并发执行。
-        // cd：跨会话历史记录检索
-        shouldSearchHistory && !objectiveFactQuery
-          ? this.conversationEmbeddingService.searchHistory(
-              req.query,
-              2,
-              userId,
-            )
-          : Promise.resolve([]),
-        this.runtime
-          ? this.runtime.createPlan({ objective: req.query, mode })
-          : Promise.resolve(undefined),
-        this.resolveRetrievalProfile(
-          req.query,
-          req.knowledgeBaseKey ??
-            req.scope?.projectId ??
-            req.scope?.documentType,
-        ),
-      ]);
+    const objectiveFactQuery = isObjectiveKnowledgePlan(queryPlan);
+    const [
+      memoryResult,
+      historySearch,
+      runtimePlan,
+      retrievalProfileOverrides,
+    ] = await Promise.all([
+      objectiveFactQuery || req.useLongTermMemory === false
+        ? Promise.resolve({
+            userMemories: [],
+            sessionMemories: [],
+            systemMessage: null,
+          })
+        : this.memoryService.searchMemory(req.query, userId, threadId),
+      shouldSearchHistory && !objectiveFactQuery
+        ? this.conversationEmbeddingService.searchHistory(
+            req.query,
+            2,
+            userId,
+            executionOptions?.tenantId,
+          )
+        : Promise.resolve([]),
+      this.runtime
+        ? this.runtime.createPlan({
+            objective: req.query,
+            mode,
+            skipSkillMatching: mode === 'simple',
+          })
+        : Promise.resolve(undefined),
+      this.resolveRetrievalProfileOverrides(
+        req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
+      ),
+    ]);
     if (
-      queryIntent.contextMode === 'factual_verification' ||
+      queryPlan.contextMode === 'verification' ||
       (objectiveFactQuery &&
-        !['context_follow_up', 'mixed'].includes(queryIntent.contextMode)) ||
-      (queryIntent.historyPolicy === 'factual_priority' &&
-        queryIntent.contextMode !== 'mixed')
+        !['follow_up', 'mixed'].includes(queryPlan.contextMode))
     ) {
       history = [];
     }
-    // cd：设定还没持久化，先手动塞历史里面
-    if (queryIntent.contextMode === 'conversation_setting') {
-      // 当前这条临时设定尚未持久化，先作为状态投影的最后一条有效陈述，
-      // 确保“鸡”更新为“南瓜”时不会仍回答上一轮状态。
+    if (queryPlan.contextMode === 'setting') {
       history = [...history, { role: 'human', content: req.query }];
     }
-    //cd: 判断是不是玩设定游戏
     const conversationStateUpdate =
       history.length > 0 &&
-      ['conversation_setting', 'context_follow_up'].includes(
-        queryIntent.contextMode,
+      ['setting', 'follow_up'].includes(queryPlan.contextMode);
+    const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
+    const retrievalScope = {
+      ...req.scope,
+      role: roleContext.role,
+    };
+    const executionPlan = this.retrievalPolicy.build(
+      req.query,
+      queryPlan,
+      retrievalScope,
+      retrievalProfileOverrides,
+      {
+        forceLocal: Boolean(
+          executionOptions?.tenantId?.trim() ||
+          req.knowledgeBaseKey?.trim() ||
+          hasExplicitRetrievalScope,
+        ),
+      },
+    );
+    const requestHistoryTokenBudget =
+      this.shortTermMemory.getAvailableHistoryTokenBudget(
+        req.query,
+        executionPlan.profile.contextCharacterBudget,
+        executionOptions?.model,
       );
+    history = this.shortTermMemory.limitHistoryToTokenBudget(
+      history,
+      requestHistoryTokenBudget,
+    );
+    const effectiveRetrievalScope = executionPlan.scope ?? retrievalScope;
+    this.metrics?.observeQueryPlanQueries?.(
+      queryPlan.taskType,
+      executionPlan.queries.length,
+    );
+    const supplementalEvidence = executionOptions?.loadSupplementalEvidence
+      ? (
+          await executionOptions.loadSupplementalEvidence({
+            queryPlan,
+            executionPlan,
+          })
+        ).evidence
+      : executionOptions?.supplementalEvidence;
+    if (supplementalEvidence?.length) {
+      executionPlan.sourcePolicy = 'local_only';
+      executionPlan.scopeRestricted = true;
+      executionPlan.reasonCode = 'internal_evidence_required';
+    }
     const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
-    // cd：最多能调用24次工具
     const maxToolCalls =
       this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
-    // 将意图、权限范围、来源策略和执行预算固定在同一请求上下文，供后续执行引擎复用。
     const requestContext: RequestContext = {
       requestId: randomUUID(),
       userId,
@@ -296,14 +367,11 @@ export class ChatService {
       threadId,
       query: req.query,
       mode,
-      queryIntent,
-      sourcePolicy: conversationStateUpdate
-        ? 'local_only'
-        : queryIntent.sourcePolicy,
-      scope: req.scope,
-      deadlineAt:
-        Date.now() +
-        (this.config?.get<number>('agentRun.timeoutMs') ?? 120_000),
+      queryPlan,
+      executionPlan,
+      sourcePolicy: executionPlan.sourcePolicy,
+      scope: effectiveRetrievalScope,
+      deadlineAt,
       budget: {
         maxSteps,
         maxToolCalls,
@@ -311,13 +379,10 @@ export class ChatService {
         remainingToolCalls: maxToolCalls,
       },
     };
-    // cd：后端产生的threadId前端没传的时候，requestId：后端产生的（用于识别请求来源）
-    // cd：告诉前端会话id和请求id
     onEvent?.({
       type: 'thread',
       data: { threadId, requestId: requestContext.requestId },
     });
-    // cd： 告诉前端路由
     onEvent?.({
       type: 'routing',
       data: {
@@ -326,9 +391,7 @@ export class ChatService {
         requestId: requestContext.requestId,
       },
     });
-    // 执行器产生的正文 token 先暂存，拿到经过引用／证据校验的最终答案后再统一发布。
-    const bufferedTokens: string[] = [];
-    // cd：缓存回答token，
+    const streamedTokenParts: string[] = [];
     const publishEvent: ChatEventCallback = (event) => {
       if (event.type === 'token') {
         const token =
@@ -337,55 +400,53 @@ export class ChatService {
             : event.data == null
               ? ''
               : (JSON.stringify(event.data) ?? '');
-        bufferedTokens.push(token);
+        if (token.length === 0) return;
+        streamedTokenParts.push(token);
+        onEvent?.({ type: 'token', data: token });
         return;
       }
       onEvent?.(event);
     };
-    // cd：发布缓存内容
+    /**
+     * token 已实时透传。若引用门禁最终选择了不同答案，用替换事件纠正
+     * 已经展示的草稿，不能让客户端保留模型中途生成的未审核内容。
+     */
     const flushBufferedTokens = (finalAnswer?: string) => {
-      const streamedAnswer = bufferedTokens.join('');
-      const tokens =
-        finalAnswer !== undefined && streamedAnswer !== finalAnswer
-          ? [finalAnswer]
-          : bufferedTokens;
-      for (const token of tokens) {
-        onEvent?.({ type: 'token', data: token });
+      const streamedAnswer = streamedTokenParts.join('');
+      streamedTokenParts.length = 0;
+      if (finalAnswer === undefined) return;
+      if (streamedAnswer.length === 0) {
+        onEvent?.({ type: 'token', data: finalAnswer });
+        return;
       }
-      bufferedTokens.length = 0;
+      if (streamedAnswer !== finalAnswer) {
+        onEvent?.({ type: 'answer_replace', data: finalAnswer });
+      }
     };
     const memoryMessages: Array<{ role: string; content: string }> = [];
     memoryMessages.push({
       role: 'system',
       content: buildContextPolicyMessage(),
     });
-    const roleContext = resolveRoleContext(req.rolePresetId, req.scope?.role);
     memoryMessages.push({
       role: 'system',
       content: roleContext.systemMessage,
     });
-    const retrievalScope = {
-      ...req.scope,
-      role: roleContext.role,
-    };
-    // cd：约束执行计划的上下文策略
     const retrievalOptions = {
-      scope: retrievalScope,
+      scope: effectiveRetrievalScope,
       requestContext,
-      queryIntent,
-      sourcePolicy: conversationStateUpdate
-        ? 'local_only'
-        : queryIntent.sourcePolicy,
+      queryPlan,
+      executionPlan,
+      sourcePolicy: executionPlan.sourcePolicy,
       tenantId: executionOptions?.tenantId,
-      knowledgeOnly:
-        queryIntent.sourcePolicy === 'local_only' || conversationStateUpdate,
+      trustedAdminPrincipal: executionOptions?.trustedAdminPrincipal,
+      departmentIds: executionOptions?.departmentIds,
+      knowledgeOnly: executionPlan.sourcePolicy === 'local_only',
       allowConversationStateAnswer: conversationStateUpdate,
-      needsSynthesis: queryIntent.needsSynthesis,
-      entities: queryIntent.entities,
-      ...(retrievalProfile ? { profile: retrievalProfile } : {}),
-      ...(executionOptions?.supplementalEvidence?.length
-        ? { supplementalEvidence: executionOptions.supplementalEvidence }
-        : {}),
+      needsSynthesis: queryPlan.taskType === 'synthesis',
+      entities: queryPlan.entities,
+      profile: executionPlan.profile,
+      ...(supplementalEvidence?.length ? { supplementalEvidence } : {}),
       ...(pluginComposition
         ? {
             pluginKeys: pluginComposition.pluginKeys,
@@ -405,9 +466,19 @@ export class ChatService {
       maxDelegations: this.config?.get<number>('agentRun.maxDelegations') ?? 6,
     });
     if (run) {
+      await this.agentRuns?.recordRuntimeEvent(run.id, {
+        eventType: 'query.plan.created',
+        target: 'query_planner',
+        payload: {
+          planVersion: QUERY_PLAN_VERSION,
+          queryPlan,
+          executionPlan: this.executionPlanSummary(executionPlan),
+        },
+      });
       await this.agentGoals?.activate({
         threadId,
         runId: run.id,
+        tenantId: run.tenantId?.trim() || 'legacy',
         actor: mode,
         objective: req.query,
         maxRounds: run.maxSteps,
@@ -419,8 +490,14 @@ export class ChatService {
       });
       await this.agentRuns?.recordRuntimeEvent(run.id, {
         eventType: 'context.policy.selected',
-        target: 'context-engineering',
-        payload: runtimePlan?.contextPolicy,
+        target: 'short-term-memory',
+        payload: {
+          messageSafetyCap,
+          planningHistoryTokenBudget,
+          requestHistoryTokenBudget,
+          loadedTurns: history.length,
+          summaryLoaded: Boolean(shortTermContext.systemMessage),
+        },
       });
       if (runtimePlan?.selectedSkills.length) {
         await this.agentRuns?.recordRuntimeEvent(run.id, {
@@ -432,12 +509,12 @@ export class ChatService {
       await this.agentRuns?.recordRuntimeEvent(run.id, {
         eventType: 'request.snapshot',
         target: 'model_request',
-        payload: this.requestSnapshot({
+        payload: this.runObservability.requestSnapshot({
           query: req.query,
           mode,
           rolePresetId: req.rolePresetId,
           role: roleContext.role ?? 'business-owner',
-          retrievalProfile,
+          retrievalProfile: executionPlan.profile,
           historyCount: history.length,
           memoryEnabled: Boolean(memoryResult.systemMessage),
           threadId,
@@ -501,9 +578,10 @@ export class ChatService {
         // 借由 Agentic 入口绕回状态图。Karpathy 负责固定线性取证和最终校验。
         const answerOptions = {
           ...retrievalOptions,
-          signal: executionOptions?.signal,
+          signal: requestSignal,
           adaptiveVectorSearch: true,
           karpathyDirectAnswer: true,
+          preferFastModel: true,
         };
         const executeSimple = () =>
           onEvent
@@ -526,7 +604,7 @@ export class ChatService {
         result = await runWithUsage(
           () =>
             this.llmProvider?.runWithSignal(
-              executionOptions?.signal,
+              requestSignal,
               executeSimple,
             ) ?? executeSimple(),
         );
@@ -557,7 +635,8 @@ export class ChatService {
         userId,
         threadId,
         startTime,
-        queryIntent,
+        queryPlan,
+        executionPlan,
         run,
         onEvent,
         model: executionOptions?.model,
@@ -590,15 +669,13 @@ export class ChatService {
     const traceEvents: RagTraceEvent[] = [];
     let result;
     try {
-      const agenticExecutionOptions = executionOptions?.signal
-        ? { signal: executionOptions.signal }
-        : undefined;
+      const agenticExecutionOptions = { signal: requestSignal };
       const executeAgentic = () =>
         this.agenticRagService.run(
           req.query,
           mode,
           (event) => {
-            traceEvents.push(this.toTraceEvent(event));
+            traceEvents.push(this.runObservability.toTraceEvent(event));
             if (event.type !== 'final') publishEvent(event);
           },
           history,
@@ -615,7 +692,7 @@ export class ChatService {
       result = await runWithUsage(
         () =>
           this.llmProvider?.runWithSignal(
-            executionOptions?.signal,
+            requestSignal,
             executeAgentic,
           ) ?? executeAgentic(),
       );
@@ -634,7 +711,8 @@ export class ChatService {
       userId,
       threadId,
       startTime,
-      queryIntent,
+      queryPlan,
+      executionPlan,
       run: run ?? undefined,
       onEvent,
       model: executionOptions?.model,
@@ -644,8 +722,6 @@ export class ChatService {
     });
   }
 
-
-
   private async finalizeChatResult(input: {
     result: FinalizableChatResult;
     mode: ChatMode;
@@ -654,7 +730,8 @@ export class ChatService {
     userId: string;
     threadId: string;
     startTime: number;
-    queryIntent: QueryIntent;
+    queryPlan: QueryPlan;
+    executionPlan: RetrievalExecutionPlan;
     run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
     onEvent?: ChatEventCallback;
     model?: string;
@@ -678,13 +755,22 @@ export class ChatService {
       query: input.req.query,
       answer: result.answer,
       tenantId: input.tenantId,
+      historyTokenBudget: this.shortTermMemory.getAvailableHistoryTokenBudget(
+        input.req.query,
+        input.executionPlan.profile.contextCharacterBudget,
+        input.model,
+      ),
       includeUserMessage: input.includeUserMessage,
       skipLongTermMemory:
-        input.queryIntent.contextMode !== 'none' &&
-        input.queryIntent.contextMode !== 'factual_verification',
+        input.queryPlan.contextMode !== 'independent' &&
+        input.queryPlan.contextMode !== 'verification',
+      skipMem0Memory: input.req.useLongTermMemory === false,
       metadata: {
-        contextMode: input.queryIntent.contextMode,
-        entities: input.queryIntent.entities,
+        planVersion: QUERY_PLAN_VERSION,
+        queryPlan: input.queryPlan,
+        executionPlanSummary: this.executionPlanSummary(input.executionPlan),
+        contextMode: input.queryPlan.contextMode,
+        entities: input.queryPlan.entities,
         source: 'session_context',
       },
       answerMetadata: {
@@ -694,11 +780,11 @@ export class ChatService {
         retrievalSufficient: result.retrievalSufficient,
         retrievalReason: result.retrievalReason,
         references: result.references,
-        contextMode: input.queryIntent.contextMode,
+        contextMode: input.queryPlan.contextMode,
       },
     });
 
-    const queryLogId = await this.logQuery({
+    const queryLogId = await this.chatQueryLogService.logQuery({
       userId: input.userId,
       query: input.req.query,
       mode: input.mode,
@@ -754,14 +840,14 @@ export class ChatService {
       }
     }
     if (input.run && input.traceEvents?.length) {
-      await this.recordTraceTimeline(
+      await this.runObservability.recordTraceTimeline(
         input.run.id,
         input.traceEvents,
         input.route,
       );
     }
 
-    const estimatedUsage = this.estimateRunUsage(
+    const estimatedUsage = this.runObservability.estimateRunUsage(
       input.req.query,
       result.answer,
       input.route,
@@ -775,7 +861,7 @@ export class ChatService {
             modelCallsEstimated: input.actualUsage.calls,
             inputTokens: input.actualUsage.inputTokens,
             outputTokens: input.actualUsage.outputTokens,
-            costUsd: this.langfuseProvider.estimateCostUsd(
+            costUsd: this.runObservability.estimateCostUsd(
               input.actualUsage.inputTokens,
               input.actualUsage.outputTokens,
             ),
@@ -802,6 +888,7 @@ export class ChatService {
       await this.agentGoals?.update({
         threadId: input.threadId,
         runId: input.run.id,
+        tenantId: input.run.tenantId?.trim() || 'legacy',
         actor: input.mode,
         objective: input.req.query,
         maxRounds: input.run.maxSteps,
@@ -810,7 +897,7 @@ export class ChatService {
       });
     }
 
-    this.traceAnswer({
+    this.runObservability.traceAnswer({
       userId: input.userId,
       query: input.req.query,
       mode: input.mode,
@@ -860,7 +947,8 @@ export class ChatService {
     userId: string;
     threadId: string;
     startTime: number;
-    queryIntent: QueryIntent;
+    queryPlan: QueryPlan;
+    executionPlan: RetrievalExecutionPlan;
     run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
     onEvent?: ChatEventCallback;
     model?: string;
@@ -878,7 +966,7 @@ export class ChatService {
       paused: true,
       lastNode: input.result.executionState?.lastNode ?? 'humanApprovalNode',
     };
-    await this.addConversationMessage(
+    const userMessageId = await this.addConversationMessage(
       input.threadId,
       'human',
       input.req.query,
@@ -887,16 +975,25 @@ export class ChatService {
         pendingApproval: true,
         runId: input.run?.id,
         mode: input.mode,
-        queryIntent: input.queryIntent,
+        planVersion: QUERY_PLAN_VERSION,
+        queryPlan: input.queryPlan,
+        executionPlanSummary: this.executionPlanSummary(input.executionPlan),
         skipLongTermMemory:
-          input.queryIntent.contextMode !== 'none' &&
-          input.queryIntent.contextMode !== 'factual_verification',
+          input.queryPlan.contextMode !== 'independent' &&
+          input.queryPlan.contextMode !== 'verification',
+        useLongTermMemory: input.req.useLongTermMemory !== false,
         model: input.model,
         checkpointId: executionState.checkpointId,
       },
       input.tenantId,
     );
-    void this.shortTermMemory.addTurn(input.threadId, 'user', input.req.query);
+    void this.shortTermMemory
+      .addTurn(input.threadId, 'user', input.req.query, userMessageId)
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
 
     if (input.run) {
       await this.agentRuns?.recordRuntimeEvent(input.run.id, {
@@ -909,7 +1006,7 @@ export class ChatService {
         },
       });
       if (input.traceEvents?.length) {
-        await this.recordTraceTimeline(
+        await this.runObservability.recordTraceTimeline(
           input.run.id,
           input.traceEvents,
           input.route,
@@ -925,6 +1022,7 @@ export class ChatService {
       await this.agentGoals?.update({
         threadId: input.threadId,
         runId: input.run.id,
+        tenantId: input.run.tenantId?.trim() || 'legacy',
         actor: input.mode,
         objective: input.req.query,
         maxRounds: input.run.maxSteps,
@@ -982,11 +1080,19 @@ export class ChatService {
       throw new BadRequestException('当前运行不在等待审批状态');
     }
 
-    const queryIntent = this.asQueryIntent(metadata.queryIntent);
+    const queryPlan = adaptStoredQueryPlan(
+      metadata.queryPlan ?? metadata.queryIntent,
+      pending.content,
+      metadata.planVersion,
+    );
+    const executionPlan = this.retrievalPolicy.build(
+      pending.content,
+      queryPlan,
+    );
     const mode = this.asChatMode(metadata.mode) ?? 'agentic';
     const traceEvents: RagTraceEvent[] = [];
     const resumeEvent = (event: SseEvent) => {
-      traceEvents.push(this.toTraceEvent(event));
+      traceEvents.push(this.runObservability.toTraceEvent(event));
       if (event.type !== 'final') onEvent?.(event);
     };
     const result = tenantId?.trim()
@@ -1009,15 +1115,28 @@ export class ChatService {
       const rejectionAnswer = feedback?.trim()
         ? `本次草稿未获批准：${feedback.trim()}`
         : '本次草稿未获批准，未写入正式答案。';
-      await this.addConversationMessage(
+      const rejectionMessageId = await this.addConversationMessage(
         threadId,
         'ai',
         rejectionAnswer,
         userId,
-        { approval: 'rejected', runId: run?.id },
+        {
+          approval: 'rejected',
+          runId: run?.id,
+          planVersion: QUERY_PLAN_VERSION,
+          queryPlan,
+          executionPlanSummary: this.executionPlanSummary(executionPlan),
+        },
         tenantId,
       );
-      const queryLogId = await this.logQuery({
+      void this.shortTermMemory
+        .addTurn(threadId, 'assistant', rejectionAnswer, rejectionMessageId)
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      const queryLogId = await this.chatQueryLogService.logQuery({
         userId,
         query: pending.content,
         mode,
@@ -1030,7 +1149,11 @@ export class ChatService {
         references: [],
       });
       if (run) {
-        await this.recordTraceTimeline(run.id, traceEvents, 'agentic');
+        await this.runObservability.recordTraceTimeline(
+          run.id,
+          traceEvents,
+          'agentic',
+        );
         await this.agentRuns?.finish(run.id, {
           route: 'agentic',
           status: 'completed',
@@ -1041,6 +1164,7 @@ export class ChatService {
         await this.agentGoals?.update({
           threadId,
           runId: run.id,
+          tenantId: run.tenantId?.trim() || 'legacy',
           actor: mode,
           objective: pending.content,
           maxRounds: run.maxSteps,
@@ -1085,11 +1209,16 @@ export class ChatService {
       }),
       mode,
       route: 'agentic',
-      req: { query: pending.content, mode },
+      req: {
+        query: pending.content,
+        mode,
+        useLongTermMemory: metadata.useLongTermMemory !== false,
+      },
       userId,
       threadId,
       startTime,
-      queryIntent,
+      queryPlan,
+      executionPlan,
       run: run ?? undefined,
       onEvent,
       model: typeof metadata.model === 'string' ? metadata.model : undefined,
@@ -1102,85 +1231,6 @@ export class ChatService {
       includeUserMessage: false,
       tenantId,
     });
-  }
-
-  async logQuery(params: {
-    userId: string;
-    query: string;
-    mode: string;
-    threadId: string;
-    startTime: number;
-    refused: boolean;
-    citationCount: number;
-    hasAnswer: boolean;
-    answer: string;
-    references: unknown[];
-  }): Promise<string | undefined> {
-    const id = randomUUID();
-    try {
-      await this.queryLogRepo.save(
-        this.queryLogRepo.create({
-          id,
-          userId: params.userId ?? null,
-          query: redactAuditText(params.query).slice(0, 2000),
-          mode: params.mode as 'simple' | 'agentic' | 'auto',
-          threadId: params.threadId ?? null,
-          refused: params.refused,
-          citationCount: params.citationCount,
-          latencyMs: Date.now() - params.startTime,
-          hasAnswer: params.hasAnswer,
-          answer: redactAuditText(params.answer).slice(0, 20_000),
-          retrievalSnapshot: JSON.stringify(
-            redactAuditValue(params.references),
-          ).slice(0, 100_000),
-        }),
-      );
-      this.scheduleQueryLogRetentionSweep();
-      return id;
-    } catch (err) {
-      this.logger.warn(`Failed to log query: ${(err as Error).message}`);
-      return undefined;
-    }
-  }
-
-  /**
-   * ChatService 直接写入 query_logs，不能依赖仅由运营 QueryLogService 触发的清理。
-   * 保持低频触发，清理失败只记录日志，不影响回答主链路。
-   */
-  private scheduleQueryLogRetentionSweep(): void {
-    const now = Date.now();
-    if (now - this.lastQueryLogRetentionSweepAt < 60 * 60 * 1000) return;
-    this.lastQueryLogRetentionSweepAt = now;
-    const repo = this.queryLogRepo as unknown as {
-      createQueryBuilder?: () => {
-        delete: () => unknown;
-      };
-    };
-    if (typeof repo.createQueryBuilder !== 'function') return;
-    void this.purgeExpiredQueryLogs().catch((error: unknown) => {
-      this.logger.warn(
-        `Failed to purge expired query logs: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
-  }
-
-  private async purgeExpiredQueryLogs(): Promise<void> {
-    const retentionDays = Math.min(
-      Math.max(
-        Number(this.config?.get<number>('queryLog.retentionDays') ?? 180),
-        1,
-      ),
-      3650,
-    );
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-    await this.queryLogRepo
-      .createQueryBuilder()
-      .delete()
-      .from(QueryLogEntity)
-      .where('createdAt < :cutoff', { cutoff })
-      .execute();
   }
 
   private createConversation(
@@ -1249,51 +1299,52 @@ export class ChatService {
     query: string;
     answer: string;
     tenantId?: string;
+    historyTokenBudget?: number;
     includeUserMessage?: boolean;
     skipLongTermMemory?: boolean;
+    skipMem0Memory?: boolean;
     metadata?: Record<string, unknown>;
     answerMetadata?: Record<string, unknown>;
   }): Promise<void> {
-    if (input.includeUserMessage !== false) {
-      await this.addConversationMessage(
+    const persistedMessageIds = await this.conversationService.addCompletedTurn({
+      threadId: input.threadId,
+      query: input.query,
+      answer: input.answer,
+      userId: input.userId,
+      tenantId: input.tenantId,
+      queryMetadata: input.metadata,
+      answerMetadata: input.answerMetadata,
+      includeUserMessage: input.includeUserMessage,
+      indexConversation: !input.skipLongTermMemory,
+      persistMem0Memory:
+        !input.skipLongTermMemory &&
+        !input.skipMem0Memory &&
+        this.memoryService.isEnabled(),
+    });
+    void this.shortTermMemory
+      .addTurns(
         input.threadId,
-        'human',
-        input.query,
-        input.userId,
-        input.metadata,
-        input.tenantId,
-      );
-    }
-    await this.addConversationMessage(
-      input.threadId,
-      'ai',
-      input.answer,
-      input.userId,
-      input.answerMetadata,
-      input.tenantId,
-    );
-    if (input.includeUserMessage !== false) {
-      void this.shortTermMemory.addTurn(input.threadId, 'user', input.query);
-    }
-    void this.shortTermMemory.addTurn(
-      input.threadId,
-      'assistant',
-      input.answer,
-    );
-    if (!input.skipLongTermMemory) {
-      void this.memoryService.classifyAndPersist(
-        input.userId,
-        input.threadId,
-        input.query,
-        input.answer,
-      );
-      void this.conversationEmbeddingService.indexConversation(
-        input.threadId,
-        input.query,
-        input.answer,
-        input.userId,
-      );
-    }
+        [
+          ...(input.includeUserMessage !== false
+            ? [{
+                role: 'user' as const,
+                content: input.query,
+                messageId: persistedMessageIds.userMessageId,
+              }]
+            : []),
+          {
+            role: 'assistant' as const,
+            content: input.answer,
+            messageId: persistedMessageIds.assistantMessageId,
+          },
+        ],
+        input.historyTokenBudget,
+      )
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
   }
 
   /**
@@ -1318,236 +1369,34 @@ export class ChatService {
     };
   }
 
-  private async resolveRetrievalProfile(
-    query: string,
+  private async resolveRetrievalProfileOverrides(
     key?: string,
-  ): Promise<RetrievalProfile | undefined> {
-    const detected = detectRetrievalProfile(query);
+  ): Promise<Partial<RetrievalProfile> | undefined> {
     if (!key?.trim()) return undefined;
     const config = await this.knowledgeBaseProfileRepo?.findOne({
       where: { key: key.trim(), workspaceId: 'default', status: 'enabled' },
     });
-    if (!config?.retrievalConfig) return detected;
+    if (!config?.retrievalConfig) return undefined;
     try {
-      const overrides = JSON.parse(
-        config.retrievalConfig,
-      ) as Partial<RetrievalProfile>;
-      return { ...detected, ...overrides, intent: detected.intent };
+      return sanitizeRetrievalProfileConfig(
+        JSON.parse(config.retrievalConfig),
+      );
     } catch {
       this.logger.warn(`Invalid retrievalConfig for knowledge base ${key}`);
-      return detected;
+      return undefined;
     }
   }
 
-  /**
-   * Provider 当前只提供文本结果，不能稳定取得所有模型的真实 usage；这里按实际
-   * 完成的模型节点汇总估算，并把 estimated 标记写入 Run 事件，避免把它当账单。
-   */
-  private estimateRunUsage(
-    query: string,
-    answer: string,
-    route: 'simple' | 'agentic',
-    events?: RagTraceEvent[],
-  ): {
-    modelCallsEstimated: number;
-    inputTokens: number;
-    outputTokens: number;
-    costUsd: number;
-    source: 'estimated_from_completed_nodes';
-  } {
-    const modelNodes = new Set(['queryAugment', 'generate', 'reflection']);
-    const completedModelNodes = (events ?? []).flatMap((event) => {
-      if (event.type !== 'node_timing') return [];
-      const data = this.asRecord(event.data);
-      const node = typeof data?.node === 'string' ? data.node : undefined;
-      return data?.status === 'success' && node && modelNodes.has(node)
-        ? [node]
-        : [];
-    });
-    const modelCallsEstimated =
-      1 + (route === 'agentic' ? completedModelNodes.length : 0);
-    const queryTokens = this.langfuseProvider.estimateTextTokens(query);
-    const answerTokens = this.langfuseProvider.estimateTextTokens(answer);
-    const reflectionCount = completedModelNodes.filter(
-      (node) => node === 'reflection',
-    ).length;
-    const inputTokens =
-      queryTokens * modelCallsEstimated + answerTokens * reflectionCount;
+  private executionPlanSummary(plan: RetrievalExecutionPlan) {
     return {
-      modelCallsEstimated,
-      inputTokens,
-      outputTokens: answerTokens,
-      costUsd: this.langfuseProvider.estimateCostUsd(inputTokens, answerTokens),
-      source: 'estimated_from_completed_nodes',
+      planVersion: plan.planVersion,
+      sourcePolicy: plan.sourcePolicy,
+      queries: plan.queries,
+      useGraph: plan.useGraph,
+      scopeRestricted: plan.scopeRestricted,
+      reasonCode: plan.reasonCode,
+      retrievalIntent: plan.profile.intent,
     };
-  }
-
-  private traceAnswer(params: {
-    userId: string;
-    query: string;
-    mode: string;
-    route: string;
-    model?: string;
-    threadId: string;
-    startTime: number;
-    answer: string;
-    references: Array<{
-      docId: string;
-      chunkIndex: number;
-      totalScore: number;
-    }>;
-    refused: boolean;
-    events?: RagTraceEvent[];
-    usage?: {
-      inputTokens: number;
-      outputTokens: number;
-      costUsd: number;
-      source?: string;
-    };
-  }): void {
-    const inputTokens =
-      params.usage?.inputTokens ??
-      this.langfuseProvider.estimateTextTokens(params.query);
-    const outputTokens =
-      params.usage?.outputTokens ??
-      this.langfuseProvider.estimateTextTokens(params.answer);
-    this.langfuseProvider.traceRagAnswer({
-      userId: params.userId,
-      threadId: params.threadId,
-      query: params.query,
-      answer: params.answer,
-      mode: params.mode,
-      route: params.route,
-      model: params.model,
-      latencyMs: Date.now() - params.startTime,
-      citationCount: params.references.length,
-      refused: params.refused,
-      references: params.references.map((ref) => ({
-        docId: ref.docId,
-        chunkIndex: ref.chunkIndex,
-        totalScore: ref.totalScore,
-      })),
-      events: params.events,
-      inputTokensEstimated: inputTokens,
-      outputTokensEstimated: outputTokens,
-      costUsdEstimated:
-        params.usage?.costUsd ??
-        this.langfuseProvider.estimateCostUsd(inputTokens, outputTokens),
-      usageSource:
-        params.usage?.source === 'provider_reported_tokens'
-          ? 'provider_reported'
-          : 'estimated',
-    });
-    // 钉钉问答推送（fire-and-forget，threadId 白名单过滤）
-    void this.dingTalk?.forwardRagAnswer({
-      threadId: params.threadId,
-      query: params.query,
-      answer: params.answer,
-      mode: params.mode,
-      latencyMs: Date.now() - params.startTime,
-      citationCount: params.references.length,
-    });
-  }
-
-  private requestSnapshot(input: {
-    query: string;
-    mode: ChatMode;
-    rolePresetId?: string;
-    role: string;
-    retrievalProfile?: RetrievalProfile;
-    historyCount: number;
-    memoryEnabled: boolean;
-    threadId: string;
-    pluginKeys?: string[];
-    pluginTools?: string[];
-    runtimePlan?: unknown;
-  }) {
-    const hash = (value: string) =>
-      createHash('sha256').update(value).digest('hex').slice(0, 16);
-    return {
-      schemaVersion: 1,
-      mode: input.mode,
-      threadId: input.threadId,
-      queryHash: hash(input.query),
-      queryLength: input.query.length,
-      role: input.role,
-      rolePresetId: input.rolePresetId ?? null,
-      retrievalProfile: input.retrievalProfile
-        ? {
-            intent: input.retrievalProfile.intent,
-            candidateDepth: input.retrievalProfile.candidateDepth,
-            finalTopK: input.retrievalProfile.finalTopK,
-            neighborWindow: input.retrievalProfile.neighborWindow,
-            contextCharacterBudget:
-              input.retrievalProfile.contextCharacterBudget,
-          }
-        : null,
-      promptVersions: {
-        roleContext: 'role-presets/v1',
-        memory: 'short-term-memory/v1',
-        answer: input.mode === 'simple' ? 'karpathy/v1' : 'agentic/v1',
-      },
-      historyCount: input.historyCount,
-      memoryEnabled: input.memoryEnabled,
-      pluginKeys: input.pluginKeys ?? [],
-      pluginTools: input.pluginTools ?? [],
-      runtimePlan: input.runtimePlan ?? null,
-      toolPolicy:
-        input.mode === 'agentic' || input.mode === 'auto'
-          ? 'tool-registry/v1'
-          : null,
-    };
-  }
-
-  private toTraceEvent(event: SseEvent): RagTraceEvent {
-    return {
-      type: event.type,
-      data: event.type === 'token' ? undefined : event.data,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  private async recordTraceTimeline(
-    runId: string,
-    events: RagTraceEvent[],
-    route: string,
-  ): Promise<void> {
-    for (const event of events) {
-      const data = this.asRecord(event.data);
-      if (event.type === 'routing') {
-        await this.agentRuns?.recordRuntimeEvent(runId, {
-          eventType: 'route.selected',
-          target: typeof data?.route === 'string' ? data.route : route,
-          payload: data,
-        });
-        continue;
-      }
-      if (event.type === 'node_timing') {
-        const node = typeof data?.node === 'string' ? data.node : 'unknown';
-        await this.agentRuns?.updateCurrentNode(runId, node, data);
-        await this.agentRuns?.recordRuntimeEvent(runId, {
-          eventType: data?.success === false ? 'node.failed' : 'node.completed',
-          target: node,
-          payload: data,
-        });
-        continue;
-      }
-      if (
-        [
-          'retrieval',
-          'sufficiency',
-          'web_search',
-          'rerank',
-          'reflection',
-        ].includes(event.type)
-      ) {
-        await this.agentRuns?.recordRuntimeEvent(runId, {
-          eventType: `${event.type}.completed`,
-          target: event.type,
-          payload: data ?? event.data,
-        });
-      }
-    }
   }
 
   private async finishFailedRun(
@@ -1566,6 +1415,7 @@ export class ChatService {
     await this.agentGoals?.update({
       threadId: run.threadId,
       runId: run.id,
+      tenantId: run.tenantId?.trim() || 'legacy',
       actor: mode,
       objective,
       maxRounds: run.maxSteps,
@@ -1584,42 +1434,5 @@ export class ChatService {
     return value === 'simple' || value === 'auto' || value === 'agentic'
       ? value
       : undefined;
-  }
-
-  private asQueryIntent(value: unknown): QueryIntent {
-    const intent = this.asRecord(value);
-    if (
-      intent &&
-      typeof intent.contextMode === 'string' &&
-      typeof intent.sourcePolicy === 'string' &&
-      typeof intent.action === 'string'
-    ) {
-      return intent as unknown as QueryIntent;
-    }
-    return {
-      intent: 'general',
-      contextMode: 'none',
-      historyPolicy: 'context_only',
-      confidence: 0,
-      standaloneQuery: '',
-      multiIntent: false,
-      subQueries: [],
-      action: 'retrieve',
-      sourcePolicy: 'local_only',
-      needsSynthesis: false,
-      requiresGraph: false,
-      targetKbs: ['general'],
-      queryType: 'private_entity',
-      entities: [],
-      filters: {
-        department: null,
-        project: null,
-        timeRange: null,
-        documentType: null,
-      },
-      rewriteQueries: [],
-      reason: '恢复请求缺少原始语义上下文，保守使用本地边界',
-      ambiguity: { detected: false, confidence: 0, senses: [] },
-    };
   }
 }

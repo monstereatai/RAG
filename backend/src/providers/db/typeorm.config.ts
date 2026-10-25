@@ -16,6 +16,7 @@
 
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { join } from 'node:path';
 import { UserEntity } from './entities/user.entity';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
@@ -130,7 +131,7 @@ export default new DataSource({
     FeishuWikiConnectorEntity,
     FeishuWikiItemEntity,
   ],
-  migrations: ['src/migrations/*.ts'],
+  migrations: [join(__dirname, '../../migrations/*{.ts,.js}')],
   synchronize: false, // CLI 模式始终关闭自动同步，使用 migration:run
   logging: true,
 });

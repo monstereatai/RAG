@@ -5,7 +5,7 @@
 # ============================================================
 
 # ---- 构建阶段 ----
-FROM docker.m.daocloud.io/library/node:20.20.2-alpine AS builder
+FROM docker.m.daocloud.io/library/node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./

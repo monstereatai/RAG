@@ -19,6 +19,8 @@ export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 export const OBSIDIAN_NOTE_INGEST_QUEUE = 'obsidian-note-ingest';
 const DOCUMENT_SOURCE_CLEANUP_QUEUE = 'document-processing-source-cleanup';
 const DOCUMENT_PROCESSING_ATTEMPTS = 3;
+// 给对象写入留出安全窗口；进程若在写入后崩溃，job 到期后仍会自动执行。
+const DOCUMENT_UPLOAD_STAGING_DELAY_MS = 5 * 60 * 1000;
 const FAILED_SOURCE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export interface ObsidianNoteIngestJob {
@@ -45,8 +47,10 @@ export interface DocumentProcessingJob {
   userId: string;
   /** 请求侧租户上下文必须随持久队列一起传递，避免 Worker 丢失隔离边界。 */
   tenantId?: string;
+  /** Set only when enqueued by the ServiceTokenGuard-protected Admin bridge. */
+  trustedAdminPrincipal?: boolean;
   filename: string;
-  /** 原始文件已落入对象存储，队列只传 key，避免把大文件塞进 Redis。 */
+  /** 源文件先写入对象存储，队列只传 key，避免把大文件塞进 Redis。 */
   objectKey: string;
   contentType?: string;
   businessMetadata?: DocumentBusinessMetadata;
@@ -62,6 +66,11 @@ export interface DocumentProcessingResult {
 export type DocumentProcessingProcessor = (
   job: DocumentProcessingJob,
 ) => Promise<{ chunkCount?: number } | void>;
+
+export type DocumentProcessingFailureHandler = (
+  job: DocumentProcessingJob,
+  error: Error,
+) => Promise<void>;
 
 export interface PendingDocumentQueueTask {
   taskId: string;
@@ -81,6 +90,7 @@ export class DocumentQueueService implements OnModuleDestroy {
   private readonly cleanupQueue: Queue<{ objectKey: string }>;
   private readonly cleanupWorker: Worker<{ objectKey: string }>;
   private processor: DocumentProcessingProcessor | null = null;
+  private failureHandler: DocumentProcessingFailureHandler | null = null;
   private obsidianProcessor: ObsidianNoteIngestProcessor | null = null;
   readonly enabled: boolean;
   readonly required: boolean;
@@ -203,6 +213,15 @@ export class DocumentQueueService implements OnModuleDestroy {
         `Document processing failed: ${job?.data?.filename}: ${err.message}`,
       );
       if (job && job.attemptsMade >= Number(job.opts.attempts ?? 1)) {
+        if (this.failureHandler) {
+          void this.failureHandler(job.data, err).catch(
+            (handlerError: unknown) => {
+              this.logger.error(
+                `Document failure callback failed for task=${job.data.taskId}: ${handlerError instanceof Error ? handlerError.message : String(handlerError)}`,
+              );
+            },
+          );
+        }
         void this.scheduleSourceObjectCleanup(job.data);
       }
     });
@@ -230,6 +249,10 @@ export class DocumentQueueService implements OnModuleDestroy {
 
   registerProcessor(processor: DocumentProcessingProcessor): void {
     this.processor = processor;
+  }
+
+  registerFailureHandler(handler: DocumentProcessingFailureHandler): void {
+    this.failureHandler = handler;
   }
 
   registerObsidianNoteProcessor(processor: ObsidianNoteIngestProcessor): void {
@@ -302,6 +325,48 @@ export class DocumentQueueService implements OnModuleDestroy {
       jobId: job.taskId,
     });
     return job.taskId;
+  }
+
+  /**
+   * 先持久化完整 job，但延迟执行；上传方写完对象后再 promote。
+   * 若进程在对象写入后崩溃，延迟到期后 Worker 仍能接手该任务。
+   */
+  async stageUpload(job: DocumentProcessingJob): Promise<void> {
+    if (!this.enabled) {
+      throw new Error('Redis/BullMQ is required to stage document uploads.');
+    }
+    await this.queue.add(job.taskId, job, {
+      jobId: job.taskId,
+      delay: DOCUMENT_UPLOAD_STAGING_DELAY_MS,
+    });
+  }
+
+  async promoteUpload(taskId: string): Promise<void> {
+    if (!this.enabled) {
+      throw new Error('Redis/BullMQ is required to promote document uploads.');
+    }
+    const job = await this.queue.getJob(taskId);
+    if (!job) throw new Error(`staged document job not found: ${taskId}`);
+    const state = await job.getState();
+    if (state === 'delayed') {
+      await job.promote();
+    } else if (state !== 'waiting' && state !== 'active') {
+      throw new Error(`staged document job cannot be promoted from ${state}`);
+    }
+  }
+
+  async removeStagedUpload(taskId: string): Promise<void> {
+    if (!this.enabled) return;
+    const job = await this.queue.getJob(taskId);
+    if (!job) return;
+    const state = await job.getState();
+    if (this.isPendingState(state)) await job.remove();
+  }
+
+  async getJobState(taskId: string): Promise<string | null> {
+    if (!this.enabled) return null;
+    const job = await this.queue.getJob(taskId);
+    return job ? job.getState() : null;
   }
 
   /**

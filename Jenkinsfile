@@ -26,24 +26,18 @@ pipeline {
   }
 
   stages {
-    stage('Backend Gate') {
+    stage('Workspace Gate') {
       steps {
-        dir('backend') {
-          sh 'npm ci --omit=optional --legacy-peer-deps'
-          sh 'npm run build'
-          sh 'npx eslint "{src,apps,libs,test}/**/*.ts"'
-          sh 'npm run eval:rag'
-        }
-      }
-    }
-
-    stage('Frontend Gate') {
-      steps {
-        dir('frontend') {
-          sh 'npm ci'
-          sh 'npm run lint'
-          sh 'npm run build'
-        }
+        sh 'corepack enable'
+        sh 'corepack prepare pnpm@10.17.1 --activate'
+        sh 'pnpm install --frozen-lockfile'
+        sh 'pnpm typecheck'
+        sh 'pnpm build'
+        sh 'pnpm test'
+        sh 'pnpm --filter backend run eval:rag'
+        sh 'pnpm --filter backend run eval:golden:check'
+        sh 'pnpm --filter backend run eval:langfuse:check'
+        sh 'pnpm --filter backend run eval:langfuse:dataset'
       }
     }
 

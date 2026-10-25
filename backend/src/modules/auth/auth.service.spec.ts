@@ -42,7 +42,10 @@ describe('AuthService tenant claims', () => {
       jwtService as never,
       configService as never,
       userStore as never,
-      {} as never,
+      {
+        set: jest.fn().mockResolvedValue(undefined),
+        consume: jest.fn(),
+      } as never,
       {} as never,
       iamService as never,
     );

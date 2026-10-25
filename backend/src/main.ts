@@ -1,4 +1,10 @@
 import { NestFactory } from '@nestjs/core';
+import type { INestApplication } from '@nestjs/common';
+import type {
+  NextFunction,
+  Request as ExpressRequest,
+  Response as ExpressResponse,
+} from 'express';
 import { ServerCredentials } from '@grpc/grpc-js';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -11,6 +17,7 @@ import type { Duplex } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { AppModule } from './app.module';
+import { assertRuntimeConfig } from './config/validate-runtime-config';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TencentSpeechProvider } from './providers/speech/tencent-speech.provider';
@@ -79,6 +86,7 @@ function addChineseSwaggerDescriptions(document: {
 }
 
 async function bootstrap() {
+  assertRuntimeConfig();
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api');
@@ -94,6 +102,7 @@ async function bootstrap() {
     }),
   );
   app.useGlobalInterceptors(new TransformInterceptor());
+  configureUploadConcurrencyLimit(app);
   app.useGlobalFilters(new AllExceptionsFilter());
 
   const swaggerConfig = new DocumentBuilder()
@@ -167,6 +176,46 @@ async function bootstrap() {
     app.getHttpServer() as Server,
     app.get(TencentSpeechProvider),
     app.get(SpeechTicketService),
+  );
+}
+
+function configureUploadConcurrencyLimit(app: INestApplication): void {
+  const parsedLimit = Number(process.env.DOCUMENT_UPLOAD_MAX_CONCURRENCY ?? '2');
+  const limit =
+    Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.min(16, Math.floor(parsedLimit))
+      : 2;
+  let activeUploads = 0;
+
+  app.use(
+    (request: ExpressRequest, response: ExpressResponse, next: NextFunction) => {
+      const isDocumentUpload =
+        request.path.endsWith('/documents/upload') ||
+        request.path.endsWith('/documents/upload/async');
+      if (isDocumentUpload === false) {
+        next();
+        return;
+      }
+      if (activeUploads >= limit) {
+        response.status(503).json({
+          code: 503,
+          data: null,
+          message: 'document upload concurrency limit reached; retry later',
+        });
+        return;
+      }
+      activeUploads += 1;
+      let released = false;
+      const release = () => {
+        if (released === false) {
+          released = true;
+          activeUploads = Math.max(0, activeUploads - 1);
+        }
+      };
+      response.once('finish', release);
+      response.once('close', release);
+      next();
+    },
   );
 }
 

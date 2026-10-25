@@ -32,6 +32,9 @@ export class DocumentMetaEntity {
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   indexGeneration!: string | null;
 
+  @Column({ type: 'varchar', length: 24, default: 'standalone' })
+  changeType!: string;
+
   @Column({ type: 'int', default: 0 })
   chunkCount!: number;
 

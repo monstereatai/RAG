@@ -1,4 +1,4 @@
-import { ContextBuilder, detectRetrievalProfile } from './context-builder';
+import { ContextBuilder, retrievalProfileForTaskType } from './context-builder';
 import type { RetrievedChunk } from './karpathy-rag.service';
 
 function chunk(
@@ -20,19 +20,19 @@ function chunk(
 
 describe('ContextBuilder', () => {
   it('selects adaptive retrieval profiles by query intent', () => {
-    expect(detectRetrievalProfile('错误码 40003 是什么').intent).toBe('lookup');
-    expect(detectRetrievalProfile('活动上线怎么验收').intent).toBe('procedure');
-    expect(detectRetrievalProfile('对比台湾服和东南亚服差异').intent).toBe(
+    expect(retrievalProfileForTaskType('lookup').intent).toBe('lookup');
+    expect(retrievalProfileForTaskType('procedure').intent).toBe('procedure');
+    expect(retrievalProfileForTaskType('comparison').intent).toBe(
       'comparison',
     );
-    expect(detectRetrievalProfile('生成完整前后端技术方案').intent).toBe(
+    expect(retrievalProfileForTaskType('synthesis').intent).toBe(
       'generation',
     );
   });
 
   it('deduplicates chunks and enforces document diversity', () => {
     const profile = {
-      ...detectRetrievalProfile('生成测试矩阵'),
+      ...retrievalProfileForTaskType('synthesis'),
       maxChunksPerDocument: 1,
       finalTopK: 3,
     };
@@ -53,7 +53,7 @@ describe('ContextBuilder', () => {
 
   it('keeps stable citations while arranging strong evidence at both ends', () => {
     const profile = {
-      ...detectRetrievalProfile('生成完整方案'),
+      ...retrievalProfileForTaskType('synthesis'),
       finalTopK: 4,
     };
     const result = new ContextBuilder().build(

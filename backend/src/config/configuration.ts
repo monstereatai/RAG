@@ -194,16 +194,42 @@ export const configuration = () => ({
   // LLM（通义千问 + OpenAI 兼容）
   llm: {
     provider: process.env.LLM_PROVIDER ?? 'qwen',
+    // 用于给历史、检索证据和回答输出分配上下文预算；按当前模型服务配置调整。
+    contextWindowTokens: parseInt(
+      process.env.LLM_CONTEXT_WINDOW_TOKENS ?? '32768',
+      10,
+    ),
     gateway: {
       fallbackEnabled: process.env.LLM_GATEWAY_FALLBACK_ENABLED !== 'false',
       fallbackProvider: process.env.LLM_GATEWAY_FALLBACK_PROVIDER ?? '',
     },
+    // 防止模型流长时间不返回时挂死请求；调用层和流式 Runnable 共用该上限。
+    requestTimeoutMs: parseInt(
+      process.env.LLM_REQUEST_TIMEOUT_MS ?? '90000',
+      10,
+    ),
+    // simple 模式下的短问题使用本地 QueryPlan，省掉一次规划模型调用。
+    queryPlannerFastPathEnabled:
+      process.env.QUERY_PLANNER_FAST_PATH_ENABLED !== 'false',
+    circuitBreaker: {
+      failureThreshold: parseInt(
+        process.env.LLM_CIRCUIT_FAILURE_THRESHOLD ?? '2',
+        10,
+      ),
+      openMs: parseInt(process.env.LLM_CIRCUIT_OPEN_MS ?? '30000', 10),
+    },
     qwen: {
       apiKey: process.env.QWEN_API_KEY ?? '',
       baseUrl:
-        process.env.QWEN_BASE_URL ??
+        process.env.QWEN_LLM_BASE_URL ||
+        process.env.QWEN_BASE_URL ||
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
       model: process.env.QWEN_MODEL ?? 'qwen-plus',
+      // 交互式 Agentic 生成使用更快模型；复杂任务可显式改回 qwen-plus。
+      agenticModel:
+        process.env.QWEN_AGENTIC_MODEL ??
+        process.env.QWEN_FAST_MODEL ??
+        'qwen-turbo',
       timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '60000', 10),
       maxTokens: parseInt(process.env.QWEN_MAX_TOKENS ?? '4096', 10),
       maxRetries: parseInt(process.env.QWEN_MAX_RETRIES ?? '2', 10),
@@ -330,11 +356,17 @@ export const configuration = () => ({
       process.env.AGENTIC_WEB_SEARCH_FALLBACK_ENABLED !== 'false',
     rerankEnabled: process.env.AGENTIC_RERANK_ENABLED !== 'false',
     graphSearchEnabled: process.env.AGENTIC_GRAPH_SEARCH_ENABLED !== 'false',
+    // 本地证据门禁和答案契约都已经给出确定结论时，跳过冗余的模型自检调用。
+    sufficiencyFastPathEnabled:
+      process.env.AGENTIC_SUFFICIENCY_FAST_PATH_ENABLED !== 'false',
+    reflectionFastPathEnabled:
+      process.env.AGENTIC_REFLECTION_FAST_PATH_ENABLED !== 'false',
   },
 
   // Agent Run Center 预算门禁（估算成本超过阈值时标记为需审批）
   agentRun: {
     budgetUsd: parseFloat(process.env.AGENT_RUN_BUDGET_USD ?? '0.2'),
+    timeoutMs: parseInt(process.env.AGENT_RUN_TIMEOUT_MS ?? '120000', 10),
     maxSteps: parseInt(process.env.AGENT_RUN_MAX_STEPS ?? '18', 10),
     maxToolCalls: parseInt(process.env.AGENT_RUN_MAX_TOOL_CALLS ?? '24', 10),
     maxDelegations: parseInt(process.env.AGENT_RUN_MAX_DELEGATIONS ?? '6', 10),

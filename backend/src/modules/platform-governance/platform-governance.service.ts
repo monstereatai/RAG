@@ -12,7 +12,8 @@ import { ModelRegistryEntity } from '../../providers/db/entities/model-registry.
 import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
 import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import { detectRetrievalProfile } from '../../rag/karpathy/context-builder';
+import { retrievalProfileForTaskType } from '../../rag/karpathy/context-builder';
+import { sanitizeRetrievalProfileConfig } from '../../rag/planning/retrieval-profile-config';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
 const DEFAULT_MODELS = [
@@ -285,15 +286,24 @@ export class PlatformGovernanceService {
       where: { workspaceId, status: 'enabled' },
       order: { key: 'ASC' },
     });
-    return stored.length > 0
-      ? stored
-      : DEFAULT_KNOWLEDGE_BASE_PROFILES.map((item) => ({
+    const storedByKey = new Map(stored.map((item) => [item.key, item]));
+    const defaultKeys = new Set(
+      DEFAULT_KNOWLEDGE_BASE_PROFILES.map((item) => item.key),
+    );
+    const defaults = DEFAULT_KNOWLEDGE_BASE_PROFILES.map(
+      (item) =>
+        storedByKey.get(item.key) ?? {
           ...item,
           workspaceId,
           status: 'enabled',
           retrievalConfig: '{}',
           syncConfig: '{}',
-        }));
+        },
+    );
+    return [
+      ...defaults,
+      ...stored.filter((item) => !defaultKeys.has(item.key)),
+    ];
   }
 
   async registerKnowledgeBaseProfile(input: {
@@ -336,7 +346,9 @@ export class PlatformGovernanceService {
       input.documentType ?? entity.documentType ?? 'general';
     entity.chunkSize = chunkSize;
     entity.chunkOverlap = chunkOverlap;
-    entity.retrievalConfig = JSON.stringify(input.retrievalConfig ?? {});
+    entity.retrievalConfig = JSON.stringify(
+      sanitizeRetrievalProfileConfig(input.retrievalConfig),
+    );
     entity.syncConfig = JSON.stringify(input.syncConfig ?? {});
     entity.status = 'enabled';
     return this.profileRepo.save(entity);
@@ -345,34 +357,54 @@ export class PlatformGovernanceService {
   async debugRetrieval(
     query: string,
     userId: string,
-    options: { vectorSearch?: boolean; scope?: string; profile?: string } = {},
+    options: {
+      vectorSearch?: boolean;
+      scope?: string;
+      profile?: string;
+      tenantId?: string;
+      roles?: string[];
+      trustedAdminPrincipal?: boolean;
+    } = {},
   ) {
     if (!query?.trim()) throw new BadRequestException('query is required');
+    const startedAt = process.hrtime.bigint();
     const scope = options.scope
       ? (this.parseJson(options.scope, undefined) as
           | Record<string, unknown>
           | undefined)
       : undefined;
-    let profile = detectRetrievalProfile(query.trim());
+    let profile = retrievalProfileForTaskType('lookup');
     if (options.profile) {
       const config = await this.profileRepo.findOne({
         where: {
           key: options.profile,
           workspaceId: 'default',
-          status: 'enabled',
         },
       });
-      if (config)
-        profile = {
-          ...profile,
-          ...(this.parseJson(config.retrievalConfig, {}) as Partial<
-            typeof profile
-          >),
-        };
+      const defaultConfig = DEFAULT_KNOWLEDGE_BASE_PROFILES.find(
+        (item) => item.key === options.profile,
+      );
+      if ((config && config.status !== 'enabled') || (!config && !defaultConfig))
+        throw new NotFoundException(
+          `enabled knowledge base profile ${options.profile} was not found`,
+        );
+      profile = {
+        ...profile,
+        ...sanitizeRetrievalProfileConfig(
+          this.parseJson(config?.retrievalConfig ?? '{}', {}),
+        ),
+      };
     }
     const result = await this.rag.retrieveDetailed(
       query.trim(),
-      { vectorSearch: options.vectorSearch, scope, profile },
+      {
+        vectorSearch: options.vectorSearch,
+        scope,
+        profile,
+        tenantId: options.tenantId,
+        roles: options.roles,
+        trustedAdminPrincipal: options.trustedAdminPrincipal,
+      },
       userId,
     );
     return {
@@ -380,6 +412,7 @@ export class PlatformGovernanceService {
       profile: result.profile,
       diagnostics: result.diagnostics,
       stages: { final: result.chunks, count: result.chunks.length },
+      durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
       generatedAt: new Date().toISOString(),
     };
   }

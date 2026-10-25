@@ -1,4 +1,5 @@
 import type { RetrievedChunk } from './karpathy-rag.service';
+import type { QueryTaskType } from '../planning/query-plan';
 
 export type RetrievalIntent =
   | 'lookup'
@@ -67,19 +68,10 @@ const PROFILES: Record<RetrievalIntent, RetrievalProfile> = {
   },
 };
 
-export function detectRetrievalProfile(query: string): RetrievalProfile {
-  if (/(对比|比较|差异|区别|不同版本|去年|历史版本|地区差异)/.test(query)) {
-    return PROFILES.comparison;
-  }
-  if (
-    /(生成|设计|方案|矩阵|完整清单|技术拆解|怎么规划|有哪些风险)/.test(query)
-  ) {
-    return PROFILES.generation;
-  }
-  if (/(流程|步骤|如何|怎么做|验收|测试|上线|排查|处理)/.test(query)) {
-    return PROFILES.procedure;
-  }
-  return PROFILES.lookup;
+export function retrievalProfileForTaskType(
+  taskType: QueryTaskType,
+): RetrievalProfile {
+  return taskType === 'synthesis' ? PROFILES.generation : PROFILES[taskType];
 }
 
 export class ContextBuilder {
@@ -142,7 +134,10 @@ export class ContextBuilder {
     const contextCharacterBudget = attachmentPrimaries.size
       ? Math.max(
           profile.contextCharacterBudget,
-          Math.min(10_000, profile.contextCharacterBudget + attachmentPrimaries.size * 1_900),
+          Math.min(
+            10_000,
+            profile.contextCharacterBudget + attachmentPrimaries.size * 1_900,
+          ),
         )
       : profile.contextCharacterBudget;
     const selected: RetrievedChunk[] = [];

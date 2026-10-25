@@ -3,7 +3,9 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  OnModuleDestroy,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -26,16 +28,13 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
 import { GraphService } from '../graph/graph.service';
 import { DocumentQueueService } from './document-queue.service';
+import { DocumentTaskService } from './document-task.service';
+import { DocumentImageIngestionService } from './document-image-ingestion.service';
 import { DocumentRetrievalDescriptionService } from './document-retrieval-description.service';
 import {
   detectDocumentKind,
   extractDocumentText,
-  type DocumentImageExtractionOptions,
 } from './document-parser.util';
-import {
-  ImageIndexService,
-  type ImageIndexInput,
-} from '../image-index/image-index.service';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import {
   assessIngestionQuality,
@@ -43,6 +42,7 @@ import {
   DocumentLifecycleStatus,
   GameDocumentMetadata,
   DocumentBusinessMetadata,
+  DocumentChangeType,
   ResolvedDocumentBusinessMetadata,
   GameDocumentType,
   getChunkStrategy,
@@ -71,9 +71,17 @@ export interface UploadResult {
   graphIndexStatus?: GraphIndexStatus;
   graphIndexedAt?: string | null;
   graphIndexError?: string | null;
+  imageIndex?: { indexed: boolean; assetCount: number; reason?: string };
   supersedesDocId?: string | null;
   ingestionQuality?: IngestionQualityReport;
   chunkStrategy?: { chunkSize: number; chunkOverlap: number };
+  incremental?: {
+    added: number;
+    changed: number;
+    removed: number;
+    unchanged: number;
+    embedded: number;
+  };
   metadata?: {
     title: string;
     author: string;
@@ -84,15 +92,55 @@ export interface UploadResult {
   };
 }
 
+type IncrementalChunkDraft = {
+  id: string;
+  content: string;
+  docId: string;
+  chunkIndex: number;
+  userId: string;
+  tenantId: string;
+  contentHash: string;
+  indexGeneration: string;
+  parentChunkId: string | null;
+  headingPath: string[];
+  sectionId: string | null;
+  clauseId: string | null;
+  tableRef: string | null;
+  sourceStart: number | null;
+  sourceEnd: number | null;
+  ruleKey: string | null;
+  changeType: string;
+  supersedesChunkId: string | null;
+  docVersion: string | null;
+  effectiveAt: Date | null;
+  expiredAt: Date | null;
+  sourceAuthority: string;
+  projectId: string | null;
+  activityId: string | null;
+  region: string | null;
+  locale: string | null;
+  channel: string | null;
+  roleScope: string[];
+  documentType: string;
+  lifecycleStatus: string;
+  reviewStatus: string;
+  supersedesDocId: string | null;
+  hypotheticalQuestions: string[];
+};
+
 export interface UploadOptions {
   docId?: string;
   taskId?: string;
   /** 修复已有文档时保留当前 ACL 和人工维护的元数据。 */
   preservePermissions?: boolean;
+  /** 同一 docId 的 chunk 级增量更新；只重算新增/变化的 chunk。 */
+  incrementalUpdate?: boolean;
   preserveExistingMetadata?: boolean;
   awaitImageIndex?: boolean;
   /** Worker／跨服务调用携带的租户上下文；持久化租户列仍需后续迁移补齐。 */
   tenantId?: string;
+  /** Internal Admin bridge only; the caller must be authenticated by ServiceTokenGuard. */
+  trustedAdminPrincipal?: boolean;
   originalBuffer?: Buffer;
   contentType?: string;
   businessMetadata?: DocumentBusinessMetadata;
@@ -117,12 +165,22 @@ type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
  * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
  */
 @Injectable()
-export class DocumentService implements OnModuleInit {
+export class DocumentService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DocumentService.name);
   private readonly pendingMilvusDeletes = new Map<string, number>();
+  private milvusCompensationRestore: Promise<void> | null = null;
+  private milvusCompensationLastScanAt = 0;
+  private milvusCompensationScanTimer?: ReturnType<typeof setInterval>;
+  private readonly milvusDeleteRetryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private readonly pendingGraphIndexes = new Map<string, Promise<void>>();
   private readonly cancelledGraphIndexes = new Set<string>();
-  private readonly milvusCompensationKey = 'rag:index:milvus:delete:pending:v1';
+  private readonly milvusCompensationKeyPrefix =
+    'rag:index:milvus:delete:pending:v2:';
+  private readonly legacyMilvusCompensationKey =
+    'rag:index:milvus:delete:pending:v1';
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -131,8 +189,6 @@ export class DocumentService implements OnModuleInit {
     private readonly docChunkRepo: Repository<DocumentChunkEntity>,
     @InjectRepository(FactConflictEntity)
     private readonly factConflictRepo: Repository<FactConflictEntity>,
-    @InjectRepository(DocumentTaskEntity)
-    private readonly taskRepo: Repository<DocumentTaskEntity>,
     @InjectRepository(DocumentResourceEntity)
     private readonly resourceRepo: Repository<DocumentResourceEntity>,
     private readonly embeddingProvider: EmbeddingProvider,
@@ -144,17 +200,31 @@ export class DocumentService implements OnModuleInit {
     private readonly permissionService: DocumentPermissionService,
     private readonly graphService: GraphService,
     private readonly documentQueueService: DocumentQueueService,
+    private readonly documentTaskService: DocumentTaskService,
     private readonly domainEvents: DomainEventsService,
     private readonly retrievalDescriptionService: DocumentRetrievalDescriptionService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
-    private readonly imageIndexService: ImageIndexService,
+    private readonly documentImageIngestionService: DocumentImageIngestionService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
     @Optional() private readonly redisProvider?: RedisProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.restoreMilvusDeleteCompensations();
+    await this.ensureMilvusDeleteCompensationsRestored();
+    this.milvusCompensationScanTimer = setInterval(() => {
+      void this.ensureMilvusDeleteCompensationsRestored();
+    }, 30_000);
+    this.milvusCompensationScanTimer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.milvusCompensationScanTimer) {
+      clearInterval(this.milvusCompensationScanTimer);
+    }
+    for (const timer of this.milvusDeleteRetryTimers.values()) {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -167,11 +237,15 @@ export class DocumentService implements OnModuleInit {
     userId: string,
     options: UploadOptions = {},
   ): Promise<UploadResult> {
-    await this.permissionService.assertTenant(userId, options.tenantId);
+    await this.permissionService.assertTenant(
+      userId,
+      options.tenantId,
+      options.trustedAdminPrincipal,
+    );
     const docId = options.docId ?? randomUUID();
     const taskId = options.taskId ?? randomUUID();
     this.logger.log(`Uploading ${filename}, docId=${docId}, userId=${userId}`);
-    await this.upsertTask(taskId, {
+    await this.documentTaskService.upsertTask(taskId, {
       docId,
       userId,
       filename,
@@ -288,6 +362,8 @@ export class DocumentService implements OnModuleInit {
         expiredAt:
           this.parseDateOverride(business.expiredAt) ??
           extractedGovernance.expiredAt,
+        changeType: business.changeType ?? 'standalone',
+        validityMonths: business.validityMonths,
       };
       if (!ingestionQuality.accepted) {
         throw new Error('document failed ingestion quality gate');
@@ -324,9 +400,22 @@ export class DocumentService implements OnModuleInit {
         tableRef: structuredChunks[idx]?.tableRef ?? null,
         sourceStart: structuredChunks[idx]?.sourceStart ?? null,
         sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,
+        ruleKey: this.resolveRuleKey(structuredChunks[idx], idx),
+        changeType: governance.changeType ?? 'standalone',
+        supersedesChunkId: null,
         docVersion: indexingGovernance.docVersion,
-        effectiveAt: indexingGovernance.effectiveAt,
-        expiredAt: indexingGovernance.expiredAt,
+        effectiveAt: this.resolveChunkValidity(
+          chunk,
+          governance.effectiveAt,
+          governance.expiredAt,
+          governance.validityMonths,
+        ).effectiveAt,
+        expiredAt: this.resolveChunkValidity(
+          chunk,
+          governance.effectiveAt,
+          governance.expiredAt,
+          governance.validityMonths,
+        ).expiredAt,
         sourceAuthority: indexingGovernance.sourceAuthority,
         projectId: indexingGovernance.projectId,
         activityId: indexingGovernance.activityId,
@@ -341,6 +430,22 @@ export class DocumentService implements OnModuleInit {
         supersedesDocId: indexingGovernance.supersedesDocId,
         hypotheticalQuestions: hypotheticalQuestions[idx],
       }));
+      if (options.incrementalUpdate) {
+        return this.applyIncrementalChunkUpdate({
+          docId,
+          userId,
+          tenantId: options.tenantId ?? 'legacy',
+          filename,
+          content,
+          contentSha256,
+          indexGeneration,
+          chunkDocs,
+          governance,
+          taskId,
+          options,
+        });
+      }
+
       // 标题、摘要等 LLM 元数据是增强信息；失败记为缺失，不阻断正文索引。
       const metadataPromise = options.preserveExistingMetadata
         ? Promise.resolve(null)
@@ -357,6 +462,7 @@ export class DocumentService implements OnModuleInit {
         filename,
         contentHash: contentSha256,
         indexGeneration,
+        changeType: governance.changeType ?? 'standalone',
         chunkCount: chunks.length,
         userId,
         docVersion: indexingGovernance.docVersion,
@@ -385,7 +491,10 @@ export class DocumentService implements OnModuleInit {
 
       // 嵌入提前到并行入库之前：同一条向量既要写 Milvus，也要随 chunk 写入 ES（dense_vector kNN 通道）。
       // 失败语义与原先一致：嵌入失败 => 清理外部索引并整体入库失败（原先对应 allSettled 首分支拒绝路径）。
-      await this.updateTask(taskId, { stage: 'embedding', progress: 30 });
+      await this.documentTaskService.updateTask(taskId, {
+        stage: 'embedding',
+        progress: 30,
+      });
       let vectors: number[][];
       try {
         vectors = await this.embeddingProvider.embedDocuments(chunks);
@@ -393,7 +502,10 @@ export class DocumentService implements OnModuleInit {
         await this.cleanupFailedExternalIndexes(docId, userId);
         throw embeddingErr;
       }
-      await this.updateTask(taskId, { stage: 'vector_index', progress: 50 });
+      await this.documentTaskService.updateTask(taskId, {
+        stage: 'vector_index',
+        progress: 50,
+      });
 
       // 四个必要落点彼此独立，因此并发降低等待时间；allSettled 用于收集所有结果，
       // 以便后续对已成功的外部索引做一致的补偿清理。
@@ -467,13 +579,10 @@ export class DocumentService implements OnModuleInit {
         throw failedIndex.reason;
       }
 
-      // 图片检索是可选索引：PDF/PPTX 内嵌图与原始图片统一替换成完整资产集合。
-      const documentKind = detectDocumentKind(filename);
-      if (
-        this.imageIndexService.isEnabled() &&
-        ['pdf', 'pptx', 'image'].includes(documentKind)
-      ) {
-        const imageIndexPromise = this.indexDocumentImages({
+      // 图片检索是可选索引：文档中的本地图片资产与原始图片统一替换为完整集合。
+      let imageIndexResult: UploadResult['imageIndex'];
+      if (this.documentImageIngestionService.isEnabled()) {
+        const imageIndexPromise = this.documentImageIngestionService.indexDocumentImages({
           docId,
           userId,
           filename,
@@ -486,7 +595,18 @@ export class DocumentService implements OnModuleInit {
             `Image index failed for docId=${docId}: ${err.message}`,
           );
         if (options.awaitImageIndex) {
-          await imageIndexPromise.catch(handleImageIndexError);
+          try {
+            const assetCount = await imageIndexPromise;
+            imageIndexResult = { indexed: true, assetCount };
+          } catch (err) {
+            const error = err as Error;
+            handleImageIndexError(error);
+            imageIndexResult = {
+              indexed: false,
+              assetCount: 0,
+              reason: error.message,
+            };
+          }
         } else {
           void imageIndexPromise.catch(handleImageIndexError);
         }
@@ -497,7 +617,10 @@ export class DocumentService implements OnModuleInit {
       if (graphIndexStatus === 'pending') {
         this.scheduleOptionalGraphIndex({ docId, userId, content });
       }
-      await this.updateTask(taskId, { stage: 'metadata', progress: 80 });
+      await this.documentTaskService.updateTask(taskId, {
+        stage: 'metadata',
+        progress: 80,
+      });
 
       const metadata = await metadataPromise;
       if (metadata) {
@@ -531,7 +654,7 @@ export class DocumentService implements OnModuleInit {
         );
       }
 
-      await this.updateTask(taskId, {
+      await this.documentTaskService.updateTask(taskId, {
         status: 'completed',
         stage: 'completed',
         progress: 100,
@@ -561,6 +684,7 @@ export class DocumentService implements OnModuleInit {
         documentType: governance.documentType,
         lifecycleStatus: governance.lifecycleStatus,
         graphIndexStatus,
+        ...(imageIndexResult ? { imageIndex: imageIndexResult } : {}),
         supersedesDocId: governance.supersedesDocId,
         ingestionQuality,
         chunkStrategy: strategy,
@@ -568,7 +692,7 @@ export class DocumentService implements OnModuleInit {
       };
     } catch (err) {
       const message = (err as Error).message;
-      await this.updateTask(taskId, {
+      await this.documentTaskService.updateTask(taskId, {
         status: 'failed',
         stage: message.startsWith('document quarantined for security review:')
           ? 'security_review'
@@ -597,15 +721,22 @@ export class DocumentService implements OnModuleInit {
         this.karpathyRagService.removeDocChunks(docId, userId),
       ),
     ]);
-    cleanupResults.forEach((result, index) => {
+    for (const [index, result] of cleanupResults.entries()) {
       if (result.status === 'rejected') {
         const target = ['Milvus', 'Elasticsearch', 'Karpathy/BM25'][index];
-        if (index === 0) this.scheduleMilvusDeleteRetry(docId);
+        if (index === 0) {
+          const persisted = await this.scheduleMilvusDeleteRetry(docId);
+          if (!persisted) {
+            this.logger.error(
+              `Milvus compensation is not durable for docId=${docId}; manual reconciliation may be required`,
+            );
+          }
+        }
         this.logger.warn(
           `Failed to compensate ${target} index for docId=${docId}: ${String(result.reason)}`,
         );
       }
-    });
+    }
   }
 
   /** 图谱是非阻塞补充索引：失败不回滚主入库，也不影响版本切换。 */
@@ -681,104 +812,31 @@ export class DocumentService implements OnModuleInit {
     userId: string,
     tenantId?: string,
   ): Promise<DocumentTaskEntity> {
-    const task = this.taskRepo.create({
-      id: randomUUID(),
-      filename,
-      userId,
-      tenantId: tenantId ?? 'legacy',
-      status: 'queued',
-      stage: 'queued',
-      progress: 0,
-    });
-    return this.taskRepo.save(task);
+    return this.documentTaskService.createQueuedTask(filename, userId, tenantId);
   }
 
   getTask(taskId: string, userId: string): Promise<DocumentTaskEntity | null> {
-    return this.taskRepo.findOne({ where: { id: taskId, userId } });
+    return this.documentTaskService.getTask(taskId, userId);
   }
 
-  async getPendingTasks(limit = 50) {
-    const queueResult = await this.documentQueueService.listPending(limit);
-    if (!queueResult.enabled || queueResult.tasks.length === 0) {
-      return queueResult;
-    }
-
-    const taskIds = queueResult.tasks.map((task) => task.taskId);
-    const records = await this.taskRepo.find({ where: { id: In(taskIds) } });
-    const tasksById = new Map(records.map((task) => [task.id, task]));
-    return {
-      enabled: true,
-      tasks: queueResult.tasks.flatMap((queuedTask) => {
-        const task = tasksById.get(queuedTask.taskId);
-        if (!task || task.status !== 'queued') return [];
-        return [
-          {
-            id: task.id,
-            filename: task.filename,
-            status: task.status,
-            queueStatus: queuedTask.status,
-            createdAt:
-              task.createdAt?.toISOString() ??
-              new Date(queuedTask.createdAt).toISOString(),
-          },
-        ];
-      }),
-    };
+  getPendingTasks(limit = 50) {
+    return this.documentTaskService.getPendingTasks(limit);
   }
 
-  async cancelQueuedTask(taskId: string) {
-    const task = await this.taskRepo.findOne({ where: { id: taskId } });
-    if (!task) {
-      return { taskId, cancelled: false, reason: '任务记录不存在。' };
-    }
-    if (task.status !== 'queued') {
-      return {
-        taskId,
-        cancelled: false,
-        reason:
-          task.status === 'processing'
-            ? '任务已处理中，无法中断。'
-            : `任务状态为 ${task.status}，无法取消。`,
-      };
-    }
-
-    const result = await this.documentQueueService.cancelPending(taskId);
-    if (!result.cancelled) return result;
-
-    await this.taskRepo.update(
-      { id: taskId },
-      {
-        status: 'cancelled',
-        stage: 'cancelled',
-        errorMessage:
-          result.cleanupScheduled === false &&
-          result.cleanupCompleted !== true
-            ? result.reason
-            : null,
-        finishedAt: new Date(),
-      },
-    );
-    return result;
+  cancelQueuedTask(taskId: string) {
+    return this.documentTaskService.cancelQueuedTask(taskId);
   }
 
-  async getFailedTasks(limit = 50): Promise<DocumentTaskEntity[]> {
-    return this.taskRepo.find({
-      where: { status: 'failed' },
-      order: { updatedAt: 'DESC' },
-      take: Math.min(Math.max(limit, 1), 100),
-    });
+  getFailedTasks(limit = 50): Promise<DocumentTaskEntity[]> {
+    return this.documentTaskService.getFailedTasks(limit);
   }
 
-  /**
-   * 暴露当前进程可观察到的索引补偿状态。这里不是耐久化 outbox：进程重启
-   * 后内存重试会丢失，接口明确标记 pendingDurable=false，避免运营误以为
-   * 已经具备跨实例恢复能力。
-   */
-  getIndexCompensationStatus() {
+  /** 暴露已恢复到当前进程的补偿记录和本地索引任务状态。 */
+  async getIndexCompensationStatus() {
+    await this.ensureMilvusDeleteCompensationsRestored();
     const pendingMilvus = [...this.pendingMilvusDeletes.entries()].map(
       ([docId, attempts]) => ({ docId, attempts }),
     );
-    void this.restoreMilvusDeleteCompensations();
     return {
       pendingDurable: Boolean(this.redisProvider?.isEnabled()),
       pendingMilvusDeletes: pendingMilvus,
@@ -791,20 +849,7 @@ export class DocumentService implements OnModuleInit {
   }
 
   async retryFailedTask(taskId: string) {
-    const task = await this.taskRepo.findOne({ where: { id: taskId } });
-    if (!task || task.status !== 'failed')
-      return { taskId, retried: false, reason: 'failed task not found' };
-    const result = await this.documentQueueService.retryFailed(taskId);
-    if (result.retried) {
-      await this.updateTask(taskId, {
-        status: 'queued',
-        stage: 'retry_queued',
-        progress: 0,
-        errorMessage: null,
-        finishedAt: null,
-      });
-    }
-    return result;
+    return this.documentTaskService.retryFailedTask(taskId);
   }
 
   async hasDoc(docId: string, userId: string): Promise<boolean> {
@@ -816,8 +861,15 @@ export class DocumentService implements OnModuleInit {
     userId: string,
     tenantId?: string,
     roles: string[] = [],
+    trustedAdminPrincipal = false,
   ): Promise<Set<string>> {
-    return this.permissionService.getAllowedDocIds(userId, roles, [], tenantId);
+    return this.permissionService.getAllowedDocIds(
+      userId,
+      roles,
+      [],
+      tenantId,
+      trustedAdminPrincipal,
+    );
   }
 
   /** Rebuild the optional image index from the saved source without changing document chunks or ACL. */
@@ -826,7 +878,7 @@ export class DocumentService implements OnModuleInit {
     assetCount: number;
     reason?: string;
   }> {
-    if (!this.imageIndexService.isEnabled()) {
+    if (!this.documentImageIngestionService.isEnabled()) {
       return {
         indexed: false,
         assetCount: 0,
@@ -850,13 +902,6 @@ export class DocumentService implements OnModuleInit {
     }
 
     const kind = detectDocumentKind(original.filename);
-    if (!['pdf', 'pptx', 'image'].includes(kind)) {
-      return {
-        indexed: true,
-        assetCount: 0,
-        reason: 'document has no supported image assets',
-      };
-    }
     try {
       const buffer = await this.objectStorageProvider.getObject(
         original.objectKey,
@@ -866,10 +911,13 @@ export class DocumentService implements OnModuleInit {
         kind,
         undefined,
         kind === 'pdf' || kind === 'pptx'
-          ? this.buildImageExtractionOptions(docId, document.userId ?? 'system')
+          ? this.documentImageIngestionService.buildImageExtractionOptions(
+              docId,
+              document.userId ?? 'system',
+            )
           : undefined,
       );
-      const assetCount = await this.indexDocumentImages({
+      const assetCount = await this.documentImageIngestionService.indexDocumentImages({
         docId,
         userId: document.userId ?? 'system',
         filename: original.filename,
@@ -888,18 +936,7 @@ export class DocumentService implements OnModuleInit {
   }
 
   async markTaskFailed(taskId: string, errorMessage: string): Promise<void> {
-    await this.updateTask(taskId, {
-      status: 'failed',
-      stage: 'failed',
-      progress: 100,
-      errorMessage,
-      finishedAt: new Date(),
-    });
-    // 钉钉告警（fire-and-forget）
-    void this.dingTalk?.notifyAlert(
-      `document.failed:${taskId}`,
-      `**文档入库任务失败**（taskId：\`${taskId}\`）\n\n错误：${errorMessage.slice(0, 300)}`,
-    );
+    return this.documentTaskService.markTaskFailed(taskId, errorMessage);
   }
 
   setPermissions(docId: string, subjects: PermissionSubject[]): Promise<void> {
@@ -932,7 +969,10 @@ export class DocumentService implements OnModuleInit {
         buffer,
         detectDocumentKind(original.filename),
         undefined,
-        this.buildImageExtractionOptions(docId, userId),
+        this.documentImageIngestionService.buildImageExtractionOptions(
+          docId,
+          userId,
+        ),
       )
     )
       .replace(/\0/g, '')
@@ -989,12 +1029,6 @@ export class DocumentService implements OnModuleInit {
       `Deleting doc ${docId} (${meta.filename}) for userId=${userId}`,
     );
 
-    // 描述向量清理失败时停止删除原文，避免留下无法追溯的检索入口。
-    await this.retrievalDescriptionService.deleteForDocument({
-      tenantId: meta.tenantId ?? 'legacy',
-      docId,
-    });
-
     // 1. 删除 Milvus 中的 chunks
     try {
       await this.vectorStoreProvider.deleteByDocId(docId);
@@ -1002,8 +1036,19 @@ export class DocumentService implements OnModuleInit {
       this.logger.warn(
         `Milvus delete failed for docId=${docId}: ${(err as Error).message}`,
       );
-      this.scheduleMilvusDeleteRetry(docId);
+      const persisted = await this.scheduleMilvusDeleteRetry(docId);
+      if (!persisted) {
+        throw new ServiceUnavailableException(
+          'Milvus 删除失败，补偿任务未能可靠保存；文档保留，请稍后重试。',
+        );
+      }
     }
+
+    // 描述向量清理失败时停止删除原文，避免留下无法追溯的检索入口。
+    await this.retrievalDescriptionService.deleteForDocument({
+      tenantId: meta.tenantId ?? 'legacy',
+      docId,
+    });
 
     // 2. 删除 BM25 内存索引 + JSON 持久化更新
     this.karpathyRagService.removeDocChunks(docId, userId);
@@ -1013,7 +1058,7 @@ export class DocumentService implements OnModuleInit {
 
     // 3.5 文搜图：清理图片向量库（未启用/失败不阻塞删除主流程）
     try {
-      await this.imageIndexService.deleteByDoc(docId, userId);
+      await this.documentImageIngestionService.deleteByDoc(docId, userId);
     } catch (err) {
       this.logger.warn(
         `Image index delete failed for docId=${docId}: ${(err as Error).message}`,
@@ -1079,136 +1124,6 @@ export class DocumentService implements OnModuleInit {
     );
   }
 
-  private async indexDocumentImages(params: {
-    docId: string;
-    userId: string;
-    filename: string;
-    content: string;
-    originalUrl: string | null;
-    originalBuffer?: Buffer;
-  }): Promise<number> {
-    const kind = detectDocumentKind(params.filename);
-    let assets: ImageIndexInput[] = [];
-
-    if (kind === 'image' && params.originalBuffer) {
-      const objectKey = this.getImageObjectKey(params.originalUrl);
-      assets = [
-        {
-          docId: params.docId,
-          userId: params.userId,
-          url: params.originalUrl ?? undefined,
-          embeddingBase64: params.originalBuffer.toString('base64'),
-          mimeType: resolveImageMimeType(params.filename),
-          assetHash: createHash('sha256')
-            .update(params.originalBuffer)
-            .digest('hex'),
-          assetKey: params.filename,
-          meta: {
-            filename: params.filename,
-            placement: 'original',
-            assetKey: objectKey?.split('/').at(-1),
-            sourceDocumentId: params.docId,
-          },
-        },
-      ];
-    } else if (['pdf', 'pptx'].includes(kind)) {
-      const matches: Array<{
-        url: string;
-        alt: string;
-        placement: string;
-      }> = [];
-      let placement = 'document';
-      for (const line of params.content.split(/\r?\n/)) {
-        const pageHeading = /^##\s+第\s+(\d+)\s+页/.exec(line);
-        const slideHeading = /^##\s+Slide\s+(\d+)/i.exec(line);
-        const frameHeading = /^##\s+画面要点/.exec(line);
-        if (pageHeading) placement = `page-${pageHeading[1]}`;
-        else if (slideHeading) placement = `slide-${slideHeading[1]}`;
-        else if (frameHeading) placement = 'video-frame';
-
-        const imagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+[^)]*)?\)/g;
-        for (const match of line.matchAll(imagePattern)) {
-          matches.push({
-            alt: match[1].trim(),
-            url: match[2],
-            placement,
-          });
-        }
-      }
-
-      const sanitizedUserId =
-        params.userId.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') ||
-        'unknown';
-      const ownerPrefix = `documents/${sanitizedUserId}/`;
-      for (const [index, match] of matches.entries()) {
-        const objectKey = this.getImageObjectKey(match.url);
-        if (
-          !objectKey ||
-          objectKey.split('/').includes('..') ||
-          !objectKey.startsWith(ownerPrefix)
-        ) {
-          continue;
-        }
-        const buffer = await this.objectStorageProvider.getObject(objectKey);
-        const assetKey = objectKey.split('/images/').at(-1) ?? objectKey;
-        assets.push({
-          docId: params.docId,
-          userId: params.userId,
-          url: match.url,
-          embeddingBase64: buffer.toString('base64'),
-          mimeType: resolveImageMimeType(assetKey),
-          assetHash: createHash('sha256').update(buffer).digest('hex'),
-          assetKey,
-          meta: {
-            description: match.alt,
-            filename: assetKey.split('/').at(-1),
-            placement: match.placement,
-            ...(match.placement.startsWith('page-')
-              ? { pageNumber: Number(match.placement.slice(5)) }
-              : {}),
-            ...(match.placement.startsWith('slide-')
-              ? { slideNumber: Number(match.placement.slice(6)) }
-              : {}),
-            assetKey,
-            assetIndex: index + 1,
-            sourceDocumentId: params.docId,
-          },
-        });
-      }
-    }
-
-    await this.imageIndexService.replaceDocumentImages(
-      params.docId,
-      params.userId,
-      assets,
-    );
-    return assets.length;
-  }
-
-  private getImageObjectKey(url: string | null | undefined): string | null {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url, 'http://localhost');
-      if (parsed.pathname !== '/api/v1/documents/assets/image') return null;
-      return parsed.searchParams.get('key');
-    } catch {
-      return null;
-    }
-  }
-
-  private buildImageExtractionOptions(
-    docId: string,
-    userId: string,
-  ): DocumentImageExtractionOptions {
-    return {
-      storage: this.objectStorageProvider,
-      docId,
-      ownerUserId: userId,
-      urlResolver: (stored) =>
-        `/api/v1/documents/assets/image?key=${encodeURIComponent(stored.key)}`,
-    };
-  }
-
   private proxyResourceUrlIfImage(
     key: string,
     fallbackUrl: string,
@@ -1237,97 +1152,186 @@ export class DocumentService implements OnModuleInit {
     return getChunkStrategy(business.documentType);
   }
 
-  private async upsertTask(
-    taskId: string,
-    patch: Partial<DocumentTaskEntity>,
-  ): Promise<void> {
-    const existing = await this.taskRepo.findOne({ where: { id: taskId } });
-    if (existing) {
-      await this.taskRepo.update({ id: taskId }, patch);
-      return;
+  private async scheduleMilvusDeleteRetry(docId: string): Promise<boolean> {
+    if (this.milvusDeleteRetryTimers.has(docId)) {
+      return this.persistMilvusDeleteCompensation(docId);
     }
-    await this.taskRepo.save(
-      this.taskRepo.create({
-        id: taskId,
-        filename: patch.filename ?? 'unknown',
-        userId: patch.userId ?? null,
-        docId: patch.docId ?? null,
-        status: patch.status ?? 'queued',
-        stage: patch.stage ?? 'queued',
-        progress: patch.progress ?? 0,
-        startedAt: patch.startedAt ?? null,
-      }),
-    );
-  }
 
-  private async updateTask(
-    taskId: string,
-    patch: Partial<DocumentTaskEntity>,
-  ): Promise<void> {
-    await this.taskRepo.update({ id: taskId }, patch);
-  }
-
-  private scheduleMilvusDeleteRetry(docId: string): void {
     const attempts = this.pendingMilvusDeletes.get(docId) ?? 0;
     if (attempts >= 5) {
       this.logger.warn(
         `Milvus delete retry exhausted for docId=${docId}; vector hits remain guarded by active docId filtering`,
       );
-      return;
+      return false;
     }
 
     const nextAttempt = attempts + 1;
     this.pendingMilvusDeletes.set(docId, nextAttempt);
-    void this.persistMilvusDeleteCompensations();
-    const delayMs = Math.min(5_000 * 2 ** attempts, 60_000);
-
-    const timer = setTimeout(() => {
-      void this.retryMilvusDelete(docId);
-    }, delayMs);
-    timer.unref?.();
+    const persisted = await this.persistMilvusDeleteCompensation(docId);
+    this.armMilvusDeleteRetry(docId, nextAttempt);
+    return persisted;
   }
 
   private async retryMilvusDelete(docId: string): Promise<void> {
     try {
       await this.vectorStoreProvider.deleteByDocId(docId);
-      this.pendingMilvusDeletes.delete(docId);
-      void this.persistMilvusDeleteCompensations();
-      this.logger.log(`Milvus delete retry succeeded for docId=${docId}`);
     } catch (err) {
       this.logger.warn(
         `Milvus delete retry failed for docId=${docId}: ${
           (err as Error).message
         }`,
       );
-      this.scheduleMilvusDeleteRetry(docId);
+      await this.scheduleMilvusDeleteRetry(docId);
+      return;
+    }
+
+    this.pendingMilvusDeletes.delete(docId);
+    if (!(await this.clearMilvusDeleteCompensation(docId))) {
+      this.logger.warn(
+        `Milvus delete succeeded but compensation state could not be cleared for docId=${docId}; a later retry is safe`,
+      );
+    }
+    this.logger.log(`Milvus delete retry succeeded for docId=${docId}`);
+  }
+
+  private milvusDeleteRetryKey(docId: string): string {
+    return `${this.milvusCompensationKeyPrefix}${Buffer.from(docId).toString('base64url')}`;
+  }
+
+  private async persistMilvusDeleteCompensation(
+    docId: string,
+  ): Promise<boolean> {
+    if (!this.redisProvider?.isEnabled()) return false;
+    const attempts = this.pendingMilvusDeletes.get(docId);
+    if (attempts == null) return false;
+    const saved = await this.redisProvider.setRequired(
+      this.milvusDeleteRetryKey(docId),
+      JSON.stringify({ docId, attempts }),
+    );
+    if (!saved) {
+      this.logger.warn(
+        `Failed to persist Milvus delete compensation for docId=${docId}`,
+      );
+    }
+    return saved;
+  }
+
+  private async clearMilvusDeleteCompensation(docId: string): Promise<boolean> {
+    if (!this.redisProvider?.isEnabled()) return false;
+    try {
+      await this.redisProvider.delRequired(this.milvusDeleteRetryKey(docId));
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to clear Milvus delete compensation for docId=${docId}: ${(error as Error).message}`,
+      );
+      return false;
     }
   }
 
-  private async persistMilvusDeleteCompensations(): Promise<void> {
+  private armMilvusDeleteRetry(docId: string, attempts: number): void {
+    if (this.milvusDeleteRetryTimers.has(docId) || attempts >= 5) return;
+    const delayMs = Math.min(5_000 * 2 ** Math.max(0, attempts - 1), 60_000);
+    const timer = setTimeout(() => {
+      this.milvusDeleteRetryTimers.delete(docId);
+      void this.retryMilvusDelete(docId);
+    }, delayMs);
+    timer.unref?.();
+    this.milvusDeleteRetryTimers.set(docId, timer);
+  }
+
+  private async ensureMilvusDeleteCompensationsRestored(): Promise<void> {
     if (!this.redisProvider?.isEnabled()) return;
-    const saved = await this.redisProvider.setRequired(
-      this.milvusCompensationKey,
-      JSON.stringify([...this.pendingMilvusDeletes.entries()]),
-    );
-    if (!saved) {
-      this.logger.warn('Failed to persist Milvus delete compensation state');
+    if (this.milvusCompensationRestore) {
+      await this.milvusCompensationRestore;
+      return;
     }
+    if (Date.now() - this.milvusCompensationLastScanAt < 30_000) return;
+
+    if (!this.milvusCompensationRestore) {
+      this.milvusCompensationRestore = this.restoreMilvusDeleteCompensations()
+        .then(() => {
+          this.milvusCompensationLastScanAt = Date.now();
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Failed to restore Milvus delete compensations: ${(error as Error).message}`,
+          );
+        })
+        .finally(() => {
+          this.milvusCompensationRestore = null;
+        });
+    }
+    await this.milvusCompensationRestore;
   }
 
   private async restoreMilvusDeleteCompensations(): Promise<void> {
     if (!this.redisProvider?.isEnabled()) return;
-    const raw = await this.redisProvider.get(this.milvusCompensationKey);
-    if (!raw) return;
-    try {
-      const entries = JSON.parse(raw) as Array<[string, number]>;
-      for (const [docId, attempts] of entries) {
-        if (!docId || !Number.isFinite(attempts)) continue;
-        this.pendingMilvusDeletes.set(docId, Math.max(0, attempts));
-        this.scheduleMilvusDeleteRetry(docId);
+    await this.migrateLegacyMilvusDeleteCompensations();
+    const keys = await this.redisProvider.scanRequired(
+      `${this.milvusCompensationKeyPrefix}*`,
+    );
+    for (const key of keys) {
+      const raw = await this.redisProvider.getRequired(key);
+      if (!raw) continue;
+      try {
+        const entry = JSON.parse(raw) as { docId?: string; attempts?: number };
+        if (
+          typeof entry.docId !== 'string' ||
+          !entry.docId ||
+          !Number.isFinite(entry.attempts) ||
+          Number(entry.attempts) < 0
+        ) {
+          this.logger.warn(
+            `Ignoring invalid Milvus compensation record: ${key}`,
+          );
+          continue;
+        }
+        const attempts = Math.trunc(Number(entry.attempts));
+        this.pendingMilvusDeletes.set(entry.docId, attempts);
+        this.armMilvusDeleteRetry(entry.docId, attempts);
+      } catch (error) {
+        this.logger.warn(
+          `Ignoring unreadable Milvus compensation record ${key}: ${(error as Error).message}`,
+        );
       }
-    } catch (error) {
+    }
+  }
+
+  private async migrateLegacyMilvusDeleteCompensations(): Promise<void> {
+    if (!this.redisProvider?.isEnabled()) return;
+    const raw = await this.redisProvider.getRequired(
+      this.legacyMilvusCompensationKey,
+    );
+    if (!raw) return;
+
+    const entries = JSON.parse(raw) as unknown;
+    if (!Array.isArray(entries)) {
+      throw new Error('Legacy Milvus compensation state is invalid');
+    }
+    for (const entry of entries) {
+      if (
+        !Array.isArray(entry) ||
+        typeof entry[0] !== 'string' ||
+        !entry[0] ||
+        !Number.isFinite(entry[1]) ||
+        Number(entry[1]) < 0
+      ) {
+        throw new Error('Legacy Milvus compensation entry is invalid');
+      }
+      await this.redisProvider.setIfAbsentRequired(
+        this.milvusDeleteRetryKey(entry[0]),
+        JSON.stringify({ docId: entry[0], attempts: Math.trunc(entry[1]) }),
+      );
+    }
+
+    const removed = await this.redisProvider.compareAndDeleteRequired(
+      this.legacyMilvusCompensationKey,
+      raw,
+    );
+    if (!removed) {
       this.logger.warn(
-        `Failed to restore Milvus delete compensations: ${(error as Error).message}`,
+        'Legacy Milvus compensation state changed during migration and was retained for the next recovery pass',
       );
     }
   }
@@ -1335,9 +1339,50 @@ export class DocumentService implements OnModuleInit {
   async getDocMeta(
     docId: string,
     userId: string,
+    tenantId?: string,
   ): Promise<DocMeta | undefined> {
-    const meta = await this.docMetaRepo.findOne({ where: { docId, userId } });
-    if (!meta) return undefined;
+    if (tenantId?.trim()) {
+      const allowedDocIds =
+        await this.permissionService.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          tenantId,
+        );
+      if (allowedDocIds.has(docId) === false) return undefined;
+    }
+    const meta = tenantId?.trim()
+      ? await this.docMetaRepo.findOne({ where: { docId } })
+      : await this.docMetaRepo.findOne({ where: { docId, userId } });
+    if (meta == null) return undefined;
+    return this.toDocMeta(meta);
+  }
+
+  async listDocs(userId: string, tenantId?: string): Promise<DocMeta[]> {
+    let list: DocumentMetaEntity[];
+    if (tenantId?.trim()) {
+      const allowedDocIds =
+        await this.permissionService.getAllowedDocIds(
+          userId,
+          [],
+          [],
+          tenantId,
+        );
+      if (allowedDocIds.size === 0) return [];
+      list = await this.docMetaRepo.find({
+        where: { docId: In([...allowedDocIds]) },
+        order: { createdAt: 'DESC' },
+      });
+    } else {
+      list = await this.docMetaRepo.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
+    }
+    return list.map((meta) => this.toDocMeta(meta, true));
+  }
+
+  private toDocMeta(meta: DocumentMetaEntity, includeMetadata = false): DocMeta {
     return {
       docId: meta.docId,
       filename: meta.filename,
@@ -1371,60 +1416,20 @@ export class DocumentService implements OnModuleInit {
             chunkOverlap: number;
           })
         : undefined,
+      metadata:
+        includeMetadata && meta.title
+          ? {
+              title: meta.title,
+              author: meta.author || '未知',
+              summary: meta.summary || '',
+              keywords: meta.keywords
+                ? (JSON.parse(meta.keywords) as string[])
+                : [],
+              language: meta.language || '未知',
+              category: meta.category || '其他',
+            }
+          : undefined,
     };
-  }
-
-  async listDocs(userId: string): Promise<DocMeta[]> {
-    const list = await this.docMetaRepo.find({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    });
-    return list.map((meta) => ({
-      docId: meta.docId,
-      filename: meta.filename,
-      chunkCount: meta.chunkCount,
-      createdAt: meta.createdAt.toISOString(),
-      docVersion: meta.docVersion,
-      effectiveAt: meta.effectiveAt?.toISOString() ?? null,
-      expiredAt: meta.expiredAt?.toISOString() ?? null,
-      sourceAuthority: meta.sourceAuthority,
-      projectId: meta.projectId,
-      activityId: meta.activityId,
-      region: meta.region,
-      locale: meta.locale,
-      channel: meta.channel,
-      roleScope: meta.roleScope ? (JSON.parse(meta.roleScope) as string[]) : [],
-      documentType: meta.documentType as GameDocumentType,
-      lifecycleStatus: meta.lifecycleStatus as DocumentLifecycleStatus,
-      reviewStatus: meta.reviewStatus,
-      reviewedAt: meta.reviewedAt?.toISOString() ?? null,
-      reviewComment: meta.reviewComment,
-      graphIndexStatus: meta.graphIndexStatus,
-      graphIndexedAt: meta.graphIndexedAt?.toISOString() ?? null,
-      graphIndexError: meta.graphIndexError,
-      supersedesDocId: meta.supersedesDocId,
-      ingestionQuality: meta.ingestionQuality
-        ? (JSON.parse(meta.ingestionQuality) as IngestionQualityReport)
-        : undefined,
-      chunkStrategy: meta.chunkStrategy
-        ? (JSON.parse(meta.chunkStrategy) as {
-            chunkSize: number;
-            chunkOverlap: number;
-          })
-        : undefined,
-      metadata: meta.title
-        ? {
-            title: meta.title,
-            author: meta.author || '未知',
-            summary: meta.summary || '',
-            keywords: meta.keywords
-              ? (JSON.parse(meta.keywords) as string[])
-              : [],
-            language: meta.language || '未知',
-            category: meta.category || '其他',
-          }
-        : undefined,
-    }));
   }
 
   private buildHypotheticalQuestions(
@@ -1442,6 +1447,371 @@ export class DocumentService implements OnModuleInit {
     return questions.filter(
       (question, index) => index === 0 || text.length > 80,
     );
+  }
+
+  private async applyIncrementalChunkUpdate(input: {
+    docId: string;
+    userId: string;
+    tenantId: string;
+    filename: string;
+    content: string;
+    contentSha256: string;
+    indexGeneration: string;
+    chunkDocs: IncrementalChunkDraft[];
+    governance: DocumentGovernanceMetadata;
+    taskId: string;
+    options: UploadOptions;
+  }): Promise<UploadResult> {
+    const existing = await this.docMetaRepo.findOne({
+      where: { docId: input.docId, userId: input.userId },
+    });
+    if (existing === null) {
+      throw new Error(
+        'incremental update requires an existing document with the same docId',
+      );
+    }
+    const oldChunks = await this.docChunkRepo.find({
+      where: { docId: input.docId, userId: input.userId },
+      order: { chunkIndex: 'ASC' },
+    });
+    if (oldChunks.length === 0) {
+      throw new Error(
+        'incremental update requires existing chunks; use the normal upload path first',
+      );
+    }
+    const now = new Date();
+    const requestedChangeType =
+      input.options.businessMetadata?.changeType ?? 'amend';
+    const effectiveAt = input.governance.effectiveAt ?? now;
+    const activeOld = oldChunks.filter((chunk) => {
+      if (chunk.expiredAt === null || chunk.expiredAt === undefined) {
+        return true;
+      }
+      return new Date(chunk.expiredAt).getTime() > now.getTime();
+    });
+    const oldByHash = new Map<string, DocumentChunkEntity[]>();
+    for (const chunk of activeOld) {
+      if (chunk.contentHash === null || chunk.contentHash === undefined) {
+        continue;
+      }
+      const list = oldByHash.get(chunk.contentHash) ?? [];
+      list.push(chunk);
+      oldByHash.set(chunk.contentHash, list);
+    }
+    const oldByRule = new Map<string, DocumentChunkEntity[]>();
+    const oldByIndex = new Map<string, DocumentChunkEntity[]>();
+    for (const chunk of activeOld) {
+      const key = chunk.ruleKey || chunk.sectionId || `chunk-${chunk.chunkIndex}`;
+      const list = oldByRule.get(key) ?? [];
+      list.push(chunk);
+      oldByRule.set(key, list);
+      const indexKey = String(chunk.chunkIndex);
+      const indexList = oldByIndex.get(indexKey) ?? [];
+      indexList.push(chunk);
+      oldByIndex.set(indexKey, indexList);
+    }
+    for (const list of oldByRule.values()) {
+      list.sort(
+        (left, right) =>
+          new Date(right.effectiveAt ?? right.createdAt).getTime() -
+          new Date(left.effectiveAt ?? left.createdAt).getTime(),
+      );
+    }
+    for (const list of oldByIndex.values()) {
+      list.sort(
+        (left, right) =>
+          new Date(right.effectiveAt ?? right.createdAt).getTime() -
+          new Date(left.effectiveAt ?? left.createdAt).getTime(),
+      );
+    }
+    const consumed = new Set<string>();
+    const expireIds = new Set<string>();
+    const newDrafts: IncrementalChunkDraft[] = [];
+    let unchanged = 0;
+
+    const pickOldByHash = (
+      contentHash: string,
+    ): DocumentChunkEntity | undefined => {
+      const list = oldByHash.get(contentHash) ?? [];
+      const candidate = list.find((chunk) => consumed.has(chunk.id) === false);
+      if (candidate) consumed.add(candidate.id);
+      return candidate;
+    };
+
+    const pickOldByRule = (
+      ruleKey: string,
+      chunkIndex: number,
+    ): DocumentChunkEntity | undefined => {
+      const list = oldByRule.get(ruleKey) ?? [];
+      const candidate =
+        list.find((chunk) => consumed.has(chunk.id) === false) ??
+        (oldByIndex.get(String(chunkIndex)) ?? []).find(
+          (chunk) => consumed.has(chunk.id) === false,
+        );
+      if (candidate) consumed.add(candidate.id);
+      return candidate;
+    };
+
+    if (requestedChangeType === 'deprecate') {
+      for (const chunk of activeOld) expireIds.add(chunk.id);
+    } else if (requestedChangeType === 'supplement') {
+      for (const draft of input.chunkDocs) {
+        const sameContent = pickOldByHash(draft.contentHash);
+        if (sameContent) {
+          unchanged += 1;
+          continue;
+        }
+        const old = pickOldByRule(
+          draft.ruleKey || draft.sectionId || `chunk-${draft.chunkIndex}`,
+          draft.chunkIndex,
+        );
+        if (old) expireIds.delete(old.id);
+        newDrafts.push({
+          ...draft,
+          changeType: 'supplement',
+          supersedesChunkId: old?.id ?? null,
+          effectiveAt: draft.effectiveAt ?? effectiveAt,
+        });
+      }
+    } else if (requestedChangeType === 'replace') {
+      for (const chunk of activeOld) expireIds.add(chunk.id);
+      for (const draft of input.chunkDocs) {
+        const old = pickOldByRule(
+          draft.ruleKey || draft.sectionId || `chunk-${draft.chunkIndex}`,
+          draft.chunkIndex,
+        );
+        newDrafts.push({
+          ...draft,
+          changeType: 'replace',
+          supersedesChunkId: old?.id ?? null,
+          effectiveAt: draft.effectiveAt ?? effectiveAt,
+        });
+      }
+    } else {
+      for (const draft of input.chunkDocs) {
+        const sameContent = pickOldByHash(draft.contentHash);
+        if (sameContent) {
+          unchanged += 1;
+          continue;
+        }
+        const old = pickOldByRule(
+          draft.ruleKey || draft.sectionId || `chunk-${draft.chunkIndex}`,
+          draft.chunkIndex,
+        );
+        if (old) expireIds.add(old.id);
+        newDrafts.push({
+          ...draft,
+          changeType: requestedChangeType,
+          supersedesChunkId: old?.id ?? null,
+          effectiveAt: draft.effectiveAt ?? effectiveAt,
+        });
+      }
+      for (const chunk of activeOld) {
+        if (consumed.has(chunk.id) === false) expireIds.add(chunk.id);
+      }
+    }
+
+    const newEntities = newDrafts.map((draft) =>
+      this.docChunkRepo.create({
+        id: draft.id,
+        tenantId: input.tenantId,
+        docId: input.docId,
+        userId: input.userId,
+        parentChunkId: draft.parentChunkId,
+        chunkIndex: draft.chunkIndex,
+        chunkType: 'leaf',
+        content: draft.content,
+        contentHash: draft.contentHash,
+        indexGeneration: input.indexGeneration,
+        ruleKey: draft.ruleKey,
+        changeType: draft.changeType,
+        supersedesChunkId: draft.supersedesChunkId,
+        headingPath:
+          draft.headingPath.length > 0
+            ? JSON.stringify(draft.headingPath)
+            : null,
+        sectionId: draft.sectionId,
+        clauseId: draft.clauseId,
+        tableRef: draft.tableRef,
+        sourceStart: draft.sourceStart,
+        sourceEnd: draft.sourceEnd,
+        docVersion: input.governance.docVersion,
+        effectiveAt: draft.effectiveAt,
+        expiredAt: draft.expiredAt,
+        sourceAuthority: input.governance.sourceAuthority,
+        projectId: input.governance.projectId,
+        activityId: input.governance.activityId,
+        region: input.governance.region,
+        locale: input.governance.locale,
+        channel: input.governance.channel,
+        roleScope:
+          input.governance.roleScope.length > 0
+            ? JSON.stringify(input.governance.roleScope)
+            : null,
+        documentType: input.governance.documentType,
+        lifecycleStatus: existing.lifecycleStatus,
+        supersedesDocId: input.governance.supersedesDocId,
+        hypotheticalQuestions:
+          draft.hypotheticalQuestions.length > 0
+            ? JSON.stringify(draft.hypotheticalQuestions)
+            : null,
+      }),
+    );
+
+    const vectors =
+      newDrafts.length > 0
+        ? await this.embeddingProvider.embedDocuments(
+            newDrafts.map((draft) => draft.content),
+          )
+        : [];
+    if (vectors.length !== newDrafts.length) {
+      throw new Error('incremental embedding count does not match changed chunks');
+    }
+
+    let totalChunkCount = oldChunks.length + newEntities.length;
+    await this.docChunkRepo.manager.transaction(async (manager) => {
+      if (expireIds.size > 0) {
+        await manager.getRepository(DocumentChunkEntity).update(
+          { id: In([...expireIds]) },
+          { expiredAt: effectiveAt },
+        );
+      }
+      if (newEntities.length > 0) {
+        await manager.getRepository(DocumentChunkEntity).save(newEntities);
+      }
+      totalChunkCount = await manager.getRepository(DocumentChunkEntity).count({
+        where: { docId: input.docId, userId: input.userId },
+      });
+      await manager.getRepository(DocumentMetaEntity).update(
+        { docId: input.docId },
+        {
+          filename: input.filename,
+          contentHash: input.contentSha256,
+          indexGeneration: input.indexGeneration,
+          changeType: requestedChangeType,
+          chunkCount: totalChunkCount,
+          docVersion: input.governance.docVersion ?? existing.docVersion,
+          effectiveAt: input.governance.effectiveAt ?? existing.effectiveAt,
+          expiredAt: input.governance.expiredAt ?? existing.expiredAt,
+          supersedesDocId:
+            input.governance.supersedesDocId ?? existing.supersedesDocId,
+        },
+      );
+    });
+
+    if (expireIds.size > 0) {
+      await Promise.all([
+        Promise.resolve(
+          this.karpathyRagService.updateChunkMetadataByIds(
+            [...expireIds],
+            { expiredAt: effectiveAt.toISOString() },
+          ),
+        ),
+        this.elasticsearchProvider.updateChunkMetadataByIds(
+          [...expireIds],
+          { expiredAt: effectiveAt.toISOString() },
+        ),
+      ]);
+    }
+
+    if (newDrafts.length > 0) {
+      const records = newDrafts.map((draft, index) => ({
+        id: draft.id,
+        vector: vectors[index],
+        content: draft.content,
+        docId: input.docId,
+        chunkIndex: draft.chunkIndex,
+        userId: input.userId,
+      }));
+      await this.vectorStoreProvider.insert(records);
+      await Promise.all([
+        Promise.resolve(
+          this.karpathyRagService.indexChunks(newDrafts, input.userId),
+        ),
+        this.elasticsearchProvider.indexChunks(
+          newDrafts,
+          input.userId,
+          vectors,
+        ),
+      ]);
+    }
+
+    await this.elasticsearchProvider.indexDocument({
+      docId: input.docId,
+      filename: input.filename,
+      content: input.content,
+      userId: input.userId,
+      tenantId: input.tenantId,
+      title: existing.title ?? input.filename,
+      summary: existing.summary,
+      sourceAuthority: input.governance.sourceAuthority,
+      projectId: input.governance.projectId,
+      activityId: input.governance.activityId,
+      region: input.governance.region,
+      locale: input.governance.locale,
+      channel: input.governance.channel,
+      roleScope: input.governance.roleScope,
+      documentType: input.governance.documentType,
+      lifecycleStatus: existing.lifecycleStatus,
+      docVersion: input.governance.docVersion ?? existing.docVersion,
+      contentHash: input.contentSha256,
+      indexGeneration: input.indexGeneration,
+      effectiveAt: input.governance.effectiveAt ?? existing.effectiveAt,
+      expiredAt: input.governance.expiredAt ?? existing.expiredAt,
+    });
+    await this.rebuildRetrievalDescriptions(input.tenantId, input.docId);
+
+    if (this.graphService.isEnabled()) {
+      this.scheduleOptionalGraphIndex({
+        docId: input.docId,
+        userId: input.userId,
+        content: input.content,
+      });
+    }
+
+    await this.documentTaskService.updateTask(input.taskId, {
+      status: 'completed',
+      stage: 'completed',
+      progress: 100,
+      chunkCount: totalChunkCount,
+      finishedAt: new Date(),
+    });
+
+    this.logger.log(
+      `Incremental update done: docId=${input.docId}, added=${newDrafts.length}, expired=${expireIds.size}, unchanged=${unchanged}, embedded=${newDrafts.length}`,
+    );
+
+    return {
+      docId: input.docId,
+      taskId: input.taskId,
+      chunkCount: totalChunkCount,
+      docVersion: input.governance.docVersion,
+      effectiveAt: input.governance.effectiveAt?.toISOString() ?? null,
+      expiredAt: input.governance.expiredAt?.toISOString() ?? null,
+      sourceAuthority: input.governance.sourceAuthority,
+      projectId: input.governance.projectId,
+      activityId: input.governance.activityId,
+      region: input.governance.region,
+      locale: input.governance.locale,
+      channel: input.governance.channel,
+      roleScope: input.governance.roleScope,
+      documentType: input.governance.documentType,
+      lifecycleStatus: existing.lifecycleStatus as DocumentLifecycleStatus,
+      graphIndexStatus: existing.graphIndexStatus,
+      supersedesDocId: input.governance.supersedesDocId,
+      incremental: (() => {
+        const changedCount = newDrafts.filter(
+          (draft) => draft.supersedesChunkId !== null,
+        ).length;
+        return {
+          added: newDrafts.length - changedCount,
+          changed: changedCount,
+          removed: Math.max(0, expireIds.size - changedCount),
+          unchanged,
+          embedded: newDrafts.length,
+        };
+      })(),
+    };
   }
 
   private async saveChunkMetadata(
@@ -1474,6 +1844,9 @@ export class DocumentService implements OnModuleInit {
         content: record.content,
         contentHash: record.contentHash,
         indexGeneration,
+        ruleKey: this.resolveRuleKey(chunk, index),
+        changeType: governance.changeType ?? 'standalone',
+        supersedesChunkId: null,
         headingPath:
           chunk && chunk.headingPath.length > 0
             ? JSON.stringify(chunk.headingPath)
@@ -1484,8 +1857,18 @@ export class DocumentService implements OnModuleInit {
         sourceStart: chunk?.sourceStart ?? null,
         sourceEnd: chunk?.sourceEnd ?? null,
         docVersion: governance.docVersion,
-        effectiveAt: governance.effectiveAt,
-        expiredAt: governance.expiredAt,
+        effectiveAt: this.resolveChunkValidity(
+          record.content,
+          governance.effectiveAt,
+          governance.expiredAt,
+          governance.validityMonths,
+        ).effectiveAt,
+        expiredAt: this.resolveChunkValidity(
+          record.content,
+          governance.effectiveAt,
+          governance.expiredAt,
+          governance.validityMonths,
+        ).expiredAt,
         sourceAuthority: governance.sourceAuthority,
         projectId: governance.projectId,
         activityId: governance.activityId,
@@ -1637,6 +2020,72 @@ export class DocumentService implements OnModuleInit {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
+  private resolveRuleKey(
+    chunk:
+      | { sectionId?: string | null; headingPath?: string[] | null }
+      | undefined,
+    index: number,
+  ): string {
+    const sectionId = chunk?.sectionId?.trim();
+    if (sectionId) return sectionId.slice(0, 128);
+    const heading = (chunk?.headingPath ?? [])
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join(' > ');
+    if (heading) return heading.slice(0, 128);
+    return `chunk-${index}`;
+  }
+
+  private resolveChunkValidity(
+    content: string,
+    effectiveAt: Date | null,
+    expiredAt: Date | null,
+    validityMonths?: number,
+  ): { effectiveAt: Date | null; expiredAt: Date | null } {
+    const inlineStart = content.match(
+      /(?:自|从)\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s*(?:起|开始)/u,
+    );
+    const parsedStart = inlineStart
+      ? this.parseDateOverride(inlineStart[1].replace(/\//g, '-'))
+      : null;
+    const start = effectiveAt ?? parsedStart;
+    if (expiredAt) return { effectiveAt: start, expiredAt };
+    const months = validityMonths ?? this.extractValidityMonths(content);
+    if (months === null || months === undefined || months <= 0) {
+      return { effectiveAt: start, expiredAt };
+    }
+    const from = start ?? new Date();
+    const until = new Date(from);
+    until.setMonth(until.getMonth() + months);
+    return { effectiveAt: start ?? from, expiredAt: until };
+  }
+
+  private extractValidityMonths(content: string): number | null {
+    const match = content.match(
+      /(?:有效期(?:为)?|valid\s+for)\s*([0-9一二三四五六七八九十两]+)\s*(?:个)?\s*月/iu,
+    );
+    if (match === null) return null;
+    const raw = match[1];
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) return numeric;
+    const chinese: Record<string, number> = {
+      一: 1,
+      二: 2,
+      两: 2,
+      三: 3,
+      四: 4,
+      五: 5,
+      六: 6,
+      七: 7,
+      八: 8,
+      九: 9,
+      十: 10,
+      十一: 11,
+      十二: 12,
+    };
+    return chinese[raw] ?? null;
+  }
+
   private parseDateOverride(value?: string | null): Date | null {
     if (!value) return null;
     const date = new Date(value);
@@ -1678,6 +2127,8 @@ export class DocumentService implements OnModuleInit {
       docVersion: explicit?.docVersion?.trim() || null,
       effectiveAt: explicit?.effectiveAt?.trim() || null,
       expiredAt: explicit?.expiredAt?.trim() || null,
+      changeType: explicit?.changeType,
+      validityMonths: explicit?.validityMonths,
     };
   }
 
@@ -1816,28 +2267,13 @@ export class DocumentService implements OnModuleInit {
   }
 }
 
-function resolveImageMimeType(filename: string): string {
-  const extension = filename.toLowerCase().split('.').at(-1);
-  switch (extension) {
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'gif':
-      return 'image/gif';
-    case 'webp':
-      return 'image/webp';
-    case 'bmp':
-      return 'image/bmp';
-    default:
-      return 'image/png';
-  }
-}
-
 interface DocumentGovernanceMetadata extends GameDocumentMetadata {
   docVersion: string | null;
   effectiveAt: Date | null;
   expiredAt: Date | null;
   sourceAuthority: string;
+  changeType?: DocumentChangeType;
+  validityMonths?: number;
 }
 
 interface FactConflictDraft {

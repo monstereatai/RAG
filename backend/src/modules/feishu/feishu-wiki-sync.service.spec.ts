@@ -143,9 +143,11 @@ describe('FeishuWikiSyncService', () => {
       ),
     } as unknown as DocumentService;
     const accessChanges: Array<{ docId: string; subjects: unknown[] }> = [];
-    const setPermissionsMock = jest.fn((docId: string, subjects: unknown[]) => {
-      accessChanges.push({ docId, subjects });
-    });
+    const setPermissionsMock: jest.Mock = jest.fn(
+      (docId: string, subjects: unknown[]) => {
+        accessChanges.push({ docId, subjects });
+      },
+    );
     const permissions = {
       setPermissions: setPermissionsMock,
     };
@@ -282,7 +284,7 @@ describe('FeishuWikiSyncService', () => {
       subjects: [{ type: 'user', id: 'admin-1' }],
     });
     expect(setPermissionsMock.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      (feishu.listNodes as jest.Mock).mock.invocationCallOrder.at(-1),
+      (feishu.listNodes as jest.Mock).mock.invocationCallOrder.at(-1) ?? 0,
     );
     expect(items.get([...items.keys()][0])?.active).toBe(true);
 
@@ -299,7 +301,8 @@ describe('FeishuWikiSyncService', () => {
       subjects: [{ type: 'user', id: 'admin-1' }],
     });
     expect(setPermissionsMock.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      (documents.updateLifecycle as jest.Mock).mock.invocationCallOrder.at(-1),
+      (documents.updateLifecycle as jest.Mock).mock.invocationCallOrder.at(-1) ??
+        0,
     );
   });
 

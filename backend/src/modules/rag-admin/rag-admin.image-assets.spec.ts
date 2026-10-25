@@ -29,6 +29,7 @@ describe('RagAdminService image asset ACL', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     docMetaRepo as never,
     {} as never,
     {} as never,

@@ -8,6 +8,8 @@ import type { MetricsService } from '../../modules/metrics/metrics.service';
 import type { ObsidianKnowledgeService } from '../../modules/obsidian/obsidian-knowledge.service';
 import type { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
 import type { DocumentPermissionService } from '../../modules/document/document-permission.service';
+import { retrievalProfileForTaskType } from './context-builder';
+import type { RetrievalExecutionPlan } from '../planning/retrieval-policy.service';
 
 describe('KarpathyRagService exception scenarios', () => {
   function createService(overrides?: {
@@ -62,8 +64,10 @@ describe('KarpathyRagService exception scenarios', () => {
       formatHitsForPrompt: jest.fn().mockReturnValue(''),
     } as unknown as ObsidianKnowledgeService;
     const retrieveBadCaseMatches = jest.fn().mockResolvedValue([]);
+    const retrieveExactBadCaseMatches = jest.fn().mockResolvedValue([]);
     const badCaseFlywheel = {
       retrieveMatches: retrieveBadCaseMatches,
+      retrieveExactMatches: retrieveExactBadCaseMatches,
       formatPrompt: jest.fn().mockReturnValue(''),
     } as unknown as BadCaseFlywheelService;
     const bochaSearchService = {
@@ -118,6 +122,7 @@ describe('KarpathyRagService exception scenarios', () => {
       obsidianKnowledge,
       documentPermissionService,
       retrieveBadCaseMatches,
+      retrieveExactBadCaseMatches,
       bochaSearchService,
       dashscopeRerankService,
       retrievalDescriptionService,
@@ -241,6 +246,74 @@ describe('KarpathyRagService exception scenarios', () => {
       assessment: { sufficient: true, evaluatedQuery: '韦水春是谁' },
     });
     expect(result.reason).toContain('Base Case:');
+  });
+
+  it('skips exact Bad Case direct answers for explicitly scoped Simple requests', async () => {
+    const {
+      service,
+      retrieveExactBadCaseMatches,
+      retrieveBadCaseMatches,
+      obsidianKnowledge,
+    } = createService();
+    const obsidianSearch = jest.spyOn(obsidianKnowledge, 'search');
+    retrieveExactBadCaseMatches.mockResolvedValue([
+      {
+        id: 'feedback-1',
+        query: '项目 A 的发布规则是什么？',
+        text: '正确处理标准：项目 A 的私有发布规则。',
+        score: 1,
+        mode: 'exact',
+      },
+    ]);
+
+    await service.answer(
+      '项目 A 的发布规则是什么？',
+      [],
+      'user-1',
+      [],
+      undefined,
+      {
+        karpathyDirectAnswer: true,
+        scope: { projectId: 'project-a' },
+      },
+    );
+
+    expect(retrieveExactBadCaseMatches).not.toHaveBeenCalled();
+    expect(retrieveBadCaseMatches).not.toHaveBeenCalled();
+    expect(obsidianSearch).not.toHaveBeenCalled();
+  });
+
+  it('uses tenant-scoped exact Base Case and skips Obsidian when tenant filtering is explicit', async () => {
+    const {
+      service,
+      retrieveExactBadCaseMatches,
+      retrieveBadCaseMatches,
+      obsidianKnowledge,
+    } = createService();
+    const obsidianSearch = jest.spyOn(obsidianKnowledge, 'search');
+    retrieveExactBadCaseMatches.mockResolvedValue([
+      {
+        id: 'feedback-1',
+        query: '项目规则是什么？',
+        text: '正确处理标准：其他租户的规则。',
+        score: 1,
+        mode: 'exact',
+      },
+    ]);
+
+    await service.answer('项目规则是什么？', [], 'user-1', [], undefined, {
+      karpathyDirectAnswer: true,
+      tenantId: 'tenant-a',
+    });
+
+    expect(retrieveExactBadCaseMatches).toHaveBeenCalledWith(
+      '项目规则是什么?',
+      1,
+      'user-1',
+      'tenant-a',
+    );
+    expect(retrieveBadCaseMatches).not.toHaveBeenCalled();
+    expect(obsidianSearch).not.toHaveBeenCalled();
   });
 
   it('resolves source-note hits to permitted, active, in-scope original chunks', async () => {
@@ -434,7 +507,10 @@ describe('KarpathyRagService exception scenarios', () => {
       )
       .mockReturnValue({ sufficient: true, reason: 'test' });
 
-    const result = await service.assessFastPath('发布审批需要谁复核？', 'user-1');
+    const result = await service.assessFastPath(
+      '发布审批需要谁复核？',
+      'user-1',
+    );
 
     expect(result.chunks).toContainEqual(
       expect.objectContaining({
@@ -601,7 +677,21 @@ describe('KarpathyRagService exception scenarios', () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('2');
 
-    await expect(service.answer('量子计算是什么')).resolves.toMatchObject({
+    await expect(
+      service.answer('量子计算是什么', [], undefined, [], undefined, {
+        queryPlan: {
+          action: 'direct',
+          domain: 'public',
+          contextMode: 'independent',
+          standaloneQuery: '量子计算是什么',
+          subQueries: [],
+          taskType: 'lookup',
+          needsGraph: false,
+          entities: [],
+          filters: {},
+        },
+      }),
+    ).resolves.toMatchObject({
       answer: '2',
       references: [],
       retrievalSufficient: true,
@@ -999,22 +1089,50 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-  it('extracts the salary date from current evidence instead of a fixed demo value', () => {
-    const { service } = createService();
-    const answer = service.buildEvidenceFirstAnswer(
-      '薪资什么时候发放？',
+  it('passes planned answer requirements into the grounded answer prompt', async () => {
+    const { service, llmInvoke } = createService();
+    llmInvoke.mockResolvedValueOnce('负责人林晓，预算728万元。[片段1]');
+
+    await service.generateGroundedAnswer(
+      '请列出项目负责人、预算、交付日期和风险等级。',
       [
         {
-          id: 'payroll-current',
-          content: '基本工资按月发放，每月 15 日发放。',
-          docId: 'payroll-policy',
+          id: 'project-1',
+          content:
+            '项目负责人：林晓。核准预算：728 万元。正式交付日期：2027 年 3 月 18 日。风险等级：中等。',
+          docId: 'project-doc',
           chunkIndex: 0,
           bm25Score: 1,
           cosineScore: 1,
           totalScore: 1,
         },
       ],
+      [],
+      [],
+      undefined,
+      {
+        answerRequirements: ['负责人和预算', '交付日期和风险等级'],
+      },
     );
+
+    const prompt = JSON.stringify(llmInvoke.mock.calls[0]?.[0]);
+    expect(prompt).toContain('1. 负责人和预算');
+    expect(prompt).toContain('2. 交付日期和风险等级');
+  });
+
+  it('extracts the salary date from current evidence instead of a fixed demo value', () => {
+    const { service } = createService();
+    const answer = service.buildEvidenceFirstAnswer('薪资什么时候发放？', [
+      {
+        id: 'payroll-current',
+        content: '基本工资按月发放，每月 15 日发放。',
+        docId: 'payroll-policy',
+        chunkIndex: 0,
+        bm25Score: 1,
+        cosineScore: 1,
+        totalScore: 1,
+      },
+    ]);
 
     expect(answer).toContain('每月 15 日发放');
     expect(answer).toContain('[片段1]');
@@ -1023,20 +1141,17 @@ describe('KarpathyRagService exception scenarios', () => {
 
   it('does not turn an unrelated payroll schedule into a tax answer', () => {
     const { service } = createService();
-    const answer = service.buildEvidenceFirstAnswer(
-      '工资需要缴纳哪些税？',
-      [
-        {
-          id: 'payroll-schedule-only',
-          content: '基本工资按月发放，每月 15 日发放。',
-          docId: 'payroll-policy',
-          chunkIndex: 0,
-          bm25Score: 1,
-          cosineScore: 1,
-          totalScore: 1,
-        },
-      ],
-    );
+    const answer = service.buildEvidenceFirstAnswer('工资需要缴纳哪些税？', [
+      {
+        id: 'payroll-schedule-only',
+        content: '基本工资按月发放，每月 15 日发放。',
+        docId: 'payroll-policy',
+        chunkIndex: 0,
+        bm25Score: 1,
+        cosineScore: 1,
+        totalScore: 1,
+      },
+    ]);
 
     expect(answer).toBeNull();
   });
@@ -1205,6 +1320,34 @@ describe('KarpathyRagService exception scenarios', () => {
           docId: 'doc-1',
           chunkIndex: 0,
           content: '模块 A 负责处理请求。',
+          bm25Score: 0,
+          cosineScore: 0,
+          totalScore: 0,
+        },
+      ],
+    );
+
+    expect(gate).toEqual(expect.objectContaining({ sufficient: true }));
+  });
+
+  it('accepts a cited markdown table when every data row is supported', () => {
+    const { service } = createService();
+    const gate = service.validateAnswerCitationSupport(
+      [
+        '| 项目属性 | 资料内容',
+        '|--------------|------------|',
+        '| 项目负责人 | 林晓 [片段1] |',
+        '| 核准预算 | 728 万元 [片段1] |',
+        '| 正式交付日期 | 2027 年 3 月 18 日 [片段1] |',
+        '| 风险等级 | 中等 [片段1] |',
+      ].join('\n'),
+      [
+        {
+          id: 'chunk-1',
+          docId: 'doc-1',
+          chunkIndex: 0,
+          content:
+            '项目负责人：林晓。核准预算：728 万元。正式交付日期：2027 年 3 月 18 日。风险等级：中等。',
           bm25Score: 0,
           cosineScore: 0,
           totalScore: 0,
@@ -1413,7 +1556,11 @@ describe('KarpathyRagService exception scenarios', () => {
       'user-1',
     );
 
-    const results = await service.retrieve('企业知识库　是什么？', {}, 'user-1');
+    const results = await service.retrieve(
+      '企业知识库　是什么？',
+      {},
+      'user-1',
+    );
 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
@@ -1422,7 +1569,7 @@ describe('KarpathyRagService exception scenarios', () => {
     });
   });
 
-  it('keeps the user's query wording in the generated answer prompt', async () => {
+  it("keeps the user's query wording in the generated answer prompt", async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       '企业知识库是知识库系统的内部别名之一，正式名称为 Atlas Knowledge Base。[片段1]',
@@ -1447,7 +1594,7 @@ describe('KarpathyRagService exception scenarios', () => {
     expect(JSON.stringify(firstPrompt)).toContain('企业知识库 是什么');
   });
 
-  it('retrieves versioned policy using the user's complete question', async () => {
+  it("retrieves versioned policy using the user's complete question", async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
       '2026 年一线城市住宿报销上限为 650 元；如果 2025 版写的是 500 元，应以 2026 版优先生效。[片段1]',
@@ -1616,7 +1763,11 @@ describe('KarpathyRagService exception scenarios', () => {
     );
     const result = await service.retrieveDetailed(
       '如何配置抽奖流程？',
-      { vectorSearch: false, scope: { projectId: 'game-a' } },
+      {
+        vectorSearch: false,
+        scope: { projectId: 'game-a' },
+        profile: retrievalProfileForTaskType('procedure'),
+      },
       'user-1',
     );
 
@@ -1682,9 +1833,9 @@ describe('KarpathyRagService exception scenarios', () => {
         }),
       ]),
     );
-    expect(result.chunks.some((chunk) => chunk.content.includes('描述里的内容'))).toBe(
-      false,
-    );
+    expect(
+      result.chunks.some((chunk) => chunk.content.includes('描述里的内容')),
+    ).toBe(false);
     expect(result.diagnostics.stages).toEqual(
       expect.objectContaining({
         descriptionCandidates: 1,
@@ -1840,5 +1991,266 @@ describe('KarpathyRagService exception scenarios', () => {
         reason: expect.stringContaining('重排语义相关度'),
       }),
     );
+  });
+
+  it('uses QueryPlan graph retrieval and filters graph facts by ACL, scope, and lifecycle', async () => {
+    const { service, documentPermissionService } = createService();
+    const graphFacts = [
+      {
+        source: 'A',
+        sourceLabel: 'A',
+        relationship: 'USES',
+        target: 'B',
+        targetLabel: 'B',
+        confidence: 0.9,
+        sourceId: 'doc-active',
+        sourceIds: [
+          'doc-active',
+          'doc-active-shared',
+          'doc-other-project',
+          'doc-expired',
+          'doc-forbidden',
+        ],
+      },
+      {
+        source: 'C',
+        sourceLabel: 'C',
+        relationship: 'USES',
+        target: 'D',
+        targetLabel: 'D',
+        confidence: 0.9,
+        sourceId: 'doc-other-project',
+      },
+      {
+        source: 'E',
+        sourceLabel: 'E',
+        relationship: 'USES',
+        target: 'F',
+        targetLabel: 'F',
+        confidence: 0.9,
+        sourceId: 'doc-expired',
+      },
+      {
+        source: 'G',
+        sourceLabel: 'G',
+        relationship: 'USES',
+        target: 'H',
+        targetLabel: 'H',
+        confidence: 0.9,
+        sourceId: 'doc-forbidden',
+      },
+    ];
+    const queryGraph = jest.fn().mockResolvedValue({ facts: graphFacts });
+    Object.assign(service, {
+      graphService: {
+        isEnabled: jest.fn().mockReturnValue(true),
+        queryGraph,
+      },
+    });
+    const allowedDocIds = new Set([
+      'doc-active',
+      'doc-active-shared',
+      'doc-other-project',
+      'doc-expired',
+    ]);
+    jest
+      .spyOn(documentPermissionService, 'getAllowedDocIds')
+      .mockResolvedValue(allowedDocIds);
+    service.indexChunks(
+      [
+        {
+          id: 'active-0',
+          content: '有效文档内容',
+          docId: 'doc-active',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'other-project-0',
+          content: '其他项目文档内容',
+          docId: 'doc-other-project',
+          chunkIndex: 0,
+          projectId: 'game-b',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'active-shared-0',
+          content: '共享关系的第二个有效来源。',
+          docId: 'doc-active-shared',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'expired-0',
+          content: '过期文档内容',
+          docId: 'doc-expired',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+          expiredAt: new Date(Date.now() - 60_000),
+        },
+        {
+          id: 'forbidden-0',
+          content: '无权文档内容',
+          docId: 'doc-forbidden',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+        },
+      ],
+      'user-1',
+    );
+    const executionPlan: RetrievalExecutionPlan = {
+      planVersion: 2,
+      sourcePolicy: 'local_only',
+      queries: [{ text: '部署方案', kind: 'original', weight: 1 }],
+      profile: retrievalProfileForTaskType('lookup'),
+      useGraph: true,
+      scope: { projectId: 'game-a' },
+      scopeRestricted: true,
+      reasonCode: 'internal_evidence_required',
+    };
+
+    const result = await service.retrieveDetailed(
+      '部署方案',
+      {
+        executionPlan,
+        scope: { projectId: 'game-a' },
+        tenantId: 'tenant-1',
+        vectorSearch: false,
+      },
+      'user-1',
+    );
+
+    expect(queryGraph).toHaveBeenCalledWith('部署方案', 'user-1', {
+      generateAnswer: false,
+    });
+    expect(documentPermissionService.getAllowedDocIds).toHaveBeenCalledWith(
+      'user-1',
+      [],
+      [],
+      'tenant-1',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).toContain('doc-active');
+    expect(result.chunks.map((chunk) => chunk.docId)).toContain(
+      'doc-active-shared',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-other-project',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-expired',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-forbidden',
+    );
+    expect(result.diagnostics.graphProbe?.factCount).toBe(2);
+  });
+
+  it('searches image candidates without keyword gating and filters ACL, scope, and lifecycle', async () => {
+    const { service, documentPermissionService } = createService();
+    const searchText = jest.fn().mockResolvedValue([
+      {
+        docId: 'doc-active',
+        url: 'https://example.test/active.png',
+        score: 0.9,
+      },
+      {
+        docId: 'doc-other-project',
+        url: 'https://example.test/other.png',
+        score: 0.95,
+      },
+      {
+        docId: 'doc-expired',
+        url: 'https://example.test/expired.png',
+        score: 0.99,
+      },
+      {
+        docId: 'doc-forbidden',
+        url: 'https://example.test/forbidden.png',
+        score: 1,
+      },
+    ]);
+    Object.assign(service, {
+      imageIndexService: {
+        isEnabled: jest.fn().mockReturnValue(true),
+        searchText,
+      },
+    });
+    const allowedDocIds = new Set([
+      'doc-active',
+      'doc-other-project',
+      'doc-expired',
+    ]);
+    jest
+      .spyOn(documentPermissionService, 'getAllowedDocIds')
+      .mockResolvedValue(allowedDocIds);
+    service.indexChunks(
+      [
+        {
+          id: 'active-0',
+          content: '有效文档内容',
+          docId: 'doc-active',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'other-project-0',
+          content: '其他项目文档内容',
+          docId: 'doc-other-project',
+          chunkIndex: 0,
+          projectId: 'game-b',
+          lifecycleStatus: 'effective',
+        },
+        {
+          id: 'expired-0',
+          content: '过期文档内容',
+          docId: 'doc-expired',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+          expiredAt: new Date(Date.now() - 60_000),
+        },
+        {
+          id: 'forbidden-0',
+          content: '无权文档内容',
+          docId: 'doc-forbidden',
+          chunkIndex: 0,
+          projectId: 'game-a',
+          lifecycleStatus: 'effective',
+        },
+      ],
+      'user-1',
+    );
+
+    const result = await service.retrieveDetailed(
+      '如何查看发布状态？',
+      {
+        scope: { projectId: 'game-a' },
+        tenantId: 'tenant-1',
+        vectorSearch: false,
+      },
+      'user-1',
+    );
+
+    expect(searchText).toHaveBeenCalledWith('如何查看发布状态?', {
+      topK: 6,
+      userId: 'user-1',
+      allowedDocIds,
+    });
+    expect(result.chunks.map((chunk) => chunk.docId)).toContain('doc-active');
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-other-project',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-expired',
+    );
+    expect(result.chunks.map((chunk) => chunk.docId)).not.toContain(
+      'doc-forbidden',
+    );
+    expect(result.diagnostics.imageProbe?.hitCount).toBe(1);
   });
 });

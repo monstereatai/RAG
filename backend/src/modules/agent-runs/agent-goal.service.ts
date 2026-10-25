@@ -19,6 +19,7 @@ export class AgentGoalService {
   async activate(input: {
     threadId: string;
     runId?: string;
+    tenantId?: string;
     actor: string;
     objective: string;
     maxRounds: number;
@@ -29,6 +30,7 @@ export class AgentGoalService {
   async update(input: {
     threadId: string;
     runId?: string;
+    tenantId?: string;
     actor: string;
     objective: string;
     maxRounds: number;
@@ -39,8 +41,15 @@ export class AgentGoalService {
     return this.emit(input, input.status, input.round, input.reason);
   }
 
-  async get(runId: string): Promise<AgentGoalSnapshot | null> {
-    const events = await this.events.list(undefined, runId);
+  async get(
+    runId: string,
+    tenantId?: string,
+  ): Promise<AgentGoalSnapshot | null> {
+    const events = await this.events.list(
+      undefined,
+      runId,
+      tenantId?.trim() || 'legacy',
+    );
     const goalEvents = events.filter((event) =>
       event.eventType.startsWith('goal.'),
     );
@@ -62,6 +71,7 @@ export class AgentGoalService {
     input: {
       threadId: string;
       runId?: string;
+      tenantId?: string;
       actor: string;
       objective: string;
       maxRounds: number;
@@ -75,6 +85,7 @@ export class AgentGoalService {
   ) {
     return this.events.emit({
       threadId: input.threadId,
+      tenantId: input.tenantId?.trim() || 'legacy',
       runId: input.runId,
       eventType: `goal.${status}`,
       actor: input.actor,

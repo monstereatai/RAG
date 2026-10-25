@@ -102,7 +102,7 @@ describe('DomainEventsService', () => {
   it('retries only failed subscription deliveries', async () => {
     const { outbox, redis, subscriptions } = (() => {
       const outbox = {
-        findOneBy: jest.fn().mockResolvedValue({ id: 'event-1' }),
+        findOneBy: jest.fn().mockResolvedValue({ id: 'event-1', status: 'failed' }),
         save: jest.fn().mockResolvedValue(undefined),
       };
       return {
@@ -154,10 +154,10 @@ describe('DomainEventsService', () => {
     );
   });
 
-  it('does not dispatch without the required distributed lock', async () => {
+  it('only reads internal cache invalidation events without the required lock', async () => {
     const { service, outbox } = createService();
     await (service as any).dispatchPending();
-    expect(outbox.createQueryBuilder).not.toHaveBeenCalled();
+    expect(outbox.createQueryBuilder).toHaveBeenCalled();
   });
 
   it('releases the dispatch lock after processing a batch', async () => {

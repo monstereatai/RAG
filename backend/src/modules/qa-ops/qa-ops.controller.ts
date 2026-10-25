@@ -17,7 +17,9 @@ import type { ChatMode } from '../chat/chat.dto';
 import type { LlmModelProvider } from '../../providers/llm/llm-provider.interface';
 import { ConversationService } from '../chat/conversation.service';
 import { QaOpsService } from './qa-ops.service';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('admin/qa-ops')
 @UseGuards(ServiceTokenGuard)
 export class QaOpsController {

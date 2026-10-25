@@ -2,7 +2,9 @@ import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { ConfigService } from '@nestjs/config';
+import { Public } from '../../common/decorators/public.decorator';
 
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

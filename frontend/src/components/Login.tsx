@@ -33,6 +33,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     try {
       const response = await login(username, password);
       localStorage.setItem('token', response.accessToken);
+      localStorage.setItem('refreshToken', response.refreshToken);
       onLoginSuccess(response.accessToken);
     } catch (err: unknown) {
       setError(getLoginErrorMessage(err));
@@ -49,6 +50,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     try {
       const response = await login(user, pass);
       localStorage.setItem('token', response.accessToken);
+      localStorage.setItem('refreshToken', response.refreshToken);
       onLoginSuccess(response.accessToken);
     } catch (err: unknown) {
       setError(getLoginErrorMessage(err));

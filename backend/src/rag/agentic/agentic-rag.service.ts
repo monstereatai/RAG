@@ -4,8 +4,6 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import {
@@ -25,20 +23,20 @@ import {
   type AnswerContractArtifactPayload,
 } from './agentic-rag.state';
 import {
-  isObjectiveKnowledgeIntent,
-  resolveStandaloneRetrievalQuery,
-  shouldClarifyQueryIntent,
-} from '../prompts/query-intent-router';
+  adaptStoredQueryPlan,
+  createFallbackQueryPlan,
+  isObjectiveKnowledgePlan,
+  shouldClarifyQueryPlan,
+  type QueryPlan,
+  type QueryTaskType,
+} from '../planning/query-plan';
+import type { RetrievalExecutionPlan } from '../planning/retrieval-policy.service';
+import { retrievalProfileForTaskType } from '../karpathy/context-builder';
 import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
 import {
-  queryAugmentPrompt,
   reflectionPrompt,
   sufficiencyPrompt,
-  deepAgentQueryPlanSystemPrompt,
-  deepAgentQueryPlanUserPrompt,
 } from '../prompts/agentic.prompts';
-import { queryAugmentFewShotPrompt } from '../prompts/few-shot.examples';
-import { SemanticExampleSelector } from '../prompts/semantic-example.selector';
 import {
   BadCaseFlywheelService,
   type BadCaseMatch,
@@ -62,19 +60,23 @@ import { RedisCheckpointer } from '../../providers/langgraph-checkpointer/redis-
 import { MetricsService } from '../../modules/metrics/metrics.service';
 import { SecurityAuditService } from '../../modules/metrics/security-audit.service';
 import { TracingService } from '../../modules/tracing/tracing.service';
-import { buildStructuredDeliveryArtifacts } from './structured-delivery-artifacts';
-import { AgenticStructuredArtifactEntity } from '../../providers/db/entities/agentic-structured-artifact.entity';
-import { ArtifactDependencyEntity } from '../../providers/db/entities/artifact-dependency.entity';
+import { AgenticArtifactStoreService } from './agentic-artifact-store.service';
+import { AgenticAnswerGenerationService } from './agentic-answer-generation.service';
 import { randomUUID } from 'node:crypto';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
-import { QueryIntentRouter } from '../prompts/query-intent-router';
-import { filterSemanticQueries } from '../prompts/query-similarity';
-import type { QueryIntent } from '../prompts/query-intent-router';
 import type { RequestContext } from '../../modules/chat/chat-runtime.types';
 import {
   appliesToQuery,
   type EvidenceBundle,
 } from '../evidence/evidence-bundle';
+import {
+  buildExplicitSubQuestions,
+  buildSubQuestions,
+  hasExplicitRetrievalScope,
+  hasExplicitScopeFilter,
+  requiresAgenticPlan,
+  resolveAutoRoute,
+} from './agentic-rag-planning';
 
 /**
  * 深度问答的 LangGraph 状态机。
@@ -86,21 +88,12 @@ import {
 @Injectable()
 export class AgenticRagService {
   private readonly logger = new Logger(AgenticRagService.name);
-  private readonly deepAgents = new Map<
-    string,
-    {
-      invoke: (
-        input: unknown,
-        options?: { signal?: AbortSignal },
-      ) => Promise<unknown>;
-    }
-  >();
   private app: any;
   private readonly checkpointer: RedisCheckpointer;
+  private readonly answerGenerationService: AgenticAnswerGenerationService;
 
   private readonly confidenceThreshold: number;
   private readonly maxRetries: number;
-  private readonly maxAugmentedQueries: number;
   private readonly maxRetrievalQueries: number;
   private readonly maxSubQuestions: number;
   private readonly maxRetrievedChunks: number;
@@ -108,7 +101,8 @@ export class AgenticRagService {
   private readonly maxRerankTopN: number;
   private readonly webSearchFallbackEnabled: boolean;
   private readonly rerankEnabled: boolean;
-  private readonly querySimilarityThreshold: number;
+  private readonly sufficiencyFastPathEnabled: boolean;
+  private readonly reflectionFastPathEnabled: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -117,23 +111,26 @@ export class AgenticRagService {
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
     private readonly toolPolicy: ToolExecutionPolicyService,
-    private readonly semanticExampleSelector: SemanticExampleSelector,
     private readonly badCaseFlywheel: BadCaseFlywheelService,
     private readonly metricsService: MetricsService,
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
-    private readonly agentLoop: AgentLoopService,
-    @Optional() private readonly queryIntentRouter?: QueryIntentRouter,
+    agentLoop: AgentLoopService,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
-    @Optional() private readonly documentPermissions?: DocumentPermissionService,
     @Optional()
-    @InjectRepository(AgenticStructuredArtifactEntity)
-    private readonly structuredArtifactRepository?: Repository<AgenticStructuredArtifactEntity>,
-    @Optional()
-    @InjectRepository(ArtifactDependencyEntity)
-    private readonly artifactDependencyRepository?: Repository<ArtifactDependencyEntity>,
+    private readonly documentPermissions?: DocumentPermissionService,
+    @Optional() private readonly artifactStore?: AgenticArtifactStoreService,
+    @Optional() answerGenerationService?: AgenticAnswerGenerationService,
   ) {
+    this.answerGenerationService =
+      answerGenerationService ??
+      new AgenticAnswerGenerationService(
+        llmProvider,
+        karpathyRagService,
+        badCaseFlywheel,
+        agentLoop,
+      );
     this.confidenceThreshold = this.numberConfig(
       'agentic.confidenceThreshold',
       0.7,
@@ -141,12 +138,6 @@ export class AgenticRagService {
       1,
     );
     this.maxRetries = this.intConfig('agentic.maxRetries', 2, 0, 5);
-    this.maxAugmentedQueries = this.intConfig(
-      'agentic.maxAugmentedQueries',
-      3,
-      1,
-      5,
-    );
     this.maxRetrievalQueries = this.intConfig(
       'agentic.maxRetrievalQueries',
       4,
@@ -172,12 +163,12 @@ export class AgenticRagService {
       true;
     this.rerankEnabled =
       this.configService.get<boolean>('agentic.rerankEnabled') ?? true;
-    this.querySimilarityThreshold = this.numberConfig(
-      'agentic.querySimilarityThreshold',
-      0.8,
-      0.5,
-      1,
-    );
+    this.sufficiencyFastPathEnabled =
+      this.configService.get<boolean>('agentic.sufficiencyFastPathEnabled') ??
+      true;
+    this.reflectionFastPathEnabled =
+      this.configService.get<boolean>('agentic.reflectionFastPathEnabled') ??
+      true;
     this.checkpointer = new RedisCheckpointer(
       this.redisProvider,
       86400 * 7,
@@ -192,11 +183,12 @@ export class AgenticRagService {
    * 初始化 LangGraph 状态图
    */
   private initGraph() {
-    // 主路径是扩展问题→检索→充分性判断；不足时联网补证，之后重排、生成和反思，未通过时回到检索。
+    // 保留 queryAugment 节点 id 以恢复旧 checkpoint；节点只整理 QueryPlan 结果，不再调用扩写模型。
     const workflow = new StateGraph(AgenticRagState)
       .addNode(
         'queryAugment',
-        this.observedNode('queryAugment', this.queryAugmentNode.bind(this)),
+        // 保留 LangGraph 节点 id，旧 checkpoint 恢复时仍能找到原节点。
+        this.observedNode('queryAugment', this.prepareQueriesNode.bind(this)),
       )
       .addNode(
         'retrieval',
@@ -302,11 +294,16 @@ export class AgenticRagService {
   routeNode(
     state: AgenticRagStateType,
     mode: 'simple' | 'agentic' | 'auto',
+    config?: RunnableConfig,
   ): Partial<AgenticRagStateType> {
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
+    const queryPlan =
+      retrieveOptions.queryPlan ?? createFallbackQueryPlan(state.query);
     let route: 'simple' | 'agentic';
 
     if (mode === 'auto') {
-      route = this.shouldUseAgentic(state.query) ? 'agentic' : 'simple';
+      route = resolveAutoRoute(queryPlan, state.retrievalSufficient);
     } else {
       route = mode;
     }
@@ -317,129 +314,84 @@ export class AgenticRagService {
     return { route };
   }
 
-  /**
-   * 查询扩展节点：用 LLM 生成 3 条多角度检索问句
-   */
-  async queryAugmentNode(
+  resolveAutoRoute(
+    queryPlan: ReturnType<typeof createFallbackQueryPlan>,
+    fastPathSufficient: boolean,
+  ): 'simple' | 'agentic' {
+    return resolveAutoRoute(queryPlan, fastPathSufficient);
+  }
+
+  buildSubQuestions(
+    original: string,
+    queries: string[],
+    limit: number,
+  ): ReturnType<typeof buildSubQuestions> {
+    return buildSubQuestions(original, queries, limit);
+  }
+
+  buildExplicitSubQuestions(
+    questions: string[],
+    maxSubQuestions: number,
+  ): ReturnType<typeof buildExplicitSubQuestions> {
+    return buildExplicitSubQuestions(questions, maxSubQuestions);
+  }
+
+  /** 将 QueryPlan 整理成 Agentic 状态节点使用的查询与子问题清单。 */
+  async prepareQueriesNode(
     state: AgenticRagStateType,
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
     const userId = config?.configurable?.userId as string | undefined;
-    const abortSignal = config?.configurable?.abortSignal as
-      | AbortSignal
-      | undefined;
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
     const prefetchedFastPath = config?.configurable?.prefetchedFastPath as
       | PrefetchedFastPath
       | undefined;
-    const badCaseMatchesPromise = prefetchedFastPath?.badCaseMatches
-      ? Promise.resolve(prefetchedFastPath.badCaseMatches)
-      : this.withTimeout(
-          this.badCaseFlywheel.retrieveMatches(state.query, 2, userId),
-          2_000,
-          'Bad case candidate retrieval',
-        ).catch(() => [] as BadCaseMatch[]);
-    // 语义路由已确认一条消息含多个独立问题时，优先保留原始问题边界，
-    // 不再让查询扩展模型把多个问题收缩为首题的同义改写。
-    // 人物章节／绰号类问题虽然包含两个事实字段，但答案通常来自同一段
-    // 文本。这里优先合并路由器预拆出的子问题，避免“花名”或“第几回”
-    // 子问题失去原始人物实体后触发整体拒答。
-    const seededSubQuestions =
-      state.subQuestions?.length > 1 && !this.isAtomicFactQuestion(state.query)
+    const badCaseMatchesPromise = retrieveOptions.executionPlan?.scopeRestricted
+      ? Promise.resolve([] as BadCaseMatch[])
+      : prefetchedFastPath?.badCaseMatches
+        ? Promise.resolve(prefetchedFastPath.badCaseMatches)
+        : this.withTimeout(
+            this.badCaseFlywheel.retrieveMatches(state.query, 2, userId),
+            2_000,
+            'Bad case candidate retrieval',
+          ).catch(() => [] as BadCaseMatch[]);
+    const queryPlan =
+      retrieveOptions.queryPlan ?? createFallbackQueryPlan(state.query);
+    const plannedQueries = retrieveOptions.executionPlan?.queries.map(
+      (item) => item.text,
+    ) ?? [state.query, ...queryPlan.subQueries];
+    const queries = Array.from(
+      new Set([state.query, ...plannedQueries, ...state.augmentedQueries]),
+    )
+      .filter(Boolean)
+      .slice(0, this.maxRetrievalQueries);
+    const plannedSubQuestions =
+      state.subQuestions?.length > 0
         ? state.subQuestions
-        : [];
-    const deepAgentQueries =
-      seededSubQuestions.length > 0 || state.augmentedQueries.length > 0
-        ? []
-        : await this.planQueriesWithDeepAgent(state.query, abortSignal);
-    let queries: string[];
-
-    if (seededSubQuestions.length > 0) {
-      queries = seededSubQuestions.map((item) => item.question);
-    } else if (state.augmentedQueries.length > 0) {
-      queries = this.normalizeQueries(state.query, state.augmentedQueries);
-    } else if (deepAgentQueries.length > 0) {
-      queries = this.normalizeQueries(state.query, deepAgentQueries);
-      this.logger.log(`DeepAgent planned queries: ${JSON.stringify(queries)}`);
-    } else {
-      const model = this.llmProvider.getModel();
-
-      const schema = z.object({
-        queries: z
-          .array(z.string())
-          .min(1)
-          .max(this.maxAugmentedQueries)
-          .describe(
-            `最多 ${this.maxAugmentedQueries} 条中文检索问句：不同角度改写或扩写；保留专有名词、订单号等字面信息`,
-          ),
-      });
-
-      try {
-        const structured = model.withStructuredOutput(schema);
-        const chain = queryAugmentPrompt.pipe(structured);
-
-        // 优先使用语义示例选择器（从 Milvus 检索相关示例），超时则回退静态 few-shot。
-        let fewShotBlock = '';
-        try {
-          fewShotBlock = await this.withTimeout(
-            this.semanticExampleSelector.selectAndFormat(
-              state.query,
-              2,
-              'query_augment',
-            ),
-            4_000,
-            'Semantic example selection',
-          );
-        } catch (err) {
-          this.logger.warn(
-            `Semantic example selection skipped: ${(err as Error).message}`,
-          );
-        }
-
-        // 若语义选择器返回空（Milvus 未就绪），回退到静态 few-shot
-        if (!fewShotBlock) {
-          fewShotBlock = await queryAugmentFewShotPrompt.format({});
-        }
-
-        const raw = await this.withTimeout(
-          chain.invoke(
-            {
-              query: state.query,
-              few_shot_block: fewShotBlock,
-            },
-            {
-              signal: abortSignal,
-            },
-          ),
-          8_000,
-          'Query augment structured output',
-        );
-        queries = this.normalizeQueries(state.query, raw.queries);
-        this.logger.log(`Augmented queries: ${JSON.stringify(queries)}`);
-      } catch (err) {
-        this.logger.warn(
-          `Query augment failed, fallback to original: ${(err as Error).message}`,
-        );
-        queries = [state.query];
-      }
-    }
-
-    const subQuestions =
-      seededSubQuestions.length > 0
-        ? seededSubQuestions.slice(0, this.getSubQuestionLimit(config))
-        : this.buildSubQuestions(
-            state.query,
-            queries,
-            this.getSubQuestionLimit(config),
-          );
+        : queryPlan.subQueries.length > 0
+          ? buildExplicitSubQuestions(
+              queryPlan.subQueries,
+              this.maxSubQuestions,
+            )
+          : buildExplicitSubQuestions([state.query], this.maxSubQuestions);
+    const subQuestions = plannedSubQuestions.slice(
+      0,
+      this.getSubQuestionLimit(config),
+    );
     onEvent?.({
       type: 'query_augment',
       data: { queries, subQuestions },
     });
-    const artifact = createAgenticArtifact('subquestion_plan', 'queryAugment', {
-      query: state.query,
-      subQuestions,
-    });
+    const artifact = createAgenticArtifact(
+      'subquestion_plan',
+      'prepareQueries',
+      {
+        query: state.query,
+        subQuestions,
+      },
+    );
     onEvent?.({ type: 'artifact', data: artifact });
     return {
       augmentedQueries: queries,
@@ -449,10 +401,7 @@ export class AgenticRagService {
     };
   }
 
-  /**
-   * 检索节点：每个子问题独立执行完整 Hybrid Search（向量＋关键词／ES），
-   * 低命中时再补一次 BM25，最后合并去重。这样扩展问句不会只依赖关键词检索。
-   */
+  /** Agentic 只负责多步推理；底层候选由统一计划检索一次性召回和融合。 */
   async retrievalNode(
     state: AgenticRagStateType,
     config?: RunnableConfig,
@@ -470,7 +419,7 @@ export class AgenticRagService {
     const plannedSubQuestions =
       state.subQuestions?.length > 0
         ? state.subQuestions
-        : this.buildSubQuestions(
+        : buildSubQuestions(
             state.query,
             state.augmentedQueries,
             subQuestionLimit,
@@ -479,107 +428,46 @@ export class AgenticRagService {
       0,
       Math.min(subQuestionLimit, this.maxRetrievalQueries),
     );
-    const standaloneQuery = resolveStandaloneRetrievalQuery(
-      state.query,
-      retrieveOptions.queryIntent,
+    const executionPlan =
+      retrieveOptions.executionPlan ??
+      this.resolveExecutionPlan(state.query, retrieveOptions);
+    const formalRetrieval = fastPathChunks.length
+      ? Promise.resolve(fastPathChunks)
+      : this.karpathyRagService
+          .retrieve(
+            state.query,
+            {
+              ...retrieveOptions,
+              executionPlan,
+              rankingQuery: state.query,
+            },
+            userId,
+          )
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `Unified retrieval failed: ${(error as Error).message}`,
+            );
+            return [] as RetrievedChunk[];
+          });
+    const retrievedSubQuestionsPromise = formalRetrieval.then((chunks) =>
+      boundedSubQuestions.map((subQuestion) => ({
+        ...subQuestion,
+        status:
+          chunks.length > 0 ? ('retrieved' as const) : ('needs_more' as const),
+        evidenceIds: chunks.map((chunk) => chunk.id),
+        retrievalAttempts: subQuestion.retrievalAttempts + 1,
+        results: chunks,
+      })),
     );
-    const contextualQueries =
-      standaloneQuery !== state.query.trim() ? [standaloneQuery] : [];
 
-    // 子问题 Hybrid 检索、已审核纠错证据和 Obsidian 读取并发；Auto 预取结果能复用的部分不再重查。
+    // 统一 Hybrid 结果、已审核纠错证据和 Obsidian 读取并发准备；Auto 预取结果不重查。
     this.logger.log(
       `Retrieving ${boundedSubQuestions.length}/${plannedSubQuestions.length} sub-questions with hybrid search for userId=${userId ?? 'none'}`,
     );
 
     const [retrievedSubQuestions, reviewedBaseCaseChunks, obsidianContext] =
       await Promise.all([
-        Promise.all(
-          boundedSubQuestions.map(async (subQuestion, index) => {
-            const q = subQuestion.question;
-            try {
-              // 使用语义路由／查询规划生成的改写补召回，不依赖某一业务领域的关键词。
-              // 原问题始终保留为首项，改写仅用于覆盖资料与用户问法不一致的情况。
-              const retrievalQueries = this.buildRetrievalQueries(
-                q,
-                state.query,
-                fastPathChunks.length > 0
-                  ? []
-                  : [...contextualQueries, ...(state.augmentedQueries ?? [])],
-                index,
-              );
-              const resultGroups = await Promise.all(
-                retrievalQueries.map(async (retrievalQuery, queryIndex) => {
-                  // Auto 升级时只复用原问题的 Fast Path；补充改写必须实际检索。
-                  let results =
-                    index === 0 &&
-                    queryIndex === 0 &&
-                    retrievalQuery === state.query &&
-                    fastPathChunks.length > 0
-                      ? fastPathChunks
-                      : await this.karpathyRagService.retrieve(
-                          retrievalQuery,
-                          {
-                            ...retrieveOptions,
-                            rankingQuery: state.query,
-                            // Auto 升级时原问题已由 Fast Path 完成图谱探测；
-                            // 显式 Agentic 的原问题在这里按结构化计划探测一次。
-                            // 子问题只补文本证据，不能隐式重复探测图谱。
-                            queryIntent: retrieveOptions.queryIntent
-                              ? {
-                                  ...retrieveOptions.queryIntent,
-                                  requiresGraph:
-                                    fastPathChunks.length === 0 &&
-                                    index === 0 &&
-                                    queryIndex === 0 &&
-                                    retrievalQuery === state.query
-                                      ? retrieveOptions.queryIntent
-                                          .requiresGraph
-                                      : false,
-                                }
-                              : undefined,
-                          },
-                          userId,
-                        );
-                  // 向量服务短暂不可用或混合结果为空时，保留关键词降级能力。
-                  if (results.length === 0) {
-                    results = await this.karpathyRagService.retrieveBm25Only(
-                      retrievalQuery,
-                      userId,
-                      retrieveOptions.scope,
-                      true,
-                      retrieveOptions.tenantId,
-                    );
-                  }
-                  return results;
-                }),
-              );
-              // 图谱证据由共享 Hybrid 检索根据 RequestContext 的计划按需合并。
-              // Agentic 仅为新增子问题调用这条共享链路，避免额外的图谱工具调用。
-              const results = resultGroups.flat();
-              return {
-                ...subQuestion,
-                status:
-                  results.length > 0
-                    ? ('retrieved' as const)
-                    : ('needs_more' as const),
-                evidenceIds: results.map((chunk) => chunk.id),
-                retrievalAttempts: subQuestion.retrievalAttempts + 1,
-                results,
-              };
-            } catch (err) {
-              this.logger.warn(
-                `Retrieve failed for query "${q.slice(0, 30)}": ${(err as Error).message}`,
-              );
-              return {
-                ...subQuestion,
-                status: 'needs_more' as const,
-                retrievalAttempts: subQuestion.retrievalAttempts + 1,
-                reason: (err as Error).message,
-                results: [] as RetrievedChunk[],
-              };
-            }
-          }),
-        ),
+        retrievedSubQuestionsPromise,
         Promise.resolve(
           this.karpathyRagService.toReviewedEvidenceChunks(
             state.badCaseMatches?.length
@@ -587,20 +475,22 @@ export class AgenticRagService {
               : (prefetchedFastPath?.badCaseMatches ?? []),
           ),
         ),
-        prefetchedFastPath?.obsidianHits
-          ? Promise.resolve({
-              hits: prefetchedFastPath.obsidianHits,
-              context: this.karpathyRagService.formatObsidianContext(
-                prefetchedFastPath.obsidianHits,
-              ),
-            })
-          : this.karpathyRagService
-              .getObsidianContext(
-                state.query,
-                userId,
-                retrieveOptions.scope?.role,
-              )
-              .catch(() => ({ hits: [], context: '' })),
+        retrieveOptions.executionPlan?.scopeRestricted
+          ? Promise.resolve({ hits: [], context: '' })
+          : prefetchedFastPath?.obsidianHits
+            ? Promise.resolve({
+                hits: prefetchedFastPath.obsidianHits,
+                context: this.karpathyRagService.formatObsidianContext(
+                  prefetchedFastPath.obsidianHits,
+                ),
+              })
+            : this.karpathyRagService
+                .getObsidianContext(
+                  state.query,
+                  userId,
+                  retrieveOptions.scope?.role,
+                )
+                .catch(() => ({ hits: [], context: '' })),
       ]);
     const sourceResolution =
       await this.karpathyRagService.resolveObsidianSourceEvidence(
@@ -612,9 +502,8 @@ export class AgenticRagService {
     const obsidianEvidenceHits = obsidianContext.hits.filter(
       (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
     );
-    const obsidianChunks = this.karpathyRagService.toObsidianChunks(
-      obsidianEvidenceHits,
-    );
+    const obsidianChunks =
+      this.karpathyRagService.toObsidianChunks(obsidianEvidenceHits);
     const allResults = retrievedSubQuestions.map((item) => item.results);
     const updatedSubQuestions: AgenticSubQuestion[] = retrievedSubQuestions.map(
       ({ results, ...subQuestion }) => {
@@ -651,7 +540,11 @@ export class AgenticRagService {
     const formalChunks = Array.from(formalChunkMap.values());
     const formalEvidenceSufficient =
       formalChunks.length > 0 &&
-      this.assessRetrievedChunks(state.query, formalChunks).sufficient;
+      this.assessRetrievedChunks(
+        state.query,
+        formalChunks,
+        retrieveOptions.queryPlan?.taskType,
+      ).sufficient;
     // 与 Simple/Auto 的统一证据策略保持一致：正式 RAG 已足够时，Obsidian
     // 只能作为可观测补充，不能挤占正式片段；正式 RAG 不足时才纳入长期笔记兜底。
     const baselineCandidates = [
@@ -779,9 +672,11 @@ export class AgenticRagService {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const retrieveOptions = (config?.configurable?.retrieveOptions ??
+      {}) as RetrieveOptions;
     const subQuestions = state.subQuestions?.length
       ? state.subQuestions
-      : this.buildSubQuestions(
+      : buildSubQuestions(
           state.query,
           state.augmentedQueries,
           this.getSubQuestionLimit(config),
@@ -836,7 +731,11 @@ export class AgenticRagService {
       const evidence = subQuestion.evidenceIds
         .map((id) => chunksById.get(id))
         .filter((chunk): chunk is RetrievedChunk => Boolean(chunk));
-      const gate = this.assessRetrievedChunks(subQuestion.question, evidence);
+      const gate = this.assessRetrievedChunks(
+        subQuestion.question,
+        evidence,
+        retrieveOptions.queryPlan?.taskType,
+      );
       return {
         ...subQuestion,
         sufficient: gate.sufficient || deterministicEvidenceGate,
@@ -873,6 +772,7 @@ export class AgenticRagService {
     const localGate = this.assessRetrievedChunks(
       state.query,
       state.retrievedChunks,
+      retrieveOptions.queryPlan?.taskType,
     );
     if (!localGate.sufficient) {
       onEvent?.({
@@ -886,6 +786,27 @@ export class AgenticRagService {
         retrievalSufficient: false,
         retrievalReason: localGate.reason,
         subQuestions: evaluatedSubQuestions,
+      };
+    }
+
+    if (
+      this.sufficiencyFastPathEnabled &&
+      evaluatedSubQuestions.every((item) => item.sufficient)
+    ) {
+      const reason =
+        '本地质量门禁与子问题证据均已通过，跳过冗余的模型充分性判断';
+      onEvent?.({
+        type: 'sufficiency',
+        data: { sufficient: true, reason, fastPath: true },
+      });
+      return {
+        retrievalSufficient: true,
+        retrievalReason: reason,
+        subQuestions: evaluatedSubQuestions.map((item) => ({
+          ...item,
+          sufficient: true,
+          status: 'sufficient' as const,
+        })),
       };
     }
 
@@ -945,6 +866,7 @@ export class AgenticRagService {
       const fallbackGate = this.assessRetrievedChunks(
         state.query,
         state.retrievedChunks,
+        retrieveOptions.queryPlan?.taskType,
       );
       const sufficient = fallbackGate.sufficient;
       const reason = `充分性 LLM 评估失败，按检索质量门禁判断：${fallbackGate.reason}`;
@@ -1027,7 +949,7 @@ export class AgenticRagService {
     try {
       const subQuestions = state.subQuestions?.length
         ? state.subQuestions
-        : this.buildSubQuestions(
+        : buildSubQuestions(
             state.query,
             state.augmentedQueries,
             this.getSubQuestionLimit(config),
@@ -1254,367 +1176,24 @@ export class AgenticRagService {
     state: AgenticRagStateType,
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
-    const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
-    const history = (config?.configurable?.history ?? []) as Array<{
-      role: 'human' | 'ai';
-      content: string;
-    }>;
-    const memoryMessages = (config?.configurable?.memoryMessages ??
-      []) as Array<{
-      role: string;
-      content: string;
-    }>;
-    const retrieveOptions = (config?.configurable?.retrieveOptions ??
-      {}) as RetrieveOptions;
-    const badCaseMatches = state.badCaseMatches ?? [];
-    const badCasePrompt = badCaseMatches.length
-      ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
-      : '';
-    const generationMemory = badCasePrompt
-      ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
-      : memoryMessages;
-    const deterministicEvidenceAnswer = this.buildEvidenceFirstAnswer(
-      state.query,
-      state.retrievedChunks,
-    );
-    const effectiveRetrievalSufficient =
-      state.retrievalSufficient || Boolean(deterministicEvidenceAnswer);
-    const strongBadCase = badCaseMatches.find(
-      (match) => match.mode === 'exact',
-    );
-    const correction = strongBadCase
-      ? this.karpathyRagService.extractCorrectedAnswer(strongBadCase.text)
-      : '';
-    if (strongBadCase && correction) {
-      const answer = await this.karpathyRagService.generateCorrectionAnswer(
-        state.query,
-        correction,
-        history,
-        memoryMessages,
-        (token) => onEvent?.({ type: 'token', data: token }),
-        strongBadCase.query,
-        retrieveOptions.signal,
-      );
-      onEvent?.({ type: 'citation', data: state.retrievedChunks });
-      const artifacts = this.withAnswerArtifact(
-        state,
-        answer,
-        true,
-        1,
-        '命中已审核 Bad Case 纠错答案',
-      );
-      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-      return {
-        answer,
-        retrievalSufficient: true,
-        retrievalReason: `命中已审核 Bad Case 纠错证据（${strongBadCase.mode}，${strongBadCase.score.toFixed(3)}）`,
-        artifacts,
-      };
-    }
-
-    if (state.retrievedChunks.length === 0 || !effectiveRetrievalSufficient) {
-      const reason =
-        state.retrievedChunks.length === 0
-          ? '没有检索到任何可用片段'
-          : state.retrievalReason || '检索不足';
-      const ans = this.karpathyRagService.unsupportedReliableAnswer();
-      onEvent?.({ type: 'token', data: ans });
-      onEvent?.({ type: 'citation', data: [] });
-      const artifacts = this.withAnswerArtifact(
-        state,
-        ans,
-        false,
-        0,
-        '本地与联网证据不足，已进入安全降级',
-      );
-      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-      return {
-        answer: ans,
-        retrievedChunks: [],
-        retrievalSufficient: false,
-        retrievalReason: `${reason}；本地与联网证据不足，已进入安全降级`,
-        artifacts,
-      };
-    }
-
-    type GenerationLoopState = {
-      answer: string;
-      citationGate?: { sufficient: boolean; reason: string };
-    };
-    // 有界生成循环固定为“生成草稿→引用校验→完成”；引用门禁是工具步骤，不由模型自行宣告通过。
-    const loop = await this.agentLoop.run<
-      GenerationLoopState,
-      GenerationLoopState
-    >({
-      threadId: this.threadIdFromConfig(config) || 'agentic-rag',
+    return this.answerGenerationService.generate(state, {
+      onEvent: config?.configurable?.onEvent as SseCallback | undefined,
+      history: (config?.configurable?.history ?? []) as Array<{
+        role: 'human' | 'ai';
+        content: string;
+      }>,
+      memoryMessages: (config?.configurable?.memoryMessages ?? []) as Array<{
+        role: string;
+        content: string;
+      }>,
+      retrieveOptions: (config?.configurable?.retrieveOptions ??
+        {}) as RetrieveOptions,
+      userId: this.userIdFromConfig(config),
+      threadId: this.threadIdFromConfig(config),
       runId: this.runIdFromConfig(config),
-      actor: 'agentic_answer',
-      initialState: { answer: '' },
-      maxSteps: 3,
-      maxToolCalls: 1,
-      timeoutMs: 90_000,
-      decide: (loopState) => {
-        if (!loopState.answer) {
-          return {
-            type: 'model' as const,
-            name: 'generate_grounded_answer',
-            execute: async () => {
-              const grounded =
-                await this.karpathyRagService.generateGroundedAnswer(
-                  state.query,
-                  state.retrievedChunks,
-                  history,
-                  generationMemory,
-                  (token) => onEvent?.({ type: 'token', data: token }),
-                  {
-                    userId: this.userIdFromConfig(config),
-                    scope: retrieveOptions.scope,
-                    entities: retrieveOptions.entities,
-                    needsSynthesis: retrieveOptions.needsSynthesis,
-                    signal: retrieveOptions.signal,
-                  },
-                );
-              return grounded.answer;
-            },
-            reduce: (current: GenerationLoopState, answer: string) => ({
-              ...current,
-              answer,
-            }),
-          };
-        }
-        if (!loopState.citationGate) {
-          return {
-            type: 'tool' as const,
-            name: 'citation_validate',
-            mode: 'agentic' as const,
-            ownerUserId: this.userIdFromConfig(config),
-            input: {
-              answerLength: loopState.answer.length,
-              evidenceCount: state.retrievedChunks.length,
-            },
-            execute: async () =>
-              this.karpathyRagService.validateAnswerCitationSupport(
-                loopState.answer,
-                state.retrievedChunks,
-              ),
-            reduce: (
-              current: GenerationLoopState,
-              citationGate: { sufficient: boolean; reason: string },
-            ) => ({ ...current, citationGate }),
-          };
-        }
-        return {
-          type: 'complete' as const,
-          output: loopState,
-          reason: loopState.citationGate.sufficient
-            ? '引用门禁通过'
-            : loopState.citationGate.reason,
-        };
-      },
+      buildEvidenceFirstAnswer: (query, chunks) =>
+        this.buildEvidenceFirstAnswer(query, chunks),
     });
-    if (loop.status !== 'completed' || !loop.output?.citationGate) {
-      throw new Error(`Agent Loop 未完成：${loop.terminationReason}`);
-    }
-    let answer = loop.output.answer;
-    let citationGate = loop.output.citationGate;
-    // Agentic 的多轮总结可能把结构化事实中的数字、单位或实体名压缩掉。
-    // 如果同一批已授权证据能够生成通过引用门禁的确定性答案，优先采用它，
-    // 保证复杂链路和 Simple 对可核验事实保持一致。
-    const deterministicAnswer = deterministicEvidenceAnswer;
-    if (deterministicAnswer) {
-      // 结构化答案只由当前 evidenceChunks 的固定字段组成，片段编号也是同一
-      // 批证据的局部编号；引用门禁的 LLM/覆盖率波动不能否定这类确定性结果。
-      answer = deterministicAnswer;
-      citationGate = {
-        sufficient: true,
-        reason: '结构化证据答案使用当前片段字段并保留局部引用',
-      };
-    }
-    if (!citationGate.sufficient) {
-      // 不能把候选原文片段伪装成回答。首次生成未通过引用门禁时，使用同一批
-      // 证据做一次更短、更受约束的语义压缩；仍失败则安全降级。
-      const fallbackAnswer = await this.synthesizeEvidenceAnswer(
-        state.query,
-        state.retrievedChunks,
-        retrieveOptions.signal,
-      );
-      let repairedFallbackAnswer = fallbackAnswer
-        ? this.karpathyRagService.repairAnswerCitations(
-            fallbackAnswer,
-            state.retrievedChunks,
-          )
-        : null;
-      let fallbackGate = repairedFallbackAnswer
-        ? this.karpathyRagService.validateAnswerCitationSupport(
-            repairedFallbackAnswer,
-            state.retrievedChunks,
-          )
-        : null;
-
-      // DeepSeek 在部分本地配置下会返回非空但不可引用的短句；这不是证据不足，
-      // 而是生成器结果不可用。此时必须显式切换到 Qwen 重新做同一批证据的语义总结，
-      // 不能把“引用门禁失败”直接暴露给用户。
-      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
-        // 首选模型已经未通过引用门禁，不能继续接受其可能混入证据外事实的
-        // 语义总结；统一切换备用模型重新压缩同一批证据。
-        try {
-          const qwenAnswer = await this.llmProvider.runWithModel('qwen', () =>
-            this.synthesizeEvidenceAnswer(
-              state.query,
-              state.retrievedChunks,
-              retrieveOptions.signal,
-            ),
-          );
-          repairedFallbackAnswer = qwenAnswer
-            ? this.karpathyRagService.repairAnswerCitations(
-                qwenAnswer,
-                state.retrievedChunks,
-              )
-            : null;
-          fallbackGate = repairedFallbackAnswer
-            ? this.karpathyRagService.validateAnswerCitationSupport(
-                repairedFallbackAnswer,
-                state.retrievedChunks,
-              )
-            : null;
-        } catch (error) {
-          this.logger.warn(
-            `Qwen semantic fallback failed: ${(error as Error).message}`,
-          );
-        }
-      }
-
-      if (repairedFallbackAnswer && fallbackGate?.sufficient) {
-        const citedChunks = this.karpathyRagService.selectCitedChunks(
-          repairedFallbackAnswer,
-          state.retrievedChunks,
-        );
-        onEvent?.({ type: 'token', data: repairedFallbackAnswer });
-        onEvent?.({ type: 'citation', data: citedChunks });
-        const artifacts = this.withAnswerArtifact(
-          state,
-          repairedFallbackAnswer,
-          true,
-          this.getSubQuestionCoverage(state),
-          '证据语义总结通过引用校验',
-        );
-        onEvent?.({
-          type: 'artifact',
-          data: artifacts[artifacts.length - 1],
-        });
-        return {
-          answer: repairedFallbackAnswer,
-          retrievalSufficient: true,
-          retrievalReason: '首选模型答案不可用，已切换备用模型完成证据总结',
-          artifacts,
-        };
-      }
-
-      const safeAnswer = this.karpathyRagService.unsupportedReliableAnswer();
-      onEvent?.({ type: 'token', data: safeAnswer });
-      onEvent?.({ type: 'citation', data: [] });
-      const artifacts = this.withAnswerArtifact(
-        state,
-        safeAnswer,
-        false,
-        0,
-        citationGate.reason,
-      );
-      onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-      return {
-        answer: safeAnswer,
-        retrievedChunks: [],
-        retrievalSufficient: false,
-        retrievalReason: citationGate.reason,
-        passed: true,
-        artifacts,
-      };
-    }
-
-    const citedChunks = this.karpathyRagService.selectCitedChunks(
-      answer,
-      state.retrievedChunks,
-    );
-    onEvent?.({ type: 'citation', data: citedChunks });
-    const artifacts = this.withAnswerArtifact(
-      state,
-      answer,
-      true,
-      this.getSubQuestionCoverage(state),
-      '答案通过引用和子问题覆盖校验',
-    );
-    onEvent?.({ type: 'artifact', data: artifacts[artifacts.length - 1] });
-    return {
-      answer,
-      retrievedChunks: citedChunks,
-      retrievalSufficient: true,
-      retrievalReason: deterministicAnswer
-        ? '结构化证据答案使用当前片段字段并保留局部引用'
-        : undefined,
-      artifacts,
-    };
-  }
-
-  private async synthesizeEvidenceAnswer(
-    query: string,
-    chunks: RetrievedChunk[],
-    signal?: AbortSignal,
-  ): Promise<string | null> {
-    if (chunks.length === 0) return null;
-    const evidence = chunks
-      .slice(0, 6)
-      .map(
-        (chunk, index) =>
-          `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
-      )
-      .join('\n\n');
-    const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。若问题包含多个并列事项，必须逐项回答并分别引用对应片段；某一项缺证据时只对该项说明“片段中未提及”，不能只回答其中最相关的一项。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n问题：${query}\n\n证据：\n${evidence}`;
-    try {
-      const answer = await this.withTimeout(
-        this.llmProvider.invoke(prompt, {
-          signal: this.composeSignal(signal, 20_000),
-        }),
-        20_000,
-        'Evidence synthesis fallback',
-      );
-      if (answer.trim()) return answer.trim();
-      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
-        const fallback = await this.withTimeout(
-          this.llmProvider.runWithModel('qwen', () =>
-            this.llmProvider.invoke(prompt, {
-              signal: this.composeSignal(signal, 20_000),
-            }),
-          ),
-          20_000,
-          'Qwen evidence synthesis fallback',
-        );
-        return fallback.trim() || null;
-      }
-      return null;
-    } catch (error) {
-      this.logger.warn(
-        `Evidence synthesis fallback failed: ${(error as Error).message}`,
-      );
-      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
-        try {
-          const fallback = await this.withTimeout(
-            this.llmProvider.runWithModel('qwen', () =>
-              this.llmProvider.invoke(prompt, {
-                signal: this.composeSignal(signal, 20_000),
-              }),
-            ),
-            20_000,
-            'Qwen evidence synthesis fallback',
-          );
-          return fallback.trim() || null;
-        } catch (fallbackError) {
-          this.logger.warn(
-            `Qwen evidence synthesis fallback failed: ${(fallbackError as Error).message}`,
-          );
-        }
-      }
-      return null;
-    }
   }
 
   /**
@@ -1657,7 +1236,35 @@ export class AgenticRagService {
           reason,
         },
       });
-      return { confidence: 0, passed: false, retryCount };
+      return {
+        confidence: 0,
+        passed: false,
+        retryCount,
+        reflectionFeedback: reason.slice(0, 500),
+      };
+    }
+
+    if (
+      this.reflectionFastPathEnabled &&
+      contractPayload?.valid === true &&
+      contractPayload.citationSupported === true &&
+      contractPayload.subQuestionCoverage >= 1
+    ) {
+      onEvent?.({
+        type: 'reflection',
+        data: {
+          confidence: 0.9,
+          passed: true,
+          retryCount: state.retryCount,
+          reason: '答案契约和引用覆盖已通过，跳过冗余的模型反思调用',
+          fastPath: true,
+        },
+      });
+      return {
+        confidence: 0.9,
+        passed: true,
+        retryCount: state.retryCount,
+      };
     }
 
     const model = this.llmProvider.getModel();
@@ -1702,6 +1309,7 @@ export class AgenticRagService {
           confidence: result.confidence,
           passed,
           retryCount,
+          reason: result.reason,
         },
       });
 
@@ -1709,6 +1317,9 @@ export class AgenticRagService {
         confidence: result.confidence,
         passed,
         retryCount,
+        reflectionFeedback: passed
+          ? ''
+          : `答案需要补充或修正：${result.reason}`.slice(0, 500),
       };
     } catch (err) {
       this.logger.warn(
@@ -1724,7 +1335,13 @@ export class AgenticRagService {
           reason: '反思评估失败，不能确认答案可信度',
         },
       });
-      return { confidence: 0, passed: false, retryCount };
+      return {
+        confidence: 0,
+        passed: false,
+        retryCount,
+        reflectionFeedback:
+          '反思评估失败，请重新核对原问题的每个要求并逐项作答。',
+      };
     }
   }
 
@@ -1753,9 +1370,10 @@ export class AgenticRagService {
       if (userId && this.documentPermissions) {
         const allowedDocIds = await this.documentPermissions.getAllowedDocIds(
           userId,
-          [],
-          [],
+          retrieveOptions?.roles ?? [],
+          retrieveOptions?.departmentIds ?? [],
           retrieveOptions?.tenantId,
+          retrieveOptions?.trustedAdminPrincipal,
         );
         retrievedChunks = retrievedChunks.filter((chunk) =>
           allowedDocIds.has(chunk.docId),
@@ -1763,7 +1381,8 @@ export class AgenticRagService {
       } else {
         retrievedChunks = [];
       }
-      permissionChanged = retrievedChunks.length !== state.retrievedChunks.length;
+      permissionChanged =
+        retrievedChunks.length !== state.retrievedChunks.length;
     }
     const answer = permissionChanged ? '' : state.answer;
 
@@ -1927,14 +1546,47 @@ export class AgenticRagService {
     if (!this.isResumeContext(context)) {
       throw new BadRequestException('检查点缺少可恢复的授权上下文');
     }
+    const checkpointValues = tuple?.checkpoint.channel_values;
+    const checkpointQuery =
+      checkpointValues && typeof checkpointValues.query === 'string'
+        ? checkpointValues.query
+        : '';
+    const retrieveOptions = {
+      ...context.retrieveOptions,
+    } as RetrieveOptions & {
+      queryIntent?: unknown;
+      planVersion?: unknown;
+    };
+    const queryPlan = retrieveOptions.queryPlan
+      ? adaptStoredQueryPlan(
+          retrieveOptions.queryPlan,
+          checkpointQuery,
+          retrieveOptions.planVersion,
+        )
+      : adaptStoredQueryPlan(
+          retrieveOptions.queryIntent,
+          checkpointQuery,
+          retrieveOptions.planVersion,
+        );
+    retrieveOptions.queryPlan = queryPlan;
+    retrieveOptions.needsSynthesis = queryPlan.taskType === 'synthesis';
+    retrieveOptions.entities = queryPlan.entities;
+
+    const executionPlan =
+      retrieveOptions.executionPlan ??
+      this.resolveExecutionPlan(checkpointQuery, retrieveOptions);
+    retrieveOptions.executionPlan = {
+      ...executionPlan,
+      useGraph: executionPlan.useGraph || queryPlan.needsGraph,
+    };
     const requestedTenant = tenantId?.trim();
     if (requestedTenant) {
-      const checkpointTenant = context.retrieveOptions.tenantId?.trim();
+      const checkpointTenant = retrieveOptions.tenantId?.trim();
       if (!checkpointTenant || checkpointTenant !== requestedTenant) {
         throw new BadRequestException('检查点租户与当前身份不匹配');
       }
     }
-    return context;
+    return { ...context, retrieveOptions };
   }
 
   /**
@@ -1961,7 +1613,8 @@ export class AgenticRagService {
       configurable: { thread_id: threadId },
     });
     if (!tuple) {
-      const persistedArtifacts = await this.loadPersistedArtifacts(threadId);
+      const persistedArtifacts =
+        (await this.artifactStore?.loadRunArtifacts(threadId)) ?? [];
       return {
         available: false,
         threadId,
@@ -1984,7 +1637,8 @@ export class AgenticRagService {
     const checkpointArtifacts = this.isArtifacts(values.artifacts)
       ? values.artifacts
       : [];
-    const persistedArtifacts = await this.loadPersistedArtifacts(threadId);
+    const persistedArtifacts =
+      (await this.artifactStore?.loadRunArtifacts(threadId)) ?? [];
     const artifacts = [...checkpointArtifacts];
     for (const artifact of persistedArtifacts) {
       if (!artifacts.some((item) => item.id === artifact.id))
@@ -2020,32 +1674,6 @@ export class AgenticRagService {
           | AgenticRagStateType['executionState']
           | undefined) ?? null,
     };
-  }
-
-  private async loadPersistedArtifacts(
-    threadId: string,
-  ): Promise<AgenticArtifact[]> {
-    if (!this.structuredArtifactRepository) return [];
-    const rows = await this.structuredArtifactRepository.find({
-      where: { threadId },
-      order: { createdAt: 'ASC' },
-    });
-    return rows.flatMap((row) => {
-      try {
-        return [
-          {
-            id: row.artifactId,
-            type: row.type as AgenticArtifact['type'],
-            version: row.version as 1,
-            producer: row.producer,
-            createdAt: row.createdAt.toISOString(),
-            payload: JSON.parse(row.payload) as unknown,
-          },
-        ];
-      } catch {
-        return [];
-      }
-    });
   }
 
   /** 重新执行当前 Thread 的 Agentic 全链路，保留同一会话用于对比前后 Artifact。 */
@@ -2154,66 +1782,70 @@ export class AgenticRagService {
       }
       downstreamOnEvent?.(event);
     };
-    // 系统能力类问题不依赖知识库证据，避免被“证据不足”门禁误判为无法回答。
-    const queryIntent =
-      retrieveOptions.queryIntent ??
-      (this.queryIntentRouter
-        ? await this.queryIntentRouter.classify(query)
-        : {
-            intent: 'general' as const,
-            contextMode: 'none' as const,
-            historyPolicy: 'context_only' as const,
-            confidence: 0,
-            standaloneQuery: query,
-            multiIntent: false,
-            subQueries: [],
-            action: 'retrieve' as const,
-            sourcePolicy: 'local_only' as const,
-            needsSynthesis: false,
-            requiresGraph: false,
-            targetKbs: ['general'] as QueryIntent['targetKbs'],
-            queryType: 'public_knowledge' as const,
-            entities: [],
-            filters: {
-              department: null,
-              project: null,
-              timeRange: null,
-              documentType: null,
-            },
-            rewriteQueries: [],
-            reason: '',
-            ambiguity: {
-              detected: false,
-              confidence: 0,
-              senses: [],
-              clarificationQuestion: undefined,
-            },
-          });
-    const ambiguity = queryIntent.ambiguity;
-    const multiIntent = this.isMultiIntentQuery(queryIntent);
-    const routeMetadata = {
-      action: queryIntent.action,
-      sourcePolicy: queryIntent.sourcePolicy,
-      queryType: queryIntent.queryType,
-      targetKbs: queryIntent.targetKbs,
-      entities: queryIntent.entities,
-      requiresGraph: queryIntent.requiresGraph,
-      filters: queryIntent.filters,
-      rewriteQueries: queryIntent.rewriteQueries,
-      reason: queryIntent.reason,
-    };
-    // 上游 RequestContext 是不可放宽的授权上限：下游语义结果只能收紧来源。
+    // 系统能力/公共事实/多问题边界由统一 QueryPlan 表达；执行策略由后端 Policy 生成。
+    const queryPlan =
+      retrieveOptions.queryPlan ?? createFallbackQueryPlan(query);
+    let executionPlan =
+      retrieveOptions.executionPlan ??
+      this.resolveExecutionPlan(query, retrieveOptions);
     const requestedSourcePolicy = retrieveOptions.sourcePolicy;
-    const effectiveSourcePolicy =
-      requestedSourcePolicy === 'local_only'
-        ? 'local_only'
-        : requestedSourcePolicy === 'direct_answer'
-          ? 'direct_answer'
-          : queryIntent.sourcePolicy;
+    const supplementalEvidencePresent = Boolean(
+      retrieveOptions.supplementalEvidence?.length,
+    );
+    const scopeRestricted =
+      executionPlan.scopeRestricted === true ||
+      hasExplicitScopeFilter(executionPlan.scope) ||
+      hasExplicitScopeFilter(retrieveOptions.scope) ||
+      supplementalEvidencePresent;
+    const queryRequiresLocalEvidence =
+      queryPlan.domain === 'internal' ||
+      (queryPlan.domain === 'public' && queryPlan.action !== 'direct') ||
+      ['setting', 'follow_up', 'mixed'].includes(queryPlan.contextMode);
+    const mustUseLocalEvidence =
+      requestedSourcePolicy === 'local_only' ||
+      scopeRestricted ||
+      queryRequiresLocalEvidence;
+    const effectiveSourcePolicy = mustUseLocalEvidence
+      ? 'local_only'
+      : executionPlan.sourcePolicy;
+    const effectiveScope = executionPlan.scope ?? retrieveOptions.scope;
+    executionPlan = {
+      ...executionPlan,
+      sourcePolicy: effectiveSourcePolicy,
+      scope: effectiveScope,
+      scopeRestricted,
+      ...(mustUseLocalEvidence
+        ? { reasonCode: 'internal_evidence_required' as const }
+        : {}),
+    };
     retrieveOptions.knowledgeOnly = effectiveSourcePolicy === 'local_only';
     retrieveOptions.sourcePolicy = effectiveSourcePolicy;
-    retrieveOptions.needsSynthesis = queryIntent.needsSynthesis;
-    retrieveOptions.entities = queryIntent.entities;
+    retrieveOptions.executionPlan = executionPlan;
+    if (retrieveOptions.requestContext) {
+      retrieveOptions.requestContext = {
+        ...retrieveOptions.requestContext,
+        queryPlan,
+        executionPlan,
+        sourcePolicy: effectiveSourcePolicy,
+        scope: effectiveScope,
+      };
+    }
+    const multiIntent = queryPlan.subQueries.length > 0;
+    const routeMetadata = {
+      action: queryPlan.action,
+      domain: queryPlan.domain,
+      contextMode: queryPlan.contextMode,
+      sourcePolicy: effectiveSourcePolicy,
+      taskType: queryPlan.taskType,
+      entities: queryPlan.entities,
+      needsGraph: executionPlan.useGraph,
+      filters: queryPlan.filters,
+      queries: executionPlan.queries,
+      reason: executionPlan.reasonCode,
+    };
+    retrieveOptions.needsSynthesis = queryPlan.taskType === 'synthesis';
+    retrieveOptions.entities = queryPlan.entities;
+    retrieveOptions.queryPlan = queryPlan;
     if (!retrieveOptions.requestContext) {
       const maxSteps =
         this.configService.get<number>('agentRun.maxSteps') ?? 18;
@@ -2226,7 +1858,8 @@ export class AgenticRagService {
         threadId,
         query,
         mode,
-        queryIntent,
+        queryPlan,
+        executionPlan,
         sourcePolicy: effectiveSourcePolicy,
         scope: retrieveOptions.scope,
         deadlineAt:
@@ -2240,9 +1873,9 @@ export class AgenticRagService {
         },
       } satisfies RequestContext;
     }
-    if (shouldClarifyQueryIntent(queryIntent)) {
+    if (shouldClarifyQueryPlan(queryPlan)) {
       const answer =
-        ambiguity.clarificationQuestion ??
+        queryPlan.clarificationQuestion ??
         '这个问题存在多种可能含义。请补充具体对象、项目或业务场景。';
       onEvent?.({
         type: 'routing',
@@ -2264,7 +1897,7 @@ export class AgenticRagService {
       return {
         ...direct,
         route: 'simple' as const,
-        confidence: ambiguity.confidence,
+        confidence: 0.5,
         retryCount: 0,
         evidenceCoverage: [],
       };
@@ -2273,23 +1906,19 @@ export class AgenticRagService {
       // Auto 的职责是先用 Fast Path 判断是否已有本地证据，再在两个引擎间路由。
       // 这里提前直答会绕过本地证据，导致同一个问题在 Auto 下被模型误判为公共知识；
       // Simple 才允许在明确 direct_answer 边界内跳过检索。
-      mode === 'simple' &&
+      (mode === 'simple' || mode === 'auto') &&
+      queryPlan.action === 'direct' &&
       !multiIntent &&
-      (queryIntent.intent === 'system_capability' ||
-        queryIntent.intent === 'objective_fact' ||
-        queryIntent.queryType === 'public_knowledge') &&
-      (queryIntent.queryType === 'public_knowledge' ||
-        queryIntent.confidence >= 0.85) &&
-      (queryIntent.contextMode === 'none' ||
-        queryIntent.contextMode === 'factual_verification') &&
-      queryIntent.sourcePolicy === 'direct_answer' &&
+      !supplementalEvidencePresent &&
+      !scopeRestricted &&
+      queryPlan.domain === 'public' &&
+      (queryPlan.contextMode === 'independent' ||
+        queryPlan.contextMode === 'verification') &&
+      executionPlan.sourcePolicy === 'direct_answer' &&
       retrieveOptions.sourcePolicy !== 'local_only'
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
-      const prompt =
-        queryIntent.intent === 'system_capability'
-          ? `你正在回答系统能力问题。当前实际选用的模型是 ${modelName}。请用中文直接说明模型名称、文本能力，以及是否支持图片、音频、视频输入；不要声称具备当前模型未提供的能力，也不要要求用户补充资料。用户问题：${query}`
-          : `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
+      const prompt = `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
       onEvent?.({
         type: 'routing',
         data: { mode, route: 'simple', reason: 'system_capability_direct' },
@@ -2298,10 +1927,7 @@ export class AgenticRagService {
         type: 'sufficiency',
         data: {
           sufficient: true,
-          reason:
-            queryIntent.intent === 'system_capability'
-              ? '系统能力问答，直接回答'
-              : '客观事实问答，直接回答',
+          reason: '客观事实问答，直接回答',
         },
       });
       let answer: string;
@@ -2345,10 +1971,7 @@ export class AgenticRagService {
         answer,
         references: [],
         retrievalSufficient: true,
-        retrievalReason:
-          queryIntent.intent === 'system_capability'
-            ? '系统能力问答，直接回答'
-            : '客观事实问答，直接回答',
+        retrievalReason: '客观事实问答，直接回答',
       };
       onEvent?.({ type: 'citation', data: [] });
       onEvent?.({ type: 'final', data: direct });
@@ -2359,8 +1982,8 @@ export class AgenticRagService {
         retryCount: 0,
       };
     }
-    // Auto 的 Fast Path 只用于选择执行引擎和向升级后的 Agentic 复用首轮证据。
-    // 用户显式选择 Agentic 时直接进入状态机，由 Query Augment 规划后按需取证。
+    // Auto 的 Fast Path 只用于选择执行引擎，并把首轮证据交给升级后的 Agentic 复用。
+    // 显式 Agentic 直接进入状态机，按 QueryPlan 取证。
     const fastPathGate =
       !multiIntent && mode === 'auto'
         ? await this.karpathyRagService.assessFastPath(
@@ -2370,22 +1993,24 @@ export class AgenticRagService {
           )
         : null;
     const route =
-      mode === 'simple'
-        ? 'simple'
-        : mode === 'agentic'
-          ? 'agentic'
-          : retrieveOptions.allowConversationStateAnswer
-            ? 'simple'
-            : retrieveOptions.queryIntent?.contextMode === 'mixed'
+      queryPlan.action === 'execute'
+        ? 'agentic'
+        : mode === 'simple'
+          ? 'simple'
+          : mode === 'agentic'
+            ? 'agentic'
+            : retrieveOptions.allowConversationStateAnswer
               ? 'simple'
-              : isObjectiveKnowledgeIntent(queryIntent)
+              : queryPlan.contextMode === 'mixed'
                 ? 'simple'
-                : multiIntent
-                  ? 'agentic'
-                  : this.resolveAutoRoute(
-                      query,
-                      Boolean(fastPathGate?.sufficient),
-                    );
+                : isObjectiveKnowledgePlan(queryPlan)
+                  ? 'simple'
+                  : multiIntent
+                    ? 'agentic'
+                    : resolveAutoRoute(
+                        queryPlan,
+                        Boolean(fastPathGate?.sufficient),
+                      );
     observedRoute = route;
     onEvent?.({
       type: 'routing',
@@ -2394,7 +2019,7 @@ export class AgenticRagService {
         route,
         ...routeMetadata,
         ...(multiIntent
-          ? { reason: 'multi_intent_query', subQueries: queryIntent.subQueries }
+          ? { reason: 'multi_intent_query', subQueries: queryPlan.subQueries }
           : {}),
       },
     });
@@ -2404,7 +2029,7 @@ export class AgenticRagService {
         data: {
           sufficient: fastPathGate.sufficient,
           reason: fastPathGate.reason,
-          taskComplexity: this.shouldUseAgentic(query),
+          taskComplexity: requiresAgenticPlan(queryPlan),
           obsidianPaths: fastPathGate.obsidianHits.map((hit) => hit.path),
           ragReferences: fastPathGate.chunks.map((chunk) => chunk.id),
         },
@@ -2471,17 +2096,20 @@ export class AgenticRagService {
         query,
         route: 'agentic',
         augmentedQueries:
-          queryIntent.action === 'retrieve'
+          queryPlan.action === 'retrieve'
             ? Array.from(
                 new Set(
-                  queryIntent.rewriteQueries.filter(
-                    (rewrite) => rewrite !== query,
-                  ),
+                  executionPlan.queries
+                    .map((item) => item.text)
+                    .filter((text) => text !== query),
                 ),
               )
             : [],
         subQuestions: multiIntent
-          ? this.buildExplicitSubQuestions(queryIntent.subQueries)
+          ? buildExplicitSubQuestions(
+              queryPlan.subQueries,
+              this.maxSubQuestions,
+            )
           : [],
         retrievedChunks: [],
         retrievalSufficient: false,
@@ -2590,7 +2218,7 @@ export class AgenticRagService {
       })),
       executionState: finalState.executionState,
     };
-    await this.persistStructuredArtifacts(
+    await this.artifactStore?.saveRunArtifacts(
       threadId,
       userId,
       finalState.artifacts,
@@ -2601,87 +2229,6 @@ export class AgenticRagService {
 
   private splitAnswerTokens(answer: string): string[] {
     return answer.match(/.{1,24}/gs) ?? [];
-  }
-
-  private async persistStructuredArtifacts(
-    threadId: string,
-    userId: string | undefined,
-    artifacts: AgenticArtifact[],
-  ): Promise<void> {
-    if (!this.structuredArtifactRepository || artifacts.length === 0) return;
-    const rows = artifacts
-      .filter(
-        (artifact) => artifact.type !== 'subquestion_plan' || artifact.payload,
-      )
-      .map((artifact) => {
-        const payload = this.recordOf(artifact.payload);
-        const sourceDocIds = Array.isArray(payload.sourceDocIds)
-          ? payload.sourceDocIds.filter(
-              (item): item is string => typeof item === 'string',
-            )
-          : [];
-        return this.structuredArtifactRepository!.create({
-          id: `${threadId}:${artifact.type}:${artifact.id}`.slice(0, 128),
-          threadId,
-          userId: userId ?? null,
-          artifactId: artifact.id,
-          type: artifact.type,
-          producer: artifact.producer,
-          version: artifact.version,
-          status:
-            typeof payload.status === 'string'
-              ? payload.status
-              : 'ready_for_review',
-          payload: JSON.stringify(artifact.payload),
-          sourceDocIds:
-            sourceDocIds.length > 0 ? JSON.stringify(sourceDocIds) : null,
-        });
-      });
-    if (rows.length > 0) {
-      await this.structuredArtifactRepository.save(rows);
-      if (this.artifactDependencyRepository) {
-        const byType = new Map(rows.map((row) => [row.type, row.artifactId]));
-        const dependencyTypes: Record<string, string[]> = {
-          assumption_register: ['requirement_brief'],
-          claim_evidence_matrix: ['requirement_brief'],
-          solution_brief: [
-            'requirement_brief',
-            'assumption_register',
-            'claim_evidence_matrix',
-          ],
-          api_contract: ['solution_brief'],
-          event_tracking_plan: ['solution_brief'],
-          test_plan: ['api_contract', 'event_tracking_plan', 'solution_brief'],
-          acceptance_checklist: ['test_plan', 'risk_register'],
-          risk_register: ['solution_brief'],
-          rollout_plan: ['acceptance_checklist', 'risk_register'],
-          code_context_pack: [
-            'solution_brief',
-            'api_contract',
-            'event_tracking_plan',
-            'test_plan',
-          ],
-        };
-        const links = rows.flatMap((row) =>
-          (dependencyTypes[row.type] ?? []).flatMap((type) => {
-            const dependsOnArtifactId = byType.get(type);
-            return dependsOnArtifactId
-              ? [
-                  {
-                    id: randomUUID(),
-                    threadId,
-                    artifactId: row.artifactId,
-                    dependsOnArtifactId,
-                    relation: 'input',
-                  },
-                ]
-              : [];
-          }),
-        );
-        if (links.length > 0)
-          await this.artifactDependencyRepository.save(links);
-      }
-    }
   }
 
   private observedNode(
@@ -2784,62 +2331,6 @@ export class AgenticRagService {
     }
   }
 
-  private withAnswerArtifact(
-    state: AgenticRagStateType,
-    answer: string,
-    citationSupported: boolean,
-    subQuestionCoverage: number,
-    reason: string,
-  ): AgenticArtifact[] {
-    const payload: AnswerContractArtifactPayload = {
-      answer,
-      citationSupported,
-      subQuestionCoverage,
-      valid: citationSupported && subQuestionCoverage >= 1,
-      reason,
-    };
-    const artifact = createAgenticArtifact(
-      'answer_contract',
-      'generate',
-      payload,
-    );
-    const artifacts = [
-      ...(state.artifacts ?? []).filter(
-        (item) =>
-          item.type !== 'answer_contract' &&
-          ![
-            'requirement_brief',
-            'assumption_register',
-            'claim_evidence_matrix',
-            'solution_brief',
-            'api_contract',
-            'event_tracking_plan',
-            'test_plan',
-            'acceptance_checklist',
-            'risk_register',
-            'rollout_plan',
-            'code_context_pack',
-          ].includes(item.type),
-      ),
-      artifact,
-    ];
-    return [
-      ...artifacts,
-      ...buildStructuredDeliveryArtifacts(
-        state.query,
-        state.retrievedChunks,
-        answer,
-        state.retrievalSufficient,
-      ),
-    ];
-  }
-
-  private getSubQuestionCoverage(state: AgenticRagStateType): number {
-    if (!state.subQuestions?.length) return 1;
-    const covered = state.subQuestions.filter((item) => item.sufficient).length;
-    return covered / state.subQuestions.length;
-  }
-
   private isAgenticRoute(value: unknown): value is 'simple' | 'agentic' {
     return value === 'simple' || value === 'agentic';
   }
@@ -2868,150 +2359,30 @@ export class AgenticRagService {
     );
   }
 
-  private isMultiIntentQuery(intent: QueryIntent): boolean {
-    return intent.multiIntent;
+  /** 直连 Agentic 的兼容入口也只生成保守单查询计划，不再自行做意图识别。 */
+  private resolveExecutionPlan(
+    query: string,
+    options: RetrieveOptions,
+  ): RetrievalExecutionPlan {
+    if (options.executionPlan) return options.executionPlan;
+    const queryPlan = options.queryPlan ?? createFallbackQueryPlan(query);
+    return {
+      planVersion: 2,
+      sourcePolicy: options.sourcePolicy ?? 'local_only',
+      queries: [{ text: query.trim(), kind: 'original', weight: 1 }],
+      profile:
+        options.profile ?? retrievalProfileForTaskType(queryPlan.taskType),
+      useGraph: false,
+      scope: options.scope,
+      scopeRestricted: hasExplicitRetrievalScope(options.scope),
+      reasonCode: 'internal_evidence_required',
+    };
   }
 
   private recordOf(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object'
       ? (value as Record<string, unknown>)
       : {};
-  }
-
-  /**
-   * auto 模式下用 LLM 判断问题复杂度
-   */
-  private classifyRoute(
-    query: string,
-    mode: 'simple' | 'agentic' | 'auto',
-  ): 'simple' | 'agentic' {
-    if (mode === 'simple') return 'simple';
-    if (mode === 'agentic') return 'agentic';
-    return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
-  }
-
-  /** Auto 先看 Hybrid 证据，再将多步骤／分析类请求升级为 Agentic。 */
-  private resolveAutoRoute(
-    query: string,
-    fastPathSufficient: boolean,
-  ): 'simple' | 'agentic' {
-    if (!fastPathSufficient) return 'agentic';
-    return this.shouldUseAgentic(query) ? 'agentic' : 'simple';
-  }
-
-  private shouldUseAgentic(query: string): boolean {
-    const normalized = query.normalize('NFKC').toLowerCase();
-    const complexPatterns = [
-      /对比|比较|区别|差异|优缺点/,
-      /为什么|原因|影响|风险|评估|分析/,
-      /多跳|关联|关系|上下游|依赖|链路/,
-      /(?:第\s*几|[哪那]一|哪几|哪个)\s*(?:章|回)|(?:章节|章回).*(?:出场|出现)|(?:出场|出现).*(?:做了|什么事情)/,
-      /分别.*(什么|哪些|如何)|哪些.*分别/,
-      /规划|步骤|方案|策略|拆解/,
-      /联网|最新|实时|新闻|今天|当前/,
-      /compare|difference|trade[- ]?off|analy[sz]e|why|plan|strategy|latest|current/,
-    ];
-    return complexPatterns.some((pattern) => pattern.test(normalized));
-  }
-
-  /**
-   * 规范化扩展查询：确保恰好 3 条，不足用原问题补齐
-   */
-  private normalizeQueries(original: string, list: unknown): string[] {
-    const out = filterSemanticQueries(
-      original,
-      list,
-      this.querySimilarityThreshold,
-    );
-    while (out.length < this.maxAugmentedQueries) out.push(original);
-    return out.slice(0, this.maxAugmentedQueries);
-  }
-
-  private buildSubQuestions(
-    original: string,
-    queries: string[],
-    limit = this.maxSubQuestions,
-  ): AgenticSubQuestion[] {
-    // 「某某是什么／是谁」这类原子事实问句无需被扩成多个验收项；否则联网已找到原问题证据，
-    // 仍可能因一个额外的延伸问题未覆盖而整体拒答。
-    const questions = this.isAtomicFactQuestion(original)
-      ? [original]
-      : [
-          original,
-          ...this.normalizeQueries(original, queries).filter(
-            (query) => query !== original,
-          ),
-        ];
-    return questions.slice(0, limit).map((question, index) => ({
-      id: `subq-${index + 1}`,
-      question,
-      // 当前规划器生成互补问题；保留依赖字段，支持后续有向多跳计划。
-      dependsOn: index === 0 ? [] : ['subq-1'],
-      status: 'planned',
-      evidenceIds: [],
-      retrievalAttempts: 0,
-      sufficient: false,
-      reason: '',
-    }));
-  }
-
-  private buildRetrievalQueries(
-    subQuestion: string,
-    originalQuery: string,
-    augmentedQueries: string[] | undefined,
-    subQuestionIndex: number,
-  ): string[] {
-    if (subQuestionIndex !== 0 || subQuestion !== originalQuery) {
-      return [subQuestion];
-    }
-    // 原问题已有 Fast Path 证据时，扩展问题会作为独立子问题补检；不要在
-    // 原问题分支再次检索同一个扩展问句，避免重复检索与不一致排序。
-    return Array.from(
-      new Set([subQuestion, ...(augmentedQueries ?? [])].filter(Boolean)),
-    ).slice(0, this.maxAugmentedQueries);
-  }
-
-  private buildExplicitSubQuestions(questions: string[]): AgenticSubQuestion[] {
-    return questions.slice(0, this.maxSubQuestions).map((question, index) => ({
-      id: `subq-${index + 1}`,
-      question,
-      dependsOn: [],
-      status: 'planned',
-      evidenceIds: [],
-      retrievalAttempts: 0,
-      sufficient: false,
-      reason: '',
-    }));
-  }
-
-  private isAtomicFactQuestion(query: string): boolean {
-    const normalized = query.trim();
-    // 人物资料类的复合事实问句（例如“陈达第几回出场、花名叫什么”）
-    // 通常由同一段原文同时给出答案。拆成多个子问题会把“他的花名”
-    // 这类代词问句与实体分离，导致其中一个子问题无法通过证据门禁，
-    // 最终把本来可回答的问题误判为资料不足。
-    const entityFactPattern =
-      /(?:第\s*[几一二三四五六七八九十百千万\d]+\s*(?:章|回|章节)|[哪那]一回|哪个章节|花名|绰号|外号|出场)/;
-    if (
-      entityFactPattern.test(normalized) &&
-      /(?:是谁|是什么|叫什么|花名|绰号|外号|出场|人物|哪里|哪一回|第\s*[几一二三四五六七八九十百千万\d]+)/.test(
-        normalized,
-      )
-    ) {
-      return true;
-    }
-    const isBareEntity =
-      normalized.length >= 2 &&
-      normalized.length <= 16 &&
-      !/[，。！？；：、,.!?]/.test(normalized) &&
-      !/(对比|比较|区别|差异|为什么|原因|影响|风险|评估|分析|关联|关系|上下游|依赖|链路|方案|步骤|规划)/.test(
-        normalized,
-      );
-    return (
-      isBareEntity ||
-      (normalized.length <= 24 &&
-        /(?:是什么|是谁|指什么|在哪里|什么时候)$/.test(normalized))
-    );
   }
 
   private getSubQuestionLimit(config?: RunnableConfig): number {
@@ -3140,19 +2511,21 @@ export class AgenticRagService {
   private assessRetrievedChunks(
     query: string,
     chunks: RetrievedChunk[],
+    taskType?: QueryTaskType,
   ): { sufficient: boolean; reason: string } {
     const assessor = (
       this.karpathyRagService as KarpathyRagService & {
         assessRetrievedChunks?: (
           question: string,
           evidence: RetrievedChunk[],
+          taskType?: QueryTaskType,
         ) => { sufficient: boolean; reason: string };
       }
     ).assessRetrievedChunks;
     // 兼容轻量测试替身和可选 RAG 网关：没有统一质量门禁时，只把非空
     // 片段交给后续节点继续判断，不因为测试替身缺方法而直接崩溃。
     return typeof assessor === 'function'
-      ? assessor.call(this.karpathyRagService, query, chunks)
+      ? assessor.call(this.karpathyRagService, query, chunks, taskType)
       : {
           sufficient: chunks.length > 0,
           reason: chunks.length > 0 ? '存在检索片段' : '没有检索片段',
@@ -3199,121 +2572,5 @@ export class AgenticRagService {
   private composeSignal(signal: AbortSignal | undefined, timeoutMs: number) {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-  }
-
-  /**
-   * 使用 deepagents 做 agentic 检索规划。
-   */
-  private async planQueriesWithDeepAgent(
-    query: string,
-    signal?: AbortSignal,
-  ): Promise<string[]> {
-    try {
-      const agent = await this.withTimeout(
-        this.getDeepAgent(),
-        3_000,
-        'DeepAgent initialization',
-      );
-      const formatted = await deepAgentQueryPlanUserPrompt.format({ query });
-      const result = await this.withTimeout(
-        agent.invoke(
-          {
-            messages: [
-              {
-                role: 'user',
-                content: formatted,
-              },
-            ],
-          },
-          signal ? { signal } : undefined,
-        ),
-        8_000,
-        'DeepAgent query planning',
-      );
-
-      return this.extractQueriesFromDeepAgentResult(result);
-    } catch (err) {
-      this.logger.warn(
-        `DeepAgent query planning failed, fallback to structured output: ${(err as Error).message}`,
-      );
-      return [];
-    }
-  }
-
-  private async getDeepAgent(): Promise<{
-    invoke: (
-      input: unknown,
-      options?: { signal?: AbortSignal },
-    ) => Promise<unknown>;
-  }> {
-    const modelName = this.llmProvider.getActiveProviderName();
-    const cached = this.deepAgents.get(modelName);
-    if (cached) {
-      return cached;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const dynamicImport = new Function(
-      'specifier',
-      'return import(specifier)',
-    ) as (specifier: string) => Promise<{
-      createDeepAgent: (params: {
-        model: ReturnType<LlmProvider['getModel']>;
-        systemPrompt: string;
-      }) => {
-        invoke: (
-          input: unknown,
-          options?: { signal?: AbortSignal },
-        ) => Promise<unknown>;
-      };
-    }>;
-    const { createDeepAgent } = await dynamicImport('deepagents');
-
-    const deepAgent = createDeepAgent({
-      model: this.llmProvider.getModel(),
-      systemPrompt: deepAgentQueryPlanSystemPrompt,
-    });
-
-    this.deepAgents.set(modelName, deepAgent);
-    return deepAgent;
-  }
-
-  private extractQueriesFromDeepAgentResult(result: unknown): string[] {
-    const content = this.extractLastMessageText(result);
-    const jsonText = content.match(/\{[\s\S]*\}/)?.[0] ?? content;
-    const parsed = JSON.parse(jsonText) as { queries?: unknown };
-    return Array.isArray(parsed.queries)
-      ? parsed.queries.filter(
-          (item): item is string => typeof item === 'string',
-        )
-      : [];
-  }
-
-  private extractLastMessageText(result: unknown): string {
-    const maybeMessages = (result as { messages?: unknown }).messages;
-    if (!Array.isArray(maybeMessages) || maybeMessages.length === 0) {
-      return '';
-    }
-    const last = maybeMessages[maybeMessages.length - 1] as {
-      content?: unknown;
-    };
-    if (typeof last.content === 'string') {
-      return last.content;
-    }
-    if (Array.isArray(last.content)) {
-      return last.content
-        .map((part) => {
-          if (typeof part === 'string') return part;
-          if (part && typeof part === 'object' && 'text' in part) {
-            const text = (part as Record<'text', unknown>).text;
-            if (typeof text === 'string') {
-              return text;
-            }
-          }
-          return '';
-        })
-        .join('');
-    }
-    return '';
   }
 }

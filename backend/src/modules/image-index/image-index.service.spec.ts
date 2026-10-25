@@ -27,6 +27,15 @@ describe('ImageIndexService', () => {
       for (const record of records) rows.set(record.id, record);
       return Promise.resolve();
     }),
+    countImagesByDocId: jest.fn((docId, userId) =>
+      Promise.resolve(
+        [...rows.values()].filter(
+          (record) =>
+            record.docId === docId &&
+            (userId === undefined || record.userId === userId),
+        ).length,
+      ),
+    ),
     searchImages: jest.fn((_vector, limit, userId, allowedDocIds) => {
       searched.push({ limit, userId, allowedDocIds });
       const hits: ImageSearchHit[] = [...rows.values()]

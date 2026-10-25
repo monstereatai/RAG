@@ -20,7 +20,8 @@ if (!Array.isArray(items)) {
 }
 
 const normalized = items.map(normalizeItem);
-const errors = validateDataset(normalized, minCases);
+const { documents, queries, errors: projectErrors } = createProjectEvalView(normalized);
+const errors = [...validateDataset(normalized, minCases), ...projectErrors];
 const departments = [...new Set(normalized.map((item) => item.department))].sort();
 const categories = [...new Set(normalized.map((item) => item.category))].sort();
 
@@ -48,6 +49,14 @@ if (errors.length > 0) {
       'Imported business regression dataset. Keep private source material out of git unless it is explicitly sanitized.',
     total: normalized.length,
     items: normalized,
+    documents,
+    queries,
+    ...(typeof payload.synthetic === 'boolean'
+      ? { synthetic: payload.synthetic }
+      : {}),
+    ...(payload.provenance && typeof payload.provenance === 'object'
+      ? { provenance: payload.provenance }
+      : {}),
   };
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
 }
@@ -74,12 +83,27 @@ function normalizeItem(item, index) {
     expectedKeywords: arrayOfStrings(item.expectedKeywords),
     minKeywordCoverage:
       typeof item.minKeywordCoverage === 'number' ? item.minKeywordCoverage : 0.5,
-    requireCitation: item.requireCitation !== false,
-    expectRefusal: Boolean(item.expectRefusal),
-    expectConflictHandling: Boolean(item.expectConflictHandling),
+    requireCitation: booleanOrDefault(item.requireCitation, true, 'requireCitation', item, index),
+    expectRefusal: booleanOrDefault(item.expectRefusal, false, 'expectRefusal', item, index),
+    expectConflictHandling: booleanOrDefault(
+      item.expectConflictHandling,
+      false,
+      'expectConflictHandling',
+      item,
+      index,
+    ),
     sourceDocument: normalizeSourceDocument(item.sourceDocument, index),
     ordinal: Number(item.ordinal ?? index + 1),
   };
+}
+
+function booleanOrDefault(value, fallback, field, item, index) {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'boolean') {
+    const label = String(item.id ?? `item[${index}]`);
+    throw new Error(`${label}: ${field} must be a boolean`);
+  }
+  return value;
 }
 
 function normalizeSourceDocument(sourceDocument, index) {
@@ -112,7 +136,11 @@ function validateDataset(items, min) {
     if (!item.documentType) errors.push(`${label}: documentType is required`);
     if (!item.expectedClaims.length) errors.push(`${label}: expectedClaims[] is required`);
     if (!item.expectedKeywords.length) errors.push(`${label}: expectedKeywords[] is required`);
-    if (item.minKeywordCoverage < 0 || item.minKeywordCoverage > 1) {
+    if (
+      !Number.isFinite(item.minKeywordCoverage) ||
+      item.minKeywordCoverage < 0 ||
+      item.minKeywordCoverage > 1
+    ) {
       errors.push(`${label}: minKeywordCoverage must be between 0 and 1`);
     }
     for (const [claimIndex, claim] of item.expectedClaims.entries()) {
@@ -124,9 +152,70 @@ function validateDataset(items, min) {
     if (item.sourceDocument) {
       if (!item.sourceDocument.title) errors.push(`${label}: sourceDocument.title is required`);
       if (!item.sourceDocument.content) errors.push(`${label}: sourceDocument.content is required`);
+      if (item.sourceDocument.content.length < 80) {
+        errors.push(`${label}: sourceDocument.content must be at least 80 characters for project evaluation`);
+      }
+    } else if (!item.expectRefusal) {
+      errors.push(`${label}: answerable cases require sourceDocument for retrieval evaluation`);
     }
   }
   return errors;
+}
+
+function createProjectEvalView(items) {
+  const documentsById = new Map();
+  const queries = items.map((item) => {
+    const sourceDocument = item.sourceDocument;
+    if (sourceDocument) {
+      const existing = documentsById.get(sourceDocument.id);
+      if (
+        existing &&
+        (existing.title !== sourceDocument.title || existing.content !== sourceDocument.content)
+      ) {
+        return null;
+      }
+      documentsById.set(sourceDocument.id, {
+        id: sourceDocument.id,
+        title: sourceDocument.title,
+        content: sourceDocument.content,
+        department: item.department,
+        documentType: item.documentType,
+      });
+    }
+
+    const minKeywordHits = item.expectRefusal
+      ? 0
+      : Math.max(
+          1,
+          Math.ceil(item.expectedKeywords.length * item.minKeywordCoverage),
+        );
+    return {
+      id: item.id,
+      category: item.category,
+      department: item.department,
+      documentType: item.documentType,
+      query: item.query,
+      expectedKeywords: item.expectedKeywords,
+      minKeywordHits,
+      requireCitation: item.requireCitation,
+      expectRefusal: item.expectRefusal,
+      expectConflictHandling: item.expectConflictHandling,
+      expectedDocIds:
+        item.expectRefusal || !sourceDocument ? [] : [sourceDocument.id],
+      expectedClaims: item.expectedClaims,
+      referenceAnswer: item.referenceAnswer,
+    };
+  });
+
+  const errors = [];
+  if (queries.some((query) => query === null)) {
+    errors.push('cases sharing a sourceDocument id must use identical title and content');
+  }
+  return {
+    documents: [...documentsById.values()],
+    queries: queries.filter(Boolean),
+    errors,
+  };
 }
 
 function arrayOfStrings(value) {

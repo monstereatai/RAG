@@ -58,6 +58,7 @@ export class ChatController {
     // 控制器只补入认证身份；问答编排统一由 ChatService 完成。
     return this.chatService.chat(body, user.userId, undefined, {
       tenantId: user.tenantId,
+      departmentIds: user.departmentIds,
     });
   }
 
@@ -118,7 +119,11 @@ export class ChatController {
             }
             subscriber.next(event);
           },
-          { signal: abortController.signal, tenantId: user.tenantId },
+          {
+            signal: abortController.signal,
+            tenantId: user.tenantId,
+            departmentIds: user.departmentIds,
+          },
         )
         .then((result) => {
           // ChatService 已在最终持久化前后发出完整生命周期事件；这里只负责结束传输。

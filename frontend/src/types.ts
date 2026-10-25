@@ -98,8 +98,10 @@ export interface DebugResponse {
 
 export interface LoginResponse {
   accessToken: string;
+  refreshToken: string;
   tokenType: 'Bearer';
   expiresIn: string;
+  refreshTokenExpiresIn: string;
 }
 
 export interface UserInfo {

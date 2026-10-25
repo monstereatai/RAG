@@ -76,7 +76,7 @@ export class SemanticExampleSelector implements OnModuleInit {
   async select(
     query: string,
     k = 2,
-    task?: 'query_augment' | 'answer_generation' | 'reflection',
+    task?: 'answer_generation' | 'reflection',
   ): Promise<string[]> {
     if (!this.initialized || !this.client) {
       return [];
@@ -114,7 +114,7 @@ export class SemanticExampleSelector implements OnModuleInit {
   async selectAndFormat(
     query: string,
     k = 2,
-    task?: 'query_augment' | 'answer_generation' | 'reflection',
+    task?: 'answer_generation' | 'reflection',
   ): Promise<string> {
     const examples = await this.select(query, k, task);
     if (examples.length === 0) {
@@ -122,13 +122,11 @@ export class SemanticExampleSelector implements OnModuleInit {
     }
 
     const header =
-      task === 'query_augment'
-        ? '以下是查询扩展的参考示例：'
-        : task === 'answer_generation'
-          ? '以下是答案生成的参考示例：'
-          : task === 'reflection'
-            ? '以下是反思评估的参考示例：'
-            : '以下是相关参考示例：';
+      task === 'answer_generation'
+        ? '以下是答案生成的参考示例：'
+        : task === 'reflection'
+          ? '以下是反思评估的参考示例：'
+          : '以下是相关参考示例：';
 
     return `${header}\n${examples.map((ex, i) => `示例 ${i + 1}：\n${ex}`).join('\n\n')}`;
   }

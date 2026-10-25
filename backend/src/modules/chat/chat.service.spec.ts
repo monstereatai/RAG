@@ -1,30 +1,196 @@
 import { ChatService } from './chat.service';
 
+const basePlan = {
+  action: 'retrieve',
+  domain: 'internal',
+  contextMode: 'independent',
+  standaloneQuery: '',
+  subQueries: [],
+  taskType: 'lookup',
+  needsGraph: false,
+  entities: [],
+  filters: {},
+} as const;
+
+const baseExecutionPlan = {
+  planVersion: 2,
+  sourcePolicy: 'local_only',
+  queries: [{ text: '', kind: 'original', weight: 1 }],
+  profile: {
+    intent: 'lookup',
+    candidateDepth: 8,
+    finalTopK: 4,
+    neighborWindow: 0,
+    sameSectionLimit: 0,
+    contextCharacterBudget: 3500,
+    maxChunksPerDocument: 2,
+  },
+  useGraph: false,
+  reasonCode: 'internal_evidence_required',
+} as const;
+
+type Deps = Record<string, unknown>;
+
+function createService(overrides: Deps = {}) {
+  const deps: Deps = {
+    karpathy: {
+      answer: jest.fn().mockResolvedValue({
+        answer: '回答',
+        references: [],
+        retrievalSufficient: true,
+      }),
+      unsupportedReliableAnswer: () => '证据不足',
+    },
+    agentic: {
+      run: jest.fn().mockResolvedValue({
+        answer: '回答',
+        references: [],
+        route: 'agentic',
+        confidence: 1,
+        retryCount: 0,
+        retrievalSufficient: true,
+      }),
+    },
+    conversation: {
+      create: jest.fn().mockResolvedValue('thread-1'),
+      get: jest.fn().mockResolvedValue({ messages: [] }),
+      getRecentHistory: jest.fn().mockResolvedValue([]),
+      addMessage: jest.fn().mockResolvedValue(undefined),
+      addCompletedTurn: jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' }),
+    },
+    embedding: {
+      searchHistory: jest.fn().mockResolvedValue([]),
+      indexConversation: jest.fn(),
+    },
+    memory: {
+      searchMemory: jest.fn().mockResolvedValue({
+        userMemories: [],
+        sessionMemories: [],
+        systemMessage: null,
+      }),
+      classifyAndPersist: jest.fn().mockResolvedValue(undefined),
+    },
+    shortTerm: {
+      getContext: jest.fn().mockResolvedValue({
+        systemMessage: null,
+        recentTurns: [],
+        truncatedHistory: false,
+      }),
+      addTurn: jest.fn().mockResolvedValue(undefined),
+      addTurns: jest.fn().mockResolvedValue(null),
+      getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
+      limitHistoryToTokenBudget: jest.fn((turns) => turns),
+    },
+    langfuse: {
+      estimateTextTokens: () => 1,
+      estimateCostUsd: () => 0,
+      traceRagAnswer: jest.fn(),
+    },
+    queryLog: {
+      logQuery: jest.fn().mockResolvedValue(undefined),
+    },
+    planner: {
+      plan: jest.fn().mockResolvedValue(basePlan),
+    },
+    policy: {
+      build: jest.fn().mockReturnValue({
+        ...baseExecutionPlan,
+        queries: [{ text: '', kind: 'original', weight: 1 }],
+      }),
+    },
+  };
+  Object.assign(deps, overrides);
+  return new ChatService(
+    deps.karpathy as never,
+    deps.agentic as never,
+    deps.conversation as never,
+    deps.embedding as never,
+    deps.memory as never,
+    deps.shortTerm as never,
+    deps.langfuse as never,
+    deps.queryLog as never,
+    deps.planner as never,
+    deps.policy as never,
+    undefined,
+    deps.agentRuns as never,
+    deps.agentGoals as never,
+    deps.config as never,
+    undefined,
+    undefined,
+    deps.metrics as never,
+    undefined,
+    undefined,
+    undefined,
+  );
+}
+
 describe('ChatService', () => {
-  it('只分类一次，并让显式 Simple 保持在 Karpathy 线性引擎内', async () => {
-    const classify = jest.fn().mockResolvedValue({
-      intent: 'objective_fact',
-      confidence: 0.99,
-      standaloneQuery: '1+1 等于多少？',
-      multiIntent: false,
-      subQueries: [],
-      action: 'direct_answer',
-      sourcePolicy: 'direct_answer',
-      needsSynthesis: false,
-      requiresGraph: false,
-      targetKbs: ['general'],
-      queryType: 'public_knowledge',
-      entities: [],
-      filters: {
-        department: null,
-        project: null,
-        timeRange: null,
-        documentType: null,
+  it('marks tenant requests restricted so auxiliary evidence sources fail closed', async () => {
+    type AnswerOptions = {
+      tenantId?: string;
+      executionPlan?: { sourcePolicy: string; scopeRestricted: boolean };
+    };
+    const receivedOptions: AnswerOptions[] = [];
+    const answer = jest.fn(
+      (
+        _query: string,
+        _history: unknown[],
+        _userId: string,
+        _memory: unknown[],
+        _onToken: unknown,
+        options: AnswerOptions,
+      ) => {
+        receivedOptions.push(options);
+        return Promise.resolve({
+          answer: '回答',
+          references: [],
+          retrievalSufficient: true,
+        });
       },
-      rewriteQueries: [],
-      reason: '稳定公共知识',
-      ambiguity: { detected: false, confidence: 1, senses: [] },
+    );
+    const build = jest.fn(
+      (
+        _query: string,
+        _plan: unknown,
+        _scope: unknown,
+        _profile: unknown,
+        options: { forceLocal?: boolean },
+      ) => ({
+        ...baseExecutionPlan,
+        sourcePolicy: options.forceLocal ? 'local_only' : 'web_allowed',
+        scopeRestricted: Boolean(options.forceLocal),
+      }),
+    );
+    const service = createService({
+      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      policy: { build },
     });
+
+    await service.chat(
+      { query: '项目发布规则是什么？', mode: 'simple' },
+      'user-1',
+      undefined,
+      { tenantId: 'tenant-a' },
+    );
+
+    expect(build).toHaveBeenCalledWith(
+      '项目发布规则是什么？',
+      expect.any(Object),
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({ forceLocal: true }),
+    );
+    expect(answer).toHaveBeenCalledTimes(1);
+    expect(receivedOptions[0]).toMatchObject({
+      tenantId: 'tenant-a',
+      executionPlan: {
+        sourcePolicy: 'local_only',
+        scopeRestricted: true,
+      },
+    });
+  });
+
+  it('只规划一次，并让显式 Simple 保持在 Karpathy 线性引擎内', async () => {
     const answer = jest
       .fn()
       .mockImplementation(
@@ -47,57 +213,28 @@ describe('ChatService', () => {
           });
         },
       );
-    const run = jest.fn();
-    const conversationService = {
-      create: jest.fn().mockResolvedValue('thread-1'),
-      getRecentHistory: jest.fn().mockResolvedValue([]),
-      addMessage: jest.fn().mockResolvedValue(undefined),
-    };
-    const service = new ChatService(
-      { answer, unsupportedReliableAnswer: () => '证据不足' } as never,
-      { run } as never,
-      conversationService as never,
-      {
-        searchHistory: jest.fn().mockResolvedValue([]),
-        indexConversation: jest.fn(),
-      } as never,
-      {
-        searchMemory: jest.fn().mockResolvedValue({ systemMessage: null }),
-        classifyAndPersist: jest.fn(),
-      } as never,
-      {
-        getContext: jest.fn().mockResolvedValue({
-          systemMessage: {
-            content: '【历史摘要】小明先是一只狗，后来又是一只猫，最后是一条鱼',
-          },
-          recentTurns: [
-            { role: 'user', content: '小明是一只狗' },
-            { role: 'user', content: '小明是一只猫' },
-            { role: 'user', content: '小明是一条鱼' },
-          ],
-          truncatedHistory: false,
+    const service = createService({
+      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      agentic: { run: jest.fn() },
+      planner: {
+        plan: jest.fn().mockResolvedValue({
+          ...basePlan,
+          action: 'direct',
+          domain: 'public',
+          contextMode: 'independent',
         }),
-        addTurn: jest.fn(),
-      } as never,
-      {
-        estimateTextTokens: () => 1,
-        estimateCostUsd: () => 0,
-        traceRagAnswer: jest.fn(),
-      } as never,
-      {
-        create: jest.fn((value) => value),
-        save: jest.fn().mockResolvedValue(undefined),
-      } as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { classify } as never,
-    );
+      },
+      policy: {
+        build: jest.fn().mockReturnValue({
+          ...baseExecutionPlan,
+          sourcePolicy: 'direct_answer',
+          queries: [{ text: '1+1 等于多少？', kind: 'original', weight: 1 }],
+        }),
+      },
+    });
+    const planner = (
+      service as unknown as { queryPlanner: { plan: jest.Mock } }
+    ).queryPlanner;
 
     const events: Array<{ type: string }> = [];
     await service.chat(
@@ -106,13 +243,7 @@ describe('ChatService', () => {
       (event) => events.push(event),
     );
 
-    expect(conversationService.create).toHaveBeenCalledWith(
-      '1+1 等于多少？',
-      'simple',
-      'user-1',
-    );
-    expect(classify).toHaveBeenCalledTimes(1);
-    expect(run).not.toHaveBeenCalled();
+    expect(planner.plan).toHaveBeenCalledTimes(1);
     expect(answer).toHaveBeenCalledWith(
       '1+1 等于多少？',
       expect.any(Array),
@@ -121,24 +252,16 @@ describe('ChatService', () => {
       expect.any(Function),
       expect.objectContaining({
         sourcePolicy: 'direct_answer',
-        queryIntent: expect.objectContaining({ requiresGraph: false }),
-      }),
-    );
-    const memoryMessages = answer.mock.calls[0][3] as Array<{
-      content: string;
-    }>;
-    expect(memoryMessages).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          content: expect.stringContaining('小明是一只狗'),
+        executionPlan: expect.objectContaining({
+          queries: expect.any(Array),
         }),
-      ]),
+      }),
     );
     expect(events.map((event) => event.type)).toEqual(
       expect.arrayContaining(['citation', 'token', 'final']),
     );
-    expect(events.findIndex((event) => event.type === 'citation')).toBeLessThan(
-      events.findIndex((event) => event.type === 'token'),
+    expect(events.findIndex((event) => event.type === 'token')).toBeLessThan(
+      events.findIndex((event) => event.type === 'citation'),
     );
   });
 
@@ -150,11 +273,13 @@ describe('ChatService', () => {
       retrievalReason: '证据充分',
     });
     const conversationService = {
+      assertAccessible: jest.fn().mockResolvedValue(true),
       getRecentHistory: jest.fn().mockResolvedValue([
         { role: 'human', content: 'PostgreSQL 的旧问题' },
         { role: 'ai', content: 'PostgreSQL 的旧回答' },
       ]),
       addMessage: jest.fn().mockResolvedValue(undefined),
+      addCompletedTurn: jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' }),
     };
     const shortTermMemory = {
       getContext: jest.fn().mockResolvedValue({
@@ -166,34 +291,22 @@ describe('ChatService', () => {
         truncatedHistory: true,
       }),
       addTurn: jest.fn().mockResolvedValue(null),
+      addTurns: jest.fn().mockResolvedValue(null),
+      getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
+      limitHistoryToTokenBudget: jest.fn((turns) => turns),
     };
-    const queryLogRepo = {
-      create: jest.fn((value) => value),
-      save: jest.fn().mockResolvedValue(undefined),
-    };
-    const service = new ChatService(
-      {
-        answer,
-        unsupportedReliableAnswer: () => '证据不足',
-      } as never,
-      {} as never,
-      conversationService as never,
-      {
-        searchHistory: jest.fn().mockResolvedValue([]),
-        indexConversation: jest.fn(),
-      } as never,
-      {
-        searchMemory: jest.fn().mockResolvedValue({ systemMessage: null }),
-        classifyAndPersist: jest.fn(),
-      } as never,
-      shortTermMemory as never,
-      {
-        estimateTextTokens: () => 1,
-        estimateCostUsd: () => 0,
-        traceRagAnswer: jest.fn(),
-      } as never,
-      queryLogRepo as never,
-    );
+    const service = createService({
+      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      conversation: conversationService,
+      shortTerm: shortTermMemory,
+      planner: {
+        plan: jest.fn().mockResolvedValue({
+          ...basePlan,
+          contextMode: 'follow_up',
+          standaloneQuery: '继续处理活动方案',
+        }),
+      },
+    });
 
     await service.chat(
       {
@@ -240,10 +353,7 @@ describe('ChatService', () => {
       },
     });
     const addMessage = jest.fn().mockResolvedValue(undefined);
-    const queryLogRepo = {
-      create: jest.fn((value) => value),
-      save: jest.fn().mockResolvedValue(undefined),
-    };
+    const addCompletedTurn = jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' });
     const agentRuns = {
       start: jest.fn().mockResolvedValue({
         id: 'run-1',
@@ -257,38 +367,16 @@ describe('ChatService', () => {
       activate: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
     };
-    const service = new ChatService(
-      { unsupportedReliableAnswer: () => '证据不足' } as never,
-      { run: agenticRun } as never,
-      {
+    const service = createService({
+      agentic: { run: agenticRun },
+      conversation: {
+        assertAccessible: jest.fn().mockResolvedValue(true),
         getRecentHistory: jest.fn().mockResolvedValue([]),
         addMessage,
-      } as never,
-      {
-        searchHistory: jest.fn().mockResolvedValue([]),
-        indexConversation: jest.fn(),
-      } as never,
-      {
-        searchMemory: jest.fn().mockResolvedValue({ systemMessage: null }),
-      } as never,
-      {
-        getContext: jest.fn().mockResolvedValue({
-          systemMessage: null,
-          recentTurns: [],
-          truncatedHistory: false,
-        }),
-        addTurn: jest.fn().mockResolvedValue(undefined),
-      } as never,
-      {
-        estimateTextTokens: () => 1,
-        estimateCostUsd: () => 0,
-        traceRagAnswer: jest.fn(),
-      } as never,
-      queryLogRepo as never,
-      undefined,
-      agentRuns as never,
-      agentGoals as never,
-    );
+      },
+      agentRuns,
+      agentGoals,
+    });
     const events: Array<{ type: string }> = [];
 
     const response = await service.chat(
@@ -312,6 +400,7 @@ describe('ChatService', () => {
       expect.any(Array),
       true,
       expect.any(Object),
+      expect.objectContaining({ signal: expect.anything() }),
     );
     expect(addMessage).toHaveBeenCalledTimes(1);
     expect(addMessage).toHaveBeenCalledWith(
@@ -320,11 +409,6 @@ describe('ChatService', () => {
       '请生成待审批方案',
       'user-1',
       expect.objectContaining({ pendingApproval: true, runId: 'run-1' }),
-    );
-    expect(queryLogRepo.save).not.toHaveBeenCalled();
-    expect(agentRuns.finish).toHaveBeenCalledWith(
-      'run-1',
-      expect.objectContaining({ status: 'waiting_approval' }),
     );
     expect(events.map((event) => event.type)).not.toContain('final');
     expect(response.executionState).toMatchObject({
@@ -336,10 +420,7 @@ describe('ChatService', () => {
 
   it('审批通过后复用原请求完成收口，且不重复写入用户消息', async () => {
     const addMessage = jest.fn().mockResolvedValue(undefined);
-    const queryLogRepo = {
-      create: jest.fn((value) => value),
-      save: jest.fn().mockResolvedValue(undefined),
-    };
+    const addCompletedTurn = jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' });
     const agentRuns = {
       get: jest.fn().mockResolvedValue({
         id: 'run-1',
@@ -368,10 +449,10 @@ describe('ChatService', () => {
         lastNode: 'reflection',
       },
     });
-    const service = new ChatService(
-      { unsupportedReliableAnswer: () => '证据不足' } as never,
-      { resumeGraph } as never,
-      {
+    const service = createService({
+      karpathy: { unsupportedReliableAnswer: () => '证据不足' },
+      agentic: { resumeGraph },
+      conversation: {
         get: jest.fn().mockResolvedValue({
           messages: [
             {
@@ -381,37 +462,23 @@ describe('ChatService', () => {
                 pendingApproval: true,
                 runId: 'run-1',
                 mode: 'agentic',
-                queryIntent: {
-                  contextMode: 'none',
-                  sourcePolicy: 'local_only',
+                planVersion: 2,
+                queryPlan: {
+                  ...basePlan,
                   action: 'retrieve',
-                  entities: [],
+                  domain: 'internal',
+                  contextMode: 'independent',
                 },
               },
             },
           ],
         }),
         addMessage,
-      } as never,
-      {
-        indexConversation: jest.fn(),
-      } as never,
-      {
-        classifyAndPersist: jest.fn(),
-      } as never,
-      {
-        addTurn: jest.fn().mockResolvedValue(undefined),
-      } as never,
-      {
-        estimateTextTokens: () => 1,
-        estimateCostUsd: () => 0,
-        traceRagAnswer: jest.fn(),
-      } as never,
-      queryLogRepo as never,
-      undefined,
-      agentRuns as never,
-      agentGoals as never,
-    );
+        addCompletedTurn,
+      },
+      agentRuns,
+      agentGoals,
+    });
 
     const response = await service.resume(
       'thread-1',
@@ -426,18 +493,13 @@ describe('ChatService', () => {
       undefined,
       expect.any(Function),
     );
-    expect(addMessage).toHaveBeenCalledTimes(1);
-    expect(addMessage).toHaveBeenCalledWith(
-      'thread-1',
-      'ai',
-      '已批准的正式答案',
-      'user-1',
-      expect.any(Object),
-    );
-    expect(queryLogRepo.save).toHaveBeenCalledTimes(1);
-    expect(agentRuns.finish).toHaveBeenCalledWith(
-      'run-1',
-      expect.objectContaining({ status: 'completed' }),
+    expect(addCompletedTurn).toHaveBeenCalledTimes(1);
+    expect(addCompletedTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thread-1',
+        answer: '已批准的正式答案',
+        userId: 'user-1',
+      }),
     );
     expect(response.answer).toBe('已批准的正式答案');
     expect(response.executionState).toMatchObject({

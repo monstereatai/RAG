@@ -4,12 +4,17 @@
 # 验证：docker compose -f docker-compose.prod.yml ps
 #
 # 包含：
+#   - backend-migrate（一次性数据库迁移）
 #   - backend（NestJS API）
 #   - frontend（nginx + React 静态资源）
 #   - postgres（pgvector）
 #   - redis
+#   - elasticsearch（IK 中文全文检索）
 #   - milvus + etcd + minio
 #   - neo4j（GraphRAG，可选 profile=graphrag）
+#
+# 说明：admin-backend / admin-frontend 使用独立的管理后台发布栈，
+# 不在本文件内和用户端 RAG 服务强行耦合。
 #
 # 密钥：模型密钥从 backend/.env 读取；POSTGRES_USER、POSTGRES_PASSWORD、
 # REDIS_PASSWORD、MINIO_ROOT_USER、MINIO_ROOT_PASSWORD、NEO4J_PASSWORD 通过部署环境提供。
@@ -20,6 +25,25 @@ services:
   # ============================================================
   # 应用层
   # ============================================================
+
+  # ---- Migration（一次性任务，失败则 backend 不启动）----
+  backend-migrate:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: rag-backend-migrate
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      POSTGRES_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/rag
+    env_file:
+      - ../backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['npm', 'run', 'migration:run:prod']
+    networks:
+      - rag-net
 
   # ---- Backend（NestJS API）----
   backend:
@@ -39,6 +63,8 @@ services:
       POSTGRES_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/rag
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
       NEO4J_URL: bolt://neo4j:7687
+      ES_NODE: http://elasticsearch:9200
+      ALLOW_DEV_ENDPOINTS: 'false'
       # 密钥类从 .env 读取
     env_file:
       - ../backend/.env
@@ -49,7 +75,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
       milvus:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
       neo4j:
         condition: service_healthy
@@ -218,6 +248,35 @@ services:
     networks:
       - rag-net
 
+  # ---- Elasticsearch 8 + IK 中文分词 ----
+  elasticsearch:
+    build:
+      context: ./elasticsearch
+      args:
+        ELASTICSEARCH_VERSION: 8.13.0
+    container_name: rag-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms768m -Xmx768m
+      cluster.name: rag-prod
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:9200/_cluster/health || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - rag-net
+
   # ---- Neo4j 5（知识图谱 GraphRAG，profile=graphrag 可选启动）----
   neo4j:
     image: neo4j:5.26.27-community
@@ -255,4 +314,5 @@ volumes:
   minio_data:
   milvus_data:
   neo4j_data:
+  elasticsearch_data:
   backend_workspace:

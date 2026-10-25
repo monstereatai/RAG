@@ -24,6 +24,7 @@ describe('RagAdminService document versions', () => {
   const service = new RagAdminService(
     {} as never,
     documentService as never,
+    {} as never,
     documentQueue as never,
     ingest as never,
     {} as never,
@@ -180,6 +181,7 @@ describe('RagAdminService image-to-image search', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     docMetaRepo as never,
     {} as never,
     {} as never,
@@ -263,6 +265,7 @@ describe('RagAdminService document listing and archive', () => {
   const service = new RagAdminService(
     {} as never,
     documentService as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

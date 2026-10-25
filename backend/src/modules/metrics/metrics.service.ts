@@ -73,6 +73,32 @@ export class MetricsService implements OnModuleInit {
     buckets: [500, 1000, 2000, 4000, 6000, 8000, 12000],
   });
 
+  private readonly queryPlannerRunsTotal = new Counter({
+    name: 'rag_query_planner_runs_total',
+    help: 'Total QueryPlanner runs by status',
+    labelNames: ['status'] as const,
+  });
+
+  private readonly queryPlannerDuration = new Histogram({
+    name: 'rag_query_planner_duration_seconds',
+    help: 'QueryPlanner duration by outcome',
+    labelNames: ['status'] as const,
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20],
+  });
+
+  private readonly queryPlanQueryCount = new Histogram({
+    name: 'rag_query_plan_query_count',
+    help: 'Number of retrieval queries in a QueryPlan execution',
+    labelNames: ['task_type'] as const,
+    buckets: [1, 2, 3, 4],
+  });
+
+  private readonly attachmentRetrievalHitsTotal = new Counter({
+    name: 'rag_attachment_retrieval_hits_total',
+    help: 'Total session-attachment chunks retrieved by channel',
+    labelNames: ['source'] as const,
+  });
+
   private readonly retrievalExpandedTotal = new Counter({
     name: 'rag_retrieval_expanded_chunks_total',
     help: 'Total neighbor or same-section chunks added to context candidates',
@@ -335,6 +361,28 @@ export class MetricsService implements OnModuleInit {
       pattern: pattern || 'unknown',
       route: route || 'unknown',
     });
+  }
+
+  observeQueryPlannerRun(
+    status: 'success' | 'fallback' | 'timeout' | 'fast_path',
+    durationSeconds: number,
+  ): void {
+    this.queryPlannerRunsTotal.inc({ status });
+    this.queryPlannerDuration.observe({ status }, durationSeconds);
+  }
+
+  observeQueryPlanQueries(taskType: string, queryCount: number): void {
+    this.queryPlanQueryCount.observe(
+      { task_type: taskType || 'lookup' },
+      queryCount,
+    );
+  }
+
+  observeAttachmentRetrievalHits(
+    source: 'bm25' | 'vector' | 'hybrid',
+    count: number,
+  ): void {
+    this.attachmentRetrievalHitsTotal.inc({ source }, count);
   }
 
   contentType(): string {

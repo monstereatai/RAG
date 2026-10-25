@@ -23,6 +23,10 @@ import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 import { DocumentModule } from '../document/document.module';
 import { MetricsModule } from '../metrics/metrics.module';
 import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
+import { QueryPlanningModule } from '../../rag/planning/query-planning.module';
+import { ChatRunObservabilityService } from './chat-run-observability.service';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { ChatQueryLogService } from './chat-query-log.service';
 
 @Module({
   imports: [
@@ -46,10 +50,14 @@ import { TenantQuotaModule } from '../../common/tenant/tenant-quota.module';
     DocumentModule,
     MetricsModule,
     TenantQuotaModule,
+    QueryPlanningModule,
+    DomainEventsModule,
   ],
   controllers: [ChatController],
   providers: [
     ChatService,
+    ChatRunObservabilityService,
+    ChatQueryLogService,
     ConversationService,
     ConversationEmbeddingService,
     RagFeedbackService,

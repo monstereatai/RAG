@@ -5,12 +5,15 @@ describe('SecurityService', () => {
   let warnSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    process.env.APP_ENCRYPTION_KEY =
+      'test-encryption-key-with-at-least-32-characters';
     service = new SecurityService();
     warnSpy = jest.spyOn(console, 'warn').mockImplementation();
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
+    delete process.env.APP_ENCRYPTION_KEY;
   });
 
   describe('validatePassword', () => {

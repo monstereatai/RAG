@@ -9,8 +9,10 @@ import {
 } from '@nestjs/common';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { FeishuWikiSyncService } from './feishu-wiki-sync.service';
+import { Public } from '../../common/decorators/public.decorator';
 
-/** Internal bridge for Admin Backend; the RAG user and tenant are resolved from the database. */
+/** Internal bridge for Admin Backend; ServiceTokenGuard authenticates the upstream Admin service. */
+@Public()
 @Controller('rag/admin/integrations/feishu/wiki')
 @UseGuards(ServiceTokenGuard)
 export class FeishuWikiAdminController {

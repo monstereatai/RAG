@@ -1,12 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { InjectRepository } from '@nestjs/typeorm';
 import { z } from 'zod';
+import { Repository } from 'typeorm';
 import {
   Mem0Provider,
   type Mem0MemoryResult,
 } from '../../providers/mem0/mem0.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { buildContextPolicyMessage } from '../../rag/prompts/context-policy';
+import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
+import { MessageEntity } from '../../providers/db/entities/message.entity';
+import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-event-outbox.entity';
+import { DomainEventsService } from '../domain-events/domain-events.service';
+
+const CONVERSATION_MEMORY_PERSIST_EVENT = 'conversation.memory.persist';
+const MESSAGE_META_PREFIX = '<!-- rag-message-meta:';
+const MESSAGE_META_SUFFIX = ' -->';
 
 /** 分类器输出 schema */
 const memoryClassifierSchema = z.object({
@@ -22,6 +32,20 @@ const memoryClassifierSchema = z.object({
     ),
   reason: z.string().describe('分类理由，一句话'),
 });
+
+type MemoryClassifierOutput = z.infer<typeof memoryClassifierSchema>;
+
+interface MemoryPersistenceProgress {
+  classification?: Pick<MemoryClassifierOutput, 'write_user' | 'write_session'>;
+  completedScopes?: Array<'user' | 'session'>;
+  onProgress?: (progress: {
+    classification: Pick<
+      MemoryClassifierOutput,
+      'write_user' | 'write_session'
+    >;
+    completedScopes: Array<'user' | 'session'>;
+  }) => void;
+}
 
 const CLASSIFIER_PROMPT = `你是记忆分层分类器。判断本轮对话是否有「新事实」需写入 Mem0，并分到正确层级。
 
@@ -54,6 +78,7 @@ export interface MemorySearchResult {
 export interface MemoryClassifyResult {
   written: string[];
   reason: string;
+  failed?: string[];
 }
 
 @Injectable()
@@ -67,7 +92,19 @@ export class MemoryService {
   constructor(
     private readonly mem0Provider: Mem0Provider,
     private readonly llmProvider: LlmProvider,
-  ) {}
+    @Optional()
+    @InjectRepository(ConversationEntity)
+    private readonly conversationRepository?: Repository<ConversationEntity>,
+    @Optional()
+    @InjectRepository(MessageEntity)
+    private readonly messageRepository?: Repository<MessageEntity>,
+    @Optional() private readonly domainEvents?: DomainEventsService,
+  ) {
+    this.domainEvents?.registerInternalHandler(
+      CONVERSATION_MEMORY_PERSIST_EVENT,
+      (event) => this.persistOutboxMemory(event),
+    );
+  }
 
   isEnabled(): boolean {
     return this.mem0Provider.isEnabled();
@@ -143,50 +180,230 @@ export class MemoryService {
     conversationId: string | undefined,
     userText: string,
     assistantText: string,
+    progress: MemoryPersistenceProgress = {},
   ): Promise<MemoryClassifyResult> {
     if (!this.mem0Provider.isEnabled()) {
       return { written: [], reason: 'mem0 disabled' };
     }
 
-    try {
-      const classifier = this.llmProvider
-        .getModel()
-        .withStructuredOutput(memoryClassifierSchema);
-      const result = await classifier.invoke([
-        new SystemMessage(CLASSIFIER_PROMPT),
-        new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
-      ]);
-
-      const turn: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        { role: 'user', content: userText },
-        { role: 'assistant', content: assistantText },
-      ];
-
-      const written: string[] = [];
-
-      if (result.write_user) {
-        await this.mem0Provider.add({ messages: turn, userId });
-        written.push('user');
+    let result: MemoryClassifierOutput;
+    if (progress.classification) {
+      result = {
+        ...progress.classification,
+        reason: 'resumed from persisted outbox classification',
+      };
+    } else {
+      try {
+        const classifier = this.llmProvider
+          .getModel()
+          .withStructuredOutput(memoryClassifierSchema);
+        result = await classifier.invoke([
+          new SystemMessage(CLASSIFIER_PROMPT),
+          new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
+        ]);
+      } catch (err) {
+        const message = (err as Error).message;
+        this.logger.error(
+          `Memory classify failed before persistence: ${message}`,
+        );
+        return {
+          written: [],
+          failed: ['classification'],
+          reason: `error: ${message}`,
+        };
       }
-
-      if (result.write_session && conversationId) {
-        await this.mem0Provider.add({
-          messages: turn,
-          userId,
-          runId: conversationId,
-        });
-        written.push('session');
-      }
-
-      this.logger.log(
-        `Memory classify: reason="${result.reason}", written=[${written.join(', ')}]`,
-      );
-
-      return { written, reason: result.reason };
-    } catch (err) {
-      this.logger.error(`Memory classify failed: ${(err as Error).message}`);
-      return { written: [], reason: `error: ${(err as Error).message}` };
     }
+
+    const written: string[] = [];
+    const failed: string[] = [];
+    const completedScopes = new Set(progress.completedScopes ?? []);
+    const saveProgress = () => {
+      progress.onProgress?.({
+        classification: {
+          write_user: result.write_user,
+          write_session: result.write_session,
+        },
+        completedScopes: [...completedScopes],
+      });
+    };
+    saveProgress();
+    const turn: Array<{ role: 'user' | 'assistant'; content: string }> = [
+      { role: 'user', content: userText },
+      { role: 'assistant', content: assistantText },
+    ];
+
+    if (result.write_user) {
+      if (completedScopes.has('user')) {
+        written.push('user');
+      } else {
+        try {
+          await this.mem0Provider.add({ messages: turn, userId });
+          written.push('user');
+          completedScopes.add('user');
+          saveProgress();
+        } catch (err) {
+          failed.push('user');
+          this.logger.error(
+            `Mem0 user-scope persistence failed: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+
+    if (result.write_session && conversationId) {
+      if (completedScopes.has('session')) {
+        written.push('session');
+      } else {
+        try {
+          await this.mem0Provider.add({
+            messages: turn,
+            userId,
+            runId: conversationId,
+          });
+          written.push('session');
+          completedScopes.add('session');
+          saveProgress();
+        } catch (err) {
+          failed.push('session');
+          this.logger.error(
+            `Mem0 session-scope persistence failed: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+
+    this.logger.log(
+      `Memory classify: reason="${result.reason}", written=[${written.join(', ')}], failed=[${failed.join(', ')}]`,
+    );
+
+    return { written, failed, reason: result.reason };
+  }
+
+  private async persistOutboxMemory(
+    event: DomainEventOutboxEntity,
+  ): Promise<void> {
+    if (!this.conversationRepository || !this.messageRepository) {
+      throw new Error('Conversation repositories are unavailable.');
+    }
+    if (!this.mem0Provider.isEnabled()) {
+      throw new Error('Mem0 is unavailable while a memory event is pending.');
+    }
+    if (event.aggregateType !== 'conversation') {
+      throw new Error('Conversation memory event has an invalid aggregateType.');
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(event.payload);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid event payload.');
+      }
+      payload = parsed as Record<string, unknown>;
+    } catch {
+      throw new Error('Conversation memory event has an invalid payload.');
+    }
+
+    const threadId = event.aggregateId.trim();
+    const userId = payload.userId;
+    const userMessageId = payload.userMessageId;
+    const assistantMessageId = payload.assistantMessageId;
+    if (
+      !threadId ||
+      typeof userId !== 'string' ||
+      !userId.trim() ||
+      typeof userMessageId !== 'string' ||
+      !userMessageId.trim() ||
+      typeof assistantMessageId !== 'string' ||
+      !assistantMessageId.trim()
+    ) {
+      throw new Error('Conversation memory event is missing message identity.');
+    }
+
+    const conversation = await this.conversationRepository.findOneBy({
+      id: threadId,
+    });
+    // A deleted conversation must not recreate its session memories.
+    if (!conversation) return;
+
+    const tenantId = event.tenantId?.trim() || 'legacy';
+    if ((conversation.tenantId?.trim() || 'legacy') !== tenantId) {
+      throw new Error('Conversation memory event tenant does not match its conversation.');
+    }
+    if (conversation.userId?.trim() && conversation.userId !== userId) {
+      throw new Error('Conversation memory event user does not own its conversation.');
+    }
+
+    const [userMessage, assistantMessage] = await Promise.all([
+      this.messageRepository.findOneBy({ id: userMessageId }),
+      this.messageRepository.findOneBy({ id: assistantMessageId }),
+    ]);
+    if (!userMessage || !assistantMessage) {
+      throw new Error('Conversation memory event references missing messages.');
+    }
+    for (const message of [userMessage, assistantMessage]) {
+      if (
+        message.conversationId !== threadId ||
+        (message.tenantId?.trim() || 'legacy') !== tenantId
+      ) {
+        throw new Error('Conversation memory event references a message outside its scope.');
+      }
+    }
+    if (userMessage.role !== 'human' || assistantMessage.role !== 'ai') {
+      throw new Error('Conversation memory event references invalid message roles.');
+    }
+
+    const completedScopes: Array<'user' | 'session'> = [];
+    if (payload.completedMemoryScopes !== undefined) {
+      if (!Array.isArray(payload.completedMemoryScopes)) {
+        throw new Error('Conversation memory event has invalid completed scopes.');
+      }
+      for (const scope of payload.completedMemoryScopes) {
+        if (scope !== 'user' && scope !== 'session') {
+          throw new Error('Conversation memory event has invalid completed scopes.');
+        }
+        completedScopes.push(scope);
+      }
+    }
+
+    let classification: MemoryPersistenceProgress['classification'];
+    if (payload.memoryClassification !== undefined) {
+      const parsedClassification = memoryClassifierSchema
+        .pick({ write_user: true, write_session: true })
+        .safeParse(payload.memoryClassification);
+      if (!parsedClassification.success) {
+        throw new Error('Conversation memory event has an invalid classification.');
+      }
+      classification = parsedClassification.data;
+    }
+
+    const result = await this.classifyAndPersist(
+      userId,
+      threadId,
+      this.decodeStoredMessageContent(userMessage.content),
+      this.decodeStoredMessageContent(assistantMessage.content),
+      {
+        classification,
+        completedScopes,
+        onProgress: (progress) => {
+          payload.memoryClassification = progress.classification;
+          payload.completedMemoryScopes = progress.completedScopes;
+          event.payload = JSON.stringify(payload);
+        },
+      },
+    );
+    if (result.failed?.length) {
+      throw new Error(
+        `Conversation memory event was not fully persisted: ${result.failed.join(', ')}`,
+      );
+    }
+  }
+
+  private decodeStoredMessageContent(content: string): string {
+    const markerStart = content.lastIndexOf(MESSAGE_META_PREFIX);
+    if (markerStart < 0 || !content.endsWith(MESSAGE_META_SUFFIX)) {
+      return content;
+    }
+    return content.slice(0, markerStart).trimEnd();
   }
 
   /**
@@ -217,6 +434,26 @@ export class MemoryService {
    */
   async clearMemories(userId: string): Promise<void> {
     await this.mem0Provider.deleteAll(userId);
+  }
+
+  /**
+   * 删除指定会话的临时记忆，不影响用户跨会话保留的长期记忆。
+   */
+  async deleteSessionMemory(
+    userId: string | null | undefined,
+    conversationId: string,
+  ): Promise<void> {
+    if (!this.mem0Provider.isRequested()) return;
+    if (!this.mem0Provider.isEnabled()) {
+      throw new Error('Mem0 is enabled but unavailable.');
+    }
+    if (!userId?.trim() || !conversationId.trim()) {
+      throw new Error(
+        'Session memory cleanup requires userId and conversationId.',
+      );
+    }
+
+    await this.mem0Provider.deleteByRunId(userId, conversationId);
   }
 
   // --- private helpers ---

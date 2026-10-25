@@ -37,11 +37,13 @@ export class Mem0Provider implements OnModuleInit {
   private localBaseUrl: string | null = null;
   private localApiKey: string | null = null;
   private _isEnabled = false;
+  private _requested = false;
 
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
     const enabled = this.configService.get<boolean>('mem0.enabled', false);
+    this._requested = enabled;
     if (!enabled) {
       this.logger.log(
         'Mem0 is disabled (MEM0_ENABLED !== true). Long-term memory features disabled.',
@@ -81,6 +83,10 @@ export class Mem0Provider implements OnModuleInit {
 
   isEnabled(): boolean {
     return this._isEnabled;
+  }
+
+  isRequested(): boolean {
+    return this._requested;
   }
 
   /**
@@ -155,6 +161,7 @@ export class Mem0Provider implements OnModuleInit {
       });
     } catch (err) {
       this.logger.error(`Mem0 add failed: ${(err as Error).message}`);
+      throw err;
     }
   }
 
@@ -206,22 +213,47 @@ export class Mem0Provider implements OnModuleInit {
   async deleteAll(userId: string): Promise<void> {
     if (!this._isEnabled) return;
 
-    try {
-      if (this.cloudClient) {
-        await this.cloudClient.deleteAll({ userId });
-        return;
-      }
-
-      // local mode
-      await this.localRequest(
-        `/memories?user_id=${encodeURIComponent(userId)}`,
-        {
-          method: 'DELETE',
-        },
-      );
-    } catch (err) {
-      this.logger.error(`Mem0 deleteAll failed: ${(err as Error).message}`);
+    if (this.cloudClient) {
+      await this.cloudClient.deleteAll({ userId });
+      return;
     }
+
+    // local mode
+    await this.localRequest(
+      `/memories?user_id=${encodeURIComponent(userId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
+
+  /**
+   * 删除指定用户在指定会话（run）下的记忆，保留该用户其他会话和长期记忆。
+   */
+  async deleteByRunId(userId: string, runId: string): Promise<void> {
+    if (!this._isEnabled) return;
+
+    const scopedUserId = userId.trim();
+    const scopedRunId = runId.trim();
+    if (!scopedUserId || !scopedRunId) {
+      throw new Error('Mem0 session delete requires userId and runId.');
+    }
+
+    if (this.cloudClient) {
+      await this.cloudClient.deleteAll({
+        userId: scopedUserId,
+        runId: scopedRunId,
+      });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      user_id: scopedUserId,
+      run_id: scopedRunId,
+    });
+    await this.localRequest(`/memories?${params.toString()}`, {
+      method: 'DELETE',
+    });
   }
 
   // --- private helpers ---

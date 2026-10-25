@@ -13,6 +13,7 @@ import { ApiTokenService } from '../../modules/auth/api-token.service';
 import { JwtPayload } from '../interfaces/api-response.interface';
 import { SseTicketService } from '../../modules/auth/sse-ticket.service';
 import { API_SCOPES_KEY } from '../decorators/api-scopes.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { IamService } from '../../modules/iam/iam.service';
 
 /**
@@ -35,6 +36,15 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // gRPC 等非 HTTP 上下文由各自的认证实现处理，不能在这里读取 HTTP request。
+    if (context.getType() !== 'http') return true;
+
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const request = context.switchToHttp().getRequest<{
       headers: { authorization?: string };
       query?: { ticket?: string };

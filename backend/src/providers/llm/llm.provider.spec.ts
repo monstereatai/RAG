@@ -93,7 +93,36 @@ describe('LlmProvider request model selection', () => {
       wrapped.withStructuredOutput({}).invoke('结构化问题'),
     );
 
-    expect(modelInvoke).toHaveBeenCalledWith('问题', { signal });
-    expect(structuredInvoke).toHaveBeenCalledWith('结构化问题', { signal });
+    expect(modelInvoke).toHaveBeenCalledWith(
+      '问题',
+      expect.objectContaining({ signal: expect.any(Object) }),
+    );
+    expect(structuredInvoke).toHaveBeenCalledWith(
+      '结构化问题',
+      expect.objectContaining({ signal: expect.any(Object) }),
+    );
+  });
+
+  it('falls back to the configured secondary provider when primary fails', async () => {
+    qwen.invoke.mockRejectedValueOnce(new Error('qwen upstream failure'));
+
+    await expect(service.invoke('fallback 问题')).resolves.toBe(
+      'deepseek answer',
+    );
+    expect(qwen.invoke).toHaveBeenCalledTimes(1);
+    expect(deepseek.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the primary circuit after repeated failures and skips it', async () => {
+    qwen.invoke.mockRejectedValue(new Error('qwen upstream failure'));
+
+    await expect(service.invoke('失败一')).resolves.toBe('deepseek answer');
+    await expect(service.invoke('失败二')).resolves.toBe('deepseek answer');
+    qwen.invoke.mockClear();
+    deepseek.invoke.mockClear();
+
+    await expect(service.invoke('熔断后')).resolves.toBe('deepseek answer');
+    expect(qwen.invoke).not.toHaveBeenCalled();
+    expect(deepseek.invoke).toHaveBeenCalledTimes(1);
   });
 });
