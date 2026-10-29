@@ -627,7 +627,7 @@ ProcessOn「AI 应用」思维导图适合当作 Agent / RAG 面试补课地图�
 6. MCP：让 Codex / Claude Code / Trae 写代码前自动拿业务和工程上下文。
 ```
 
-详细用法看 `docs/interview/interview-docs-usage.md` 的“ProcessOn AI 应用思维导图用法”。
+详细用法看 `docs/interview/README.md` 的“ProcessOn AI 应用思维导图用法”。
 
 ## 重难点与结果短回答
 

@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-企业级 Agentic RAG Web 应用。详细规划见 `docs/plans/rag-plan.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `docs/reference/SUMMARY.md`。
+企业级 Agentic RAG Web 应用。详细规划见 `docs/architecture/ARCHITECTURE.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `docs/reference/SUMMARY.md`。
 
 ## 文档关系
 
@@ -12,7 +12,7 @@
 - `docs/product/PRD.md`：产品需求与验收标准。
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
-- `docs/plans/rag-plan.md`：早期计划和技术路线。
+- `docs/architecture/ARCHITECTURE.md`：早期计划和技术路线。
 - `docs/README.md`：文档分类和阅读入口。
 
 ## 技术栈（锁死，未经主人确认不得更换）

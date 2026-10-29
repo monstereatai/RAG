@@ -324,7 +324,6 @@ Tool、MCP、Skill 分别是什么？
 | 项目还有什么没实现                        | [JD 缺口状态](./jd/jd-gap-implementation-status.md)               | [项目真实进度](../../ROADMAP.md)                                |
 | 一线大厂岗位要求                          | [JD 要求与项目对照](./jd/jd-requirements-project-mapping.md)      | [高级岗位就绪度](./SENIOR_AGENT_INTERVIEW_READINESS.md)         |
 | 游戏官网／活动业务背景                    | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md)   | [游戏营销证据](./resume/game-marketing-rag-evidence.md)         |
-| 公开资料入库与 Simple 编译知识 验收        | [公开资料与 编译知识方案](../plans/游戏运营营销公开资料与编译知识方案.md) | [功能步骤流程](./功能步骤流程.md) |
 | 简历怎么写                                | [通用 RAG 简历版](./resume/resume-rag-project.md)                 | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md) |
 | 历次真实面试题和主人问过的问题            | [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 表中标注的具体答案入口                                          |
 | AI 应用完整知识地图                       | [ProcessOn 知识图谱](./processon-ai-application-mindmap.md)       | [AgentGuide 对照](./agentguide-rag-interview-mapping.md)        |
@@ -350,16 +349,14 @@ Tool、MCP、Skill 分别是什么？
 | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------- |
 | [deepseek-AI应用Agent岗-10小时冲刺指南.md](./deepseek-AI应用Agent岗-10小时冲刺指南.md)                     | 高级 AI 应用/Agent 岗 10 小时倒排冲刺、数字表、红线、模拟问答和面试复盘 | 面试前必读 |
 | [deepseek-AI应用Agent岗-模拟问答题库.md](./deepseek-AI应用Agent岗-模拟问答题库.md)                         | 33 道高频模拟题逐题可背答案、追问应对和边界红线（覆盖检索/Agentic/Prompt/安全/多租户/可观测等全知识面） | 面试前必读 |
-| [AI复盘四场面试问题与RAG项目回答.md](./AI复盘四场面试问题与RAG项目回答.md) | 外部 MHTML 去重后的 58 个显式／隐含问题，结合当前项目给出可核验回答、HR 模板和生产边界 | 事实核对版 |
+| [AI复盘四场面试问题与RAG项目回答-面试表达版.md](./AI复盘四场面试问题与RAG项目回答-面试表达版.md) | 外部 MHTML 去重后的 58 个显式／隐含问题，结合当前项目给出可核验回答、HR 模板和生产边界 | 事实核对版 |
 | [AI复盘四场面试问题与RAG项目回答-面试表达版.md](./AI复盘四场面试问题与RAG项目回答-面试表达版.md) | 保留完整 58 题，以“业务问题—设计取舍—工程价值”重写核心回答，并补齐英文术语中文解释 | 面试背诵版 |
 | [Agent-Task-Artifact结构验收与驳回重跑.md](./Agent-Task-Artifact结构验收与驳回重跑.md) | Artifact 的三层结构、Schema、证据与岗位验收，以及工作流驳回修改、岗位重跑和“单任务重跑”真实边界 | 专题理解 |
 | [林芮瑭简历大模型面试问题.md](./林芮瑭简历大模型面试问题.md) | 针对多模态算法/Agent 简历的高频追问、回答要点、项目可信度核验和岗位定位 | 简历定向复习 |
-| [平台型Agent开源框架参考.md](./平台型Agent开源框架参考.md) | DeepSeek Harness、OpenHands、SWE-agent、Letta、Microsoft Agent Framework、Dify、RAGFlow 等平台型 Agent 框架的学习重点和当前项目映射 | 框架调研 |
 | [SEVEN_DIFFICULTIES_CHEATSHEET.md](./SEVEN_DIFFICULTIES_CHEATSHEET.md)                                   | 七个难点的一页式速查和回答框架                       | 面试前必读 |
 | [SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md](./SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md)                         | 七个难点的背景、方案比较、项目选择、代码、效果和追问 | 必读       |
 | [USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 历次提问、真实面试题、覆盖状态和建议补齐项           | 查漏必读   |
 | [SENIOR_AGENT_INTERVIEW_READINESS.md](./SENIOR_AGENT_INTERVIEW_READINESS.md)                             | 高级／资深／Staff 岗位差距、真实数据采集和证据验收   | 投递前必读 |
-| [interview-docs-usage.md](./interview-docs-usage.md)                                                     | 更详细的文档使用场景、问题定位和复习说明             | 需要时查   |
 | [功能步骤流程.md](./功能步骤流程.md)                                                                       | 项目模块清单、模块交互、用户操作和服务端状态／数据流 | 项目深挖   |
 | [开源项目参考能力归档.md](./开源项目参考能力归档.md)                                                       | Dify、RAGFlow、AutoGPT、MetaGPT、CrewAI、AutoGen 的参考能力与当前项目融合边界 | 项目深挖 |
 

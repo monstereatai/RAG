@@ -637,5 +637,5 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 | -------------- | -------------------------------------------------------- |
 | 工作流使用说明 | `docs/PRODUCTION_WORKFLOW_USAGE.md`                      |
 | 七项面试速查卡 | `docs/interview/SEVEN_DIFFICULTIES_CHEATSHEET.md`        |
-| 七项实现证据   | `docs/plans/expert-agent-difficulties-implementation.md` |
+| 七项实现证据   | `docs/interview/SEVEN_DIFFICULTIES_CHEATSHEET.md` |
 | 当前真实进度   | `ROADMAP.md`                                             |

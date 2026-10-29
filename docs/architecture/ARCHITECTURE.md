@@ -584,7 +584,7 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - `../product/PRD.md`：产品需求与验收标准。
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
-- `../plans/rag-plan.md`：早期计划和技术路线。
+- `ARCHITECTURE.md`：早期计划和技术路线。
 - `../reference/SUMMARY.md`：`agent-course/` 参考能力总结。
 
 

@@ -19,7 +19,7 @@
 - **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch 及 Obsidian 编译知识索引；线性 RAG 本地知识作为受治理直答与降级资产，不是独立在线检索链路。公开快照用于验证链路，不代表真实企业线上效果。
 - **部署目标**：当前固定为 Docker Compose，见 `docs/architecture/DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
-详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./docs/plans/rag-plan.md)。
+详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)。
 
 ---
 
@@ -179,11 +179,7 @@ pnpm --filter backend run eval:langfuse:dataset
 
 完整测试矩阵和每个场景的验收点见 [docs/reference/LANGFUSE_OBSERVABILITY_TEST_MATRIX.md](./docs/reference/LANGFUSE_OBSERVABILITY_TEST_MATRIX.md)。
 
-独立 golden set 的真实 live 性能评测与结论见 [docs/evidence/INDEPENDENT_GOLDEN_LIVE_PERF_2026-10-18.md](./docs/evidence/INDEPENDENT_GOLDEN_LIVE_PERF_2026-10-18.md)。
-
-延迟优化与模型依赖稳定性、故障注入和优化后复测见 [docs/evidence/LATENCY_AND_MODEL_RESILIENCE_2026-10-18.md](./docs/evidence/LATENCY_AND_MODEL_RESILIENCE_2026-10-18.md)。
-
-并发 2/5/10 的模式矩阵压测结果见 [docs/evidence/CONCURRENCY_LOAD_TEST_2026-10-18.md](./docs/evidence/CONCURRENCY_LOAD_TEST_2026-10-18.md)。
+当前本地回归、检索专项与 smoke 证据见 [docs/refactor/evidence](./docs/refactor/evidence/)，真实 live 性能、故障注入和并发压测仍需在目标环境重新执行。
 
 覆盖方向：
 
