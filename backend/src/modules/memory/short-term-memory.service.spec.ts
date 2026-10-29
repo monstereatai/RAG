@@ -1,4 +1,6 @@
+import { IsNull } from 'typeorm';
 import { ShortTermMemoryService } from './short-term-memory.service';
+import type { ContextMessageCandidate } from '../../rag/contracts/context-budget';
 
 describe('ShortTermMemoryService structured compression', () => {
   it('按模型可用上下文和检索预算动态计算历史预算', () => {
@@ -33,6 +35,91 @@ describe('ShortTermMemoryService structured compression', () => {
 
     expect(lookupBudget).toBeGreaterThan(synthesisBudget);
     expect(synthesisBudget).toBeGreaterThan(0);
+  });
+
+  it('按来源优先级裁剪 system context，并保留完整的安全策略', () => {
+    const service = new ShortTermMemoryService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const candidates: ContextMessageCandidate[] = [
+      {
+        source: 'context_policy',
+        role: 'system',
+        content: '安全规则',
+        priority: Number.MAX_SAFE_INTEGER,
+        required: true,
+      },
+      {
+        source: 'role_preset',
+        role: 'system',
+        content: '岗位规则',
+        priority: Number.MAX_SAFE_INTEGER,
+        required: true,
+      },
+      {
+        source: 'session_memory',
+        role: 'system',
+        content: '会话记忆',
+        priority: 80,
+      },
+      {
+        source: 'short_term_summary',
+        role: 'system',
+        content: '历史摘要',
+        priority: 60,
+      },
+      {
+        source: 'user_memory',
+        role: 'system',
+        content: '用户偏好',
+        priority: 40,
+      },
+      {
+        source: 'history_search',
+        role: 'system',
+        content: '历史线索',
+        priority: 20,
+      },
+    ];
+
+    const result = service.budgetSystemContext(candidates, 24);
+    const overflow = service.budgetSystemContext(candidates.slice(0, 2), 1);
+
+    expect(result.messages.map(({ source }) => source)).toEqual([
+      'context_policy',
+      'role_preset',
+      'session_memory',
+    ]);
+    expect(result.droppedSources).toEqual([
+      'short_term_summary',
+      'user_memory',
+      'history_search',
+    ]);
+    expect(overflow.messages.map(({ content }) => content)).toEqual([
+      '安全规则',
+      '岗位规则',
+    ]);
+    expect(overflow.overflowTokens).toBeGreaterThan(0);
+  });
+
+  it('长会话按预算保留最近的完整问答轮次', () => {
+    const service = new ShortTermMemoryService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const turns = Array.from({ length: 20 }, (_, index) => [
+      { role: 'human', content: `用户问题${index}` },
+      { role: 'assistant', content: `助手回答${index}` },
+    ]).flat();
+
+    const limited = service.limitHistoryToTokenBudget(turns, 32);
+
+    expect(limited).toEqual(turns.slice(-4));
   });
 
   it('stores a user/assistant pair before making one compression decision', async () => {
@@ -84,6 +171,8 @@ describe('ShortTermMemoryService structured compression', () => {
       zadd: jest.fn().mockResolvedValue(undefined),
       expire: jest.fn().mockResolvedValue(undefined),
       zrange: jest.fn(),
+      setIfAbsent: jest.fn().mockResolvedValue(true),
+      releaseLock: jest.fn().mockResolvedValue(undefined),
     };
     const llm = { invoke: jest.fn() };
     const service = new ShortTermMemoryService(
@@ -238,7 +327,15 @@ describe('ShortTermMemoryService structured compression', () => {
       {
         findOne: jest.fn().mockResolvedValue({ contextSummary: summary }),
       } as never,
-      { find: jest.fn().mockResolvedValue([]) } as never,
+      {
+        createQueryBuilder: jest.fn(() => ({
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          addOrderBy: jest.fn().mockReturnThis(),
+          take: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+        })),
+      } as never,
     );
 
     const context = await service.getContext('thread-persisted');
@@ -250,18 +347,35 @@ describe('ShortTermMemoryService structured compression', () => {
 
   it('旧会话没有持久化摘要时，从 PostgreSQL 早期消息重建一次', async () => {
     const messageRepo = {
-      count: jest.fn().mockResolvedValue(12),
+      count: jest.fn().mockResolvedValue(212),
       find: jest.fn().mockResolvedValue(
         Array.from({ length: 12 }, (_, index) => ({
           role: index % 2 === 0 ? 'human' : 'ai',
           content: `历史第${index}条消息`,
           createdAt: new Date(2026, 0, index + 1),
+          id: `message-${index}`,
         })),
       ),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(
+          Array.from({ length: 12 }, (_, index) => ({
+            role: index % 2 === 0 ? 'human' : 'ai',
+            content: `历史第${index}条消息`,
+            createdAt: new Date(2026, 0, index + 1),
+            id: `message-${index}`,
+          })),
+        ),
+      })),
     };
     const conversationRepo = {
       findOne: jest.fn().mockResolvedValue({ contextSummary: null }),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const service = new ShortTermMemoryService(
       { isEnabled: () => false } as never,
@@ -282,11 +396,9 @@ describe('ShortTermMemoryService structured compression', () => {
 
     const context = await service.getContext('thread-legacy');
 
-    expect(messageRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { conversationId: 'thread-legacy' } }),
-    );
+    expect(messageRepo.createQueryBuilder).toHaveBeenCalledWith('message');
     expect(conversationRepo.update).toHaveBeenCalledWith(
-      'thread-legacy',
+      { id: 'thread-legacy', contextSummary: IsNull() },
       expect.objectContaining({ contextSummaryVersion: 1 }),
     );
     expect(context.systemMessage?.content).toContain('周年庆活动采用抽奖玩法');

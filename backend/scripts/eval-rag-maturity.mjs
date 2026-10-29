@@ -62,7 +62,9 @@ function loadEvidence() {
     'src/providers/db/entities/fact-conflict.entity.ts',
   );
   const jobsServiceText = readText('src/modules/jobs/jobs.service.ts');
-  const karpathyRagText = readText('src/rag/karpathy/karpathy-rag.service.ts');
+  const ragServiceText = readText('src/rag/rag.service.ts');
+  const ragEvidenceText = readText('src/rag/evidence/rag-evidence.service.ts');
+  const answerQualityText = readText('src/rag/evidence/answer-quality.service.ts');
   const milvusProviderText = readText(
     'src/providers/vector-store/milvus.vector-store.ts',
   );
@@ -103,8 +105,9 @@ function loadEvidence() {
       jobsServiceText.includes('SupervisorService') &&
       jobsServiceText.includes('this.supervisorService.query'),
     hasClaimLevelCitation:
-      karpathyRagText.includes('validateClaimCitationSupport') ||
-      karpathyRagText.includes('关键结论引用支撑不足'),
+      (ragServiceText.includes('validateAnswerCitationSupport') ||
+        ragEvidenceText.includes('validateAnswerCitationSupport')) &&
+      answerQualityText.includes('关键结论引用支撑不足'),
     hasStructuredSourceSpan:
       chunkEntityText.includes('sourceStart') &&
       chunkEntityText.includes('sourceEnd') &&

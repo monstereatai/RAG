@@ -1,10 +1,10 @@
-# Agentic RAG + Karpathy-Style RAG Web 应用计划
+# Agentic RAG + 轻量编译知识 RAG Web 应用计划
 
 ## Summary
 
 构建一个从零开始的 Web RAG 系统：前端支持文件上传、语音输入、流式回答；后端使用 NestJS、LangChain.js、LangGraph.js 和 DeepAgents.js；向量库使用 Milvus，全文检索使用 Elasticsearch（IK 中文分词）；模型、Embedding 和语音服务采用可插拔 Provider。
 
-Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检索管线（使用 `rank_bm25` + 纯 JS cosine 评分），并与 Agentic RAG 混合使用。两种方案可以在同一查询请求中按策略切换。
+编译知识 部分按照"极简、透明的 nano-rag 风格"实现一条手写检索管线（使用 `rank_bm25` + 纯 JS cosine 评分），并与 Agentic RAG 混合使用。两种方案可以在同一查询请求中按策略切换。
 
 技术栈对齐 `agent-course` 实战经验（见 SUMMARY.md，共 26 个实战项目）：
 
@@ -44,7 +44,7 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
 
 - **M1/M2/M3/M4/M5 已完成**，真实进度以 `ROADMAP.md` 为准。
 - **后端**：NestJS + LangChain.js + LangGraph.js + DeepAgents；已实现 auth/document/chat/debug/memory/graph/mcp/metrics/tracing/jobs/skills 等模块。
-- **simple 模式**：Karpathy-style RAG，使用 BM25 / Elasticsearch / Milvus 混合检索；Milvus 超时快速降级，并通过 active docId 过滤避免残留向量进入答案。
+- **simple 模式**：轻量编译知识 RAG，使用 BM25 / Elasticsearch / Milvus 混合检索；Milvus 超时快速降级，并通过 active docId 过滤避免残留向量进入答案。
 - **agentic/auto 模式**：包含 route、query augment、retrieval、sufficiency、web_search、rerank、generate、reflection 和 resume 流程。
 - **SSE**：`GET /api/v1/chat/stream` 输出 `routing / query_augment / retrieval / sufficiency / web_search / rerank / token / citation / reflection / final / error`。
 - **前端**：React + Vite 已支持登录、文件上传、文档列表、聊天、引用展示、模式切换、SSE 流式显示、浏览器语音输入和 TTS 朗读。
@@ -66,20 +66,20 @@ Karpathy 部分按照"极简、透明的 nano-rag 风格"实现一条手写检�
   - Answer generation
   - Reflection / Self-Critique
 - 使用 DeepAgents.js 处理复杂任务，包括规划、工具调用、多步检索和子任务分解。
-- Karpathy-style RAG 作为独立模块，使用 `rank_bm25` + 纯 JS cosine 实现，不依赖 LangChain 检索器，便于调试与对照。
+- 轻量编译知识 RAG 作为独立模块，使用 `rank_bm25` + 纯 JS cosine 实现，不依赖 LangChain 检索器，便于调试与对照。
 
 ### 混用策略
 
 两种方案在同一系统中互补运行，不互斥：
 
-- **简单问题** 默认走 Karpathy-style 快速检索（rank_bm25 + 纯 JS cosine），延迟低、结果透明可调试。
+- **简单问题** 默认走 轻量编译知识 快速检索（rank_bm25 + 纯 JS cosine），延迟低、结果透明可调试。
 - **复杂问题** 走 Agentic RAG，由 DeepAgents.js 判断是否需要多轮检索、查询改写、工具调用（含 Bocha 联网）和子任务分解。
 - 提供以下运行模式（用户可在请求中强制指定）：
   - `auto`：DeepAgents.js 自动决策，作为默认值。
   - `agentic`：强制使用 Agentic RAG + 全部工具。
-  - `simple`：强制使用 Karpathy-style 快速管线。
+  - `simple`：强制使用 轻量编译知识 快速管线。
 
-### Karpathy-Style RAG 模块（极简透明管线）
+### 轻量编译知识 RAG 模块（极简透明管线）
 
 使用以下现有库，**不自己实现算法**：
 
@@ -103,7 +103,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
 | 工具 | 实现方案 |
 |---|---|
 | `vector_search` | Milvus 向量检索（LangChain.js Milvus 集成） |
-| `keyword_search` | BM25 关键字检索（`rank_bm25` + `@node-rs/jieba`，复用 Karpathy 模块） |
+| `keyword_search` | BM25 关键字检索（`rank_bm25` + `@node-rs/jieba`，复用 编译知识 模块） |
 | `es_search` | Elasticsearch 全文检索（`multi_match` + `ik_smart` 分词，参考 agent-course/es-test） |
 | `web_search` | Bocha Search API（参考 agent-course/deep-research-assistant/tools/search.mjs） |
 | `query_decompose` | DeepAgents.js 内置规划能力，拆解多跳问题为子问题 |
@@ -118,7 +118,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
 
 不引入额外路由框架，由 DeepAgents.js 根据输入消息和工具上下文自动决策：
 
-- 简单事实型问题 → DeepAgents.js 直接选择 `keyword_search` / `vector_search` / `es_search`，走 Karpathy 快速管线。
+- 简单事实型问题 → DeepAgents.js 直接选择 `keyword_search` / `vector_search` / `es_search`，走 编译知识 快速管线。
 - 含多跳、比较、推理类问题 → DeepAgents.js 触发 `query_decompose` + 多轮工具调用，走 Agentic 管线。
 - 需要联网补充知识时 → DeepAgents.js 自动调用 `web_search`（Bocha）。
 
@@ -128,7 +128,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
 
 - `auto`：DeepAgents.js 自动决策，默认值。
 - `agentic`：强制使用 Agentic RAG + 全部工具。
-- `simple`：强制使用 Karpathy-style 快速管线（rank_bm25 + 纯 JS cosine）。
+- `simple`：强制使用 轻量编译知识 快速管线（rank_bm25 + 纯 JS cosine）。
 
 ### 数据层
 
@@ -188,7 +188,7 @@ DeepAgents.js + LangGraph.js，包含以下内置工具：
   - **Embedding**：通义千问 Embedding / OpenAI text-embedding-3-small
   - **Speech**：腾讯云 ASR（语音识别）+ TTS（语音合成），参考 agent-course/asr-and-tts-nest-service
 - 预留 Ollama、Anthropic 等 Provider 配置。
-- Karpathy 模块的 Embedding 复用同一个 `EmbeddingProvider`，不单独实现。
+- 编译知识 模块的 Embedding 复用同一个 `EmbeddingProvider`，不单独实现。
 
 ### 前端
 
@@ -289,13 +289,13 @@ Chat 流式响应事件：
 │  │                   Mode Router                                 │   │
 │  │  auto → DeepAgents.js / LangGraph.js 决策                     │   │
 │  │  agentic → Agentic RAG 管线                                  │   │
-│  │  simple  → Karpathy-style 快速管线                           │   │
+│  │  simple  → 轻量编译知识 快速管线                           │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                        │              │                              │
 │          ┌─────────────┘              └─────────────┐              │
 │          ▼                                          ▼              │
 │  ┌──────────────────┐                  ┌──────────────────────┐     │
-│  │  Agentic RAG     │                  │  Karpathy-style RAG  │     │
+│  │  Agentic RAG     │                  │  轻量编译知识 RAG  │     │
 │  │  (LangGraph.js)  │                  │  (Minimal Pipeline)  │     │
 │  │                  │                  │                      │     │
 │  │ ┌──────────────┐ │                  │ ┌──────────────────┐ │     │
@@ -377,7 +377,7 @@ Chat 流式响应事件：
 | `@langchain/community/graphs/neo4j_graph` | latest | Neo4j 知识图谱集成（GraphRAG） |
 | `neo4j-driver` | latest | Neo4j 驱动（知识图谱 RAG） |
 | `deepagents` | latest | Agent 规划与工具调用（DeepAgents.js） |
-| `rank_bm25` | >=0.2 | Karpathy-style BM25 检索 |
+| `rank_bm25` | >=0.2 | 轻量编译知识 BM25 检索 |
 | `@node-rs/jieba` | latest | 中文分词（BM25 + ES） |
 | `@elastic/elasticsearch` | latest | ES 客户端（全文检索） |
 | `typeorm` | latest | ORM（PostgreSQL / MySQL 通用） |
@@ -401,7 +401,7 @@ Chat 流式响应事件：
 ### 单元测试
 
 - 验证文档解析、chunking 和 metadata 保留（包含 char_start/char_end）。
-- 验证 Karpathy 模块：rank_bm25 评分、cosine 计算、加权融合和 Top-K 筛选结果正确。
+- 验证 编译知识 模块：rank_bm25 评分、cosine 计算、加权融合和 Top-K 筛选结果正确。
 - 验证 Provider 抽象在 mock LLM 和 embedding 下可以运行。
 - 验证 Bocha 工具调用在 mock 模式下正确传参和解析结果。
 
@@ -440,7 +440,7 @@ Chat 流式响应事件：
 - 向量库可插拔：默认 Milvus，可通过 `VECTOR_STORE_PROVIDER=milvus|pgvector` 切换；pgvector 复用 PostgreSQL，适合轻量部署。
 - 关系型数据库可插拔：默认 PostgreSQL，可通过 `RELATIONAL_DB_PROVIDER=postgres|mysql` 切换；TypeORM 统一 ORM 层。
 - 全文检索使用 Elasticsearch（IK 中文分词），与向量库形成混合检索。
-- Karpathy-style 模块使用 `rank_bm25` + `@node-rs/jieba` + 纯 JS cosine，不自己实现 BM25 或向量算法，embedding 复用统一 Provider。
+- 轻量编译知识 模块使用 `rank_bm25` + `@node-rs/jieba` + 纯 JS cosine，不自己实现 BM25 或向量算法，embedding 复用统一 Provider。
 - Router 不引入额外框架，由 DeepAgents.js 原生决策；`mode` 字段允许用户强制覆盖。
 - Bocha Web Search 为可选工具，API key 缺失时自动跳过，不作为必选依赖。
 - 模型层要求可插拔，第一版实现通义千问 + OpenAI 兼容 Provider + 腾讯云 ASR/TTS，再通过配置扩展其他 Provider。
@@ -769,7 +769,7 @@ researcher → analyst（可选）→ writer → critic → editor
 ```
 
 **触发条件**：
-- `simple` 模式：不走子 Agent，直接 Karpathy 管线
+- `simple` 模式：不走子 Agent，直接 编译知识 管线
 - `agentic` 模式：DeepAgents.js 自动决定是否启用子 Agent
 - 复杂查询（多跳、比较、分析类）强制走子 Agent 流程
 

@@ -19,7 +19,7 @@
 | AgentGuide 高频主题 | 当前项目覆盖度 | 项目证据 | 面试边界 |
 |---|---:|---|---|
 | RAG 完整流水线 | 强 | 文档解析、切片、Embedding、Milvus、BM25/ES、RRF、生成、引用校验 | 可以讲完整工程链路，不要只说“接了向量库” |
-| Chunking / 入库治理 | 中强 | 多格式上传、URL、官方文档同步、Obsidian/Karpathy 双链路 | 真实公司历史原件仍需继续替换当前仿真模板 |
+| Chunking / 入库治理 | 中强 | 多格式上传、URL、官方文档同步、Obsidian/编译知识 双链路 | 真实公司历史原件仍需继续替换当前仿真模板 |
 | Embedding / 向量库 | 中强 | Milvus provider、向量召回、失败降级 BM25 | 本机 Milvus 压测和真实资源规格仍待做 |
 | BM25 / Hybrid Search | 强 | BM25 + ES + Milvus + RRF 融合 | 这是项目简历里最稳的技术亮点之一 |
 | Rerank | 中强 | DashScope Rerank 工具，失败降级 | 依赖外部 key，不要说任何环境都一定启用 |
@@ -29,7 +29,7 @@
 | Multi-Agent | 中 | researcher / analyst / writer / critic / editor + Supervisor 路由 | 目前是顺序管线和领域路由，非 A2A，冲突仲裁还可增强 |
 | ReAct / Tool Use | 中强 | Bocha、Rerank、Graph、MCP、Vision、ASR/TTS provider | 工具多为只读 / 检索型，真实业务写操作未接 |
 | MCP | 强 | `tools/rag-mcp-server` 暴露 RAG、GraphRAG、Supervisor、游戏营销工具 | 可讲“给 Codex/Trae/Claude Code 自动取上下文”，不是平台插件独占 |
-| Memory | 中强 | Redis 短期记忆、Mem0 长期记忆、Obsidian/Karpathy 知识编译 | 记忆衰退、合规留存、冲突消解还不是完整生产体系 |
+| Memory | 中强 | Redis 短期记忆、Mem0 长期记忆、Obsidian/编译知识 知识编译 | 记忆衰退、合规留存、冲突消解还不是完整生产体系 |
 | RAG 评测 | 中强 | 项目级评测、Prompt Injection、Agent task、游戏营销专项 96 问 | 当前是本地 / 仿真评测，不等同长期线上准确率 |
 | Agent Evaluation Harness | 中 | eval 脚本、readiness gate、task 脚手架 | 缺完整 transcript 分析、step accuracy、线上看板、shadow/A-B |
 | Prompt Injection / 安全 | 中强 | 检索片段检测和脱敏、prompt 边界、权限、审计基础 | 缺真实红队样本、DLP、IAM、审批流 |
@@ -168,12 +168,12 @@
 | 对话缓存层 | 最近会话消息 | Redis `conv:messages:{userId}:{threadId}`，30 分钟 TTL，写入新消息后失效 | 减少频繁查库，提高历史会话读取速度 |
 | 短期记忆层 | 最近 N 轮 + 更早摘要 | Redis ZSET `stm:{conversationId}:turns` + String `stm:{conversationId}:summary`，24 小时 TTL | 多轮问答时保留近期细节，把旧历史压缩成摘要 |
 | 长期记忆层 | 用户偏好、跨会话事实 | Mem0 provider / MemoryService | 个性化和跨会话复用 |
-| 长期知识层 | 文档、文章、官方文档、Obsidian notes | RAG 索引 + Karpathy/Obsidian compiled/index | 稳定知识检索，不混进用户短期对话噪声 |
+| 长期知识层 | 文档、文章、官方文档、Obsidian notes | RAG 索引 + 编译知识/Obsidian compiled/index | 稳定知识检索，不混进用户短期对话噪声 |
 
 面试回答：
 
 ```text
-我的记忆不是一股脑塞上下文，而是按“会话历史、短期记忆、长期记忆、长期知识”分层。全量消息落库保证可追溯；Redis 缓存最近会话减少查库；短期记忆保留最近 N 轮，超出后用 LLM 摘要压缩；长期记忆存用户偏好和跨会话事实；真正稳定的业务知识放在 RAG/Karpathy/Obsidian 里。这样可以兼顾上下文连续性、token 成本和知识稳定性。
+我的记忆不是一股脑塞上下文，而是按“会话历史、短期记忆、长期记忆、长期知识”分层。全量消息落库保证可追溯；Redis 缓存最近会话减少查库；短期记忆保留最近 N 轮，超出后用 LLM 摘要压缩；长期记忆存用户偏好和跨会话事实；真正稳定的业务知识放在 RAG/编译知识/Obsidian 里。这样可以兼顾上下文连续性、token 成本和知识稳定性。
 ```
 
 可指代码：
@@ -237,8 +237,8 @@ BM25 解决精确词、专有名词、组件名、埋点名、制度编号这类
 
 可指代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
-- `backend/src/rag/karpathy/bm25.util.ts`
+- `backend/src/rag/rag.service.ts`
+- `backend/src/rag/indexing/bm25.util.ts`
 - `backend/src/providers/elasticsearch/elasticsearch.provider.ts`
 - `backend/src/tools/dashscope-rerank.service.ts`
 
@@ -318,7 +318,7 @@ RAG 面试经常会问：文档更新、删除、重建索引时怎么保证不�
 
 | 问题 | 当前做法 | 面试边界 |
 |---|---|---|
-| 文档新增 | 上传后解析 chunk，写 DB / Milvus / BM25 / ES / Karpathy / Obsidian | 本地链路完整，生产要加异步状态和补偿重试 |
+| 文档新增 | 上传后解析 chunk，写 DB / Milvus / BM25 / ES / 编译知识 / Obsidian | 本地链路完整，生产要加异步状态和补偿重试 |
 | 文档删除 | BM25 按 docId 重建用户索引，检索时按 userId / active 过滤 | 向量库和 ES 的删除一致性要靠任务状态校验 |
 | 重复入库 | Obsidian `content_hash + rag_doc_id` 复用，减少重复写入 | 真实生产还要做 chunk hash 和 embedding cache |
 | 官方文档更新 | 按 URL 内容 hash 判断新增 / 修改 | 当前是官方文档同步，业务文档还要接真实源系统 |
@@ -327,13 +327,13 @@ RAG 面试经常会问：文档更新、删除、重建索引时怎么保证不�
 面试回答：
 
 ```text
-我把文档状态和索引状态分开看。文档进入系统后先落库，再解析 chunk，最后同步到 Milvus、BM25/ES、Karpathy/Obsidian。新增、删除和更新都要围绕 docId、userId、content_hash 做幂等控制。删除时不能只删 DB，还要清理关键词索引、向量索引和缓存；如果某个索引失败，文档任务状态要标出来，后续补偿重试。当前项目已有 BM25 快照、content_hash 去重和异步队列基础，生产上还要补完整索引状态机和失败重放。
+我把文档状态和索引状态分开看。文档进入系统后先落库，再解析 chunk，最后同步到 Milvus、BM25/ES、编译知识/Obsidian。新增、删除和更新都要围绕 docId、userId、content_hash 做幂等控制。删除时不能只删 DB，还要清理关键词索引、向量索引和缓存；如果某个索引失败，文档任务状态要标出来，后续补偿重试。当前项目已有 BM25 快照、content_hash 去重和异步队列基础，生产上还要补完整索引状态机和失败重放。
 ```
 
 可指代码：
 
 - `backend/src/modules/document/document.service.ts`
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/modules/obsidian/obsidian-knowledge.service.ts`
 - `backend/src/modules/official-docs-sync/official-docs-sync.service.ts`
 
@@ -350,7 +350,7 @@ RAG 面试经常会问：文档更新、删除、重建索引时怎么保证不�
 可指代码：
 
 - `backend/src/modules/document/document-permission.service.ts`
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/modules/chat/conversation.service.ts`
 
 不要硬说：
@@ -404,7 +404,7 @@ RAG 里的噪声我会分两类：一类是检索噪声，靠 hybrid search、re
 
 可指代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/scripts/eval-rag-project.mjs`
 - `backend/src/modules/obsidian/obsidian-knowledge.service.ts`
 
@@ -579,7 +579,7 @@ GraphRAG 更新分三步：先定义 schema，包括实体类型、关系类型�
 ### Q1：你的记忆系统怎么设计？
 
 ```text
-我把记忆分成四层：第一层是全量对话落库，保证历史可追溯；第二层是 Redis 会话缓存，提升最近会话读取速度；第三层是短期记忆，用 Redis ZSET 保存最近 N 轮，更早历史用 LLM 压缩成摘要；第四层是长期记忆和长期知识，用户偏好进 Mem0，稳定业务知识进 RAG/Karpathy/Obsidian。这样不会把所有历史都塞进 prompt，可以兼顾连续对话、token 成本和知识稳定性。
+我把记忆分成四层：第一层是全量对话落库，保证历史可追溯；第二层是 Redis 会话缓存，提升最近会话读取速度；第三层是短期记忆，用 Redis ZSET 保存最近 N 轮，更早历史用 LLM 压缩成摘要；第四层是长期记忆和长期知识，用户偏好进 Mem0，稳定业务知识进 RAG/编译知识/Obsidian。这样不会把所有历史都塞进 prompt，可以兼顾连续对话、token 成本和知识稳定性。
 ```
 
 ### Q2：缓存怎么做？怎么避免缓存脏数据？
@@ -627,7 +627,7 @@ RRF 是 Reciprocal Rank Fusion，它不直接比较 BM25 分数和向量相似�
 ### Q9：文档更新后怎么保证索引一致？
 
 ```text
-我会围绕 docId、userId、content_hash 做幂等。文档先落库，再解析 chunk，之后同步 Milvus、BM25/ES、Karpathy/Obsidian。新增、更新、删除都要更新索引状态；删除不能只删 DB，还要清理关键词索引、向量索引和缓存。当前项目已有 BM25 快照、content_hash 去重和异步队列基础，生产上还要补完整索引状态机、失败补偿和重放机制。
+我会围绕 docId、userId、content_hash 做幂等。文档先落库，再解析 chunk，之后同步 Milvus、BM25/ES、编译知识/Obsidian。新增、更新、删除都要更新索引状态；删除不能只删 DB，还要清理关键词索引、向量索引和缓存。当前项目已有 BM25 快照、content_hash 去重和异步队列基础，生产上还要补完整索引状态机、失败补偿和重放机制。
 ```
 
 ### Q10：权限过滤怎么做？
@@ -760,7 +760,7 @@ Long memory:
 
 当前项目状态：
 
-- 已有：DB 会话、Redis 会话缓存、短期记忆摘要、Mem0 provider、Obsidian/Karpathy。
+- 已有：DB 会话、Redis 会话缓存、短期记忆摘要、Mem0 provider、Obsidian/编译知识。
 - 未完整：记忆衰退、记忆冲突消解、用户可编辑记忆审核流。
 
 ### 方案 2：缓存系统落地方案
@@ -1172,14 +1172,14 @@ GraphRAG 我不会拿来替代向量检索，而是补关系。向量检索负�
 ### 1. 你的 RAG 项目怎么做的？
 
 ```text
-我这个项目不是单纯向量库问答，主链路是：文档／URL／Obsidian／官方文档进入系统后做解析、结构化切片和 metadata（元数据）标注，再按适用性写入 Milvus、BM25／Elasticsearch、Neo4j 和 Obsidian 编译知识。查询时，Simple 与 Auto 先过 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG；Auto 根据证据充分性和复杂度升级 LangGraph Agentic RAG。检索阶段用 Milvus 做语义召回，BM25／Elasticsearch 做关键词召回，RRF（倒数排名融合）后可选 Rerank（重排），最后做引用校验和低相关拒答。Karpathy 本地知识只用于受治理直答和降级。
+我这个项目不是单纯向量库问答，主链路是：文档／URL／Obsidian／官方文档进入系统后做解析、结构化切片和 metadata（元数据）标注，再按适用性写入 Milvus、BM25／Elasticsearch、Neo4j 和 Obsidian 编译知识。查询时，Simple 与 Auto 先过 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG；Auto 根据证据充分性和复杂度升级 LangGraph Agentic RAG。检索阶段用 Milvus 做语义召回，BM25／Elasticsearch 做关键词召回，RRF（倒数排名融合）后可选 Rerank（重排），最后做引用校验和低相关拒答。本地编译知识只用于受治理直答和降级。
 
 业务上我把它收敛到游戏活动和官网营销场景，不沉淀每次变化的具体奖励规则，而是沉淀活动类型、营销玩法、页面模块、接口模式、埋点规范、地区适配和上线验收清单。
 ```
 
 可指代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/rag/agentic/agentic-rag.service.ts`
 - `backend/src/modules/obsidian/obsidian-knowledge.service.ts`
 
@@ -1243,7 +1243,7 @@ Function Calling 解决的是模型用什么格式表达“我要调用工具”
 ### 6. Memory 怎么设计？
 
 ```text
-我分了几层：全量对话消息落库保证可追溯；Redis 缓存最近会话，减少查库；短期记忆用 Redis ZSET 保存最近 N 轮，超出窗口后用 LLM 摘要压缩；长期记忆用 Mem0 provider 存用户偏好和跨会话事实；Obsidian/Karpathy 更像知识编译层，沉淀文章、官方文档、项目决策和业务模板。
+我分了几层：全量对话消息落库保证可追溯；Redis 缓存最近会话，减少查库；短期记忆用 Redis ZSET 保存最近 N 轮，超出窗口后用 LLM 摘要压缩；长期记忆用 Mem0 provider 存用户偏好和跨会话事实；Obsidian/编译知识 更像知识编译层，沉淀文章、官方文档、项目决策和业务模板。
 
 边界是：当前有分层、缓存和摘要压缩，但还没做很完整的记忆衰退、合规留存、冲突消解和租户级记忆策略。
 ```
@@ -1280,7 +1280,7 @@ Token 节省上，先通过 simple/auto/agentic 路由避免所有问题都走�
 
 可指代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/rag/agentic/agentic-rag.service.ts`
 - `backend/src/tools/dashscope-rerank.service.ts`
 - `backend/src/tools/tool-registry.ts`
@@ -1382,7 +1382,7 @@ Agentic RAG、Hybrid Search、Milvus、Elasticsearch/BM25、RRF、Rerank、Graph
 | 游戏营销证据说明 | `docs/interview/resume/game-marketing-rag-evidence.md` |
 | JD 与项目代码对照 | `docs/interview/jd/jd-requirements-project-mapping.md` |
 | JD 差距状态 | `docs/interview/jd/jd-gap-implementation-status.md` |
-| 精确直答与统一 Hybrid RAG 主链路（保留 Karpathy 文件名兼容） | `backend/src/rag/karpathy/karpathy-rag.service.ts` |
+| 精确直答与统一 Hybrid RAG 主链路（保留 编译知识 文件名兼容） | `backend/src/rag/rag.service.ts` |
 | Agentic RAG 状态机 | `backend/src/rag/agentic/agentic-rag.service.ts` |
 | 多 Agent Supervisor | `backend/src/modules/supervisor/supervisor.service.ts` |
 | 子 Agent 管线 | `backend/src/rag/agents/agent-pipeline.service.ts` |
@@ -1394,5 +1394,5 @@ Agentic RAG、Hybrid Search、Milvus、Elasticsearch/BM25、RRF、Rerank、Graph
 | 游戏营销评测集 | `backend/eval/game-marketing-regression.dataset.json` |
 | 对话缓存 | `backend/src/modules/chat/conversation.service.ts` |
 | 短期记忆摘要压缩 | `backend/src/modules/memory/short-term-memory.service.ts` |
-| BM25 中文分词 | `backend/src/rag/karpathy/bm25.util.ts` |
+| BM25 中文分词 | `backend/src/rag/indexing/bm25.util.ts` |
 | 指标与 token 估算 | `backend/src/modules/metrics/metrics.service.ts` |

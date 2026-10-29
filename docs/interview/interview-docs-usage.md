@@ -404,7 +404,7 @@ https://www.processon.com/view/link/6a66ce9ad35afd24c9ee7c62
 
 你的项目回答：
 - 支持 PDF / DOCX / Markdown / URL / HTML / Obsidian 笔记等多来源入库。
-- 入库后并发构建关键词、向量及 Obsidian 编译知识等索引；Karpathy 本地知识只作为受治理直答与降级资产，不单独形成在线路由。
+- 入库后并发构建关键词、向量及 Obsidian 编译知识等索引；本地编译知识只作为受治理直答与降级资产，不单独形成在线路由。
 - Chunk 不只按长度切，还保留标题、来源、元数据、引用信息。
 - 多租户 userId 隔离，权限相关问题不能跨用户召回。
 ```

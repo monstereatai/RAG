@@ -6,7 +6,7 @@ import {
 } from '../../providers/observability/langfuse.provider';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
-import type { RetrievalProfile } from '../../rag/karpathy/context-builder';
+import type { RetrievalProfile } from '../../rag/retrieval/context-builder';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import type { ChatMode } from './chat.dto';
 
@@ -173,7 +173,7 @@ export class ChatRunObservabilityService {
       promptVersions: {
         roleContext: 'role-presets/v1',
         memory: 'short-term-memory/v1',
-        answer: input.mode === 'simple' ? 'karpathy/v1' : 'agentic/v1',
+        answer: input.mode === 'simple' ? 'linear_rag/v1' : 'agentic/v1',
       },
       historyCount: input.historyCount,
       memoryEnabled: input.memoryEnabled,

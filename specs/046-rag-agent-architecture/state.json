@@ -1,0 +1,469 @@
+{
+  "schema_version": 2,
+  "change_id": "046-rag-agent-architecture",
+  "mode": "standard",
+  "status": "verifying",
+  "current_task": null,
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/046-rag-agent-architecture/spec.md",
+    "plan": "specs/046-rag-agent-architecture/plan.md",
+    "tasks": "specs/046-rag-agent-architecture/tasks.md",
+    "verify": "specs/046-rag-agent-architecture/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "plan"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-10-29T09:13:00Z",
+      "approver": "主人",
+      "evidence": "用户请求：根据这个来重构。该请求将附件任务书指定为本次重构依据。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-10-29T09:43:01Z",
+      "approver": "monstereat",
+      "evidence": "用户明确回复：不用写plan直接修改；批准执行所有计划。覆盖现有 P0-P6 路线图，后续按源码事实直接实施，红线保留。",
+      "review_report": "specs/046-rag-agent-architecture/plan-review.md"
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "P0 基线、调用链、模块盘点与兼容契约文档可复核"
+    },
+    "AC-02": {
+      "description": "Agentic 通过显式共享 Evidence Policy 使用排序、充分性和证据优先摘要"
+    },
+    "AC-03": {
+      "description": "线性 RAG 兼容入口及 API/SSE/ACL/引用行为保持兼容"
+    },
+    "AC-04": {
+      "description": "计划范围内的定向测试、构建和 Diff 验证有可追溯证据"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "docs/README.md",
+        "docs/refactor/**",
+        "ROADMAP.md",
+        "specs/046-rag-agent-architecture/**"
+      ],
+      "commands": [
+        "git diff --check -- docs/README.md"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T001-doc-diff",
+        "P0-source-audit"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/046-rag-agent-architecture/scope-baseline-T001.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/046-rag-agent-architecture/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/046-rag-agent-architecture/scope-report-T001.json",
+        "sha256": "95eefc7ef364e4e1b1e59c85a93ce4498c8a010bf14c5489c88176d05841c260"
+      }
+    },
+    "T002": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-03",
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "backend/src/rag/evidence/retrieval.types.ts",
+        "backend/src/rag/evidence/answer-quality.service.ts",
+        "backend/src/rag/evidence/deterministic-answer-builder.ts",
+        "backend/src/rag/evidence/evidence-policy.service.ts",
+        "backend/src/rag/evidence/evidence-policy.service.spec.ts",
+        "backend/src/rag/evidence/evidence.module.ts",
+        "backend/src/rag/evidence/evidence-bundle.ts",
+        "backend/src/rag/rag.module.ts",
+        "backend/src/rag/rag.service.ts",
+        "backend/src/rag/rag.service.spec.ts",
+        "backend/src/rag/agentic/agentic-rag.module.ts",
+        "backend/src/rag/agentic/agentic-rag.service.ts",
+        "backend/src/rag/agentic/agentic-rag.service.spec.ts",
+        "specs/046-rag-agent-architecture/**",
+        "backend/src/rag/contracts/rag-capabilities.ts",
+        "backend/src/rag/indexing/**",
+        "backend/src/rag/retrieval/**"
+      ],
+      "commands": [
+        "pnpm --dir backend exec jest --runInBand <13 related RAG suites>",
+        "pnpm --dir backend run build"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T002-related-tests",
+        "T002-backend-build"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/046-rag-agent-architecture/scope-baseline-T002.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/046-rag-agent-architecture/**",
+          "backend/src/modules/document/**",
+          "backend/src/modules/chat/**",
+          "backend/src/rag/contracts/**",
+          "backend/src/modules/agent-*/**",
+          "backend/src/modules/workflow/**"
+        ]
+      }
+    },
+    "T003": {
+      "depends_on": [
+        "T002"
+      ],
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "specs/046-rag-agent-architecture/**"
+      ],
+      "commands": [
+        "pnpm --dir backend exec eslint src/rag/evidence/retrieval.types.ts src/rag/evidence/answer-quality.service.ts src/rag/evidence/deterministic-answer-builder.ts src/rag/evidence/evidence-policy.service.ts src/rag/evidence/evidence-policy.service.spec.ts src/rag/evidence/evidence.module.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T003-evidence-lint"
+      ]
+    },
+    "T004": {
+      "depends_on": [
+        "T003"
+      ],
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "specs/046-rag-agent-architecture/**"
+      ],
+      "commands": [
+        "node specs/046-rag-agent-architecture/compare-eslint-baseline.mjs"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T004-lint-delta"
+      ]
+    },
+    "T005": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-04"
+      ],
+      "allowed_paths": [
+        "specs/046-rag-agent-architecture/**"
+      ],
+      "commands": [
+        "python3 -c 'from pathlib import Path; files=[*Path(\"docs/refactor\").glob(\"*.md\"),Path(\"docs/README.md\")]; errors=[f\"{p}:{i}\" for p in files for i,line in enumerate(p.read_text(encoding=\"utf-8\").splitlines(),1) if line.rstrip(\" \\\\t\") != line]; print(\"\\\\n\".join(errors)); raise SystemExit(bool(errors))'"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T005-docs-format"
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "T001-doc-diff",
+      "type": "command",
+      "kind": "docs",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "command": "git diff --check -- docs/README.md",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T09:46:54Z",
+      "duration_ms": 51,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/046-rag-agent-architecture/evidence/T001-doc-diff.stdout.log",
+      "stderr_log": "specs/046-rag-agent-architecture/evidence/T001-doc-diff.stderr.log",
+      "git": {
+        "head": "fb7d5dd9b8150667e563ea7017afb6a17c975d9b",
+        "changed_files": [
+          ".obsidian/community-plugins.json",
+          ".obsidian/workspace.json",
+          "ROADMAP.md",
+          "docs/README.md",
+          "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"",
+          "workspace/bm25-index.json"
+        ],
+        "diff_sha256": "c2f16321b6e58cd815a2e544f4d1c34c2285007c73235851a4b067a82d53b1b0"
+      }
+    },
+    {
+      "id": "P0-source-audit",
+      "type": "observation",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-04"
+      ],
+      "observer": "Codex + three audit agents",
+      "evidence": "已对照当前 HEAD、原工作区和三 Agent 源码审计；docs/refactor 记录基线；64 个契约文件哈希已保存。",
+      "result": "pass",
+      "at": "2026-10-29T09:47:08Z"
+    },
+    {
+      "id": "T002-related-tests",
+      "type": "command",
+      "kind": "test",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-03",
+        "AC-04"
+      ],
+      "command": "pnpm --dir backend exec jest --runInBand <13 related suites>",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T12:39:00Z",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "docs/refactor/evidence/integration-tests.txt",
+      "stderr_log": "docs/refactor/evidence/integration-tests.txt"
+    },
+    {
+      "id": "T002-backend-build",
+      "type": "command",
+      "kind": "build",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-03",
+        "AC-04"
+      ],
+      "command": "pnpm --dir backend run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T12:39:00Z",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "docs/refactor/evidence/backend-build.txt",
+      "stderr_log": "docs/refactor/evidence/backend-build.txt"
+    },
+    {
+      "id": "T003-evidence-lint",
+      "type": "command",
+      "kind": "lint",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "command": "pnpm --dir backend exec eslint <new evidence files>",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T12:39:00Z",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "docs/refactor/evidence/t003-evidence-lint.txt",
+      "stderr_log": "docs/refactor/evidence/t003-evidence-lint.txt"
+    },
+    {
+      "id": "T004-lint-delta",
+      "type": "command",
+      "kind": "lint",
+      "task": "T004",
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "command": "node specs/046-rag-agent-architecture/compare-eslint-baseline.mjs",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T12:39:00Z",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "docs/refactor/evidence/p1-lint-delta.txt",
+      "stderr_log": "docs/refactor/evidence/p1-lint-delta.txt"
+    },
+    {
+      "id": "T005-docs-format",
+      "type": "command",
+      "kind": "docs",
+      "task": "T005",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-04"
+      ],
+      "command": "python3 -c <docs trailing-whitespace check>",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-10-29T12:39:00Z",
+      "duration_ms": 0,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "docs/refactor/evidence/t005-docs-format.txt",
+      "stderr_log": "docs/refactor/evidence/t005-docs-format.txt"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-29T09:12:48Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "基于用户指定的任务书与只读预检，锁定 P0 基线审计和 P1a Evidence Policy 边界。"
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-10-29T09:13:00Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户请求：根据这个来重构。该请求将附件任务书指定为本次重构依据。"
+    },
+    {
+      "at": "2026-10-29T09:13:23Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "P0/P1a 文件范围和命令已从当前代码与只读审计中细化，等待独立计划审查与用户批准。"
+    },
+    {
+      "at": "2026-10-29T09:13:30Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-10-29T09:13:30Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T002."
+    },
+    {
+      "at": "2026-10-29T09:16:31Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T003."
+    },
+    {
+      "at": "2026-10-29T09:20:28Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T004."
+    },
+    {
+      "at": "2026-10-29T09:20:28Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T005."
+    },
+    {
+      "at": "2026-10-29T09:43:01Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by monstereat: 用户明确回复：不用写plan直接修改；批准执行所有计划。覆盖现有 P0-P6 路线图，后续按源码事实直接实施，红线保留。"
+    },
+    {
+      "at": "2026-10-29T09:43:01Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    },
+    {
+      "at": "2026-10-29T09:46:54Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-doc-diff: pass (git diff --check -- docs/README.md)"
+    },
+    {
+      "at": "2026-10-29T09:47:08Z",
+      "action": "record_observation",
+      "status": "executing",
+      "note": "P0-source-audit: pass by Codex + three audit agents"
+    },
+    {
+      "at": "2026-10-29T09:47:08Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T001 with T001-doc-diff, P0-source-audit."
+    },
+    {
+      "at": "2026-10-29T09:47:08Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T002."
+    },
+    {
+      "at": "2026-10-29T12:39:00Z",
+      "action": "complete_task",
+      "status": "verifying",
+      "note": "Completed T002 with related 13-suite regression and backend build."
+    },
+    {
+      "at": "2026-10-29T12:39:00Z",
+      "action": "complete_task",
+      "status": "verifying",
+      "note": "Completed T003 with Evidence file lint pass."
+    },
+    {
+      "at": "2026-10-29T12:39:00Z",
+      "action": "complete_task",
+      "status": "verifying",
+      "note": "Completed T004 with no introduced ESLint diagnostics."
+    },
+    {
+      "at": "2026-10-29T12:39:00Z",
+      "action": "complete_task",
+      "status": "verifying",
+      "note": "Completed T005 with docs format check pass."
+    },
+    {
+      "at": "2026-10-29T12:39:00Z",
+      "action": "set_status",
+      "status": "verifying",
+      "note": "All registered tasks complete; full Jest still has 7 unrelated failing suites and real-mode validation is blocked."
+    }
+  ],
+  "created_at": "2026-10-29T09:12:48Z",
+  "updated_at": "2026-10-29T13:10:00Z"
+}

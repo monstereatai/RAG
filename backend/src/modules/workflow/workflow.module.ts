@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { WorkflowController } from './workflow.controller';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { ProductionWorkflowService } from './production-workflow.service';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { ProductionWorkflowTools } from './production-workflow.tools';
 import { ObservabilityModule } from '../../providers/observability/observability.module';
@@ -20,7 +20,7 @@ import { ProductionWorkflowQueueService } from './production-workflow-queue.serv
 @Module({
   imports: [
     LlmModule,
-    KarpathyRagModule,
+    RagModule,
     ArtifactsModule,
     ObservabilityModule,
     AgentCollaborationModule,

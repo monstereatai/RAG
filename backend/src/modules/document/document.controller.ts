@@ -35,7 +35,7 @@ import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
 import { VisionProvider } from '../../providers/vision/vision.provider';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
-import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
+import { ObsidianIngestService } from './obsidian-ingest.service';
 import {
   DocumentLifecycleStatus,
   DocumentBusinessMetadata,
@@ -81,7 +81,7 @@ export class DocumentController {
     private readonly speechProvider: TencentSpeechProvider,
     private readonly visionProvider: VisionProvider,
     private readonly documentQueue: DocumentQueueService,
-    private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
+    private readonly obsidianIngest: ObsidianIngestService,
     private readonly objectStorageProvider: ObjectStorageProvider,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
@@ -127,7 +127,7 @@ export class DocumentController {
     this.logger.log(
       `Received ${file.originalname}, user=${user.username}, ${content.length} chars`,
     );
-    const result = await this.karpathyObsidianIngest.ingestText({
+    const result = await this.obsidianIngest.ingestText({
       title: file.originalname,
       content,
       userId: user.userId,
@@ -238,7 +238,7 @@ export class DocumentController {
     this.logger.log(
       `Received url ${url}, user=${user.username}, ${content.length} chars`,
     );
-    const result = await this.karpathyObsidianIngest.ingestUrl({
+    const result = await this.obsidianIngest.ingestUrl({
       url,
       extracted,
       userId: user.userId,
@@ -264,7 +264,7 @@ export class DocumentController {
     }
 
     const filename = `${normalizedTitle.replace(/[\\/:*?"<>|#\[\]\n\r\t]+/g, ' ').trim() || 'manual-note'}.md`;
-    const result = await this.karpathyObsidianIngest.ingestText({
+    const result = await this.obsidianIngest.ingestText({
       title: normalizedTitle,
       content: normalizedContent,
       userId: user.userId,
@@ -319,7 +319,7 @@ export class DocumentController {
       );
       throw new BadRequestException('document text is empty');
     }
-    const result = await this.karpathyObsidianIngest.ingestText({
+    const result = await this.obsidianIngest.ingestText({
       title: file.originalname,
       content,
       userId,

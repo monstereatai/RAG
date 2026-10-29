@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { RetrievedChunk } from '../rag/karpathy/karpathy-rag.service';
+import type { RetrievedChunk } from '../rag/evidence/retrieval.types';
 
 interface RerankResultItem {
   index?: unknown;

@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { DashScopeRerankService } from './dashscope-rerank.service';
-import type { RetrievedChunk } from '../rag/karpathy/karpathy-rag.service';
+import type { RetrievedChunk } from '../rag/evidence/retrieval.types';
 
 describe('DashScopeRerankService', () => {
   const originalFetch = global.fetch;

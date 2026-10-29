@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,7 +16,10 @@ import { DocumentService } from '../document/document.service';
 import { DocumentPermissionService } from '../document/document-permission.service';
 import { GraphService } from '../graph/graph.service';
 import { ConversationService } from '../chat/conversation.service';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import {
+  RAG_ADMIN_CAPABILITY,
+  type RagAdminCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { QueryLogService } from './query-log.service';
@@ -27,7 +31,7 @@ import { DocumentPermissionEntity } from '../../providers/db/entities/document-p
 import { randomUUID } from 'node:crypto';
 import { RagDocumentQueryDto, RagEvaluationRunDto } from './dto/rag-admin.dto';
 import { ObsidianKnowledgeService } from '../obsidian/obsidian-knowledge.service';
-import { KarpathyObsidianIngestService } from '../document/karpathy-obsidian-ingest.service';
+import { ObsidianIngestService } from '../document/obsidian-ingest.service';
 import {
   DocumentChangeType,
   DocumentLifecycleStatus,
@@ -179,10 +183,11 @@ export class RagAdminService implements OnModuleInit {
     private readonly documentService: DocumentService,
     private readonly documentPermissionService: DocumentPermissionService,
     private readonly documentQueue: DocumentQueueService,
-    private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
+    private readonly obsidianIngest: ObsidianIngestService,
     private readonly graphService: GraphService,
     private readonly conversationService: ConversationService,
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_ADMIN_CAPABILITY)
+    private readonly ragService: RagAdminCapability,
     private readonly elasticsearchProvider: ElasticsearchProvider,
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly queryLogService: QueryLogService,
@@ -882,7 +887,7 @@ export class RagAdminService implements OnModuleInit {
     limit = 50,
   ) {
     if (!query?.trim()) throw new BadRequestException('query is required');
-    const result = await this.karpathyRagService.retrieveDetailed(
+    const result = await this.ragService.retrieveDetailed(
       query.trim(),
       { tenantId, roles: ['admin'], trustedAdminPrincipal: true },
       userId,
@@ -1364,7 +1369,7 @@ export class RagAdminService implements OnModuleInit {
     const roleScope = previous.roleScope
       ? (JSON.parse(previous.roleScope) as string[])
       : [];
-    const result = await this.karpathyObsidianIngest.ingestText({
+    const result = await this.obsidianIngest.ingestText({
       title: body.filename?.trim() || previous.filename,
       content,
       userId: previous.userId,
@@ -1426,7 +1431,7 @@ export class RagAdminService implements OnModuleInit {
     } catch {
       roleScope = [];
     }
-    const result = await this.karpathyObsidianIngest.ingestText({
+    const result = await this.obsidianIngest.ingestText({
       title: body.filename?.trim() || previous.filename,
       content,
       userId: previous.userId,
@@ -1668,7 +1673,7 @@ export class RagAdminService implements OnModuleInit {
         const expectedGenerations = [
           ...(dbGenerations.get(doc.docId) ?? new Set()),
         ];
-        const bm25 = this.karpathyRagService.getIndexedChunkCount(
+        const bm25 = this.ragService.getIndexedChunkCount(
           doc.docId,
           doc.userId ?? undefined,
         );
@@ -1677,8 +1682,8 @@ export class RagAdminService implements OnModuleInit {
           doc.userId ?? undefined,
         );
         const bm25Hashes =
-          typeof this.karpathyRagService.getIndexedChunkHashes === 'function'
-            ? this.karpathyRagService.getIndexedChunkHashes(
+          typeof this.ragService.getIndexedChunkHashes === 'function'
+            ? this.ragService.getIndexedChunkHashes(
                 doc.docId,
                 doc.userId ?? undefined,
               )
@@ -2377,8 +2382,8 @@ export class RagAdminService implements OnModuleInit {
         roleScope: parseArray(chunk.roleScope),
         hypotheticalQuestions: parseArray(chunk.hypotheticalQuestions),
       }));
-      this.karpathyRagService.removeDocChunks(docId, userId);
-      this.karpathyRagService.indexChunks(indexedChunks, userId);
+      this.ragService.removeDocChunks(docId, userId);
+      this.ragService.indexChunks(indexedChunks, userId);
 
       if (this.elasticsearchProvider.isEnabled()) {
         await this.elasticsearchProvider.deleteByDocId(docId, userId);
@@ -2597,7 +2602,7 @@ export class RagAdminService implements OnModuleInit {
   async getVectorIndex(): Promise<VectorIndexResponse> {
     const indexInfo = this.vectorStoreProvider.getIndexInfo();
     const runtimeStatus = this.vectorStoreProvider.getRuntimeStatus();
-    const bm25Stats = this.karpathyRagService.getStats();
+    const bm25Stats = this.ragService.getStats();
     const dbChunkCount = await this.chunkRepo.count();
 
     return {

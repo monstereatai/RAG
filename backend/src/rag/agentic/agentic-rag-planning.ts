@@ -1,4 +1,4 @@
-import type { RetrieveOptions } from '../karpathy/karpathy-rag.service';
+import type { RetrieveOptions } from '../contracts/rag-types';
 import type { QueryPlan } from '../planning/query-plan';
 import type { AgenticRagStateType, AgenticSubQuestion } from './agentic-rag.state';
 
@@ -68,6 +68,7 @@ export function hasExplicitRetrievalScope(
   scope: RetrieveOptions['scope'],
 ): boolean {
   if (!scope) return false;
+  if (scope.effectiveTime) return true;
   return [
     scope.projectId,
     scope.activityId,
@@ -84,6 +85,7 @@ export function hasExplicitScopeFilter(
   scope: RetrieveOptions['scope'],
 ): boolean {
   if (!scope) return false;
+  if (scope.effectiveTime) return true;
   return [
     scope.projectId,
     scope.activityId,

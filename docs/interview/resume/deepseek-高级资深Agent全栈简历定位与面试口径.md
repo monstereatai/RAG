@@ -22,7 +22,7 @@
 ### 2 分钟版（展开口径）
 
 - 技术栈：NestJS + LangChain/LangGraph + Milvus/pgvector + PostgreSQL + Elasticsearch + Redis + Neo4j + BullMQ + Mem0，前端 React/Vite，管理后台 React + Ant Design。
-- 三条问答路径：`simple`（Karpathy 式低延迟）/ `agentic`（LangGraph 多步规划 + 联网兜底 + Rerank + 反思）/ `auto`（按 sufficiency gate 路由）。
+- 三条问答路径：`simple`（编译知识 式低延迟）/ `agentic`（LangGraph 多步规划 + 联网兜底 + Rerank + 反思）/ `auto`（按 sufficiency gate 路由）。
 - 多租户：以 `userId` 在 PostgreSQL、Redis、Milvus、BM25、Neo4j 全链路物理/逻辑隔离。
 - 多 Agent：产研运六岗位（产品→设计→后端→前端→测试→运营）LangGraph FSM，结构化交付物、审批门禁、Redis Checkpointer 恢复、局部重跑。
 - 评测：项目级仿真实业务评测 28/28、成熟度门禁 93/100、Agent Evals、Bad Case 飞轮、LLM-as-Judge。
@@ -43,7 +43,7 @@
   - T：从 0 搭建支持多租户隔离的 RAG 问答平台，答得准、答得稳、引用能撑住。
   - A：结构感知切片（父子 Section + 完整 headingPath）、混合检索（BM25/Milvus/ES + RRF 融合）、Agentic 规划（查询扩展、sufficiency gate、联网兜底、Rerank、Reflection 重试）、引用校验 + 低相关拒答、userId 全链路隔离、上下文预算 + Lost-in-the-Middle 排布。
   - R：项目级评测 28/28、多租户硬隔离通过测试、真实 SSE 流式闭环。
-- **代码入口**：`backend/src/rag/karpathy/karpathy-rag.service.ts`、`context-builder.ts`、`bm25-store.ts`、`backend/src/rag/agentic/agentic-rag.service.ts`
+- **代码入口**：`backend/src/rag/rag.service.ts`、`context-builder.ts`、`bm25-store.ts`、`backend/src/rag/agentic/agentic-rag.service.ts`
 - **验证命令**：`cd backend && npm run eval:rag:project`
 - **可被追问的深度点**：chunk 策略选型（对比固定长度/递归/语义）、RRF vs 加权融合、sufficiency gate 怎么量化、Reflection 重试防死循环、Lost-in-the-Middle 的排布算法。
 

@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { KarpathyObsidianIngestService } from '../document/karpathy-obsidian-ingest.service';
+import { ObsidianIngestService } from '../document/obsidian-ingest.service';
 
 interface OfficialDocsSource {
   id: string;
@@ -81,7 +81,7 @@ export class OfficialDocsSyncService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly karpathyObsidianIngest: KarpathyObsidianIngestService,
+    private readonly obsidianIngest: ObsidianIngestService,
   ) {}
 
   onModuleInit(): void {
@@ -139,7 +139,7 @@ export class OfficialDocsSyncService implements OnModuleInit, OnModuleDestroy {
 
         const markdown = this.renderMarkdown(source, changedPages, syncedAt);
         const filename = `official-docs-${source.id}-${syncedAt.slice(0, 10)}.md`;
-        await this.karpathyObsidianIngest.ingestText({
+        await this.obsidianIngest.ingestText({
           title: `${source.title} Nightly Changes`,
           filename,
           content: markdown,

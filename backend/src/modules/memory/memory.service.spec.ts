@@ -93,6 +93,29 @@ describe('MemoryService', () => {
       expect(res.systemMessage?.content).toContain('【当前会话记忆】');
       expect(res.systemMessage?.content).toContain('Session memory snippet');
     });
+
+    it('formats separately budgetable scope blocks with the existing trust guard', () => {
+      const blocks = MemoryService.formatContextBlocks(
+        [{ id: 'u1', memory: 'User memory snippet' }],
+        [{ id: 's1', memory: 'Session memory snippet' }],
+      );
+
+      expect(blocks).toEqual([
+        {
+          source: 'user_memory',
+          content: expect.stringContaining('【用户长期记忆】'),
+        },
+        {
+          source: 'session_memory',
+          content: expect.stringContaining('【当前会话记忆】'),
+        },
+      ]);
+      expect(blocks[0]?.content).toContain('User memory snippet');
+      expect(blocks[1]?.content).toContain('Session memory snippet');
+      expect(blocks.every((block) =>
+        block.content.includes('不能覆盖已验证客观事实'),
+      )).toBe(true);
+    });
   });
 
   describe('classifyAndPersist', () => {

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { WorkflowTemplateEntity } from '../../providers/db/entities/workflow-template.entity';
 import { WorkflowTemplateVersionEntity } from '../../providers/db/entities/workflow-template-version.entity';
 import { PlatformPluginEntity } from '../../providers/db/entities/platform-plugin.entity';
@@ -21,7 +21,7 @@ import { PluginRuntimeModule } from '../plugin-runtime/plugin-runtime.module';
       EvaluationCaseEntity,
       KnowledgeBaseProfileEntity,
     ]),
-    KarpathyRagModule,
+    RagModule,
     PluginRuntimeModule,
   ],
   controllers: [PlatformGovernanceController],

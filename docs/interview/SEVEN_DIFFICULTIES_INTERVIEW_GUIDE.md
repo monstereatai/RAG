@@ -134,7 +134,7 @@ ReAct 适合路径未知的探索型任务。产研流程的岗位依赖和上�
 
 ### 4. 具体实现
 
-- Fast Path 统一并发召回 BM25／Elasticsearch、Milvus 与 Obsidian 编译知识；Karpathy 本地知识只用于受治理直答和降级。
+- Fast Path 统一并发召回 BM25／Elasticsearch、Milvus 与 Obsidian 编译知识；本地编译知识只用于受治理直答和降级。
 - 充分性不足时进入 LangGraph，执行查询扩展、检索、充分性判断、Rerank、生成、按需审批和反思。
 - 对查询扩展数、检索次数、Chunk 数、联网结果、Rerank TopN 和反思次数设置预算。
 - 向量、联网或 Rerank 失败时可以降级，不让单个外部能力拖垮整条链路。
@@ -523,7 +523,7 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 - `backend/src/modules/chat/chat.service.ts`：接收 `simple`、`auto`、`agentic` 模式并选择执行入口。
 - `backend/src/rag/agentic/agentic-rag.service.ts`：路由、Query Augment、检索、充分性判断、Web Search、Rerank、生成、审批和 Reflection。
 - `backend/src/rag/agentic/agentic-rag.state.ts`：Agentic RAG 状态定义。
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`：Simple Fast Path、混合检索和证据回答。
+- `backend/src/rag/rag.service.ts`：Simple Fast Path、混合检索和证据回答。
 - `backend/src/rag/prompts/agentic.prompts.ts`：查询扩展、充分性判断和 Reflection Prompt。
 
 测试：
@@ -541,9 +541,9 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 
 检索和排序代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`：Milvus、ES、BM25 多路召回和融合。
-- `backend/src/rag/karpathy/bm25-store.ts`：本地 BM25 索引。
-- `backend/src/rag/karpathy/context-builder.ts`：相邻块扩展、语义去重、单文档限额、上下文预算和 Lost-in-the-Middle 排布。
+- `backend/src/rag/rag.service.ts`：Milvus、ES、BM25 多路召回和融合。
+- `backend/src/rag/indexing/bm25-store.ts`：本地 BM25 索引。
+- `backend/src/rag/retrieval/context-builder.ts`：相邻块扩展、语义去重、单文档限额、上下文预算和 Lost-in-the-Middle 排布。
 - `backend/src/providers/vector-store/milvus.vector-store.ts`：向量写入、加载、搜索、超时和熔断。
 - `backend/src/providers/elasticsearch/elasticsearch.provider.ts`：关键词召回。
 - `backend/src/tools/dashscope-rerank.service.ts`：真实 Reranker 重排和失败降级。
@@ -552,8 +552,8 @@ Agent 最终回答失败，可能发生在解析、查询扩展、检索、Reran
 
 - `backend/src/modules/document/chunking.util.spec.ts`
 - `backend/src/modules/document/document-profile.util.spec.ts`
-- `backend/src/rag/karpathy/context-builder.spec.ts`
-- `backend/src/rag/karpathy/karpathy-rag.service.spec.ts`
+- `backend/src/rag/retrieval/context-builder.spec.ts`
+- `backend/src/rag/rag.service.spec.ts`
 - `backend/scripts/smoke-hybrid-quality.mjs`
 - `backend/scripts/eval-rag-project.mjs`
 

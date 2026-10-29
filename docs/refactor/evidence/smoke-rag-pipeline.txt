@@ -1,0 +1,77 @@
+
+[1] RAG_ES_KNN_MODE=fallback + Milvus 抛错 -> 向量候选来自 ES kNN
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+[33m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [33m   WARN[39m [38;5;3m[RagService] [39m[33mVector search failed, fallback to BM25 only: Milvus connection refused (stub)[39m
+  PASS  vectorSource=elasticsearch
+  PASS  knnSearch 被调用 1 次
+  PASS  knn 入参正确（dim=3, topK=profile.candidateDepth, userId）
+  PASS  结果包含 ES-kNN 专属候选 chunk-b 且 cosineScore>0 / retrievalSource=vector
+  PASS  结果包含关键词候选 chunk-a 且 bm25Score>0
+  PASS  缺 chunkMeta 的 chunk-ghost 被跳过
+  PASS  Milvus 抛错后 chunk-c 不出现
+  PASS  rerank 未生效时 rerankApplied=false
+  PASS  引用溯源：docId/docVersion/sourceAuthority/lifecycleStatus 齐全
+  PASS  引用溯源：score=totalScore 且未生效时不带 rerankScore
+[33m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [33m   WARN[39m [38;5;3m[RagService] [39m[33mVector search failed, fallback to BM25 only: Milvus connection refused (stub)[39m
+  PASS  /rag/search 响应含 vectorSource/rerankApplied
+  PASS  /rag/search results 内容与引用正常（docId/score/content）
+  PASS  /rag/search 未生效时不携带 rerankScore
+
+[2] RAG_ES_KNN_MODE=always + Milvus 健康 -> 两路向量按 id 去重合并
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  knnSearch 被并行调用 1 次
+  PASS  向量候选池去重后为 2（chunk-c + chunk-b）
+  PASS  chunk-c 只出现一次（按 id 去重）
+  PASS  chunk-b 与 chunk-c 均带 cosineScore>0
+  PASS  chunk-ghost 仍被跳过
+  PASS  vectorSource=milvus（主通道）
+
+[3] RAG_ES_KNN_MODE=off + Milvus 健康 -> 行为与旧版一致
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  knnSearch 未被调用
+  PASS  vectorSource=milvus
+  PASS  向量候选仅来自 Milvus（vectorCandidates=1）
+  PASS  chunk-c 命中、chunk-b 不出现
+
+[4] RAG_ES_KNN_MODE=fallback + Milvus 健康 -> 不浪费 knnSearch
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  knnSearch 未被调用（Milvus 正常）
+  PASS  vectorSource=milvus
+  PASS  结果含 chunk-c
+
+[5] rerank 生效 -> 顺序按重排分变化、挂 rerankScore、totalScore 保留融合分
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  rerankApplied=true
+  PASS  两个候选均保留，上下文编排允许再排序
+  PASS  chunk-a 挂上 rerankScore=0.9
+  PASS  chunk-c 挂上 rerankScore=0.1
+  PASS  totalScore 保留融合分（chunk-a≈0.3，未被重排分 0.9 覆盖）
+  PASS  rerank 收到前 TOP_N 候选（顺序=融合序，topN=20 默认）
+  PASS  /rag/search 响应 rerankApplied=true 且 results 携带 rerankScore
+
+[6] rerank 调用失败 -> 保持原序、不抛错
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+[33m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [33m   WARN[39m [38;5;3m[RagService] [39m[33mDashScope rerank failed, keep original order: DashScope rerank timeout (stub)[39m
+  PASS  rerank 失败不阻断检索（正常返回）
+  PASS  保持原序 [chunk-c, chunk-a]
+  PASS  rerankApplied=false 且不携带 rerankScore
+
+[7] RAG_RERANK_ENABLED=false -> 总开关关闭，不调用 rerank
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  rerank 未被调用
+  PASS  rerankApplied=false 且保持原序
+
+[8] RAG_RERANK_TOP_N=1（字符串 env 解析）-> 候选不足 2 条跳过重排
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mBM25 index saved: 2 total chunks[39m
+[32m[Nest] 10251  - [39m10/29/2026, 10:36:42 PM [32m    LOG[39m [38;5;3m[RagIndexService] [39m[32mIndexed 2 chunks into BM25 (total: 2)[39m
+  PASS  TOP_N=1 时不调用 rerank
+  PASS  rerankApplied=false
+
+=== smoke-rag-pipeline: 40 passed, 0 failed ===

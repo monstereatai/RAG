@@ -6,7 +6,7 @@ import { QueryLogService } from './query-log.service';
 import { DocumentModule } from '../document/document.module';
 import { GraphModule } from '../graph/graph.module';
 import { ChatModule } from '../chat/chat.module';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
 import { ObsidianKnowledgeModule } from '../obsidian/obsidian-knowledge.module';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
@@ -29,7 +29,7 @@ import { RagAdminModule } from '../rag-admin/rag-admin.module';
     RagAdminModule,
     GraphModule,
     ChatModule,
-    KarpathyRagModule,
+    RagModule,
     VectorStoreModule,
     ObsidianKnowledgeModule,
   ],

@@ -31,9 +31,26 @@ const baseExecutionPlan = {
 
 type Deps = Record<string, unknown>;
 
+function keepSystemContextCandidates(candidates: Array<{
+  source: string;
+  role: 'system';
+  content: string;
+  priority: number;
+  required?: boolean;
+}>) {
+  return {
+    messages: candidates,
+    budgetTokens: 2_048,
+    estimatedTokens: 0,
+    overflowTokens: 0,
+    retainedSources: [...new Set(candidates.map(({ source }) => source))],
+    droppedSources: [],
+  };
+}
+
 function createService(overrides: Deps = {}) {
   const deps: Deps = {
-    karpathy: {
+    rag: {
       answer: jest.fn().mockResolvedValue({
         answer: '回答',
         references: [],
@@ -63,6 +80,7 @@ function createService(overrides: Deps = {}) {
       indexConversation: jest.fn(),
     },
     memory: {
+      isEnabled: jest.fn().mockReturnValue(true),
       searchMemory: jest.fn().mockResolvedValue({
         userMemories: [],
         sessionMemories: [],
@@ -71,6 +89,7 @@ function createService(overrides: Deps = {}) {
       classifyAndPersist: jest.fn().mockResolvedValue(undefined),
     },
     shortTerm: {
+      getMessageSafetyCap: jest.fn().mockReturnValue(200),
       getContext: jest.fn().mockResolvedValue({
         systemMessage: null,
         recentTurns: [],
@@ -80,6 +99,7 @@ function createService(overrides: Deps = {}) {
       addTurns: jest.fn().mockResolvedValue(null),
       getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
       limitHistoryToTokenBudget: jest.fn((turns) => turns),
+      budgetSystemContext: jest.fn(keepSystemContextCandidates),
     },
     langfuse: {
       estimateTextTokens: () => 1,
@@ -101,7 +121,7 @@ function createService(overrides: Deps = {}) {
   };
   Object.assign(deps, overrides);
   return new ChatService(
-    deps.karpathy as never,
+    deps.rag as never,
     deps.agentic as never,
     deps.conversation as never,
     deps.embedding as never,
@@ -162,7 +182,7 @@ describe('ChatService', () => {
       }),
     );
     const service = createService({
-      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      rag: { answer, unsupportedReliableAnswer: () => '证据不足' },
       policy: { build },
     });
 
@@ -190,7 +210,7 @@ describe('ChatService', () => {
     });
   });
 
-  it('只规划一次，并让显式 Simple 保持在 Karpathy 线性引擎内', async () => {
+  it('只规划一次，并让显式 Simple 保持在 RAG 线性引擎内', async () => {
     const answer = jest
       .fn()
       .mockImplementation(
@@ -214,7 +234,7 @@ describe('ChatService', () => {
         },
       );
     const service = createService({
-      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      rag: { answer, unsupportedReliableAnswer: () => '证据不足' },
       agentic: { run: jest.fn() },
       planner: {
         plan: jest.fn().mockResolvedValue({
@@ -265,6 +285,69 @@ describe('ChatService', () => {
     );
   });
 
+  it('长会话先按规划预算取历史，再按最终检索档位收紧执行上下文', async () => {
+    const turns = Array.from({ length: 20 }, (_, index) => [
+      { role: 'human' as const, content: `用户问题${index}` },
+      { role: 'ai' as const, content: `助手回答${index}` },
+    ]).flat();
+    const limitHistoryToTokenBudget = jest.fn(
+      (history: typeof turns, budget: number) =>
+        history.slice(-Math.floor(budget / 8)),
+    );
+    const getAvailableHistoryTokenBudget = jest
+      .fn()
+      .mockReturnValueOnce(500)
+      .mockReturnValueOnce(32)
+      .mockReturnValue(32);
+    const answer = jest.fn().mockResolvedValue({
+      answer: '回答',
+      references: [],
+      retrievalSufficient: true,
+    });
+    const planner = jest.fn().mockResolvedValue(basePlan);
+    const service = createService({
+      rag: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      planner: { plan: planner },
+      shortTerm: {
+        getMessageSafetyCap: jest.fn().mockReturnValue(200),
+        getContext: jest.fn().mockResolvedValue({
+          systemMessage: null,
+          recentTurns: turns.map((turn) => ({
+            role: turn.role === 'ai' ? 'assistant' : 'user',
+            content: turn.content,
+          })),
+          truncatedHistory: false,
+        }),
+        addTurn: jest.fn().mockResolvedValue(undefined),
+        addTurns: jest.fn().mockResolvedValue(null),
+        getAvailableHistoryTokenBudget,
+        limitHistoryToTokenBudget,
+        budgetSystemContext: jest.fn(keepSystemContextCandidates),
+      },
+    });
+
+    await service.chat({ query: '继续刚才的任务', mode: 'simple' }, 'user-1');
+
+    expect(planner).toHaveBeenCalledTimes(1);
+    expect(planner).toHaveBeenCalledWith(
+      '继续刚才的任务',
+      turns,
+      expect.any(Object),
+    );
+    const executionHistory = answer.mock.calls[0]?.[1] as unknown;
+    expect(executionHistory).toEqual(turns.slice(-4));
+    expect(limitHistoryToTokenBudget).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      500,
+    );
+    expect(limitHistoryToTokenBudget).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Array),
+      32,
+    );
+  });
+
   it('优先使用 Redis 短期记忆窗口，避免重复注入 PostgreSQL 最近会话', async () => {
     const answer = jest.fn().mockResolvedValue({
       answer: '回答',
@@ -282,6 +365,7 @@ describe('ChatService', () => {
       addCompletedTurn: jest.fn().mockResolvedValue({ userMessageId: 'user-message-1', assistantMessageId: 'assistant-message-1' }),
     };
     const shortTermMemory = {
+      getMessageSafetyCap: jest.fn().mockReturnValue(200),
       getContext: jest.fn().mockResolvedValue({
         systemMessage: { content: '【历史摘要】早期决策' },
         recentTurns: [
@@ -294,9 +378,10 @@ describe('ChatService', () => {
       addTurns: jest.fn().mockResolvedValue(null),
       getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
       limitHistoryToTokenBudget: jest.fn((turns) => turns),
+      budgetSystemContext: jest.fn(keepSystemContextCandidates),
     };
     const service = createService({
-      karpathy: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      rag: { answer, unsupportedReliableAnswer: () => '证据不足' },
       conversation: conversationService,
       shortTerm: shortTermMemory,
       planner: {
@@ -331,6 +416,39 @@ describe('ChatService', () => {
       undefined,
       expect.any(Object),
     );
+  });
+
+  it('does not inject the context policy twice when Mem0 memories are present', async () => {
+    const answer = jest.fn().mockResolvedValue({
+      answer: '回答',
+      references: [],
+      retrievalSufficient: true,
+    });
+    const service = createService({
+      rag: { answer, unsupportedReliableAnswer: () => '证据不足' },
+      memory: {
+        isEnabled: jest.fn().mockReturnValue(true),
+        searchMemory: jest.fn().mockResolvedValue({
+          userMemories: [{ memory: '用户偏好简洁回答' }],
+          sessionMemories: [],
+          systemMessage: {
+            content:
+              '【上下文使用规则】历史对话只能作为语义线索。\n\n【用户长期记忆】\n- 用户偏好简洁回答',
+          },
+        }),
+      },
+    });
+
+    await service.chat({ query: '回答偏好是什么？', mode: 'simple' }, 'user-1');
+
+    const memoryMessages = answer.mock.calls[0]?.[3] as Array<{
+      content: string;
+    }>;
+    expect(
+      memoryMessages.filter((message) =>
+        message.content.includes('【上下文使用规则】'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('审批暂停只保存待恢复请求，不把草稿当作正式答案收口', async () => {
@@ -450,7 +568,7 @@ describe('ChatService', () => {
       },
     });
     const service = createService({
-      karpathy: { unsupportedReliableAnswer: () => '证据不足' },
+      rag: { unsupportedReliableAnswer: () => '证据不足' },
       agentic: { resumeGraph },
       conversation: {
         get: jest.fn().mockResolvedValue({

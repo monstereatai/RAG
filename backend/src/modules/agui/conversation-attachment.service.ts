@@ -14,7 +14,7 @@ import {
   extractDocumentText,
   type SupportedDocumentKind,
 } from '../document/document-parser.util';
-import type { RetrievedChunk } from '../../rag/karpathy/karpathy-rag.service';
+import type { RetrievedChunk } from '../../rag/evidence/retrieval.types';
 import { MetricsService } from '../metrics/metrics.service';
 import type { QueryContextMode } from '../../rag/planning/query-plan';
 import type { PlannedRetrievalQuery } from '../../rag/planning/retrieval-policy.service';

@@ -2,18 +2,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
-  OnModuleDestroy,
   Optional,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
-import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
-import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { MarkdownChunker } from './chunking.util';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
@@ -30,6 +23,7 @@ import { GraphService } from '../graph/graph.service';
 import { DocumentQueueService } from './document-queue.service';
 import { DocumentTaskService } from './document-task.service';
 import { DocumentImageIngestionService } from './document-image-ingestion.service';
+import { DocumentIndexCoordinator } from './document-index-coordinator.service';
 import { DocumentRetrievalDescriptionService } from './document-retrieval-description.service';
 import {
   detectDocumentKind,
@@ -48,7 +42,6 @@ import {
   getChunkStrategy,
   IngestionQualityReport,
 } from './document-profile.util';
-import { RedisProvider } from '../../providers/redis/redis.provider';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import type { DomainEventInput } from '../domain-events/domain-events.service';
 
@@ -165,22 +158,10 @@ type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
  * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
  */
 @Injectable()
-export class DocumentService implements OnModuleInit, OnModuleDestroy {
+export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
-  private readonly pendingMilvusDeletes = new Map<string, number>();
-  private milvusCompensationRestore: Promise<void> | null = null;
-  private milvusCompensationLastScanAt = 0;
-  private milvusCompensationScanTimer?: ReturnType<typeof setInterval>;
-  private readonly milvusDeleteRetryTimers = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
   private readonly pendingGraphIndexes = new Map<string, Promise<void>>();
   private readonly cancelledGraphIndexes = new Set<string>();
-  private readonly milvusCompensationKeyPrefix =
-    'rag:index:milvus:delete:pending:v2:';
-  private readonly legacyMilvusCompensationKey =
-    'rag:index:milvus:delete:pending:v1';
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -191,41 +172,20 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     private readonly factConflictRepo: Repository<FactConflictEntity>,
     @InjectRepository(DocumentResourceEntity)
     private readonly resourceRepo: Repository<DocumentResourceEntity>,
-    private readonly embeddingProvider: EmbeddingProvider,
-    private readonly vectorStoreProvider: VectorStoreProvider,
-    private readonly karpathyRagService: KarpathyRagService,
-    private readonly elasticsearchProvider: ElasticsearchProvider,
     private readonly metadataExtractor: DocumentMetadataExtractor,
     private readonly objectStorageProvider: ObjectStorageProvider,
     private readonly permissionService: DocumentPermissionService,
     private readonly graphService: GraphService,
     private readonly documentQueueService: DocumentQueueService,
     private readonly documentTaskService: DocumentTaskService,
+    private readonly documentIndexCoordinator: DocumentIndexCoordinator,
     private readonly domainEvents: DomainEventsService,
     private readonly retrievalDescriptionService: DocumentRetrievalDescriptionService,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly documentImageIngestionService: DocumentImageIngestionService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
-    @Optional() private readonly redisProvider?: RedisProvider,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.ensureMilvusDeleteCompensationsRestored();
-    this.milvusCompensationScanTimer = setInterval(() => {
-      void this.ensureMilvusDeleteCompensationsRestored();
-    }, 30_000);
-    this.milvusCompensationScanTimer.unref?.();
-  }
-
-  onModuleDestroy(): void {
-    if (this.milvusCompensationScanTimer) {
-      clearInterval(this.milvusCompensationScanTimer);
-    }
-    for (const timer of this.milvusDeleteRetryTimers.values()) {
-      clearTimeout(timer);
-    }
-  }
 
   /**
    * 接收解析后的正文并创建可审计的异步入库任务。
@@ -497,7 +457,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       });
       let vectors: number[][];
       try {
-        vectors = await this.embeddingProvider.embedDocuments(chunks);
+        vectors = await this.documentIndexCoordinator.embedChunks(chunks);
       } catch (embeddingErr) {
         await this.cleanupFailedExternalIndexes(docId, userId);
         throw embeddingErr;
@@ -510,42 +470,34 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       // 四个必要落点彼此独立，因此并发降低等待时间；allSettled 用于收集所有结果，
       // 以便后续对已成功的外部索引做一致的补偿清理。
       const indexResults = await Promise.allSettled([
-        (async () => {
-          await this.vectorStoreProvider.insert(
-            records.map((record, index) => ({
-              ...record,
-              vector: vectors[index],
-            })),
-          );
-        })(),
-        (async () => {
-          this.karpathyRagService.indexChunks(chunkDocs, userId);
-          await Promise.all([
-            this.elasticsearchProvider.indexChunks(chunkDocs, userId, vectors),
-            this.elasticsearchProvider.indexDocument({
-              docId,
-              filename,
-              content,
-              userId,
-              tenantId: options.tenantId ?? 'legacy',
-              title: filename,
-              sourceAuthority: indexingGovernance.sourceAuthority,
-              projectId: indexingGovernance.projectId,
-              activityId: indexingGovernance.activityId,
-              region: indexingGovernance.region,
-              locale: indexingGovernance.locale,
-              channel: indexingGovernance.channel,
-              roleScope: indexingGovernance.roleScope,
-              documentType: indexingGovernance.documentType,
-              lifecycleStatus: indexingGovernance.lifecycleStatus,
-              docVersion: indexingGovernance.docVersion,
-              contentHash: contentSha256,
-              indexGeneration,
-              effectiveAt: indexingGovernance.effectiveAt,
-              expiredAt: indexingGovernance.expiredAt,
-            }),
-          ]);
-        })(),
+        this.documentIndexCoordinator.writeDocumentIndexes({
+          records,
+          chunks: chunkDocs,
+          userId,
+          vectors,
+          document: {
+            docId,
+            filename,
+            content,
+            userId,
+            tenantId: options.tenantId ?? 'legacy',
+            title: filename,
+            sourceAuthority: indexingGovernance.sourceAuthority,
+            projectId: indexingGovernance.projectId,
+            activityId: indexingGovernance.activityId,
+            region: indexingGovernance.region,
+            locale: indexingGovernance.locale,
+            channel: indexingGovernance.channel,
+            roleScope: indexingGovernance.roleScope,
+            documentType: indexingGovernance.documentType,
+            lifecycleStatus: indexingGovernance.lifecycleStatus,
+            docVersion: indexingGovernance.docVersion,
+            contentHash: contentSha256,
+            indexGeneration,
+            effectiveAt: indexingGovernance.effectiveAt,
+            expiredAt: indexingGovernance.expiredAt,
+          },
+        }),
         (async () => {
           await this.docMetaRepo.save(docMeta);
           if (!options.preservePermissions) {
@@ -665,7 +617,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Upload done: docId=${docId}, chunks=${
           chunks.length
-        }, esEnabled=${this.elasticsearchProvider.isEnabled()}`,
+        }, esEnabled=${this.documentIndexCoordinator.isElasticsearchEnabled()}`,
       );
       return {
         docId,
@@ -714,29 +666,10 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     docId: string,
     userId: string,
   ): Promise<void> {
-    const cleanupResults = await Promise.allSettled([
-      this.vectorStoreProvider.deleteByDocId(docId),
-      this.elasticsearchProvider.deleteByDocId(docId, userId),
-      Promise.resolve().then(() =>
-        this.karpathyRagService.removeDocChunks(docId, userId),
-      ),
-    ]);
-    for (const [index, result] of cleanupResults.entries()) {
-      if (result.status === 'rejected') {
-        const target = ['Milvus', 'Elasticsearch', 'Karpathy/BM25'][index];
-        if (index === 0) {
-          const persisted = await this.scheduleMilvusDeleteRetry(docId);
-          if (!persisted) {
-            this.logger.error(
-              `Milvus compensation is not durable for docId=${docId}; manual reconciliation may be required`,
-            );
-          }
-        }
-        this.logger.warn(
-          `Failed to compensate ${target} index for docId=${docId}: ${String(result.reason)}`,
-        );
-      }
-    }
+    await this.documentIndexCoordinator.cleanupFailedExternalIndexes(
+      docId,
+      userId,
+    );
   }
 
   /** 图谱是非阻塞补充索引：失败不回滚主入库，也不影响版本切换。 */
@@ -833,18 +766,14 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
 
   /** 暴露已恢复到当前进程的补偿记录和本地索引任务状态。 */
   async getIndexCompensationStatus() {
-    await this.ensureMilvusDeleteCompensationsRestored();
-    const pendingMilvus = [...this.pendingMilvusDeletes.entries()].map(
-      ([docId, attempts]) => ({ docId, attempts }),
-    );
+    const status =
+      await this.documentIndexCoordinator.getMilvusDeleteCompensationStatus();
     return {
-      pendingDurable: Boolean(this.redisProvider?.isEnabled()),
-      pendingMilvusDeletes: pendingMilvus,
-      pendingMilvusDeleteCount: pendingMilvus.length,
+      pendingDurable: status.pendingDurable,
+      pendingMilvusDeletes: status.pendingMilvusDeletes,
+      pendingMilvusDeleteCount: status.pendingMilvusDeleteCount,
       pendingGraphIndexCount: this.pendingGraphIndexes.size,
-      note: this.redisProvider?.isEnabled()
-        ? 'Milvus 删除补偿已写入 Redis，可跨实例恢复；ES、BM25、图谱全量对账仍需后续 Reconciler。'
-        : 'Redis 不可用时 Milvus 补偿仍为进程内状态，需启用 Redis 或后续 outbox/schema 迁移。',
+      note: status.note,
     };
   }
 
@@ -989,7 +918,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
         return [];
       }
     })();
-    this.karpathyRagService.removeDocChunks(docId, userId);
+    this.documentIndexCoordinator.removeBm25Chunks(docId, userId);
 
     const result = await this.upload(original.filename, content, userId, {
       docId,
@@ -1030,19 +959,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     );
 
     // 1. 删除 Milvus 中的 chunks
-    try {
-      await this.vectorStoreProvider.deleteByDocId(docId);
-    } catch (err) {
-      this.logger.warn(
-        `Milvus delete failed for docId=${docId}: ${(err as Error).message}`,
-      );
-      const persisted = await this.scheduleMilvusDeleteRetry(docId);
-      if (!persisted) {
-        throw new ServiceUnavailableException(
-          'Milvus 删除失败，补偿任务未能可靠保存；文档保留，请稍后重试。',
-        );
-      }
-    }
+    await this.documentIndexCoordinator.removeVectorIndex(docId);
 
     // 描述向量清理失败时停止删除原文，避免留下无法追溯的检索入口。
     await this.retrievalDescriptionService.deleteForDocument({
@@ -1050,11 +967,8 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       docId,
     });
 
-    // 2. 删除 BM25 内存索引 + JSON 持久化更新
-    this.karpathyRagService.removeDocChunks(docId, userId);
-
-    // 3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
-    await this.elasticsearchProvider.deleteByDocId(docId, userId);
+    // 2. 删除 BM25 内存索引 + JSON 持久化更新；3. 删除 Elasticsearch 索引（ES 未启用时自动跳过）
+    await this.documentIndexCoordinator.removeSearchIndexes(docId, userId);
 
     // 3.5 文搜图：清理图片向量库（未启用/失败不阻塞删除主流程）
     try {
@@ -1150,190 +1064,6 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
         };
     }
     return getChunkStrategy(business.documentType);
-  }
-
-  private async scheduleMilvusDeleteRetry(docId: string): Promise<boolean> {
-    if (this.milvusDeleteRetryTimers.has(docId)) {
-      return this.persistMilvusDeleteCompensation(docId);
-    }
-
-    const attempts = this.pendingMilvusDeletes.get(docId) ?? 0;
-    if (attempts >= 5) {
-      this.logger.warn(
-        `Milvus delete retry exhausted for docId=${docId}; vector hits remain guarded by active docId filtering`,
-      );
-      return false;
-    }
-
-    const nextAttempt = attempts + 1;
-    this.pendingMilvusDeletes.set(docId, nextAttempt);
-    const persisted = await this.persistMilvusDeleteCompensation(docId);
-    this.armMilvusDeleteRetry(docId, nextAttempt);
-    return persisted;
-  }
-
-  private async retryMilvusDelete(docId: string): Promise<void> {
-    try {
-      await this.vectorStoreProvider.deleteByDocId(docId);
-    } catch (err) {
-      this.logger.warn(
-        `Milvus delete retry failed for docId=${docId}: ${
-          (err as Error).message
-        }`,
-      );
-      await this.scheduleMilvusDeleteRetry(docId);
-      return;
-    }
-
-    this.pendingMilvusDeletes.delete(docId);
-    if (!(await this.clearMilvusDeleteCompensation(docId))) {
-      this.logger.warn(
-        `Milvus delete succeeded but compensation state could not be cleared for docId=${docId}; a later retry is safe`,
-      );
-    }
-    this.logger.log(`Milvus delete retry succeeded for docId=${docId}`);
-  }
-
-  private milvusDeleteRetryKey(docId: string): string {
-    return `${this.milvusCompensationKeyPrefix}${Buffer.from(docId).toString('base64url')}`;
-  }
-
-  private async persistMilvusDeleteCompensation(
-    docId: string,
-  ): Promise<boolean> {
-    if (!this.redisProvider?.isEnabled()) return false;
-    const attempts = this.pendingMilvusDeletes.get(docId);
-    if (attempts == null) return false;
-    const saved = await this.redisProvider.setRequired(
-      this.milvusDeleteRetryKey(docId),
-      JSON.stringify({ docId, attempts }),
-    );
-    if (!saved) {
-      this.logger.warn(
-        `Failed to persist Milvus delete compensation for docId=${docId}`,
-      );
-    }
-    return saved;
-  }
-
-  private async clearMilvusDeleteCompensation(docId: string): Promise<boolean> {
-    if (!this.redisProvider?.isEnabled()) return false;
-    try {
-      await this.redisProvider.delRequired(this.milvusDeleteRetryKey(docId));
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        `Failed to clear Milvus delete compensation for docId=${docId}: ${(error as Error).message}`,
-      );
-      return false;
-    }
-  }
-
-  private armMilvusDeleteRetry(docId: string, attempts: number): void {
-    if (this.milvusDeleteRetryTimers.has(docId) || attempts >= 5) return;
-    const delayMs = Math.min(5_000 * 2 ** Math.max(0, attempts - 1), 60_000);
-    const timer = setTimeout(() => {
-      this.milvusDeleteRetryTimers.delete(docId);
-      void this.retryMilvusDelete(docId);
-    }, delayMs);
-    timer.unref?.();
-    this.milvusDeleteRetryTimers.set(docId, timer);
-  }
-
-  private async ensureMilvusDeleteCompensationsRestored(): Promise<void> {
-    if (!this.redisProvider?.isEnabled()) return;
-    if (this.milvusCompensationRestore) {
-      await this.milvusCompensationRestore;
-      return;
-    }
-    if (Date.now() - this.milvusCompensationLastScanAt < 30_000) return;
-
-    if (!this.milvusCompensationRestore) {
-      this.milvusCompensationRestore = this.restoreMilvusDeleteCompensations()
-        .then(() => {
-          this.milvusCompensationLastScanAt = Date.now();
-        })
-        .catch((error: unknown) => {
-          this.logger.warn(
-            `Failed to restore Milvus delete compensations: ${(error as Error).message}`,
-          );
-        })
-        .finally(() => {
-          this.milvusCompensationRestore = null;
-        });
-    }
-    await this.milvusCompensationRestore;
-  }
-
-  private async restoreMilvusDeleteCompensations(): Promise<void> {
-    if (!this.redisProvider?.isEnabled()) return;
-    await this.migrateLegacyMilvusDeleteCompensations();
-    const keys = await this.redisProvider.scanRequired(
-      `${this.milvusCompensationKeyPrefix}*`,
-    );
-    for (const key of keys) {
-      const raw = await this.redisProvider.getRequired(key);
-      if (!raw) continue;
-      try {
-        const entry = JSON.parse(raw) as { docId?: string; attempts?: number };
-        if (
-          typeof entry.docId !== 'string' ||
-          !entry.docId ||
-          !Number.isFinite(entry.attempts) ||
-          Number(entry.attempts) < 0
-        ) {
-          this.logger.warn(
-            `Ignoring invalid Milvus compensation record: ${key}`,
-          );
-          continue;
-        }
-        const attempts = Math.trunc(Number(entry.attempts));
-        this.pendingMilvusDeletes.set(entry.docId, attempts);
-        this.armMilvusDeleteRetry(entry.docId, attempts);
-      } catch (error) {
-        this.logger.warn(
-          `Ignoring unreadable Milvus compensation record ${key}: ${(error as Error).message}`,
-        );
-      }
-    }
-  }
-
-  private async migrateLegacyMilvusDeleteCompensations(): Promise<void> {
-    if (!this.redisProvider?.isEnabled()) return;
-    const raw = await this.redisProvider.getRequired(
-      this.legacyMilvusCompensationKey,
-    );
-    if (!raw) return;
-
-    const entries = JSON.parse(raw) as unknown;
-    if (!Array.isArray(entries)) {
-      throw new Error('Legacy Milvus compensation state is invalid');
-    }
-    for (const entry of entries) {
-      if (
-        !Array.isArray(entry) ||
-        typeof entry[0] !== 'string' ||
-        !entry[0] ||
-        !Number.isFinite(entry[1]) ||
-        Number(entry[1]) < 0
-      ) {
-        throw new Error('Legacy Milvus compensation entry is invalid');
-      }
-      await this.redisProvider.setIfAbsentRequired(
-        this.milvusDeleteRetryKey(entry[0]),
-        JSON.stringify({ docId: entry[0], attempts: Math.trunc(entry[1]) }),
-      );
-    }
-
-    const removed = await this.redisProvider.compareAndDeleteRequired(
-      this.legacyMilvusCompensationKey,
-      raw,
-    );
-    if (!removed) {
-      this.logger.warn(
-        'Legacy Milvus compensation state changed during migration and was retained for the next recovery pass',
-      );
-    }
   }
 
   async getDocMeta(
@@ -1660,7 +1390,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
 
     const vectors =
       newDrafts.length > 0
-        ? await this.embeddingProvider.embedDocuments(
+        ? await this.documentIndexCoordinator.embedChunks(
             newDrafts.map((draft) => draft.content),
           )
         : [];
@@ -1700,64 +1430,48 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (expireIds.size > 0) {
-      await Promise.all([
-        Promise.resolve(
-          this.karpathyRagService.updateChunkMetadataByIds(
-            [...expireIds],
-            { expiredAt: effectiveAt.toISOString() },
-          ),
-        ),
-        this.elasticsearchProvider.updateChunkMetadataByIds(
-          [...expireIds],
-          { expiredAt: effectiveAt.toISOString() },
-        ),
-      ]);
+      await this.documentIndexCoordinator.updateChunkMetadataByIds(
+        [...expireIds],
+        { expiredAt: effectiveAt.toISOString() },
+      );
     }
 
-    if (newDrafts.length > 0) {
-      const records = newDrafts.map((draft, index) => ({
-        id: draft.id,
-        vector: vectors[index],
-        content: draft.content,
-        docId: input.docId,
-        chunkIndex: draft.chunkIndex,
-        userId: input.userId,
-      }));
-      await this.vectorStoreProvider.insert(records);
-      await Promise.all([
-        Promise.resolve(
-          this.karpathyRagService.indexChunks(newDrafts, input.userId),
-        ),
-        this.elasticsearchProvider.indexChunks(
-          newDrafts,
-          input.userId,
-          vectors,
-        ),
-      ]);
-    }
-
-    await this.elasticsearchProvider.indexDocument({
+    const records = newDrafts.map((draft, index) => ({
+      id: draft.id,
+      vector: vectors[index],
+      content: draft.content,
       docId: input.docId,
-      filename: input.filename,
-      content: input.content,
+      chunkIndex: draft.chunkIndex,
       userId: input.userId,
-      tenantId: input.tenantId,
-      title: existing.title ?? input.filename,
-      summary: existing.summary,
-      sourceAuthority: input.governance.sourceAuthority,
-      projectId: input.governance.projectId,
-      activityId: input.governance.activityId,
-      region: input.governance.region,
-      locale: input.governance.locale,
-      channel: input.governance.channel,
-      roleScope: input.governance.roleScope,
-      documentType: input.governance.documentType,
-      lifecycleStatus: existing.lifecycleStatus,
-      docVersion: input.governance.docVersion ?? existing.docVersion,
-      contentHash: input.contentSha256,
-      indexGeneration: input.indexGeneration,
-      effectiveAt: input.governance.effectiveAt ?? existing.effectiveAt,
-      expiredAt: input.governance.expiredAt ?? existing.expiredAt,
+    }));
+    await this.documentIndexCoordinator.writeIncrementalIndexes({
+      records,
+      chunks: newDrafts,
+      userId: input.userId,
+      vectors,
+      document: {
+        docId: input.docId,
+        filename: input.filename,
+        content: input.content,
+        userId: input.userId,
+        tenantId: input.tenantId,
+        title: existing.title ?? input.filename,
+        summary: existing.summary,
+        sourceAuthority: input.governance.sourceAuthority,
+        projectId: input.governance.projectId,
+        activityId: input.governance.activityId,
+        region: input.governance.region,
+        locale: input.governance.locale,
+        channel: input.governance.channel,
+        roleScope: input.governance.roleScope,
+        documentType: input.governance.documentType,
+        lifecycleStatus: existing.lifecycleStatus,
+        docVersion: input.governance.docVersion ?? existing.docVersion,
+        contentHash: input.contentSha256,
+        indexGeneration: input.indexGeneration,
+        effectiveAt: input.governance.effectiveAt ?? existing.effectiveAt,
+        expiredAt: input.governance.expiredAt ?? existing.expiredAt,
+      },
     });
     await this.rebuildRetrievalDescriptions(input.tenantId, input.docId);
 
@@ -1909,13 +1623,13 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
         { docId, userId },
         { lifecycleStatus: 'deprecated' },
       ),
-      this.elasticsearchProvider.updateDocumentLifecycle(
+      this.documentIndexCoordinator.updateElasticsearchDocumentLifecycle(
         docId,
         'deprecated',
         userId,
       ),
     ]);
-    this.karpathyRagService.updateDocumentLifecycle(
+    this.documentIndexCoordinator.updateBm25DocumentLifecycle(
       docId,
       'deprecated',
       userId,
@@ -2153,7 +1867,9 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     lifecycleStatus: DocumentLifecycleStatus,
     event?: DomainEventInput,
   ): Promise<boolean> {
-    const document = await this.docMetaRepo.findOne({ where: { docId, userId } });
+    const document = await this.docMetaRepo.findOne({
+      where: { docId, userId },
+    });
     if (!document) return false;
     await this.docMetaRepo.manager.transaction(async (manager) => {
       await Promise.all([
@@ -2166,12 +1882,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       ]);
       if (event) await this.domainEvents.emitInTransaction(manager, event);
     });
-    await this.elasticsearchProvider.updateDocumentLifecycle(
-      docId,
-      lifecycleStatus,
-      userId,
-    );
-    this.karpathyRagService.updateDocumentLifecycle(
+    await this.documentIndexCoordinator.updateDocumentLifecycle(
       docId,
       lifecycleStatus,
       userId,
@@ -2231,19 +1942,27 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     });
 
     for (const id of deprecatedDocIds) {
-      await this.elasticsearchProvider.updateDocumentLifecycle(
+      await this.documentIndexCoordinator.updateElasticsearchDocumentLifecycle(
         id,
         'deprecated',
         userId,
       );
-      this.karpathyRagService.updateDocumentLifecycle(id, 'deprecated', userId);
+      this.documentIndexCoordinator.updateBm25DocumentLifecycle(
+        id,
+        'deprecated',
+        userId,
+      );
     }
-    await this.elasticsearchProvider.updateDocumentLifecycle(
+    await this.documentIndexCoordinator.updateElasticsearchDocumentLifecycle(
       docId,
       'effective',
       userId,
     );
-    this.karpathyRagService.updateDocumentLifecycle(docId, 'effective', userId);
+    this.documentIndexCoordinator.updateBm25DocumentLifecycle(
+      docId,
+      'effective',
+      userId,
+    );
     for (const document of documents) {
       await this.rebuildRetrievalDescriptions(
         document.tenantId ?? 'legacy',

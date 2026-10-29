@@ -1,0 +1,5 @@
+Runtime Karpathy reference scan
+- backend/src: no Karpathy/karpathy/KARPATHY references
+- backend/scripts: no Karpathy/karpathy/KARPATHY references
+- backend/.env.example: no Karpathy/karpathy/KARPATHY references
+- backend/src/rag/karpathy: absent

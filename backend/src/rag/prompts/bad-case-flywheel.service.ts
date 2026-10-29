@@ -1,3 +1,4 @@
+import type { BadCaseMatch, BadCaseMatchMode } from './bad-case.types';
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,15 +21,7 @@ export interface ApprovedBadCase {
   errorType?: string | null;
 }
 
-export type BadCaseMatchMode = 'hint' | 'correction' | 'exact';
-
-export interface BadCaseMatch {
-  id: string;
-  query: string;
-  text: string;
-  score: number;
-  mode: BadCaseMatchMode;
-}
+export type { BadCaseMatch, BadCaseMatchMode } from './bad-case.types';
 
 @Injectable()
 export class BadCaseFlywheelService implements OnModuleInit {
@@ -139,7 +132,7 @@ export class BadCaseFlywheelService implements OnModuleInit {
     return exactMatches.length > 0 ? exactMatches : semanticMatches;
   }
 
-  /** 只查询已审核纠正层的精确问题，用于 Karpathy 直答前的低成本覆盖检查。 */
+  /** 只查询已审核纠正层的精确问题，用于 受治理直答前的低成本覆盖检查。 */
   async retrieveExactMatches(
     query: string,
     limit = 2,

@@ -13,7 +13,7 @@ frontend       面向普通知识库用户
 admin-frontend 面向后台管理员
 ```
 
-当前仓库里的 `backend/` 继续作为 `rag-backend` 演进。后续新增独立 `admin-backend/`，后台通过 HTTP API 调用 `rag-backend` 的运营接口，不直接 import RAG 内部 service。
+当前仓库里的 `backend/` 继续作为 `rag-backend` 演进。当前已有独立 `admin-backend/`，后台通过 HTTP API 调用 `rag-backend` 的运营接口，不直接 import RAG 内部 service。
 
 ## 为什么改成两个项目
 
@@ -210,3 +210,8 @@ admin-backend/src/
 
 所以我后面把方案调整成两个独立后端：rag-backend 专注知识库和 Agent 能力，admin-backend 专注管理后台。后台不直接 import RAG service，也不直接读向量库，而是通过 rag-backend 暴露的运营 API 查看文档、chunk、索引、评测和问答记录。当前我甚至不先抽 packages/shared，因为两个服务的业务模型不同，过早共享 DTO 会重新制造耦合。admin-backend 自己维护 rag-client 和调用 DTO，rag-backend 维护自己的接口 DTO，靠 HTTP 契约对齐。这样边界更硬，后续真有稳定重复再考虑抽公共契约。
 ```
+
+
+## 2026-10-29 当前实现补充
+
+上文的迁移步骤保留为历史设计说明；当前 admin-backend 与 rag-client 已存在，运营服务通过 HTTP API 调用 RAG，不能将“准备/新建”理解为本轮需要重复创建。此次内部重构收敛在 `backend/src/rag/{contracts,retrieval,evidence,generation}` 与文档索引协调服务，后台、CLI、MCP 的消费契约保持。具体本地验证与待执行项见 [重构进度](../refactor/progress.md)。

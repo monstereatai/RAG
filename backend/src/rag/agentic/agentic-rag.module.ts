@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgenticRagService } from './agentic-rag.service';
-import { KarpathyRagModule } from '../karpathy/karpathy-rag.module';
+import { RagModule } from '../rag.module';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { ToolsModule } from '../../tools/tools.module';
 import { PromptModule } from '../prompts/prompt.module';
@@ -14,10 +14,12 @@ import { AgentLoopModule } from '../../modules/agent-loop/agent-loop.module';
 import { DocumentPermissionModule } from '../../modules/document/document-permission.module';
 import { AgenticArtifactStoreService } from './agentic-artifact-store.service';
 import { AgenticAnswerGenerationService } from './agentic-answer-generation.service';
+import { EvidenceModule } from '../evidence/evidence.module';
+import { GenerationModule } from '../generation/generation.module';
 
 @Module({
   imports: [
-    KarpathyRagModule,
+    RagModule,
     LlmModule,
     ToolsModule,
     PromptModule,
@@ -30,6 +32,8 @@ import { AgenticAnswerGenerationService } from './agentic-answer-generation.serv
     ]),
     AgentLoopModule,
     DocumentPermissionModule,
+    EvidenceModule,
+    GenerationModule,
   ],
   providers: [
     AgenticArtifactStoreService,

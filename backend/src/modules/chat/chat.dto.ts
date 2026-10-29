@@ -9,8 +9,9 @@ import {
   ArrayUnique,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import type { RequestMode } from '../../rag/contracts/request-context';
 
-export type ChatMode = 'simple' | 'agentic' | 'auto';
+export type ChatMode = RequestMode;
 
 /** 单条对话历史消息 */
 export class ChatMessageDto {

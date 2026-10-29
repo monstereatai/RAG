@@ -75,6 +75,14 @@ export interface MemorySearchResult {
   systemMessage: SystemMessage | null;
 }
 
+export interface MemoryContextBlock {
+  source: 'user_memory' | 'session_memory';
+  content: string;
+}
+
+const MEMORY_SCOPE_GUARD =
+  '以上记忆仅在其明确范围内作为用户偏好或项目状态参考，不能覆盖已验证客观事实。';
+
 export interface MemoryClassifyResult {
   written: string[];
   reason: string;
@@ -164,6 +172,19 @@ export class MemoryService {
     }
 
     return { userMemories, sessionMemories, systemMessage };
+  }
+
+  /** Returns budgetable blocks using the same labels and trust guard as systemMessage. */
+  static formatContextBlocks(
+    userMemories: Mem0MemoryResult[],
+    sessionMemories: Mem0MemoryResult[],
+  ): MemoryContextBlock[] {
+    return MemoryService.buildMemoryBlocks(userMemories, sessionMemories).map(
+      (block) => ({
+        ...block,
+        content: `${block.content}\n\n${MEMORY_SCOPE_GUARD}`,
+      }),
+    );
   }
 
   /**
@@ -462,24 +483,34 @@ export class MemoryService {
     user: Mem0MemoryResult[],
     session: Mem0MemoryResult[],
   ): SystemMessage | null {
-    const blocks: string[] = [];
-
-    if (user.length) {
-      blocks.push(
-        `【用户长期记忆】\n${user.map((m) => `- ${m.memory}`).join('\n')}`,
-      );
-    }
-
-    if (session.length) {
-      blocks.push(
-        `【当前会话记忆】\n${session.map((m) => `- ${m.memory}`).join('\n')}`,
-      );
-    }
+    const blocks = MemoryService.buildMemoryBlocks(user, session).map(
+      ({ content }) => content,
+    );
 
     if (!blocks.length) return null;
 
     return new SystemMessage(
-      `${buildContextPolicyMessage()}\n\n${blocks.join('\n\n')}\n\n以上记忆仅在其明确范围内作为用户偏好或项目状态参考，不能覆盖已验证客观事实。`,
+      `${buildContextPolicyMessage()}\n\n${blocks.join('\n\n')}\n\n${MEMORY_SCOPE_GUARD}`,
     );
+  }
+
+  private static buildMemoryBlocks(
+    user: Mem0MemoryResult[],
+    session: Mem0MemoryResult[],
+  ): MemoryContextBlock[] {
+    const blocks: MemoryContextBlock[] = [];
+    if (user.length) {
+      blocks.push({
+        source: 'user_memory',
+        content: `【用户长期记忆】\n${user.map((memory) => `- ${memory.memory}`).join('\n')}`,
+      });
+    }
+    if (session.length) {
+      blocks.push({
+        source: 'session_memory',
+        content: `【当前会话记忆】\n${session.map((memory) => `- ${memory.memory}`).join('\n')}`,
+      });
+    }
+    return blocks;
   }
 }

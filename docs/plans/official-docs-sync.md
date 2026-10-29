@@ -2,7 +2,7 @@
 
 ## 目标
 
-每天凌晨 01:00 抓取 React、Vue、JavaScript、NestJS 官方文档，检测新增或修改页面，将变化内容插入数据库、向量库、ES、Karpathy BM25 知识库，并同步写入 Obsidian 本地知识库。
+每天凌晨 01:00 抓取 React、Vue、JavaScript、NestJS 官方文档，检测新增或修改页面，将变化内容插入数据库、向量库、ES、编译知识 BM25 知识库，并同步写入 Obsidian 本地知识库。
 
 ## 实现策略
 
@@ -11,12 +11,12 @@
 - 调度时间：默认每天 01:00，本地时区；可用 `OFFICIAL_DOCS_SYNC_HOUR` 调整小时。
 - 状态存储：`workspace/official-docs-sync-state.json`，按 URL 保存内容 hash。
 - 去重策略：只有 URL 首次出现或正文 hash 变化时才入库。
-- 入库链路：复用 Karpathy-Obsidian ingestion service，所以会同步写入：
+- 入库链路：复用 Obsidian 编译知识 ingestion service，所以会同步写入：
   - `documents_meta`
   - `document_chunks`
   - Milvus / vector store
   - Elasticsearch
-  - Karpathy BM25 持久化索引
+  - 编译知识 BM25 持久化索引
   - Obsidian `raw/official-docs`
   - Obsidian `notes/日期-标题.md`
   - Obsidian `index/sources.md`、`index/tags.md`

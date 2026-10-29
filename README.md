@@ -16,7 +16,7 @@
 - **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
 - **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
 - **本地工程质量结构检查已完成**：`eval:rag:maturity` 当前的 93/100 只检查工程结构、脚本和证据文件是否存在，不代表检索/回答质量。真实质量门禁必须启动后端并运行 `eval:rag:release`（强制 live project eval + LLM judge）；真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
-- **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch 及 Obsidian 编译知识索引；Karpathy 本地知识作为受治理直答与降级资产，不是独立在线检索链路。公开快照用于验证链路，不代表真实企业线上效果。
+- **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch 及 Obsidian 编译知识索引；线性 RAG 本地知识作为受治理直答与降级资产，不是独立在线检索链路。公开快照用于验证链路，不代表真实企业线上效果。
 - **部署目标**：当前固定为 Docker Compose，见 `docs/architecture/DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
 
 详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [rag-plan.md](./docs/plans/rag-plan.md)。

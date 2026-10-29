@@ -7,10 +7,11 @@ import { DocumentRetrievalDescriptionModule } from './document-retrieval-descrip
 import { DocumentQueueService } from './document-queue.service';
 import { DocumentTaskService } from './document-task.service';
 import { DocumentImageIngestionService } from './document-image-ingestion.service';
-import { KarpathyObsidianIngestService } from './karpathy-obsidian-ingest.service';
+import { DocumentIndexCoordinator } from './document-index-coordinator.service';
+import { ObsidianIngestService } from './obsidian-ingest.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { LlmModule } from '../../providers/llm/llm.module';
 import { ObsidianKnowledgeModule } from '../obsidian/obsidian-knowledge.module';
 import { GraphModule } from '../graph/graph.module';
@@ -38,7 +39,7 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     ]),
     EmbeddingModule,
     VectorStoreModule,
-    KarpathyRagModule,
+    RagModule,
     LlmModule,
     ObsidianKnowledgeModule,
     GraphModule,
@@ -54,14 +55,15 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     DocumentQueueService,
     DocumentTaskService,
     DocumentImageIngestionService,
-    KarpathyObsidianIngestService,
+    DocumentIndexCoordinator,
+    ObsidianIngestService,
   ],
   exports: [
     DocumentService,
     DocumentQueueService,
     DocumentTaskService,
     DocumentImageIngestionService,
-    KarpathyObsidianIngestService,
+    ObsidianIngestService,
   ],
 })
 export class DocumentModule {}

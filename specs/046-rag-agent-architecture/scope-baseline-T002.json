@@ -1,0 +1,110 @@
+{
+  "schema_version": 2,
+  "base_commit": "fb7d5dd9b8150667e563ea7017afb6a17c975d9b",
+  "initial_snapshots": {
+    "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"": {
+      "kind": "missing"
+    },
+    ".obsidian/community-plugins.json": {
+      "kind": "file",
+      "sha256": "b6d71934f97cbe7a28da4cff5f699b6a71a17bf72457105782d47f204e49401c"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/data.json": {
+      "kind": "file",
+      "sha256": "a361cf6a685ee27266d8235f5609eaa517f70ae38865b2469398e9c73f21eba9"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/main.js": {
+      "kind": "file",
+      "sha256": "861c2af33b19356869a20ff161dcdcef97238c35527d49cb86d51dacf0969c76"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/manifest.json": {
+      "kind": "file",
+      "sha256": "b3be3f430034719ca2c3bdf29c04d98f1139c0e9579c52f5279a3fe5c0b29b5a"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/styles.css": {
+      "kind": "file",
+      "sha256": "12611a5787bd1aad17ae0224ee0cf55e1e7df9c73bf58a3890a406de256ff9c6"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/data.json": {
+      "kind": "file",
+      "sha256": "25ffc55dddb09b20bb1dc9161bbdedf0ec3ae75d55fc3e7c8aaa31b359220fe7"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/main.js": {
+      "kind": "file",
+      "sha256": "86027c9f881d70069f40d1fdf63d38868c606c8000169d730cc68c62a6978a77"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/manifest.json": {
+      "kind": "file",
+      "sha256": "4880b885c50643ef848d31cea829776ca2e96747353aee334d71e875f79d31c0"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/styles.css": {
+      "kind": "file",
+      "sha256": "173e9c161a01c53b3c173344e023de4d327fd0658e476961b46b0e6a93117ded"
+    },
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "6d3ffaf4b4c8fc95d939f3bf168f88a9d0f2523c4bdf1bcddd4af718ffde518f"
+    },
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "57401e6279f6bb7dfa0d960600ec6839b519a9d3ab614fec8fc81a326710cbe2"
+    },
+    "docs/README.md": {
+      "kind": "file",
+      "sha256": "e8bf2dfd08c915c774ca7e1e19199dbb3af53d16a084f72b31a84771e56cb375"
+    },
+    "docs/refactor/00-baseline.md": {
+      "kind": "file",
+      "sha256": "6e084e07a3354ab13902bbdf45061712db941ab3040e4495f3c923598fe0028f"
+    },
+    "docs/refactor/01-module-audit.md": {
+      "kind": "file",
+      "sha256": "36bd73c86051db776d5b6aba9d573d5b77d7375c55dbbae3687840ebfc9acc72"
+    },
+    "docs/refactor/02-target-architecture.md": {
+      "kind": "file",
+      "sha256": "0dec3463f6bbcec5e7ba55f4837f46cbc750a85b4816ce071a680a4aacffe2a8"
+    },
+    "docs/refactor/03-api-and-event-compatibility.md": {
+      "kind": "file",
+      "sha256": "5e3f8fe06c616ee7ccc7d6020e62c6f80b53f1e96b95db2b93d5100b3455bd30"
+    },
+    "docs/refactor/04-test-and-evaluation.md": {
+      "kind": "file",
+      "sha256": "fc8b1f44a40dfc2031e8e4b8d7fcecfddbb8031bd9e54f5ebd90d093cdfcef62"
+    },
+    "docs/refactor/05-migration-and-rollback.md": {
+      "kind": "file",
+      "sha256": "ba1f673ed68c076df26c048f9291be4c54066b33f3cfe8be2bff446657d7bcfc"
+    },
+    "docs/refactor/README.md": {
+      "kind": "file",
+      "sha256": "7bba25968ca76caf8e13aeca28122ff54a1c6fb4969449c25f34855915eb9049"
+    },
+    "docs/refactor/blocked-validation.md": {
+      "kind": "file",
+      "sha256": "7b22f9f46ef031f78e934231d727c08d1594a8ed8facb22e1778380de14f33f7"
+    },
+    "docs/refactor/contract-snapshot.json": {
+      "kind": "file",
+      "sha256": "d1caa736b7f9f62c8811a668153b998f6f00dd52d1c8080d3353ec6d741b2ad8"
+    },
+    "docs/refactor/progress.md": {
+      "kind": "file",
+      "sha256": "2f763ef84aaa895b6840e7078328867f94d1d9ce4f62f38fea92fb658c497360"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "14b160a8eaf9567ae5cc433d67afc3dc9bc297e64ecddacf3cd99a81386282d3"
+    }
+  },
+  "internal_patterns": [
+    "specs/046-rag-agent-architecture/**",
+    "backend/src/modules/document/**",
+    "backend/src/modules/chat/**",
+    "backend/src/rag/contracts/**",
+    "backend/src/modules/agent-*/**",
+    "backend/src/modules/workflow/**",
+    "specs/046-rag-agent-architecture/scope-baseline-T002.json"
+  ]
+}

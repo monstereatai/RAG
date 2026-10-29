@@ -287,7 +287,7 @@ QWEN_AGENTIC_MODEL=qwen-turbo
 - `backend/src/modules/chat/chat.service.ts`
 - `backend/src/rag/agentic/agentic-rag.service.ts`
 - `backend/src/providers/llm/llm.provider.ts`
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/config/configuration.ts`
 
 主要配置：

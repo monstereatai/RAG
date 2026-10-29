@@ -1,6 +1,6 @@
 import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.service';
 import type { BadCaseMatch } from '../prompts/bad-case-flywheel.service';
-import type { DetailedRetrievalResult } from '../karpathy/karpathy-rag.service';
+import type { DetailedRetrievalResult } from './retrieval.types';
 import type {
   EvidenceSourcePolicy,
   EvidenceSourceSnapshot,

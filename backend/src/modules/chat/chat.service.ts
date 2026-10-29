@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   BadRequestException,
   Logger,
@@ -8,13 +9,15 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
+import type { RetrievedChunk } from '../../rag/evidence/retrieval.types';
 import {
-  KarpathyRagService,
-  type RetrievedChunk,
-} from '../../rag/karpathy/karpathy-rag.service';
+  RAG_QUERY_CAPABILITY,
+  type RagQueryCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
+import type { ContextMessageCandidate } from '../../rag/contracts/context-budget';
 import { MemoryService } from '../memory/memory.service';
 import { ShortTermMemoryService } from '../memory/short-term-memory.service';
 import { ChatDto, type ChatMode } from './chat.dto';
@@ -26,7 +29,7 @@ import {
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import { resolveRoleContext } from './role-presets';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import { type RetrievalProfile } from '../../rag/karpathy/context-builder';
+import { type RetrievalProfile } from '../../rag/retrieval/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
@@ -90,12 +93,13 @@ type AggregatedLlmUsage = LlmUsage & { calls: number };
 export class ChatService {
   /**
    * 问答主编排入口：只负责准备上下文、选择执行模式和记录审计；
-   * 检索细节下沉到 KarpathyRagService，复杂推理下沉到 AgenticRagService。
+   * 检索细节下沉到 RagService，复杂推理下沉到 AgenticRagService。
    */
   private readonly logger = new Logger(ChatService.name);
 
   constructor(
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_QUERY_CAPABILITY)
+    private readonly ragService: RagQueryCapability,
     private readonly agenticRagService: AgenticRagService,
     private readonly conversationService: ConversationService,
     private readonly conversationEmbeddingService: ConversationEmbeddingService,
@@ -329,7 +333,7 @@ export class ChatService {
         ),
       },
     );
-    const requestHistoryTokenBudget =
+    let requestHistoryTokenBudget =
       this.shortTermMemory.getAvailableHistoryTokenBudget(
         req.query,
         executionPlan.profile.contextCharacterBudget,
@@ -357,6 +361,69 @@ export class ChatService {
       executionPlan.scopeRestricted = true;
       executionPlan.reasonCode = 'internal_evidence_required';
     }
+    const memoryContextBlocks = MemoryService.formatContextBlocks(
+      memoryResult.userMemories,
+      memoryResult.sessionMemories,
+    );
+    const contextCandidates: ContextMessageCandidate[] = [
+      {
+        source: 'context_policy',
+        role: 'system',
+        content: buildContextPolicyMessage(),
+        priority: Number.MAX_SAFE_INTEGER,
+        required: true,
+      },
+      {
+        source: 'role_preset',
+        role: 'system',
+        content: roleContext.systemMessage,
+        priority: Number.MAX_SAFE_INTEGER,
+        required: true,
+      },
+      ...memoryContextBlocks.map((block) => ({
+        source: block.source,
+        role: 'system' as const,
+        content: block.content,
+        priority: block.source === 'session_memory' ? 80 : 40,
+      })),
+      ...(threadId && !objectiveFactQuery && shortTermContext.systemMessage
+        ? [
+            {
+              source: 'short_term_summary' as const,
+              role: 'system' as const,
+              content: shortTermContext.systemMessage.content as string,
+              priority: 60,
+            },
+          ]
+        : []),
+      ...(historySearch.length > 0
+        ? [
+            {
+              source: 'history_search' as const,
+              role: 'system' as const,
+              content: formatUntrustedHistoryContext(historySearch),
+              priority: 20,
+            },
+          ]
+        : []),
+    ];
+    const systemContextBudget = this.shortTermMemory.budgetSystemContext(
+      contextCandidates,
+    );
+    const {
+      messages: budgetedSystemMessages,
+      ...systemContextSummary
+    } = systemContextBudget;
+    const memoryMessages = budgetedSystemMessages.map(
+      ({ role, content }) => ({ role, content }),
+    );
+    if (systemContextBudget.overflowTokens > 0) {
+      requestHistoryTokenBudget = Math.max(0, requestHistoryTokenBudget - systemContextBudget.overflowTokens);
+      history = this.shortTermMemory.limitHistoryToTokenBudget(history, requestHistoryTokenBudget);
+      this.logger.warn(
+        `Required system context exceeds its reserve by ${systemContextBudget.overflowTokens} estimated tokens`,
+      );
+    }
     const maxSteps = this.config?.get<number>('agentRun.maxSteps') ?? 18;
     const maxToolCalls =
       this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
@@ -372,6 +439,11 @@ export class ChatService {
       sourcePolicy: executionPlan.sourcePolicy,
       scope: effectiveRetrievalScope,
       deadlineAt,
+      contextBudget: {
+        historyTokens: requestHistoryTokenBudget,
+        system: systemContextSummary,
+        retrievalCharacters: executionPlan.profile.contextCharacterBudget,
+      },
       budget: {
         maxSteps,
         maxToolCalls,
@@ -423,15 +495,6 @@ export class ChatService {
         onEvent?.({ type: 'answer_replace', data: finalAnswer });
       }
     };
-    const memoryMessages: Array<{ role: string; content: string }> = [];
-    memoryMessages.push({
-      role: 'system',
-      content: buildContextPolicyMessage(),
-    });
-    memoryMessages.push({
-      role: 'system',
-      content: roleContext.systemMessage,
-    });
     const retrievalOptions = {
       scope: effectiveRetrievalScope,
       requestContext,
@@ -495,6 +558,10 @@ export class ChatService {
           messageSafetyCap,
           planningHistoryTokenBudget,
           requestHistoryTokenBudget,
+          systemContextTokenBudget: systemContextBudget.budgetTokens,
+          systemContextEstimatedTokens: systemContextBudget.estimatedTokens,
+          systemContextOverflowTokens: systemContextBudget.overflowTokens,
+          systemContextDroppedSources: systemContextBudget.droppedSources,
           loadedTurns: history.length,
           summaryLoaded: Boolean(shortTermContext.systemMessage),
         },
@@ -524,23 +591,15 @@ export class ChatService {
         }),
       });
     }
-    if (memoryResult.systemMessage) {
-      memoryMessages.push({
-        role: 'system',
-        content: memoryResult.systemMessage.content as string,
-      });
+    if (memoryResult.userMemories.length || memoryResult.sessionMemories.length) {
       this.logger.debug(
-        `Memory injected: user=${memoryResult.userMemories.length}, session=${memoryResult.sessionMemories.length}`,
+        `Memory candidates loaded: user=${memoryResult.userMemories.length}, session=${memoryResult.sessionMemories.length}`,
       );
     }
 
     // Redis 短期记忆注入：最近 N 轮对话 + 历史摘要
     if (threadId && !objectiveFactQuery) {
       if (shortTermContext.systemMessage) {
-        memoryMessages.push({
-          role: 'system',
-          content: shortTermContext.systemMessage.content as string,
-        });
         this.logger.debug(
           `Short-term memory injected: ${shortTermContext.recentTurns.length} recent turns, truncated=${shortTermContext.truncatedHistory}`,
         );
@@ -553,6 +612,7 @@ export class ChatService {
             recentTurns: shortTermContext.recentTurns.length,
             truncatedHistory: shortTermContext.truncatedHistory,
             summaryLoaded: Boolean(shortTermContext.systemMessage),
+            systemContextDroppedSources: systemContextBudget.droppedSources,
           },
         });
       }
@@ -560,12 +620,6 @@ export class ChatService {
 
     // 对话历史向量化搜索结果已与短期／长期记忆并发取得，此处只负责格式化注入。
     if (historySearch.length > 0) {
-      const historyContext = formatUntrustedHistoryContext(historySearch);
-      // 将历史对话上下文作为额外的 system 消息注入
-      memoryMessages.push({
-        role: 'system',
-        content: historyContext,
-      });
       this.logger.debug(
         `History context injected: ${historySearch.length} relevant conversations`,
       );
@@ -575,17 +629,17 @@ export class ChatService {
       let result;
       try {
         // 显式 Simple 是用户选择的执行上限：公共直答、多问题或歧义都不能
-        // 借由 Agentic 入口绕回状态图。Karpathy 负责固定线性取证和最终校验。
+        // 借由 Agentic 入口绕回状态图。线性 RAG 负责固定线性取证和最终校验。
         const answerOptions = {
           ...retrievalOptions,
           signal: requestSignal,
           adaptiveVectorSearch: true,
-          karpathyDirectAnswer: true,
+          governedDirectAnswer: true,
           preferFastModel: true,
         };
         const executeSimple = () =>
           onEvent
-            ? this.karpathyRagService.answer(
+            ? this.ragService.answer(
                 req.query,
                 history,
                 userId,
@@ -593,7 +647,7 @@ export class ChatService {
                 (token: string) => publishEvent({ type: 'token', data: token }),
                 answerOptions,
               )
-            : this.karpathyRagService.answer(
+            : this.ragService.answer(
                 req.query,
                 history,
                 userId,
@@ -747,7 +801,7 @@ export class ChatService {
       return this.finalizeInterruptedChat(input);
     }
     const refused =
-      result.answer === this.karpathyRagService.unsupportedReliableAnswer();
+      result.answer === this.ragService.unsupportedReliableAnswer();
 
     await this.persistConversationResult({
       threadId: input.threadId,
@@ -805,7 +859,7 @@ export class ChatService {
       });
       await this.agentRuns?.recordRuntimeEvent(input.run.id, {
         eventType: 'retrieval.completed',
-        target: input.route === 'simple' ? 'karpathy_rag' : 'agentic_rag',
+        target: input.route === 'simple' ? 'linear_rag' : 'agentic_rag',
         payload: {
           references: result.references.length,
           sufficient: result.retrievalSufficient,

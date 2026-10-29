@@ -36,10 +36,10 @@
 | 时段 | 时长 | 任务 | 材料 | 输出物（能背出） | 完成 |
 |------|------|------|------|------------------|------|
 | H1 | 1h | 定位 + 红线 + 数字表 | 本指南第 1/4/5 节 | 项目一句话 + 全部边界数字 | [ ] |
-| H2 | 1h | RAG 检索链路 | `rag/karpathy/karpathy-rag.service.ts`、`bm25-store.ts` + 核心知识手册 RAG 章节 | 混合检索为什么、RRF 怎么融合、切片策略 | [ ] |
+| H2 | 1h | RAG 检索链路 | `rag/compiled-knowledge-rag.service.ts`、`bm25-store.ts` + 核心知识手册 RAG 章节 | 混合检索为什么、RRF 怎么融合、切片策略 | [ ] |
 | H3 | 1h | 入库 + 切片 + 质量门禁 | `modules/document/` + `docs/interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md` | 结构化切片设计、游戏业务 metadata、门禁 | [ ] |
 | H4 | 1h | Agentic 编排 | `rag/agentic/agentic-rag.service.ts`、`agentic-rag.state.ts` | 三档路由、sufficiency 判断、防循环 | [ ] |
-| H5 | 1h | 引用 / 拒答 / Bad Case | `rag/karpathy/context-builder.ts` + 核心知识手册幻觉治理 | 引用校验、低相关拒答、Bad Case 飞轮 | [ ] |
+| H5 | 1h | 引用 / 拒答 / Bad Case | `rag/context-builder.ts` + 核心知识手册幻觉治理 | 引用校验、低相关拒答、Bad Case 飞轮 | [ ] |
 | H6 | 1h | 评测 + 记忆 | `scripts/eval-rag-project.mjs`、`eval-rag-quality-gate.mjs`、`modules/memory/` | 评测指标、28/28 口径、短期/长期记忆分层 | [ ] |
 | H7 | 1h | 稳定性 + 降级 + 成本 | `scripts/collect-agent-stability-evidence.mjs`、ROADMAP 稳定性记录 | Qwen 超时修复、降级链、3 次 DAG 18/18 | [ ] |
 | H8 | 1h | 多 Agent + Tool/MCP/Skill + GraphRAG | `rag/agents/agent-pipeline.service.ts` + `docs/interview/AI_TOOLING_INTERVIEW_GUIDE.md` | 为什么多 Agent、Supervisor 编排、MCP 11 工具 | [ ] |
@@ -57,7 +57,7 @@
 
 ### 3.2 Agentic 编排（为什么这样编）
 
-- **30 秒**：simple 走 Karpathy 快路径；auto 先快路径再用 sufficiency gate 判断是否升级；agentic 走完整 research 链：routing → query augment → retrieval → sufficiency → web search → rerank → generate → citation → reflection。用 LangGraph 状态机，最大步骤防死循环。
+- **30 秒**：simple 走 编译知识 快路径；auto 先快路径再用 sufficiency gate 判断是否升级；agentic 走完整 research 链：routing → query augment → retrieval → sufficiency → web search → rerank → generate → citation → reflection。用 LangGraph 状态机，最大步骤防死循环。
 - **追问点**：sufficiency 怎么量化？什么时候触发 web search？query augment 扩什么？reflection 后悔改什么？
 
 ### 3.3 引用与拒答（怎么撑住）

@@ -1,17 +1,37 @@
 import { ConfigService } from '@nestjs/config';
 import { AgenticRagService } from './agentic-rag.service';
 import type { LlmProvider } from '../../providers/llm/llm.provider';
-import type {
-  KarpathyRagService,
-  RetrieveOptions,
-} from '../karpathy/karpathy-rag.service';
+import type { RagService } from '../rag.service';
+import type { RetrieveOptions } from '../contracts/rag-types';
 import type { BochaSearchService } from '../../tools/bocha-search.service';
 import type { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { createFallbackQueryPlan } from '../planning/query-plan';
 import type { RedisProvider } from '../../providers/redis/redis.provider';
 import type { AgenticRagStateType } from './agentic-rag.state';
 import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.service';
-import type { PrefetchedFastPath } from '../karpathy/karpathy-rag.service';
+import type { PrefetchedFastPath } from '../contracts/rag-types';
+import type { RetrievedChunk } from '../evidence/retrieval.types';
+import type { EvidencePolicyService } from '../evidence/evidence-policy.service';
+
+interface AgenticRagServiceInternals {
+  rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[];
+  assessRetrievedChunks(
+    query: string,
+    chunks: RetrievedChunk[],
+    taskType?: string,
+  ): { sufficient: boolean; reason: string };
+  buildEvidenceFirstAnswer(
+    query: string,
+    chunks: RetrievedChunk[],
+  ): string | null;
+  answerGenerationService: {
+    synthesizeEvidenceAnswer(
+      query: string,
+      chunks: Array<{ content: string }>,
+      signal?: AbortSignal,
+    ): Promise<string>;
+  };
+}
 
 describe('AgenticRagService budget boundaries', () => {
   function createService(overrides: Record<string, unknown> = {}) {
@@ -38,7 +58,7 @@ describe('AgenticRagService budget boundaries', () => {
     const llmProvider = {
       getModel: getModelMock,
     } as unknown as LlmProvider;
-    const karpathyRagService = {
+    const ragService = {
       answerDirect: jest.fn().mockResolvedValue(null),
       assessFastPath: jest.fn(),
       answer: jest.fn(),
@@ -59,7 +79,7 @@ describe('AgenticRagService budget boundaries', () => {
       unsupportedReliableAnswer: jest
         .fn()
         .mockReturnValue('知识库片段不足以支撑可靠回答，暂不生成确定结论。'),
-    } as unknown as jest.Mocked<KarpathyRagService>;
+    } as unknown as jest.Mocked<RagService>;
     const bochaSearchService = {
       isEnabled: jest.fn().mockReturnValue(false),
     } as unknown as BochaSearchService;
@@ -83,11 +103,39 @@ describe('AgenticRagService budget boundaries', () => {
     };
     const redisProvider = {} as RedisProvider;
     const agentLoop = { run: jest.fn() };
+    const evidencePolicy = {
+      rankEvidenceChunks: jest.fn((chunks: RetrievedChunk[]) =>
+        [...chunks].sort((left, right) => {
+          const leftHasRerank = left.rerankScore !== undefined;
+          const rightHasRerank = right.rerankScore !== undefined;
+          if (leftHasRerank !== rightHasRerank) {
+            return leftHasRerank ? -1 : 1;
+          }
+          const leftScore = left.rerankScore ?? left.totalScore;
+          const rightScore = right.rerankScore ?? right.totalScore;
+          return (
+            rightScore - leftScore ||
+            right.totalScore - left.totalScore ||
+            left.id.localeCompare(right.id)
+          );
+        }),
+      ),
+      assessRetrievedChunks: jest.fn(
+        (_query: string, chunks: RetrievedChunk[]) => ({
+          sufficient: chunks.length > 0,
+          reason: chunks.length > 0 ? '存在检索片段' : '没有检索片段',
+        }),
+      ),
+      buildEvidenceFirstAnswer: jest.fn().mockReturnValue(null),
+    } as unknown as EvidencePolicyService;
 
     const service = new AgenticRagService(
       config,
       llmProvider,
-      karpathyRagService,
+      ragService,
+      ragService,
+      ragService,
+      ragService,
       bochaSearchService,
       dashScopeRerankService,
       toolPolicy,
@@ -96,14 +144,16 @@ describe('AgenticRagService budget boundaries', () => {
       tracingService as never,
       redisProvider,
       agentLoop as never,
+      evidencePolicy,
     );
 
     return {
       service,
-      karpathyRagService,
+      ragService,
       llmProvider,
       getModelMock,
       badCaseFlywheel,
+      evidencePolicy,
     };
   }
 
@@ -128,6 +178,42 @@ describe('AgenticRagService budget boundaries', () => {
     expect(resolveAutoRoute(lookupPlan, false)).toBe('agentic');
   });
 
+  it('delegates ranking, sufficiency, and evidence-first answers to Evidence Policy', () => {
+    const { service, evidencePolicy } = createService();
+    const chunks = [
+      {
+        id: 'evidence-1',
+        content: '证据',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        bm25Score: 0.4,
+        cosineScore: 0.4,
+        totalScore: 0.4,
+      },
+    ];
+
+    const internals = service as unknown as AgenticRagServiceInternals;
+    const evidenceMocks = evidencePolicy as unknown as {
+      rankEvidenceChunks: jest.Mock;
+      assessRetrievedChunks: jest.Mock;
+      buildEvidenceFirstAnswer: jest.Mock;
+    };
+    internals.rankEvidenceChunks(chunks);
+    internals.assessRetrievedChunks('问题', chunks, 'lookup');
+    internals.buildEvidenceFirstAnswer('问题', chunks);
+
+    expect(evidenceMocks.rankEvidenceChunks).toHaveBeenCalledWith(chunks);
+    expect(evidenceMocks.assessRetrievedChunks).toHaveBeenCalledWith(
+      '问题',
+      chunks,
+      'lookup',
+    );
+    expect(evidenceMocks.buildEvidenceFirstAnswer).toHaveBeenCalledWith(
+      '问题',
+      chunks,
+    );
+  });
+
   it('passes request cancellation into evidence synthesis fallback', async () => {
     const { service, llmProvider } = createService();
     const invoke = jest.fn().mockResolvedValue('结论[片段1]');
@@ -137,8 +223,9 @@ describe('AgenticRagService budget boundaries', () => {
       .mockReturnValue('qwen');
     const controller = new AbortController();
 
+    const internals = service as unknown as AgenticRagServiceInternals;
     await expect(
-      (service as any).synthesizeEvidenceAnswer(
+      internals.answerGenerationService.synthesizeEvidenceAnswer(
         '问题',
         [{ content: '证据' }],
         controller.signal,
@@ -153,7 +240,7 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('keeps an explicitly selected agentic request on the state machine', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const invoke = jest.fn().mockResolvedValue({
       answer: '已完成深度处理。',
       retrievedChunks: [],
@@ -212,7 +299,7 @@ describe('AgenticRagService budget boundaries', () => {
       ),
     ).resolves.toMatchObject({ route: 'agentic' });
 
-    expect(karpathyRagService.assessFastPath).not.toHaveBeenCalled();
+    expect(ragService.assessFastPath).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -364,7 +451,7 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('does not use a direct-answer shortcut when current-turn attachments are evidence', async () => {
-    const { service, karpathyRagService, llmProvider } = createService();
+    const { service, ragService, llmProvider } = createService();
     const attachment = {
       ...chunk('attachment:1:1', 0.9),
       retrievalSource: 'attachment' as const,
@@ -379,14 +466,14 @@ describe('AgenticRagService budget boundaries', () => {
       chunks: [attachment],
       obsidianHits: [],
       prefetchedFastPath,
-    }) as unknown as jest.MockedFunction<KarpathyRagService['assessFastPath']>;
+    }) as unknown as jest.MockedFunction<RagService['assessFastPath']>;
     const answer = jest.fn().mockResolvedValue({
       answer: '附件资料给出的结果。',
       references: [attachment],
       retrievalSufficient: true,
-    }) as unknown as jest.MockedFunction<KarpathyRagService['answer']>;
-    karpathyRagService.assessFastPath = assessFastPath;
-    karpathyRagService.answer = answer;
+    }) as unknown as jest.MockedFunction<RagService['answer']>;
+    ragService.assessFastPath = assessFastPath;
+    ragService.answer = answer;
     const invoke = jest.fn();
     (llmProvider as unknown as { invoke: jest.Mock }).invoke = invoke;
     const queryPlan = {
@@ -461,27 +548,27 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('keeps a public QueryPlan on retrieval when a stale execution plan says direct-answer', async () => {
-    const { service, karpathyRagService, llmProvider } = createService();
+    const { service, ragService, llmProvider } = createService();
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
       obsidianHits: [],
     } as never;
-    karpathyRagService.assessFastPath.mockResolvedValue({
+    ragService.assessFastPath.mockResolvedValue({
       sufficient: true,
       reason: '已有本地证据',
       chunks: [],
       obsidianHits: [],
       prefetchedFastPath,
     });
-    karpathyRagService.answer.mockResolvedValue({
+    ragService.answer.mockResolvedValue({
       answer: '通过本地证据回答。',
       references: [],
       retrievalSufficient: true,
     });
     const invoke = jest.fn();
     (llmProvider as unknown as { invoke: jest.Mock }).invoke = invoke;
-    const assessFastPath = serviceMock(karpathyRagService, 'assessFastPath');
-    const answer = serviceMock(karpathyRagService, 'answer');
+    const assessFastPath = serviceMock(ragService, 'assessFastPath');
+    const answer = serviceMock(ragService, 'answer');
     const query = '核对这个公开事实';
     const queryPlan = {
       ...createFallbackQueryPlan(query),
@@ -536,14 +623,14 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('retrieves one shared candidate bundle from every execution-plan query', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const retrieve = jest
       .fn()
       .mockResolvedValue([
         chunk('candidate-original', 0.9),
         chunk('candidate-subquery', 0.8),
       ]);
-    karpathyRagService.retrieve = retrieve;
+    ragService.retrieve = retrieve;
     const executionPlan = {
       planVersion: 2 as const,
       sourcePolicy: 'local_only' as const,
@@ -649,10 +736,10 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('restores a legacy queryIntent from a checkpoint and passes its plan to retrieval', async () => {
-    const { service, karpathyRagService } = createService();
-    const retrieve = serviceMock(karpathyRagService, 'retrieve');
+    const { service, ragService } = createService();
+    const retrieve = serviceMock(ragService, 'retrieve');
     retrieve.mockResolvedValue([]);
-    (karpathyRagService.retrieveBm25Only as jest.Mock).mockResolvedValue([]);
+    (ragService.retrieveBm25Only as jest.Mock).mockResolvedValue([]);
     const legacyQueryIntent = {
       intent: 'objective_fact',
       contextMode: 'factual_verification',
@@ -786,19 +873,19 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('uses the Hybrid Fast Path as Auto direct-answer evidence instead of a second direct lookup', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
       obsidianHits: [],
     } as never;
-    karpathyRagService.assessFastPath.mockResolvedValue({
+    ragService.assessFastPath.mockResolvedValue({
       sufficient: true,
       reason: '结构化状态证据充分',
       chunks: [],
       obsidianHits: [],
       prefetchedFastPath,
     });
-    karpathyRagService.answer.mockResolvedValue({
+    ragService.answer.mockResolvedValue({
       answer: 'ACT100 已上线。',
       references: [],
       retrievalSufficient: true,
@@ -812,9 +899,9 @@ describe('AgenticRagService budget boundaries', () => {
       route: 'simple',
       retrievalSufficient: true,
     });
-    expect(karpathyRagService.answerDirect).not.toHaveBeenCalled();
-    expect(karpathyRagService.assessFastPath).toHaveBeenCalledTimes(1);
-    expect(karpathyRagService.answer).toHaveBeenCalledWith(
+    expect(ragService.answerDirect).not.toHaveBeenCalled();
+    expect(ragService.assessFastPath).toHaveBeenCalledTimes(1);
+    expect(ragService.answer).toHaveBeenCalledWith(
       'ACT100 的状态是什么？',
       [],
       undefined,
@@ -825,7 +912,7 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('reuses a sufficient Base Case Fast Path result in Auto simple route', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const reviewedChunk = chunk('reviewed-bad-case:feedback-1', 0.96);
     const prefetchedFastPath = {
       retrieval: {
@@ -844,14 +931,14 @@ describe('AgenticRagService budget boundaries', () => {
         },
       ],
     } as never;
-    karpathyRagService.assessFastPath.mockResolvedValue({
+    ragService.assessFastPath.mockResolvedValue({
       sufficient: true,
       reason: 'Base Case 证据充分',
       chunks: [reviewedChunk],
       obsidianHits: [],
       prefetchedFastPath,
     });
-    karpathyRagService.answer.mockResolvedValue({
+    ragService.answer.mockResolvedValue({
       answer: '韦水春是临床病理工作人员。',
       references: [reviewedChunk],
       retrievalSufficient: true,
@@ -863,7 +950,7 @@ describe('AgenticRagService budget boundaries', () => {
       route: 'simple',
       retrievalSufficient: true,
     });
-    expect(karpathyRagService.answer.mock.calls[0]).toEqual([
+    expect(ragService.answer.mock.calls[0]).toEqual([
       '韦水春是谁',
       [],
       undefined,
@@ -874,12 +961,9 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('caps retrieval query count and returned chunks', async () => {
-    const { service, karpathyRagService } = createService();
-    karpathyRagService.retrieve.mockResolvedValue([
-      chunk('c1', 0.9),
-      chunk('c2', 0.8),
-    ]);
-    karpathyRagService.retrieveBm25Only.mockResolvedValue([
+    const { service, ragService } = createService();
+    ragService.retrieve.mockResolvedValue([chunk('c1', 0.9), chunk('c2', 0.8)]);
+    ragService.retrieveBm25Only.mockResolvedValue([
       chunk('c3', 0.7),
       chunk('c4', 0.6),
     ]);
@@ -893,13 +977,13 @@ describe('AgenticRagService budget boundaries', () => {
       configurable: { userId: 'user-1' },
     });
 
-    expect(karpathyRagService.retrieve.mock.calls).toHaveLength(1);
+    expect(ragService.retrieve.mock.calls).toHaveLength(1);
     expect(
-      karpathyRagService.retrieve.mock.calls[0]?.[1]?.executionPlan?.queries?.map(
+      ragService.retrieve.mock.calls[0]?.[1]?.executionPlan?.queries?.map(
         (item: { text: string }) => item.text,
       ) ?? [],
     ).toEqual(['请分析差旅制度']);
-    expect(karpathyRagService.retrieveBm25Only.mock.calls).toHaveLength(0);
+    expect(ragService.retrieveBm25Only.mock.calls).toHaveLength(0);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
       'c1',
       'c2',
@@ -915,12 +999,12 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('merges planned correction and Obsidian evidence into explicit agentic retrieval', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const reviewed = chunk('reviewed', 0.96);
     const obsidian = chunk('obsidian', 0.82);
-    karpathyRagService.retrieve.mockResolvedValue([chunk('formal', 0.9)]);
-    karpathyRagService.toReviewedEvidenceChunks.mockReturnValue([reviewed]);
-    karpathyRagService.getObsidianContext.mockResolvedValue({
+    ragService.retrieve.mockResolvedValue([chunk('formal', 0.9)]);
+    ragService.toReviewedEvidenceChunks.mockReturnValue([reviewed]);
+    ragService.getObsidianContext.mockResolvedValue({
       hits: [
         {
           path: 'notes/rag.md',
@@ -933,7 +1017,7 @@ describe('AgenticRagService budget boundaries', () => {
       ],
       context: 'Obsidian context',
     });
-    karpathyRagService.toObsidianChunks.mockReturnValue([obsidian]);
+    ragService.toObsidianChunks.mockReturnValue([obsidian]);
 
     const result = await service.retrievalNode(
       {
@@ -952,12 +1036,12 @@ describe('AgenticRagService budget boundaries', () => {
       { configurable: { userId: 'user-1' } },
     );
 
-    expect(karpathyRagService.getObsidianContext).toHaveBeenCalledWith(
+    expect(ragService.getObsidianContext).toHaveBeenCalledWith(
       '请分析活动方案风险',
       'user-1',
       undefined,
     );
-    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith([
+    expect(ragService.toObsidianChunks).toHaveBeenCalledWith([
       expect.objectContaining({ path: 'notes/rag.md', type: 'note' }),
     ]);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual(
@@ -966,7 +1050,7 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('uses source-note hits to retrieve original chunks without keeping their summaries as evidence', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service, ragService } = createService();
     const sourceHit: ObsidianSearchHit = {
       path: 'notes/source.md',
       type: 'note',
@@ -999,18 +1083,18 @@ describe('AgenticRagService budget boundaries', () => {
       docId: 'source-doc',
       content: '原文：发布前必须由业务负责人复核。',
     };
-    karpathyRagService.retrieve.mockResolvedValue([]);
-    karpathyRagService.retrieveBm25Only.mockResolvedValue([]);
-    karpathyRagService.getObsidianContext.mockResolvedValue({
+    ragService.retrieve.mockResolvedValue([]);
+    ragService.retrieveBm25Only.mockResolvedValue([]);
+    ragService.getObsidianContext.mockResolvedValue({
       hits: [sourceHit, legacySourceHit, manualHit],
       context: 'source and manual notes',
     });
-    karpathyRagService.resolveObsidianSourceEvidence.mockResolvedValue({
+    ragService.resolveObsidianSourceEvidence.mockResolvedValue({
       chunks: [raw],
       mappedDocIds: new Set(['source-doc']),
       sourceNotePaths: new Set(['notes/source.md', 'notes/legacy-source.md']),
     });
-    karpathyRagService.toObsidianChunks.mockImplementation((hits) =>
+    ragService.toObsidianChunks.mockImplementation((hits) =>
       hits.map((hit) => chunk(`obsidian:${hit.path}`, 0.3)),
     );
 
@@ -1022,17 +1106,13 @@ describe('AgenticRagService budget boundaries', () => {
       { configurable: { userId: 'user-1' } },
     );
 
-    expect(
-      karpathyRagService.resolveObsidianSourceEvidence,
-    ).toHaveBeenCalledWith(
+    expect(ragService.resolveObsidianSourceEvidence).toHaveBeenCalledWith(
       '发布前必须由谁复核？',
       [sourceHit, legacySourceHit, manualHit],
       'user-1',
       {},
     );
-    expect(karpathyRagService.toObsidianChunks).toHaveBeenCalledWith([
-      manualHit,
-    ]);
+    expect(ragService.toObsidianChunks).toHaveBeenCalledWith([manualHit]);
     expect(result.retrievedChunks).toContainEqual(raw);
     expect(result.retrievedChunks?.map((item) => item.id)).not.toContain(
       'obsidian:notes/source.md',
@@ -1045,21 +1125,15 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('reuses fast-path evidence when agentic retrieval starts', async () => {
-    const { service, karpathyRagService } = createService();
-    const retrieve = serviceMock(karpathyRagService, 'retrieve');
-    const getObsidianContext = serviceMock(
-      karpathyRagService,
-      'getObsidianContext',
-    );
+    const { service, ragService } = createService();
+    const retrieve = serviceMock(ragService, 'retrieve');
+    const getObsidianContext = serviceMock(ragService, 'getObsidianContext');
     const toReviewedEvidenceChunks = serviceMock(
-      karpathyRagService,
+      ragService,
       'toReviewedEvidenceChunks',
     );
-    const toObsidianChunks = serviceMock(
-      karpathyRagService,
-      'toObsidianChunks',
-    );
-    karpathyRagService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
+    const toObsidianChunks = serviceMock(ragService, 'toObsidianChunks');
+    ragService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
       obsidianHits: [
@@ -1082,7 +1156,7 @@ describe('AgenticRagService budget boundaries', () => {
         },
       ],
     } as unknown as PrefetchedFastPath;
-    karpathyRagService.toObsidianChunks.mockReturnValue([
+    ragService.toObsidianChunks.mockReturnValue([
       chunk('obsidian:notes/fast-path.md', 0.8),
     ]);
 
@@ -1172,7 +1246,7 @@ describe('AgenticRagService budget boundaries', () => {
   });
 
   it('does not reject a sufficient original evidence bundle after planning one subquestion', async () => {
-    const { service, karpathyRagService } = createService();
+    const { service } = createService();
     const evidence = chunk('c1', 0.9);
 
     const result = await service.sufficiencyNode(
@@ -1260,8 +1334,8 @@ describe('AgenticRagService budget boundaries', () => {
   }
 });
 
-function serviceMock<K extends keyof KarpathyRagService>(
-  service: jest.Mocked<KarpathyRagService>,
+function serviceMock<K extends keyof RagService>(
+  service: jest.Mocked<RagService>,
   method: K,
 ): jest.Mock {
   return service[method] as unknown as jest.Mock;

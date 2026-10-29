@@ -10,6 +10,7 @@
 | `interview/resume/`       | 简历写法、业务证据、游戏营销项目表达     |
 | `interview/jd/`           | JD 要求、项目能力映射和缺口状态          |
 | `plans/`                  | 工程方案、增强计划、同步策略             |
+| `refactor/`              | 架构重构审计、兼容契约与验证证据；按阶段追加，禁止将未验证项标为完成 |
 | `architecture/`          | 技术架构、服务边界、部署和基础设施       |
 | `product/`                | PRD、管理后台功能和产品集成说明         |
 | `cli/`                    | RAG CLI 产品和技术设计                  |
@@ -69,9 +70,9 @@
 | `plans/remaining-enhancement-plan.md`               | 剩余增强项和生产化差距                                                                    |
 | `plans/game-production-rag-functional-plan.md`      | 游戏官网／活动场景的入库、检索、上下文、业务元数据、生命周期、Bad Case 和专项评测增强方案 |
 | `plans/expert-agent-difficulties-implementation.md` | 七项专家级 Agent／RAG 难点的实现入口、方案取舍、指标和真实验证                            |
-| `plans/karpathy-obsidian-dual-ingest-plan.md`       | Karpathy + Obsidian 统一知识链路方案                                                      |
+| `plans/compiled-knowledge-obsidian-dual-ingest-plan.md`       | 编译知识 + Obsidian 统一知识链路方案                                                      |
 | `plans/query-planning-and-unified-retrieval-refactor.md` | QueryPlan、统一检索、附件混合召回改造与验收记录                 |
-| `plans/游戏运营营销公开资料与Karpathy方案.md`       | PC／页游 Top100 公开资料抓取、入库、Simple Karpathy Fast Path 和最终验收口径                  |
+| `plans/游戏运营营销公开资料与编译知识方案.md`       | PC／页游 Top100 公开资料抓取、入库、Simple 编译知识 Fast Path 和最终验收口径                  |
 | `plans/official-docs-sync.md`                       | 官方文档夜间同步策略                                                                      |
 | `plans/image-to-image-search-spec.md`               | 图片以图搜图功能 Spec                                                                     |
 | `plans/image-to-image-search-plan.md`               | 图片以图搜图实施方案和验证计划                                                            |

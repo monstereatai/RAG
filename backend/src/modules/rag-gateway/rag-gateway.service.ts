@@ -1,27 +1,31 @@
-import { Injectable } from '@nestjs/common';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  RAG_RETRIEVAL_CAPABILITY,
+  type RagRetrievalCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { SkillsService } from '../skills/skills.service';
 import { RagContextDto, RagSearchDto } from './rag-gateway.dto';
 
 @Injectable()
 export class RagGatewayService {
   constructor(
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_RETRIEVAL_CAPABILITY)
+    private readonly ragService: RagRetrievalCapability,
     private readonly skillsService: SkillsService,
   ) {}
 
   async search(input: RagSearchDto, userId: string) {
     const limit = input.limit ?? 5;
     const [retrieval, reviewedEvidence] = await Promise.all([
-      this.karpathyRagService.retrieveDetailed(input.query, {}, userId),
-      this.karpathyRagService.retrieveReviewedEvidence(input.query, 2),
+      this.ragService.retrieveDetailed(input.query, {}, userId),
+      this.ragService.retrieveReviewedEvidence(input.query, 2),
     ]);
     const retrievedChunks = retrieval.chunks;
     const chunks = [...reviewedEvidence, ...retrievedChunks];
     const selectedChunks = chunks.slice(0, limit);
     const assessment =
       selectedChunks.length > 0
-        ? this.karpathyRagService.assessRetrievedChunks(
+        ? this.ragService.assessRetrievedChunks(
             input.query,
             selectedChunks,
           )

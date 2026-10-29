@@ -50,6 +50,8 @@ type IndexedDocument = {
   expiredAt?: string | null;
 };
 
+type EffectiveTimeRange = { from: string; to: string };
+
 export interface ElasticsearchSearchScope {
   projectId?: string;
   activityId?: string;
@@ -59,6 +61,7 @@ export interface ElasticsearchSearchScope {
   role?: string;
   documentType?: string;
   includeDeprecated?: boolean;
+  effectiveTime?: EffectiveTimeRange;
   /** 按文件扩展名过滤（filename.keyword wildcard `*.{fileType}`），如 'pdf' */
   fileType?: string;
   /** 按更新时间过滤：day=今天 / week=近7天 / month=近30天（updatedAt date math range） */
@@ -76,6 +79,31 @@ const BUSINESS_PROPERTIES = {
   lifecycleStatus: { type: 'keyword' },
   supersedesDocId: { type: 'keyword' },
 } satisfies Record<string, estypes.MappingProperty>;
+
+function effectiveTimeFilters(
+  range: EffectiveTimeRange,
+): estypes.QueryDslQueryContainer[] {
+  return [
+    {
+      bool: {
+        should: [
+          { bool: { must_not: [{ exists: { field: 'effectiveAt' } }] } },
+          { range: { effectiveAt: { lt: range.to } } },
+        ],
+        minimum_should_match: 1,
+      },
+    },
+    {
+      bool: {
+        should: [
+          { bool: { must_not: [{ exists: { field: 'expiredAt' } }] } },
+          { range: { expiredAt: { gt: range.from } } },
+        ],
+        minimum_should_match: 1,
+      },
+    },
+  ];
+}
 
 /**
  * Elasticsearch Provider
@@ -783,7 +811,13 @@ export class ElasticsearchProvider implements OnModuleInit {
         }[scope.updatedRange];
         if (gte) filter.push({ range: { updatedAt: { gte } } });
       }
-      if (!scope.includeDeprecated) {
+      if (scope.effectiveTime) {
+        filter.push(...effectiveTimeFilters(scope.effectiveTime));
+      }
+      const excludeDeprecated = scope.effectiveTime
+        ? scope.includeDeprecated === false
+        : !scope.includeDeprecated;
+      if (excludeDeprecated) {
         filter.push({
           bool: {
             must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
@@ -880,6 +914,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     opts?: {
       includeDeprecated?: boolean;
       allowedDocIds?: ReadonlySet<string>;
+      effectiveTime?: EffectiveTimeRange;
     },
   ): Promise<Array<{ id: string; score: number }>> {
     if (!this.enabled) return [];
@@ -893,7 +928,13 @@ export class ElasticsearchProvider implements OnModuleInit {
       } else if (userId) {
         filter.push({ term: { userId } });
       }
-      if (!opts?.includeDeprecated) {
+      if (opts?.effectiveTime) {
+        filter.push(...effectiveTimeFilters(opts.effectiveTime));
+      }
+      const excludeDeprecated = opts?.effectiveTime
+        ? opts.includeDeprecated === false
+        : !opts?.includeDeprecated;
+      if (excludeDeprecated) {
         filter.push({
           bool: {
             must_not: [{ term: { lifecycleStatus: 'deprecated' } }],

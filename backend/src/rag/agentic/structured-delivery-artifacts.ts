@@ -1,4 +1,4 @@
-import type { RetrievedChunk } from '../karpathy/karpathy-rag.service';
+import type { RetrievedChunk } from '../evidence/retrieval.types';
 import {
   createAgenticArtifact,
   type AgenticArtifact,

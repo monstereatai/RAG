@@ -1,0 +1,58 @@
+{
+  "baseCommit": "fb7d5dd9b8150667e563ea7017afb6a17c975d9b",
+  "protectedUserFiles": [
+    {
+      "path": ".obsidian/community-plugins.json",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/export-mermaid-diagrams/data.json",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/export-mermaid-diagrams/main.js",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/export-mermaid-diagrams/manifest.json",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/export-mermaid-diagrams/styles.css",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/obsidian-excalidraw-plugin/data.json",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/obsidian-excalidraw-plugin/main.js",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/obsidian-excalidraw-plugin/manifest.json",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/plugins/obsidian-excalidraw-plugin/styles.css",
+      "unchanged": true
+    },
+    {
+      "path": ".obsidian/workspace.json",
+      "unchanged": true
+    },
+    {
+      "path": "workspace/bm25-index.json",
+      "unchanged": true
+    }
+  ],
+  "publicContractSourceChanges": [
+    "backend/src/modules/agui/agui.service.ts",
+    "backend/src/modules/chat/chat.dto.ts"
+  ],
+  "notes": [
+    "ROADMAP.md retains prior text and adds refactor progress.",
+    "Contract changes are ChatMode type alias and AGUI type import only.",
+    "No database/schema/env/CI or agent-course file is in the implementation diff."
+  ]
+}

@@ -48,7 +48,7 @@ describe('RAG Pipeline Integration', () => {
       // 当向量库不可用时，BM25 作为降级应能独立返回结果
       expect(mockVectorStore.isConnected()).toBe(false);
       // BM25 索引是内存实现，不依赖外部服务
-      // 完整测试需要 KarpathyRagService 实例化，此处验证 mock 可工作
+      // 完整测试需要 RagService 实例化，此处验证 mock 可工作
     });
 
     it('should merge BM25 and vector results with deduplication', () => {
@@ -82,7 +82,7 @@ describe('RAG Pipeline Integration', () => {
   });
 
   describe('三模式路由', () => {
-    it('should route simple mode directly to KarpathyRag', () => {
+    it('should route simple mode directly to RAGRag', () => {
       // simple 模式不走 Agentic 管线
       const mode = 'simple';
       expect(mode).toBe('simple');

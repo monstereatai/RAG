@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { SkillsModule } from '../skills/skills.module';
 import { RagGatewayController } from './rag-gateway.controller';
 import { RagGatewayService } from './rag-gateway.service';
 
 @Module({
-  imports: [KarpathyRagModule, SkillsModule],
+  imports: [RagModule, SkillsModule],
   controllers: [RagGatewayController],
   providers: [RagGatewayService],
 })

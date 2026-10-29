@@ -9,8 +9,8 @@
 | 内容 | 当前状态 | 依据／尚缺证据 |
 | --- | --- | --- |
 | 精简 QueryPlan、确定性 RetrievalPolicy、旧 QueryIntent 运行记录适配 | 已实施并定向验证 | `backend/src/rag/planning/`、旧格式适配用例、ChatService 定向测试 |
-| Simple／Auto／Agentic 共用 `retrieveByPlan()`，多查询融合、权限／生命周期过滤和统一重排 | 已实施并定向验证 | Karpathy RAG 与 Agentic 定向测试；Chat modes 集成测试 7/7 |
-| 移除检索档位语义正则；图片证据纳入检索候选 | 已实施并定向验证 | `context-builder.ts`、Karpathy RAG 定向测试 |
+| Simple／Auto／Agentic 共用 `retrieveByPlan()`，多查询融合、权限／生命周期过滤和统一重排 | 已实施并定向验证 | 编译知识 RAG 与 Agentic 定向测试；Chat modes 集成测试 7/7 |
+| 移除检索档位语义正则；图片证据纳入检索候选 | 已实施并定向验证 | `context-builder.ts`、编译知识 RAG 定向测试 |
 | 会话附件 BM25 + 向量召回、用户／会话边界及 Redis v1 兼容 | 已实施并定向验证 | 附件定向测试覆盖无关附件、低相似度候选与旧格式兼容 |
 | 查询规划、附件命中指标及运行计划记录 | 已实施并通过真实运行核对 | Run Center 中三种模式均记录 QueryPlan、执行计划、检索结果和引用 |
 | 构建与代码级验证 | 已通过 | Backend build、Admin build；Query Routing 评测 13/13 |
@@ -90,14 +90,14 @@ Star 为 2026-10-17 查询时的近似值，只用来筛选成熟度，不作为
 
 | 能力 | 当前入口 | 处理意见 |
 | --- | --- | --- |
-| BM25／Elasticsearch + Vector | `backend/src/rag/karpathy/karpathy-rag.service.ts` | 保留 |
+| BM25／Elasticsearch + Vector | `backend/src/rag/rag.service.ts` | 保留 |
 | RRF 融合 | `fuseByRrf()` | 保留并增加跨查询加权融合 |
 | DashScope Rerank | `applyRerank()` | 保留，所有查询候选合并后只调用一次 |
 | 权限和租户范围 | `DocumentPermissionService`、`RetrieveOptions.scope` | 保留并继续在召回和融合后双重过滤 |
 | 描述命中后回原文 | `RetrievalDescriptionService` | 保留 |
 | 上下文去重、文档占比和字符预算 | `ContextBuilder` | 保留 |
 | GraphRAG | 改造前由旧意图字段控制 | 现由 `QueryPlan.needsGraph` 和后端执行计划显式控制 |
-| 引用和证据门禁 | Karpathy／Agentic 最终阶段 | 保留 |
+| 引用和证据门禁 | 编译知识／Agentic 最终阶段 | 保留 |
 
 ### 3.2 改造前问题（对应代码改造已实施）
 
@@ -118,7 +118,7 @@ Star 为 2026-10-17 查询时的近似值，只用来筛选成熟度，不作为
 
 #### 检索档位依赖正则
 
-`backend/src/rag/karpathy/context-builder.ts` 的 `detectRetrievalProfile()` 通过“比较、生成、流程”等关键词选择检索深度。表达方式变化后容易误判，也可能把同一个词在不同语境中的含义混在一起。
+`backend/src/rag/retrieval/context-builder.ts` 的 `detectRetrievalProfile()` 通过“比较、生成、流程”等关键词选择检索深度。表达方式变化后容易误判，也可能把同一个词在不同语境中的含义混在一起。
 
 #### 三种模式使用查询计划不一致
 
@@ -198,7 +198,7 @@ export interface RetrievalExecutionPlan {
 
 ### 4.3 UnifiedRetrieval：统一候选管线
 
-先在现有 `KarpathyRagService` 增加统一入口，不立即重写四千多行服务：
+先在现有 `RagService` 增加统一入口，不立即重写四千多行服务：
 
 ```ts
 retrieveByPlan(
@@ -272,11 +272,11 @@ retrieveByPlan(
 | `backend/src/rag/planning/query-plan.ts`、`query-planner.service.ts`、`retrieval-policy.service.ts` | 定义 QueryPlan、模型语义规划和后端确定性执行策略；旧 router 文件只保留兼容导出 |
 | `backend/src/rag/prompts/few-shot.examples.ts` | few-shot 改为精简 QueryPlan 示例 |
 | `backend/src/modules/chat/chat.service.ts` | 生成一次 QueryPlan，交给 Policy；删除对旧字段的散落判断 |
-| `backend/src/rag/karpathy/context-builder.ts` | 删除语义正则；只接收明确 profile |
-| `backend/src/rag/karpathy/karpathy-rag.service.ts` | 增加 `retrieveByPlan()`；并行执行查询集合；跨查询加权 RRF；统一 Rerank |
+| `backend/src/rag/retrieval/context-builder.ts` | 删除语义正则；只接收明确 profile |
+| `backend/src/rag/rag.service.ts` | 增加 `retrieveByPlan()`；并行执行查询集合；跨查询加权 RRF；统一 Rerank |
 | `backend/src/rag/agentic/agentic-rag.service.ts` | 移除独立消费 `rewriteQueries` 的路径；知识检索统一调用 planned retrieval；保留旧 checkpoint 节点 ID 与 SSE 事件名兼容 |
 | `backend/src/modules/agui/conversation-attachment.service.ts` | 新附件上传生成向量；BM25 + 向量召回；输出统一候选 |
-| `backend/src/rag/karpathy/karpathy-rag.module.ts` | 注册新增 Planner／Policy 服务 |
+| `backend/src/rag/rag.module.ts` | 注册新增 Planner／Policy 服务 |
 
 建议新增：
 
@@ -287,7 +287,7 @@ backend/src/rag/planning/
 └── retrieval-policy.service.ts
 ```
 
-第一轮不要直接拆散 `KarpathyRagService`。功能收敛并验证后，再按候选召回、融合排序、上下文组装拆文件，降低同时重构和改行为的风险。
+第一轮不要直接拆散 `RagService`。功能收敛并验证后，再按候选召回、融合排序、上下文组装拆文件，降低同时重构和改行为的风险。
 
 ## 7. 实施顺序与当前状态
 

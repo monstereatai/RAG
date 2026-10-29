@@ -83,7 +83,7 @@ flowchart TB
     Index[(Milvus／Elasticsearch／Neo4j\n语义／关键词／关系索引)]
     Knowledge[(PostgreSQL\n文档／版本／会话／Query Log／Bad Case／Artifact)]
     Memory[(Redis\n缓存／队列／Checkpoint／短期记忆)]
-    Obsidian[(本地编译知识\nKarpathy 直答资产／Obsidian notes)]
+    Obsidian[(本地编译知识\n编译知识直答资产／Obsidian notes)]
   end
 
   subgraph FLYWHEEL[质量闭环]
@@ -166,7 +166,7 @@ flowchart TB
 
 ```text
 知识从文件、URL、公开资料进入解析和质量门禁
-  → 父子切块后写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、Karpathy 和 Obsidian
+  → 父子切块后写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、编译知识 和 Obsidian
   → 用户问题经过 Simple／Auto／Agentic 路由
   → 关键词、向量、图谱和纠错证据统一召回、融合、重排和版本权限过滤
   → LLM Gateway 基于证据生成答案，Agentic 必要时调用 Tool／MCP
@@ -181,7 +181,7 @@ flowchart TB
 | 箭头颜色 | 代表流程 | 起点 | 经过的主要模块 | 终点／结果 |
 | --- | --- | --- | --- | --- |
 | 灰色 | 公共入口与服务分发 | React 页面和管理操作 | admin-backend、rag-backend | 完成认证、权限、审计和 API 分发；不属于某一条业务闭环 |
-| 绿色 | 知识入库流 | 文件、URL、公开资料、手工笔记 | 解析、质量门禁、父子切块、BullMQ Worker | 写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、Karpathy、Obsidian |
+| 绿色 | 知识入库流 | 文件、URL、公开资料、手工笔记 | 解析、质量门禁、父子切块、BullMQ Worker | 写入 PostgreSQL、Milvus、Elasticsearch、Neo4j、编译知识、Obsidian |
 | 紫色 | 用户问答流 | 用户问题 | Simple／Auto／Agentic、混合检索、RRF、Rerank、引用门禁、Tool／MCP、LLM Gateway | 返回带引用的答案；必要时降级或拒答 |
 | 橙色 | Bad Case 质量回流 | 用户反馈和 Bad Case | Agent Ops 审核、纠正答案、纠错索引、回归评测 | 重新召回验证，合格证据进入后续问答 |
 | 红色 | 观测与告警流 | 问答、队列、Agent、模型调用 | LangFuse、Prometheus、告警适配层 | Trace、指标、告警、审计和运营处理 |
@@ -198,7 +198,7 @@ flowchart TB
 2. **服务入口区**：React 请求先进入 `admin-backend` 或 `rag-backend`。`admin-backend` 主要负责管理端认证、权限、审计和代理；真正的问答、入库和 Agent 执行由 `rag-backend` 完成。
 3. **知识入库区**：文件、URL、公开资料和手工笔记经过解析、质量门禁、父子切块和版本治理，再由 BullMQ Worker 异步写入索引。
 4. **问答区**：Simple 与 Auto 先经过 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG；Auto 再按证据和复杂度决定是否升级 Agentic。
-5. **数据区**：PostgreSQL 保存业务状态和审计；Milvus、Elasticsearch、Neo4j 负责不同类型的检索；Redis 保存运行时状态；Karpathy 本地知识和 Obsidian 保存编译资产，其中 Karpathy 不构成独立在线路由。
+5. **数据区**：PostgreSQL 保存业务状态和审计；Milvus、Elasticsearch、Neo4j 负责不同类型的检索；Redis 保存运行时状态；本地编译知识和 Obsidian 保存编译资产，其中 编译知识 不构成独立在线路由。
 6. **质量闭环区**：错误答案不是直接覆盖，而是经过 Bad Case 审核、回灌、重新召回和回归验证后才再次参与回答。
 
 #### 再看四条主要链路
@@ -213,7 +213,7 @@ flowchart TB
   → BullMQ Worker 异步处理
   → PostgreSQL 保存元数据
   → Milvus／Elasticsearch／Neo4j 建立索引
-  → 按文档适用性并发生成 Obsidian 编译知识与 Karpathy 本地直答资产
+  → 按文档适用性并发生成 Obsidian 编译知识与 编译知识 本地直答资产
 ```
 
 这条链路解决“知识怎么进入系统，以及最新规范如何替换旧规范”。新版本索引成功后，旧版本变成 `deprecated`（注：已废弃），默认检索不再使用旧版本。
@@ -255,7 +255,7 @@ Agentic 不是直接让模型随便执行动作，而是先通过 `Tool Registry
 
 #### 面试时可以这样复述
 
-> 这个项目分成入口、服务、知识入库、问答编排、检索存储和质量运营几部分。知识从文件、URL 或公开资料进入后，经过解析、质量门禁、父子切块和版本治理，分别写入 PostgreSQL、Milvus、Elasticsearch、Neo4j 以及 Karpathy 和 Obsidian。用户提问后，由 Simple、Auto、Agentic 三档链路路由，经过关键词、向量、图谱和纠错证据的混合检索、融合重排、权限版本过滤和引用门禁，最后通过 LLM Gateway 生成答案。Agentic 复杂任务可以调用受控工具并产出结构化 Artifact；错误答案通过 Bad Case 审核、回灌和回归验证形成质量飞轮，LangFuse 和 Prometheus 负责单次调用与整体运行监控。
+> 这个项目分成入口、服务、知识入库、问答编排、检索存储和质量运营几部分。知识从文件、URL 或公开资料进入后，经过解析、质量门禁、父子切块和版本治理，分别写入 PostgreSQL、Milvus、Elasticsearch、Neo4j 以及 编译知识 和 Obsidian。用户提问后，由 Simple、Auto、Agentic 三档链路路由，经过关键词、向量、图谱和纠错证据的混合检索、融合重排、权限版本过滤和引用门禁，最后通过 LLM Gateway 生成答案。Agentic 复杂任务可以调用受控工具并产出结构化 Artifact；错误答案通过 Bad Case 审核、回灌和回归验证形成质量飞轮，LangFuse 和 Prometheus 负责单次调用与整体运行监控。
 
 ## 二、最短阅读路线
 
@@ -324,7 +324,7 @@ Tool、MCP、Skill 分别是什么？
 | 项目还有什么没实现                        | [JD 缺口状态](./jd/jd-gap-implementation-status.md)               | [项目真实进度](../../ROADMAP.md)                                |
 | 一线大厂岗位要求                          | [JD 要求与项目对照](./jd/jd-requirements-project-mapping.md)      | [高级岗位就绪度](./SENIOR_AGENT_INTERVIEW_READINESS.md)         |
 | 游戏官网／活动业务背景                    | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md)   | [游戏营销证据](./resume/game-marketing-rag-evidence.md)         |
-| 公开资料入库与 Simple Karpathy 验收        | [公开资料与 Karpathy 方案](../plans/游戏运营营销公开资料与Karpathy方案.md) | [功能步骤流程](./功能步骤流程.md) |
+| 公开资料入库与 Simple 编译知识 验收        | [公开资料与 编译知识方案](../plans/游戏运营营销公开资料与编译知识方案.md) | [功能步骤流程](./功能步骤流程.md) |
 | 简历怎么写                                | [通用 RAG 简历版](./resume/resume-rag-project.md)                 | [游戏营销简历版](./resume/resume-rag-project-game-marketing.md) |
 | 历次真实面试题和主人问过的问题            | [问题总清单](./USER_ARCHITECTURE_INTERVIEW_QUESTION_INVENTORY.md) | 表中标注的具体答案入口                                          |
 | AI 应用完整知识地图                       | [ProcessOn 知识图谱](./processon-ai-application-mindmap.md)       | [AgentGuide 对照](./agentguide-rag-interview-mapping.md)        |

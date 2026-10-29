@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { RetrievalProfile } from '../karpathy/context-builder';
+import type { RetrievalProfile } from '../retrieval/context-builder';
 
 const RETRIEVAL_CONFIG_LIMITS = {
   candidateDepth: [1, 50],

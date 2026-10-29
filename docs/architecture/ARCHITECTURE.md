@@ -349,7 +349,7 @@ backend/src
 ├── config/        # 环境变量解析和配置映射
 ├── modules/       # auth / document / chat / memory / graph / jobs / skills / metrics / tracing 等业务模块
 ├── providers/     # llm / embedding / speech / vector-store / db / redis / elasticsearch / mem0 / neo4j / mcp
-├── rag/           # karpathy / agentic / agents / prompts / router
+├── rag/           # application / retrieval / evidence / generation / agentic / agents
 ├── tools/         # RAG 工具与 Graph search 工具
 └── migrations/    # TypeORM migration
 ```
@@ -358,7 +358,7 @@ backend/src
 
 - `modules/*` 负责业务入口和用例编排。
 - `providers/*` 负责外部系统或可替换能力封装。
-- `rag/karpathy` 保持透明、可调试的精确直答与统一 Hybrid RAG 管线；文件名保留兼容，不代表独立 Karpathy 在线路由。
+- `rag/rag.service.ts` 是统一的线性 RAG 应用服务，负责编排共享召回、证据、生成和受治理直答；`rag/rag.module.ts` 通过 `RAG_QUERY_CAPABILITY`、`RAG_RETRIEVAL_CAPABILITY`、`RAG_INDEX_CAPABILITY`、`RAG_ADMIN_CAPABILITY` 暴露窄能力入口。
 - `rag/agentic` 负责 LangGraph 工作流和多步骤 Agentic RAG。
 - `common` 放横切能力，不承载业务规则。
 
@@ -586,3 +586,13 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - `CLAUDE.md`：项目规则。
 - `../plans/rag-plan.md`：早期计划和技术路线。
 - `../reference/SUMMARY.md`：`agent-course/` 参考能力总结。
+
+
+## 2026-10-29 RAG 职责边界收敛
+
+- `rag/retrieval` 承接 provider 召回、候选融合、过滤/重排、扩展与上下文选取；`rag/evidence` 承接充分性、确定性答案与引用门禁。
+- `rag/generation` 承接 grounded/correction/synthesis 和模型流式降级；生成消费已授权且保持本地引用顺序的片段。旧的单一检索服务命名与目录已退场；`RagService` 收敛为组合 Facade，BM25 持久化与状态由 `RagIndexService` 独占，检索、证据、Obsidian 和回答编排分别由 `RagRetrievalService`、`RagEvidenceService`、`RagObsidianService`、`RagAnswerService` 等窄服务承担。BM25 文件路径与 JSON 格式保持不变。
+- `rag/contracts` 定义中立 RequestContext、RetrievalExecutionPlan、结果/检索选项、附件证据与 Agentic 能力契约；不依赖业务 Service。Agentic 编排通过 Nest token 绑定兼容实现。
+- `DocumentIndexCoordinator` 接管索引写入/删除/失败清理及 Redis Milvus 删除补偿；DocumentService 保留原件、PG、ACL、版本业务与现有阶段编排。此边界不承诺跨数据库和搜索引擎事务。
+- Chat 的上下文系统消息有来源与实际预算；保留必需策略、整块裁剪可选记忆，历史预算对必需消息超额做让步。字符/token 估算仍为启发式，真实模型与工具预算验收待补。
+- Run、Task、RuntimeEvent、Checkpoint、Artifact 的权威分工保持，不合并为另一套状态容器。详细代码/验证/已知缺口见 [重构进度](../refactor/progress.md)。

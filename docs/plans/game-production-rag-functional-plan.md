@@ -84,8 +84,8 @@
 - 文档识别与质量门禁：`backend/src/modules/document/document-profile.util.ts`
 - 结构保护切片：`backend/src/modules/document/chunking.util.ts`
 - 入库路由与生命周期：`backend/src/modules/document/document.service.ts`
-- 自适应检索与上下文扩展：`backend/src/rag/karpathy/karpathy-rag.service.ts`
-- 去重、来源限额和上下文预算：`backend/src/rag/karpathy/context-builder.ts`
+- 自适应检索与上下文扩展：`backend/src/rag/rag.service.ts`
+- 去重、来源限额和上下文预算：`backend/src/rag/retrieval/context-builder.ts`
 - ES 业务过滤：`backend/src/providers/elasticsearch/elasticsearch.provider.ts`
 - 反馈与 Bad Case：`backend/src/modules/chat/rag-feedback.service.ts`
 - Schema migration：`backend/src/migrations/1783200000000-AddGameProductionRagGovernance.ts`

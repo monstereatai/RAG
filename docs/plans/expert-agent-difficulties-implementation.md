@@ -15,7 +15,7 @@
 - 背景：所有问题都跑 Agent 会提高首字延迟和成本，所有问题都走 simple 又无法处理复杂任务。
 - 选择：`simple` 直接混合检索与生成；`auto` 先做 Fast Path 充分性判断，不足再升级 Agentic；`agentic` 强制进入图。
 - 约束：扩展查询数、检索次数、chunk 数、联网结果、Rerank topN 和反思次数都有上限；超长自动问题降级 simple。
-- 入口：`backend/src/rag/agentic/agentic-rag.service.ts`、`backend/src/rag/karpathy/karpathy-rag.service.ts`。
+- 入口：`backend/src/rag/agentic/agentic-rag.service.ts`、`backend/src/rag/rag.service.ts`。
 - 效果：项目真实服务回放 simple／auto 共 28／28 通过；首 token 进入 Prometheus 指标。
 
 ## 3. 混合检索与结构保护切片
@@ -23,7 +23,7 @@
 - 背景：中文专有名词、缩写、版本号靠纯向量容易漏召回；表格、代码、接口契约被定长切碎后无法支撑引用。
 - 选择：BM25／Elasticsearch 与向量检索经 RRF 融合，再做 Rerank；Chunk 保留完整 headingPath、父子关系、source span、表头和内容类型。
 - 治理：支持同 Section／相邻块扩展、语义去重、单文档限额、来源多样性和 Lost-in-the-Middle 排布；向量失败降级 BM25。
-- 入口：`backend/src/modules/document/chunking.util.ts`、`backend/src/rag/karpathy/`。
+- 入口：`backend/src/modules/document/chunking.util.ts`、`backend/src/rag/retrieval/`。
 - 效果：结构切片与混合检索定向测试通过；真实项目回放覆盖版本冲突、缩写、跨文档、拒答和强引用。
 
 ## 4. 分层结构化记忆

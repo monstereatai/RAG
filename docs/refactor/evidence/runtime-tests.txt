@@ -1,0 +1,30 @@
+[Nest] 9156  - 10/29/2026, 5:58:49 PM    WARN [ProductionWorkflowService] backend structured output attempt 1 failed: model unavailable
+PASS src/modules/workflow/production-workflow.service.spec.ts
+[Nest] 9156  - 10/29/2026, 5:58:50 PM    WARN [ProductionWorkflowService] backend structured output attempt 2 failed: model unavailable
+PASS src/modules/agent-runs/agent-runs.service.spec.ts
+PASS src/modules/agent-loop/agent-loop.service.spec.ts
+PASS src/modules/workflow/production-workflow.tools.spec.ts
+PASS src/modules/artifacts/public-artifacts.controller.spec.ts
+PASS src/tools/tool-execution.service.spec.ts
+PASS src/modules/agent-tasks/agent-tasks.service.spec.ts
+PASS src/modules/artifacts/artifact-generator.service.spec.ts
+PASS src/modules/supervisor/supervisor.service.spec.ts
+[Nest] 9156  - 10/29/2026, 5:58:55 PM     LOG [SupervisorService] Domain matched by keywords: tech
+[Nest] 9156  - 10/29/2026, 5:58:55 PM     LOG [SupervisorService] Routed to domain: tech (技术/编程/架构/工程)
+PASS src/modules/agent-runtime-events/agent-runtime-events.service.spec.ts
+PASS src/modules/agent-runtime/agent-runtime.service.spec.ts
+PASS src/modules/workflow/playway-component-registry.spec.ts
+PASS src/modules/workflow/production-workflow.plan.spec.ts
+PASS src/modules/artifacts/artifact-queue.service.spec.ts
+PASS src/tools/tool-execution-policy.service.spec.ts
+[Nest] 9156  - 10/29/2026, 5:58:57 PM    WARN [ArtifactQueueService] Artifact queue is unavailable because Redis is required in production; enqueue will fail closed.
+[Nest] 9156  - 10/29/2026, 5:58:57 PM    WARN [ArtifactQueueService] Artifact queue uses in-process fallback because Redis is unavailable.
+PASS src/modules/artifacts/artifact-intent.spec.ts
+PASS src/modules/workflow/agentic-workflow.mermaid.spec.ts
+
+Test Suites: 17 passed, 17 total
+Tests:       80 passed, 80 total
+Snapshots:   0 total
+Time:        11.655 s
+Ran all test suites matching /src\/modules\/agent-loop|src\/modules\/agent-runtime|src\/modules\/agent-runs|src\/modules\/agent-runtime-events|src\/modules\/agent-tasks|src\/modules\/workflow|src\/modules\/supervisor|src\/modules\/artifacts|src\/tools\/tool-execution/i.
+Test results written to: ../docs/refactor/evidence/runtime-tests.json

@@ -1,0 +1,11 @@
+Admin Karpathy reference scan
+- admin/src: 0 matches for Karpathy/karpathy
+- admin-backend/src: 0 matches for Karpathy/karpathy
+- admin/dist after rebuild: 0 matches
+- admin-backend/dist after rebuild: 0 matches
+- Admin UI continues to call RAG through RagClientService HTTP boundary; no concrete RAG/Karpathy service import.
+Validation:
+- pnpm --dir admin run build: PASS
+- pnpm --dir admin run tsc: PASS
+- pnpm --dir admin-backend run build: PASS
+- admin-backend targeted rag-client/search-ops tests: 2 suites / 40 tests PASS

@@ -8,7 +8,7 @@ import {
   IndexType,
 } from '@zilliz/milvus2-sdk-node';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
-import { buildFewShotExampleEntries } from '../prompts/few-shot.examples';
+import { buildFewShotExampleEntries } from './few-shot.examples';
 
 /**
  * 语义示例选择器

@@ -23,8 +23,8 @@
 | PC／页游候选目录 | `backend/eval/game-marketing-top100.catalog.json` | PC 端 50 个、页游 50 个 |
 | 公开页面采集器 | `backend/scripts/collect-game-marketing-top100.mjs` | 127 个页面实际抓取成功 |
 | Markdown 快照 | `backend/eval/game-marketing-top100-markdown/` | 官网、活动、运营、营销、社区资料落盘 |
-| Simple Karpathy 方案 | `docs/plans/游戏运营营销公开资料与Karpathy方案.md` | 用户流程、数据流和路由边界已记录 |
-| 最终入库 | PostgreSQL、Milvus、BM25／ES、Karpathy、Obsidian | 108 份唯一目标文档全部完成索引 |
+| Simple 编译知识方案 | `docs/plans/游戏运营营销公开资料与编译知识方案.md` | 用户流程、数据流和路由边界已记录 |
+| 最终入库 | PostgreSQL、Milvus、BM25／ES、编译知识、Obsidian | 108 份唯一目标文档全部完成索引 |
 
 这批资料是公开网页快照和项目设计资料，用于证明采集、治理、检索和回归链路，不应在面试中表述成公司的真实业务数据、线上准确率或用户采纳率。
 

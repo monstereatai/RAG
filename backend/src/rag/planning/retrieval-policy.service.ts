@@ -1,30 +1,18 @@
+import { scopeForEffectiveTime } from '../retrieval/effective-time';
 import { Injectable } from '@nestjs/common';
-import type { RetrievalProfile } from '../karpathy/context-builder';
-import { retrievalProfileForTaskType } from '../karpathy/context-builder';
-import type { RetrievalScope } from '../karpathy/karpathy-rag.service';
+import type { RetrievalProfile } from '../evidence/retrieval.types';
+import { retrievalProfileForTaskType } from '../retrieval/context-builder';
+import type { RetrievalScope } from '../evidence/retrieval.types';
 import type { QueryPlan, QuerySourcePolicy } from './query-plan';
+import type {
+  PlannedRetrievalQuery,
+  RetrievalExecutionPlan,
+} from '../contracts/retrieval-execution-plan';
 
-export interface PlannedRetrievalQuery {
-  text: string;
-  kind: 'original' | 'standalone' | 'sub_query';
-  weight: number;
-}
-
-export interface RetrievalExecutionPlan {
-  planVersion: 2;
-  sourcePolicy: QuerySourcePolicy;
-  queries: PlannedRetrievalQuery[];
-  profile: RetrievalProfile;
-  useGraph: boolean;
-  scope?: RetrievalScope;
-  /** 是否由用户显式知识库／Scope 或计划过滤器限定了本地检索范围。 */
-  scopeRestricted?: boolean;
-  reasonCode:
-    | 'internal_evidence_required'
-    | 'realtime_web_allowed'
-    | 'stable_public_direct'
-    | 'public_retrieval';
-}
+export type {
+  PlannedRetrievalQuery,
+  RetrievalExecutionPlan,
+} from '../contracts/retrieval-execution-plan';
 
 export interface RetrievalPolicyOptions {
   /** 用户显式选择知识库或业务 Scope 时，禁止公共知识／联网策略绕过该范围。 */
@@ -45,15 +33,16 @@ export class RetrievalPolicyService {
     const contextualMode = ['setting', 'follow_up', 'mixed'].includes(
       plan.contextMode,
     );
-    const narrowedScope = this.narrowScope(scope);
+    const narrowedScope = scopeForEffectiveTime(original, this.narrowScope(scope));
     const scopeRestricted = Boolean(
       options.forceLocal ||
+      narrowedScope?.effectiveTime ||
       scope?.projectId?.trim() ||
       scope?.activityId?.trim() ||
       scope?.region?.trim() ||
       scope?.locale?.trim() ||
       scope?.channel?.trim() ||
-      scope?.documentType?.trim()
+      scope?.documentType?.trim(),
     );
     const sourcePolicy: QuerySourcePolicy =
       scopeRestricted || plan.domain === 'internal' || contextualMode
@@ -108,7 +97,9 @@ export class RetrievalPolicyService {
    * 若直接作为 filter 会把“用户反馈处理规范”这类实体词误当成 projectId，
    * 导致已授权文档被错误过滤。
    */
-  private narrowScope(scope: RetrievalScope | undefined): RetrievalScope | undefined {
+  private narrowScope(
+    scope: RetrievalScope | undefined,
+  ): RetrievalScope | undefined {
     if (scope == null) return undefined;
     return { ...scope };
   }

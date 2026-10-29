@@ -1,17 +1,29 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   Optional,
 } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import {
-  KarpathyRagService,
+import type {
   RetrieveOptions,
-  RetrievedChunk,
-  type PrefetchedFastPath,
-} from '../karpathy/karpathy-rag.service';
+  PrefetchedFastPath,
+} from '../contracts/rag-types';
+import type { RetrievedChunk } from '../evidence/retrieval.types';
+import { EvidencePolicyService } from '../evidence/evidence-policy.service';
+import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
+import {
+  AGENTIC_FAST_PATH_CAPABILITY,
+  AGENTIC_RETRIEVAL_CAPABILITY,
+  AGENTIC_SIMPLE_ANSWER_CAPABILITY,
+  AGENTIC_SUPPORTING_EVIDENCE_CAPABILITY,
+  type AgenticFastPathCapability,
+  type AgenticRetrievalCapability,
+  type AgenticSimpleAnswerCapability,
+  type AgenticSupportingEvidenceCapability,
+} from '../contracts/agentic-rag-capabilities';
 import { SseCallback } from './sse-event';
 import {
   AgenticRagState,
@@ -30,8 +42,8 @@ import {
   type QueryPlan,
   type QueryTaskType,
 } from '../planning/query-plan';
-import type { RetrievalExecutionPlan } from '../planning/retrieval-policy.service';
-import { retrievalProfileForTaskType } from '../karpathy/context-builder';
+import type { RetrievalExecutionPlan } from '../contracts/retrieval-execution-plan';
+import { retrievalProfileForTaskType } from '../retrieval/context-builder';
 import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
 import {
   reflectionPrompt,
@@ -64,7 +76,7 @@ import { AgenticArtifactStoreService } from './agentic-artifact-store.service';
 import { AgenticAnswerGenerationService } from './agentic-answer-generation.service';
 import { randomUUID } from 'node:crypto';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
-import type { RequestContext } from '../../modules/chat/chat-runtime.types';
+import type { RequestContext } from '../contracts/request-context';
 import {
   appliesToQuery,
   type EvidenceBundle,
@@ -107,7 +119,14 @@ export class AgenticRagService {
   constructor(
     private readonly configService: ConfigService,
     private readonly llmProvider: LlmProvider,
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(AGENTIC_RETRIEVAL_CAPABILITY)
+    private readonly retrievalCapability: AgenticRetrievalCapability,
+    @Inject(AGENTIC_FAST_PATH_CAPABILITY)
+    private readonly fastPathCapability: AgenticFastPathCapability,
+    @Inject(AGENTIC_SIMPLE_ANSWER_CAPABILITY)
+    private readonly simpleAnswerCapability: AgenticSimpleAnswerCapability,
+    @Inject(AGENTIC_SUPPORTING_EVIDENCE_CAPABILITY)
+    private readonly supportingEvidenceCapability: AgenticSupportingEvidenceCapability,
     private readonly bochaSearchService: BochaSearchService,
     private readonly dashScopeRerankService: DashScopeRerankService,
     private readonly toolPolicy: ToolExecutionPolicyService,
@@ -116,6 +135,7 @@ export class AgenticRagService {
     private readonly tracingService: TracingService,
     private readonly redisProvider: RedisProvider,
     agentLoop: AgentLoopService,
+    private readonly evidencePolicy: EvidencePolicyService,
     @Optional() private readonly toolExecution?: ToolExecutionService,
     @Optional() private readonly securityAudit?: SecurityAuditService,
     @Optional()
@@ -127,9 +147,11 @@ export class AgenticRagService {
       answerGenerationService ??
       new AgenticAnswerGenerationService(
         llmProvider,
-        karpathyRagService,
+        new GroundedAnswerGenerationService(llmProvider, this.evidencePolicy),
+        this.evidencePolicy,
         badCaseFlywheel,
         agentLoop,
+        this.retrievalCapability,
       );
     this.confidenceThreshold = this.numberConfig(
       'agentic.confidenceThreshold',
@@ -433,7 +455,7 @@ export class AgenticRagService {
       this.resolveExecutionPlan(state.query, retrieveOptions);
     const formalRetrieval = fastPathChunks.length
       ? Promise.resolve(fastPathChunks)
-      : this.karpathyRagService
+      : this.retrievalCapability
           .retrieve(
             state.query,
             {
@@ -469,7 +491,7 @@ export class AgenticRagService {
       await Promise.all([
         retrievedSubQuestionsPromise,
         Promise.resolve(
-          this.karpathyRagService.toReviewedEvidenceChunks(
+          this.supportingEvidenceCapability.toReviewedEvidenceChunks(
             state.badCaseMatches?.length
               ? state.badCaseMatches
               : (prefetchedFastPath?.badCaseMatches ?? []),
@@ -480,11 +502,12 @@ export class AgenticRagService {
           : prefetchedFastPath?.obsidianHits
             ? Promise.resolve({
                 hits: prefetchedFastPath.obsidianHits,
-                context: this.karpathyRagService.formatObsidianContext(
-                  prefetchedFastPath.obsidianHits,
-                ),
+                context:
+                  this.supportingEvidenceCapability.formatObsidianContext(
+                    prefetchedFastPath.obsidianHits,
+                  ),
               })
-            : this.karpathyRagService
+            : this.supportingEvidenceCapability
                 .getObsidianContext(
                   state.query,
                   userId,
@@ -493,7 +516,7 @@ export class AgenticRagService {
                 .catch(() => ({ hits: [], context: '' })),
       ]);
     const sourceResolution =
-      await this.karpathyRagService.resolveObsidianSourceEvidence(
+      await this.supportingEvidenceCapability.resolveObsidianSourceEvidence(
         state.query,
         obsidianContext.hits,
         userId,
@@ -503,7 +526,7 @@ export class AgenticRagService {
       (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
     );
     const obsidianChunks =
-      this.karpathyRagService.toObsidianChunks(obsidianEvidenceHits);
+      this.supportingEvidenceCapability.toObsidianChunks(obsidianEvidenceHits);
     const allResults = retrievedSubQuestions.map((item) => item.results);
     const updatedSubQuestions: AgenticSubQuestion[] = retrievedSubQuestions.map(
       ({ results, ...subQuestion }) => {
@@ -1986,7 +2009,7 @@ export class AgenticRagService {
     // 显式 Agentic 直接进入状态机，按 QueryPlan 取证。
     const fastPathGate =
       !multiIntent && mode === 'auto'
-        ? await this.karpathyRagService.assessFastPath(
+        ? await this.fastPathCapability.assessFastPath(
             query,
             userId,
             retrieveOptions,
@@ -2037,7 +2060,7 @@ export class AgenticRagService {
     }
 
     if (route === 'simple') {
-      const result = await this.karpathyRagService.answer(
+      const result = await this.simpleAnswerCapability.answer(
         query,
         history,
         userId,
@@ -2047,7 +2070,7 @@ export class AgenticRagService {
           ? {
               ...retrieveOptions,
               prefetchedFastPath: fastPathGate.prefetchedFastPath,
-              karpathyDirectAnswer: true,
+              governedDirectAnswer: true,
             }
           : retrieveOptions,
       );
@@ -2069,7 +2092,7 @@ export class AgenticRagService {
 
     const obsidianContext = {
       hits: fastPathGate?.obsidianHits ?? [],
-      context: this.karpathyRagService.formatObsidianContext(
+      context: this.supportingEvidenceCapability.formatObsidianContext(
         fastPathGate?.obsidianHits ?? [],
       ),
     };
@@ -2493,19 +2516,7 @@ export class AgenticRagService {
   }
 
   private rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[] {
-    const sharedRanker = (
-      this.karpathyRagService as KarpathyRagService & {
-        rankEvidenceChunks?: (items: RetrievedChunk[]) => RetrievedChunk[];
-      }
-    ).rankEvidenceChunks;
-    if (typeof sharedRanker === 'function') {
-      return sharedRanker.call(this.karpathyRagService, chunks);
-    }
-    return [...chunks].sort((left, right) => {
-      const leftScore = left.rerankScore ?? left.totalScore;
-      const rightScore = right.rerankScore ?? right.totalScore;
-      return rightScore - leftScore;
-    });
+    return this.evidencePolicy.rankEvidenceChunks(chunks);
   }
 
   private assessRetrievedChunks(
@@ -2513,40 +2524,14 @@ export class AgenticRagService {
     chunks: RetrievedChunk[],
     taskType?: QueryTaskType,
   ): { sufficient: boolean; reason: string } {
-    const assessor = (
-      this.karpathyRagService as KarpathyRagService & {
-        assessRetrievedChunks?: (
-          question: string,
-          evidence: RetrievedChunk[],
-          taskType?: QueryTaskType,
-        ) => { sufficient: boolean; reason: string };
-      }
-    ).assessRetrievedChunks;
-    // 兼容轻量测试替身和可选 RAG 网关：没有统一质量门禁时，只把非空
-    // 片段交给后续节点继续判断，不因为测试替身缺方法而直接崩溃。
-    return typeof assessor === 'function'
-      ? assessor.call(this.karpathyRagService, query, chunks, taskType)
-      : {
-          sufficient: chunks.length > 0,
-          reason: chunks.length > 0 ? '存在检索片段' : '没有检索片段',
-        };
+    return this.evidencePolicy.assessRetrievedChunks(query, chunks, taskType);
   }
 
   private buildEvidenceFirstAnswer(
     query: string,
     chunks: RetrievedChunk[],
   ): string | null {
-    const builder = (
-      this.karpathyRagService as KarpathyRagService & {
-        buildEvidenceFirstAnswer?: (
-          question: string,
-          evidence: RetrievedChunk[],
-        ) => string | null;
-      }
-    ).buildEvidenceFirstAnswer;
-    return typeof builder === 'function'
-      ? builder.call(this.karpathyRagService, query, chunks)
-      : null;
+    return this.evidencePolicy.buildEvidenceFirstAnswer(query, chunks);
   }
 
   private async withTimeout<T>(

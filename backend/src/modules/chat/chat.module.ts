@@ -5,7 +5,7 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { AgenticRagModule } from '../../rag/agentic/agentic-rag.module';
 import { MemoryModule } from '../memory/memory.module';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
@@ -39,7 +39,7 @@ import { ChatQueryLogService } from './chat-query-log.service';
       KnowledgeBaseProfileEntity,
     ]),
     ConfigModule,
-    KarpathyRagModule,
+    RagModule,
     AgenticRagModule,
     MemoryModule,
     EmbeddingModule,

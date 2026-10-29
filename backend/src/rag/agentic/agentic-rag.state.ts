@@ -1,8 +1,6 @@
 import { Annotation } from '@langchain/langgraph';
-import type {
-  RetrieveOptions,
-  RetrievedChunk,
-} from '../karpathy/karpathy-rag.service';
+import type { RetrieveOptions } from '../contracts/rag-types';
+import type { RetrievedChunk } from '../evidence/retrieval.types';
 import type { BadCaseMatch } from '../prompts/bad-case-flywheel.service';
 
 export interface AgenticSubQuestion {

@@ -10,7 +10,7 @@
 - Agentic 编排：LangGraph 状态机、Query Augment、Retrieval、Sufficiency、Web Search、Rerank、Generate、Reflection。
 - 工具调用：Bocha Web Search、DashScope Rerank、Graph Search、MCP Provider、ASR/TTS、Vision Provider 脚手架。
 - 工程化：NestJS 模块化、SSE/AG-UI、Prometheus 指标、LangFuse 可选 Trace、评测脚本、后台运营。
-- 企业落地：多租户隔离、文档权限、审计日志、GraphOps、QA Ops、CLI、Obsidian/Karpathy 知识编译。
+- 企业落地：多租户隔离、文档权限、审计日志、GraphOps、QA Ops、CLI、Obsidian/编译知识 知识编译。
 
 但不要把它说成“一线大厂生产系统已经完整具备”。目前比较明显的差距是：
 
@@ -72,9 +72,9 @@ BOSS/公开 JD 补充观察：
 
 | 招聘要求 | 项目是否对得上 | 项目实现内容 | 代码 / 文档位置 | 面试回答边界 |
 |---|---:|---|---|---|
-| RAG 基础链路 | 已实现 | 文档进入系统后做切片、Embedding、BM25/ES、Milvus 检索、RRF 融合、生成、引用、拒答 | `backend/src/rag/karpathy/karpathy-rag.service.ts:323`、`backend/src/rag/karpathy/karpathy-rag.service.ts:438` | 可以说“不是纯向量问答，是 hybrid retrieval + citation + refusal” |
-| 向量数据库 | 已实现 | Milvus 相似度检索，失败时降级 BM25 | `backend/src/rag/karpathy/karpathy-rag.service.ts:351`、`backend/src/providers/vector-store/milvus.vector-store.ts` | 可以讲 Milvus，但本机 Milvus timeout 仍依赖降级 |
-| 关键词 / ES 检索 | 已实现 | 本地 BM25 + Elasticsearch 搜索合并 | `backend/src/rag/karpathy/karpathy-rag.service.ts:334`、`backend/src/providers/elasticsearch/elasticsearch.provider.ts` | 可以说企业中文知识库不能只靠向量 |
+| RAG 基础链路 | 已实现 | 文档进入系统后做切片、Embedding、BM25/ES、Milvus 检索、RRF 融合、生成、引用、拒答 | `backend/src/rag/rag.service.ts:323`、`backend/src/rag/rag.service.ts:438` | 可以说“不是纯向量问答，是 hybrid retrieval + citation + refusal” |
+| 向量数据库 | 已实现 | Milvus 相似度检索，失败时降级 BM25 | `backend/src/rag/rag.service.ts:351`、`backend/src/providers/vector-store/milvus.vector-store.ts` | 可以讲 Milvus，但本机 Milvus timeout 仍依赖降级 |
+| 关键词 / ES 检索 | 已实现 | 本地 BM25 + Elasticsearch 搜索合并 | `backend/src/rag/rag.service.ts:334`、`backend/src/providers/elasticsearch/elasticsearch.provider.ts` | 可以说企业中文知识库不能只靠向量 |
 | Rerank | 已实现 | DashScope Rerank 工具，Agentic 链路可开关，失败降级 | `backend/src/rag/agentic/agentic-rag.service.ts:20`、`backend/src/tools/dashscope-rerank.service.ts` | 依赖外部 key，没 key 时不能说真实 rerank 生效 |
 | Agentic Workflow | 已实现 | LangGraph 状态机：queryAugment、retrieval、sufficiency、webSearchFallback、rerank、generate、humanApproval、reflection | `backend/src/rag/agentic/agentic-rag.service.ts:111` | 要说“状态机编排”，不要说“多个 Agent 自己聊天” |
 | Planning / Acting / Reflection | 已实现主体 | Query plan / query augment 属于 planning，retrieval/tool 属于 acting，reflection 负责质量自检和重试 | `backend/src/rag/agentic/agentic-rag.service.ts:31`、`backend/src/rag/agentic/agentic-rag.service.ts:154` | 可以讲闭环，但不是通用 AutoGPT 类无限规划执行 |
@@ -86,7 +86,7 @@ BOSS/公开 JD 补充观察：
 | MCP | 已实现基础 | 读取 `mcp-servers.yaml`，用 `MultiServerMCPClient` 初始化 server，加载工具并带 source | `backend/src/providers/mcp/mcp.provider.ts:31`、`backend/src/providers/mcp/mcp.provider.ts:71` | 是 MCP Provider 和 smoke 能力，不是接了一堆真实业务 MCP server |
 | A2A | 未实现 | 当前没有 Agent-to-Agent 协议实现 | 无 | 只能说了解概念，项目没有接 |
 | Memory 长短期记忆 | 已实现 | Mem0 user/session 分层；会话前检索记忆，回答后分类写入 | `backend/src/modules/memory/memory.service.ts:10`、`backend/src/modules/memory/memory.service.ts:89`、`backend/src/modules/memory/memory.service.ts:132` | 可以讲 conversation memory / semantic memory；别说有复杂遗忘策略和合规留存 |
-| Obsidian／Karpathy 知识编译 | 已实现 | Karpathy 本地知识进入精确直答门禁；直答未命中后，RAG chunks（检索片段）和 Obsidian hits（命中项）合并成统一 evidence（证据） | `backend/src/rag/karpathy/karpathy-rag.service.ts`、`backend/src/modules/obsidian/obsidian-knowledge.service.ts` | 可以讲个人知识库和企业 RAG 互补，但不表述为独立在线链路 |
+| Obsidian／编译知识 知识编译 | 已实现 | 本地编译知识进入精确直答门禁；直答未命中后，RAG chunks（检索片段）和 Obsidian hits（命中项）合并成统一 evidence（证据） | `backend/src/rag/rag.service.ts`、`backend/src/modules/obsidian/obsidian-knowledge.service.ts` | 可以讲个人知识库和企业 RAG 互补，但不表述为独立在线链路 |
 | GraphRAG | 已实现基础 | Neo4j Provider、Graph service、GraphOps、seed 数据、Graph Search | `backend/src/modules/graph/graph.service.ts`、`backend/src/providers/neo4j/neo4j.provider.ts`、`admin/src/pages/graph-ops/index.tsx` | 真实业务图谱仍是模拟，不要说已经接公司真实知识图谱 |
 | 多智能体协同 | 部分实现 | 更准确是 LangGraph 多节点状态机，不是多个自治 Agent 互相协商 | `backend/src/rag/agentic/agentic-rag.service.ts:111` | 面试要主动纠正：“我这里不是自由聊天多 Agent” |
 | Human-in-the-loop | 已实现后端基础 | `enableInterrupt=true` 时生成后暂停，等待 approve/reject，再 resume graph | `backend/src/rag/agentic/agentic-rag.service.ts:783`、`backend/src/rag/agentic/agentic-rag.service.ts:844`、`backend/src/modules/chat/chat.controller.ts:196` | 后端能力有，完整前端审批工作台/业务审批流不算生产完成 |
@@ -97,14 +97,14 @@ BOSS/公开 JD 补充观察：
 | 灰度 / A/B / 效果回归 | 部分实现偏弱 | 有 eval gate 和 maturity gate；没有线上灰度分流、A/B 实验和发布门禁平台 | `backend/scripts/eval-rag-quality-gate.mjs`、`backend/scripts/eval-rag-maturity.mjs` | 美团/字节问灰度时要说“离线门禁有，线上灰度还没做” |
 | Observability | 已实现基础 | Prometheus HTTP/Retrieval/LLM 指标；AG-UI trace 事件；LangFuse 可选估算 token/cost | `backend/src/modules/metrics/metrics.service.ts:10`、`backend/src/modules/agui/agui.service.ts:263`、`backend/src/providers/observability/langfuse.provider.ts` | 可以讲链路可观测；生产监控接入和告警还不是完整 |
 | Trace / Cost | 部分实现 | traceRagAnswer 记录 latency、citationCount、events、token/cost estimate | `backend/src/modules/agui/agui.service.ts:280` | 是估算和可选 provider，不是财务级成本核算 |
-| 权限过滤 | 已实现基础 | 文档 ACL 支持 user/role/department/public，缓存 allowed docIds；检索层带 userId | `backend/src/modules/document/document-permission.service.ts:8`、`backend/src/modules/document/document-permission.service.ts:49`、`backend/src/rag/karpathy/karpathy-rag.service.ts:329` | 有基础权限模型；真实组织继承/IAM 仍要对接 |
-| 多租户隔离 | 已实现基础 | PostgreSQL、Redis、Milvus、BM25 等按 userId 过滤；文档和检索带 userId | `README.md`、`backend/src/rag/karpathy/karpathy-rag.service.ts:329` | 可以讲基础隔离，不说金融级合规完成 |
+| 权限过滤 | 已实现基础 | 文档 ACL 支持 user/role/department/public，缓存 allowed docIds；检索层带 userId | `backend/src/modules/document/document-permission.service.ts:8`、`backend/src/modules/document/document-permission.service.ts:49`、`backend/src/rag/rag.service.ts:329` | 有基础权限模型；真实组织继承/IAM 仍要对接 |
+| 多租户隔离 | 已实现基础 | PostgreSQL、Redis、Milvus、BM25 等按 userId 过滤；文档和检索带 userId | `README.md`、`backend/src/rag/rag.service.ts:329` | 可以讲基础隔离，不说金融级合规完成 |
 | 审计日志 | admin-backend 已实现 | 后台审计日志查询，数据库未启用时返回 disabled；关键写操作有 AuditLog 标记 | `admin-backend/src/modules/audit-logs/audit-logs.service.ts:21`、`admin-backend/src/common/decorators/audit-log.decorator.ts` | 能讲后台审计基础，不代表满足金融监管 |
 | 安全合规 | 部分实现 | 权限、审计、拒答、脱敏样本、红线文档；没有真实 DLP/IAM/审批/等保流程 | `docs/plans/remaining-enhancement-plan.md`、`admin-backend/src/modules/security/security.service.ts` | 金融/证券面试必须说“架构预留，生产需接公司合规系统” |
 | 多模态 | 部分实现 | Vision Provider 接口、Mock/OpenAI-compatible OCR/图片理解；视频 provider 明确不直接支持，需要抽帧/音频 | `backend/src/providers/vision/vision-provider.interface.ts:1`、`backend/src/providers/vision/openai-vision.provider.ts:81` | 可以说有链路和样本，不说完整视频理解/视觉向量/以图搜图 |
 | ASR / TTS | 已实现基础 | 腾讯云 ASR/TTS Provider，缺 key 明确降级 | `backend/src/providers/speech/tencent-speech.provider.ts`、`backend/scripts/smoke-speech.mjs` | 依赖腾讯云 key；不是端侧语音模型 |
 | Prompt 工程 | 已实现基础 | prompt 文件集中管理，few-shot、semantic example selector 存在；新增 Prompt Registry 记录 version/owner/evals/rollback | `backend/src/rag/prompts/agentic.prompts.ts`、`backend/src/rag/prompts/few-shot.examples.ts`、`backend/src/rag/prompts/prompt-registry.ts` | 可以说“有代码级 Prompt Registry”，不要说已有后台灰度/回滚平台 |
-| 上下文工程 | 已实现基础 | RAG chunks、Obsidian hits、memoryMessages、history 统一组装进 prompt；低质量证据走 fallback | `backend/src/rag/karpathy/karpathy-rag.service.ts:532`、`backend/src/modules/agui/agui.service.ts:73` | 可以讲证据选择、去噪、记忆注入；不要说已有自动 context optimizer |
+| 上下文工程 | 已实现基础 | RAG chunks、Obsidian hits、memoryMessages、history 统一组装进 prompt；低质量证据走 fallback | `backend/src/rag/rag.service.ts:532`、`backend/src/modules/agui/agui.service.ts:73` | 可以讲证据选择、去噪、记忆注入；不要说已有自动 context optimizer |
 | Prompt Injection 防护 | 已实现基础 | 检索片段会做本地注入模式检测和高风险行脱敏；生成 prompt 明确把片段当不可信证据；新增专项样本评测 | `backend/src/rag/prompts/prompt-injection.guard.ts`、`backend/src/rag/prompts/rag.prompts.ts`、`backend/eval/prompt-injection.dataset.json`、`backend/scripts/eval-prompt-injection.mjs` | 可以说“有基础防护和评测”，不要说能抵御所有 prompt injection |
 | 模型路由 | 部分实现 | AG-UI 支持选择 model；simple/auto/agentic 路由；LLM Provider 有模型选择入口 | `backend/src/modules/agui/agui.service.ts:51`、`backend/src/rag/agentic/agentic-rag.service.ts:171` | 不是完整多供应商动态路由和成本最优路由 |
 | SFT / RLHF / 模型训练 | 未实现 | 项目定位是 AI 应用工程和 RAG/Agent，不做模型训练和强化学习 | 无 | 金融/DeepSeek/算法岗问到时直接说不是本项目主线 |
@@ -128,7 +128,7 @@ BOSS/公开 JD 补充观察：
 
 对应代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts`
+- `backend/src/rag/rag.service.ts`
 - `backend/src/modules/agui/agui.service.ts`
 - `admin/src/pages/qa-ops/index.tsx`
 - `backend/scripts/eval-rag-quality-gate.mjs`
@@ -175,12 +175,12 @@ BOSS/公开 JD 补充观察：
 你应该重点讲：
 
 ```text
-这个项目最强的是企业 RAG 主链路：Milvus 负责语义召回，BM25/ES 负责精确词和制度编号，GraphRAG 负责关系型问题，Obsidian/Karpathy 负责长期知识编译，最后通过引用校验、质量闸门和拒答控制幻觉。
+这个项目最强的是企业 RAG 主链路：Milvus 负责语义召回，BM25/ES 负责精确词和制度编号，GraphRAG 负责关系型问题，Obsidian/编译知识 负责长期知识编译，最后通过引用校验、质量闸门和拒答控制幻觉。
 ```
 
 对应代码：
 
-- `backend/src/rag/karpathy/karpathy-rag.service.ts:323`
+- `backend/src/rag/rag.service.ts:323`
 - `backend/src/providers/elasticsearch/elasticsearch.provider.ts`
 - `backend/src/modules/graph/graph.service.ts`
 - `backend/src/modules/obsidian/obsidian-knowledge.service.ts`
@@ -247,7 +247,7 @@ BOSS/公开 JD 补充观察：
 1. **不是纯向量 RAG**：Milvus + BM25 + ES + RRF + Rerank。
 2. **Agentic 不是黑盒**：LangGraph 状态机节点可观测、可预算、可回放。
 3. **Simple / Auto / Agentic 路由**：成本和稳定性优先。
-4. **本地编译知识层**：Karpathy 本地知识用于受治理直答与降级，Obsidian 候选进入统一 Hybrid RAG，个人知识与企业证据治理互补。
+4. **本地编译知识层**：本地编译知识用于受治理直答与降级，Obsidian 候选进入统一 Hybrid RAG，个人知识与企业证据治理互补。
 5. **GraphRAG 有工程入口**：Neo4j、GraphOps、图上编辑、CLI query。
 6. **AG-UI/SSE 真实流式**：不是前端假打字效果。
 7. **Memory 分层**：user/session memory 由分类器判断写入。

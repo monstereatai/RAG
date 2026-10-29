@@ -1,6 +1,7 @@
 import {
   Controller,
   ForbiddenException,
+  Inject,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -11,7 +12,10 @@ import { AuthService } from '../auth/auth.service';
 import { ApiTokenService } from '../auth/api-token.service';
 import { IamService } from '../iam/iam.service';
 import type { JwtPayload } from '../../common/interfaces/api-response.interface';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import {
+  RAG_RETRIEVAL_CAPABILITY,
+  type RagRetrievalCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { DocumentService } from '../document/document.service';
 
 // gRPC 使用 proto 中的 snake_case 字段名（keepCase: true）
@@ -52,7 +56,8 @@ export class RagGrpcController {
   private readonly startTime = Date.now();
 
   constructor(
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_RETRIEVAL_CAPABILITY)
+    private readonly ragService: RagRetrievalCapability,
     private readonly documentService: DocumentService,
     private readonly authService: AuthService,
     private readonly apiTokenService: ApiTokenService,
@@ -71,7 +76,7 @@ export class RagGrpcController {
     );
 
     try {
-      const retrieved = await this.karpathyRagService.retrieve(
+      const retrieved = await this.ragService.retrieve(
         query,
         {
           vectorSearch: true,

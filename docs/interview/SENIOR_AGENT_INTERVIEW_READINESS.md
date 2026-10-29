@@ -32,8 +32,8 @@
 ### 最新可展示的公开资料闭环
 
 - 已建立 PC 端候选 Top50、页游候选 Top50 的公开资料目录，实际抓取 127 个官网／活动／运营／营销／社区页面。
-- 108 份唯一目标文档已完成 PostgreSQL、Milvus、BM25／Elasticsearch、Karpathy 和 Obsidian 索引。
-- Simple 链路有独立的 Karpathy Fast Path Markdown 方案，明确用户操作、服务端状态流、证据边界和与 Auto／Agentic 的升级边界。
+- 108 份唯一目标文档已完成 PostgreSQL、Milvus、BM25／Elasticsearch、编译知识 和 Obsidian 索引。
+- Simple 链路有独立的 编译知识 Fast Path Markdown 方案，明确用户操作、服务端状态流、证据边界和与 Auto／Agentic 的升级边界。
 - 面试表述仍需区分公开网页快照、本地仿真评测和真实企业生产数据，不能把公开资料入库结果包装成线上业务效果。
 
 ### 当前不能吹成生产成绩的内容

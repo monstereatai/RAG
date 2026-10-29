@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  RAG_RETRIEVAL_CAPABILITY,
+  type RagRetrievalCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { AgentLoopService } from '../agent-loop/agent-loop.service';
 import {
@@ -86,7 +89,8 @@ export class ProductionWorkflowTools {
   private readonly evidenceLimit = 6;
 
   constructor(
-    private readonly rag: KarpathyRagService,
+    @Inject(RAG_RETRIEVAL_CAPABILITY)
+    private readonly rag: RagRetrievalCapability,
     private readonly toolPolicy: ToolExecutionPolicyService,
     private readonly agentLoop: AgentLoopService,
   ) {}
@@ -122,7 +126,7 @@ export class ProductionWorkflowTools {
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
     try {
       type GatherLoopState = {
-        retrieval?: Awaited<ReturnType<KarpathyRagService['retrieveDetailed']>>;
+        retrieval?: Awaited<ReturnType<RagRetrievalCapability['retrieveDetailed']>>;
       };
       const loop = await this.agentLoop.run<GatherLoopState, GatherLoopState>({
         threadId: context.threadId ?? `production:${context.projectId}`,
@@ -160,7 +164,7 @@ export class ProductionWorkflowTools {
                 reduce: (
                   current: GatherLoopState,
                   retrieval: Awaited<
-                    ReturnType<KarpathyRagService['retrieveDetailed']>
+                    ReturnType<RagRetrievalCapability['retrieveDetailed']>
                   >,
                 ) => ({
                   ...current,

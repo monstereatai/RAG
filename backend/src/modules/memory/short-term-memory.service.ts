@@ -24,6 +24,10 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { MetricsService } from '../metrics/metrics.service';
+import type {
+  ContextMessageBudgetResult,
+  ContextMessageCandidate,
+} from '../../rag/contracts/context-budget';
 
 interface StoredTurn {
   messageId?: string;
@@ -402,6 +406,71 @@ export class ShortTermMemoryService {
       this.estimateTokens(query);
 
     return Math.max(0, Math.min(MAX_HISTORY_CONTEXT_TOKENS, available));
+  }
+
+  /**
+   * Enforce the system-context reserve without truncating policy or role rules.
+   * Optional context is selected whole, by priority, so memory facts are never
+   * cut mid-sentence and then presented as complete.
+   */
+  budgetSystemContext(
+    candidates: readonly ContextMessageCandidate[],
+    tokenBudget = SYSTEM_CONTEXT_RESERVE_TOKENS,
+  ): ContextMessageBudgetResult {
+    const budgetTokens = Math.max(0, Math.floor(tokenBudget));
+    const kept = new Set<number>();
+    const costs = candidates.map(
+      ({ content }) => this.estimateTokens(content) + 4,
+    );
+    let estimatedTokens = 0;
+
+    candidates.forEach((candidate, index) => {
+      if (candidate.required) {
+        kept.add(index);
+        estimatedTokens += costs[index];
+      }
+    });
+
+    const optional = candidates
+      .map((candidate, index) => ({ candidate, index }))
+      .filter(({ candidate }) => !candidate.required)
+      .sort(
+        (left, right) =>
+          right.candidate.priority - left.candidate.priority ||
+          left.index - right.index,
+      );
+    for (const { index } of optional) {
+      if (estimatedTokens + costs[index] > budgetTokens) continue;
+      kept.add(index);
+      estimatedTokens += costs[index];
+    }
+
+    return {
+      messages: candidates.flatMap((candidate, index) =>
+        kept.has(index)
+          ? [
+              {
+                source: candidate.source,
+                role: candidate.role,
+                content: candidate.content,
+              },
+            ]
+          : [],
+      ),
+      budgetTokens,
+      estimatedTokens,
+      overflowTokens: Math.max(0, estimatedTokens - budgetTokens),
+      retainedSources: [
+        ...new Set(
+          candidates.flatMap((candidate, index) =>
+            kept.has(index) ? [candidate.source] : [],
+          ),
+        ),
+      ],
+      droppedSources: candidates.flatMap((candidate, index) =>
+        kept.has(index) ? [] : [candidate.source],
+      ).filter((source, index, sources) => sources.indexOf(source) === index),
+    };
   }
 
   limitHistoryToTokenBudget<T extends { content: string; role?: string }>(

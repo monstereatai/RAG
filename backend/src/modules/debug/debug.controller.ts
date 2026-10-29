@@ -1,5 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import { Controller, Get, Inject, Query } from '@nestjs/common';
+import {
+  RAG_RETRIEVAL_CAPABILITY,
+  type RagRetrievalCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { Public } from '../../common/decorators/public.decorator';
 import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
@@ -10,7 +13,8 @@ import { UseGuards } from '@nestjs/common';
 @Controller('debug')
 export class DebugController {
   constructor(
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_RETRIEVAL_CAPABILITY)
+    private readonly ragService: RagRetrievalCapability,
     private readonly vectorStoreProvider: VectorStoreProvider,
   ) {}
 
@@ -20,7 +24,7 @@ export class DebugController {
       return { error: 'query is required' };
     }
     const topK = k ? parseInt(k, 10) : 5;
-    const chunks = await this.karpathyRagService.retrieve(query);
+    const chunks = await this.ragService.retrieve(query);
     return {
       query,
       topK,

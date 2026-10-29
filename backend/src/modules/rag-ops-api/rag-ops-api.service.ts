@@ -1,11 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DocumentService } from '../document/document.service';
 import { GraphService } from '../graph/graph.service';
 import { ConversationService } from '../chat/conversation.service';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import {
+  RAG_INDEX_CAPABILITY,
+  type RagIndexCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { ElasticsearchProvider } from '../../providers/elasticsearch/elasticsearch.provider';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
 import { QueryLogService } from './query-log.service';
@@ -102,7 +105,8 @@ export class RagOpsApiService {
     private readonly ragAdminService: RagAdminService,
     private readonly graphService: GraphService,
     private readonly conversationService: ConversationService,
-    private readonly karpathyRagService: KarpathyRagService,
+    @Inject(RAG_INDEX_CAPABILITY)
+    private readonly ragService: RagIndexCapability,
     private readonly elasticsearchProvider: ElasticsearchProvider,
     private readonly vectorStoreProvider: VectorStoreProvider,
     private readonly queryLogService: QueryLogService,
@@ -367,7 +371,7 @@ export class RagOpsApiService {
   async getVectorIndex(): Promise<VectorIndexResponse> {
     const indexInfo = this.vectorStoreProvider.getIndexInfo();
     const runtimeStatus = this.vectorStoreProvider.getRuntimeStatus();
-    const bm25Stats = this.karpathyRagService.getStats();
+    const bm25Stats = this.ragService.getStats();
     const dbChunkCount = await this.chunkRepo.count();
 
     return {

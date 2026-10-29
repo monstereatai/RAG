@@ -8,7 +8,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ChatService } from '../modules/chat/chat.service';
-import { KarpathyRagService } from '../rag/karpathy/karpathy-rag.service';
+import {
+  RAG_QUERY_CAPABILITY,
+  type RagQueryCapability,
+} from '../rag/contracts/rag-capabilities';
 import { AgenticRagService } from '../rag/agentic/agentic-rag.service';
 import { ConversationService } from '../modules/chat/conversation.service';
 import { ConversationEmbeddingService } from '../modules/chat/conversation-embedding.service';
@@ -23,13 +26,13 @@ import { ChatQueryLogService } from '../modules/chat/chat-query-log.service';
 
 describe('ChatModes Integration', () => {
   let chatService: ChatService;
-  let karpathyRagService: jest.Mocked<KarpathyRagService>;
+  let ragService: jest.Mocked<RagQueryCapability>;
   let agenticRagService: jest.Mocked<AgenticRagService>;
   let conversationService: jest.Mocked<ConversationService>;
   let conversationEmbeddingService: jest.Mocked<ConversationEmbeddingService>;
 
   beforeEach(async () => {
-    const mockKarpathyRagService = {
+    const mockRagService = {
       answer: jest.fn(),
       unsupportedReliableAnswer: jest
         .fn()
@@ -51,6 +54,7 @@ describe('ChatModes Integration', () => {
       indexConversation: jest.fn().mockResolvedValue(undefined),
     };
     const mockMemoryService = {
+      isEnabled: jest.fn().mockReturnValue(false),
       searchMemory: jest.fn().mockResolvedValue({
         systemMessage: { content: 'mock memory' },
         userMemories: [],
@@ -66,7 +70,11 @@ describe('ChatModes Integration', () => {
       save: jest.fn().mockResolvedValue(undefined),
       create: jest.fn().mockImplementation((data: unknown) => data),
     };
+    // Use the real pure budgeting method; infrastructure methods remain mocked.
+    const contextBudgeter = Object.create(ShortTermMemoryService.prototype) as ShortTermMemoryService;
     const mockShortTermMemory = {
+      budgetSystemContext: contextBudgeter.budgetSystemContext.bind(contextBudgeter),
+      getMessageSafetyCap: contextBudgeter.getMessageSafetyCap.bind(contextBudgeter),
       getContext: jest.fn().mockResolvedValue({
         systemMessage: null,
         recentTurns: [],
@@ -117,7 +125,7 @@ describe('ChatModes Integration', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
-        { provide: KarpathyRagService, useValue: mockKarpathyRagService },
+        { provide: RAG_QUERY_CAPABILITY, useValue: mockRagService },
         { provide: AgenticRagService, useValue: mockAgenticRagService },
         { provide: ConversationService, useValue: mockConversationService },
         {
@@ -138,7 +146,7 @@ describe('ChatModes Integration', () => {
     }).compile();
 
     chatService = module.get<ChatService>(ChatService);
-    karpathyRagService = module.get(KarpathyRagService);
+    ragService = module.get(RAG_QUERY_CAPABILITY);
     agenticRagService = module.get(AgenticRagService);
     conversationService = module.get(ConversationService);
     conversationEmbeddingService = module.get(ConversationEmbeddingService);
@@ -159,11 +167,11 @@ describe('ChatModes Integration', () => {
       answer: 'I am simple RAG',
       references: [],
     };
-    karpathyRagService.answer.mockResolvedValue(mockResponse);
+    ragService.answer.mockResolvedValue(mockResponse);
 
     const res = await chatService.chat({ query, mode: 'simple' }, 'user-1');
 
-    expect(karpathyRagService.answer).toHaveBeenCalledWith(
+    expect(ragService.answer).toHaveBeenCalledWith(
       query,
       [],
       'user-1',
@@ -171,7 +179,7 @@ describe('ChatModes Integration', () => {
       undefined,
       expect.objectContaining({
         adaptiveVectorSearch: true,
-        karpathyDirectAnswer: true,
+        governedDirectAnswer: true,
         entities: [],
         needsSynthesis: false,
         scope: { role: undefined },
@@ -226,7 +234,7 @@ describe('ChatModes Integration', () => {
       }),
       expect.objectContaining({ signal: expect.anything() }),
     );
-    expect(karpathyRagService.answer).not.toHaveBeenCalled();
+    expect(ragService.answer).not.toHaveBeenCalled();
     expect(res.answer).toBe('Quantum computing is...');
     expect(res.mode).toBe('agentic');
     expect(res.route).toBe('agentic');
@@ -277,7 +285,7 @@ describe('ChatModes Integration', () => {
       cosineScore: 0,
     };
     for (const mode of ['simple', 'auto', 'agentic'] as const) {
-      karpathyRagService.answer.mockResolvedValueOnce({
+      ragService.answer.mockResolvedValueOnce({
         answer: '已根据证据回答。[片段1]',
         references: [reference],
         retrievalSufficient: true,
@@ -310,7 +318,7 @@ describe('ChatModes Integration', () => {
     conversationEmbeddingService.searchHistory.mockResolvedValue([
       { content: 'Q: Show status\nA: status ok', threadId, score: 0.9 },
     ]);
-    karpathyRagService.answer.mockResolvedValue({
+    ragService.answer.mockResolvedValue({
       answer: 'Status is OK',
       references: [],
     });
@@ -323,7 +331,7 @@ describe('ChatModes Integration', () => {
       'user-1',
       undefined,
     );
-    expect(karpathyRagService.answer.mock.calls[0]?.[3]).toEqual(
+    expect(ragService.answer.mock.calls[0]?.[3]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ content: expect.stringContaining('相关历史对话') }),
       ]),
@@ -331,7 +339,7 @@ describe('ChatModes Integration', () => {
   });
 
   it('should apply the selected role to retrieval and answer context', async () => {
-    karpathyRagService.answer.mockResolvedValue({
+    ragService.answer.mockResolvedValue({
       answer: '已按产品经理视角整理',
       references: [],
     });
@@ -345,7 +353,7 @@ describe('ChatModes Integration', () => {
       'user-1',
     );
 
-    const call = karpathyRagService.answer.mock.calls[0];
+    const call = ragService.answer.mock.calls[0];
     expect(call?.[0]).toBe('检查需求缺口');
     expect(
       call?.[3]?.some((message) =>
@@ -354,7 +362,7 @@ describe('ChatModes Integration', () => {
     ).toBe(true);
     expect(call?.[5]).toEqual(expect.objectContaining({
       adaptiveVectorSearch: true,
-      karpathyDirectAnswer: true,
+      governedDirectAnswer: true,
       entities: [],
       needsSynthesis: false,
       scope: { role: 'product-manager' },

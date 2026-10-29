@@ -1,5 +1,6 @@
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
+import { DocumentTaskService } from './document-task.service';
 import { DocumentService } from './document.service';
 
 function createService() {
@@ -25,6 +26,7 @@ function createService() {
     docMetaRepo: {
       findOne: jest.fn(),
       find: jest.fn(),
+      delete: jest.fn().mockResolvedValue(undefined),
       manager: {
         transaction: jest.fn((callback: (value: typeof manager) => unknown) =>
           callback(manager),
@@ -43,23 +45,32 @@ function createService() {
       listPending: jest.fn(),
       cancelPending: jest.fn(),
     },
-    vectorStoreProvider: {
-      deleteByDocId: jest.fn().mockResolvedValue(undefined),
-    },
-    karpathyRagService: {
-      updateDocumentLifecycle: jest.fn(),
-      removeDocChunks: jest.fn(),
-    },
-    elasticsearchProvider: {
+    documentIndexCoordinator: {
+      getMilvusDeleteCompensationStatus: jest.fn().mockResolvedValue({
+        pendingDurable: false,
+        pendingMilvusDeletes: [],
+        pendingMilvusDeleteCount: 0,
+        note: '',
+      }),
+      removeVectorIndex: jest.fn().mockResolvedValue(undefined),
+      removeSearchIndexes: jest.fn().mockResolvedValue(undefined),
+      removeBm25Chunks: jest.fn(),
+      updateElasticsearchDocumentLifecycle: jest
+        .fn()
+        .mockResolvedValue(undefined),
+      updateBm25DocumentLifecycle: jest.fn(),
       updateDocumentLifecycle: jest.fn().mockResolvedValue(undefined),
-      deleteByDocId: jest.fn().mockResolvedValue(undefined),
     },
     imageIndexService: { deleteByDoc: jest.fn().mockResolvedValue(undefined) },
     graphService: { removeSource: jest.fn().mockResolvedValue(undefined) },
     domainEvents: { emitInTransaction: jest.fn() },
     logger: { log: jest.fn(), warn: jest.fn() },
   };
-  Object.assign(service, mocks);
+  const documentTaskService = new DocumentTaskService(
+    mocks.taskRepo as never,
+    mocks.documentQueueService as never,
+  );
+  Object.assign(service, mocks, { documentTaskService });
   return { service, mocks };
 }
 
@@ -113,6 +124,18 @@ describe('DocumentService retrieval descriptions', () => {
       2,
       { tenantId: 'tenant-2', docId: 'old-doc' },
     );
+    expect(
+      mocks.documentIndexCoordinator.updateElasticsearchDocumentLifecycle,
+    ).toHaveBeenNthCalledWith(1, 'old-doc', 'deprecated', 'user-1');
+    expect(
+      mocks.documentIndexCoordinator.updateElasticsearchDocumentLifecycle,
+    ).toHaveBeenNthCalledWith(2, 'new-doc', 'effective', 'user-1');
+    expect(
+      mocks.documentIndexCoordinator.updateBm25DocumentLifecycle,
+    ).toHaveBeenNthCalledWith(1, 'old-doc', 'deprecated', 'user-1');
+    expect(
+      mocks.documentIndexCoordinator.updateBm25DocumentLifecycle,
+    ).toHaveBeenNthCalledWith(2, 'new-doc', 'effective', 'user-1');
   });
 
   it('does not delete the source document when description cleanup fails', async () => {
@@ -137,8 +160,39 @@ describe('DocumentService retrieval descriptions', () => {
       tenantId: 'tenant-1',
       docId: 'doc-1',
     });
-    expect(mocks.vectorStoreProvider.deleteByDocId).not.toHaveBeenCalled();
+    expect(
+      mocks.documentIndexCoordinator.removeVectorIndex,
+    ).toHaveBeenCalledWith('doc-1');
+    expect(
+      mocks.documentIndexCoordinator.removeSearchIndexes,
+    ).not.toHaveBeenCalled();
     expect(mocks.docChunkRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not delete PostgreSQL records when Milvus compensation is not durable', async () => {
+    const { service, mocks } = createService();
+    mocks.docMetaRepo.findOne.mockResolvedValue({
+      docId: 'doc-1',
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      filename: 'guide.md',
+    });
+    mocks.documentIndexCoordinator.removeVectorIndex.mockRejectedValue(
+      new Error(
+        'Milvus 删除失败，补偿任务未能可靠保存；文档保留，请稍后重试。',
+      ),
+    );
+
+    await expect(service.delete('doc-1', 'user-1')).rejects.toThrow(
+      'Milvus 删除失败，补偿任务未能可靠保存；文档保留，请稍后重试。',
+    );
+
+    expect(
+      mocks.retrievalDescriptionService.deleteForDocument,
+    ).not.toHaveBeenCalled();
+    expect(mocks.factConflictRepo.delete).not.toHaveBeenCalled();
+    expect(mocks.docChunkRepo.delete).not.toHaveBeenCalled();
+    expect(mocks.docMetaRepo.delete).not.toHaveBeenCalled();
   });
 
   it('lists only queued database tasks that still exist in BullMQ', async () => {

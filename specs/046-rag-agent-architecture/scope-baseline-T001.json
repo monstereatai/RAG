@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "base_commit": "fb7d5dd9b8150667e563ea7017afb6a17c975d9b",
+  "initial_snapshots": {
+    "\"docs/interview/\\345\\212\\237\\350\\203\\275\\346\\255\\245\\351\\252\\244\\346\\265\\201\\347\\250\\213.md\"": {
+      "kind": "missing"
+    },
+    ".obsidian/community-plugins.json": {
+      "kind": "file",
+      "sha256": "b6d71934f97cbe7a28da4cff5f699b6a71a17bf72457105782d47f204e49401c"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/data.json": {
+      "kind": "file",
+      "sha256": "a361cf6a685ee27266d8235f5609eaa517f70ae38865b2469398e9c73f21eba9"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/main.js": {
+      "kind": "file",
+      "sha256": "861c2af33b19356869a20ff161dcdcef97238c35527d49cb86d51dacf0969c76"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/manifest.json": {
+      "kind": "file",
+      "sha256": "b3be3f430034719ca2c3bdf29c04d98f1139c0e9579c52f5279a3fe5c0b29b5a"
+    },
+    ".obsidian/plugins/export-mermaid-diagrams/styles.css": {
+      "kind": "file",
+      "sha256": "12611a5787bd1aad17ae0224ee0cf55e1e7df9c73bf58a3890a406de256ff9c6"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/data.json": {
+      "kind": "file",
+      "sha256": "25ffc55dddb09b20bb1dc9161bbdedf0ec3ae75d55fc3e7c8aaa31b359220fe7"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/main.js": {
+      "kind": "file",
+      "sha256": "86027c9f881d70069f40d1fdf63d38868c606c8000169d730cc68c62a6978a77"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/manifest.json": {
+      "kind": "file",
+      "sha256": "4880b885c50643ef848d31cea829776ca2e96747353aee334d71e875f79d31c0"
+    },
+    ".obsidian/plugins/obsidian-excalidraw-plugin/styles.css": {
+      "kind": "file",
+      "sha256": "173e9c161a01c53b3c173344e023de4d327fd0658e476961b46b0e6a93117ded"
+    },
+    ".obsidian/workspace.json": {
+      "kind": "file",
+      "sha256": "6d3ffaf4b4c8fc95d939f3bf168f88a9d0f2523c4bdf1bcddd4af718ffde518f"
+    },
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "13d7e7fc8c692cc11f756ccb44f28e6cbdd1f88cc527c7209d5b08d4ab2eed9d"
+    },
+    "workspace/bm25-index.json": {
+      "kind": "file",
+      "sha256": "14b160a8eaf9567ae5cc433d67afc3dc9bc297e64ecddacf3cd99a81386282d3"
+    }
+  },
+  "internal_patterns": [
+    "specs/046-rag-agent-architecture/**",
+    "specs/046-rag-agent-architecture/scope-baseline-T001.json"
+  ]
+}

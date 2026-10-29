@@ -47,7 +47,7 @@ describe('RagAdminService index reconciliation', () => {
           .fn()
           .mockResolvedValue([{ docId: 'doc-1' }, { docId: 'doc-1' }]),
       },
-      karpathyRagService: {
+      ragService: {
         getIndexedChunkCount: jest.fn().mockReturnValue(2),
       },
       elasticsearchProvider: {
@@ -189,7 +189,7 @@ describe('RagAdminService index reconciliation', () => {
           },
         ]),
       },
-      karpathyRagService: {
+      ragService: {
         getIndexedChunkCount: jest.fn().mockReturnValue(1),
         getIndexedChunkHashes: jest.fn().mockReturnValue({
           hashes: ['chunk-hash'],
@@ -415,7 +415,7 @@ describe('RagAdminService index reconciliation', () => {
         insert: jest.fn().mockResolvedValue(undefined),
         countByDocId: jest.fn().mockResolvedValue(1),
       },
-      karpathyRagService: {
+      ragService: {
         removeDocChunks: jest.fn(),
         indexChunks: jest.fn(),
       },

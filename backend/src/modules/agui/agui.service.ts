@@ -14,7 +14,7 @@ import { ConversationAttachmentService } from './conversation-attachment.service
 import type {
   SupplementalEvidenceContext,
   SupplementalEvidenceLoaderInput,
-} from '../chat/chat-runtime.types';
+} from '../../rag/contracts/supplemental-evidence';
 
 @Injectable()
 export class AguiService {

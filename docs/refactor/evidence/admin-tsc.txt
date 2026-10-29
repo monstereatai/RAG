@@ -1,0 +1,3 @@
+
+> ant-design-pro@6.0.2 tsc /Users/monster/Documents/GitHub/code/RAG/admin
+> tsc --noEmit

@@ -1,0 +1,294 @@
+{
+  "passed": true,
+  "score": 93,
+  "maxScore": 100,
+  "threshold": 90,
+  "requireExternal": false,
+  "scoreKind": "static-engineering-checklist",
+  "qualityMeasured": false,
+  "grade": "static-structure-check-passed",
+  "disclaimer": "This score checks engineering structure and evidence files only. It is not a retrieval or answer-quality metric.",
+  "dimensions": [
+    {
+      "name": "查得准",
+      "score": 15,
+      "maxScore": 15,
+      "checks": [
+        {
+          "name": "hybrid retrieval 有中文质量回归",
+          "passed": true,
+          "score": 5,
+          "maxScore": 5
+        },
+        {
+          "name": "业务回归集达到 100+ 条",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3,
+          "detail": "120 cases"
+        },
+        {
+          "name": "项目级仿真实业务评测集覆盖复杂场景",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2,
+          "detail": "14 project queries"
+        },
+        {
+          "name": "GraphRAG smoke 与业务种子入口存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "Milvus 诊断入口存在，慢向量可被识别并降级",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        }
+      ]
+    },
+    {
+      "name": "答得稳",
+      "score": 15,
+      "maxScore": 15,
+      "checks": [
+        {
+          "name": "稳定质量门禁存在",
+          "passed": true,
+          "score": 5,
+          "maxScore": 5
+        },
+        {
+          "name": "真实服务 e2e 回放入口存在",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        },
+        {
+          "name": "Agentic 成本边界可配置",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        },
+        {
+          "name": "定时任务复用 Supervisor 执行",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        }
+      ]
+    },
+    {
+      "name": "引用能撑住",
+      "score": 15,
+      "maxScore": 15,
+      "checks": [
+        {
+          "name": "claim-level 引用支撑校验已记录",
+          "passed": true,
+          "score": 5,
+          "maxScore": 5
+        },
+        {
+          "name": "smoke dataset 包含 expectedClaims",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "业务回归集包含引用要求",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "项目级评测包含引用强制问题",
+          "passed": true,
+          "score": 1,
+          "maxScore": 1
+        },
+        {
+          "name": "结构化 chunk/source span 已落地",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        }
+      ]
+    },
+    {
+      "name": "不会瞎编",
+      "score": 15,
+      "maxScore": 15,
+      "checks": [
+        {
+          "name": "无答案拒答样本存在",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        },
+        {
+          "name": "LLM-as-Judge 入口存在",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "事实冲突表与冲突处理记录存在",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        },
+        {
+          "name": "联网增强严格 smoke 可强制失败",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "低相关/引用缺失拒答策略已记录",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        }
+      ]
+    },
+    {
+      "name": "可观测与恢复",
+      "score": 10,
+      "maxScore": 10,
+      "checks": [
+        {
+          "name": "Redis Checkpointer 跨进程 smoke 存在",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "Speech 真实 smoke 存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "Prometheus 业务指标已记录",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "RBAC 基础角色守卫存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        }
+      ]
+    },
+    {
+      "name": "工程化门禁",
+      "score": 10,
+      "maxScore": 10,
+      "checks": [
+        {
+          "name": "build script 存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "lint script 存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "test script 存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "business dataset gate 存在",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        },
+        {
+          "name": "quality gate 集成 maturity",
+          "passed": true,
+          "score": 2,
+          "maxScore": 2
+        }
+      ]
+    },
+    {
+      "name": "真实落地准备",
+      "score": 13,
+      "maxScore": 20,
+      "checks": [
+        {
+          "name": "真实业务评测导入入口存在",
+          "passed": true,
+          "score": 4,
+          "maxScore": 4
+        },
+        {
+          "name": "业务 MCP 配置校验入口存在",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "GraphRAG 业务种子导入入口存在",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "生产就绪检查入口已记录",
+          "passed": false,
+          "score": 0,
+          "maxScore": 3
+        },
+        {
+          "name": "真实私有业务评测集已接入",
+          "passed": true,
+          "score": 3,
+          "maxScore": 3
+        },
+        {
+          "name": "Milvus search runtime 无降级缺口",
+          "passed": false,
+          "score": 0,
+          "maxScore": 2
+        },
+        {
+          "name": "生产目标机器/证书/备份策略已确认",
+          "passed": false,
+          "score": 0,
+          "maxScore": 2
+        }
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "name": "真实私有业务评测集",
+      "status": "ready",
+      "blocksGate": false,
+      "note": "默认门禁只评价本地工程成熟度；开启 RAG_MATURITY_REQUIRE_EXTERNAL=true 后必须提供私有真实题集。"
+    },
+    {
+      "name": "Milvus search runtime",
+      "status": "degraded",
+      "blocksGate": false,
+      "note": "当前主链路可降级 BM25；collection 压实/重建或容器升级仍属于需单独确认的运行环境治理。"
+    },
+    {
+      "name": "生产发布材料",
+      "status": "missing",
+      "blocksGate": false,
+      "note": "生产部署、证书、备份、密钥注入策略需要显式确认；可用 RAG_PRODUCTION_MATERIALS_CONFIRMED=true 纳入本地门禁。"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,9 +11,12 @@ import { WorkflowTemplateEntity } from '../../providers/db/entities/workflow-tem
 import { WorkflowTemplateVersionEntity } from '../../providers/db/entities/workflow-template-version.entity';
 import { ModelRegistryEntity } from '../../providers/db/entities/model-registry.entity';
 import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import {
+  RAG_RETRIEVAL_CAPABILITY,
+  type RagRetrievalCapability,
+} from '../../rag/contracts/rag-capabilities';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import { retrievalProfileForTaskType } from '../../rag/karpathy/context-builder';
+import { retrievalProfileForTaskType } from '../../rag/retrieval/context-builder';
 import { sanitizeRetrievalProfileConfig } from '../../rag/planning/retrieval-profile-config';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 
@@ -88,7 +92,8 @@ export class PlatformGovernanceService {
     private readonly evalRepo: Repository<EvaluationCaseEntity>,
     @InjectRepository(KnowledgeBaseProfileEntity)
     private readonly profileRepo: Repository<KnowledgeBaseProfileEntity>,
-    private readonly rag: KarpathyRagService,
+    @Inject(RAG_RETRIEVAL_CAPABILITY)
+    private readonly rag: RagRetrievalCapability,
     private readonly pluginRuntime: PluginRuntimeService,
   ) {}
 

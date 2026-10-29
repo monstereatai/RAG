@@ -7,7 +7,7 @@ import { DocumentModule } from '../document/document.module';
 import { DocumentPermissionModule } from '../document/document-permission.module';
 import { GraphModule } from '../graph/graph.module';
 import { ChatModule } from '../chat/chat.module';
-import { KarpathyRagModule } from '../../rag/karpathy/karpathy-rag.module';
+import { RagModule } from '../../rag/rag.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
 import { ImageIndexModule } from '../image-index/image-index.module';
 import { ObsidianKnowledgeModule } from '../obsidian/obsidian-knowledge.module';
@@ -40,7 +40,7 @@ import { DocumentRetrievalDescriptionModule } from '../document/document-retriev
     DocumentRetrievalDescriptionModule,
     GraphModule,
     ChatModule,
-    KarpathyRagModule,
+    RagModule,
     VectorStoreModule,
     ImageIndexModule,
     ObsidianKnowledgeModule,

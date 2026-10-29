@@ -120,7 +120,7 @@ MCP 不直连存储，只携带 JWT 或后端只存 hash 的长期 API Key 调 R
 
 ### A12. RAG 的完整流程是什么：文档如何处理、存储、召回和生成？
 
-入库：原始资料 → 解析与快照 → 来源、空内容、注入和元数据门禁 → 父子切块 → PostgreSQL → 按文档适用性并行写 Milvus、BM25／Elasticsearch、Neo4j 和 Obsidian 编译知识 → 必要索引完成后切换生效；Karpathy 本地知识是受治理直答与降级资产，不是独立在线链路。查询：Direct Answer Gate（精确直答门禁）→ 未命中后统一 Hybrid RAG → 权限／版本过滤 → RRF（倒数排名融合）→ Rerank（重排）→ 上下文预算 → 生成 → 引用校验 → 补证或拒答 → Query Log（查询日志）和审计。
+入库：原始资料 → 解析与快照 → 来源、空内容、注入和元数据门禁 → 父子切块 → PostgreSQL → 按文档适用性并行写 Milvus、BM25／Elasticsearch、Neo4j 和 Obsidian 编译知识 → 必要索引完成后切换生效；本地编译知识是受治理直答与降级资产，不是独立在线链路。查询：Direct Answer Gate（精确直答门禁）→ 未命中后统一 Hybrid RAG → 权限／版本过滤 → RRF（倒数排名融合）→ Rerank（重排）→ 上下文预算 → 生成 → 引用校验 → 补证或拒答 → Query Log（查询日志）和审计。
 
 ### A13. 为什么用 RAG，而不是全文检索或直接把文档放进上下文？
 
@@ -291,7 +291,7 @@ HTTP 层记录请求和延迟；Agent 节点层记录路由、检索、充分性
 | Run、Event、Action、Failure Onset | `backend/src/modules/agent-runs/`、`backend/src/modules/agent-runtime-events/`、`backend/src/modules/agent-runtime/` |
 | 工具权限、审批、幂等 | `backend/src/tools/tool-execution.service.ts`、`backend/src/tools/tool-execution-policy.service.ts` |
 | MCP 工具和认证 | `tools/rag-mcp-server/README.md`、`tools/rag-mcp-server/src/server.ts` |
-| RAG 与引用门禁 | `backend/src/rag/karpathy/karpathy-rag.service.ts`、`backend/src/rag/karpathy/context-builder.ts` |
+| RAG 与引用门禁 | `backend/src/rag/rag.service.ts`、`backend/src/rag/retrieval/context-builder.ts` |
 | Bad Case | `backend/src/modules/chat/rag-feedback.service.ts`、`backend/src/rag/prompts/bad-case-flywheel.service.ts` |
 | 可观测 | `backend/src/providers/observability/langfuse.provider.ts`、`backend/src/providers/observability/observability.controller.ts`、`backend/src/modules/metrics/` |
 | 当前验证与边界 | `ROADMAP.md` |

@@ -6,7 +6,7 @@ import {
 /**
  * RAG 问答 Prompt：基于检索片段生成答案
  *
- * Karpathy RAG 与 Agentic RAG 的 generateNode 共用此模板。
+ * Linear RAG 与 Agentic RAG 的 generateNode 共用此模板。
  * 支持多轮对话历史注入（history 为空数组时等同于无历史）。
  */
 export const generateAnswerPrompt = ChatPromptTemplate.fromMessages([

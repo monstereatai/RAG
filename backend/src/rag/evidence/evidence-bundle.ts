@@ -1,7 +1,4 @@
-import type {
-  RetrievalDiagnostics,
-  RetrievedChunk,
-} from '../karpathy/karpathy-rag.service';
+import type { RetrievalDiagnostics, RetrievedChunk } from './retrieval.types';
 
 /** 请求级证据来源策略。它是外网工具是否可以执行的唯一授权依据。 */
 export type EvidenceSourcePolicy =
@@ -19,7 +16,15 @@ export type EvidenceSourceStatus =
   | 'forbidden';
 
 export interface EvidenceSourceSnapshot {
-  source: 'bad_case' | 'bm25' | 'vector' | 'elasticsearch' | 'obsidian' | 'graph' | 'image' | 'web';
+  source:
+    | 'bad_case'
+    | 'bm25'
+    | 'vector'
+    | 'elasticsearch'
+    | 'obsidian'
+    | 'graph'
+    | 'image'
+    | 'web';
   status: EvidenceSourceStatus;
   hitCount: number;
   elapsedMs?: number;
@@ -47,7 +52,12 @@ export interface EvidenceBundle {
   diagnostics?: RetrievalDiagnostics;
   sourceStatuses?: EvidenceSourceSnapshot[];
   /** 子问题覆盖率：每个子问题是否有可引用证据，供 Agent Loop 复用。 */
-  subquestionCoverage?: Array<{ id: string; query: string; covered: boolean; evidenceIds: string[] }>;
+  subquestionCoverage?: Array<{
+    id: string;
+    query: string;
+    covered: boolean;
+    evidenceIds: string[];
+  }>;
 }
 
 export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
@@ -61,7 +71,11 @@ export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
       evaluatedQuery: input.assessment.evaluatedQuery.trim(),
     },
     sourceStatuses: input.sourceStatuses?.map((item) => ({ ...item })) ?? [],
-    subquestionCoverage: input.subquestionCoverage?.map((item) => ({ ...item, evidenceIds: [...item.evidenceIds] })) ?? [],
+    subquestionCoverage:
+      input.subquestionCoverage?.map((item) => ({
+        ...item,
+        evidenceIds: [...item.evidenceIds],
+      })) ?? [],
   };
 }
 

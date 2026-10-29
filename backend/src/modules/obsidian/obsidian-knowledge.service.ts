@@ -1,3 +1,4 @@
+import type { ObsidianSearchHit } from './obsidian-knowledge.types';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
@@ -48,17 +49,7 @@ export interface ObsidianWriteResult {
   ragDocId?: string;
 }
 
-export interface ObsidianSearchHit {
-  path: string;
-  type: 'compiled' | 'index' | 'note';
-  isSourceNote?: boolean;
-  title: string;
-  content: string;
-  score: number;
-  ragDocId?: string;
-  sourceUrl?: string;
-  tags: string[];
-}
+export type { ObsidianSearchHit } from './obsidian-knowledge.types';
 
 export type ProjectWorkflowType =
   | 'solution'
@@ -1591,7 +1582,7 @@ export class ObsidianKnowledgeService {
       [/Vue/i, 'Vue'],
       [/NestJS/i, 'NestJS'],
       [/JavaScript|TypeScript|JS/i, 'JavaScript'],
-      [/知识库|Obsidian|Karpathy|RAG/i, '知识库'],
+      [/知识库|Obsidian|RAG|RAG/i, '知识库'],
       [/写作|选题|内容|文章/i, '写作'],
     ];
     return candidates
@@ -1609,7 +1600,7 @@ export class ObsidianKnowledgeService {
       text.match(/\b[A-Z][A-Za-z0-9]*(?:[.-]?[A-Z][A-Za-z0-9]*)*\b/g) ?? [];
     const chinese =
       text.match(
-        /(?:React|Vue|NestJS|TypeScript|JavaScript|Milvus|Neo4j|Redis|PostgreSQL|Elasticsearch|Obsidian|Karpathy|RAG|GraphRAG|Agentic|LangChain|OpenAI|DeepSeek|Qwen|Docker|Node\.js)/gi,
+        /(?:React|Vue|NestJS|TypeScript|JavaScript|Milvus|Neo4j|Redis|PostgreSQL|Elasticsearch|Obsidian|RAG|RAG|GraphRAG|Agentic|LangChain|OpenAI|DeepSeek|Qwen|Docker|Node\.js)/gi,
       ) ?? [];
     return [...new Set([...english, ...chinese])]
       .map((item) => item.trim())

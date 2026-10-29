@@ -87,7 +87,7 @@ this.metricsService.observeLlmCall(
 
 ### 3.2 检索分阶段埋点
 
-在 `karpathy-rag.service.ts` 的主检索链路与 `retrieveBm25Only` 两条路径上：
+在 `rag/rag.service.ts` 的主检索链路与 `retrieveBm25Only` 两条路径上：
 
 - `stage="bm25"`：本地 BM25 + ES 全文检索合并，失败时以 `status="error"` 记录后原样抛出（不改变原有异常语义）
 - `stage="vector_search"`：`embedQuery` + Milvus `similaritySearch`（含 ES kNN 合并），Milvus 失败并降级 BM25 时记 `status="error"`
@@ -388,5 +388,5 @@ cd backend && PORT=9101 UPSTREAM=http://localhost:3000/api/v1/metrics \
 4. **无 exemplar**：histogram 样本里还没有挂 `trace_id`，无法从"某个慢样本"一键跳到调用链。项目已有 LangFuse / OTLP tracing，后续可在 prom-client 侧开启 exemplar 关联。
 5. **无多窗口燃烧率告警**：当前是单阈值告警，尚未实现 SLO + 多窗口多燃烧率（`2%/1h` + `5%/6h` 这类）。数据已经够（`rag_http_requests:error_ratio5m` 记录的都有），属可增量增强项。
 6. `backend/src/rag/agentic/agentic-rag.service.spec.ts` 仍按旧的构造函数参数个数实例化（少传参数），`tsc` 报 `Expected 12-18 arguments, but got 11`，属历史遗留，与本次监控改造无关。
-7. `rag-admin.controller.spec.ts` / `karpathy-rag.service.spec.ts` 中另有少量历史类型错误（`tsc` 共 7 处，全在 spec 文件），生产构建口径 `tsconfig.build.json` 不受影响。
+7. `rag-admin.controller.spec.ts` / `rag.service.spec.ts` 中另有少量历史类型错误（`tsc` 共 7 处，全在 spec 文件），生产构建口径 `tsconfig.build.json` 不受影响。
 8. 若后续接入远端存储或多副本部署，告警里的 `up == 0` 需改成分片感知写法（如 `max by (job) (up) == 0`）。

@@ -1,4 +1,4 @@
-import { KarpathyRagService } from '../../rag/karpathy/karpathy-rag.service';
+import type { RagRetrievalCapability } from '../../rag/contracts/rag-capabilities';
 import { SkillsService } from '../skills/skills.service';
 import { RagGatewayService } from './rag-gateway.service';
 
@@ -12,7 +12,7 @@ describe('RagGatewayService', () => {
   };
 
   function createService(sufficient: boolean, reason: string) {
-    const karpathyRagService = {
+    const ragService = {
       retrieveDetailed: jest.fn().mockResolvedValue({
         chunks: [chunk],
         diagnostics: {},
@@ -29,15 +29,15 @@ describe('RagGatewayService', () => {
 
     return {
       service: new RagGatewayService(
-        karpathyRagService as unknown as KarpathyRagService,
+        ragService as unknown as RagRetrievalCapability,
         skillsService as unknown as SkillsService,
       ),
-      karpathyRagService,
+      ragService,
     };
   }
 
   it('marks low-relevance candidates as insufficient context', async () => {
-    const { service, karpathyRagService } = createService(
+    const { service, ragService } = createService(
       false,
       '候选片段与问题缺少有效语义关联',
     );
@@ -47,7 +47,7 @@ describe('RagGatewayService', () => {
       'user-1',
     );
 
-    expect(karpathyRagService.assessRetrievedChunks).toHaveBeenCalledWith(
+    expect(ragService.assessRetrievedChunks).toHaveBeenCalledWith(
       '韦水春是谁',
       [chunk],
     );
@@ -79,11 +79,11 @@ describe('RagGatewayService', () => {
       totalScore: 1,
       sourceAuthority: 'reviewed_bad_case',
     };
-    const { service, karpathyRagService } = createService(
+    const { service, ragService } = createService(
       true,
       '命中已审核纠错证据',
     );
-    karpathyRagService.retrieveReviewedEvidence.mockResolvedValue([
+    ragService.retrieveReviewedEvidence.mockResolvedValue([
       reviewedChunk,
     ]);
 

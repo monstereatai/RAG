@@ -119,7 +119,7 @@ AI 应用开发 / 大模型应用开发必会的横向方案：
 项目做法：
 
 ```text
-写入侧先把 PDF、DOCX、Markdown、URL、Obsidian 笔记等资料解析成 chunk，每个 chunk 带 docId、chunkId、userId、标题路径、来源、版本、权限等 metadata；再分别写入数据库、Milvus、BM25/ES 和 Obsidian/Karpathy 编译层。
+写入侧先把 PDF、DOCX、Markdown、URL、Obsidian 笔记等资料解析成 chunk，每个 chunk 带 docId、chunkId、userId、标题路径、来源、版本、权限等 metadata；再分别写入数据库、Milvus、BM25/ES 和 Obsidian/编译知识 编译层。
 
 查询侧先做 query normalize，再走向量召回和关键词召回，融合后 rerank，最后把证据交给 LLM 生成。生成后还要检查引用编号和关键 claim 是否能被证据支撑；证据不足就拒答或提示人工确认。
 ```
@@ -252,7 +252,7 @@ Rerank 有成本，所以不能无限重排。项目里会限制 rerank topN，�
 项目做法：
 
 ```text
-短期记忆放 Redis，按会话保留最近对话并做摘要压缩；长期记忆走 Mem0，用来保存跨会话稳定偏好和事实；Obsidian/Karpathy 更像 artifact memory，用来沉淀可复用知识产物。
+短期记忆放 Redis，按会话保留最近对话并做摘要压缩；长期记忆走 Mem0，用来保存跨会话稳定偏好和事实；Obsidian/编译知识 更像 artifact memory，用来沉淀可复用知识产物。
 
 缓存上，简单问题优先复用受治理直答与统一 Hybrid RAG 的检索结果；摘要、会话状态、Provider（能力提供方）状态都可以按 TTL（生存时间）和 userId（用户标识）缓存。权限变化、文档删除、版本更新时要让相关缓存和索引失效。
 ```
@@ -1306,7 +1306,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 ```text
 输入资料
   -> 解析/清洗/切片/metadata
-  -> 多路索引：Milvus 向量 + BM25/ES 关键词 + Neo4j 图谱 + Obsidian/Karpathy 编译层
+  -> 多路索引：Milvus 向量 + BM25/ES 关键词 + Neo4j 图谱 + Obsidian/编译知识 编译层
   -> 查询路由：simple / auto / agentic
   -> 检索增强：query normalize、hybrid retrieval、GraphRAG、Web Search、Rerank
   -> 生成治理：引用校验、claim support、低相关拒答、reflection
@@ -1326,7 +1326,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 ### 30 秒总回答
 
 ```text
-这个项目是企业级统一 Hybrid RAG 与 Agentic RAG 知识库系统。我做的不是单纯向量问答，而是完整的知识工程链路：文档解析、结构化切片、Direct Answer Gate（精确直答门禁）、Milvus（向量数据库）、BM25／Elasticsearch 中文关键词索引、Neo4j GraphRAG、Obsidian 编译知识、Rerank（重排）、引用校验和低相关拒答。Karpathy 本地知识保留为受治理直答与降级资产，不是独立在线路由。
+这个项目是企业级统一 Hybrid RAG 与 Agentic RAG 知识库系统。我做的不是单纯向量问答，而是完整的知识工程链路：文档解析、结构化切片、Direct Answer Gate（精确直答门禁）、Milvus（向量数据库）、BM25／Elasticsearch 中文关键词索引、Neo4j GraphRAG、Obsidian 编译知识、Rerank（重排）、引用校验和低相关拒答。本地编译知识保留为受治理直答与降级资产，不是独立在线路由。
 
 简单问题走 simple，也就是稳定 hybrid retrieval；复杂问题走 auto/agentic，由 LangGraph 状态机编排 query augment、retrieval、sufficiency、web search、rerank、generate、reflection。工程上有多租户隔离、AG-UI/SSE 流式输出、后台运营、Prometheus 指标和评测门禁。本地工程成熟度 93/100，项目级仿真实业务评测 28/28，但我不会把它说成真实生产准确率，因为还需要公司真实题库和生产环境验证。
 ```
@@ -1338,7 +1338,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 
 第一条是传统企业 RAG 链路：文件或 URL 进入系统后，先做解析、清洗、结构化切片，切片会带 docId、chunkId、userId、章节、来源、生效期、权限等 metadata。之后同一份 chunk 同步进入 Milvus 向量索引、BM25/Elasticsearch 关键词索引和数据库元数据。查询时先做 query normalize，再做向量召回和关键词召回，用融合排序和 rerank 选证据，最后生成答案并做引用校验、claim support 和拒答判断。
 
-第二条是知识编译与统一检索链路。URL、文件、手动输入、官方文档同步会按文档适用性并发构建关键词、向量和 Obsidian 编译知识。simple 与 auto 都先过 Direct Answer Gate，未命中后执行完整 Hybrid RAG；auto 在证据不足或问题复杂时升级 agentic。Karpathy 本地知识只负责受治理直答和降级，Obsidian 候选进入统一证据融合，不再表述成两条独立 fast path。
+第二条是知识编译与统一检索链路。URL、文件、手动输入、官方文档同步会按文档适用性并发构建关键词、向量和 Obsidian 编译知识。simple 与 auto 都先过 Direct Answer Gate，未命中后执行完整 Hybrid RAG；auto 在证据不足或问题复杂时升级 agentic。本地编译知识只负责受治理直答和降级，Obsidian 候选进入统一证据融合，不再表述成两条独立 fast path。
 
 复杂问题会进入 LangGraph 编排，但我没有让所有问题默认走 Agent。Agentic 节点包括 routing、query augment、retrieval、sufficiency、web search、rerank、generate、citation、reflection、final，每个节点都有状态、预算和可观测事件。这样能控制成本，也能定位慢在哪里、错在哪里。
 
@@ -1350,7 +1350,7 @@ Chatbot 主要是对话入口，核心是根据上下文生成回复。Agent 是
 可以这样答：
 
 ```text
-这个项目是企业知识库 RAG，不是简单的“向量召回 + LLM 总结”。完整链路是文档上传、URL 抓取或手动输入，进入解析、清洗、结构化切片、metadata 补全，然后同一份 chunk 同步进入 PostgreSQL 元数据、Milvus 向量索引、BM25/ES 关键词索引和 Karpathy/Obsidian 知识层。查询时先做 query normalize，再做混合检索、Rerank、生成回答、引用校验和低相关拒答。
+这个项目是企业知识库 RAG，不是简单的“向量召回 + LLM 总结”。完整链路是文档上传、URL 抓取或手动输入，进入解析、清洗、结构化切片、metadata 补全，然后同一份 chunk 同步进入 PostgreSQL 元数据、Milvus 向量索引、BM25/ES 关键词索引和 编译知识/Obsidian 知识层。查询时先做 query normalize，再做混合检索、Rerank、生成回答、引用校验和低相关拒答。
 
 我重点处理的是企业知识库里的可信问题：中文召回、引用支撑、低相关拒答、空库兜底、版本冲突、GraphRAG 关系检索和后台运营可观测。
 ```
@@ -1606,7 +1606,7 @@ Dify/Coze 适合快速搭应用和验证流程，但企业知识库落地时会�
 ```text
 企业知识库最怕旧版本残留。我的处理是每个文档有 docId、version、content_hash、effectiveAt、expiredAt、sourceAuthority。更新时要么生成新版本，要么触发 reindex；删除时清理元数据、chunk、BM25/ES、Milvus 和图谱关联，并在检索阶段用 active docId 过滤残留。
 
-Obsidian/Karpathy 链路里也用 content_hash 和 rag_doc_id 做去重和补偿，避免 Obsidian 已经有笔记但当前用户 RAG 索引没写入，或者重复资料反复入库。
+Obsidian/编译知识 链路里也用 content_hash 和 rag_doc_id 做去重和补偿，避免 Obsidian 已经有笔记但当前用户 RAG 索引没写入，或者重复资料反复入库。
 ```
 
 可以说的取舍：
@@ -1811,7 +1811,7 @@ RAG 不能只看 accuracy。召回层看 Recall@K、Hit Rate、MRR；排序层�
 1. **Agent Memory 分类**
 
 ```text
-短期记忆是当前会话上下文，长期记忆是跨会话沉淀的用户偏好、业务事实或项目资产，工具记忆是外部系统返回的结构化结果，artifact memory 是 Obsidian/Karpathy 这种可复用知识产物。记忆必须可过期、可删除、可追溯，不能把所有聊天记录无限塞上下文。
+短期记忆是当前会话上下文，长期记忆是跨会话沉淀的用户偏好、业务事实或项目资产，工具记忆是外部系统返回的结构化结果，artifact memory 是 Obsidian/编译知识 这种可复用知识产物。记忆必须可过期、可删除、可追溯，不能把所有聊天记录无限塞上下文。
 ```
 
 2. **Agent 任务成功率怎么评估**
@@ -2036,7 +2036,7 @@ Memory 要分 working、episodic、semantic、procedural。当前任务状态是
 1. 先读 `README.md`，掌握项目一句话和当前状态。
 2. 再读 `../architecture/ARCHITECTURE.md`，掌握模块边界和技术取舍。
 3. 再读 `ROADMAP.md`，掌握完成项、缺口和验证证据。
-4. 再看 `backend/src/rag/karpathy/karpathy-rag.service.ts`，弄懂稳定主链路。
+4. 再看 `backend/src/rag/rag.service.ts`，弄懂稳定主链路。
 5. 再看 `backend/src/rag/agentic/agentic-rag.service.ts`，弄懂 Agentic 编排。
 6. 再看 `backend/scripts/eval-rag-quality-gate.mjs`、`backend/scripts/eval-rag-project.mjs`、`backend/scripts/eval-rag-maturity.mjs`，弄懂质量门禁。
 7. 最后看前端聊天、上传、Debug、SSE 相关页面，准备前端岗位追问。

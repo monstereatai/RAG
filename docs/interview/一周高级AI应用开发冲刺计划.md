@@ -141,7 +141,7 @@
 ## 面试前最后一小时
 
 - 脱稿讲项目介绍，再随机抽六题，每题一分钟；卡住的只查对应代码和课程段落。
-- 能现场找到四个入口：[检索与回答](../../backend/src/rag/karpathy/karpathy-rag.service.ts)、[问答编排](../../backend/src/rag/agentic/agentic-rag.service.ts)、[工具执行](../../backend/src/tools/tool-execution.service.ts)、[生产工作流](../../backend/src/modules/workflow/production-workflow.service.ts)。
+- 能现场找到四个入口：[检索与回答](../../backend/src/rag/rag.service.ts)、[问答编排](../../backend/src/rag/agentic/agentic-rag.service.ts)、[工具执行](../../backend/src/tools/tool-execution.service.ts)、[生产工作流](../../backend/src/modules/workflow/production-workflow.service.ts)。
 - 讲清两个案例：一个已有修复记录，一个当前待处理问题；区分自己实际参与的部分。
 - 不背虚构准确率、并发量、降本比例或生产用户数；不知道数字，就讲测量方法和已验证范围。
 

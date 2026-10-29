@@ -10,7 +10,7 @@ import {
   SerializerProtocol,
 } from '@langchain/langgraph-checkpoint';
 import { RunnableConfig } from '@langchain/core/runnables';
-import { RedisProvider } from '../../providers/redis/redis.provider';
+import { RedisProvider } from '../redis/redis.provider';
 
 /**
  * Redis-based LangGraph Checkpointer

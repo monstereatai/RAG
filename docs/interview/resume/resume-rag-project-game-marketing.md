@@ -6,7 +6,7 @@
 
 面向游戏活动、营销投放、小程序/H5 和游戏官网的 Agentic RAG 知识库与方案生成平台。
 
-当前公开资料验收已覆盖 PC 端候选 Top50 和页游候选 Top50：实际抓取 127 个官网／活动／运营／营销／社区公开页面，形成 108 份唯一目标文档并完成 RAG、Karpathy、Obsidian 索引；真实活动数据和长期线上效果仍需业务环境继续验证。
+当前公开资料验收已覆盖 PC 端候选 Top50 和页游候选 Top50：实际抓取 127 个官网／活动／运营／营销／社区公开页面，形成 108 份唯一目标文档并完成 RAG、编译知识、Obsidian 索引；真实活动数据和长期线上效果仍需业务环境继续验证。
 
 这个版本比“企业级知识库”更贴合我的业务经历：我之前做游戏节假日活动、周年庆、版本活动、角色活动、改版活动、充值营销、抽奖营销、新角色宣发、小程序/H5 活动页，以及 PC/H5 游戏官网，业务覆盖台湾服、东南亚服、国内和海外。真实痛点不是记住某一次活动的具体规则，而是快速理解活动类型、营销玩法、地区差异、官网落地模式和前端交付约束，并把需求转成可执行的技术方案。
 
@@ -122,7 +122,7 @@ NestJS + React + LangGraph.js + Milvus + Elasticsearch/BM25 + Redis + Neo4j + MC
 
 负责内容：
 1. 负责整体方案设计、技术选型、架构拆分和任务推进，完成 RAG 后端、Admin 管理后台、MCP 工具服务和评测脚本等核心链路的从 0 到 1 建设。
-2. 设计知识入库链路，支持活动模板、官网规范、前端经验、Obsidian 笔记、URL 文章和官方文档统一进入 RAG/Karpathy/Obsidian 索引层，先以业务模板、试点样本和官网/活动交付经验建立可持续扩充的知识结构。
+2. 设计知识入库链路，支持活动模板、官网规范、前端经验、Obsidian 笔记、URL 文章和官方文档统一进入 RAG/编译知识/Obsidian 索引层，先以业务模板、试点样本和官网/活动交付经验建立可持续扩充的知识结构。
 3. 设计 Hybrid Search 检索链路，结合 Milvus 向量召回、Elasticsearch/BM25 关键词召回、RRF 融合、Rerank 和引用校验，提升活动模板、页面模块、埋点规范和地区适配经验的检索可靠性。
 4. 基于 LangGraph 设计 simple / auto / agentic 分层问答流程，简单问题走快速检索，复杂活动需求升级为 Agentic Workflow，输出页面结构、接口清单、埋点清单、风险检查和测试验收 checklist。
 5. 引入 GraphRAG 建模活动类型、营销玩法、页面模块、接口、埋点、地区版本和风险项之间的关系，用于补齐技术方案中的遗漏项。
@@ -144,7 +144,7 @@ NestJS + React + LangGraph.js + Milvus + Elasticsearch/BM25 + Redis + Neo4j + MC
 游戏活动与官网营销 Agentic RAG 知识协同平台｜NestJS、React、LangGraph.js、Milvus、Elasticsearch、Neo4j、MCP
 
 - 面向游戏节假日、周年庆、版本更新、新角色宣发、充值/抽奖营销、小程序/H5 活动页和 PC/H5 官网等场景，从 0 到 1 设计并落地 Agentic RAG 知识协同平台试点；结合当前业务链路搭建活动类型、营销玩法、页面模块、前端工程规范、埋点规范、地区适配和上线验收清单框架，辅助业务负责人快速形成可评审的技术方案初稿。
-- 设计统一知识入库链路，支持活动模板、官网规范、前端经验、Obsidian 笔记、URL 文章和官方文档进入 RAG/Karpathy/Obsidian 索引层，通过 metadata 标注玩法类型、页面形态、地区版本、技术关注点和风险边界，让知识库能随着后续活动上线和复盘持续扩充，避免做成一次性活动规则库。
+- 设计统一知识入库链路，支持活动模板、官网规范、前端经验、Obsidian 笔记、URL 文章和官方文档进入 RAG/编译知识/Obsidian 索引层，通过 metadata 标注玩法类型、页面形态、地区版本、技术关注点和风险边界，让知识库能随着后续活动上线和复盘持续扩充，避免做成一次性活动规则库。
 - 实现 Milvus 向量召回 + Elasticsearch/BM25 关键词召回 + RRF 融合 + Rerank + 引用校验的 Hybrid Search 链路，用于检索抽奖、充值返利、微信分享裂变、角色宣发、官网 SEO/性能、埋点和地区适配等知识，保证生成结果有来源、可追溯、低置信度可拒答。
 - 基于 LangGraph 构建 simple／auto／agentic 分层编排：Simple 与 Auto 先走 Direct Answer Gate（精确直答门禁），未命中后执行统一 Hybrid RAG（混合检索增强生成）；Auto 按证据充分性和复杂度升级到 Agentic Workflow（智能体工作流），输出活动理解、页面结构、素材需求、接口清单、埋点清单、风险检查、地区适配和测试验收 checklist（检查清单）。
 - 引入 GraphRAG 表达活动类型、营销玩法、页面模块、接口、埋点、地区版本和风险项之间的关系；同时通过 MCP 暴露 `rag_context`、`rag_search`、`rag_game_plan` 等工具，让 Codex/Claude Code/Trae 在编码前自动获取内部组件、活动模板、埋点规范和地区适配上下文。
@@ -575,7 +575,7 @@ Checklist -> verifies -> PageModule / TrackingEvent / ApiContract / RiskItem
 
 第一块是整体架构，包括 NestJS RAG 后端、React Admin 管理后台、MCP 工具服务和评测脚本，保证系统能被管理、被评测，也能给 AI 编程工具调用。
 
-第二块是知识和检索链路。资料进来后会并发构建关键词、向量、图谱和 Obsidian 编译知识；Simple 与 Auto 先精确直答，未命中后执行统一 Hybrid Search，复杂问题再按需补充 GraphRAG。Karpathy 本地知识只负责受治理直答和降级，不是独立在线链路。
+第二块是知识和检索链路。资料进来后会并发构建关键词、向量、图谱和 Obsidian 编译知识；Simple 与 Auto 先精确直答，未命中后执行统一 Hybrid Search，复杂问题再按需补充 GraphRAG。本地编译知识只负责受治理直答和降级，不是独立在线链路。
 
 第三块是问答编排。简单查询走 simple，系统判断证据不足时进入 auto，复杂活动需求走 agentic，通过 LangGraph 拆成页面方案、接口清单、埋点方案、风险检查和验收 checklist。
 

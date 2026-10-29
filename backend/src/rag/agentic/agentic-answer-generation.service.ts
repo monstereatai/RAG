@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import {
-  KarpathyRagService,
-  type RetrieveOptions,
-  type RetrievedChunk,
-} from '../karpathy/karpathy-rag.service';
+import type { RetrieveOptions } from '../contracts/rag-types';
+import type { RetrievedChunk } from '../evidence/retrieval.types';
+import { EvidencePolicyService } from '../evidence/evidence-policy.service';
+import { AGENTIC_RETRIEVAL_CAPABILITY, type AgenticRetrievalCapability } from '../contracts/agentic-rag-capabilities';
+import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 import { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
 import type { AgenticRagStateType } from './agentic-rag.state';
@@ -32,9 +32,12 @@ export class AgenticAnswerGenerationService {
 
   constructor(
     private readonly llmProvider: LlmProvider,
-    private readonly karpathyRagService: KarpathyRagService,
+    private readonly groundedAnswerGeneration: GroundedAnswerGenerationService,
+    private readonly evidencePolicy: EvidencePolicyService,
     private readonly badCaseFlywheel: BadCaseFlywheelService,
     private readonly agentLoop: AgentLoopService,
+    @Inject(AGENTIC_RETRIEVAL_CAPABILITY)
+    private readonly retrievalCapability: AgenticRetrievalCapability,
   ) {}
 
   /**
@@ -86,10 +89,12 @@ export class AgenticAnswerGenerationService {
       (match) => match.mode === 'exact',
     );
     const correction = strongBadCase
-      ? this.karpathyRagService.extractCorrectedAnswer(strongBadCase.text)
+      ? this.groundedAnswerGeneration.extractCorrectedAnswer(
+          strongBadCase.text,
+        )
       : '';
     if (strongBadCase && correction) {
-      const answer = await this.karpathyRagService.generateCorrectionAnswer(
+      const answer = await this.groundedAnswerGeneration.generateCorrectionAnswer(
         state.query,
         correction,
         history,
@@ -120,7 +125,7 @@ export class AgenticAnswerGenerationService {
         state.retrievedChunks.length === 0
           ? '没有检索到任何可用片段'
           : state.retrievalReason || '检索不足';
-      const ans = this.karpathyRagService.unsupportedReliableAnswer();
+      const ans = this.groundedAnswerGeneration.unsupportedReliableAnswer();
       onEvent?.({ type: 'token', data: ans });
       onEvent?.({ type: 'citation', data: [] });
       const artifacts = buildAnswerArtifacts(
@@ -141,13 +146,12 @@ export class AgenticAnswerGenerationService {
     }
 
     if (deterministicEvidenceAnswer) {
-      const deterministicGate =
-        this.karpathyRagService.validateAnswerCitationSupport(
-          deterministicEvidenceAnswer,
-          state.retrievedChunks,
-        );
+      const deterministicGate = this.evidencePolicy.validateAnswerCitationSupport(
+        deterministicEvidenceAnswer,
+        state.retrievedChunks,
+      );
       if (deterministicGate.sufficient) {
-        const citedChunks = this.karpathyRagService.selectCitedChunks(
+        const citedChunks = this.evidencePolicy.selectCitedChunks(
           deterministicEvidenceAnswer,
           state.retrievedChunks,
         );
@@ -194,17 +198,16 @@ export class AgenticAnswerGenerationService {
             name: 'generate_grounded_answer',
             execute: async () => {
               const grounded =
-                await this.karpathyRagService.generateGroundedAnswer(
+                await this.groundedAnswerGeneration.generateGroundedAnswer(
                   state.query,
-                  state.retrievedChunks,
+                  this.retrievalCapability.prepareGroundedEvidence(
+                    state.retrievedChunks,
+                    retrieveOptions.scope,
+                  ),
                   history,
                   generationMemory,
                   (token) => onEvent?.({ type: 'token', data: token }),
                   {
-                    userId,
-                    scope: retrieveOptions.scope,
-                    entities: retrieveOptions.entities,
-                    needsSynthesis: retrieveOptions.needsSynthesis,
                     answerRequirements:
                       retrieveOptions.queryPlan?.subQueries ?? [],
                     preferAgenticModel: true,
@@ -230,7 +233,7 @@ export class AgenticAnswerGenerationService {
               evidenceCount: state.retrievedChunks.length,
             },
             execute: async () =>
-              this.karpathyRagService.validateAnswerCitationSupport(
+              this.evidencePolicy.validateAnswerCitationSupport(
                 loopState.answer,
                 state.retrievedChunks,
               ),
@@ -279,13 +282,13 @@ export class AgenticAnswerGenerationService {
         retrieveOptions.queryPlan?.subQueries ?? [],
       );
       let repairedFallbackAnswer = fallbackAnswer
-        ? this.karpathyRagService.repairAnswerCitations(
+        ? this.evidencePolicy.repairAnswerCitations(
             fallbackAnswer,
             state.retrievedChunks,
           )
         : null;
       let fallbackGate = repairedFallbackAnswer
-        ? this.karpathyRagService.validateAnswerCitationSupport(
+        ? this.evidencePolicy.validateAnswerCitationSupport(
             repairedFallbackAnswer,
             state.retrievedChunks,
           )
@@ -307,13 +310,13 @@ export class AgenticAnswerGenerationService {
             ),
           );
           repairedFallbackAnswer = qwenAnswer
-            ? this.karpathyRagService.repairAnswerCitations(
+            ? this.evidencePolicy.repairAnswerCitations(
                 qwenAnswer,
                 state.retrievedChunks,
               )
             : null;
           fallbackGate = repairedFallbackAnswer
-            ? this.karpathyRagService.validateAnswerCitationSupport(
+            ? this.evidencePolicy.validateAnswerCitationSupport(
                 repairedFallbackAnswer,
                 state.retrievedChunks,
               )
@@ -326,7 +329,7 @@ export class AgenticAnswerGenerationService {
       }
 
       if (repairedFallbackAnswer && fallbackGate?.sufficient) {
-        const citedChunks = this.karpathyRagService.selectCitedChunks(
+        const citedChunks = this.evidencePolicy.selectCitedChunks(
           repairedFallbackAnswer,
           state.retrievedChunks,
         );
@@ -351,7 +354,7 @@ export class AgenticAnswerGenerationService {
         };
       }
 
-      const safeAnswer = this.karpathyRagService.unsupportedReliableAnswer();
+      const safeAnswer = this.groundedAnswerGeneration.unsupportedReliableAnswer();
       onEvent?.({ type: 'token', data: safeAnswer });
       onEvent?.({ type: 'citation', data: [] });
       const artifacts = buildAnswerArtifacts(
@@ -372,7 +375,7 @@ export class AgenticAnswerGenerationService {
       };
     }
 
-    const citedChunks = this.karpathyRagService.selectCitedChunks(
+    const citedChunks = this.evidencePolicy.selectCitedChunks(
       answer,
       state.retrievedChunks,
     );
@@ -402,90 +405,6 @@ export class AgenticAnswerGenerationService {
     signal?: AbortSignal,
     answerRequirements: string[] = [],
   ): Promise<string | null> {
-    if (chunks.length === 0) return null;
-    const evidence = chunks
-      .slice(0, 6)
-      .map(
-        (chunk, index) =>
-          `[片段${index + 1}] ${chunk.content.slice(0, 900).replace(/\s+/g, ' ')}`,
-      )
-      .join('\n\n');
-    const requirements = answerRequirements.length
-      ? answerRequirements
-          .map((item, index) => `${index + 1}. ${item}`)
-          .join('\n')
-      : '无（请从用户问题中逐项拆分）';
-    const prompt = `你是企业知识库问答的证据编辑。只根据下列证据回答问题，不要逐段转抄，不要补充证据外事实。先直接给结论，再用不超过三句概括关键依据。若问题包含多个并列事项，必须逐项回答并分别引用对应片段；某一项缺证据时只对该项说明“片段中未提及”，不能只回答其中最相关的一项。每个结论句末必须标注对应的[片段N]；没有可靠依据就只回答“当前资料不足以确认该结论。”\n\n必答事项（如未提供，请从用户问题中逐项拆分）：\n${requirements}\n\n问题：${query}\n\n证据：\n${evidence}`;
-    try {
-      const answer = await this.withTimeout(
-        this.llmProvider.invoke(prompt, {
-          signal: this.composeSignal(signal, 20_000),
-        }),
-        20_000,
-        'Evidence synthesis fallback',
-      );
-      if (answer.trim()) return answer.trim();
-      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
-        const fallback = await this.withTimeout(
-          this.llmProvider.runWithModel('qwen', () =>
-            this.llmProvider.invoke(prompt, {
-              signal: this.composeSignal(signal, 20_000),
-            }),
-          ),
-          20_000,
-          'Qwen evidence synthesis fallback',
-        );
-        return fallback.trim() || null;
-      }
-      return null;
-    } catch (error) {
-      this.logger.warn(
-        `Evidence synthesis fallback failed: ${(error as Error).message}`,
-      );
-      if (this.llmProvider.getActiveProviderName() !== 'qwen') {
-        try {
-          const fallback = await this.withTimeout(
-            this.llmProvider.runWithModel('qwen', () =>
-              this.llmProvider.invoke(prompt, {
-                signal: this.composeSignal(signal, 20_000),
-              }),
-            ),
-            20_000,
-            'Qwen evidence synthesis fallback',
-          );
-          return fallback.trim() || null;
-        } catch (fallbackError) {
-          this.logger.warn(
-            `Qwen evidence synthesis fallback failed: ${(fallbackError as Error).message}`,
-          );
-        }
-      }
-      return null;
-    }
-  }
-
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    label: string,
-  ): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`${label} timeout after ${ms}ms`)),
-        ms,
-      );
-    });
-
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  private composeSignal(signal: AbortSignal | undefined, timeoutMs: number) {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    return this.groundedAnswerGeneration.synthesizeAgenticEvidenceAnswer(query, chunks, signal, answerRequirements);
   }
 }
