@@ -33,12 +33,13 @@ yarn-error.log*
 
 # Docker volumes（本地数据卷）
 docker/volumes/
+infra/docker/volumes/
 
 # Test coverage
 coverage/
 
 # 冒烟脚本运行时生成的测试夹具
-backend/scripts/fixtures/
+apps/rag-api/scripts/fixtures/
 
 # Misc
 .cache/

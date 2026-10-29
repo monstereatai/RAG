@@ -21,7 +21,7 @@ steps:
     image: plugins/docker
     settings:
       dry_run: true
-      context: backend
+      context: apps/rag-api
       dockerfile: Dockerfile
       repo: rag-backend
       tags:
@@ -33,7 +33,7 @@ steps:
     image: plugins/docker
     settings:
       dry_run: true
-      context: frontend
+      context: apps/user-web
       dockerfile: Dockerfile
       repo: rag-frontend
       tags:

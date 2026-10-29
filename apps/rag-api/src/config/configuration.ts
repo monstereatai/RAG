@@ -1,0 +1,468 @@
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+dotenv.config();
+
+export const configuration = () => ({
+  port: parseInt(process.env.PORT ?? '3000', 10),
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  core: {
+    requireDependencies:
+      process.env.REQUIRE_CORE_DEPENDENCIES === 'true' ||
+      process.env.NODE_ENV === 'production',
+  },
+
+  // 认证（JWT）
+  auth: {
+    jwtSecret: process.env.JWT_SECRET ?? '',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+    requireDistributedTokenStore:
+      process.env.REQUIRE_DISTRIBUTED_TOKEN_STORE === 'true' ||
+      process.env.NODE_ENV === 'production',
+    allowFileStore:
+      process.env.NODE_ENV !== 'production' ||
+      process.env.ALLOW_FILE_AUTH_STORE === 'true',
+    // 生产用户身份必须带租户上下文；内部 Service Token 走独立守卫，不受此门禁影响。
+    requireTenantContext:
+      process.env.AUTH_REQUIRE_TENANT_CONTEXT === 'true' ||
+      process.env.NODE_ENV === 'production',
+    // 生产用户请求必须拥有路由声明的 IAM scope 权限；服务令牌走独立守卫。
+    enforceIam:
+      process.env.AUTH_ENFORCE_IAM === 'true' ||
+      (process.env.AUTH_ENFORCE_IAM !== 'false' &&
+        process.env.NODE_ENV === 'production'),
+  },
+
+  // API 限流（默认 60 req/min）
+  throttle: {
+    ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT ?? '60', 10),
+  },
+
+  // 租户／用户级请求和 AI 成本预算；生产默认启用并要求 Redis 共享计数。
+  tenantQuota: {
+    enabled:
+      process.env.TENANT_QUOTA_ENABLED === 'true' ||
+      process.env.NODE_ENV === 'production',
+    requireDistributed:
+      process.env.TENANT_QUOTA_REQUIRE_REDIS === 'true' ||
+      process.env.NODE_ENV === 'production',
+    windowMs: parseInt(process.env.TENANT_QUOTA_WINDOW_MS ?? '60000', 10),
+    requestLimit: parseInt(process.env.TENANT_QUOTA_REQUEST_LIMIT ?? '60', 10),
+    dailyBudgetUsd: parseFloat(
+      process.env.TENANT_QUOTA_DAILY_BUDGET_USD ?? '0',
+    ),
+    estimatedCostPerRequestUsd: parseFloat(
+      process.env.TENANT_QUOTA_ESTIMATED_COST_USD ?? '0.02',
+    ),
+  },
+
+  // 向量库（可插拔：milvus | pgvector）
+  vectorStore: {
+    provider: process.env.VECTOR_STORE_PROVIDER ?? 'milvus',
+    milvus: {
+      host: process.env.MILVUS_HOST ?? '127.0.0.1',
+      port: parseInt(process.env.MILVUS_PORT ?? '19530', 10),
+      collection: process.env.MILVUS_COLLECTION ?? 'rag_chunks',
+      dimension: parseInt(process.env.MILVUS_DIMENSION ?? '1024', 10),
+      indexType: process.env.MILVUS_INDEX_TYPE ?? 'HNSW',
+      hnswM: parseInt(process.env.MILVUS_HNSW_M ?? '16', 10),
+      hnswEfConstruction: parseInt(
+        process.env.MILVUS_HNSW_EF_CONSTRUCTION ?? '200',
+        10,
+      ),
+      hnswEfSearch: parseInt(process.env.MILVUS_HNSW_EF_SEARCH ?? '64', 10),
+      searchTimeoutMs: parseInt(
+        process.env.MILVUS_SEARCH_TIMEOUT_MS ?? '800',
+        10,
+      ),
+      deleteTimeoutMs: parseInt(
+        process.env.MILVUS_DELETE_TIMEOUT_MS ?? '1000',
+        10,
+      ),
+      warmupTimeoutMs: parseInt(
+        process.env.MILVUS_WARMUP_TIMEOUT_MS ?? '1500',
+        10,
+      ),
+      circuitOpenMs: parseInt(
+        process.env.MILVUS_CIRCUIT_OPEN_MS ?? '30000',
+        10,
+      ),
+      circuitFailureThreshold: parseInt(
+        process.env.MILVUS_CIRCUIT_FAILURE_THRESHOLD ?? '2',
+        10,
+      ),
+    },
+    pgvector: {
+      url:
+        process.env.PGVECTOR_URL ??
+        'postgresql://postgres:postgres@localhost:5432/rag',
+      tableName: process.env.PGVECTOR_TABLE ?? 'rag_chunks',
+    },
+  },
+
+  // 关系型数据库（可插拔：postgres | mysql）
+  relationalDb: {
+    provider: process.env.RELATIONAL_DB_PROVIDER ?? 'postgres',
+    postgres: {
+      url:
+        process.env.POSTGRES_URL ??
+        'postgresql://postgres:postgres@localhost:5432/rag',
+    },
+    mysql: {
+      url: process.env.MYSQL_URL ?? 'mysql://root:root@localhost:3306/rag',
+    },
+  },
+
+  // Redis（对话历史 + 缓存）
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    requireDistributedLock:
+      process.env.REQUIRE_DISTRIBUTED_LOCK === 'true' ||
+      process.env.NODE_ENV === 'production',
+  },
+
+  // Outbox 派发由多个 Backend 实例共享时必须使用 Redis 租约，避免重复投递。
+  domainEvents: {
+    requireDistributedLock:
+      process.env.DOMAIN_EVENTS_REQUIRE_DISTRIBUTED_LOCK === 'true' ||
+      process.env.NODE_ENV === 'production',
+    lockTtlSeconds: parseInt(
+      process.env.DOMAIN_EVENTS_LOCK_TTL_SECONDS ?? '120',
+      10,
+    ),
+  },
+
+  workflowQueue: {
+    failedRetentionSeconds: parseInt(
+      process.env.QUEUE_FAILED_RETENTION_SECONDS ?? '604800',
+      10,
+    ),
+  },
+
+  // 外部索引自动对账：生产默认开启，但只有 Redis/BullMQ 可用时才会投递修复任务。
+  ragIndexReconciler: {
+    enabled:
+      process.env.RAG_INDEX_RECONCILER_ENABLED === 'true' ||
+      (process.env.RAG_INDEX_RECONCILER_ENABLED !== 'false' &&
+        process.env.NODE_ENV === 'production'),
+    intervalMs: parseInt(
+      process.env.RAG_INDEX_RECONCILER_INTERVAL_MS ?? '300000',
+      10,
+    ),
+    batchSize: parseInt(
+      process.env.RAG_INDEX_RECONCILER_BATCH_SIZE ?? '100',
+      10,
+    ),
+  },
+
+  // 对象存储（业务原始文件与解析资源）
+  objectStorage: {
+    provider: process.env.OBJECT_STORAGE_PROVIDER ?? 'local',
+    // 生产环境禁止在远程对象存储不可用时静默写入本机磁盘。
+    requireRemote:
+      process.env.OBJECT_STORAGE_REQUIRE_REMOTE === 'true' ||
+      process.env.NODE_ENV === 'production',
+    endpoint: process.env.OBJECT_STORAGE_ENDPOINT ?? '127.0.0.1',
+    port: parseInt(process.env.OBJECT_STORAGE_PORT ?? '9000', 10),
+    useSSL: process.env.OBJECT_STORAGE_USE_SSL === 'true',
+    accessKey: process.env.OBJECT_STORAGE_ACCESS_KEY ?? 'minioadmin',
+    secretKey: process.env.OBJECT_STORAGE_SECRET_KEY ?? 'minioadmin',
+    bucket: process.env.OBJECT_STORAGE_BUCKET ?? 'rag-documents',
+    publicBaseUrl: process.env.OBJECT_STORAGE_PUBLIC_BASE_URL ?? '',
+  },
+
+  // Elasticsearch（全文检索）
+  elasticsearch: {
+    node: process.env.ES_NODE ?? 'http://localhost:9200',
+    apiKey: process.env.ES_API_KEY ?? '',
+  },
+
+  // 视觉 / 视频理解（可选，VISION_PROVIDER=mock 时可降级运行）
+  vision: {
+    provider: (process.env.VISION_PROVIDER ?? 'mock') as
+      | 'mock'
+      | 'openai-compatible',
+    baseUrl:
+      process.env.VISION_BASE_URL ??
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: process.env.VISION_MODEL ?? 'qwen3-vl-plus',
+    apiKey: process.env.VISION_API_KEY ?? '',
+    qwenVlApiKey: process.env.QWEN_VL_API_KEY ?? '',
+  },
+
+  // LLM（通义千问 + OpenAI 兼容）
+  llm: {
+    provider: process.env.LLM_PROVIDER ?? 'qwen',
+    // 用于给历史、检索证据和回答输出分配上下文预算；按当前模型服务配置调整。
+    contextWindowTokens: parseInt(
+      process.env.LLM_CONTEXT_WINDOW_TOKENS ?? '32768',
+      10,
+    ),
+    gateway: {
+      fallbackEnabled: process.env.LLM_GATEWAY_FALLBACK_ENABLED !== 'false',
+      fallbackProvider: process.env.LLM_GATEWAY_FALLBACK_PROVIDER ?? '',
+    },
+    // 防止模型流长时间不返回时挂死请求；调用层和流式 Runnable 共用该上限。
+    requestTimeoutMs: parseInt(
+      process.env.LLM_REQUEST_TIMEOUT_MS ?? '90000',
+      10,
+    ),
+    // simple 模式下的短问题使用本地 QueryPlan，省掉一次规划模型调用。
+    queryPlannerFastPathEnabled:
+      process.env.QUERY_PLANNER_FAST_PATH_ENABLED !== 'false',
+    circuitBreaker: {
+      failureThreshold: parseInt(
+        process.env.LLM_CIRCUIT_FAILURE_THRESHOLD ?? '2',
+        10,
+      ),
+      openMs: parseInt(process.env.LLM_CIRCUIT_OPEN_MS ?? '30000', 10),
+    },
+    qwen: {
+      apiKey: process.env.QWEN_API_KEY ?? '',
+      baseUrl:
+        process.env.QWEN_LLM_BASE_URL ||
+        process.env.QWEN_BASE_URL ||
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: process.env.QWEN_MODEL ?? 'qwen-plus',
+      // 交互式 Agentic 生成使用更快模型；复杂任务可显式改回 qwen-plus。
+      agenticModel:
+        process.env.QWEN_AGENTIC_MODEL ??
+        process.env.QWEN_FAST_MODEL ??
+        'qwen-turbo',
+      timeoutMs: parseInt(process.env.QWEN_TIMEOUT_MS ?? '60000', 10),
+      maxTokens: parseInt(process.env.QWEN_MAX_TOKENS ?? '4096', 10),
+      maxRetries: parseInt(process.env.QWEN_MAX_RETRIES ?? '2', 10),
+      temperature: parseFloat(process.env.QWEN_TEMPERATURE ?? '0.2'),
+    },
+    deepseek: {
+      apiKey: process.env.DEEPSEEK_API_KEY ?? '',
+      baseUrl: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
+      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
+      timeoutMs: parseInt(process.env.DEEPSEEK_TIMEOUT_MS ?? '30000', 10),
+      // DeepSeek v4 会把输出预算的一部分用于 reasoning；默认 1024 避免简单问答因推理耗尽而超时。
+      maxTokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS ?? '1024', 10),
+      maxRetries: parseInt(process.env.DEEPSEEK_MAX_RETRIES ?? '1', 10),
+      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE ?? '0.2'),
+    },
+    zhipu: {
+      apiKey: process.env.ZHIPU_API_KEY || process.env.ZAI_API_KEY || '',
+      baseUrl:
+        process.env.ZHIPU_BASE_URL ?? 'https://open.bigmodel.cn/api/paas/v4/',
+      model: process.env.ZHIPU_MODEL ?? 'glm-5.2',
+      timeoutMs: parseInt(process.env.ZHIPU_TIMEOUT_MS ?? '60000', 10),
+      maxTokens: parseInt(process.env.ZHIPU_MAX_TOKENS ?? '4096', 10),
+      maxRetries: parseInt(process.env.ZHIPU_MAX_RETRIES ?? '2', 10),
+      temperature: parseFloat(process.env.ZHIPU_TEMPERATURE ?? '0.2'),
+    },
+    openai: {
+      apiKey: process.env.OPENAI_API_KEY ?? '',
+      baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+      model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+    },
+  },
+
+  // Embedding
+  embedding: {
+    provider: process.env.EMBEDDING_PROVIDER ?? 'qwen',
+    qwen: {
+      apiKey: process.env.QWEN_API_KEY ?? '',
+      baseUrl:
+        process.env.QWEN_BASE_URL ??
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: process.env.EMBEDDING_MODEL ?? 'text-embedding-v3',
+      dimension: parseInt(process.env.EMBEDDING_DIMENSION ?? '1024', 10),
+    },
+  },
+
+  // 语音（腾讯云 ASR/TTS）
+  speech: {
+    provider: process.env.SPEECH_PROVIDER ?? 'tencent',
+    tencent: {
+      secretId: process.env.TENCENT_SECRET_ID ?? '',
+      secretKey: process.env.TENCENT_SECRET_KEY ?? '',
+      region: process.env.TENCENT_REGION ?? 'ap-shanghai',
+    },
+  },
+
+  // 搜索工具（Bocha）
+  bocha: {
+    apiKey: process.env.BOCHA_API_KEY ?? '',
+  },
+
+  // Rerank（DashScope）
+  rerank: {
+    provider: process.env.RERANK_PROVIDER ?? 'dashscope',
+    apiKey: process.env.RERANK_API_KEY ?? process.env.QWEN_API_KEY ?? '',
+    model: process.env.RERANK_MODEL ?? 'qwen3-rerank',
+    baseUrl:
+      process.env.RERANK_BASE_URL ??
+      'https://dashscope.aliyuncs.com/compatible-api/v1/reranks',
+  },
+
+  // RAG 质量闸门
+  ragQuality: {
+    minTopScore: parseFloat(process.env.RAG_MIN_TOP_SCORE ?? '0.05'),
+    // 重排模型已判断 query 与片段的语义相关性时，优先使用该信号，
+    // 避免把“请总结／资料库中”等指令文字误当作必须出现在原文中的事实。
+    minRerankScore: parseFloat(process.env.RAG_MIN_RERANK_SCORE ?? '0.65'),
+    minQueryTokenOverlap: parseInt(
+      process.env.RAG_MIN_QUERY_TOKEN_OVERLAP ?? '1',
+      10,
+    ),
+    minCitationCoverage: parseFloat(
+      process.env.RAG_MIN_CITATION_COVERAGE ?? '0.15',
+    ),
+    governedDirectCoverage: parseFloat(
+      process.env.RAG_GOVERNED_DIRECT_COVERAGE ?? '0.7',
+    ),
+    sourceAuthorityRules: process.env.RAG_SOURCE_AUTHORITY_RULES ?? '',
+  },
+
+  // 问答运营日志：只保留脱敏后的查询文本，默认 180 天自动清理。
+  queryLog: {
+    retentionDays: parseInt(process.env.QUERY_LOG_RETENTION_DAYS ?? '180', 10),
+  },
+
+  // Agentic RAG 成本与复杂度边界
+  agentic: {
+    confidenceThreshold: parseFloat(
+      process.env.AGENTIC_CONFIDENCE_THRESHOLD ?? '0.7',
+    ),
+    maxRetries: parseInt(process.env.AGENTIC_MAX_RETRIES ?? '2', 10),
+    maxAugmentedQueries: parseInt(
+      process.env.AGENTIC_MAX_AUGMENTED_QUERIES ?? '3',
+      10,
+    ),
+    maxRetrievalQueries: parseInt(
+      process.env.AGENTIC_MAX_RETRIEVAL_QUERIES ?? '4',
+      10,
+    ),
+    maxSubQuestions: parseInt(process.env.AGENTIC_MAX_SUB_QUESTIONS ?? '3', 10),
+    maxRetrievedChunks: parseInt(
+      process.env.AGENTIC_MAX_RETRIEVED_CHUNKS ?? '5',
+      10,
+    ),
+    maxWebSearchResults: parseInt(
+      process.env.AGENTIC_MAX_WEB_SEARCH_RESULTS ?? '5',
+      10,
+    ),
+    maxRerankTopN: parseInt(process.env.AGENTIC_MAX_RERANK_TOP_N ?? '5', 10),
+    maxAutoQueryLength: parseInt(
+      process.env.AGENTIC_MAX_AUTO_QUERY_LENGTH ?? '500',
+      10,
+    ),
+    webSearchFallbackEnabled:
+      process.env.AGENTIC_WEB_SEARCH_FALLBACK_ENABLED !== 'false',
+    rerankEnabled: process.env.AGENTIC_RERANK_ENABLED !== 'false',
+    graphSearchEnabled: process.env.AGENTIC_GRAPH_SEARCH_ENABLED !== 'false',
+    // 本地证据门禁和答案契约都已经给出确定结论时，跳过冗余的模型自检调用。
+    sufficiencyFastPathEnabled:
+      process.env.AGENTIC_SUFFICIENCY_FAST_PATH_ENABLED !== 'false',
+    reflectionFastPathEnabled:
+      process.env.AGENTIC_REFLECTION_FAST_PATH_ENABLED !== 'false',
+  },
+
+  // Agent Run Center 预算门禁（估算成本超过阈值时标记为需审批）
+  agentRun: {
+    budgetUsd: parseFloat(process.env.AGENT_RUN_BUDGET_USD ?? '0.2'),
+    timeoutMs: parseInt(process.env.AGENT_RUN_TIMEOUT_MS ?? '120000', 10),
+    maxSteps: parseInt(process.env.AGENT_RUN_MAX_STEPS ?? '18', 10),
+    maxToolCalls: parseInt(process.env.AGENT_RUN_MAX_TOOL_CALLS ?? '24', 10),
+    maxDelegations: parseInt(process.env.AGENT_RUN_MAX_DELEGATIONS ?? '6', 10),
+  },
+
+  // LangSmith 评测与追踪（可选）
+  langsmith: {
+    tracing: process.env.LANGSMITH_TRACING === 'true',
+    apiKey: process.env.LANGSMITH_API_KEY ?? '',
+    project: process.env.LANGSMITH_PROJECT ?? 'rag-evaluation',
+    endpoint:
+      process.env.LANGSMITH_ENDPOINT ?? 'https://api.smith.langchain.com',
+    dataset: process.env.LANGSMITH_DATASET ?? 'rag-smoke',
+  },
+
+  // LangFuse 线上观测（可选）
+  langfuse: {
+    enabled: process.env.LANGFUSE_ENABLED === 'true',
+    // 生产默认只向第三方追踪系统发送脱敏内容。
+    redactContent:
+      process.env.LANGFUSE_REDACT_CONTENT === 'true' ||
+      (process.env.LANGFUSE_REDACT_CONTENT !== 'false' &&
+        process.env.NODE_ENV === 'production'),
+    publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? '',
+    secretKey: process.env.LANGFUSE_SECRET_KEY ?? '',
+    baseUrl: process.env.LANGFUSE_BASE_URL ?? 'https://cloud.langfuse.com',
+    inputCostUsdPer1k: Number(process.env.LANGFUSE_INPUT_COST_USD_PER_1K ?? 0),
+    outputCostUsdPer1k: Number(
+      process.env.LANGFUSE_OUTPUT_COST_USD_PER_1K ?? 0,
+    ),
+  },
+
+  // 钉钉群机器人通知（可选，加签模式）
+  dingtalk: {
+    webhookUrl: process.env.DINGTALK_WEBHOOK_URL ?? '',
+    secret: process.env.DINGTALK_SECRET ?? '',
+    alertCooldownMs: Number(process.env.DINGTALK_ALERT_COOLDOWN_MS ?? 300_000),
+    forwardThreadIds: process.env.DINGTALK_FORWARD_THREAD_IDS ?? '',
+  },
+
+  // 知识图谱（Neo4j，可选）
+  neo4j: {
+    enabled: process.env.GRAPH_RAG_ENABLED === 'true',
+    url: process.env.NEO4J_URL ?? 'bolt://localhost:7687',
+    username: process.env.NEO4J_USERNAME ?? 'neo4j',
+    password: process.env.NEO4J_PASSWORD ?? '',
+  },
+
+  // Mem0 长期记忆（可插拔：cloud | local | 禁用）
+  mem0: {
+    enabled: process.env.MEM0_ENABLED === 'true',
+    provider: process.env.MEM0_PROVIDER ?? 'cloud',
+    apiKey: process.env.MEM0_API_KEY ?? '',
+    baseUrl: process.env.MEM0_BASE_URL ?? '',
+  },
+
+  // MCP 工具协议（默认关闭，避免示例 server 影响本地启动）
+  mcp: {
+    enabled: process.env.MCP_ENABLED === 'true',
+    configPath:
+      process.env.MCP_CONFIG_PATH ||
+      path.resolve(process.cwd(), '../../workspace/mcp-servers.yaml'),
+  },
+
+  // 官方技术文档夜间同步（默认关闭）
+  officialDocsSync: {
+    enabled: process.env.OFFICIAL_DOCS_SYNC_ENABLED === 'true',
+    hour: parseInt(process.env.OFFICIAL_DOCS_SYNC_HOUR ?? '1', 10),
+    runOnStart: process.env.OFFICIAL_DOCS_SYNC_RUN_ON_START === 'true',
+    userId: process.env.OFFICIAL_DOCS_SYNC_USER_ID ?? 'system-official-docs',
+    maxPagesPerSource: parseInt(
+      process.env.OFFICIAL_DOCS_SYNC_MAX_PAGES_PER_SOURCE ?? '12',
+      10,
+    ),
+    timeoutMs: parseInt(
+      process.env.OFFICIAL_DOCS_SYNC_TIMEOUT_MS ?? '15000',
+      10,
+    ),
+  },
+
+  // Obsidian 本地知识库
+  obsidian: {
+    vaultDir:
+      process.env.OBSIDIAN_VAULT_DIR ??
+      path.resolve(process.cwd(), '../../workspace/obsidian'),
+  },
+
+  // 工作区
+  workspace: {
+    uploadDir:
+      process.env.UPLOAD_DIR ??
+      path.resolve(process.cwd(), '../../workspace/uploads'),
+  },
+
+  // Skills 技能系统
+  skills: {
+    rootDir: process.env.SKILLS_DIR ?? path.resolve(process.cwd(), '../../skills'),
+  },
+});

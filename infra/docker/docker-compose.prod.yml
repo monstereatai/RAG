@@ -1,0 +1,318 @@
+# ============================================================
+# RAG 项目生产环境完整栈编排
+# 使用：cd infra/docker && docker compose -f docker-compose.prod.yml up -d
+# 验证：docker compose -f docker-compose.prod.yml ps
+#
+# 包含：
+#   - backend-migrate（一次性数据库迁移）
+#   - backend（NestJS API）
+#   - frontend（nginx + React 静态资源）
+#   - postgres（pgvector）
+#   - redis
+#   - elasticsearch（IK 中文全文检索）
+#   - milvus + etcd + minio
+#   - neo4j（GraphRAG，可选 profile=graphrag）
+#
+# 说明：admin-backend / admin-frontend 使用独立的管理后台发布栈，
+# 不在本文件内和用户端 RAG 服务强行耦合。
+#
+# 密钥：模型密钥从 apps/rag-api/.env 读取；POSTGRES_USER、POSTGRES_PASSWORD、
+# REDIS_PASSWORD、MINIO_ROOT_USER、MINIO_ROOT_PASSWORD、NEO4J_PASSWORD 通过部署环境提供。
+# 若密码用于 *_URL，需先做 URL 编码。基础设施端口仅暴露在 Compose 网络内。
+# ============================================================
+
+services:
+  # ============================================================
+  # 应用层
+  # ============================================================
+
+  # ---- Migration（一次性任务，失败则 backend 不启动）----
+  backend-migrate:
+    build:
+      context: ../../apps/rag-api
+      dockerfile: Dockerfile
+    container_name: rag-backend-migrate
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      POSTGRES_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/rag
+    env_file:
+      - ../../apps/rag-api/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['npm', 'run', 'migration:run:prod']
+    networks:
+      - rag-net
+
+  # ---- Backend（NestJS API）----
+  backend:
+    build:
+      context: ../../apps/rag-api
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # 基础设施连接（docker 网络内服务名）
+      MILVUS_HOST: milvus
+      MILVUS_PORT: '19530'
+      POSTGRES_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/rag
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
+      NEO4J_URL: bolt://neo4j:7687
+      ES_NODE: http://elasticsearch:9200
+      ALLOW_DEV_ENDPOINTS: 'false'
+      # 密钥类从 .env 读取
+    env_file:
+      - ../../apps/rag-api/.env
+    volumes:
+      - backend_workspace:/app/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+        required: false
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+    networks:
+      - rag-net
+
+  # ---- Frontend（nginx + React 静态资源）----
+  frontend:
+    build:
+      context: ../../apps/user-web
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+        reservations:
+          memory: 32M
+    networks:
+      - rag-net
+
+  # ============================================================
+  # 基础设施层
+  # ============================================================
+
+  # ---- PostgreSQL 16 + pgvector ----
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg16
+    container_name: rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: rag
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - rag-net
+
+  # ---- Redis 7 ----
+  redis:
+    image: redis:7.4.9-alpine
+    container_name: rag-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    command: ['sh', '-c', 'exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"']
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - rag-net
+
+  # ---- Milvus 依赖：etcd ----
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: rag-milvus-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ['CMD', '/bin/sh', '-c', 'ETCDCTL_API=3 etcdctl endpoint health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-net
+
+  # ---- Milvus 依赖：minio ----
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: rag-milvus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - rag-net
+
+  # ---- Milvus 2.4 standalone ----
+  milvus:
+    image: milvusdb/milvus:v2.4.4
+    container_name: rag-milvus
+    restart: unless-stopped
+    command: ['milvus', 'run', 'standalone']
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - rag-net
+
+  # ---- Elasticsearch 8 + IK 中文分词 ----
+  elasticsearch:
+    build:
+      context: ./elasticsearch
+      args:
+        ELASTICSEARCH_VERSION: 8.13.0
+    container_name: rag-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms768m -Xmx768m
+      cluster.name: rag-prod
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:9200/_cluster/health || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - rag-net
+
+  # ---- Neo4j 5（知识图谱 GraphRAG，profile=graphrag 可选启动）----
+  neo4j:
+    image: neo4j:5.26.27-community
+    container_name: rag-neo4j
+    restart: unless-stopped
+    profiles:
+      - graphrag
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - rag-net
+
+networks:
+  rag-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  neo4j_data:
+  elasticsearch_data:
+  backend_workspace:

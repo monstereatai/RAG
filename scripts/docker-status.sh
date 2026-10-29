@@ -9,12 +9,12 @@ set -uo pipefail
 
 # 本仓库涉及的三套 compose：项目名 -> compose 文件
 COMPOSE_FILES=(
-  "docker/docker-compose.yml"
-  "docker/docker-compose.dev.yml"
-  "docker/docker-compose.prod.yml"
-  "docker/docker-compose.staging.yml"
-  "monitoring/docker-compose.monitoring.yml"
-  "admin-backend/docker/docker-compose.yml"
+  "infra/docker/docker-compose.yml"
+  "infra/docker/docker-compose.dev.yml"
+  "infra/docker/docker-compose.prod.yml"
+  "infra/docker/docker-compose.staging.yml"
+  "infra/monitoring/docker-compose.monitoring.yml"
+  "apps/admin-api/docker/docker-compose.yml"
 )
 
 echo "== Docker 引擎 =="

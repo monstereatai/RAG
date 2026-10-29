@@ -1,9 +1,9 @@
-# 游戏营销中台组件清单（pageSchema 组件词汇表）
+# 游戏营销中台组件清单
 
 > 来源：`playway/` 9 张低代码平台组件面板截图，OCR 提取（原文与截图对照见 [playway/README.md](../../playway/README.md)）。
 > 用途：production workflow `lowCodeSchemas`（`kind: 'pageSchema'`）中 `components[].type` 的组件枚举参考——LLM 生成 Schema 时从这个词汇表取值，贴近真实营销中台语义；也可直接注入岗位 prompt（第五节紧凑格式）。
 >
-> **诚实声明**：截图仅含中文名，组件 ID 为本项目拟定的标准化命名（原平台内部标识未知，主人可按实际 ID 修正）；「通用组件」「页面框架」两组截图上无分类计数头，为整理时的整理分组。组件规则的机器可读版本见 `backend/src/modules/workflow/playway-component-registry.ts`。
+> **诚实声明**：截图仅含中文名，组件 ID 为本项目拟定的标准化命名（原平台内部标识未知，主人可按实际 ID 修正）；「通用组件」「页面框架」两组截图上无分类计数头，为整理时的整理分组。组件规则的机器可读版本见 `apps/rag-api/src/modules/workflow/playway-component-registry.ts`。
 
 ## 一、分类总览
 

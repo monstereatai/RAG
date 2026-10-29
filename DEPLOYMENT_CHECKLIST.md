@@ -1,13 +1,13 @@
-# RAG Platform Deployment Checklist
+# RAG 平台部署核对清单
 
 > 本清单用于发布前核对。勾选本地代码和配置项，不把“服务能启动”误认为“已具备生产条件”。
 
 ## 代码与契约
 
-- [ ] Backend build 通过：`pnpm --dir backend run build`
-- [ ] Admin Backend build 通过：`pnpm --dir admin-backend run build`
+- [ ] Backend build 通过：`pnpm --dir apps/rag-api run build`
+- [ ] Admin Backend build 通过：`pnpm --dir apps/admin-api run build`
 - [ ] Swagger JSON 可访问，接口摘要和描述为中文
-- [ ] OpenAPI 契约检查通过：`OPENAPI_REQUIRED=true pnpm --dir backend run contract:openapi`
+- [ ] OpenAPI 契约检查通过：`OPENAPI_REQUIRED=true pnpm --dir apps/rag-api run contract:openapi`
 - [ ] 内部服务 Token 未写入代码、日志或前端资源
 - [ ] 数据库迁移已在预发布环境演练，未启用 TypeORM 自动同步
 
@@ -22,7 +22,7 @@
 
 - [ ] 生产启用租户上下文与 IAM scope 门禁：`AUTH_REQUIRE_TENANT_CONTEXT=true`、`AUTH_ENFORCE_IAM=true`
 - [ ] 跨租户权限矩阵覆盖 PostgreSQL、Redis、Milvus、Elasticsearch、BM25、Neo4j、会话／检查点及队列任务；未知 API scope 在启动期失败
-- [ ] RAG 质量门禁通过：`pnpm --dir backend run eval:rag:quality`
+- [ ] RAG 质量门禁通过：`pnpm --dir apps/rag-api run eval:rag:quality`
 - [ ] Prompt 注入和危险操作回归集通过
 - [ ] 文档权限、版本生效时间和废弃状态完成抽样验证
 - [ ] 安全策略、拦截指标和审计查询接口可访问

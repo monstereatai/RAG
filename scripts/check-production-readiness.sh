@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 missing=()
 
-for file in docker/docker-compose.prod.yml docs/architecture/DEPLOYMENT.md ROADMAP.md; do
+for file in infra/docker/docker-compose.prod.yml docs/OPERATIONS.md ROADMAP.md; do
   if [[ ! -f "$file" ]]; then
     missing+=("$file")
   fi
@@ -21,19 +21,19 @@ fi
 
 compose_ok=true
 compose_error=""
-if ! compose_output="$(docker compose -f docker/docker-compose.prod.yml --profile graphrag config 2>&1)"; then
+if ! compose_output="$(docker compose -f infra/docker/docker-compose.prod.yml --profile graphrag config 2>&1)"; then
   compose_ok=false
   compose_error="$compose_output"
 fi
 
 redline_ok=true
 redline_notes=()
-if [[ -f backend/.env ]]; then
-  redline_notes+=("backend/.env exists locally; keep it untracked and inject production secrets on the target machine")
+if [[ -f apps/rag-api/.env ]]; then
+  redline_notes+=("apps/rag-api/.env exists locally; keep it untracked and inject production secrets on the target machine")
 fi
-if git ls-files --error-unmatch backend/.env >/dev/null 2>&1; then
+if git ls-files --error-unmatch apps/rag-api/.env >/dev/null 2>&1; then
   redline_ok=false
-  redline_notes+=("backend/.env is tracked by git")
+  redline_notes+=("apps/rag-api/.env is tracked by git")
 fi
 
 printf '{\n'

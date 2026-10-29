@@ -43,8 +43,8 @@ pipeline {
 
     stage('Docker Build') {
       steps {
-        sh 'docker build -t "$BACKEND_IMAGE" backend'
-        sh 'docker build -t "$FRONTEND_IMAGE" frontend'
+        sh 'docker build -t "$BACKEND_IMAGE" apps/rag-api'
+        sh 'docker build -t "$FRONTEND_IMAGE" apps/user-web'
       }
     }
 
@@ -59,7 +59,7 @@ pipeline {
             : 'docker-compose.staging.yml'
           def profileArgs = params.ENABLE_GRAPHRAG_PROFILE ? '--profile graphrag' : ''
 
-          dir('docker') {
+          dir('infra/docker') {
             sh "docker compose -f ${composeFile} ${profileArgs} up -d --build"
             sh "docker compose -f ${composeFile} ${profileArgs} ps"
           }

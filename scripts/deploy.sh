@@ -9,10 +9,10 @@ set -euo pipefail
 
 DEPLOY_ENV="${1:-production}"
 DEPLOY_DIR="/opt/rag"
-BACKEND_DIR="${DEPLOY_DIR}/backend"
-ADMIN_BACKEND_DIR="${DEPLOY_DIR}/admin-backend"
-ADMIN_DIR="${DEPLOY_DIR}/admin"
-DOCKER_DIR="${DEPLOY_DIR}/docker"
+BACKEND_DIR="${DEPLOY_DIR}/apps/rag-api"
+ADMIN_BACKEND_DIR="${DEPLOY_DIR}/apps/admin-api"
+ADMIN_DIR="${DEPLOY_DIR}/apps/admin-web"
+DOCKER_DIR="${DEPLOY_DIR}/infra/docker"
 LOG_FILE="/var/log/rag-deploy.log"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Deploying RAG (${DEPLOY_ENV})..." | tee -a "${LOG_FILE}"

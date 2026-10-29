@@ -1,3 +1,0 @@
-
-> admin-backend@1.0.0 build /Users/monster/Documents/GitHub/code/RAG/admin-backend
-> tsc -p tsconfig.json

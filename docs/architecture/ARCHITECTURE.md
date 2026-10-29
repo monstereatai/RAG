@@ -1,4 +1,4 @@
-# ARCHITECTURE
+# 系统架构
 
 > 企业级 RAG 知识库系统架构设计文档。本文描述当前代码真实架构，进度与缺口以 `ROADMAP.md` 为准。
 
@@ -7,7 +7,7 @@
 本项目是面向企业知识问答场景的统一 Hybrid RAG（混合检索增强生成）与 Agentic RAG（智能体式检索增强生成）Web 应用，目标是在可控成本下提供：
 
 - 多租户隔离的知识库问答能力
-- simple / agentic / auto 三种问答路径
+- 单一问答入口：由 QueryPlan 识别意图，内部自动选择快速或深度执行路径
 - 文档上传、解析、索引、删除的闭环管理
 - 向量检索、全文检索、BM25、联网搜索、Rerank、GraphRAG 的可组合检索能力
 - JWT 鉴权、结构化日志、指标、追踪、评测和容器化部署能力
@@ -30,9 +30,9 @@ flowchart TB
 
   subgraph L2["L2 编排与路由"]
     direction LR
-    ChatRouter["Chat Router<br/>Simple / Auto / Agentic"]
-    FastPath["Simple / Auto Fast Path<br/>直答门禁 + Hybrid RAG"]
-    AgenticFlow["Agentic RAG<br/>LangGraph Planner / QueryPlan"]
+    ChatRouter["Chat Entry<br/>QueryPlan 意图识别"]
+    FastPath["快速路径<br/>直答门禁 + Hybrid RAG"]
+    AgenticFlow["深度路径<br/>LangGraph Planner / QueryPlan"]
     TaskDag["产研运 Workflow DAG<br/>岗位协作 · 审批 · 修订 · 局部重跑"]
     ChatRouter --> FastPath
     ChatRouter --> AgenticFlow
@@ -95,7 +95,7 @@ flowchart TB
     direction LR
     Security["Security & Policy<br/>API scope / tenant ACL · Injection 防护 · 脱敏审计"]
     Observability["Observability<br/>pino · Prometheus / Grafana · Langfuse"]
-    EvalRelease["Evals & Release Gate<br/>三模式回归 · 引用 / 拒答 · 离线 A/B"]
+    EvalRelease["Evals & Release Gate<br/>快速/深度路径回归 · 引用 / 拒答 · 离线 A/B"]
     Rollout["人工灰度 / 回滚<br/>自动联动待补"]
   end
 
@@ -181,23 +181,19 @@ flowchart TB
 
 ### 2.1.2 用户提问与回答
 
-`simple`、`auto`、`agentic` 共用认证、请求编排、权限过滤、证据整理和最终引用校验；区别在于是否允许从 Fast Path 升级到多步 Agentic。
+所有请求共用同一条认证、QueryPlan、权限过滤、证据整理、引用校验和最终持久化链路；后端按意图、证据充分性和复杂度在内部选择快速回答或深度状态图，不再存在用户可选的三套执行模式。
 
 ```mermaid
 flowchart TB
-  UserQ["用户问题 + 模式 / 角色 / 检索范围"] --> Auth["JWT + tenant quota + department scope"]
+  UserQ["用户问题 + 角色 / 检索范围"] --> Auth["JWT + tenant quota + department scope"]
   Auth --> Chat["ChatController → ChatService<br/>会话、请求取消、运行事件"]
-  Chat --> Router{"simple / auto / agentic"}
+  Chat --> Router{"QueryPlan 意图识别<br/>内部选择执行路径"}
 
-  Router -->|simple| SimpleGate["精确直答门禁"]
+  Router -->|快速路径| SimpleGate["精确直答门禁"]
   SimpleGate -->|命中| Validate["回答与引用校验"]
   SimpleGate -->|未命中| Retrieve["统一 Hybrid 检索"]
 
-  Router -->|auto| Fast["Simple / Auto Fast Path"]
-  Fast -->|证据充分、问题简单| Validate
-  Fast -->|证据不足或复杂| Plan["Agentic 查询扩展与多问题规划"]
-
-  Router -->|agentic| Plan
+  Router -->|深度路径| Plan["深度查询扩展与多问题规划"]
   Plan --> PerQuery["按子问题执行统一检索"]
   PerQuery --> Retrieve
 
@@ -212,14 +208,14 @@ flowchart TB
   Context --> Generate["LLM 生成答案"]
   Validate --> Final["统一输出校验"]
   Generate --> Validate
-  Final -->|agentic 反思需重试| Plan
+  Final -->|深度路径反思需重试| Plan
   Final -->|通过或受控降级| Persist["保存会话 / query log / run 事件"]
   Persist --> Transport{"响应方式"}
   Transport -->|HTTP| Response["ChatResponse"]
   Transport -->|SSE| Stream["生命周期事件 + 最终答案"]
 ```
 
-`simple` 是固定线性取证与校验，不升级 Agentic；`auto` 可在 Fast Path 后按充分性和复杂度升级；`agentic` 可规划多个查询并反思重试。SSE 只负责事件传输，问答语义和最终持久化仍由 `ChatService` 收敛处理。
+快速路径做一次精确直答门禁后的统一 Hybrid 取证与引用校验；深度路径按 QueryPlan 规划多个查询、补证并反思重试。两条路径都是同一 ChatService 用例的内部实现细节；SSE 只负责事件传输，问答语义和最终持久化仍由 ChatService 收敛处理。
 
 ### 2.1.3 长任务执行与恢复
 
@@ -309,10 +305,10 @@ flowchart TB
   Mode -->|离线| Structure["结构校验报告<br/>不代表真实问答通过"]
   Mode -->|Live| Ready["服务健康检查 + 登录"]
   Ready --> Upload["上传评测资料并记录 docId"]
-  Upload --> Replay["同一入口 /api/v1/chat<br/>simple、auto、agentic 逐模式回放"]
+  Upload --> Replay["同一入口 /api/v1/chat<br/>按意图覆盖快速与深度路径"]
   Replay --> Score["评分：目标匹配、冲突事实、拒答、引用、路由"]
   Score --> Judge["可选 / 门禁要求的 LLM Claim Judge"]
-  Structure --> Report["按模式生成报告<br/>保留 skipped / blocked / failed"]
+  Structure --> Report["按内部执行路径生成报告<br/>保留 skipped / blocked / failed"]
   Judge --> Report
   Report --> Compare{"单次回归或 A/B？"}
   Compare -->|单次| Gate["质量门槛<br/>分数、引用与支持率等"]
@@ -344,7 +340,7 @@ flowchart TB
 ## 4. 后端模块划分
 
 ```text
-backend/src
+apps/rag-api/src
 ├── common/        # Guards / filters / interceptors / decorators / logger / filesystem policy
 ├── config/        # 环境变量解析和配置映射
 ├── modules/       # auth / document / chat / memory / graph / jobs / skills / metrics / tracing 等业务模块
@@ -405,7 +401,7 @@ sequenceDiagram
 - `AddGameProductionRagGovernance` migration 为上述业务元数据、生命周期、query log 快照和反馈表提供 schema；本地开发库已执行，生产环境仍需独立审批。
 - `role-presets.ts` 是岗位目录的唯一事实源，静态提供业务负责人、产品、设计、前端、后端、测试、运营和项目管理八个预设；前端通过 `GET /chat/role-presets` 获取，不重复维护角色 Prompt。
 - 岗位预设在统一“业务负责人”基础身份上注入当前服务对象、职责和回答结构，并将角色别名归一为 `roleScope`；它不替代 RBAC，不新增数据库表。
-- 用户端和管理后台 QA 工作台共用该目录：用户端调用 `/chat/role-presets`，管理后台经 `admin-backend /admin/qa-ops/role-presets` 代理 `/rag/admin/role-presets`；两条 AG-UI 链路都透传同一个 `rolePresetId`。
+- 用户端和管理后台 QA 工作台共用该目录：用户端调用 `/chat/role-presets`，管理后台经 `apps/admin-api` 代理 `/rag/admin/role-presets`；两条 AG-UI 链路都透传同一个 `rolePresetId`。
 - Milvus 存储 dense vector，主 collection 默认 HNSW。
 - Elasticsearch 存储全文检索索引。
 - 内存 BM25 索引用于快速关键词召回和降级。
@@ -415,15 +411,15 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  Q["User Query"] --> Mode{"mode"}
+  Q["User Query"] --> Intent{"QueryPlan 意图识别"}
   Role["Role preset + starter task"] --> Q
-  Mode -->|simple／auto| Direct["Direct Answer Gate"]
+  Intent -->|快速路径| Direct["Direct Answer Gate"]
   Direct -->|hit| Final["Answer + references"]
   Direct -->|miss| Retrieve["Hybrid RAG: BM25／ES + Milvus; Obsidian 来源笔记定位原文"]
-  Mode -->|agentic| Agentic["Agentic RAG"]
-  Retrieve --> Router{"mode + evidence + complexity"}
-  Router -->|simple／auto sufficient| Sufficiency["Sufficiency check"]
-  Router -->|auto insufficient／complex| Agentic
+  Intent -->|深度路径| Agentic["深度 Agentic RAG"]
+  Retrieve --> Router{"evidence + complexity"}
+  Router -->|sufficient| Sufficiency["Sufficiency check"]
+  Router -->|insufficient／complex| Agentic
   Agentic --> Plan["Query augment / planning"]
   Plan --> AgentRetrieve["Per-subquestion unified Hybrid retrieval"]
   AgentRetrieve --> Sufficiency
@@ -439,11 +435,12 @@ flowchart TD
   Reflect -->|retry| Plan
 ```
 
-模式策略：
+统一链路策略：
 
-- `simple`：先执行精确直答，未命中后执行完整 Hybrid RAG；低延迟、透明、可调试，不进入多步骤 Agentic。
-- `agentic`：外层 LangGraph 负责多步检索、查询扩展、联网兜底、Rerank 与反思重试；内层 `AgentLoopService` 统一执行模型／工具动作、工具次数与总步数限制、超时、Redis 状态快照和运行事件。通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制外层成本边界。
-- `auto`：与 simple 共用精确直答和 Hybrid Fast Path，再按证据充分性与复杂度决定轻量回答或升级 Agentic。问题长度只影响上下文、Token、时间和成本预算，不单独决定路由；`AGENTIC_MAX_AUTO_QUERY_LENGTH` 仅保留配置兼容。
+- 对外只保留一个问答入口；旧 `simple/auto/agentic` 字段仅做兼容归一化，运行时固定为 intent-routed auto。
+- 快速路径：精确直答未命中后执行完整 Hybrid RAG；低延迟、透明、可调试，不进入多步骤状态图。
+- 深度路径：外层 LangGraph 负责多步检索、查询扩展、联网兜底、Rerank 与反思重试；内层 `AgentLoopService` 统一执行模型／工具动作、工具次数与总步数限制、超时、Redis 状态快照和运行事件。通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制外层成本边界。
+- 路由依据是 QueryPlan、证据充分性、子问题数量、实时/执行意图和上下文模式，不由用户手动选择；问题长度只影响上下文、Token、时间和成本预算。
 
 ### 5.3 GraphRAG 链路
 
@@ -451,9 +448,9 @@ GraphRAG 默认可配置开启。当前 Neo4j 已在 dev / staging / prod compos
 
 文档主入库完成后，系统在 Neo4j 可用时异步抽取图谱；图谱失败不阻塞文档版本生效。实体和关系维护来源 `sourceIds`（来源标识列表），使多个文档可以共享同一实体关系；删除文档时只移除该文档来源，不删除仍被其他文档引用的图谱事实。
 
-- dev：`docker compose -f docker/docker-compose.dev.yml --profile graphrag up -d neo4j`
-- staging：`docker compose -f docker/docker-compose.staging.yml --profile graphrag up -d`
-- prod：`docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d`
+- dev：`docker compose -f infra/docker/docker-compose.dev.yml --profile graphrag up -d neo4j`
+- staging：`docker compose -f infra/docker/docker-compose.staging.yml --profile graphrag up -d`
+- prod：`docker compose -f infra/docker/docker-compose.prod.yml --profile graphrag up -d`
 
 后端容器内必须使用：
 
@@ -504,10 +501,10 @@ NEO4J_URL=bolt://localhost:7687
 ### 8.1 本地开发
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml up -d
-docker compose -f docker/docker-compose.dev.yml --profile graphrag up -d neo4j
-cd backend && npm run start:dev
-cd frontend && npm run dev
+docker compose -f infra/docker/docker-compose.dev.yml up -d
+docker compose -f infra/docker/docker-compose.dev.yml --profile graphrag up -d neo4j
+pnpm --dir apps/rag-api run start:dev
+pnpm --dir apps/user-web run dev
 ```
 
 ### 8.2 生产部署
@@ -515,13 +512,13 @@ cd frontend && npm run dev
 默认不启用 GraphRAG：
 
 ```bash
-docker compose -f docker/docker-compose.prod.yml up -d
+docker compose -f infra/docker/docker-compose.prod.yml up -d
 ```
 
 启用 GraphRAG：
 
 ```bash
-docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
+docker compose -f infra/docker/docker-compose.prod.yml --profile graphrag up -d
 ```
 
 生产 compose 中 backend 使用 Docker 网络服务名连接基础设施：
@@ -580,12 +577,11 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 
 ## 11. 文档关系
 
-- `ARCHITECTURE.md`：技术架构与设计约束。
-- `../product/PRD.md`：产品需求与验收标准。
-- `ROADMAP.md`：真实进度源。
-- `CLAUDE.md`：项目规则。
-- `ARCHITECTURE.md`：早期计划和技术路线。
-- `../reference/SUMMARY.md`：`agent-course/` 参考能力总结。
+- [`../PROJECT_BACKGROUND.md`](../PROJECT_BACKGROUND.md)：产品定位、服务对象和项目边界。
+- [`../CONTEXT_ENGINEERING.md`](../CONTEXT_ENGINEERING.md)：上下文来源、证据构建和记忆治理。
+- [`../AGENT_RUNTIME.md`](../AGENT_RUNTIME.md)：执行状态、任务治理、评测和核心决策。
+- [`../OPERATIONS.md`](../OPERATIONS.md)：部署、安全、集成与交付边界。
+- [`../../ROADMAP.md`](../../ROADMAP.md)：当前进度和验证记录。
 
 
 ## 2026-10-29 RAG 职责边界收敛
@@ -595,4 +591,4 @@ docker compose -f docker/docker-compose.prod.yml --profile graphrag up -d
 - `rag/contracts` 定义中立 RequestContext、RetrievalExecutionPlan、结果/检索选项、附件证据与 Agentic 能力契约；不依赖业务 Service。Agentic 编排通过 Nest token 绑定兼容实现。
 - `DocumentIndexCoordinator` 接管索引写入/删除/失败清理及 Redis Milvus 删除补偿；DocumentService 保留原件、PG、ACL、版本业务与现有阶段编排。此边界不承诺跨数据库和搜索引擎事务。
 - Chat 的上下文系统消息有来源与实际预算；保留必需策略、整块裁剪可选记忆，历史预算对必需消息超额做让步。字符/token 估算仍为启发式，真实模型与工具预算验收待补。
-- Run、Task、RuntimeEvent、Checkpoint、Artifact 的权威分工保持，不合并为另一套状态容器。详细代码/验证/已知缺口见 [重构进度](../refactor/progress.md)。
+- Run、Task、RuntimeEvent、Checkpoint、Artifact 的权威分工保持，不合并为另一套状态容器。当前实现、验证和已知缺口见 [ROADMAP](../../ROADMAP.md)。

@@ -1,9 +1,0 @@
-PASS src/modules/rag-client/rag-client.service.spec.ts
-PASS src/modules/search-ops/search-ops.controller.spec.ts
-
-Test Suites: 2 passed, 2 total
-Tests:       40 passed, 40 total
-Snapshots:   0 total
-Time:        4.842 s
-Ran all test suites matching /src\/modules\/rag-client|src\/modules\/search-ops|src\/modules\/rag-ops/i.
-Test results written to: ../../../../../../../tmp/admin-rag-tests-final.json

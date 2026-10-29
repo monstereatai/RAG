@@ -8,18 +8,10 @@
 
 ## 当前状态
 
-- **M1 simple RAG 已完成**：支持 Markdown/TXT/PDF/DOCX 文档解析上传、切分、Embedding 向量化、Milvus 向量入库、BM25 + Cosine 混合检索及大模型生成与引用定位。
-- **M2 Agentic RAG 已完成**：整合 deepAgent 检索规划、Query 扩展、充分性评估、Bocha 联网搜索兜底、DashScope Rerank 重排序、大模型流式生成、置信度自我评估与重试，支持 SSE 全链路事件流式推送，并通过 `AGENTIC_*` 环境变量限制重试、查询扩展、检索、联网和重排预算。
-- **M3 工程化与多租户隔离已完成**：
-  - **JWT 鉴权防护**：HTTP 路由默认全局 JWT 保护，登录/注册/健康检查等显式 `@Public()`；SSE 使用一次性短票据，避免把长期 JWT 放入 URL；开发排障接口在 production 默认隐藏；
-  - **数据隔离**：资源以 `tenantId` 作为租户边界，并结合 `userId` 所有权、文档 ACL 和外部索引过滤；生产还需启用租户上下文与 IAM 门禁。完整隔离效果应以目标环境的跨租户回归和故障演练为准，不以本地测试宣称绝对无泄漏。
-- **M4 前端 MVP 已完成**：内置精美磨砂玻璃渐变（Glassmorphism）登录/注销卡片，支持文档上传、多模式聊天、流程追踪和 Debug 属性进度条面板。
-- **M5 容器化部署已完成**：应用后端与前端 Dockerfile 多阶段瘦身构建，提供 `docker-compose.prod.yml` 完整限制资源的生产编排栈。
-- **本地工程质量结构检查已完成**：`eval:rag:maturity` 当前的 93/100 只检查工程结构、脚本和证据文件是否存在，不代表检索/回答质量。真实质量门禁必须启动后端并运行 `eval:rag:release`（强制 live project eval + LLM judge）；真实私有题集、Milvus search 运行时治理和生产材料仍按缺口处理。
-- **游戏运营营销公开资料验收已完成**：建立 PC 端候选 Top50、页游候选 Top50 目录，最新批次实际抓取 127 个公开官网／活动／运营／营销／社区页面，108 份唯一目标文档完成 PostgreSQL、Milvus、BM25／Elasticsearch 及 Obsidian 编译知识索引；线性 RAG 本地知识作为受治理直答与降级资产，不是独立在线检索链路。公开快照用于验证链路，不代表真实企业线上效果。
-- **部署目标**：当前固定为 Docker Compose，见 `docs/architecture/DEPLOYMENT.md`。真实生产发布仍需要目标机器、域名、证书、备份和密钥注入策略确认。
+- 项目阶段、已完成事项、待办、阻塞和最近验证统一维护在 [ROADMAP.md](./ROADMAP.md)。
+- 系统运行与交付边界见[项目运行、安全与交付](./docs/OPERATIONS.md)；架构设计见[系统架构](./docs/architecture/ARCHITECTURE.md)。
 
-详细进度见 [ROADMAP.md](./ROADMAP.md)，整体规划见 [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)。
+整体规划见[系统架构](./docs/architecture/ARCHITECTURE.md)。
 
 ---
 
@@ -33,7 +25,7 @@
 
 ### Workspace（推荐入口）
 
-根目录已统一纳管 `backend`、`admin-backend`、`admin`、`frontend`、`rag-cli` 和 `tools/*`。首次安装和日常开发优先在根目录执行：
+根目录通过 pnpm workspace 纳管 `apps/rag-api`、`apps/admin-api`、`apps/admin-web`、`apps/user-web`、`packages/rag-cli` 和 `packages/rag-mcp-server`。首次安装和日常开发优先在根目录执行：
 
 ```bash
 pnpm install
@@ -58,7 +50,7 @@ pnpm typecheck
 
 ### 1. 启动基础设施
 ```bash
-cd docker
+cd infra/docker
 docker compose up -d
 docker compose ps
 ```
@@ -67,7 +59,7 @@ docker compose ps
 
 ### 2. 启动后端服务
 ```bash
-cd backend
+cd apps/rag-api
 npm install
 # 启动 NestJS 开发服务（包含 watch 监听）
 npm run start:dev
@@ -75,7 +67,7 @@ npm run start:dev
 
 ### 3. 启动前端服务
 ```bash
-cd frontend
+cd apps/user-web
 npm install
 npm run dev
 ```
@@ -118,7 +110,7 @@ npm run dev
   * `GET /api/documents/:docId`：查询当前用户拥有的单篇文档详情
   * `DELETE /api/documents/:docId`：同步删除文档元数据、Milvus 分片及内存 BM25 索引
 * **聊天与检索（按租户、会话所有权与证据 ACL 隔离）**
-  * `POST /api/chat`：非流式聊天（常用于 simple 模式）
+  * `POST /api/chat`：非流式聊天兼容入口（内部仍走统一意图路由）
   * `GET /api/chat/stream?query=...&mode=...&threadId=...`：流式 SSE 聊天推送事件链
   * `GET /api/agui/stream?query=...&mode=...&threadId=...`：AG-UI 协议流式问答（用户端）
   * `GET /api/agui/admin/stream?query=...&mode=...&userId=...`：AG-UI 内部服务流式问答（管理后台代理使用，需 `RAG_SERVICE_TOKEN`）
@@ -128,7 +120,7 @@ npm run dev
 * **调试与可观测**
   * `GET /api/debug/chunks?query=...`：查看当前查询在检索召回时的 BM25 分、余弦分及融合加权总分
 
-AG-UI 用户端与管理后台接入说明见 [AGUI_INTEGRATION.md](./docs/product/AGUI_INTEGRATION.md)。
+Agent 运行时、人工审批和任务治理说明见 [Agent Runtime](./docs/AGENT_RUNTIME.md)。
 
 ---
 
@@ -137,14 +129,14 @@ AG-UI 用户端与管理后台接入说明见 [AGUI_INTEGRATION.md](./docs/produ
 ### 1. 代码规范与编译
 * **后端构建与排查**：
   ```bash
-  cd backend
+  cd apps/rag-api
   npm run build
   npm run lint
   npm run eval:rag:quality
   ```
 * **前端编译**：
   ```bash
-  cd frontend
+  cd apps/user-web
   npm run build
   ```
 
@@ -177,14 +169,14 @@ pnpm --filter backend run eval:langfuse:dataset
 
 `eval:langfuse:dataset` 使用本地 mock ingestion endpoint 验证真实 `LangfuseProvider` 的 trace/generation/span 序列化、token/cost、脱敏、工具事件、生产工作流、定时分析和禁用契约，不依赖 Langfuse 云端账号。
 
-完整测试矩阵和每个场景的验收点见 [docs/reference/LANGFUSE_OBSERVABILITY_TEST_MATRIX.md](./docs/reference/LANGFUSE_OBSERVABILITY_TEST_MATRIX.md)。
+可观测性、评测边界和验证入口见 [项目运行、安全与交付](./docs/OPERATIONS.md)；当前验证结论见 [ROADMAP.md](./ROADMAP.md)。
 
-当前本地回归、检索专项与 smoke 证据见 [docs/refactor/evidence](./docs/refactor/evidence/)，真实 live 性能、故障注入和并发压测仍需在目标环境重新执行。
+当前验证结论与真实环境边界见 [ROADMAP.md](./ROADMAP.md)，真实 live 性能、故障注入和并发压测仍需在目标环境重新执行。
 
 覆盖方向：
 
 - trace 生命周期与 session/user 分组；
-- simple、auto、agentic 三种 RAG 路由；
+- 单一问答链路：后端用 QueryPlan 做意图识别，内部自动选择快速或深度执行路径；
 - routing、retrieval、query plan、sufficiency、rerank、citation、reflection、final span；
 - web search 与 tool call 事件；
 - 无证据拒答和版本冲突；
@@ -201,7 +193,7 @@ pnpm --filter backend run eval:langfuse:dataset
 ### 4. 自动化多租户硬隔离 E2E 验证
 在基础设施和后端服务启动后，可在后端目录直接运行我们在本地集成的 E2E 自动化交叉隔离验证脚本：
 ```bash
-cd backend
+cd apps/rag-api
 node verify-multitenancy.mjs
 ```
 *该脚本会自动以不同账户身份进行文档上传、跨权限读取拦截测试、对话内容物理隔离检索测试并最终清除测试会话及文档，全链路断言校验，若输出 `🏆 ALL MULTI-TENANCY ISOLATION TESTS PASSED SUCCESSFULLY!` 则代表数据隔离完全符合规格。*
@@ -211,7 +203,7 @@ node verify-multitenancy.mjs
 共享 ACL 回归可在服务启动后运行：
 
 ```bash
-cd backend
+cd apps/rag-api
 RAG_BASE_URL=http://localhost:3000/api/v1 npm run verify:acl
 ```
 

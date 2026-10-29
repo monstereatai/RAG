@@ -4,16 +4,19 @@
 
 ## 项目定位
 
-企业级 Agentic RAG Web 应用。详细规划见 `docs/architecture/ARCHITECTURE.md`，进度见 `ROADMAP.md`，参考代码能力总结见 `docs/reference/SUMMARY.md`。
+面向游戏官网与活动产研团队的 RAG 与 Agent 工作台。业务定位见 `docs/PROJECT_BACKGROUND.md`，上下文方案见 `docs/CONTEXT_ENGINEERING.md`，系统架构见 `docs/architecture/ARCHITECTURE.md`，进度见 `ROADMAP.md`。
 
 ## 文档关系
 
-- `docs/architecture/ARCHITECTURE.md`：技术架构与设计约束。
-- `docs/product/PRD.md`：产品需求与验收标准。
+- `docs/PROJECT_BACKGROUND.md`：产品定位、服务对象和边界。
+- `docs/CONTEXT_ENGINEERING.md`：提示词、记忆、RAG、工具和输出如何组成模型上下文。
+- `docs/AGENT_RUNTIME.md`：运行时、工作流、评测和核心架构决策。
+- `docs/architecture/ARCHITECTURE.md`：系统模块、数据关系和核心链路。
+- `docs/OPERATIONS.md`：运行、安全、集成和交付边界。
+- `docs/cli-docs/README.md`：RAG CLI 与主项目的职责边界及包内文档入口。
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
-- `docs/architecture/ARCHITECTURE.md`：早期计划和技术路线。
-- `docs/README.md`：文档分类和阅读入口。
+- `docs/README.md`：分层阅读入口。
 
 ## 技术栈（锁死，未经主人确认不得更换）
 
@@ -33,8 +36,8 @@
 - **REPL**：quickjs-emscripten
 
 ### 前端
-- **用户端**（frontend/）：React + Vite
-- **管理后台**（admin/）：React + Vite + Ant Design，内置 Agent 控制台（DeepAgents 驱动）
+- **用户端**（apps/user-web/）：React + Vite
+- **管理后台**（apps/admin-web/）：React + Vite + Ant Design，内置 Agent 控制台（DeepAgents 驱动）
 
 ### 基础设施
 - **容器化**：Docker + Docker Compose
@@ -45,42 +48,34 @@
 ```
 RAG/
 ├── agent-course/        # 参考代码（只读，禁止修改）
-├── backend/             # NestJS 后端
-│   ├── src/
-│   │   ├── common/      # 工程化（decorators/filters/guards/interceptors/pipes/interfaces）
-│   │   ├── config/      # 配置加载
-│   │   ├── modules/     # 业务模块（每个模块独立目录：entity/service/controller/dto）
-│   │   ├── providers/   # 可插拔 Provider（llm/embedding/speech/vector-store/db）
-│   │   ├── rag/         # RAG 管线（application / retrieval / evidence / generation / agentic）
-│   │   ├── tools/       # LangChain 工具定义
-│   │   ├── app.module.ts
-│   │   └── main.ts
-│   ├── .env.example
-│   ├── .env             # 本地环境变量（不进 git）
-│   └── package.json
-├── frontend/            # 用户端前端（M4+）
-├── admin/               # 管理后台前端（M4+）
-├── admin-backend/       # 管理后台服务
-├── rag-cli/              # RAG 命令行工具
-├── tools/                # MCP 和外部工具服务
+├── apps/
+│   ├── rag-api/         # NestJS RAG 后端
+│   │   ├── src/         # common/config/modules/providers/rag/tools
+│   │   ├── .env.example
+│   │   └── package.json
+│   ├── admin-api/       # 管理后台服务
+│   ├── user-web/        # 用户端前端（React + Vite）
+│   └── admin-web/       # 管理后台前端（React + Vite + Ant Design）
+├── packages/
+│   ├── rag-cli/         # RAG 命令行工具
+│   └── rag-mcp-server/  # MCP 服务
+├── infra/
+│   ├── docker/          # Docker 编排
+│   └── monitoring/      # Prometheus / Grafana
 ├── scripts/              # 项目级脚本
-├── docker/              # Docker 编排
-│   └── docker-compose.yml
 ├── skills/              # Skills 技能系统（M8+）
 ├── workspace/           # 运行时工作区（上传文件等，运行时内容不进 git）
-├── docs/                # 项目文档、面试资料、方案、素材和验证证据
-│   ├── architecture/   # 架构、服务边界和部署
-│   ├── product/        # PRD、后台功能和集成说明
-│   ├── plans/          # 技术方案和实施计划
-│   ├── interview/      # 面试、简历和岗位材料
-│   ├── cli/            # CLI 设计文档
-│   ├── reference/      # 参考项目和能力总结
-│   ├── archive/        # 历史文档
-│   └── assets/         # 截图、面试素材和文档附件
+├── docs/                # 分层项目文档
+│   ├── architecture/   # 系统架构
+│   ├── interview/      # 功能步骤流程
+│   ├── cli-docs/       # RAG CLI 项目边界与文档入口
+│   └── reference/      # 项目专用组件清单
 ├── CLAUDE.md            # 本文件
 ├── ROADMAP.md           # 进度源
 └── docs/README.md        # 文档总索引
 ```
+
+本地 `.env` 文件仍保留在各应用目录内，不进入 Git。
 
 ## 命名约定
 
@@ -93,28 +88,28 @@ RAG/
 ## 验证命令（改完必须跑）
 
 ```bash
-# 后端验证（在 backend/ 目录下）
-cd backend && npm run build           # 编译通过
-cd backend && npm run lint            # ESLint 通过
-cd backend && npm test -- --runInBand # 相关单测，按改动范围可定向执行
-cd backend && npm run start:dev       # 服务启动，若 3000 被占用使用 PORT=3001
+# 后端验证（在 apps/rag-api/ 目录下）
+cd apps/rag-api && npm run build           # 编译通过
+cd apps/rag-api && npm run lint            # ESLint 通过
+cd apps/rag-api && npm test -- --runInBand # 相关单测，按改动范围可定向执行
+cd apps/rag-api && npm run start:dev       # 服务启动，若 3000 被占用使用 PORT=3001
 curl http://localhost:3000/api/v1/health # 健康检查
 
-# 基础设施验证（在 docker/ 目录下）
-cd docker && docker compose ps        # 所有服务 healthy
+# 基础设施验证（在 infra/docker/ 目录下）
+cd infra/docker && docker compose ps        # 所有服务 healthy
 
 # 专项 smoke（按本次改动选择执行）
-cd backend && npm run smoke:mcp
-cd backend && npm run smoke:external
-cd backend && npm run smoke:speech:direct
-cd backend && npm run smoke:redis-checkpointer
+cd apps/rag-api && npm run smoke:mcp
+cd apps/rag-api && npm run smoke:external
+cd apps/rag-api && npm run smoke:speech:direct
+cd apps/rag-api && npm run smoke:redis-checkpointer
 ```
 
 **纪律**：每次改动后必须跑相关验证。不要只改不验。
 
 ### 检索改动专项验证
 
-凡涉及 RAG、检索、历史上下文、Query 路由、证据门禁、回答链路或模型兜底的代码改动，完成后必须模拟管理后台真实用户操作，分别在 `simple`、`auto`、`agentic` 三种模式各执行一次完整提问流程，并核对最终答案、路由、引用和检索状态。不能只验证底层单测或只测试其中一条链路；验证结果需记录到 `ROADMAP.md`。
+凡涉及 RAG、检索、历史上下文、Query 路由、证据门禁、回答链路或模型兜底的代码改动，完成后必须模拟管理后台真实用户操作，通过统一问答入口至少验证一个快速路径问题和一个深度路径问题，并核对最终答案、内部路由、引用和检索状态。验证结果需记录到 `ROADMAP.md`。
 
 ### 内部信息检索边界
 
@@ -161,7 +156,7 @@ cd backend && npm run smoke:redis-checkpointer
 - M1 线性 RAG：上传 Markdown/PDF/TXT/DOCX、切分、Embedding、写入 Milvus、BM25 内存索引、Hybrid 检索回答。
 - M2 Agentic RAG：deepAgent 检索规划、Query 扩展、检索充分性评估、流式生成、置信度自我评估重试。
 - M3 工程化与多租户隔离：JWT 认证保护、EventSource 流式 Token 兼容、统一响应/全局异常/日志；资源隔离以 `tenantId` 为边界，并结合 `userId` 所有权、资源 ACL 及 Redis／Milvus／Elasticsearch／BM25 的租户过滤。生产环境需启用租户上下文与 IAM 门禁；不得宣称仅凭单测或历史 userId 过滤已证明全资源隔离。
-- M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、simple/agentic/auto 模式、流式事件追踪、Debug 属性面板、Web 语音输入、TTS 朗读按钮。
+- M4 前端 MVP：磨砂渐变登录卡片、文件上传、聊天窗口、统一意图路由问答、流式事件追踪、Debug 属性面板、Web 语音输入、TTS 朗读按钮。
 - M5 容器化：后端/前端多阶段 Dockerfile、prod compose、nginx 代理。
 - P1 Prompt 工程体系：SemanticExampleSelector（Milvus 语义相似度挑选示例）+ LCEL 工具链（RunnableBranch/RunnableWithMessageHistory）+ 集成到 Agentic RAG 查询扩展。
 - P1 结构化输出：DocumentMetadataExtractor（LLM + zod structured output 抽取标题/作者/摘要/关键词/语言/类别），集成到文档上传流程。
@@ -170,7 +165,7 @@ cd backend && npm run smoke:redis-checkpointer
 - P2 MCP：MultiServerMCPClient + 本地 stdio smoke server，`npm run smoke:mcp` 已验证工具加载。
 - P3 GraphRAG：Neo4j Provider、实体关系抽取、图谱导入/查询/schema 接口已实现，业务图谱联调脚本已准备。
 - P3 可观测：Prometheus HTTP/Node/检索命中/LLM 调用/token 估算指标，traceparent in-memory tracing，workflow Mermaid。
-- 专项 smoke：MCP、GraphRAG、Speech、external tools、Redis Checkpointer、Hybrid retrieval 脚本已挂到 `backend/package.json`。
+- 专项 smoke：MCP、GraphRAG、Speech、external tools、Redis Checkpointer、Hybrid retrieval 脚本已挂到 `apps/rag-api/package.json`。
 
 当前已知问题：
 - Milvus `search` 仍可能出现短暂 timeout warning。当前主检索快速失败、短期熔断、BM25 降级，且 search/delete/warmup/circuit 超时均可通过环境变量配置。
