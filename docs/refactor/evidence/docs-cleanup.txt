@@ -5,8 +5,8 @@ Documentation cleanup (2026-10-29)
   superseded by ARCHITECTURE.md, PRD.md, ADRs and docs/refactor/.
 - Removed dated one-off evidence reports; retained evidence templates and the
   current refactor evidence directory.
-- Removed orphaned screenshots and duplicated source images; retained the
-  distilled jl-pic summary and the referenced ProcessOn diagram.
+- Removed orphaned screenshots; retained the jl-pic summary, its WeChat
+  interview screenshots and the referenced ProcessOn diagram.
 - Retained 73 Markdown documents across architecture, ADRs, refactor, product,
   CLI, reference, plans, evidence templates and curated interview material.
 - docs/README.md is now the single docs index; docs/interview/README.md is the
