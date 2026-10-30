@@ -165,9 +165,11 @@ pnpm --filter backend run eval:golden:live
 pnpm --filter backend run eval:langfuse:generate
 pnpm --filter backend run eval:langfuse:check
 pnpm --filter backend run eval:langfuse:dataset
+pnpm --filter backend run eval:langfuse:experiment
 ```
 
 `eval:langfuse:dataset` 使用本地 mock ingestion endpoint 验证真实 `LangfuseProvider` 的 trace/generation/span 序列化、token/cost、脱敏、工具事件、生产工作流、定时分析和禁用契约，不依赖 Langfuse 云端账号。
+`eval:langfuse:experiment` 会同步合成场景到配置的 Langfuse dataset，执行本地契约回放，并把每条场景的 0/1 分数及整轮通过率写入 Langfuse Experiment；它评估 Provider 序列化契约，不代表云端 ingestion 传输或 RAG 答案质量验收。
 
 可观测性、评测边界和验证入口见 [项目运行、安全与交付](./docs/OPERATIONS.md)；当前验证结论见 [ROADMAP.md](./ROADMAP.md)。
 
