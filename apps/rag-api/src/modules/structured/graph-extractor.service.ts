@@ -38,6 +38,8 @@ type ParsedProperty = {
   value: string;
 };
 
+const GRAPH_EXTRACTION_BATCH_CHARS = 12_000;
+
 @Injectable()
 export class GraphExtractorService {
   private readonly logger = new Logger(GraphExtractorService.name);
@@ -97,25 +99,31 @@ export class GraphExtractorService {
     const model = this.llmProvider.getModel();
     try {
       const structuredLlm = model.withStructuredOutput(this.graphSchema);
-
-      const prompt = `请从以下文本中提取实体和实体之间的关系，用于构建知识图谱。
+      const results: Array<{
+        nodes: ParsedGraphNode[];
+        relationships: ParsedGraphRelationship[];
+      }> = [];
+      for (const batch of this.splitTextIntoBatches(text)) {
+        const prompt = `请从以下文本中提取实体和实体之间的关系，用于构建知识图谱。
 
 文本内容：
-${text.slice(0, 12000)}
+${batch}
 
 要求：
 1. 节点 id 保持前后一致，优先使用实体原名。
 2. label 使用简短英文类型，例如 Person、Company、Product、Concept、Location。
 3. relationship.type 使用大写蛇形命名，例如 FOUNDED、WORKS_AT、DEPENDS_ON。
 4. 只提取文本直接支持的事实，不要编造。`;
+        results.push(await structuredLlm.invoke(prompt));
+      }
 
-      const result = await structuredLlm.invoke(prompt);
+      const nodes = results.flatMap((result) => result.nodes);
 
       return {
-        nodes: this.dedupeNodes(result.nodes),
+        nodes: this.dedupeNodes(nodes),
         relationships: this.filterRelationships(
-          result.relationships,
-          result.nodes,
+          results.flatMap((result) => result.relationships),
+          nodes,
         ),
       };
     } catch (error) {
@@ -124,6 +132,40 @@ ${text.slice(0, 12000)}
       );
       throw error;
     }
+  }
+
+  private splitTextIntoBatches(text: string): string[] {
+    const batches: string[] = [];
+    const paragraphs = text.match(/[\s\S]+?(?:\n{2,}|$)/g) ?? [];
+    let current = '';
+
+    for (const paragraph of paragraphs) {
+      let remaining = paragraph;
+      while (remaining.length > GRAPH_EXTRACTION_BATCH_CHARS) {
+        const boundary = remaining.lastIndexOf('\n', GRAPH_EXTRACTION_BATCH_CHARS);
+        const splitAt =
+          boundary >= GRAPH_EXTRACTION_BATCH_CHARS * 0.7
+            ? boundary + 1
+            : GRAPH_EXTRACTION_BATCH_CHARS;
+        const part = remaining.slice(0, splitAt);
+        if (current) {
+          batches.push(current);
+          current = '';
+        }
+        batches.push(part);
+        remaining = remaining.slice(splitAt);
+      }
+
+      if (current.length + remaining.length > GRAPH_EXTRACTION_BATCH_CHARS) {
+        if (current) batches.push(current);
+        current = remaining;
+      } else {
+        current += remaining;
+      }
+    }
+
+    if (current) batches.push(current);
+    return batches.length > 0 ? batches : [''];
   }
 
   private dedupeNodes(nodes: ParsedGraphNode[]): GraphNode[] {

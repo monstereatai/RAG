@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -78,6 +79,8 @@ export class AgentRunsService {
       costUsd?: number;
       requiresApproval?: boolean;
       errorMessage?: string;
+      cancelledAt?: Date | null;
+      cancelReason?: string | null;
     },
   ) {
     const run = await this.runRepo.findOne({ where: { id } });
@@ -115,12 +118,20 @@ export class AgentRunsService {
       threadId: saved.threadId,
       tenantId: saved.tenantId ?? 'legacy',
       runId: saved.id,
-      eventType: `run.${saved.status === 'completed' ? 'completed' : saved.status === 'failed' ? 'failed' : 'updated'}`,
+      eventType:
+        saved.status === 'completed'
+          ? 'run.completed'
+          : saved.status === 'failed'
+            ? 'run.failed'
+            : saved.status === 'cancelled'
+              ? 'run.cancelled'
+              : 'run.updated',
       actor: saved.mode,
       payload: {
         status: saved.status,
         route: saved.route,
         costUsd: saved.costUsd,
+        resultSummary: saved.resultSummary,
       },
     });
     return saved;
@@ -135,6 +146,24 @@ export class AgentRunsService {
 
     const now = new Date();
     const cancelReason = reason.trim().slice(0, 500) || '用户取消运行';
+    const cancelKey = `agent-loop:cancel:${run.threadId}:${run.id}`;
+    if (!this.redis.isEnabled()) {
+      throw new ServiceUnavailableException(
+        'Redis 不可用，取消标记未写入，运行状态未更改。',
+      );
+    }
+    try {
+      await this.redis.setRequiredOrThrow(
+        cancelKey,
+        'cancelled',
+        24 * 60 * 60,
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        '取消标记写入失败，运行状态未更改。',
+      );
+    }
+
     const updateResult = await this.runRepo.update(
       { id, status: In(['running', 'waiting_approval']) },
       {
@@ -149,15 +178,11 @@ export class AgentRunsService {
       typeof updateResult.affected === 'number' &&
       updateResult.affected === 0
     ) {
+      await this.redis.del(cancelKey);
       return this.get(id, run.tenantId ?? undefined);
     }
     const saved = await this.runRepo.findOne({ where: { id } });
     if (!saved) throw new NotFoundException(`agent run ${id} not found`);
-    await this.redis.set(
-      `agent-loop:cancel:${saved.threadId}:${saved.id}`,
-      'cancelled',
-      24 * 60 * 60,
-    );
     const runTenantId = saved.tenantId?.trim() || 'legacy';
     await this.events.emit({
       threadId: saved.threadId,
@@ -181,6 +206,17 @@ export class AgentRunsService {
       });
     }
     return this.get(id, saved.tenantId ?? undefined);
+  }
+
+  /** Only one approval request can claim the pending run for resume. */
+  async beginResume(id: string) {
+    const result = await this.runRepo.update(
+      { id, status: 'waiting_approval' },
+      { status: 'running' },
+    );
+    if (typeof result.affected === 'number' && result.affected === 0) {
+      throw new BadRequestException('当前运行已被恢复或取消');
+    }
   }
 
   /**
@@ -540,36 +576,6 @@ export class AgentRunsService {
         })),
       ),
     };
-  }
-
-  async retry(id: string, tenantId?: string) {
-    const run = await this.get(id, tenantId);
-    if (!['failed', 'cancelled'].includes(run.status)) {
-      throw new BadRequestException(
-        `agent run ${id} is not retryable from ${run.status}`,
-      );
-    }
-    await this.redis.del(`agent-loop:cancel:${run.threadId}:${run.id}`);
-    await this.runRepo.update(
-      { id },
-      {
-        status: 'running',
-        retryCount: run.retryCount + 1,
-        errorMessage: null,
-        cancelReason: null,
-        cancelledAt: null,
-        finishedAt: null,
-      },
-    );
-    await this.events.emit({
-      threadId: run.threadId,
-      tenantId: run.tenantId?.trim() || 'legacy',
-      runId: id,
-      eventType: 'run.retry',
-      actor: run.mode,
-      payload: { retryCount: run.retryCount + 1 },
-    });
-    return this.get(id, run.tenantId ?? undefined);
   }
 
   private stringify(value: unknown): string | null {

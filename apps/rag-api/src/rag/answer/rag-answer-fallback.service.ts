@@ -12,6 +12,7 @@ import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledg
 import { isObjectiveKnowledgePlan } from '../planning/query-plan';
 import type { RetrievedChunk } from '../evidence/retrieval.types';
 import type { RagAnswerResult, RetrieveOptions } from '../contracts/rag-types';
+import { rethrowIfAborted } from '../../common/errors/abort.util';
 
 @Injectable()
 export class RagAnswerFallbackService {
@@ -82,6 +83,7 @@ export class RagAnswerFallbackService {
         })),
       };
     } catch (error) {
+      rethrowIfAborted(error, retrieveOptions.signal);
       this.logger.warn(
         `Simple web fallback failed: ${(error as Error).message}`,
       );

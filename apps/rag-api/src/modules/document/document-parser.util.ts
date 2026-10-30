@@ -92,7 +92,13 @@ export interface DocumentImageAltDelegate {
     imageBuffer: Buffer,
     mimeType: string,
     prompt?: string,
-  ): Promise<{ description: string }>;
+  ): Promise<{ description: string; tags?: string[] }>;
+}
+
+export interface DocumentImageUnderstandingDelegate
+  extends DocumentOcrDelegate,
+    DocumentImageAltDelegate {
+  getCapabilities(): { ocr: boolean; imageUnderstanding: boolean };
 }
 
 /** 内嵌图片提取的注入参数（由控制器组装后传入 extractDocumentText） */
@@ -118,6 +124,7 @@ export interface DocumentImageExtractionOptions {
  */
 export interface DocumentAsrDelegate {
   transcribe(audioBuffer: Buffer, format: string): Promise<string>;
+  isEnabled?(): boolean;
 }
 
 /**
@@ -302,11 +309,185 @@ export async function extractDocumentText(
     case 'html':
       return htmlToText(buffer.toString('utf-8'));
     case 'image':
-      return mediaFallbackMarkdown('Image Document', buffer);
+      throw new BadRequestException(
+        'Image must be analyzed with extractImageDocumentText before it can be indexed.',
+      );
     case 'audio':
-      return mediaFallbackMarkdown('Audio Document', buffer);
+      throw new BadRequestException(
+        'Audio must be transcribed with extractAudioDocumentText before it can be indexed.',
+      );
     case 'video':
+      if (!video) {
+        throw new BadRequestException(
+          'Video must be parsed with extractVideoDocumentText before it can be indexed.',
+        );
+      }
       return extractVideoDocumentText(buffer, video);
+  }
+}
+
+/** 图片至少要产出 OCR 或视觉描述，不能把二进制大小当成可检索正文。 */
+export async function extractImageDocumentText(
+  buffer: Buffer,
+  filename: string,
+  mimeType: string,
+  vision?: DocumentImageUnderstandingDelegate,
+): Promise<string> {
+  if (!vision) {
+    throw new BadRequestException(
+      '图片入库需要配置 OCR 或视觉理解服务，当前文件未建立文本索引。',
+    );
+  }
+  const capabilities = vision.getCapabilities();
+  if (!capabilities.ocr && !capabilities.imageUnderstanding) {
+    throw new BadRequestException(
+      '当前视觉服务不支持 OCR 或图片理解，图片未建立文本索引。',
+    );
+  }
+
+  const sections = [`# 图片资料：${filename}`];
+  const errors: string[] = [];
+  if (capabilities.ocr) {
+    try {
+      const text = (await vision.ocr(buffer, mimeType)).text.trim();
+      if (text) sections.push(`## OCR 文字\n\n${text}`);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (capabilities.imageUnderstanding) {
+    try {
+      const result = await vision.describeImage(buffer, mimeType);
+      const description = result.description.trim();
+      if (description) sections.push(`## 图片内容\n\n${description}`);
+      if (result.tags?.length) {
+        sections.push(`标签：${result.tags.join('、')}`);
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (sections.length === 1) {
+    const details = errors.length > 0 ? `：${errors.join('；')}` : '';
+    throw new BadRequestException(
+      `图片解析失败${details || '，没有识别到文字或图像内容'}`,
+    );
+  }
+  return sections.join('\n\n');
+}
+
+/** 将独立音频转成检索正文；分段不超过腾讯云一句话识别的单次时长限制。 */
+export async function extractAudioDocumentText(
+  buffer: Buffer,
+  filename: string,
+  asr?: DocumentAsrDelegate,
+): Promise<string> {
+  if (
+    !asr ||
+    typeof asr.transcribe !== 'function' ||
+    (typeof asr.isEnabled === 'function' && !asr.isEnabled())
+  ) {
+    throw new BadRequestException(
+      '音频入库需要配置 ASR 转写服务，当前文件未建立文本索引。',
+    );
+  }
+  if (buffer.length === 0) {
+    throw new BadRequestException('audio file is empty');
+  }
+  if (buffer.length > AUDIO_MAX_BYTES_DEFAULT) {
+    throw new BadRequestException(
+      `audio file is too large: ${formatBytes(buffer.length)} exceeds 200 MB`,
+    );
+  }
+
+  assertFfmpegToolsAvailable();
+  const dir = await mkdtemp(join(tmpdir(), 'audio-parse-'));
+  try {
+    const extension = /\.([a-z0-9]+)$/i.exec(filename)?.[1]?.toLowerCase();
+    const inputPath = join(dir, `input.${extension || 'audio'}`);
+    await writeFile(inputPath, buffer);
+    const probe = await probeVideoMetadata(inputPath);
+    if (!probe.hasAudioStream) {
+      throw new BadRequestException('audio file has no audio stream');
+    }
+    const maxDurationSeconds = 60 * 60;
+    if (
+      probe.durationSeconds !== null &&
+      probe.durationSeconds > maxDurationSeconds
+    ) {
+      throw new BadRequestException(
+        'audio file exceeds the 60-minute ingestion limit',
+      );
+    }
+
+    const segmentSeconds = 55;
+    const segmentPattern = join(dir, 'segment-%04d.wav');
+    await runFfmpegTool(
+      'ffmpeg',
+      [
+        '-nostdin',
+        '-y',
+        '-i',
+        inputPath,
+        '-map',
+        '0:a:0',
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-c:a',
+        'pcm_s16le',
+        '-f',
+        'segment',
+        '-segment_time',
+        String(segmentSeconds),
+        '-reset_timestamps',
+        '1',
+        '-segment_format',
+        'wav',
+        segmentPattern,
+      ],
+      'Audio normalization and segmentation',
+    );
+
+    const segmentNames = (await readdir(dir))
+      .filter((name) => /^segment-\d+\.wav$/.test(name))
+      .sort();
+    if (segmentNames.length === 0) {
+      throw new BadRequestException('audio file produced no transcription segments');
+    }
+    const transcripts = await mapWithConcurrency(
+      segmentNames,
+      2,
+      async (name) => {
+        const wav = await readFile(join(dir, name));
+        if (wav.length <= WAV_HEADER_BYTES || wav.length > 3 * 1024 * 1024) {
+          throw new BadRequestException(
+            `normalized audio segment is outside Tencent ASR limits: ${name}`,
+          );
+        }
+        return (await asr.transcribe(wav, 'wav')).trim();
+      },
+    );
+    const sections = transcripts
+      .map((transcript, index) => {
+        const start = index * segmentSeconds;
+        const end = Math.min(
+          start + segmentSeconds,
+          probe.durationSeconds ?? start + segmentSeconds,
+        );
+        return transcript
+          ? `### 片段 ${index + 1}（${formatClock(start)}–${formatClock(end)}）\n\n${transcript}`
+          : '';
+      })
+      .filter(Boolean);
+    if (sections.length === 0) {
+      throw new BadRequestException('ASR returned an empty transcript');
+    }
+    return [`# 音频转写：${filename}`, '', ...sections].join('\n\n');
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -1243,6 +1424,9 @@ function hasImageStorage(
 /** 超过该大小的视频直接拒绝入库（默认 200MB，可用 VIDEO_MAX_BYTES 覆盖） */
 const VIDEO_MAX_BYTES_DEFAULT = 200 * 1024 * 1024;
 
+/** 独立音频入库大小上限；音频与视频采用相同的默认上限。 */
+const AUDIO_MAX_BYTES_DEFAULT = 200 * 1024 * 1024;
+
 /** 关键帧抽帧间隔秒数（默认 10s，可用 VIDEO_KEYFRAME_INTERVAL_SECONDS 覆盖） */
 const VIDEO_KEYFRAME_INTERVAL_SECONDS_DEFAULT = 10;
 
@@ -1398,9 +1582,9 @@ function assertFfmpegToolsAvailable(): void {
   }
   if (!ffmpegToolsAvailable) {
     throw new BadRequestException(
-      'Video ingestion requires ffmpeg/ffprobe on the server, but neither was found in PATH. ' +
+      'Audio/video ingestion requires ffmpeg/ffprobe on the server, but neither was found in PATH. ' +
         'Install ffmpeg (e.g. `brew install ffmpeg` or `apt-get install ffmpeg`) ' +
-        'to ingest video documents.',
+        'to ingest media documents.',
     );
   }
 }

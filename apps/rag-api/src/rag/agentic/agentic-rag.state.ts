@@ -65,7 +65,7 @@ export interface AgenticResumeContext {
   history: Array<{ role: 'human' | 'ai'; content: string }>;
   memoryMessages: Array<{ role: string; content: string }>;
   retrieveOptions: RetrieveOptions;
-  runtimeRunId?: string;
+  runtimeRunId: string;
 }
 
 export function createAgenticArtifact<TPayload>(

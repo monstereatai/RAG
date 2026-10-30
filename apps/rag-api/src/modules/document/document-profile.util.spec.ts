@@ -52,7 +52,7 @@ describe('game document profile', () => {
       strategy.chunkSize,
       strategy.chunkOverlap,
     ).splitStructured(source);
-    const evaluation = evaluateChunkStrategy(source, chunks, strategy);
+    const evaluation = await evaluateChunkStrategy(source, chunks, strategy);
     expect(evaluation.overlapRatio).toBeGreaterThanOrEqual(0.1);
     expect(evaluation.overlapRatio).toBeLessThanOrEqual(0.2);
     expect(evaluation.semanticBoundaryRate).toBeGreaterThan(0);

@@ -16,6 +16,10 @@ import { getRuntimeEnvFilePaths } from '../config/runtime';
       pinoHttp: process.env.NODE_ENV === 'test'
         ? { enabled: false }
         : {
+            autoLogging: {
+              ignore: (request) =>
+                request.url?.includes('/workspace/preview/') ?? false,
+            },
             transport: process.env.NODE_ENV === 'development'
               ? {
                   target: 'pino-pretty',

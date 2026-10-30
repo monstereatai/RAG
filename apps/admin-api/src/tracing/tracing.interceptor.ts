@@ -1,6 +1,7 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
+import { redactWorkspacePreviewTicketFromPath } from '../common/request-path.util';
 import { TracingService } from './tracing.service';
 
 @Injectable()
@@ -13,7 +14,9 @@ export class TracingInterceptor implements NestInterceptor {
 
     // 获取请求信息
     const method = request.method;
-    const path = request.route?.path || request.path;
+    const path = redactWorkspacePreviewTicketFromPath(
+      request.route?.path || request.path,
+    );
     const userAgent = request.get('user-agent');
     const ip = request.ip;
 

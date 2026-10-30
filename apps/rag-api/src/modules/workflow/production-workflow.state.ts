@@ -22,7 +22,8 @@ export type ProductionWorkflowStatus =
   | 'pending_approval'
   | 'revision_required'
   | 'completed'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 export interface ProductionStageResult {
   role: ProductionRole;

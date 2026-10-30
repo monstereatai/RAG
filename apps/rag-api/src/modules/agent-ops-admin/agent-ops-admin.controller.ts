@@ -1,15 +1,21 @@
 import {
+  All,
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  Optional,
   Param,
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import { createHash } from 'node:crypto';
+import type { Request, Response } from 'express';
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { AgentEvalDto } from '../agent-evals/agent-eval.dto';
@@ -22,8 +28,29 @@ import {
   StartProductionWorkflowDto,
 } from '../workflow/production-workflow.dto';
 import { ProductionWorkflowService } from '../workflow/production-workflow.service';
+import {
+  ApplyProductionCodeEditDto,
+  ApplyProductionArtifactEditDto,
+  GenerateProductionArtifactsDto,
+  ProposeProductionCodeEditDto,
+  ProposeProductionArtifactEditDto,
+  RestoreProductionArtifactVersionDto,
+} from '../workflow/production-artifact-studio.dto';
+import { ProductionArtifactStudioService } from '../workflow/production-artifact-studio.service';
+import { ProductionProjectWorkspaceService } from '../workflow/production-project-workspace.service';
+import { ProductionProjectWorkspaceAgentService } from '../workflow/production-project-workspace-agent.service';
+import {
+  CreateProductionProjectWorkspacePreviewTicketDto,
+  DestroyProductionProjectWorkspaceDto,
+  RunProductionProjectWorkspaceAgentDto,
+  RunProductionProjectWorkspaceCommandDto,
+  StartProductionProjectWorkspaceDevServerDto,
+  StartProductionProjectWorkspaceDto,
+} from '../workflow/production-project-workspace.dto';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from '../chat/conversation.service';
+import { ChatService } from '../chat/chat.service';
+import type { RetrievalScopeDto } from '../chat/chat.dto';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentCollaborationService } from '../agent-collaboration/agent-collaboration.service';
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
@@ -37,6 +64,11 @@ import {
   searchPlaywayActivityTemplates,
   searchPlaywayComponents,
 } from '../workflow/playway-component-registry';
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 
 @Public()
 @Controller('rag/admin/agent-ops')
@@ -56,6 +88,10 @@ export class AgentOpsAdminController {
     private readonly artifacts: ArtifactsService,
     private readonly jobs: JobsService,
     private readonly graphService: GraphService,
+    private readonly artifactStudio: ProductionArtifactStudioService,
+    private readonly projectWorkspace: ProductionProjectWorkspaceService,
+    private readonly projectWorkspaceAgent: ProductionProjectWorkspaceAgentService,
+    @Optional() private readonly chat?: ChatService,
   ) {}
 
   @Get('schedules')
@@ -197,6 +233,20 @@ export class AgentOpsAdminController {
     return this.workflows.reviseAsync(threadId, body, ownerUserId);
   }
 
+  @Post('workflows/:threadId/cancel')
+  cancelWorkflow(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.workflows.cancel(
+      threadId,
+      ownerUserId,
+      undefined,
+      body.reason,
+    );
+  }
+
   @Get('workflows/:threadId/coding-context')
   codingContext(
     @Param('threadId') threadId: string,
@@ -211,6 +261,333 @@ export class AgentOpsAdminController {
     @Query('ownerUserId') ownerUserId: string,
   ) {
     return this.workflows.handoffManifest(threadId, ownerUserId);
+  }
+
+  @Get('workflows/:threadId/artifacts')
+  productionArtifacts(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.artifactStudio.list(threadId, ownerUserId);
+  }
+
+  @Post('workflows/:threadId/artifacts/generate')
+  generateProductionArtifacts(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: GenerateProductionArtifactsDto,
+  ) {
+    return this.artifactStudio.generate(
+      threadId,
+      ownerUserId,
+      undefined,
+      body.targets,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/edit')
+  proposeProductionArtifactEdit(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: ProposeProductionArtifactEditDto,
+  ) {
+    return this.artifactStudio.proposeEdit(
+      threadId,
+      ownerUserId,
+      body.target,
+      body.baseArtifactId,
+      body.instruction,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/code-edit')
+  proposeProductionCodeEdit(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: ProposeProductionCodeEditDto,
+  ) {
+    return this.artifactStudio.proposeCodeEdit(
+      threadId,
+      ownerUserId,
+      body.baseArtifactId,
+      body.instruction,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/code-edit/apply')
+  applyProductionCodeEdit(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: ApplyProductionCodeEditDto,
+  ) {
+    return this.artifactStudio.applyCodeEdit(
+      threadId,
+      ownerUserId,
+      undefined,
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/apply')
+  applyProductionArtifactEdit(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: ApplyProductionArtifactEditDto,
+  ) {
+    return this.artifactStudio.applyEdit(
+      threadId,
+      ownerUserId,
+      undefined,
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/restore')
+  restoreProductionArtifactVersion(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Body() body: RestoreProductionArtifactVersionDto,
+  ) {
+    return this.artifactStudio.restore(
+      threadId,
+      ownerUserId,
+      undefined,
+      body.artifactId,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/:artifactId/simulated-sync')
+  simulateProductionArtifactSync(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.artifactStudio.simulateSync(threadId, ownerUserId, artifactId);
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/preview')
+  previewProductionArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.artifactStudio.preview(threadId, ownerUserId, artifactId);
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/source')
+  sourceProductionArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('ownerUserId') ownerUserId: string,
+  ) {
+    return this.artifactStudio.source(threadId, ownerUserId, artifactId);
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/download')
+  async downloadProductionArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Res() response: Response,
+  ) {
+    const file = await this.artifactStudio.download(
+      threadId,
+      ownerUserId,
+      artifactId,
+    );
+    response
+      .status(200)
+      .type(file.artifact.contentType ?? 'application/octet-stream')
+      .setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(file.artifact.filename)}"`,
+      )
+      .send(file.body);
+  }
+
+  @Get('workflows/:threadId/workspace')
+  productionProjectWorkspaceStatus(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.projectWorkspace.getStatus(threadId, ownerUserId, tenantId);
+  }
+
+  @Post('workflows/:threadId/workspace/start')
+  startProductionProjectWorkspace(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: StartProductionProjectWorkspaceDto,
+  ) {
+    return this.projectWorkspace.startWorkspace(
+      threadId,
+      ownerUserId,
+      tenantId,
+      body.artifactId,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/agent')
+  runProductionProjectWorkspaceAgent(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: RunProductionProjectWorkspaceAgentDto,
+  ) {
+    return this.projectWorkspaceAgent.run(
+      threadId,
+      ownerUserId,
+      tenantId,
+      body.artifactId,
+      body.instruction,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/command')
+  runProductionProjectWorkspaceCommand(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: RunProductionProjectWorkspaceCommandDto,
+  ) {
+    return this.projectWorkspace.runCommand(
+      threadId,
+      ownerUserId,
+      tenantId,
+      body.command,
+      body.timeoutSeconds,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/dev-server/start')
+  startProductionProjectWorkspaceDevServer(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: StartProductionProjectWorkspaceDevServerDto,
+  ) {
+    return this.projectWorkspace.startDevServer(threadId, ownerUserId, tenantId, {
+      port: body.port,
+      command: body.command,
+    });
+  }
+
+  @Post('workflows/:threadId/workspace/dev-server/stop')
+  stopProductionProjectWorkspaceDevServer(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    return this.projectWorkspace.stopDevServer(threadId, ownerUserId, tenantId);
+  }
+
+  @Post('workflows/:threadId/workspace/preview-ticket')
+  createProductionProjectWorkspacePreviewTicket(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: CreateProductionProjectWorkspacePreviewTicketDto,
+  ) {
+    return this.projectWorkspace.issuePreviewTicket(
+      threadId,
+      ownerUserId,
+      tenantId,
+      body.port,
+    );
+  }
+
+  @All('workflows/:threadId/workspace/preview/:ticket/{*path}')
+  async proxyProductionProjectWorkspacePreview(
+    @Param('threadId') threadId: string,
+    @Param('ticket') ticket: string,
+    @Param('path') path: string[] | string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ) {
+    const normalizedPath = Array.isArray(path) ? path.join('/') : (path ?? '');
+    const segments = normalizedPath.split('/').filter(Boolean);
+    if (
+      segments.some(
+        (segment) =>
+          segment === '.' ||
+          segment === '..' ||
+          segment.length > 255 ||
+          segment.includes('\0'),
+      )
+    ) {
+      throw new BadRequestException('invalid workspace preview path');
+    }
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      throw new BadRequestException('workspace preview supports GET and HEAD');
+    }
+    const query = request.originalUrl.includes('?')
+      ? request.originalUrl.slice(request.originalUrl.indexOf('?') + 1)
+      : '';
+    if (query.length > 8_192) {
+      throw new BadRequestException('workspace preview query is too long');
+    }
+    const abortController = new AbortController();
+    const abortWhenDisconnected = () => {
+      if (!response.writableEnded) abortController.abort();
+    };
+    request.once('aborted', abortWhenDisconnected);
+    response.once('close', abortWhenDisconnected);
+    const headers: Record<string, string> = {};
+    for (const name of ['accept', 'if-none-match', 'if-modified-since', 'range']) {
+      const value = request.headers[name];
+      if (typeof value === 'string') headers[name] = value.slice(0, 2_000);
+    }
+    let result: Awaited<ReturnType<ProductionProjectWorkspaceService['proxyPreview']>>;
+    try {
+      result = await this.projectWorkspace.proxyPreview(
+        ticket,
+        threadId,
+        {
+          method: request.method as 'GET' | 'HEAD',
+          headers,
+          query,
+          path: segments.join('/'),
+          signal: abortController.signal,
+        },
+      );
+    } finally {
+      request.off('aborted', abortWhenDisconnected);
+      response.off('close', abortWhenDisconnected);
+    }
+    if (!response.destroyed) {
+      response.status(result.status).set(result.headers).send(result.body);
+    }
+  }
+
+  @Post('workflows/:threadId/workspace/export')
+  async exportProductionProjectWorkspace(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    const artifact = await this.projectWorkspace.exportWorkspace(
+      threadId,
+      ownerUserId,
+      tenantId,
+    );
+    return { artifact };
+  }
+
+  @Delete('workflows/:threadId/workspace')
+  destroyProductionProjectWorkspace(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: DestroyProductionProjectWorkspaceDto,
+  ) {
+    return this.projectWorkspace.destroyWorkspace(
+      threadId,
+      ownerUserId,
+      tenantId,
+      body.confirmDiscard,
+    );
   }
 
   @Get('workflows/:threadId/playway-preview')
@@ -363,8 +740,162 @@ export class AgentOpsAdminController {
   }
 
   @Post('run-center/:id/retry')
-  retryRunRecord(@Param('id') id: string) {
-    return this.runs.retry(id);
+  async retryRunRecord(@Param('id') id: string) {
+    const run = await this.runs.get(id);
+    if (!['failed', 'cancelled'].includes(run.status)) {
+      throw new BadRequestException(
+        `只有失败或已取消的运行可以重跑，当前状态：${run.status}`,
+      );
+    }
+    if (!['auto', 'agentic'].includes(run.mode)) {
+      throw new BadRequestException(`不支持重跑 ${run.mode} 模式的运行`);
+    }
+    if (!run.userId) {
+      throw new BadRequestException('运行记录缺少用户身份，无法安全重跑');
+    }
+
+    // Agentic 检查点按 Thread 保存；只允许重跑该 Thread 最新的一次运行，
+    // 再用请求快照中的问题摘要校验检查点，避免拿后续请求的输入重跑旧记录。
+    const latestRun = await this.runs.findLatestByThread(
+      run.threadId,
+      run.tenantId ?? undefined,
+    );
+    if (latestRun?.id !== run.id) {
+      throw new BadRequestException(
+        '该会话已有更新的运行记录，无法安全恢复这次运行',
+      );
+    }
+    const snapshot = await this.agenticRag.getRunSnapshot(run.threadId);
+    if (
+      !snapshot.available ||
+      snapshot.runtimeRunId !== run.id ||
+      !snapshot.query?.trim() ||
+      snapshot.route !== 'agentic' ||
+      (run.route && run.route !== 'agentic')
+    ) {
+      throw new BadRequestException(
+        '没有可用的 Agentic 检查点和问题，无法重跑这条 Agentic 链路',
+      );
+    }
+
+    const requestEvent = run.events.find(
+      (event) => event.eventType === 'request.snapshot',
+    );
+    const requestSnapshot = asRecord(requestEvent?.payload);
+    if (
+      requestSnapshot?.schemaVersion !== 3 ||
+      requestSnapshot.threadId !== run.threadId ||
+      requestSnapshot.mode !== run.mode
+    ) {
+      throw new BadRequestException(
+        '这条运行的快照缺少可重跑参数，请从原对话重新发起',
+      );
+    }
+    const expectedQueryHash = requestSnapshot?.queryHash;
+    const actualQueryHash = createHash('sha256')
+      .update(snapshot.query)
+      .digest('hex')
+      .slice(0, 16);
+    if (
+      typeof expectedQueryHash !== 'string' ||
+      expectedQueryHash !== actualQueryHash
+    ) {
+      throw new BadRequestException(
+        '运行快照中找不到匹配的问题，无法安全重跑',
+      );
+    }
+
+    if (
+      typeof requestSnapshot.approvalRequired !== 'boolean' ||
+      typeof requestSnapshot.useLongTermMemory !== 'boolean' ||
+      typeof requestSnapshot.hasSupplementalEvidence !== 'boolean' ||
+      typeof requestSnapshot.trustedAdminPrincipal !== 'boolean' ||
+      !Array.isArray(requestSnapshot.departmentIds) ||
+      !requestSnapshot.departmentIds.every(
+        (departmentId) => typeof departmentId === 'string',
+      )
+    ) {
+      throw new BadRequestException('运行快照缺少必要执行参数，无法安全重跑');
+    }
+    if (requestSnapshot.hasSupplementalEvidence) {
+      throw new BadRequestException(
+        '这次运行使用了未保存的附件内容，无法安全重跑',
+      );
+    }
+
+    const rawScope = requestSnapshot.scope;
+    const scopeRecord = rawScope === null ? undefined : asRecord(rawScope);
+    if (rawScope !== null && !scopeRecord) {
+      throw new BadRequestException('运行快照中的资料范围格式无效，无法重跑');
+    }
+    const scope = scopeRecord as RetrievalScopeDto | undefined;
+    const knowledgeBaseKey = requestSnapshot.knowledgeBaseKey;
+    if (
+      knowledgeBaseKey !== null &&
+      knowledgeBaseKey !== undefined &&
+      typeof knowledgeBaseKey !== 'string'
+    ) {
+      throw new BadRequestException('运行快照中的知识库配置无效，无法重跑');
+    }
+    const rolePresetId = requestSnapshot.rolePresetId;
+    if (
+      rolePresetId !== null &&
+      rolePresetId !== undefined &&
+      typeof rolePresetId !== 'string'
+    ) {
+      throw new BadRequestException('运行快照中的岗位角色无效，无法重跑');
+    }
+    const model = requestSnapshot.model;
+    if (
+      model !== null &&
+      model !== undefined &&
+      typeof model !== 'string'
+    ) {
+      throw new BadRequestException('运行快照中的模型配置无效，无法重跑');
+    }
+    const pluginKeys = requestSnapshot.pluginKeys;
+    if (
+      !Array.isArray(pluginKeys) ||
+      !pluginKeys.every((key) => typeof key === 'string')
+    ) {
+      throw new BadRequestException('运行快照中的插件配置无效，无法重跑');
+    }
+    if (!this.chat) {
+      throw new BadRequestException('问答执行服务未就绪，无法重跑');
+    }
+    const result = await this.chat.chat(
+      {
+        query: snapshot.query,
+        threadId: run.threadId,
+        mode: 'agentic',
+        rolePresetId: typeof rolePresetId === 'string' ? rolePresetId : undefined,
+        knowledgeBaseKey:
+          typeof knowledgeBaseKey === 'string' ? knowledgeBaseKey : undefined,
+        scope,
+        pluginKeys: pluginKeys as string[],
+        approvalRequired: requestSnapshot.approvalRequired,
+        useLongTermMemory: requestSnapshot.useLongTermMemory,
+      },
+      run.userId,
+      undefined,
+      {
+        tenantId: run.tenantId ?? undefined,
+        model: typeof model === 'string' ? model : undefined,
+        forceAgentic: true,
+        trustedAdminPrincipal: requestSnapshot.trustedAdminPrincipal,
+        departmentIds: requestSnapshot.departmentIds as string[],
+      },
+    );
+    if (!result.runId) {
+      throw new BadRequestException('Agentic 重跑未创建新的运行记录');
+    }
+    return {
+      previousRunId: run.id,
+      runId: result.runId,
+      threadId: result.threadId,
+      status: result.executionState?.paused ? 'waiting_approval' : 'completed',
+      route: result.route,
+    };
   }
 
   @Post('run-center/:id/cancel')

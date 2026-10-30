@@ -25,6 +25,8 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { DocumentPermissionModule } from './document-permission.module';
 import { ImageIndexModule } from '../image-index/image-index.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { SpeechModule } from '../../providers/speech/speech.module';
+import { VisionModule } from '../../providers/vision/vision.module';
 
 @Module({
   imports: [
@@ -46,6 +48,8 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     DocumentPermissionModule,
     ImageIndexModule,
     DomainEventsModule,
+    SpeechModule,
+    VisionModule,
     DocumentRetrievalDescriptionModule,
   ],
   controllers: [DocumentController],

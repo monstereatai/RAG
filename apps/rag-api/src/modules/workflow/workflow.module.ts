@@ -16,6 +16,9 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { AgentLoopModule } from '../agent-loop/agent-loop.module';
 import { GraphModule } from '../graph/graph.module';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
+import { ProductionArtifactStudioService } from './production-artifact-studio.service';
+import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
+import { ProductionProjectWorkspaceAgentService } from './production-project-workspace-agent.service';
 
 @Module({
   imports: [
@@ -38,7 +41,15 @@ import { ProductionWorkflowQueueService } from './production-workflow-queue.serv
     ProductionWorkflowService,
     ProductionWorkflowTools,
     ProductionWorkflowQueueService,
+    ProductionArtifactStudioService,
+    ProductionProjectWorkspaceService,
+    ProductionProjectWorkspaceAgentService,
   ],
-  exports: [ProductionWorkflowService],
+  exports: [
+    ProductionWorkflowService,
+    ProductionArtifactStudioService,
+    ProductionProjectWorkspaceService,
+    ProductionProjectWorkspaceAgentService,
+  ],
 })
 export class WorkflowModule {}

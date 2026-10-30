@@ -1,138 +1,275 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
+import { countTextTokens } from '../document/chunking.util';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 import { AgentEvalDto } from './agent-eval.dto';
+import { agentEvalJudgeSystemPrompt } from './agent-eval.prompts';
 
 const judgeSchema = z.object({
-  faithfulnessAssertions: z.array(
+  answerAssertions: z.array(
     z.object({ claim: z.string(), supported: z.boolean(), reason: z.string() }),
   ),
   coverageAssertions: z.array(
-    z.object({ requirement: z.string(), covered: z.boolean() }),
+    z.object({ requirement: z.string(), covered: z.boolean(), reason: z.string() }),
+  ),
+  contextRecallAssertions: z.array(
+    z.object({ expectedClaim: z.string(), present: z.boolean(), reason: z.string() }),
   ),
   reason: z.string(),
 });
 
+const THRESHOLDS = {
+  faithfulness: 0.88,
+  context_recall: 0.8,
+  requirement_coverage: 0.8,
+  test_case_structure_completeness: 0.8,
+};
+
+type EvaluationStatus = 'evaluated' | 'insufficient_data' | 'not_evaluated';
+type JudgeMessages = [
+  { role: 'system'; content: string },
+  { role: 'user'; content: string },
+];
+
 @Injectable()
 export class AgentEvalService {
-  constructor(private readonly llmProvider: LlmProvider) {}
+  constructor(
+    private readonly llmProvider: LlmProvider,
+    private readonly config: ConfigService,
+  ) {}
 
   async evaluate(input: AgentEvalDto) {
-    const faithfulness = this.faithfulness(input.output, input.contexts);
-    const contextRecall = this.contextRecall(
-      input.contexts,
-      input.expectedContextClaims ?? [],
-    );
-    const coverage = this.coverage(
-      input.output,
-      input.requiredClaims ?? this.inferRequirements(input.query),
-    );
-    const testCaseCompleteness = this.testCaseCompleteness(
+    const structure = this.testCaseStructureCompleteness(
       input.output,
       input.taskType ?? 'general',
     );
-    const stepAccuracy = this.stepAccuracy(
-      input.expectedSteps ?? [],
-      input.actualSteps ?? [],
-    );
-    const toolSuccessRate = this.toolSuccessRate(input.toolCalls ?? []);
-    const humanHandoffRate = input.humanHandoff ? 1 : 0;
-    const taskSuccess =
-      faithfulness.score >= 0.88 &&
-      coverage.score >= 0.8 &&
-      testCaseCompleteness.score >= 0.8 &&
-      stepAccuracy >= 0.8 &&
-      toolSuccessRate >= 0.9;
-
-    const judge = input.useJudge
-      ? await this.judge(input).catch((error) => ({
-          available: false,
-          error: (error as Error).message,
-        }))
-      : { available: false, skipped: true };
-
-    return {
-      passed: taskSuccess,
-      metrics: {
-        task_success_rate: taskSuccess ? 1 : 0,
-        faithfulness: faithfulness.score,
-        context_recall: contextRecall.score,
-        prd_coverage: coverage.score,
-        test_case_completeness: testCaseCompleteness.score,
-        tool_success_rate: toolSuccessRate,
-        step_accuracy: stepAccuracy,
-        human_handoff_rate: humanHandoffRate,
-      },
-      assertions: {
-        unsupportedClaims: faithfulness.unsupported,
-        missingRequirements: coverage.missing,
-        missingTestCaseSections: testCaseCompleteness.missing,
-        missingContextClaims: contextRecall.missing,
-      },
-      thresholds: {
-        faithfulness: 0.88,
-        contextRecall: 0.8,
-        prdCoverage: 0.8,
-        testCaseCompleteness: 0.8,
-        toolSuccessRate: 0.9,
-        stepAccuracy: 0.8,
-      },
-      judge,
+    const baseMetrics = {
+      faithfulness: null as number | null,
+      context_recall: null as number | null,
+      requirement_coverage: null as number | null,
+      test_case_structure_completeness: structure.score,
     };
-  }
 
-  private faithfulness(output: string, contexts: string[]) {
-    const evidence = this.normalize(contexts.join('\n'));
-    const claims = output
-      .split(/[。！？\n]+/)
-      .map((item) => item.trim())
-      .filter((item) => item.length >= 8 && !/^#+\s/.test(item));
-    if (claims.length === 0) return { score: 1, unsupported: [] as string[] };
-    const supported = claims.filter((claim) => {
-      const tokens = this.tokens(claim);
-      if (tokens.length === 0) return true;
-      const matched = tokens.filter((token) => evidence.includes(token)).length;
-      return matched / tokens.length >= 0.5;
-    });
-    const unsupported = claims.filter((claim) => !supported.includes(claim));
-    return {
-      score: this.round(supported.length / claims.length),
-      unsupported,
-    };
-  }
-
-  private coverage(output: string, requirements: string[]) {
-    if (requirements.length === 0) return { score: 1, missing: [] as string[] };
-    const normalized = this.normalize(output);
-    const missing = requirements.filter(
-      (item) => !this.tokens(item).some((token) => normalized.includes(token)),
-    );
-    return {
-      score: this.round(
-        (requirements.length - missing.length) / requirements.length,
-      ),
-      missing,
-    };
-  }
-
-  private contextRecall(contexts: string[], expectedClaims: string[]) {
-    if (expectedClaims.length === 0) {
-      return { score: 1, missing: [] as string[] };
+    if (input.useJudge !== true) {
+      return this.result(
+        'not_evaluated',
+        null,
+        '未启用大模型裁判；结构项检查不代表回答质量评测。',
+        baseMetrics,
+        structure.missing,
+        { available: false, skipped: true },
+      );
     }
-    const evidence = this.normalize(contexts.join('\n'));
-    const missing = expectedClaims.filter(
-      (claim) => !this.tokens(claim).some((token) => evidence.includes(token)),
+
+    const requiredClaims = this.uniqueClaims(input.requiredClaims ?? []);
+    const expectedContextClaims = this.uniqueClaims(
+      input.expectedContextClaims ?? [],
     );
-    return {
-      score: this.round(
-        (expectedClaims.length - missing.length) / expectedClaims.length,
+    const missingGoldens = [
+      ...(requiredClaims.length === 0 ? ['答案必须覆盖的标准要求'] : []),
+      ...(expectedContextClaims.length === 0 ? ['检索上下文应包含的标准证据'] : []),
+    ];
+    if (missingGoldens.length > 0) {
+      return this.result(
+        'insufficient_data',
+        null,
+        `缺少评测标准：${missingGoldens.join('、')}。`,
+        baseMetrics,
+        structure.missing,
+        { available: false, skipped: true },
+      );
+    }
+
+    const judgeMessages = this.buildJudgeMessages(
+      input,
+      requiredClaims,
+      expectedContextClaims,
+    );
+    const contextWindowTokens = this.positiveNumber(
+      this.config.get<number>('llm.contextWindowTokens'),
+      32_768,
+    );
+    const structuredPolicy = this.llmProvider.getRoutePolicy(
+      'structured',
+      this.llmProvider.getActiveProviderName(),
+    );
+    const outputProviders = [
+      structuredPolicy.primary,
+      structuredPolicy.fallback,
+    ].filter((provider): provider is NonNullable<typeof provider> => !!provider);
+    const outputReserveTokens = Math.max(
+      ...outputProviders.map((provider) =>
+        Math.max(
+          this.positiveNumber(
+            this.config.get<number>(`llm.${provider}.maxTokens`),
+            4_096,
+          ),
+          this.llmProvider.getRoutePolicy('structured', provider).maxTokens,
+        ),
       ),
-      missing,
+    );
+    const safetyMarginTokens = Math.max(
+      256,
+      Math.ceil(contextWindowTokens * 0.1),
+    );
+    const maxInputTokens = Math.max(
+      0,
+      contextWindowTokens - outputReserveTokens - safetyMarginTokens,
+    );
+    const estimatedInputTokens =
+      (await countTextTokens(JSON.stringify(judgeMessages))) + 4;
+    if (estimatedInputTokens > maxInputTokens) {
+      return this.result(
+        'not_evaluated',
+        null,
+        `评测输入预计 ${estimatedInputTokens} tokens，超过安全上限 ${maxInputTokens} tokens；未调用裁判，也未裁剪证据。`,
+        baseMetrics,
+        structure.missing,
+        {
+          available: false,
+          skipped: true,
+          estimatedInputTokens,
+          maxInputTokens,
+        },
+      );
+    }
+
+    let judged: z.infer<typeof judgeSchema>;
+    try {
+      judged = await this.judge(judgeMessages);
+    } catch (error) {
+      return this.result(
+        'not_evaluated',
+        null,
+        `大模型裁判不可用：${error instanceof Error ? error.message : String(error)}`,
+        baseMetrics,
+        structure.missing,
+        { available: false, error: error instanceof Error ? error.message : String(error) },
+      );
+    }
+
+    const coverageByRequirement = new Map(
+      judged.coverageAssertions.map((item) => [
+        this.normalizeClaim(item.requirement),
+        item,
+      ]),
+    );
+    const contextByClaim = new Map(
+      judged.contextRecallAssertions.map((item) => [
+        this.normalizeClaim(item.expectedClaim),
+        item,
+      ]),
+    );
+    const assertionsComplete =
+      requiredClaims.every((claim) => coverageByRequirement.has(this.normalizeClaim(claim))) &&
+      expectedContextClaims.every((claim) => contextByClaim.has(this.normalizeClaim(claim))) &&
+      (input.output.trim().length === 0 || judged.answerAssertions.length > 0);
+
+    if (!assertionsComplete) {
+      return this.result(
+        'insufficient_data',
+        null,
+        '裁判没有逐项返回完整判断，本次不计算通过分数。',
+        baseMetrics,
+        structure.missing,
+        { available: true, ...judged },
+      );
+    }
+
+    const coverageAssertions = requiredClaims.map(
+      (requirement) => coverageByRequirement.get(this.normalizeClaim(requirement))!,
+    );
+    const contextRecallAssertions = expectedContextClaims.map(
+      (expectedClaim) => contextByClaim.get(this.normalizeClaim(expectedClaim))!,
+    );
+    const faithfulness = input.output.trim()
+      ? this.ratio(judged.answerAssertions.filter((item) => item.supported).length, judged.answerAssertions.length)
+      : 0;
+    const contextRecall = this.ratio(
+      contextRecallAssertions.filter((item) => item.present).length,
+      contextRecallAssertions.length,
+    );
+    const requirementCoverage = this.ratio(
+      coverageAssertions.filter((item) => item.covered).length,
+      coverageAssertions.length,
+    );
+    const metrics = {
+      faithfulness,
+      context_recall: contextRecall,
+      requirement_coverage: requirementCoverage,
+      test_case_structure_completeness: structure.score,
     };
+    const passed =
+      faithfulness >= THRESHOLDS.faithfulness &&
+      contextRecall >= THRESHOLDS.context_recall &&
+      requirementCoverage >= THRESHOLDS.requirement_coverage &&
+      (structure.score === null ||
+        structure.score >= THRESHOLDS.test_case_structure_completeness);
+
+    return this.result(
+      'evaluated',
+      passed,
+      judged.reason,
+      metrics,
+      structure.missing,
+      {
+        available: true,
+        answerAssertions: judged.answerAssertions,
+        coverageAssertions,
+        contextRecallAssertions,
+      },
+      {
+        unsupportedClaims: judged.answerAssertions
+          .filter((item) => !item.supported)
+          .map((item) => item.claim),
+        missingRequirements: coverageAssertions
+          .filter((item) => !item.covered)
+          .map((item) => item.requirement),
+        missingContextClaims: contextRecallAssertions
+          .filter((item) => !item.present)
+          .map((item) => item.expectedClaim),
+      },
+    );
   }
 
-  private testCaseCompleteness(output: string, taskType: string) {
-    if (taskType !== 'test_case') return { score: 1, missing: [] as string[] };
+  private buildJudgeMessages(
+    input: AgentEvalDto,
+    requiredClaims: string[],
+    expectedContextClaims: string[],
+  ): JudgeMessages {
+    return [
+      {
+        role: 'system',
+        content: agentEvalJudgeSystemPrompt,
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          query: input.query,
+          contexts: input.contexts,
+          answer: input.output,
+          requiredClaims,
+          expectedContextClaims,
+        }),
+      },
+    ];
+  }
+
+  private async judge(messages: JudgeMessages): Promise<z.infer<typeof judgeSchema>> {
+    return this.llmProvider
+      .getModel()
+      .withStructuredOutput(judgeSchema)
+      .invoke(messages);
+  }
+
+  private positiveNumber(value: number | undefined, fallback: number): number {
+    return Number.isFinite(value) && value! > 0 ? value! : fallback;
+  }
+
+  private testCaseStructureCompleteness(output: string, taskType: string) {
+    if (taskType !== 'test_case') return { score: null, missing: [] as string[] };
     const sections: Array<[string, RegExp]> = [
       ['前置条件', /前置条件|前提/],
       ['测试步骤', /测试步骤|操作步骤/],
@@ -144,83 +281,61 @@ export class AgentEvalService {
       .filter(([, pattern]) => !pattern.test(output))
       .map(([name]) => name);
     return {
-      score: this.round((sections.length - missing.length) / sections.length),
+      score: this.ratio(sections.length - missing.length, sections.length),
       missing,
     };
   }
 
-  private stepAccuracy(expected: string[], actual: string[]): number {
-    if (expected.length === 0) return 1;
-    const correct = expected.filter(
-      (step, index) =>
-        actual[index] &&
-        this.tokens(step).some((token) =>
-          this.normalize(actual[index]).includes(token),
-        ),
-    ).length;
-    return this.round(correct / expected.length);
+  private uniqueClaims(claims: string[]): string[] {
+    const seen = new Set<string>();
+    return claims
+      .map((claim) => claim.trim())
+      .filter((claim) => {
+        const key = this.normalizeClaim(claim);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }
 
-  private toolSuccessRate(calls: Array<{ success: boolean }>): number {
-    if (calls.length === 0) return 1;
-    return this.round(
-      calls.filter((item) => item.success).length / calls.length,
-    );
+  private normalizeClaim(value: string): string {
+    return value.toLowerCase().replace(/[\s，,。.!！?？：:；;]/g, '');
   }
 
-  private inferRequirements(query: string): string[] {
-    const candidates = [
-      '地区',
-      '多语言',
-      '合规',
-      '版本',
-      '权限',
-      '异常',
-      '回滚',
-      '监控',
-    ];
-    return candidates.filter((item) => query.includes(item));
+  private ratio(numerator: number, denominator: number): number {
+    if (denominator === 0) return 0;
+    return Number((numerator / denominator).toFixed(4));
   }
 
-  private async judge(input: AgentEvalDto) {
-    const result = await this.llmProvider
-      .getModel()
-      .withStructuredOutput(judgeSchema)
-      .invoke([
-        {
-          role: 'system',
-          content:
-            '你是严格的 Agent 评测员。逐条输出布尔断言，不直接给模糊总分；上下文没有支撑的结论必须标 false。',
-        },
-        {
-          role: 'user',
-          content: `问题：${input.query}\n上下文：${JSON.stringify(input.contexts)}\n回答：${input.output}\n要求：${JSON.stringify(input.requiredClaims ?? [])}`,
-        },
-      ]);
-    return { available: true, ...result };
-  }
-
-  private tokens(value: string): string[] {
-    const normalized = this.normalize(value);
-    const words =
-      normalized.match(/[a-z0-9_./:-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [];
-    return [
-      ...new Set(
-        words.flatMap((word) => {
-          if (!/[\u4e00-\u9fff]/.test(word) || word.length <= 4) return [word];
-          return Array.from({ length: word.length - 1 }, (_, index) =>
-            word.slice(index, index + 2),
-          );
-        }),
-      ),
-    ];
-  }
-
-  private normalize(value: string): string {
-    return value.toLowerCase().replace(/\s+/g, '');
-  }
-
-  private round(value: number): number {
-    return Number(value.toFixed(4));
+  private result(
+    status: EvaluationStatus,
+    passed: boolean | null,
+    reason: string,
+    metrics: Record<string, number | null>,
+    missingTestCaseSections: string[],
+    judge: Record<string, unknown>,
+    assertions: {
+      unsupportedClaims?: string[];
+      missingRequirements?: string[];
+      missingContextClaims?: string[];
+    } = {},
+  ) {
+    return {
+      status,
+      passed,
+      reason,
+      metrics,
+      thresholds: THRESHOLDS,
+      assertions: {
+        unsupportedClaims: assertions.unsupportedClaims ?? [],
+        missingRequirements: assertions.missingRequirements ?? [],
+        missingContextClaims: assertions.missingContextClaims ?? [],
+        missingTestCaseSections,
+      },
+      judge: {
+        ...judge,
+        promptVersion: getPromptVersion('agent_eval.judge'),
+      },
+    };
   }
 }

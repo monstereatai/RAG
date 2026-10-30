@@ -31,6 +31,8 @@ export interface AgentLoopToolAction<
   approvalGranted?: boolean;
   idempotencyKey?: string;
   sideEffect?: boolean;
+  /** 仅当后续代码必须读取完整结构化结果时启用；否则状态只接收 ToolExecutionService 的有界结果。 */
+  preserveFullOutput?: boolean;
   role?: string;
   mode: 'auto' | 'agentic' | 'production';
   pluginKeys?: string[];

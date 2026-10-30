@@ -147,6 +147,17 @@ export class AgentLoopService {
         );
       }
 
+      if (await this.isCancellationRequested(input)) {
+        return this.finish(
+          input,
+          state,
+          step,
+          toolCalls,
+          'cancelled',
+          'Agent Loop 已被用户取消',
+        );
+      }
+
       const actionRemainingMs = input.timeoutMs - (Date.now() - startedAt);
       if (actionRemainingMs <= 0) {
         return this.finish(
@@ -232,7 +243,10 @@ export class AgentLoopService {
             execution.error ?? `${decision.name} 执行失败`,
           );
         }
-        state = decision.reduce(state, execution.output);
+        const toolResult = decision.preserveFullOutput
+          ? execution.output
+          : execution.contextOutput;
+        state = decision.reduce(state, toolResult);
       } else {
         const actionStartedAt = Date.now();
         await this.emit(input, 'agent.loop.model.started', {
@@ -309,6 +323,7 @@ export class AgentLoopService {
           approvalGranted: action.approvalGranted,
           idempotencyKey: action.idempotencyKey,
           sideEffect: action.sideEffect,
+          createOutputArtifact: !action.preserveFullOutput,
           signal,
           execute: (toolSignal) => action.execute(toolSignal),
         }),
@@ -367,6 +382,7 @@ export class AgentLoopService {
       'threadId' | 'runId' | 'signal'
     >,
   ): Promise<boolean> {
+    if (input.signal?.aborted) return true;
     const runId = input.runId ?? 'anonymous';
     const value = await this.redis.get(
       `agent-loop:cancel:${input.threadId}:${runId}`,

@@ -13,6 +13,7 @@ export interface Mem0AddParams {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   userId: string;
   runId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Mem0MemoryResult {
@@ -102,7 +103,11 @@ export class Mem0Provider implements OnModuleInit {
         const filters = runId
           ? { AND: [{ user_id: userId }, { run_id: runId }] }
           : { user_id: userId };
-        const result = await this.cloudClient.search(query, { filters, topK });
+        const result = await this.cloudClient.search(query, {
+          filters,
+          topK,
+          latestOnly: true,
+        });
         return (result.results ?? []).map((m) => ({
           id: m.id,
           memory: m.memory ?? '',
@@ -117,7 +122,11 @@ export class Mem0Provider implements OnModuleInit {
         : { user_id: userId };
       const result = await this.localRequest('/search', {
         method: 'POST',
-        body: JSON.stringify({ query, filters, top_k: topK }),
+        body: JSON.stringify({
+          query,
+          filters,
+          top_k: topK,
+        }),
       });
       const results =
         (result.results as Record<string, unknown>[] | undefined) ?? [];
@@ -139,13 +148,14 @@ export class Mem0Provider implements OnModuleInit {
   async add(params: Mem0AddParams): Promise<void> {
     if (!this._isEnabled) return;
 
-    const { messages, userId, runId } = params;
+    const { messages, userId, runId, metadata } = params;
 
     try {
       if (this.cloudClient) {
         await this.cloudClient.add(messages, {
           userId,
           ...(runId ? { runId } : {}),
+          ...(metadata ? { metadata } : {}),
         });
         return;
       }
@@ -157,6 +167,7 @@ export class Mem0Provider implements OnModuleInit {
           messages,
           user_id: userId,
           run_id: runId,
+          ...(metadata ? { metadata } : {}),
         }),
       });
     } catch (err) {
@@ -179,6 +190,7 @@ export class Mem0Provider implements OnModuleInit {
         const result = await this.cloudClient.getAll({
           filters,
           pageSize: 50,
+          latestOnly: true,
         });
         return (result.results ?? []).map((m) => ({
           id: m.id,
@@ -189,7 +201,9 @@ export class Mem0Provider implements OnModuleInit {
       }
 
       // local mode
-      const params = new URLSearchParams({ user_id: userId });
+      const params = new URLSearchParams({
+        user_id: userId,
+      });
       if (runId) params.set('run_id', runId);
       const result = await this.localRequest(`/memories?${params.toString()}`);
       const items =

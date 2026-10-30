@@ -262,12 +262,14 @@ export class AguiService {
       return () => {
         abortController.abort();
         if (!settled && activeThreadId && this.agentRuns) {
-          void this.agentRuns.cancelActiveForThread(
-            activeThreadId,
-            options.userId,
-            '客户端断开流式连接',
-            options.tenantId,
-          );
+          void this.agentRuns
+            .cancelActiveForThread(
+              activeThreadId,
+              options.userId,
+              '客户端断开流式连接',
+              options.tenantId,
+            )
+            .catch(() => undefined);
         }
       };
     });

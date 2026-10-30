@@ -56,8 +56,12 @@ import {
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { DashScopeRerankService } from '../../tools/dashscope-rerank.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
-import { ToolExecutionService } from '../../tools/tool-execution.service';
+import {
+  executeWithToolTimeout,
+  ToolExecutionService,
+} from '../../tools/tool-execution.service';
 import { DocumentPermissionService } from '../../modules/document/document-permission.service';
+import { countTextTokens } from '../../modules/document/chunking.util';
 import {
   Command,
   interrupt,
@@ -81,6 +85,27 @@ import {
   appliesToQuery,
   type EvidenceBundle,
 } from '../evidence/evidence-bundle';
+
+const MAX_WEB_RESULT_CONTEXT_CHARACTERS = 2_000;
+
+export interface AgenticRagRunResult {
+  answer: string;
+  references: RetrievedChunk[];
+  route: 'simple' | 'agentic';
+  confidence: number;
+  retryCount: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
+  obsidianPaths?: string[];
+  interrupted?: boolean;
+  evidenceCoverage?: Array<{
+    id: string;
+    query: string;
+    covered: boolean;
+    evidenceIds: string[];
+  }>;
+  executionState?: AgenticRagStateType['executionState'];
+}
 import {
   buildExplicitSubQuestions,
   buildSubQuestions,
@@ -147,7 +172,11 @@ export class AgenticRagService {
       answerGenerationService ??
       new AgenticAnswerGenerationService(
         llmProvider,
-        new GroundedAnswerGenerationService(llmProvider, this.evidencePolicy),
+        new GroundedAnswerGenerationService(
+          llmProvider,
+          this.evidencePolicy,
+          this.configService,
+        ),
         this.evidencePolicy,
         badCaseFlywheel,
         agentLoop,
@@ -842,13 +871,29 @@ export class AgenticRagService {
     try {
       const structured = model.withStructuredOutput(schema);
       const chain = sufficiencyPrompt.pipe(structured);
-      const context = state.retrievedChunks
-        .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 500)}`)
-        .join('\n\n');
+      const budget = await this.fitEvidenceToPromptBudget(
+        state.retrievedChunks,
+        500,
+        (context) =>
+          sufficiencyPrompt.formatMessages({
+            query: state.query,
+            context,
+          }),
+      );
+      if (!budget.withinBudget) {
+        throw new Error(
+          `充分性评估的固定提示词和问题已超过输入预算：${budget.estimatedInputTokens}/${budget.maxInputTokens} tokens`,
+        );
+      }
+      if (budget.removedChunks > 0) {
+        this.logger.warn(
+          `Sufficiency prompt evidence trimmed to token budget: removed=${budget.removedChunks}, tokens=${budget.estimatedInputTokens}/${budget.maxInputTokens}`,
+        );
+      }
       const result = await chain.invoke(
         {
           query: state.query,
-          context,
+          context: budget.context,
         },
         {
           signal: config?.configurable?.abortSignal as AbortSignal | undefined,
@@ -884,6 +929,7 @@ export class AgenticRagService {
         })),
       };
     } catch (err) {
+      await this.rethrowIfAbortedOrCancelled(err, config);
       // 结构化充分性判断失败时复用统一质量门禁；不能再用更高的硬编码分数阈值，
       // 否则已通过关键词覆盖的网页证据会因 0.15 < 0.20 被错误拒答。
       const fallbackGate = this.assessRetrievedChunks(
@@ -992,13 +1038,14 @@ export class AgenticRagService {
                   threadId,
                   this.userIdFromConfig(config),
                   { question: item.question, count: this.maxWebSearchResults },
-                  () =>
+                  (signal) =>
                     this.bochaSearchService.search(
                       item.question,
                       this.maxWebSearchResults,
-                      config?.configurable?.abortSignal as
-                        | AbortSignal
-                        | undefined,
+                      signal ??
+                        (config?.configurable?.abortSignal as
+                          | AbortSignal
+                          | undefined),
                     ),
                   config,
                 )
@@ -1020,13 +1067,30 @@ export class AgenticRagService {
         for (const { results } of searchResults) {
           const result = results[resultIndex];
           if (!result) continue;
+          const metadata = [
+            `标题：${this.limitToolContextText(result.title, 300)}`,
+            `来源：${this.limitToolContextText(result.siteName ?? result.url, 250)}`,
+            result.datePublished
+              ? `发布时间：${this.limitToolContextText(result.datePublished, 100)}`
+              : '',
+            `URL：${this.limitToolContextText(result.url, 500)}`,
+          ].filter(Boolean);
+          const excerpt = [result.summary, result.snippet]
+            .filter(Boolean)
+            .join('\n');
+          const excerptBudget = Math.max(
+            0,
+            MAX_WEB_RESULT_CONTEXT_CHARACTERS -
+              metadata.join('\n').length -
+              '网页摘要与片段：\n'.length,
+          );
+          const excerptPreview = this.limitToolContextText(
+            excerpt,
+            excerptBudget,
+          );
           const parts = [
-            `标题：${result.title}`,
-            `来源：${result.siteName ?? result.url}`,
-            result.datePublished ? `发布时间：${result.datePublished}` : '',
-            result.summary ? `摘要：${result.summary}` : '',
-            result.snippet ? `片段：${result.snippet}` : '',
-            `URL：${result.url}`,
+            ...metadata,
+            excerptPreview ? `网页摘要与片段：${excerptPreview}` : '',
           ].filter(Boolean);
 
           webChunks.push({
@@ -1078,6 +1142,7 @@ export class AgenticRagService {
         webSearchAttempted: true,
       };
     } catch (err) {
+      await this.rethrowIfAbortedOrCancelled(err, config);
       const reason = `Bocha web_search 调用失败：${(err as Error).message}`;
       this.logger.warn(reason);
       const fallbackReason = `${state.retrievalReason || '检索不足'}；${reason}`;
@@ -1149,12 +1214,13 @@ export class AgenticRagService {
           candidateCount: state.retrievedChunks.length,
           topN: this.maxRerankTopN,
         },
-        () =>
+        (signal) =>
           this.dashScopeRerankService.rerank(
             state.query,
             state.retrievedChunks,
             this.maxRerankTopN,
-            config?.configurable?.abortSignal as AbortSignal | undefined,
+            signal ??
+              (config?.configurable?.abortSignal as AbortSignal | undefined),
           ),
         config,
       );
@@ -1179,6 +1245,7 @@ export class AgenticRagService {
         reranked: true,
       };
     } catch (err) {
+      await this.rethrowIfAbortedOrCancelled(err, config);
       this.logger.warn(`DashScope rerank skipped: ${(err as Error).message}`);
       onEvent?.({
         type: 'rerank',
@@ -1306,12 +1373,30 @@ export class AgenticRagService {
     try {
       const structured = model.withStructuredOutput(schema);
       const chain = reflectionPrompt.pipe(structured);
+      const budget = await this.fitEvidenceToPromptBudget(
+        state.retrievedChunks,
+        800,
+        (context) =>
+          reflectionPrompt.formatMessages({
+            query: state.query,
+            context,
+            answer: state.answer,
+          }),
+      );
+      if (!budget.withinBudget) {
+        throw new Error(
+          `反思评估的固定提示词、问题和答案已超过输入预算：${budget.estimatedInputTokens}/${budget.maxInputTokens} tokens`,
+        );
+      }
+      if (budget.removedChunks > 0) {
+        this.logger.warn(
+          `Reflection prompt evidence trimmed to token budget: removed=${budget.removedChunks}, tokens=${budget.estimatedInputTokens}/${budget.maxInputTokens}`,
+        );
+      }
       const result = await chain.invoke(
         {
           query: state.query,
-          context: state.retrievedChunks
-            .map((c, i) => `[片段 ${i + 1}] ${c.content.slice(0, 800)}`)
-            .join('\n'),
+          context: budget.context,
           answer: state.answer,
         },
         {
@@ -1345,6 +1430,7 @@ export class AgenticRagService {
           : `答案需要补充或修正：${result.reason}`.slice(0, 500),
       };
     } catch (err) {
+      await this.rethrowIfAbortedOrCancelled(err, config);
       this.logger.warn(
         `Reflection failed, treat confidence as unknown and retry safely: ${(err as Error).message}`,
       );
@@ -1493,6 +1579,7 @@ export class AgenticRagService {
     feedback?: string,
     onEvent?: SseCallback,
     tenantId?: string,
+    expectedRunId?: string,
   ): Promise<{
     answer: string;
     references: RetrievedChunk[];
@@ -1508,6 +1595,12 @@ export class AgenticRagService {
     const before = await this.getRunSnapshot(threadId);
     if (!before.available)
       throw new BadRequestException('未找到可恢复的检查点');
+    if (
+      !expectedRunId ||
+      before.runtimeRunId !== expectedRunId
+    ) {
+      throw new BadRequestException('审批请求与当前运行检查点不匹配');
+    }
     if (!before.paused)
       throw new BadRequestException('当前运行不在等待审批状态');
     if (
@@ -1517,45 +1610,79 @@ export class AgenticRagService {
     ) {
       throw new BadRequestException('检查点剩余步骤预算已耗尽，不能继续恢复');
     }
-    onEvent?.({
-      type: 'resume',
-      data: {
-        threadId,
-        checkpointId: before.checkpointId,
-        executionState: before.executionState,
-      },
-    });
-
     const resumeContext = await this.getResumeContext(threadId, tenantId);
+    if (resumeContext.runtimeRunId !== expectedRunId) {
+      throw new BadRequestException('审批上下文与目标运行记录不匹配');
+    }
     // 使用 Command 恢复原生 interrupt，不能用普通输入重新 invoke。恢复时必须
     // 重新带上原始用户、权限 scope、插件策略和预算，不能以空上下文重放。
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    const finalState = (await this.app.invoke(
-      new Command({ resume: { approval, feedback } }),
-      {
-        configurable: {
-          thread_id: threadId,
-          onEvent,
-          enableInterrupt: true,
-          userId: resumeContext.userId,
-          history: resumeContext.history,
-          memoryMessages: resumeContext.memoryMessages,
-          retrieveOptions: resumeContext.retrieveOptions,
-          runtimeRunId: resumeContext.runtimeRunId,
+    const cancellation = this.watchRunCancellation(
+      threadId,
+      resumeContext.runtimeRunId,
+    );
+    try {
+      await cancellation.ready;
+      if (cancellation.signal.aborted) {
+        throw new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        });
+      }
+      resumeContext.retrieveOptions.signal = cancellation.signal;
+      onEvent?.({
+        type: 'resume',
+        data: {
+          threadId,
+          checkpointId: before.checkpointId,
+          executionState: before.executionState,
         },
-      },
-    )) as AgenticRagStateType;
+      });
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      const finalState = (await this.app.invoke(
+        new Command({ resume: { approval, feedback } }),
+        {
+          configurable: {
+            thread_id: threadId,
+            onEvent,
+            enableInterrupt: true,
+            userId: resumeContext.userId,
+            history: resumeContext.history,
+            memoryMessages: resumeContext.memoryMessages,
+            retrieveOptions: resumeContext.retrieveOptions,
+            abortSignal: cancellation.signal,
+            runtimeRunId: resumeContext.runtimeRunId,
+          },
+        },
+      )) as AgenticRagStateType;
+      await cancellation.checkNow();
+      if (cancellation.wasCancelled()) {
+        throw new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        });
+      }
 
-    const result = {
-      answer: finalState.answer,
-      references: finalState.retrievedChunks,
-      confidence: finalState.confidence,
-      retryCount: finalState.retryCount,
-      approved: approval === 'approved',
-      executionState: finalState.executionState,
-    };
+      const result = {
+        answer: finalState.answer,
+        references: finalState.retrievedChunks,
+        confidence: finalState.confidence,
+        retryCount: finalState.retryCount,
+        approved: approval === 'approved',
+        executionState: finalState.executionState,
+      };
 
-    return result;
+      return result;
+    } catch (error) {
+      if (cancellation.wasCancelled()) {
+        throw new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        });
+      }
+      throw error;
+    } finally {
+      cancellation.dispose();
+    }
   }
 
   private async getResumeContext(
@@ -1621,6 +1748,7 @@ export class AgenticRagService {
     threadId: string;
     checkpointId: string | null;
     updatedAt: string | null;
+    runtimeRunId: string | null;
     query: string | null;
     route: 'simple' | 'agentic' | null;
     subQuestions: AgenticSubQuestion[];
@@ -1643,6 +1771,7 @@ export class AgenticRagService {
         threadId,
         checkpointId: null,
         updatedAt: null,
+        runtimeRunId: null,
         query: null,
         route: null,
         subQuestions: [],
@@ -1657,6 +1786,7 @@ export class AgenticRagService {
     }
 
     const values = tuple.checkpoint.channel_values;
+    const resumeContext = this.recordOf(values.resumeContext);
     const checkpointArtifacts = this.isArtifacts(values.artifacts)
       ? values.artifacts
       : [];
@@ -1674,6 +1804,10 @@ export class AgenticRagService {
         (tuple.config.configurable?.checkpoint_id as string | undefined) ??
         null,
       updatedAt: tuple.checkpoint.ts ?? null,
+      runtimeRunId:
+        typeof resumeContext?.runtimeRunId === 'string'
+          ? resumeContext.runtimeRunId
+          : null,
       query: typeof values.query === 'string' ? values.query : null,
       route: this.isAgenticRoute(values.route) ? values.route : null,
       subQuestions: this.isSubQuestions(values.subQuestions)
@@ -1699,13 +1833,14 @@ export class AgenticRagService {
     };
   }
 
-  /** 重新执行当前 Thread 的 Agentic 全链路，保留同一会话用于对比前后 Artifact。 */
-  async retryRun(threadId: string, onEvent?: SseCallback) {
-    const snapshot = await this.getRunSnapshot(threadId);
-    if (!snapshot.available || !snapshot.query) {
-      throw new Error('未找到可重新执行的 Agentic Thread');
-    }
-    return this.run(snapshot.query, 'agentic', onEvent, [], threadId);
+  /**
+   * 旧接口只有 Thread ID，不能恢复原运行的用户、租户、资料范围和审批参数。
+   * 保留路由以便旧客户端得到明确错误，但拒绝以空权限上下文盲目重跑。
+   */
+  async retryRun(_threadId: string, _onEvent?: SseCallback): Promise<never> {
+    throw new BadRequestException(
+      '旧版 Thread 重跑入口已停用，请使用 run-center/:id/retry 运行记录入口',
+    );
   }
 
   /**
@@ -1743,29 +1878,70 @@ export class AgenticRagService {
     enableInterrupt = false,
     retrieveOptions: RetrieveOptions = {},
     executionOptions: { signal?: AbortSignal } = {},
-  ): Promise<{
-    answer: string;
-    references: RetrievedChunk[];
-    route: 'simple' | 'agentic';
-    confidence: number;
-    retryCount: number;
-    retrievalSufficient?: boolean;
-    retrievalReason?: string;
-    obsidianPaths?: string[];
-    interrupted?: boolean;
-    evidenceCoverage?: Array<{
-      id: string;
-      query: string;
-      covered: boolean;
-      evidenceIds: string[];
-    }>;
-    executionState?: AgenticRagStateType['executionState'];
-  }> {
+  ): Promise<AgenticRagRunResult> {
+    const cancellation = this.watchRunCancellation(
+      threadId,
+      retrieveOptions.runtimeRunId,
+      executionOptions.signal,
+    );
+    try {
+      await cancellation.ready;
+      const result = await this.runInternal(
+        query,
+        mode,
+        onEvent,
+        history,
+        threadId,
+        userId,
+        memoryMessages,
+        enableInterrupt,
+        retrieveOptions,
+        { ...executionOptions, signal: cancellation.signal },
+      );
+      await cancellation.checkNow();
+      if (executionOptions.signal?.aborted) {
+        throw executionOptions.signal.reason ?? new Error('Agent run aborted');
+      }
+      if (cancellation.wasCancelled()) {
+        throw new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        });
+      }
+      return result;
+    } catch (error) {
+      if (cancellation.wasCancelled()) {
+        throw new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        });
+      }
+      throw error;
+    } finally {
+      cancellation.dispose();
+    }
+  }
+
+  private async runInternal(
+    query: string,
+    mode: 'simple' | 'agentic' | 'auto',
+    onEvent?: SseCallback,
+    history: Array<{ role: 'human' | 'ai'; content: string }> = [],
+    threadId = 'default-thread',
+    userId?: string,
+    memoryMessages: Array<{ role: string; content: string }> = [],
+    enableInterrupt = false,
+    retrieveOptions: RetrieveOptions = {},
+    executionOptions: { signal?: AbortSignal } = {},
+  ): Promise<AgenticRagRunResult> {
     if (executionOptions.signal?.aborted) {
-      throw new BadRequestException({
-        code: 'AGENT_RUN_CANCELLED',
-        message: '运行已取消，不再执行后续节点。',
-      });
+      throw (
+        executionOptions.signal.reason ??
+        new BadRequestException({
+          code: 'AGENT_RUN_CANCELLED',
+          message: '运行已取消，不再执行后续节点。',
+        })
+      );
     }
     retrieveOptions.signal = executionOptions.signal;
     const dangerousFindings = detectDangerousQuery(query);
@@ -1896,7 +2072,10 @@ export class AgenticRagService {
         },
       } satisfies RequestContext;
     }
-    if (shouldClarifyQueryPlan(queryPlan)) {
+    if (
+      shouldClarifyQueryPlan(queryPlan) &&
+      !retrieveOptions.forceAgenticRoute
+    ) {
       const answer =
         queryPlan.clarificationQuestion ??
         '这个问题存在多种可能含义。请补充具体对象、项目或业务场景。';
@@ -1942,68 +2121,76 @@ export class AgenticRagService {
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
       const prompt = `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
-      onEvent?.({
-        type: 'routing',
-        data: { mode, route: 'simple', reason: 'system_capability_direct' },
-      });
-      onEvent?.({
-        type: 'sufficiency',
-        data: {
-          sufficient: true,
-          reason: '客观事实问答，直接回答',
-        },
-      });
-      let answer: string;
-      try {
-        answer = await this.llmProvider.invoke(prompt, {
-          signal: this.composeSignal(retrieveOptions.signal, 30_000),
-        });
-        if (!answer.trim()) {
-          throw new Error('LLM returned an empty direct answer');
-        }
-      } catch {
-        const message = '模型未返回有效内容，请切换模型后重试。';
+      const estimatedInputTokens = (await countTextTokens(prompt)) + 4;
+      const maxInputTokens = this.getMaxInputTokens('fast');
+      if (estimatedInputTokens > maxInputTokens) {
         this.logger.warn(
-          `Direct answer failed for provider=${modelName}; returning controlled error`,
+          `Direct answer skipped because its protected prompt exceeds the input budget: tokens=${estimatedInputTokens}/${maxInputTokens}`,
         );
+      } else {
         onEvent?.({
-          type: 'error',
-          data: { code: 'LLM_UNAVAILABLE', message, provider: modelName },
+          type: 'routing',
+          data: { mode, route: 'simple', reason: 'system_capability_direct' },
         });
-        onEvent?.({ type: 'token', data: message });
-        const failed = {
-          answer: message,
+        onEvent?.({
+          type: 'sufficiency',
+          data: {
+            sufficient: true,
+            reason: '客观事实问答，直接回答',
+          },
+        });
+        let answer: string;
+        try {
+          answer = await this.llmProvider.invoke(prompt, {
+            signal: this.composeSignal(retrieveOptions.signal, 30_000),
+          });
+          if (!answer.trim()) {
+            throw new Error('LLM returned an empty direct answer');
+          }
+        } catch {
+          const message = '模型未返回有效内容，请切换模型后重试。';
+          this.logger.warn(
+            `Direct answer failed for provider=${modelName}; returning controlled error`,
+          );
+          onEvent?.({
+            type: 'error',
+            data: { code: 'LLM_UNAVAILABLE', message, provider: modelName },
+          });
+          onEvent?.({ type: 'token', data: message });
+          const failed = {
+            answer: message,
+            references: [],
+            retrievalSufficient: false,
+            retrievalReason: '模型服务调用失败',
+          };
+          onEvent?.({ type: 'citation', data: [] });
+          onEvent?.({ type: 'final', data: failed });
+          return {
+            ...failed,
+            route: 'simple' as const,
+            confidence: 0,
+            retryCount: 0,
+            evidenceCoverage: [],
+          };
+        }
+        for (const token of this.splitAnswerTokens(answer)) {
+          onEvent?.({ type: 'token', data: token });
+        }
+        const direct = {
+          answer,
           references: [],
-          retrievalSufficient: false,
-          retrievalReason: '模型服务调用失败',
+          retrievalSufficient: true,
+          retrievalReason: '客观事实问答，直接回答',
         };
         onEvent?.({ type: 'citation', data: [] });
-        onEvent?.({ type: 'final', data: failed });
+        onEvent?.({ type: 'final', data: direct });
         return {
-          ...failed,
+          ...direct,
           route: 'simple' as const,
-          confidence: 0,
+          confidence: 1,
           retryCount: 0,
-          evidenceCoverage: [],
         };
       }
-      for (const token of this.splitAnswerTokens(answer)) {
-        onEvent?.({ type: 'token', data: token });
-      }
-      const direct = {
-        answer,
-        references: [],
-        retrievalSufficient: true,
-        retrievalReason: '客观事实问答，直接回答',
-      };
-      onEvent?.({ type: 'citation', data: [] });
-      onEvent?.({ type: 'final', data: direct });
-      return {
-        ...direct,
-        route: 'simple' as const,
-        confidence: 1,
-        retryCount: 0,
-      };
     }
     // Auto 的 Fast Path 只用于选择执行引擎，并把首轮证据交给升级后的 Agentic 复用。
     // 显式 Agentic 直接进入状态机，按 QueryPlan 取证。
@@ -2159,7 +2346,7 @@ export class AgenticRagService {
           history,
           memoryMessages,
           retrieveOptions,
-          runtimeRunId: retrieveOptions.runtimeRunId,
+          runtimeRunId: retrieveOptions.runtimeRunId ?? '',
         },
       },
       {
@@ -2273,6 +2460,12 @@ export class AgenticRagService {
           });
         }
         const result = await handler(state, config);
+        if (await this.isCancellationRequested(config)) {
+          throw new BadRequestException({
+            code: 'AGENT_RUN_CANCELLED',
+            message: '运行已取消，当前节点结果不再进入后续步骤。',
+          });
+        }
         const durationMs = Date.now() - startedAt;
         this.metricsService.observeAgentNode(
           name,
@@ -2332,6 +2525,66 @@ export class AgenticRagService {
     };
   }
 
+  private watchRunCancellation(
+    threadId: string,
+    runId?: string,
+    parentSignal?: AbortSignal,
+  ) {
+    const controller = new AbortController();
+    const signal = parentSignal
+      ? AbortSignal.any([parentSignal, controller.signal])
+      : controller.signal;
+    const cancelKey = runId
+      ? `agent-loop:cancel:${threadId}:${runId}`
+      : undefined;
+    let cancellationObserved = false;
+    let stopped = false;
+    let timer: NodeJS.Timeout | undefined;
+    let pollInFlight: Promise<void> | undefined;
+
+    const poll = async () => {
+      if (stopped || signal.aborted || !cancelKey) return;
+      if (pollInFlight) return pollInFlight;
+      pollInFlight = (async () => {
+        try {
+          if (
+            this.redisProvider.isEnabled() &&
+            (await this.redisProvider.get(cancelKey)) === 'cancelled'
+          ) {
+            cancellationObserved = true;
+            controller.abort();
+            return;
+          }
+        } catch (error) {
+          this.logger.debug(
+            `Run cancellation marker check failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        if (!stopped && !signal.aborted) {
+          timer = setTimeout(() => void poll(), 500);
+          timer.unref();
+        }
+      })();
+      try {
+        await pollInFlight;
+      } finally {
+        pollInFlight = undefined;
+      }
+    };
+
+    const ready = poll();
+    return {
+      signal,
+      ready,
+      checkNow: poll,
+      wasCancelled: () => cancellationObserved,
+      dispose: () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+      },
+    };
+  }
+
   private recordAgentNodeTrace(
     config: RunnableConfig | undefined,
     node: string,
@@ -2371,13 +2624,15 @@ export class AgenticRagService {
       return false;
     }
     const context = value as Record<string, unknown>;
+    const retrieveOptions = this.recordOf(context.retrieveOptions);
     return (
       Array.isArray(context.history) &&
       Array.isArray(context.memoryMessages) &&
+      typeof context.runtimeRunId === 'string' &&
+      context.runtimeRunId.trim().length > 0 &&
+      retrieveOptions?.runtimeRunId === context.runtimeRunId &&
       Boolean(
-        context.retrieveOptions &&
-        typeof context.retrieveOptions === 'object' &&
-        !Array.isArray(context.retrieveOptions),
+        retrieveOptions,
       )
     );
   }
@@ -2433,23 +2688,41 @@ export class AgenticRagService {
     return Math.min(max, Math.max(min, Math.trunc(value)));
   }
 
+  private limitToolContextText(value: string, maxCharacters: number): string {
+    if (maxCharacters <= 0) return '';
+    if (value.length <= maxCharacters) return value;
+    return `${value.slice(0, maxCharacters - 1)}…`;
+  }
+
   private async executeAgenticTool<T>(
     toolName: string,
     threadId: string,
     ownerUserId: string | undefined,
     input: unknown,
-    execute: () => Promise<T>,
+    execute: (signal?: AbortSignal) => Promise<T>,
     config?: RunnableConfig,
   ): Promise<T> {
-    if (!this.toolExecution || !threadId) return execute();
+    const executionContext = this.pluginPolicy(config, 'agentic');
+    const decision = this.toolPolicy.decide(toolName, executionContext);
+    if (!decision.allowed || !decision.entry) {
+      throw new Error(decision.reason);
+    }
+    if (!this.toolExecution || !threadId) {
+      return executeWithToolTimeout(
+        toolName,
+        decision.entry.timeoutMs,
+        execute,
+        config?.configurable?.abortSignal as AbortSignal | undefined,
+      );
+    }
     const result = await this.toolExecution.execute({
       toolName,
       threadId,
       ownerUserId,
       actor: 'agentic_rag',
-      ...this.pluginPolicy(config, 'agentic'),
+      ...executionContext,
       input,
-      execute,
+      execute: (signal) => execute(signal),
     });
     if (!result.output)
       throw new Error(result.error ?? `${toolName} 被阻断或未返回结果`);
@@ -2504,6 +2777,33 @@ export class AgenticRagService {
     return marker === 'cancelled';
   }
 
+  /** 用户中断或超时不能被节点的“降级继续”逻辑吞掉。 */
+  private async rethrowIfAbortedOrCancelled(
+    error: unknown,
+    config?: RunnableConfig,
+  ): Promise<void> {
+    const errorLike = error as { name?: string; code?: string } | null;
+    const isAbortError =
+      errorLike?.name === 'AbortError' ||
+      errorLike?.name === 'TimeoutError' ||
+      errorLike?.code === 'ABORT_ERR';
+    const response =
+      error instanceof BadRequestException ? error.getResponse() : undefined;
+    const isCancelledException =
+      typeof response === 'object' &&
+      response !== null &&
+      'code' in response &&
+      response.code === 'AGENT_RUN_CANCELLED';
+
+    if (
+      isAbortError ||
+      isCancelledException ||
+      (await this.isCancellationRequested(config))
+    ) {
+      throw error;
+    }
+  }
+
   private numberConfig(
     key: string,
     fallback: number,
@@ -2517,6 +2817,106 @@ export class AgenticRagService {
 
   private rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[] {
     return this.evidencePolicy.rankEvidenceChunks(chunks);
+  }
+
+  /**
+   * 在 Agentic 评估调用前只裁检索证据，保留问题、答案和 Prompt 固定指令。
+   * 超限时按检索分从低到高移除完整片段，避免把证据内容截成失去语义的碎片。
+   */
+  private async fitEvidenceToPromptBudget(
+    chunks: RetrievedChunk[],
+    maxChunkCharacters: number,
+    formatMessages: (
+      context: string,
+    ) => Promise<Array<{ content: unknown }>>,
+  ): Promise<{
+    context: string;
+    withinBudget: boolean;
+    estimatedInputTokens: number;
+    maxInputTokens: number;
+    removedChunks: number;
+  }> {
+    const maxInputTokens = this.getMaxInputTokens();
+    const retained = chunks.map((chunk) => ({ chunk }));
+    let context = '';
+    let estimatedInputTokens = 0;
+    let withinBudget = false;
+
+    while (true) {
+      context = retained
+        .map(
+          ({ chunk }, index) =>
+            `[片段 ${index + 1}] ${chunk.content.slice(0, maxChunkCharacters)}`,
+        )
+        .join('\n\n');
+      const messages = await formatMessages(context);
+      const promptText = messages
+        .map(({ content }) =>
+          typeof content === 'string' ? content : JSON.stringify(content),
+        )
+        .join('\n');
+      estimatedInputTokens =
+        (await countTextTokens(promptText)) + messages.length * 4;
+      if (estimatedInputTokens <= maxInputTokens) {
+        withinBudget = true;
+        break;
+      }
+      if (retained.length === 0) break;
+
+      let lowestScoreIndex = 0;
+      for (let index = 1; index < retained.length; index += 1) {
+        if (
+          (retained[index].chunk.totalScore ?? 0) <
+          (retained[lowestScoreIndex].chunk.totalScore ?? 0)
+        ) {
+          lowestScoreIndex = index;
+        }
+      }
+      retained.splice(lowestScoreIndex, 1);
+    }
+
+    return {
+      context,
+      withinBudget,
+      estimatedInputTokens,
+      maxInputTokens,
+      removedChunks: chunks.length - retained.length,
+    };
+  }
+
+  private getMaxInputTokens(
+    task: 'fast' | 'reasoning' | 'structured' = 'structured',
+  ): number {
+    const configuredWindow = Number(
+      this.configService.get<number>('llm.contextWindowTokens'),
+    );
+    const contextWindow =
+      Number.isFinite(configuredWindow) && configuredWindow > 0
+        ? configuredWindow
+        : 32_768;
+    const activeProvider = this.llmProvider.getActiveProviderName();
+    const providers = [
+      activeProvider,
+      this.llmProvider.getRoutePolicy(task, activeProvider).fallback,
+    ].filter(
+      (provider): provider is NonNullable<typeof provider> => Boolean(provider),
+    );
+    const outputBudget = Math.max(
+      4_096,
+      ...providers.map((provider) => {
+        const configuredOutput = Number(
+          this.configService.get<number>(`llm.${provider}.maxTokens`),
+        );
+        return Math.max(
+          Number.isFinite(configuredOutput) && configuredOutput > 0
+            ? configuredOutput
+            : 4_096,
+          this.llmProvider.getRoutePolicy(task, provider).maxTokens,
+        );
+      }),
+    );
+    const safetyMargin = Math.max(256, Math.ceil(contextWindow * 0.1));
+    return Math.max(1, contextWindow - outputBudget - safetyMargin);
   }
 
   private assessRetrievedChunks(

@@ -129,6 +129,34 @@ export class AgentRuntimeEventsService {
       .map((row) => ({ ...row, payload: this.parse(row.payload) }));
   }
 
+  async hasMatchingEvent(input: {
+    tenantId?: string;
+    threadId: string;
+    runId: string;
+    eventType: string;
+    payload: Record<string, unknown>;
+  }): Promise<boolean> {
+    const rows = await this.events.find({
+      where: {
+        tenantId: input.tenantId ?? 'legacy',
+        threadId: input.threadId,
+        runId: input.runId,
+        eventType: input.eventType,
+      },
+      select: { payload: true },
+    });
+    return rows.some((row) => {
+      const payload = this.parse(row.payload);
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return false;
+      }
+      return Object.entries(input.payload).every(
+        ([key, value]) =>
+          (payload as Record<string, unknown>)[key] === value,
+      );
+    });
+  }
+
   async metrics(threadId?: string, runId?: string, tenantId = 'legacy') {
     const query = this.events
       .createQueryBuilder('event')

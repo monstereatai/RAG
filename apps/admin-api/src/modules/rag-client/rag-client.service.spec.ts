@@ -109,6 +109,192 @@ describe('RagClientService', () => {
       );
     });
 
+    it('uses the workflow workspace contract with mapped owner and tenant scope', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ data: { ticket: 't'.repeat(40) } }),
+        headers: new Headers({ 'content-type': 'application/zip' }),
+      });
+
+      await service.getProductionWorkflowWorkspace('thread-1', '42', 'tenant-a');
+      await service.startProductionWorkflowWorkspace('thread-1', '42', 'tenant-a', {
+        artifactId: 'artifact-1',
+      });
+      await service.runProductionWorkflowWorkspaceAgent('thread-1', '42', 'tenant-a', {
+        artifactId: 'artifact-1',
+        instruction: 'add a filter',
+      });
+      await service.runProductionWorkflowWorkspaceCommand('thread-1', '42', 'tenant-a', {
+        command: 'npm test',
+      });
+      await service.startProductionWorkflowWorkspaceDevServer(
+        'thread-1',
+        '42',
+        'tenant-a',
+        { port: 5173 },
+      );
+      await service.stopProductionWorkflowWorkspaceDevServer('thread-1', '42', 'tenant-a');
+      await service.createProductionWorkflowWorkspacePreviewTicket(
+        'thread-1',
+        '42',
+        'tenant-a',
+        { port: 5173 },
+      );
+      await service.proxyProductionWorkflowWorkspacePreview(
+        't'.repeat(40),
+        'thread-1',
+        {
+          method: 'GET',
+          path: 'assets/main.js',
+          query: 'v=1&label=hello+world',
+          headers: { accept: 'text/javascript' },
+        },
+      );
+      await service.exportProductionWorkflowWorkspace('thread-1', '42', 'tenant-a');
+      await service.deleteProductionWorkflowWorkspace(
+        'thread-1',
+        '42',
+        'tenant-a',
+        { confirmDiscard: true },
+      );
+
+      const calls = mockFetch.mock.calls;
+      expect(calls).toHaveLength(10);
+      for (const [url, init] of calls.slice(0, 7).concat(calls.slice(8))) {
+        expect(url).toMatch(/ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a/);
+        expect((init as RequestInit).headers).toEqual(
+          expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        );
+      }
+      expect(calls.map(([url]) => String(url))).toEqual([
+        expect.stringMatching(/\/workspace\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/start\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/agent\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/command\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/dev-server\/start\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/dev-server\/stop\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\/preview-ticket\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        'http://localhost:3000/api/v1/rag/admin/agent-ops/workflows/thread-1/workspace/preview/' +
+          'tttttttttttttttttttttttttttttttttttttttt/assets/main.js?v=1&label=hello+world',
+        expect.stringMatching(/\/workspace\/export\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+        expect.stringMatching(/\/workspace\?ownerUserId=admin%3A[a-f0-9]{58}&tenantId=tenant-a$/),
+      ]);
+      expect((calls[1][1] as RequestInit).body).toBe(
+        JSON.stringify({ artifactId: 'artifact-1' }),
+      );
+      expect((calls[2][1] as RequestInit).body).toBe(
+        JSON.stringify({ artifactId: 'artifact-1', instruction: 'add a filter' }),
+      );
+      expect((calls[3][1] as RequestInit).body).toBe(JSON.stringify({ command: 'npm test' }));
+      expect((calls[7][1] as RequestInit).headers).toEqual(
+        expect.objectContaining({
+          Authorization: 'Bearer test-token',
+          accept: 'text/javascript',
+        }),
+      );
+      expect((calls[8][1] as RequestInit).method).toBe('POST');
+      expect((calls[8][1] as RequestInit).headers).toEqual(
+        expect.objectContaining({ 'content-type': 'application/json' }),
+      );
+      expect((calls[8][1] as RequestInit).body).toBe(JSON.stringify({}));
+      expect((calls[9][1] as RequestInit).method).toBe('DELETE');
+      expect((calls[9][1] as RequestInit).body).toBe(
+        JSON.stringify({ confirmDiscard: true }),
+      );
+    });
+
+    it('keeps workflow loop and command client timeouts within their execution budgets', async () => {
+      const requestSpy = jest
+        .spyOn(service as any, 'request')
+        .mockResolvedValue({ available: true, status: 200, data: {} });
+      const rawRequestSpy = jest
+        .spyOn(service as any, 'requestRaw')
+        .mockResolvedValue(new Response('preview', { status: 200 }));
+
+      await service.runProductionWorkflowWorkspaceAgent('thread-1', '42', 'tenant-a', {
+        artifactId: 'artifact-1',
+        instruction: 'install dependencies and run tests',
+      });
+      await service.runProductionWorkflowWorkspaceCommand('thread-1', '42', 'tenant-a', {
+        command: 'npm test',
+      });
+      await service.createProductionWorkflowWorkspacePreviewTicket(
+        'thread-1',
+        '42',
+        'tenant-a',
+        { port: 5173 },
+      );
+      await service.proxyProductionWorkflowWorkspacePreview(
+        't'.repeat(40),
+        'thread-1',
+        {
+          method: 'GET',
+          path: 'assets/main.js',
+          query: '',
+          headers: { accept: 'text/javascript' },
+        },
+      );
+      await service.exportProductionWorkflowWorkspace('thread-1', '42', 'tenant-a');
+
+      expect(requestSpy).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(/\/workspace\/agent\?.*tenantId=tenant-a$/),
+        expect.objectContaining({ method: 'POST' }),
+        true,
+        530_000,
+      );
+      expect(requestSpy).toHaveBeenNthCalledWith(
+        2,
+        expect.stringMatching(/\/workspace\/command\?.*tenantId=tenant-a$/),
+        expect.objectContaining({ method: 'POST' }),
+        true,
+        270_000,
+      );
+      expect(requestSpy).toHaveBeenNthCalledWith(
+        3,
+        expect.stringMatching(/\/workspace\/preview-ticket\?.*tenantId=tenant-a$/),
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ port: 5173 }) }),
+        true,
+        30_000,
+      );
+      expect(rawRequestSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/workspace/preview/'),
+        true,
+        { accept: 'text/javascript' },
+        'GET',
+        undefined,
+        90_000,
+      );
+      expect(requestSpy).toHaveBeenNthCalledWith(
+        4,
+        expect.stringMatching(/\/workspace\/export\?.*tenantId=tenant-a$/),
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({}) }),
+        true,
+        180_000,
+      );
+    });
+
+    it('keeps a caller cancellation signal attached through the preview response body', async () => {
+      mockFetch.mockResolvedValue(new Response('preview', { status: 200 }));
+      const signal = new AbortController().signal;
+
+      await (service as any).requestRaw(
+        '/rag/admin/agent-ops/workflows/thread-1/workspace/preview/ticket',
+        true,
+        { accept: 'text/html' },
+        'GET',
+        undefined,
+        90_000,
+        signal,
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/workspace/preview/ticket'),
+        expect.objectContaining({ signal }),
+      );
+    });
+
     it('forwards image search uploads with the internal token and caller scope', async () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ code: 200, data: { results: [] } }), {

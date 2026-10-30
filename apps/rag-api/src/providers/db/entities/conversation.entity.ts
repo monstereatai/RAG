@@ -25,7 +25,7 @@ export class ConversationEntity {
   @Column({ type: 'varchar', length: 16, default: 'auto' })
   mode!: string;
 
-  /** 被压缩的早期会话摘要；Redis 丢失时用于恢复上下文。 */
+  /** 被压缩的会话摘要；附带消息水位线/稀疏 ID，供 Redis 丢失后恢复上下文。 */
   @Column({ type: 'text', nullable: true, default: null })
   contextSummary!: string | null;
 

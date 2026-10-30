@@ -38,11 +38,20 @@ export class EmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
     return createHash('sha256').update(text).digest('hex');
   }
 
+  /** 同一段文本在不同 embedding 模型或维度下必须使用不同缓存项。 */
+  private cacheNamespace(): string {
+    const provider = this.config.get<string>('embedding.provider') ?? 'qwen';
+    const model = this.config.get<string>('embedding.qwen.model') ?? 'unknown';
+    const dimension =
+      this.config.get<number>('embedding.qwen.dimension') ?? 1024;
+    return `${provider}:${model}:${dimension}`;
+  }
+
   /**
    * 向量化查询（支持 Redis 缓存，TTL 7 天）
    */
   async embedQuery(text: string): Promise<number[]> {
-    const key = `emb:q:${this.hashText(text)}`;
+    const key = `emb:q:${this.cacheNamespace()}:${this.hashText(text)}`;
 
     if (this.redisProvider.isEnabled()) {
       const cached = await this.redisProvider.get(key);
@@ -75,7 +84,7 @@ export class EmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
 
     // 1. 尝试在 Redis 中批量查找已存在的缓存分片
     for (const [i, text] of texts.entries()) {
-      const key = `emb:d:${this.hashText(text)}`;
+      const key = `emb:d:${this.cacheNamespace()}:${this.hashText(text)}`;
       let cachedVector: number[] | null = null;
 
       if (this.redisProvider.isEnabled()) {
@@ -106,7 +115,7 @@ export class EmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
         results[miss.index] = vector;
 
         if (this.redisProvider.isEnabled()) {
-          const key = `emb:d:${this.hashText(miss.text)}`;
+          const key = `emb:d:${this.cacheNamespace()}:${this.hashText(miss.text)}`;
           await this.redisProvider.set(
             key,
             JSON.stringify(vector),

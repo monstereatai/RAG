@@ -14,7 +14,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
@@ -24,6 +24,12 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { countTextTokens } from '../document/chunking.util';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import {
+  shortTermSummaryCompactionSystemPrompt,
+  shortTermSummaryRecoverySystemPrompt,
+} from './memory.prompts';
 import type {
   ContextMessageBudgetResult,
   ContextMessageCandidate,
@@ -41,6 +47,9 @@ const TTL_SECONDS = 86400; // 24 小时过期
 const MAX_HISTORY_CONTEXT_TOKENS = 8_000;
 const SYSTEM_CONTEXT_RESERVE_TOKENS = 2_048;
 const MAX_RETRIEVAL_CONTEXT_CHARACTERS = 10_000;
+const COMPACTION_TRIGGER_RATIO = 0.9;
+const COMPACTION_TARGET_TOKEN_RATIO = 0.7;
+const COMPACTION_RETAINED_MESSAGE_RATIO = 0.3;
 const COMPACTION_LOCK_TTL_SECONDS = 300;
 const HISTORY_CACHE_LOCK_TTL_SECONDS = 30;
 const SUMMARY_RECOVERY_PAGE_SIZE = 100;
@@ -48,10 +57,22 @@ const SUMMARY_RECOVERY_CHUNK_TOKEN_BUDGET = 5_000;
 const SUMMARY_RECOVERY_MESSAGE_PART_CHARACTERS = 1_200;
 const SUMMARY_RECOVERY_PREVIOUS_TOKEN_BUDGET = 1_500;
 const SUMMARY_RECOVERY_RECENT_MESSAGE_COUNT = DEFAULT_MESSAGE_SAFETY_CAP;
+const COMPACTION_STRATEGY_CONFIDENCE_THRESHOLD = 0.6;
+const SUMMARY_MAX_LIST_ITEMS = 12;
+const SUMMARY_MAX_ITEM_CHARACTERS = 160;
+const SUMMARY_MAX_GOAL_CHARACTERS = 240;
+const SUMMARY_MAX_DIGEST_CHARACTERS = 500;
+
+type CompactionStrategy = 'middle-removal' | 'oldest-removal' | 'hybrid';
+type RemovalStrategy = Exclude<CompactionStrategy, 'hybrid'>;
 
 const structuredMemorySummarySchema = z.object({
   schemaVersion: z.literal(1),
   compactedThroughMessageId: z.string().optional(),
+  compactedMessageIds: z.array(z.string()).optional(),
+  currentGoal: z.string().default(''),
+  constraints: z.array(z.string()).default([]),
+  nextActions: z.array(z.string()).default([]),
   changes: z.array(
     z.object({
       role: z.string(),
@@ -77,7 +98,12 @@ export interface ContextCompactionAudit {
   sourceTurnCount: number;
   retainedTurnCount: number;
   sourceTokenEstimate: number;
+  baseStrategy?: CompactionStrategy;
+  selectedStrategy?: RemovalStrategy;
+  strategyConfidence?: number;
+  adaptiveComparison?: Record<string, number>;
   summaryMode?: 'llm';
+  promptVersion?: string;
   error?: string;
   createdAt: string;
   completedAt?: string;
@@ -140,9 +166,11 @@ export class ShortTermMemoryService {
     if (!this.redis.isEnabled()) {
       // cd 拿摘要
       const summary = await this.resolvePersistentSummary(conversationId);
+      const summaryState = summary ? this.tryParseSummary(summary) : null;
       const recovered = await this.loadRecentTurnsFromPostgres(
         conversationId,
         maxMessages,
+        summaryState ?? undefined,
       );
       const formattedSummary = summary
         ? this.formatSummary(
@@ -225,9 +253,9 @@ export class ShortTermMemoryService {
     }
     let recoveredHistoryIsTruncated = false;
     let cacheMatchesPostgres = false;
-    const summaryWatermark = summary
-      ? this.tryParseSummary(summary)?.compactedThroughMessageId
-      : undefined;
+    const summaryState = summary ? this.tryParseSummary(summary) : null;
+    const summaryWatermark = summaryState?.compactedThroughMessageId;
+    const compactedMessageIds = summaryState?.compactedMessageIds ?? [];
     if (
       cacheContentsAreValid &&
       (turns.length > 0 || Boolean(summaryWatermark))
@@ -238,6 +266,7 @@ export class ShortTermMemoryService {
         recentMessageIds = await this.loadRecentMessageIdsFromPostgres(
           conversationId,
           maxMessages,
+          compactedMessageIds,
         );
       } finally {
         this.metricsService?.observeCacheOperation(
@@ -253,10 +282,14 @@ export class ShortTermMemoryService {
       const watermarkIndex = summaryWatermark
         ? recentMessageIds.ids.indexOf(summaryWatermark)
         : -1;
-      const expectedMessageIds =
+      const expectedMessageIdsWithWatermark =
         watermarkIndex >= 0
           ? recentMessageIds.ids.slice(watermarkIndex + 1)
           : recentMessageIds.ids;
+      const compactedMessageIdSet = new Set(compactedMessageIds);
+      const expectedMessageIds = expectedMessageIdsWithWatermark.filter(
+        (messageId) => !compactedMessageIdSet.has(messageId),
+      );
       cacheMatchesPostgres =
         cachedMessageIds.length === expectedMessageIds.length &&
         cachedMessageIds.every(
@@ -279,9 +312,7 @@ export class ShortTermMemoryService {
         const recovered = await this.loadRecentTurnsFromPostgres(
           conversationId,
           maxMessages,
-          summary
-            ? this.tryParseSummary(summary)?.compactedThroughMessageId
-            : undefined,
+          summaryState ?? undefined,
         );
         turns = recovered.turns;
         recoveredHistoryIsTruncated = recovered.hasOlderMessages;
@@ -446,17 +477,19 @@ export class ShortTermMemoryService {
     }
 
     return {
-      messages: candidates.flatMap((candidate, index) =>
-        kept.has(index)
-          ? [
-              {
-                source: candidate.source,
-                role: candidate.role,
-                content: candidate.content,
-              },
-            ]
-          : [],
-      ),
+      messages: candidates
+        .map((candidate, index) => ({ candidate, index }))
+        .filter(({ index }) => kept.has(index))
+        .sort(
+          (left, right) =>
+            right.candidate.priority - left.candidate.priority ||
+            left.index - right.index,
+        )
+        .map(({ candidate }) => ({
+          source: candidate.source,
+          role: candidate.role,
+          content: candidate.content,
+        })),
       budgetTokens,
       estimatedTokens,
       overflowTokens: Math.max(0, estimatedTokens - budgetTokens),
@@ -559,10 +592,12 @@ export class ShortTermMemoryService {
           ),
         ) + 12
       : 0;
-    if (
-      all.length > this.getMessageSafetyCap() ||
-      estimatedTokens + summaryTokens > tokenBudget
-    ) {
+    const tokenThreshold = Math.floor(
+      Math.max(0, tokenBudget) * COMPACTION_TRIGGER_RATIO,
+    );
+    const exceedsTokenThreshold =
+      tokenBudget > 0 && estimatedTokens + summaryTokens > tokenThreshold;
+    if (all.length > this.getMessageSafetyCap() || exceedsTokenThreshold) {
       return this.trimAndSummarize(
         conversationId,
         this.getMessageSafetyCap(),
@@ -638,15 +673,24 @@ export class ShortTermMemoryService {
           ),
         ) + 12
       : 0;
-    const rawHistoryBudget = Math.max(0, tokenBudget - summaryTokens);
-    const keepStart = this.findKeepStart(
-      all,
+    const targetTokenBudget = Math.floor(
+      Math.max(0, tokenBudget) * COMPACTION_TARGET_TOKEN_RATIO,
+    );
+    const rawHistoryBudget = Math.max(0, targetTokenBudget - summaryTokens);
+    const retainedMessageLimit = Math.min(
       maxMessages,
+      Math.max(2, Math.ceil(all.length * COMPACTION_RETAINED_MESSAGE_RATIO)),
+    );
+    const turns = all.map((raw) => JSON.parse(raw) as StoredTurn);
+    const selection = this.selectCompactionMessages(
+      turns,
+      retainedMessageLimit,
       rawHistoryBudget,
     );
-    if (keepStart <= 0) return null;
+    if (selection.removeIndexes.length === 0) return null;
 
-    const toTrim = all.slice(0, keepStart);
+    const toTrim = selection.removeIndexes.map((index) => all[index]);
+    const retainedCount = all.length - toTrim.length;
 
     const trimmedContent = toTrim
       .map((r) => {
@@ -659,9 +703,15 @@ export class ShortTermMemoryService {
       id: randomUUID(),
       status: 'started',
       reason,
-      sourceTurnCount: keepStart,
-      retainedTurnCount: all.length - keepStart,
+      sourceTurnCount: toTrim.length,
+      retainedTurnCount: retainedCount,
       sourceTokenEstimate: this.estimateTokens(trimmedContent),
+      baseStrategy: selection.baseStrategy,
+      selectedStrategy: selection.strategy,
+      strategyConfidence: selection.confidence,
+      ...(selection.adaptiveComparison
+        ? { adaptiveComparison: selection.adaptiveComparison }
+        : {}),
       createdAt: new Date().toISOString(),
     };
     await this.saveAudit(conversationId, audit);
@@ -672,23 +722,40 @@ export class ShortTermMemoryService {
     );
 
     let summary: StructuredMemorySummary;
+    let promptVersion: string | undefined;
     try {
+      const previousSummary = existingSummary
+        ? this.tryParseSummary(existingSummary)
+        : null;
       // cd 调用LLM压缩对话历史
-      const raw = await this.llmProvider.invoke([
-        new SystemMessage(
-          `你是产研运上下文压缩器。只输出 JSON，必须符合：
-{"schemaVersion":1,"changes":[{"role":"岗位","module":"模块","before":"修改前，无则写未知","after":"修改后","version":"活动或文档版本，无则写未标注","effectiveFrom":"生效时间，无则写待确认","evidence":"原对话短句"}],"decisions":["已确认决策"],"openIssues":["待确认项"],"sourceDigest":"不超过500字的事实摘要"}。
-只保留产品规则、UI 参数、接口字段、测试口径、运营配置及明确决策；禁止补写输入中不存在的事实。具体接口和规则仍需从知识库召回，摘要不是权威事实源。`,
-        ),
+      const summaryMessages = [
+        new SystemMessage(shortTermSummaryCompactionSystemPrompt),
         {
           role: 'user' as const,
-          content: `旧摘要：${existingSummary || '无'}\n\n待压缩对话：\n${trimmedContent}`,
+          content: `旧摘要：${existingSummary ? this.formatSummary(existingSummary, SUMMARY_RECOVERY_PREVIOUS_TOKEN_BUDGET) : '无'}\n\n待压缩对话：\n${trimmedContent}`,
         },
+      ];
+      await this.assertPromptWithinBudget(summaryMessages, '会话摘要压缩');
+      promptVersion = getPromptVersion('memory.summary_compaction');
+      const raw = await this.llmProvider.invoke(summaryMessages);
+      const compactedIds = new Set([
+        ...(previousSummary?.compactedMessageIds ?? []),
+        ...toTrim.flatMap((rawTurn) => {
+          const turn = JSON.parse(rawTurn) as StoredTurn;
+          return turn.messageId ? [turn.messageId] : [];
+        }),
       ]);
-      const lastTrimmedTurn = JSON.parse(toTrim[toTrim.length - 1]) as StoredTurn;
+      const watermark = await this.advanceCompactedPrefix(
+        conversationId,
+        previousSummary?.compactedThroughMessageId,
+        compactedIds,
+      );
       summary = {
         ...this.parseStructuredSummary(raw),
-        compactedThroughMessageId: lastTrimmedTurn.messageId,
+        ...(watermark.compactedThroughMessageId
+          ? { compactedThroughMessageId: watermark.compactedThroughMessageId }
+          : {}),
+        compactedMessageIds: watermark.compactedMessageIds,
       };
     } catch (err) {
       this.logger.warn(
@@ -697,6 +764,7 @@ export class ShortTermMemoryService {
       const failed = {
         ...audit,
         status: 'failed' as const,
+        ...(promptVersion ? { promptVersion } : {}),
         error: err instanceof Error ? err.message : String(err),
         completedAt: new Date().toISOString(),
       };
@@ -723,6 +791,7 @@ export class ShortTermMemoryService {
       const failed = {
         ...audit,
         status: 'failed' as const,
+        ...(promptVersion ? { promptVersion } : {}),
         error: error instanceof Error ? error.message : String(error),
         completedAt: new Date().toISOString(),
       };
@@ -739,6 +808,7 @@ export class ShortTermMemoryService {
       ...audit,
       status: 'completed' as const,
       summaryMode: 'llm' as const,
+      ...(promptVersion ? { promptVersion } : {}),
       completedAt: new Date().toISOString(),
     };
     await this.saveAudit(conversationId, completed);
@@ -749,7 +819,7 @@ export class ShortTermMemoryService {
     );
 
     this.logger.debug(
-      `Short-term memory compressed: removed ${keepStart} turns, kept ${all.length - keepStart}`,
+      `Short-term memory compressed: strategy=${selection.strategy}, removed ${toTrim.length} turns, kept ${retainedCount}`,
     );
     return completed;
   }
@@ -817,12 +887,93 @@ export class ShortTermMemoryService {
     return conversation?.contextSummary ?? null;
   }
 
+  private async advanceCompactedPrefix(
+    conversationId: string,
+    currentWatermark: string | undefined,
+    compactedIds: Set<string>,
+  ): Promise<{
+    compactedThroughMessageId?: string;
+    compactedMessageIds: string[];
+  }> {
+    let cursor = currentWatermark
+      ? await this.messageRepo.findOne({
+          where: { id: currentWatermark, conversationId },
+          select: { id: true, role: true, createdAt: true },
+        })
+      : null;
+    if (currentWatermark && !cursor) {
+      return {
+        compactedThroughMessageId: currentWatermark,
+        compactedMessageIds: [...compactedIds],
+      };
+    }
+
+    let compactedThroughMessageId = currentWatermark;
+    const roleRank =
+      "CASE WHEN message.role = 'human' THEN 0 WHEN message.role = 'ai' THEN 1 ELSE 2 END";
+    while (true) {
+      const query = this.messageRepo
+        .createQueryBuilder('message')
+        .select(['message.id', 'message.role', 'message.createdAt'])
+        .where('message.conversationId = :conversationId', { conversationId });
+      if (cursor) {
+        const cursorRoleRank =
+          cursor.role === 'human' ? 0 : cursor.role === 'ai' ? 1 : 2;
+        query.andWhere(
+          new Brackets((where) => {
+            where
+              .where('message.createdAt > :cursorCreatedAt')
+              .orWhere(
+                `message.createdAt = :cursorCreatedAt AND ${roleRank} > :cursorRoleRank`,
+              )
+              .orWhere(
+                `message.createdAt = :cursorCreatedAt AND ${roleRank} = :cursorRoleRank AND message.id > :cursorId`,
+              );
+          }),
+        );
+        query.setParameters({
+          cursorCreatedAt: cursor.createdAt,
+          cursorRoleRank,
+          cursorId: cursor.id,
+        });
+      }
+      const rows = await query
+        .orderBy('message.createdAt', 'ASC')
+        .addOrderBy(roleRank, 'ASC')
+        .addOrderBy('message.id', 'ASC')
+        .take(100)
+        .getMany();
+      if (rows.length === 0) break;
+
+      let stoppedAtGap = false;
+      for (const row of rows) {
+        if (!compactedIds.has(row.id)) {
+          stoppedAtGap = true;
+          break;
+        }
+        compactedIds.delete(row.id);
+        compactedThroughMessageId = row.id;
+        cursor = row;
+      }
+      if (stoppedAtGap || rows.length < 100) break;
+    }
+
+    return {
+      ...(compactedThroughMessageId
+        ? { compactedThroughMessageId }
+        : {}),
+      compactedMessageIds: [...compactedIds],
+    };
+  }
+
   private async loadRecentTurnsFromPostgres(
     conversationId: string,
     maxMessages: number,
-    compactedThroughMessageId?: string,
+    summaryState?: StructuredMemorySummary,
   ): Promise<{ turns: StoredTurn[]; hasOlderMessages: boolean }> {
     const limit = Math.max(1, maxMessages);
+    const compactedMessageIds = new Set(summaryState?.compactedMessageIds ?? []);
+    const fetchLimit = limit + compactedMessageIds.size + 1;
     const messages = await this.messageRepo
       .createQueryBuilder('message')
       .where('message.conversationId = :conversationId', { conversationId })
@@ -832,34 +983,44 @@ export class ShortTermMemoryService {
         'DESC',
       )
       .addOrderBy('message.id', 'DESC')
-      .take(limit + 1)
+      .take(fetchLimit)
       .getMany();
-    const hasOlderMessages = messages.length > limit;
-    const recentMessages = messages.slice(0, limit).reverse();
-    const watermarkIndex = compactedThroughMessageId
+    const recentMessages = messages.slice(0, fetchLimit - 1).reverse();
+    const watermarkIndex = summaryState?.compactedThroughMessageId
       ? recentMessages.findIndex(
-          (message) => message.id === compactedThroughMessageId,
+          (message) => message.id === summaryState.compactedThroughMessageId,
         )
       : -1;
-    const uncompressedMessages =
+    const afterWatermarkMessages =
       watermarkIndex >= 0
         ? recentMessages.slice(watermarkIndex + 1)
         : recentMessages;
+    const uncompressedMessages = afterWatermarkMessages.filter(
+      (message) => !compactedMessageIds.has(message.id),
+    );
     const turns = uncompressedMessages
+      .slice(-limit)
       .map((message) => ({
         messageId: message.id,
         role: message.role === 'ai' ? ('assistant' as const) : ('user' as const),
         content: this.messageContent(message.content),
         ts: message.createdAt.getTime(),
       }));
-    return { turns, hasOlderMessages };
+    return {
+      turns,
+      hasOlderMessages:
+        uncompressedMessages.length > limit || messages.length >= fetchLimit,
+    };
   }
 
   private async loadRecentMessageIdsFromPostgres(
     conversationId: string,
     maxMessages: number,
+    compactedMessageIds: string[] = [],
   ): Promise<{ ids: string[]; hasOlderMessages: boolean }> {
     const limit = Math.max(1, maxMessages);
+    const excludedIds = new Set(compactedMessageIds);
+    const fetchLimit = limit + excludedIds.size + 1;
     const messages = await this.messageRepo
       .createQueryBuilder('message')
       .select(['message.id', 'message.role'])
@@ -870,11 +1031,16 @@ export class ShortTermMemoryService {
         'DESC',
       )
       .addOrderBy('message.id', 'DESC')
-      .take(limit + 1)
+      .take(fetchLimit)
       .getMany();
+    const uncompressed = messages
+      .slice(0, fetchLimit - 1)
+      .reverse()
+      .filter((message) => !excludedIds.has(message.id));
     return {
-      ids: messages.slice(0, limit).reverse().map((message) => message.id),
-      hasOlderMessages: messages.length > limit,
+      ids: uncompressed.slice(-limit).map((message) => message.id),
+      hasOlderMessages:
+        uncompressed.length > limit || messages.length >= fetchLimit,
     };
   }
 
@@ -929,6 +1095,7 @@ export class ShortTermMemoryService {
     let compactedThroughMessageId: string | undefined;
     let sourceParts: string[] = [];
     let sourceTokens = 0;
+    const promptVersions = new Set<string>();
 
     try {
       const messageCount = await this.messageRepo.count({
@@ -985,6 +1152,7 @@ export class ShortTermMemoryService {
               summary = await this.summarizeRecoveryChunk(
                 summary,
                 sourceParts.join('\n'),
+                promptVersions,
               );
               sourceParts = [];
               sourceTokens = 0;
@@ -999,6 +1167,7 @@ export class ShortTermMemoryService {
         summary = await this.summarizeRecoveryChunk(
           summary,
           sourceParts.join('\n'),
+          promptVersions,
         );
       }
       if (!summary) return null;
@@ -1009,6 +1178,9 @@ export class ShortTermMemoryService {
       this.logger.warn(
         `Persistent summary recovery failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      await this.emitSummaryRecoveryAudit(conversationId, 'failed', promptVersions, {
+        error: error instanceof Error ? error.message : String(error),
+      });
       // 恢复失败时不保存兜底文本；下次读取仍可重试，原始消息继续保留在 PostgreSQL。
       return null;
     }
@@ -1023,13 +1195,25 @@ export class ShortTermMemoryService {
           contextSummaryUpdatedAt: new Date(),
         },
       );
-      if ((result.affected ?? 0) > 0) return rawSummary;
+      if ((result.affected ?? 0) > 0) {
+        await this.emitSummaryRecoveryAudit(conversationId, 'completed', promptVersions, {
+          persistedByThisRequest: true,
+        });
+        return rawSummary;
+      }
       // 多实例同时恢复时，只允许首个结果写入；后完成的任务读取赢家，避免覆盖新摘要。
-      return (await this.getPersistentSummary(conversationId)) || null;
+      const winner = (await this.getPersistentSummary(conversationId)) || null;
+      await this.emitSummaryRecoveryAudit(conversationId, 'completed', promptVersions, {
+        persistedByThisRequest: false,
+      });
+      return winner;
     } catch (error) {
       this.logger.warn(
         `Persistent summary recovery could not be saved: ${error instanceof Error ? error.message : String(error)}`,
       );
+      await this.emitSummaryRecoveryAudit(conversationId, 'failed', promptVersions, {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -1037,6 +1221,7 @@ export class ShortTermMemoryService {
   private async summarizeRecoveryChunk(
     previous: StructuredMemorySummary | null,
     source: string,
+    promptVersions: Set<string>,
   ): Promise<StructuredMemorySummary> {
     const previousSummary = previous
       ? this.formatSummary(
@@ -1044,18 +1229,93 @@ export class ShortTermMemoryService {
           SUMMARY_RECOVERY_PREVIOUS_TOKEN_BUDGET,
         )
       : '无';
-    const raw = await this.llmProvider.invoke([
-      new SystemMessage(
-        `你是产研运上下文压缩器。只输出 JSON，必须符合：
-{"schemaVersion":1,"changes":[{"role":"岗位","module":"模块","before":"修改前，无则写未知","after":"修改后","version":"活动或文档版本，无则写未标注","effectiveFrom":"生效时间，无则写待确认","evidence":"原对话短句"}],"decisions":["已确认决策"],"openIssues":["待确认项"],"sourceDigest":"不超过500字的事实摘要"}。
-将此前摘要与本批对话合并；保留此前仍有效的事实，有明确冲突时以较新的原文为准并记录新值。只保留产品规则、UI 参数、接口字段、测试口径、运营配置及明确决策；禁止补写输入中不存在的事实。具体接口和规则仍需从知识库召回，摘要不是权威事实源。`,
-      ),
+    const summaryMessages = [
+      new SystemMessage(shortTermSummaryRecoverySystemPrompt),
       {
         role: 'user' as const,
         content: `此前摘要：\n${previousSummary}\n\n本批早期对话：\n${source}`,
       },
-    ]);
+    ];
+    await this.assertPromptWithinBudget(summaryMessages, '会话摘要恢复');
+    promptVersions.add(getPromptVersion('memory.summary_recovery'));
+    const raw = await this.llmProvider.invoke(summaryMessages);
     return this.parseStructuredSummary(raw);
+  }
+
+  private async emitSummaryRecoveryAudit(
+    conversationId: string,
+    status: 'completed' | 'failed',
+    promptVersions: Set<string>,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    if (promptVersions.size === 0) return;
+    try {
+      await this.runtimeEvents?.emit({
+        threadId: conversationId,
+        eventType: `memory.summary.recovery.${status}`,
+        actor: 'short_term_memory',
+        payload: {
+          promptVersions: [...promptVersions],
+          ...details,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Short-term memory recovery audit event failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async assertPromptWithinBudget(
+    messages: Array<{ content: unknown }>,
+    operation: string,
+  ): Promise<void> {
+    const promptText = messages
+      .map(({ content }) =>
+        typeof content === 'string' ? content : JSON.stringify(content),
+      )
+      .join('\n');
+    const estimatedInputTokens =
+      (await countTextTokens(promptText)) + messages.length * 4;
+    const maxInputTokens = this.getMaxInputTokens();
+    if (estimatedInputTokens > maxInputTokens) {
+      throw new Error(
+        `${operation}固定指令与原始输入超过模型输入预算：${estimatedInputTokens}/${maxInputTokens} tokens`,
+      );
+    }
+  }
+
+  private getMaxInputTokens(): number {
+    const configuredWindow = Number(
+      this.config?.get<number>('llm.contextWindowTokens'),
+    );
+    const contextWindow =
+      Number.isFinite(configuredWindow) && configuredWindow > 0
+        ? configuredWindow
+        : 32_768;
+    const activeProvider = this.llmProvider.getActiveProviderName();
+    const providers = [
+      activeProvider,
+      this.llmProvider.getRoutePolicy('fast', activeProvider).fallback,
+    ].filter(
+      (provider): provider is NonNullable<typeof provider> => Boolean(provider),
+    );
+    const outputBudget = Math.max(
+      4_096,
+      ...providers.map((provider) => {
+        const configuredOutput = Number(
+          this.config?.get<number>(`llm.${provider}.maxTokens`),
+        );
+        return Math.max(
+          Number.isFinite(configuredOutput) && configuredOutput > 0
+            ? configuredOutput
+            : 4_096,
+          this.llmProvider.getRoutePolicy('fast', provider).maxTokens,
+        );
+      }),
+    );
+    const safetyMargin = Math.max(256, Math.ceil(contextWindow * 0.1));
+    return Math.max(1, contextWindow - outputBudget - safetyMargin);
   }
 
   private *splitRecoveryMessage(content: string): Generator<string> {
@@ -1141,33 +1401,201 @@ export class ShortTermMemoryService {
     }
   }
 
-  private findKeepStart(
-    all: string[],
-    maxMessages: number,
-    tokenBudget: number,
-  ): number {
-    let tokens = 0;
-    let kept = 0;
-    let index = all.length;
-    const recentTokenBudget = Math.max(tokenBudget, 0);
-    while (index > 0 && kept < maxMessages) {
-      const nextTokens = this.estimateStoredTurnTokens([all[index - 1]]);
-      if (tokens + nextTokens > recentTokenBudget) break;
-      index -= 1;
-      kept += 1;
-      tokens += nextTokens;
-    }
-    if (index < all.length) {
-      try {
-        const firstKept = JSON.parse(all[index]) as StoredTurn;
-        if (firstKept.role === 'assistant' && index > 0) {
-          index -= 1;
-        }
-      } catch {
-        // malformed cache entry falls back to the token boundary
+  private selectCompactionMessages(
+    turns: StoredTurn[],
+    maxRetained: number,
+    targetTokens: number,
+  ): {
+    removeIndexes: number[];
+    baseStrategy: CompactionStrategy;
+    strategy: RemovalStrategy;
+    confidence: number;
+    adaptiveComparison?: Record<string, number>;
+  } {
+    const tokens = turns.map(
+      (turn) => this.estimateTokens(`${turn.role}: ${turn.content}`) + 4,
+    );
+    const totalTokens = tokens.reduce((total, value) => total + value, 0);
+    const baseStrategy = this.getBaseCompactionStrategy();
+    let strategy: RemovalStrategy;
+    let confidence = 1;
+    let adaptiveComparison: Record<string, number> | undefined;
+
+    if (baseStrategy === 'hybrid') {
+      const recommendation = this.recommendRemovalStrategy(
+        turns,
+        tokens,
+        totalTokens,
+        targetTokens,
+      );
+      confidence = recommendation.confidence;
+      if (confidence >= COMPACTION_STRATEGY_CONFIDENCE_THRESHOLD) {
+        strategy = recommendation.strategy;
+      } else {
+        const middle = this.runRemovalStrategy(
+          turns,
+          tokens,
+          maxRetained,
+          targetTokens,
+          'middle-removal',
+        );
+        const oldest = this.runRemovalStrategy(
+          turns,
+          tokens,
+          maxRetained,
+          targetTokens,
+          'oldest-removal',
+        );
+        const middleScore = this.removalEfficiencyScore(middle, totalTokens, turns.length);
+        const oldestScore = this.removalEfficiencyScore(oldest, totalTokens, turns.length);
+        strategy = middleScore >= oldestScore ? 'middle-removal' : 'oldest-removal';
+        adaptiveComparison = {
+          middleRemoval: middleScore,
+          oldestRemoval: oldestScore,
+        };
       }
+    } else {
+      strategy = baseStrategy;
     }
-    return index;
+
+    const selected = this.runRemovalStrategy(
+      turns,
+      tokens,
+      maxRetained,
+      targetTokens,
+      strategy,
+    );
+    return {
+      removeIndexes: [...selected.removeIndexes].sort((left, right) => left - right),
+      baseStrategy,
+      strategy,
+      confidence,
+      ...(adaptiveComparison ? { adaptiveComparison } : {}),
+    };
+  }
+
+  private getBaseCompactionStrategy(): CompactionStrategy {
+    const provider = this.llmProvider.getActiveProviderName().toLowerCase();
+    const model = this.config?.get<string>(`llm.${provider}.model`)?.toLowerCase() ?? '';
+    if (provider === 'openai') return /\bo1(?:-|$)/.test(model) ? 'middle-removal' : 'hybrid';
+    if (provider === 'anthropic') return 'oldest-removal';
+    if (provider === 'google' && /1\.5/.test(model)) return 'middle-removal';
+    if (['lmstudio', 'ollama', 'local'].includes(provider)) return 'hybrid';
+    // 参考文档未给 Qwen、DeepSeek、GLM 等模型的映射，沿用项目原有的最旧优先策略。
+    return 'oldest-removal';
+  }
+
+  private recommendRemovalStrategy(
+    turns: StoredTurn[],
+    tokens: number[],
+    totalTokens: number,
+    targetTokens: number,
+  ): { strategy: RemovalStrategy; confidence: number } {
+    const compressionRatio = totalTokens > 0 ? targetTokens / totalTokens : 1;
+    const severity =
+      compressionRatio > 0.8
+        ? 'light'
+        : compressionRatio > 0.6
+          ? 'moderate'
+          : 'heavy';
+    const recentTokens = tokens.slice(-5).reduce((total, value) => total + value, 0);
+    const recentRatio = totalTokens > 0 ? recentTokens / totalTokens : 0;
+    const hasLongMessages = tokens.some((value) => value > 300);
+    const hasSystemMessages = turns.some((turn) => turn.role === 'system');
+
+    if (severity === 'light' && turns.length < 20) {
+      return { strategy: 'middle-removal', confidence: 0.8 };
+    }
+    if (severity === 'heavy' && turns.length > 30) {
+      return { strategy: 'oldest-removal', confidence: 0.9 };
+    }
+    if (recentRatio > 0.4) {
+      return { strategy: 'middle-removal', confidence: 0.7 };
+    }
+    if (hasLongMessages && severity !== 'light') {
+      return { strategy: 'oldest-removal', confidence: 0.6 };
+    }
+    if (hasSystemMessages) {
+      return { strategy: 'middle-removal', confidence: 0.7 };
+    }
+    return { strategy: 'oldest-removal', confidence: 0.5 };
+  }
+
+  private runRemovalStrategy(
+    turns: StoredTurn[],
+    tokens: number[],
+    maxRetained: number,
+    targetTokens: number,
+    strategy: RemovalStrategy,
+  ): { removeIndexes: Set<number>; remainingTokens: number; retainedCount: number } {
+    const removable = turns
+      .map((turn, index) => ({ turn, index }))
+      .filter(({ turn }) => turn.role !== 'system');
+    const priorities = turns.map((turn, index) =>
+      this.messagePriority(turn, index, turns.length, tokens[index]),
+    );
+    const byPriorityThenAge = (left: number, right: number) =>
+      priorities[left] - priorities[right] || left - right;
+    let candidates: number[];
+
+    if (strategy === 'oldest-removal') {
+      candidates = removable.map(({ index }) => index).sort(byPriorityThenAge);
+    } else {
+      const preserveStart = Math.min(2, Math.ceil(turns.length * 0.2));
+      const preserveEnd = Math.min(4, Math.max(2, Math.ceil(turns.length * 0.3)));
+      const middleEnd = Math.max(preserveStart, turns.length - preserveEnd);
+      const middle = removable
+        .map(({ index }) => index)
+        .filter((index) => index >= preserveStart && index < middleEnd)
+        .sort(
+          (left, right) =>
+            priorities[left] - priorities[right] ||
+            Math.abs((left + 0.5) - turns.length / 2) -
+              Math.abs((right + 0.5) - turns.length / 2),
+        );
+      const edges = removable
+        .map(({ index }) => index)
+        .filter((index) => index < preserveStart || index >= middleEnd)
+        .sort(byPriorityThenAge);
+      candidates = [...middle, ...edges];
+    }
+
+    const removeIndexes = new Set<number>();
+    let remainingTokens = tokens.reduce((total, value) => total + value, 0);
+    let retainedCount = turns.length;
+    for (const index of candidates) {
+      if (remainingTokens <= targetTokens && retainedCount <= maxRetained) break;
+      removeIndexes.add(index);
+      remainingTokens -= tokens[index];
+      retainedCount -= 1;
+    }
+    return { removeIndexes, remainingTokens, retainedCount };
+  }
+
+  private messagePriority(
+    turn: StoredTurn,
+    index: number,
+    total: number,
+    tokens: number,
+  ): number {
+    if (turn.role === 'system') return 4;
+    if (index < 2 || index >= total - 2 || tokens > 800) return 3;
+    if (tokens < 20 && !/[?？]/.test(turn.content)) return 0;
+    return 1;
+  }
+
+  private removalEfficiencyScore(
+    result: { remainingTokens: number; retainedCount: number },
+    originalTokens: number,
+    originalCount: number,
+  ): number {
+    const tokenReduction =
+      originalTokens > 0
+        ? (originalTokens - result.remainingTokens) / originalTokens
+        : 0;
+    const messagePreservation =
+      originalCount > 0 ? result.retainedCount / originalCount : 1;
+    return tokenReduction * 0.6 + messagePreservation * 0.4;
   }
 
   private selectRecentTurns(
@@ -1196,21 +1624,65 @@ export class ShortTermMemoryService {
 
   private parseStructuredSummary(raw: string): StructuredMemorySummary {
     const candidate = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
-    return structuredMemorySummarySchema.parse(JSON.parse(candidate));
+    return this.normalizeSummary(
+      structuredMemorySummarySchema.parse(JSON.parse(candidate)),
+    );
   }
 
   private tryParseSummary(raw: string): StructuredMemorySummary | null {
     try {
-      return structuredMemorySummarySchema.parse(JSON.parse(raw));
+      return this.normalizeSummary(
+        structuredMemorySummarySchema.parse(JSON.parse(raw)),
+      );
     } catch {
       return null;
     }
+  }
+
+  private normalizeSummary(
+    summary: StructuredMemorySummary,
+  ): StructuredMemorySummary {
+    const boundedText = (value: string, limit: number) =>
+      value.trim().slice(0, limit);
+    const boundedList = (values: string[]) =>
+      [...new Set(values.map((value) => boundedText(value, SUMMARY_MAX_ITEM_CHARACTERS)).filter(Boolean))]
+        .slice(-SUMMARY_MAX_LIST_ITEMS);
+
+    return {
+      ...summary,
+      currentGoal: boundedText(
+        summary.currentGoal,
+        SUMMARY_MAX_GOAL_CHARACTERS,
+      ),
+      constraints: boundedList(summary.constraints),
+      nextActions: boundedList(summary.nextActions),
+      changes: summary.changes
+        .slice(-8)
+        .map((change) => ({
+          role: boundedText(change.role, 40),
+          module: boundedText(change.module, 60),
+          before: boundedText(change.before, 120),
+          after: boundedText(change.after, 120),
+          version: boundedText(change.version, 40),
+          effectiveFrom: boundedText(change.effectiveFrom, 40),
+          evidence: boundedText(change.evidence, 120),
+        })),
+      decisions: boundedList(summary.decisions),
+      openIssues: boundedList(summary.openIssues),
+      sourceDigest: boundedText(summary.sourceDigest, SUMMARY_MAX_DIGEST_CHARACTERS),
+      ...(summary.compactedMessageIds
+        ? { compactedMessageIds: [...new Set(summary.compactedMessageIds)] }
+        : {}),
+    };
   }
 
   private formatSummary(raw: string, tokenBudget = 1_500): string {
     const summary = this.tryParseSummary(raw);
     if (!summary) return this.truncateToTokenBudget(raw, tokenBudget);
     const candidates = [
+      summary.currentGoal ? `- 当前目标：${summary.currentGoal}` : '',
+      ...summary.constraints.map((item) => `- 仍有效的约束：${item}`),
+      ...summary.nextActions.map((item) => `- 下一步：${item}`),
       ...summary.changes.map(
         (item) =>
           `- [${item.role}/${item.module}/${item.version}] ${item.before} → ${item.after}；生效：${item.effectiveFrom}；证据：${item.evidence}`,

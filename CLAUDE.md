@@ -14,6 +14,7 @@
 - `docs/architecture/ARCHITECTURE.md`：系统模块、数据关系和核心链路。
 - `docs/OPERATIONS.md`：运行、安全、集成和交付边界。
 - `docs/cli-docs/README.md`：RAG CLI 与主项目的职责边界及包内文档入口。
+- `plan/README.md`：未来功能计划目录约定与计划入口；实际进度仍以 `ROADMAP.md` 为准。
 - `ROADMAP.md`：真实进度源。
 - `CLAUDE.md`：项目规则。
 - `docs/README.md`：分层阅读入口。
@@ -59,6 +60,7 @@ RAG/
 ├── packages/
 │   ├── rag-cli/         # RAG 命令行工具
 │   └── rag-mcp-server/  # MCP 服务
+├── plan/                # 未来功能计划及目录约定
 ├── infra/
 │   ├── docker/          # Docker 编排
 │   └── monitoring/      # Prometheus / Grafana

@@ -146,12 +146,14 @@ export class ChatController {
       return () => {
         abortController.abort();
         if (!settled && activeThreadId && this.agentRuns) {
-          void this.agentRuns.cancelActiveForThread(
-            activeThreadId,
-            user.userId,
-            '客户端断开流式连接',
-            user.tenantId,
-          );
+          void this.agentRuns
+            .cancelActiveForThread(
+              activeThreadId,
+              user.userId,
+              '客户端断开流式连接',
+              user.tenantId,
+            )
+            .catch(() => undefined);
         }
       };
     });

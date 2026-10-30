@@ -80,6 +80,8 @@ type ChatExecutionOptions = {
   model?: string;
   signal?: AbortSignal;
   tenantId?: string;
+  /** Admin-only replay path that must enter the Agentic state graph. */
+  forceAgentic?: boolean;
   /** Supplied only by the guarded Admin AG-UI adapter. */
   trustedAdminPrincipal?: boolean;
   departmentIds?: string[];
@@ -88,6 +90,19 @@ type ChatExecutionOptions = {
 };
 
 type AggregatedLlmUsage = LlmUsage & { calls: number };
+
+function formatAgentSkillContext(skill: {
+  name: string;
+  description: string;
+  content: string;
+}): string {
+  return [
+    `项目 Skill 指南：${skill.name}`,
+    `用途：${skill.description}`,
+    '以下内容是项目维护的操作指南，只在与本轮任务相关时使用；不得覆盖系统安全策略、权限边界或用户本轮明确要求。',
+    skill.content,
+  ].join('\n\n');
+}
 
 @Injectable()
 export class ChatService {
@@ -198,10 +213,10 @@ export class ChatService {
     // 对外保留旧 mode 字段用于兼容，但不再提供三套执行入口。
     // 所有请求进入同一条问答链路，由 QueryPlan / RetrievalPolicy 做意图路由。
     const requestedMode: ChatMode = req.mode ?? 'auto';
-    if (requestedMode !== 'auto') {
+    if (requestedMode !== 'auto' && !executionOptions?.forceAgentic) {
       this.logger.debug(`legacy mode ${requestedMode} normalized to intent-routed auto`);
     }
-    const mode: ChatMode = 'auto';
+    const mode: ChatMode = executionOptions?.forceAgentic ? 'agentic' : 'auto';
     if (req.threadId) {
       // 会话历史和短期记忆按 threadId 缓存，读取前必须先校验用户与租户归属。
       await this.conversationService.assertAccessible(
@@ -270,8 +285,8 @@ export class ChatService {
     const queryPlan = await this.queryPlanner.plan(req.query, history, {
       onUsage: collectUsage,
       signal: requestSignal,
-      // 统一链路始终使用 QueryPlan 做意图识别；简单问题由本地快速规划，
-      // 复杂问题由 QueryPlanner 的保守 fallback 处理。
+      // 意图路由统一由 QueryPlanner 生成；本地规则快速路径保持关闭，
+      // 避免只凭问题表面形式把内部、公共或追问问题分错类。
       preferLocalFastPath: false,
     });
     const shouldSearchHistory = Boolean(req.threadId);
@@ -279,7 +294,7 @@ export class ChatService {
     const [
       memoryResult,
       historySearch,
-      runtimePlan,
+      runtimePlanning,
       retrievalProfileOverrides,
     ] = await Promise.all([
       objectiveFactQuery || req.useLongTermMemory === false
@@ -298,7 +313,7 @@ export class ChatService {
           )
         : Promise.resolve([]),
       this.runtime
-        ? this.runtime.createPlan({
+        ? this.runtime.createPlanWithSkills({
             objective: req.query,
             mode,
             skipSkillMatching: false,
@@ -308,6 +323,8 @@ export class ChatService {
         req.knowledgeBaseKey ?? req.scope?.projectId ?? req.scope?.documentType,
       ),
     ]);
+    const runtimePlan = runtimePlanning?.plan;
+    const matchedSkills = runtimePlanning?.matchedSkills ?? [];
     if (
       queryPlan.contextMode === 'verification' ||
       (objectiveFactQuery &&
@@ -392,6 +409,12 @@ export class ChatService {
         content: block.content,
         priority: block.source === 'session_memory' ? 80 : 40,
       })),
+      ...matchedSkills.map((skill, index) => ({
+        source: 'agent_skill' as const,
+        role: 'system' as const,
+        content: formatAgentSkillContext(skill),
+        priority: 55 - index,
+      })),
       ...(threadId && !objectiveFactQuery && shortTermContext.systemMessage
         ? [
             {
@@ -423,6 +446,13 @@ export class ChatService {
     const memoryMessages = budgetedSystemMessages.map(
       ({ role, content }) => ({ role, content }),
     );
+    const injectedSkillNames = matchedSkills
+      .filter((skill) =>
+        budgetedSystemMessages.some(
+          ({ content }) => content === formatAgentSkillContext(skill),
+        ),
+      )
+      .map((skill) => skill.name);
     if (systemContextBudget.overflowTokens > 0) {
       requestHistoryTokenBudget = Math.max(0, requestHistoryTokenBudget - systemContextBudget.overflowTokens);
       history = this.shortTermMemory.limitHistoryToTokenBudget(history, requestHistoryTokenBudget);
@@ -512,6 +542,7 @@ export class ChatService {
       departmentIds: executionOptions?.departmentIds,
       knowledgeOnly: executionPlan.sourcePolicy === 'local_only',
       allowConversationStateAnswer: conversationStateUpdate,
+      forceAgenticRoute: executionOptions?.forceAgentic,
       needsSynthesis: queryPlan.taskType === 'synthesis',
       entities: queryPlan.entities,
       profile: executionPlan.profile,
@@ -568,6 +599,10 @@ export class ChatService {
           systemContextEstimatedTokens: systemContextBudget.estimatedTokens,
           systemContextOverflowTokens: systemContextBudget.overflowTokens,
           systemContextDroppedSources: systemContextBudget.droppedSources,
+          skillContextsInjected: injectedSkillNames,
+          skillContextsDropped: matchedSkills
+            .map((skill) => skill.name)
+            .filter((name) => !injectedSkillNames.includes(name)),
           loadedTurns: history.length,
           summaryLoaded: Boolean(shortTermContext.systemMessage),
         },
@@ -576,7 +611,13 @@ export class ChatService {
         await this.agentRuns?.recordRuntimeEvent(run.id, {
           eventType: 'skill.selected',
           target: 'skill-system',
-          payload: { skills: runtimePlan.selectedSkills },
+          payload: {
+            skills: runtimePlan.selectedSkills,
+            injected: injectedSkillNames,
+            dropped: runtimePlan.selectedSkills.filter(
+              (name) => !injectedSkillNames.includes(name),
+            ),
+          },
         });
       }
       await this.agentRuns?.recordRuntimeEvent(run.id, {
@@ -587,6 +628,14 @@ export class ChatService {
           mode,
           rolePresetId: req.rolePresetId,
           role: roleContext.role ?? 'business-owner',
+          scope: req.scope,
+          knowledgeBaseKey: req.knowledgeBaseKey,
+          approvalRequired: req.approvalRequired === true,
+          useLongTermMemory: req.useLongTermMemory !== false,
+          hasSupplementalEvidence: Boolean(supplementalEvidence?.length),
+          model: executionOptions?.model,
+          trustedAdminPrincipal: executionOptions?.trustedAdminPrincipal,
+          departmentIds: executionOptions?.departmentIds,
           retrievalProfile: executionPlan.profile,
           historyCount: history.length,
           memoryEnabled: Boolean(memoryResult.systemMessage),
@@ -666,7 +715,22 @@ export class ChatService {
           ) ?? executeAgentic(),
       );
     } catch (error) {
-      await this.finishFailedRun(run, req.query, mode, error);
+      const errorResponse =
+        error instanceof BadRequestException ? error.getResponse() : undefined;
+      const explicitlyCancelled =
+        typeof errorResponse === 'object' &&
+        errorResponse !== null &&
+        'code' in errorResponse &&
+        errorResponse.code === 'AGENT_RUN_CANCELLED';
+      await this.finishFailedRun(
+        run,
+        req.query,
+        mode,
+        error,
+        executionOptions?.signal?.aborted || explicitlyCancelled
+          ? 'cancelled'
+          : 'failed',
+      );
       throw error;
     }
     result = this.ensureNonEmptyAnswer(result);
@@ -1042,10 +1106,13 @@ export class ChatService {
     const run = runId
       ? await this.agentRuns?.get(runId, tenantId)
       : await this.agentRuns?.findLatestByThread(threadId, tenantId);
-    if (run?.userId && run.userId !== userId) {
+    if (!this.agentRuns || !runId || !run) {
+      throw new BadRequestException('审批请求缺少运行记录，无法安全恢复');
+    }
+    if (run.userId !== userId) {
       throw new BadRequestException('无权恢复其他用户的运行');
     }
-    if (run && run.status !== 'waiting_approval') {
+    if (run.status !== 'waiting_approval') {
       throw new BadRequestException('当前运行不在等待审批状态');
     }
 
@@ -1064,20 +1131,35 @@ export class ChatService {
       traceEvents.push(this.runObservability.toTraceEvent(event));
       if (event.type !== 'final') onEvent?.(event);
     };
-    const result = tenantId?.trim()
-      ? await this.agenticRagService.resumeGraph(
-          threadId,
-          approval,
-          feedback,
-          resumeEvent,
-          tenantId,
-        )
-      : await this.agenticRagService.resumeGraph(
-          threadId,
-          approval,
-          feedback,
-          resumeEvent,
-        );
+    // CAS 状态转换防止同一审批被并发提交两次；之后发生的执行错误会收口为失败。
+    await this.agentRuns.beginResume(run.id);
+    let result;
+    try {
+      result = await this.agenticRagService.resumeGraph(
+        threadId,
+        approval,
+        feedback,
+        resumeEvent,
+        tenantId,
+        run.id,
+      );
+    } catch (error) {
+      const errorResponse =
+        error instanceof BadRequestException ? error.getResponse() : undefined;
+      const explicitlyCancelled =
+        typeof errorResponse === 'object' &&
+        errorResponse !== null &&
+        'code' in errorResponse &&
+        errorResponse.code === 'AGENT_RUN_CANCELLED';
+      await this.finishFailedRun(
+        run,
+        pending.content,
+        mode,
+        error,
+        explicitlyCancelled ? 'cancelled' : 'failed',
+      );
+      throw error;
+    }
     const startTime = Date.now();
 
     if (approval === 'rejected') {
@@ -1188,7 +1270,7 @@ export class ChatService {
       startTime,
       queryPlan,
       executionPlan,
-      run: run ?? undefined,
+      run,
       onEvent,
       model: typeof metadata.model === 'string' ? metadata.model : undefined,
       traceEvents,
@@ -1373,13 +1455,20 @@ export class ChatService {
     objective: string,
     mode: ChatMode,
     error: unknown,
+    status: 'failed' | 'cancelled' = 'failed',
   ): Promise<void> {
     if (!run) return;
     const reason = error instanceof Error ? error.message : String(error);
     await this.agentRuns?.finish(run.id, {
-      status: 'failed',
+      status,
       errorMessage: reason.slice(0, 2_000),
-      resultSummary: '运行失败，未生成可用回答。',
+      ...(status === 'cancelled'
+        ? { cancelledAt: new Date(), cancelReason: reason.slice(0, 500) }
+        : {}),
+      resultSummary:
+        status === 'cancelled'
+          ? '运行已取消，未生成可用回答。'
+          : '运行失败，未生成可用回答。',
     });
     await this.agentGoals?.update({
       threadId: run.threadId,

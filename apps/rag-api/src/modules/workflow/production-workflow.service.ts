@@ -39,13 +39,20 @@ import { AgentCollaborationService } from '../agent-collaboration/agent-collabor
 import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
-import { ToolExecutionService } from '../../tools/tool-execution.service';
+import {
+  executeWithToolTimeout,
+  getRegisteredToolTimeoutMs,
+  ToolExecutionService,
+} from '../../tools/tool-execution.service';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
 import type { ProductionWorkflowJob } from './production-workflow-queue.service';
+import { buildProductionRoleSystemPrompt } from './production-role.prompts';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import { countTextTokens } from '../document/chunking.util';
 
 const roleSchema = z.object({
   summary: z.string().min(1).max(4_000),
@@ -98,6 +105,20 @@ const roleSchema = z.object({
     .optional(),
 });
 
+const WORKFLOW_INPUT_SAFETY_RATIO = 0.1;
+const WORKFLOW_MIN_INPUT_SAFETY_TOKENS = 256;
+const WORKFLOW_EVIDENCE_EXCERPT_CHAR_BUDGET = 1_200;
+
+interface ProductionPreviousRoleContext {
+  role: ProductionRole;
+  summary: string;
+  deliverables: Array<{ type: string; title: string; markdownExcerpt: string }>;
+  claims: ProductionClaim[];
+  issues: string[];
+  downstreamRisks: string[];
+  riskLevel: ProductionRiskLevel;
+}
+
 const projectFileSchema = z.object({
   path: z
     .string()
@@ -115,16 +136,6 @@ const projectSchema = z.object({
   notes: z.array(z.string().max(500)).max(12),
 });
 
-const ROLE_GUIDANCE: Record<ProductionRole, string> = {
-  product:
-    '校验目标、范围、规则、边界条件、地区版本和验收口径，输出 PRD 审查结论。',
-  design: '校验页面状态、交互闭环、尺寸规范、多语言适配和设计交付物。',
-  frontend: '校验组件拆分、接口依赖、状态管理、埋点、性能和异常降级。',
-  backend: '校验领域模型、接口契约、幂等、并发、资格校验、奖励发放和可观测性。',
-  qa: '校验测试范围、前置条件、输入输出、边界、兼容性、回归和上线门禁。',
-  operations: '校验发布计划、配置、灰度、监控、应急预案、客服口径和复盘指标。',
-};
-
 const RISK_RANK: Record<ProductionRiskLevel, number> = {
   low: 1,
   medium: 2,
@@ -133,6 +144,30 @@ const RISK_RANK: Record<ProductionRiskLevel, number> = {
 
 const ROLE_LLM_TIMEOUT_MS = 75_000;
 const ROLE_LLM_RETRY_BACKOFF_MS = 1_000;
+const WORKFLOW_CANCEL_MARKER_TTL_SECONDS = 24 * 60 * 60;
+
+interface WorkflowApprovalCheckpointIdentity {
+  runId: string;
+  batchIndex: number;
+  stepCount: number;
+  revisionNumber: number;
+  currentBatch: ProductionRole[];
+  pendingApprovalRoles: ProductionRole[];
+}
+
+type ResumeWorkflowJobWithCheckpoint = Extract<
+  ProductionWorkflowJob,
+  { operation: 'resume' }
+> & {
+  approvalCheckpointIdentity: WorkflowApprovalCheckpointIdentity;
+};
+
+class ProductionWorkflowCancelledError extends Error {
+  constructor(message = '用户取消工作流') {
+    super(message);
+    this.name = 'ProductionWorkflowCancelledError';
+  }
+}
 
 @Injectable()
 export class ProductionWorkflowService implements OnModuleInit {
@@ -144,7 +179,9 @@ export class ProductionWorkflowService implements OnModuleInit {
   private readonly checkpointer: RedisCheckpointer;
   private readonly app: ReturnType<ProductionWorkflowService['buildGraph']>;
   private readonly activeRuns = new Map<string, Promise<void>>();
+  private readonly cancellationControllers = new Map<string, AbortController>();
   private readonly lostLeases = new Set<string>();
+  private readonly rejectionOperations = new Set<string>();
   private readonly pendingStates = new Map<
     string,
     ProductionWorkflowStateType
@@ -206,9 +243,28 @@ export class ProductionWorkflowService implements OnModuleInit {
             job.tenantId,
           );
         } else if (job.operation === 'resume') {
-          await this.resume(job.threadId, job.dto, job.userId, job.tenantId);
+          const approvalCheckpointIdentity = (
+            job as typeof job & {
+              approvalCheckpointIdentity?: WorkflowApprovalCheckpointIdentity;
+            }
+          ).approvalCheckpointIdentity;
+          await this.resume(
+            job.threadId,
+            job.dto,
+            job.userId,
+            job.tenantId,
+            true,
+            approvalCheckpointIdentity,
+            attempt.attempt,
+          );
         } else {
-          await this.revise(job.threadId, job.dto, job.userId, job.tenantId);
+          await this.revise(
+            job.threadId,
+            job.dto,
+            job.userId,
+            job.tenantId,
+            true,
+          );
         }
       } catch (error) {
         if (attempt.finalAttempt) {
@@ -265,6 +321,13 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (!state.selectedRoles.includes(role)) {
       throw new Error(`task role ${task.role} is not part of the workflow`);
     }
+    if (state.status === 'cancelled') {
+      await this.tasks?.updateForRole(task.threadId, role, {
+        status: 'cancelled',
+        errorMessage: state.error || '用户取消工作流',
+      });
+      return;
+    }
     await this.app.updateState(this.config(task.threadId), {
       status: 'running',
       currentBatch: [role],
@@ -283,7 +346,12 @@ export class ProductionWorkflowService implements OnModuleInit {
     await this.emitWorkflowState(settled);
     await this.saveWorkflowIndex(result);
     await this.tasks?.updateForRole(task.threadId, role, {
-      status: settled.status === 'completed' ? 'completed' : 'failed',
+      status:
+        settled.status === 'completed'
+          ? 'completed'
+          : settled.status === 'cancelled'
+            ? 'cancelled'
+            : 'failed',
       summary: settled.results[role]?.summary ?? settled.error,
       errorMessage: settled.status === 'completed' ? undefined : settled.error,
       outputArtifactId: settled.results[role]?.generatedArtifact?.id,
@@ -347,8 +415,11 @@ export class ProductionWorkflowService implements OnModuleInit {
       },
     );
     await this.initializeTasks(initialState);
-    const state = await this.app.invoke(initialState, this.config(threadId));
-    const settled = await this.runUntilSettled(threadId, state);
+    const settled = await this.runUntilSettled(
+      threadId,
+      initialState,
+      initialState,
+    );
     await this.traceLangfuse(settled);
     const result = this.view(threadId, settled, userId);
     await this.emitWorkflowState(settled);
@@ -413,14 +484,95 @@ export class ProductionWorkflowService implements OnModuleInit {
     dto: ResumeProductionWorkflowDto,
     userId: string,
     tenantId?: string,
+    allowCheckpointRecovery = false,
+    approvalCheckpointIdentity?: WorkflowApprovalCheckpointIdentity,
+    queueAttempt = 1,
   ) {
     const current = await this.getOwnedState(threadId, userId, tenantId);
     await this.ensureRun(current);
+    if (current.approval === 'rejected' && dto.approval !== 'rejected') {
+      throw new Error('a rejected approval is awaiting persistence');
+    }
+    if (dto.approval === 'rejected' && current.status === 'revision_required') {
+      return this.rejectForRevision(threadId, current, dto, userId);
+    }
+    if (allowCheckpointRecovery && dto.approval === 'approved') {
+      if (!approvalCheckpointIdentity && queueAttempt > 1) {
+        throw new Error(
+          '审批重试任务缺少原始检查点身份，拒绝重新应用审批。',
+        );
+      }
+      if (
+        approvalCheckpointIdentity &&
+        queueAttempt > 1 &&
+        this.approvalCheckpointIsRunningInPlace(
+          current,
+          approvalCheckpointIdentity,
+        )
+      ) {
+        // Approval was consumed, but its batch has not advanced yet. Resume
+        // the existing running checkpoint without invoking the approval again.
+        const settled = await this.runUntilSettled(threadId, current);
+        return this.finalizeApprovedCheckpoint(
+          threadId,
+          settled,
+          dto,
+          userId,
+          approvalCheckpointIdentity,
+          true,
+        );
+      }
+      if (
+        approvalCheckpointIdentity &&
+        this.approvalCheckpointHasAdvanced(current, approvalCheckpointIdentity)
+      ) {
+        // The original approval already advanced the workflow. If it reached a
+        // later pending_approval, only finish the old job's bookkeeping; never
+        // apply its approval to the newer batch.
+        const settled =
+          current.status === 'running' &&
+          current.revisionNumber === approvalCheckpointIdentity.revisionNumber
+            ? await this.runUntilSettled(threadId, current)
+            : current;
+        return this.finalizeApprovedCheckpoint(
+          threadId,
+          settled,
+          dto,
+          userId,
+          approvalCheckpointIdentity,
+          true,
+        );
+      }
+      if (
+        approvalCheckpointIdentity &&
+        current.status === 'pending_approval' &&
+        !this.matchesApprovalCheckpoint(current, approvalCheckpointIdentity)
+      ) {
+        throw new Error(
+          '审批任务与当前待审批批次不匹配，拒绝应用旧审批。',
+        );
+      }
+    }
     if (current.status !== 'pending_approval') {
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
     if (dto.approval === 'rejected') {
+      if (
+        approvalCheckpointIdentity &&
+        !this.matchesApprovalCheckpoint(current, approvalCheckpointIdentity)
+      ) {
+        throw new Error('驳回请求与当前待审批批次不匹配。');
+      }
       return this.rejectForRevision(threadId, current, dto, userId);
+    }
+    if (
+      approvalCheckpointIdentity &&
+      !this.matchesApprovalCheckpoint(current, approvalCheckpointIdentity)
+    ) {
+      throw new Error('审批请求与当前待审批批次不匹配。');
+    }
+    if (allowCheckpointRecovery && queueAttempt > 1 && !approvalCheckpointIdentity) {
+      throw new Error('审批重试任务缺少原始检查点身份，拒绝应用审批。');
     }
     const state = await this.app.invoke(
       {
@@ -431,20 +583,14 @@ export class ProductionWorkflowService implements OnModuleInit {
       this.config(threadId),
     );
     const settled = await this.runUntilSettled(threadId, state);
-    await this.traceLangfuse(settled);
-    const result = this.view(threadId, settled, userId);
-    await this.emitRuntimeEvent(
+    return this.finalizeApprovedCheckpoint(
+      threadId,
       settled,
-      `approval.${dto.approval}`,
-      'human_reviewer',
-      {
-        feedback: dto.feedback?.trim() ?? '',
-        rerunRoles: dto.rerunRoles ?? [],
-      },
+      dto,
+      userId,
+      approvalCheckpointIdentity,
+      false,
     );
-    await this.emitWorkflowState(settled);
-    await this.saveWorkflowIndex(result);
-    return result;
   }
 
   async resumeAsync(
@@ -456,6 +602,9 @@ export class ProductionWorkflowService implements OnModuleInit {
     const current = await this.getOwnedState(threadId, userId, tenantId);
     await this.ensureRun(current);
     if (current.status !== 'pending_approval') {
+      if (dto.approval === 'rejected' && current.status === 'revision_required') {
+        return this.rejectForRevision(threadId, current, dto, userId);
+      }
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
     if (dto.approval === 'rejected') {
@@ -472,7 +621,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     await this.saveWorkflowIndexBestEffort(
       this.view(threadId, pending, userId),
     );
-    const queued = await this.enqueueWorkflowJob({
+    const queuedJob: ResumeWorkflowJobWithCheckpoint = {
       id: this.workflowJobId(
         'resume',
         threadId,
@@ -483,13 +632,109 @@ export class ProductionWorkflowService implements OnModuleInit {
       userId,
       tenantId,
       dto,
-    });
+      approvalCheckpointIdentity: this.captureApprovalCheckpointIdentity(current),
+    };
+    const queued = await this.enqueueWorkflowJob(queuedJob);
     if (!queued && !this.workflowQueue?.isRequired?.()) {
       this.schedule(threadId, userId, () =>
         this.resume(threadId, dto, userId, tenantId),
       );
     }
     return this.view(threadId, pending, userId);
+  }
+
+  private captureApprovalCheckpointIdentity(
+    state: ProductionWorkflowStateType,
+  ): WorkflowApprovalCheckpointIdentity {
+    return {
+      runId: state.runId,
+      batchIndex: state.batchIndex,
+      stepCount: state.stepCount,
+      revisionNumber: state.revisionNumber ?? 1,
+      currentBatch: [...state.currentBatch],
+      pendingApprovalRoles: [...state.pendingApprovalRoles],
+    };
+  }
+
+  private matchesApprovalCheckpoint(
+    state: ProductionWorkflowStateType,
+    identity: WorkflowApprovalCheckpointIdentity,
+  ): boolean {
+    return (
+      state.runId === identity.runId &&
+      state.batchIndex === identity.batchIndex &&
+      state.stepCount === identity.stepCount &&
+      (state.revisionNumber ?? 1) === identity.revisionNumber &&
+      this.sameRoles(state.currentBatch, identity.currentBatch) &&
+      this.sameRoles(
+        state.pendingApprovalRoles,
+        identity.pendingApprovalRoles,
+      )
+    );
+  }
+
+  private approvalCheckpointHasAdvanced(
+    state: ProductionWorkflowStateType,
+    identity: WorkflowApprovalCheckpointIdentity,
+  ): boolean {
+    if (
+      state.runId !== identity.runId ||
+      !identity.currentBatch.every((role) => state.completedRoles.includes(role))
+    ) {
+      return false;
+    }
+    if ((state.revisionNumber ?? 1) > identity.revisionNumber) return true;
+    return (
+      (state.revisionNumber ?? 1) === identity.revisionNumber &&
+      state.batchIndex > identity.batchIndex &&
+      state.stepCount > identity.stepCount
+    );
+  }
+
+  private approvalCheckpointIsRunningInPlace(
+    state: ProductionWorkflowStateType,
+    identity: WorkflowApprovalCheckpointIdentity,
+  ): boolean {
+    return (
+      state.status === 'running' &&
+      state.approval === null &&
+      state.runId === identity.runId &&
+      (state.revisionNumber ?? 1) === identity.revisionNumber &&
+      state.batchIndex === identity.batchIndex &&
+      state.stepCount > identity.stepCount &&
+      this.sameRoles(state.currentBatch, identity.currentBatch) &&
+      state.pendingApprovalRoles.length === 0 &&
+      state.rerunRoles.length === 0 &&
+      identity.currentBatch.some((role) => !state.completedRoles.includes(role))
+    );
+  }
+
+  private sameRoles(left: ProductionRole[], right: ProductionRole[]): boolean {
+    return (
+      left.length === right.length &&
+      left.every((role, index) => role === right[index])
+    );
+  }
+
+  private async finalizeApprovedCheckpoint(
+    threadId: string,
+    state: ProductionWorkflowStateType,
+    dto: ResumeProductionWorkflowDto,
+    userId: string,
+    identity?: WorkflowApprovalCheckpointIdentity,
+    resumedFromCheckpoint = false,
+  ) {
+    await this.traceLangfuse(state);
+    const result = this.view(threadId, state, userId);
+    await this.emitRuntimeEvent(state, 'approval.approved', 'human_reviewer', {
+      feedback: dto.feedback?.trim() ?? '',
+      rerunRoles: dto.rerunRoles ?? [],
+      ...(identity ? { approvedBatchIndex: identity.batchIndex } : {}),
+      ...(resumedFromCheckpoint ? { resumedFromCheckpoint: true } : {}),
+    });
+    await this.emitWorkflowState(state);
+    await this.saveWorkflowIndex(result);
+    return result;
   }
 
   /**
@@ -501,42 +746,56 @@ export class ProductionWorkflowService implements OnModuleInit {
     dto: ReviseProductionWorkflowDto,
     userId: string,
     tenantId?: string,
+    allowCheckpointRecovery = false,
   ) {
     const current = await this.getOwnedState(threadId, userId, tenantId);
-    if (current.status !== 'revision_required') {
+    const recoveringRunningRevision =
+      allowCheckpointRecovery &&
+      current.status === 'running' &&
+      current.revisionNumber > 1 &&
+      current.rerunRoles.length > 0 &&
+      current.supplementalMaterials ===
+        (dto.supplementalMaterials?.trim() ?? current.supplementalMaterials);
+    if (
+      current.status !== 'revision_required' &&
+      !recoveringRunningRevision
+    ) {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
-    const allowed = current.rerunRoles.length
-      ? current.rerunRoles
-      : current.currentBatch;
-    const requested = dto.rerunRoles?.length
-      ? dto.rerunRoles.filter((role) => allowed.includes(role))
-      : allowed;
-    if (!requested.length)
-      throw new Error('at least one rejected role must be revised');
-    const supplementalMaterials =
-      dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
-    const revisionHistory = this.withRevisionPackage(
-      current.revisionHistory ?? [],
-      supplementalMaterials,
-      requested,
-    );
-    await this.app.updateState(this.config(threadId), {
-      status: 'running',
-      rerunRoles: requested,
-      pendingApprovalRoles: [],
-      approval: null,
-      supplementalMaterials,
-      revisionHistory,
-      error: '',
-    });
-    const state = await this.getOwnedState(threadId, userId, tenantId);
-    await this.emitRuntimeEvent(state, 'revision.started', 'human_reviewer', {
-      revision: state.revisionNumber ?? 1,
-      rerunRoles: requested,
-      feedback: state.feedback,
-      supplementalMaterialsLength: supplementalMaterials.length,
-    });
+    let state = current;
+    if (!recoveringRunningRevision) {
+      const allowed = current.rerunRoles.length
+        ? current.rerunRoles
+        : current.currentBatch;
+      const requested = dto.rerunRoles?.length
+        ? dto.rerunRoles.filter((role) => allowed.includes(role))
+        : allowed;
+      if (!requested.length)
+        throw new Error('at least one rejected role must be revised');
+      const supplementalMaterials =
+        dto.supplementalMaterials?.trim() ?? current.supplementalMaterials ?? '';
+      const revisionHistory = this.withRevisionPackage(
+        current.revisionHistory ?? [],
+        supplementalMaterials,
+        requested,
+      );
+      await this.app.updateState(this.config(threadId), {
+        status: 'running',
+        rerunRoles: requested,
+        pendingApprovalRoles: [],
+        approval: null,
+        supplementalMaterials,
+        revisionHistory,
+        error: '',
+      });
+      state = await this.getOwnedState(threadId, userId, tenantId);
+      await this.emitRuntimeEvent(state, 'revision.started', 'human_reviewer', {
+        revision: state.revisionNumber ?? 1,
+        rerunRoles: requested,
+        feedback: state.feedback,
+        supplementalMaterialsLength: supplementalMaterials.length,
+      });
+    }
     const settled = await this.runUntilSettled(threadId, state);
     await this.traceLangfuse(settled);
     const result = this.view(threadId, settled, userId);
@@ -594,6 +853,63 @@ export class ProductionWorkflowService implements OnModuleInit {
       );
     }
     return this.view(threadId, pending, userId);
+  }
+
+  async cancel(
+    threadId: string,
+    userId: string,
+    tenantId?: string,
+    reason = '用户取消工作流',
+  ) {
+    let state: ProductionWorkflowStateType;
+    try {
+      state = await this.getOwnedState(threadId, userId, tenantId);
+    } catch (error) {
+      const pending = this.pendingStates.get(threadId);
+      if (
+        !pending ||
+        pending.userId !== userId ||
+        !this.tenantMatches(pending.tenantId, tenantId)
+      ) {
+        throw error;
+      }
+      state = pending;
+    }
+    if (['completed', 'failed', 'cancelled'].includes(state.status)) {
+      return this.view(threadId, state, userId);
+    }
+
+    const cancelReason = reason.trim().slice(0, 500) || '用户取消工作流';
+    const markerKey = this.workflowCancelKey(threadId);
+    if (this.redisProvider.isEnabled()) {
+      await this.redisProvider.setRequiredOrThrow(
+        markerKey,
+        `cancelled:${cancelReason}`,
+        WORKFLOW_CANCEL_MARKER_TTL_SECONDS,
+      );
+    } else if (
+      this.configService?.get<boolean>('core.requireDependencies') === true ||
+      this.configService?.get<string>('nodeEnv') === 'production'
+    ) {
+      throw new Error('取消标记无法持久化，工作流状态未更改。');
+    } else if (
+      state.status === 'running' &&
+      !this.cancellationControllers.has(threadId)
+    ) {
+      throw new Error('工作流正在其他执行器中运行，Redis 不可用时无法安全取消。');
+    }
+
+    this.cancellationControllers
+      .get(threadId)
+      ?.abort(new ProductionWorkflowCancelledError(cancelReason));
+
+    if (state.status !== 'running') {
+      state = await this.persistWorkflowCancelled(threadId, state, cancelReason);
+    }
+    return {
+      ...this.view(threadId, state, userId),
+      cancellationRequested: state.status !== 'cancelled',
+    };
   }
 
   async status(threadId: string, userId: string, tenantId?: string) {
@@ -799,14 +1115,16 @@ export class ProductionWorkflowService implements OnModuleInit {
         content: `活动：${context.projectId}\n需求背景：${context.brief.slice(0, 8_000)}\n\n已审批岗位交付物和低代码 Schema：\n${handoff.slice(0, 80_000)}\n\n现在只输出 JSON。必须优先参考 pageSchema、apiSchema、trackingSchema、validationSchema 和 acceptanceSchema 生成代码；必须生成 package.json、index.html、src/main.tsx 或 src/main.jsx、主要页面和样式文件。`,
       },
     ];
-    const generate = async () => {
+    const generate = async (signal?: AbortSignal) => {
       let lastError: unknown;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          const output = await this.llmProvider
-            .getModel()
-            .withStructuredOutput(projectSchema, { method: 'jsonMode' })
-            .invoke(messages);
+          const output = await this.llmProvider.runWithSignal(signal, () =>
+            this.llmProvider
+              .getModel()
+              .withStructuredOutput(projectSchema, { method: 'jsonMode' })
+              .invoke(messages),
+          );
           const normalized = {
             ...output,
             notes: Array.isArray(output.notes)
@@ -847,9 +1165,17 @@ export class ProductionWorkflowService implements OnModuleInit {
           },
           approvalPolicy: 'auto',
           approvalGranted: true,
-          execute: generate,
+          execute: (signal) => generate(signal),
         })
-      : { status: 'success' as const, output: await generate(), durationMs: 0 };
+      : {
+          status: 'success' as const,
+          output: await executeWithToolTimeout(
+            'artifact_generate',
+            getRegisteredToolTimeoutMs('artifact_generate'),
+            (signal) => generate(signal),
+          ),
+          durationMs: 0,
+        };
     if (!execution.output)
       throw new Error(
         ('error' in execution ? execution.error : undefined) ??
@@ -1095,6 +1421,7 @@ export class ProductionWorkflowService implements OnModuleInit {
     if (
       status === 'completed' ||
       status === 'failed' ||
+      status === 'cancelled' ||
       status === 'pending_approval' ||
       status === 'revision_required'
     ) {
@@ -1107,8 +1434,16 @@ export class ProductionWorkflowService implements OnModuleInit {
         requiresApproval:
           status === 'pending_approval' || status === 'revision_required',
         errorMessage:
-          status === 'failed'
-            ? String(item.error ?? '历史工作流失败')
+          status === 'failed' || status === 'cancelled'
+            ? String(
+                item.error ??
+                  (status === 'cancelled' ? '用户取消工作流' : '历史工作流失败'),
+              )
+            : undefined,
+        cancelledAt: status === 'cancelled' ? new Date() : undefined,
+        cancelReason:
+          status === 'cancelled'
+            ? String(item.error ?? '用户取消工作流')
             : undefined,
         resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
       });
@@ -1223,12 +1558,12 @@ export class ProductionWorkflowService implements OnModuleInit {
       return;
     }
 
-    if (state.status === 'completed') {
+    if (state.status === 'completed' || state.status === 'cancelled') {
       try {
         await this.saveWorkflowIndex(this.view(threadId, state, userId));
       } catch (indexError) {
         this.logger.warn(
-          `production workflow ${threadId} completed index refresh failed: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
+          `production workflow ${threadId} terminal index refresh failed: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
         );
       }
       return;
@@ -1348,9 +1683,22 @@ export class ProductionWorkflowService implements OnModuleInit {
   }
 
   private assertLeaseOwned(threadId: string): void {
+    const signal = this.cancellationControllers.get(threadId)?.signal;
+    if (signal?.aborted) throw this.cancellationError(signal.reason);
     if (this.lostLeases.has(threadId)) {
       throw new Error('production workflow lease was lost');
     }
+  }
+
+  private cancellationError(reason: unknown): Error {
+    if (reason instanceof ProductionWorkflowCancelledError) return reason;
+    return reason instanceof Error
+      ? reason
+      : new Error('工作流取消状态检查失败，已停止继续执行。');
+  }
+
+  private workflowCancelKey(threadId: string): string {
+    return `production:workflow:cancel:${threadId}`;
   }
 
   private buildGraph() {
@@ -1374,6 +1722,7 @@ export class ProductionWorkflowService implements OnModuleInit {
   private async prepareNode(
     state: ProductionWorkflowStateType,
   ): Promise<Partial<ProductionWorkflowStateType>> {
+    if (state.status === 'cancelled') return {};
     this.assertLeaseOwned(state.threadId);
     if (state.status === 'completed' || state.status === 'failed') return {};
     if (state.stepCount >= state.maxSteps) {
@@ -1536,7 +1885,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       role,
       state.selectedRoles,
     );
-    const previousResults = dependencies
+    const previousResults: ProductionPreviousRoleContext[] = dependencies
       .map((item) => state.results[item])
       .filter((result): result is ProductionStageResult => result !== undefined)
       .map((result) => ({
@@ -1570,7 +1919,7 @@ export class ProductionWorkflowService implements OnModuleInit {
       schemaVersion: 1,
       route: 'production_workflow',
       role,
-      promptVersion: 'production-role/v1',
+      promptVersion: getPromptVersion('workflow.production_role'),
       projectId: state.projectId,
       briefLength: state.brief.length,
       supplementalMaterialsLength: (state.supplementalMaterials ?? '').length,
@@ -1582,27 +1931,46 @@ export class ProductionWorkflowService implements OnModuleInit {
       approvalMode: state.approvalMode,
     });
     const model = this.llmProvider.getModel();
+    const budgetedInput = await this.budgetRoleInput(
+      role,
+      state,
+      previousResults,
+      toolResult.evidence,
+    );
+    toolResult.evidence = budgetedInput.evidence;
+    if (
+      budgetedInput.previousResultsCompacted ||
+      budgetedInput.droppedEvidenceIds.length > 0
+    ) {
+      await this.emitRuntimeEvent(state, 'context.budget.applied', role, {
+        estimatedInputTokens: budgetedInput.estimatedInputTokens,
+        budgetTokens: budgetedInput.budgetTokens,
+        previousResultsCompacted: budgetedInput.previousResultsCompacted,
+        sourceEvidenceCount: budgetedInput.sourceEvidenceCount,
+        includedEvidenceCount: budgetedInput.evidence.length,
+        droppedEvidenceIds: budgetedInput.droppedEvidenceIds,
+      });
+    }
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const modelStartedAt = Date.now();
       try {
         this.assertLeaseOwned(state.threadId);
         await this.emitRuntimeEvent(state, 'model.started', role, { attempt });
-        const output = await model
-          .withStructuredOutput(roleSchema, { method: 'jsonMode' })
-          .invoke(
-            [
-              {
-                role: 'system',
-                content: `你是游戏官网／活动产研运工作流的${role}节点。${ROLE_GUIDANCE[role]}请只返回一个符合给定 schema 的 json object。生成当前岗位可直接交接的 Markdown 交付物，而不是只列交付物名称；同时输出当前岗位能交接给低代码/AI Coding 的 lowCodeSchemas。事实性声明必须引用给定 evidence id；没有证据时必须标记 pending_confirmation，禁止编造引用。只能处理当前岗位职责，不得替其他岗位作最终决定。`,
-              },
-              {
-                role: 'user',
-                content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(toolResult.evidence)}\n驳回意见：${state.feedback || '无'}\n人工补充资料（待核验，不能单独作为 supported 声明依据）：${state.supplementalMaterials || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。lowCodeSchemas 用于后续生成可运行项目代码：产品/设计/前端优先输出 pageSchema，后端输出 apiSchema，前端/运营输出 trackingSchema，产品/前端输出 validationSchema，测试输出 acceptanceSchema。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false,"lowCodeSchemas":[{"schemaVersion":1,"role":"${role}","kind":"pageSchema","title":"页面结构 Schema","source":"llm","components":[{"id":"main","type":"section","name":"主内容区"}],"apis":[],"events":[],"rules":[],"checks":[],"notes":[]}]}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
-              },
-            ],
-            { signal: AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS) },
-          );
+        const workflowSignal = this.cancellationControllers.get(
+          state.threadId,
+        )?.signal;
+        const timeoutSignal = AbortSignal.timeout(ROLE_LLM_TIMEOUT_MS);
+        const requestSignal = workflowSignal
+          ? AbortSignal.any([workflowSignal, timeoutSignal])
+          : timeoutSignal;
+        const output = await this.llmProvider.runWithSignal(
+          requestSignal,
+          () =>
+            model
+              .withStructuredOutput(roleSchema, { method: 'jsonMode' })
+              .invoke(budgetedInput.messages),
+        );
         this.assertLeaseOwned(state.threadId);
         toolResult.executions.push({
           tool: 'role_structured_llm',
@@ -1702,6 +2070,134 @@ export class ProductionWorkflowService implements OnModuleInit {
       artifact: degraded.generatedArtifact,
     });
     return degraded;
+  }
+
+  private async budgetRoleInput(
+    role: ProductionRole,
+    state: ProductionWorkflowStateType,
+    previousResults: ProductionPreviousRoleContext[],
+    sourceEvidence: ProductionEvidence[],
+  ): Promise<{
+    messages: [
+      { role: 'system'; content: string },
+      { role: 'user'; content: string },
+    ];
+    evidence: ProductionEvidence[];
+    sourceEvidenceCount: number;
+    droppedEvidenceIds: string[];
+    estimatedInputTokens: number;
+    budgetTokens: number;
+    previousResultsCompacted: boolean;
+  }> {
+    const budgetTokens = this.getWorkflowInputTokenBudget();
+    let evidence = [...sourceEvidence];
+    const droppedEvidenceIds: string[] = [];
+    let previousResultsCompacted = false;
+
+    const makeMessages = () =>
+      [
+        {
+          role: 'system' as const,
+          content: buildProductionRoleSystemPrompt(role),
+        },
+        {
+          role: 'user' as const,
+          content: `项目：${state.projectId}\n需求背景：${state.brief}\n前序结构化交付：${JSON.stringify(previousResults)}\n当前可用证据：${JSON.stringify(evidence)}\n驳回意见：${state.feedback || '无'}\n人工补充资料（待核验，不能单独作为 supported 声明依据）：${state.supplementalMaterials || '无'}\n请输出严格结构化结果。deliverables 只生成一份完整但精炼的 Markdown；claims 中 supported 声明必须填写当前证据 id。lowCodeSchemas 用于后续生成可运行项目代码：产品/设计/前端优先输出 pageSchema，后端输出 apiSchema，前端/运营输出 trackingSchema，产品/前端输出 validationSchema，测试输出 acceptanceSchema。json 字段必须严格使用以下形状，不得改名、缺失或把数组改成字符串：{"summary":"岗位结论","deliverables":[{"type":"review","title":"交付物标题","markdown":"# 完整 Markdown"}],"claims":[{"statement":"事实声明","evidenceIds":["当前证据 id"],"status":"supported"}],"issues":[],"downstreamRisks":[],"riskLevel":"low","readyForApproval":false,"lowCodeSchemas":[{"schemaVersion":1,"role":"${role}","kind":"pageSchema","title":"页面结构 Schema","source":"llm","components":[{"id":"main","type":"section","name":"主内容区"}],"apis":[],"events":[],"rules":[],"checks":[],"notes":[]}]}。没有证据的声明使用空 evidenceIds 和 pending_confirmation。`,
+        },
+      ] as const;
+
+    const estimate = async () => {
+      const messages = makeMessages();
+      const text = messages.map((message) => message.content).join('\n');
+      return {
+        messages,
+        estimatedInputTokens: (await countTextTokens(text)) + 8,
+      };
+    };
+
+    let prepared = await estimate();
+    if (prepared.estimatedInputTokens > budgetTokens) {
+      previousResultsCompacted = true;
+      previousResults = previousResults.map((result) => ({
+        ...result,
+        summary: result.summary.slice(0, 1_000),
+        deliverables: result.deliverables.map((deliverable) => ({
+          ...deliverable,
+          markdownExcerpt: deliverable.markdownExcerpt.slice(0, 800),
+        })),
+        claims: result.claims.slice(0, 8).map((claim) => ({
+          ...claim,
+          statement: claim.statement.slice(0, 400),
+        })),
+        issues: result.issues.slice(0, 6),
+        downstreamRisks: result.downstreamRisks.slice(0, 6),
+      }));
+      prepared = await estimate();
+    }
+
+    if (prepared.estimatedInputTokens > budgetTokens) {
+      evidence = evidence.map((item) => ({
+        ...item,
+        excerpt: item.excerpt.slice(0, WORKFLOW_EVIDENCE_EXCERPT_CHAR_BUDGET),
+      }));
+      prepared = await estimate();
+    }
+
+    // 证据按检索得分顺序进入；预算仍超限时从尾部移除低分项，并让
+    // 后续引用校验也只接受实际交给模型的证据。
+    while (
+      prepared.estimatedInputTokens > budgetTokens &&
+      evidence.length > 1
+    ) {
+      const dropped = evidence.pop();
+      if (dropped) droppedEvidenceIds.push(dropped.id);
+      prepared = await estimate();
+    }
+
+    if (prepared.estimatedInputTokens > budgetTokens) {
+      throw new Error(
+        `工作流固定指令与当前需求超过模型输入预算：${prepared.estimatedInputTokens}/${budgetTokens} tokens；未调用模型。`,
+      );
+    }
+
+    return {
+      messages: [prepared.messages[0], prepared.messages[1]],
+      evidence,
+      sourceEvidenceCount: sourceEvidence.length,
+      droppedEvidenceIds,
+      estimatedInputTokens: prepared.estimatedInputTokens,
+      budgetTokens,
+      previousResultsCompacted,
+    };
+  }
+
+  private getWorkflowInputTokenBudget(): number {
+    const configuredWindow = Number(
+      this.configService?.get<number>('llm.contextWindowTokens'),
+    );
+    const contextWindow =
+      Number.isFinite(configuredWindow) && configuredWindow > 0
+        ? configuredWindow
+        : 32_768;
+    const activeProvider = this.llmProvider.getActiveProviderName();
+    const providers = [
+      activeProvider,
+      this.llmProvider.getFallbackProviderName(),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const outputBudget = Math.max(
+      ...providers.map((provider) =>
+        Math.max(
+          Number(this.configService?.get<number>(`llm.${provider}.maxTokens`)) ||
+            4_096,
+          this.llmProvider.getRoutePolicy('structured', provider).maxTokens,
+        ),
+      ),
+    );
+    const safetyMargin = Math.max(
+      WORKFLOW_MIN_INPUT_SAFETY_TOKENS,
+      Math.ceil(contextWindow * WORKFLOW_INPUT_SAFETY_RATIO),
+    );
+    return Math.max(1, contextWindow - outputBudget - safetyMargin);
   }
 
   private async recordRoleHandoff(
@@ -1891,13 +2387,18 @@ export class ProductionWorkflowService implements OnModuleInit {
           })
         : {
             status: 'success' as const,
-            output: await this.artifacts.create({
-              ownerUserId: state.userId,
-              threadId: state.threadId,
-              title: `${state.projectId}-${result.role}-交付物`,
-              kind: 'markdown',
-              sourceText,
-            }),
+            output: await executeWithToolTimeout(
+              'artifact_generate',
+              getRegisteredToolTimeoutMs('artifact_generate'),
+              () =>
+                this.artifacts.create({
+                  ownerUserId: state.userId,
+                  threadId: state.threadId,
+                  title: `${state.projectId}-${result.role}-交付物`,
+                  kind: 'markdown',
+                  sourceText,
+                }),
+            ),
             durationMs: Date.now() - startedAt,
           };
       if (!execution.output)
@@ -2261,14 +2762,122 @@ export class ProductionWorkflowService implements OnModuleInit {
   private async runUntilSettled(
     threadId: string,
     initialState: ProductionWorkflowStateType,
+    initialInput?: ProductionWorkflowStateType,
   ): Promise<ProductionWorkflowStateType> {
     let state = initialState;
-    while (state.status === 'running') {
-      this.assertLeaseOwned(threadId);
-      state = await this.app.invoke({}, this.config(threadId));
+    const controller = new AbortController();
+    this.cancellationControllers.set(threadId, controller);
+    let checkingCancellation = false;
+    const checkCancellation = async () => {
+      if (checkingCancellation || !this.redisProvider.isEnabled()) return;
+      checkingCancellation = true;
+      try {
+        const marker = await this.redisProvider.getRequired(
+          this.workflowCancelKey(threadId),
+        );
+        if (marker?.startsWith('cancelled:') && !controller.signal.aborted) {
+          controller.abort(
+            new ProductionWorkflowCancelledError(
+              marker.slice('cancelled:'.length),
+            ),
+          );
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) controller.abort(error);
+      } finally {
+        checkingCancellation = false;
+      }
+    };
+    const watcher = setInterval(() => void checkCancellation(), 500);
+    try {
+      await checkCancellation();
+      if (controller.signal.aborted) {
+        throw this.cancellationError(controller.signal.reason);
+      }
+      while (state.status === 'running') {
+        this.assertLeaseOwned(threadId);
+        state = await this.app.invoke(
+          initialInput ?? {},
+          this.config(threadId),
+        );
+        initialInput = undefined;
+      }
+      if (state.status !== 'completed' && state.status !== 'failed') {
+        this.assertLeaseOwned(threadId);
+      }
+      return state;
+    } catch (error) {
+      if (error instanceof ProductionWorkflowCancelledError) {
+        return this.persistWorkflowCancelled(threadId, state, error.message);
+      }
+      throw error;
+    } finally {
+      clearInterval(watcher);
+      if (this.cancellationControllers.get(threadId) === controller) {
+        this.cancellationControllers.delete(threadId);
+      }
     }
-    this.assertLeaseOwned(threadId);
-    return state;
+  }
+
+  private async persistWorkflowCancelled(
+    threadId: string,
+    current: ProductionWorkflowStateType,
+    reason: string,
+  ): Promise<ProductionWorkflowStateType> {
+    if (current.status === 'completed' || current.status === 'failed') {
+      return current;
+    }
+    const cancelledState: ProductionWorkflowStateType = {
+      ...current,
+      status: 'cancelled',
+      error: reason,
+    };
+    try {
+      await this.app.updateState(this.config(threadId), {
+        status: 'cancelled',
+        error: reason,
+      });
+      current = (await this.getState(threadId)) ?? cancelledState;
+    } catch {
+      // 初始任务可能在首个 checkpoint 前被取消；终态初始状态不会执行工作流副作用。
+      await this.app.invoke(cancelledState, this.config(threadId));
+      current = (await this.getState(threadId)) ?? cancelledState;
+    }
+    this.pendingStates.set(threadId, current);
+    try {
+      for (const task of (await this.tasks?.list(threadId)) ?? []) {
+        if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
+          try {
+            await this.tasks?.updateForRole(threadId, task.role, {
+              status: 'cancelled',
+              errorMessage: reason,
+            });
+          } catch (error) {
+            this.logger.warn(
+              `production workflow ${threadId} task ${task.role} cancellation persistence failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `production workflow ${threadId} task cancellation lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (current.runId) {
+      try {
+        await this.agentRuns?.cancel(current.runId, reason);
+      } catch (error) {
+        this.logger.warn(
+          `production workflow ${threadId} run cancellation persistence failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    await this.emitWorkflowState(current);
+    await this.saveWorkflowIndexBestEffort(
+      this.view(threadId, current, current.userId),
+    );
+    return current;
   }
 
   private config(threadId: string) {
@@ -2469,6 +3078,28 @@ export class ProductionWorkflowService implements OnModuleInit {
       }
       return;
     }
+    if (state.status === 'cancelled') {
+      await this.emitDomainEvent('workflow.cancelled', state, {
+        reason: state.error ?? '用户取消工作流',
+      });
+      await this.emitRuntimeEvent(
+        state,
+        'workflow.cancelled',
+        'production_workflow',
+        { reason: state.error ?? '用户取消工作流' },
+      );
+      if (runId) {
+        await this.agentRuns?.finish(runId, {
+          route: 'production_workflow',
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancelReason: state.error ?? '用户取消工作流',
+          errorMessage: state.error ?? '用户取消工作流',
+          resultSummary: `${state.projectId}：工作流已取消。`,
+        });
+      }
+      return;
+    }
     if (state.status === 'failed') {
       await this.emitDomainEvent('workflow.failed', state, {
         error: state.error ?? null,
@@ -2620,57 +3251,170 @@ export class ProductionWorkflowService implements OnModuleInit {
     dto: ResumeProductionWorkflowDto,
     userId: string,
   ) {
+    const lockKey = `production:workflow:rejection:${threadId}`;
+    const lockToken = randomUUID();
+    let acquiredRedisLock = false;
+    if (this.redisProvider.isEnabled()) {
+      acquiredRedisLock = await this.redisProvider.setIfAbsent(
+        lockKey,
+        lockToken,
+        300,
+      );
+      if (!acquiredRedisLock) {
+        throw new Error('workflow rejection is already being persisted');
+      }
+    } else {
+      if (
+        this.configService?.get<boolean>('core.requireDependencies') === true ||
+        this.configService?.get<string>('nodeEnv') === 'production'
+      ) {
+        throw new Error('Redis rejection lock is required in production.');
+      }
+      if (this.rejectionOperations.has(threadId)) {
+        throw new Error('workflow rejection is already being persisted');
+      }
+      this.rejectionOperations.add(threadId);
+    }
+
+    try {
+      if (current.status === 'revision_required') {
+        if (!this.matchesRejectedRevisionRequest(current, dto)) {
+          throw new Error('驳回请求与当前待修订版本不匹配。');
+        }
+        return this.finalizeRejectedRevision(threadId, current, userId);
+      }
+      if (current.status !== 'pending_approval') {
+        throw new Error(`workflow is not pending approval: ${current.status}`);
+      }
+      return await this.completeRejectedRevision(
+        threadId,
+        current,
+        dto,
+        userId,
+      );
+    } finally {
+      this.rejectionOperations.delete(threadId);
+      if (acquiredRedisLock) {
+        try {
+          await this.redisProvider.releaseLock(lockKey, lockToken);
+        } catch (error) {
+          this.logger.warn(
+            `workflow rejection lock release failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private matchesRejectedRevisionRequest(
+    state: ProductionWorkflowStateType,
+    dto: ResumeProductionWorkflowDto,
+  ): boolean {
+    const latest = state.revisionHistory.at(-1);
+    if (
+      state.status !== 'revision_required' ||
+      dto.approval !== 'rejected' ||
+      !latest ||
+      state.revisionNumber !== latest.revision + 1 ||
+      state.feedback !== (dto.feedback?.trim() ?? '') ||
+      latest.feedback !== state.feedback ||
+      !this.sameRoles(state.rerunRoles, latest.rejectedRoles) ||
+      !this.sameRoles(state.staleRoles, latest.staleRoles)
+    ) {
+      return false;
+    }
+    if (!dto.rerunRoles?.length) return true;
+    const requested = dto.rerunRoles.filter((role) =>
+      state.currentBatch.includes(role),
+    );
+    return this.sameRoleSet(
+      requested.length ? requested : state.currentBatch,
+      latest.rejectedRoles,
+    );
+  }
+
+  private sameRoleSet(left: ProductionRole[], right: ProductionRole[]): boolean {
+    return (
+      left.length === right.length &&
+      left.every((role) => right.includes(role))
+    );
+  }
+
+  private async completeRejectedRevision(
+    threadId: string,
+    current: ProductionWorkflowStateType,
+    dto: ResumeProductionWorkflowDto,
+    userId: string,
+  ) {
     const feedback = dto.feedback?.trim() ?? '';
     if (!feedback) throw new Error('rejection feedback is required');
-    const requested = dto.rerunRoles?.length
-      ? dto.rerunRoles.filter((role) => current.currentBatch.includes(role))
-      : current.pendingApprovalRoles;
-    const rejectedRoles = requested.length ? requested : current.currentBatch;
-    const staleRoles = this.downstreamRoles(
-      rejectedRoles,
-      current.selectedRoles,
-    );
-    const rejectedResults = Object.fromEntries(
-      Object.entries(current.results).map(([role, result]) => [
-        role,
-        result
-          ? {
-              ...result,
-              reviewStatus: rejectedRoles.includes(role as ProductionRole)
-                ? 'rejected'
-                : current.currentBatch.includes(role as ProductionRole)
-                  ? 'approved'
-                  : staleRoles.includes(role as ProductionRole)
-                    ? 'stale'
-                    : result.reviewStatus,
-            }
-          : result,
-      ]),
-    ) as ProductionWorkflowStateType['results'];
-    const revisionHistory = [
-      ...(current.revisionHistory ?? []),
-      {
-        revision: current.revisionNumber ?? 1,
-        rejectedAt: new Date().toISOString(),
-        feedback,
+    const continuingRejection = current.approval === 'rejected';
+    if (continuingRejection && feedback !== current.feedback) {
+      throw new Error('rejection feedback must match the pending decision');
+    }
+    let rejectedRoles: ProductionRole[];
+    let staleRoles: ProductionRole[];
+    let rejectedResults: ProductionWorkflowStateType['results'];
+    let revisionHistory: ProductionWorkflowStateType['revisionHistory'];
+    if (continuingRejection) {
+      rejectedRoles = current.rerunRoles;
+      staleRoles = current.staleRoles;
+      rejectedResults = current.results;
+      revisionHistory = current.revisionHistory;
+      if (!rejectedRoles.length || !revisionHistory.length) {
+        throw new Error('pending rejection checkpoint is incomplete');
+      }
+    } else {
+      const requested = dto.rerunRoles?.length
+        ? dto.rerunRoles.filter((role) => current.currentBatch.includes(role))
+        : current.pendingApprovalRoles;
+      rejectedRoles = requested.length ? requested : current.currentBatch;
+      staleRoles = this.downstreamRoles(
         rejectedRoles,
+        current.selectedRoles,
+      );
+      rejectedResults = Object.fromEntries(
+        Object.entries(current.results).map(([role, result]) => [
+          role,
+          result
+            ? {
+                ...result,
+                reviewStatus: rejectedRoles.includes(role as ProductionRole)
+                  ? 'rejected'
+                  : current.currentBatch.includes(role as ProductionRole)
+                    ? 'approved'
+                    : staleRoles.includes(role as ProductionRole)
+                      ? 'stale'
+                      : result.reviewStatus,
+              }
+            : result,
+        ]),
+      ) as ProductionWorkflowStateType['results'];
+      revisionHistory = [
+        ...(current.revisionHistory ?? []),
+        {
+          revision: current.revisionNumber ?? 1,
+          rejectedAt: new Date().toISOString(),
+          feedback,
+          rejectedRoles,
+          staleRoles,
+          results: rejectedResults,
+        },
+      ];
+      // Persist the exact decision before side effects. If a task or artifact
+      // write fails, the same rejection can resume without accepting a changed
+      // role selection or feedback against partially written review state.
+      await this.app.updateState(this.config(threadId), {
+        status: 'pending_approval',
+        approval: 'rejected',
+        feedback,
+        rerunRoles: rejectedRoles,
         staleRoles,
+        revisionHistory,
         results: rejectedResults,
-      },
-    ];
-    await this.app.updateState(this.config(threadId), {
-      status: 'revision_required',
-      approval: null,
-      feedback,
-      pendingApprovalRoles: [],
-      rerunRoles: rejectedRoles,
-      staleRoles,
-      revisionNumber: (current.revisionNumber ?? 1) + 1,
-      revisionHistory,
-      results: rejectedResults,
-      error: '',
-    });
-    const state = await this.getOwnedState(threadId, userId);
+      });
+    }
+
     await Promise.all([
       ...rejectedRoles.map((role) =>
         this.tasks?.updateForRole(threadId, role, {
@@ -2706,17 +3450,167 @@ export class ProductionWorkflowService implements OnModuleInit {
           : Promise.resolve();
       }),
     );
-    await this.emitRuntimeEvent(state, 'revision.required', 'human_reviewer', {
-      revision: current.revisionNumber ?? 1,
-      nextRevision: state.revisionNumber,
+    // Keep the rejection marker until Task and Artifact review state has been
+    // persisted, so a repeated request can complete a partial write.
+    await this.app.updateState(this.config(threadId), {
+      status: 'revision_required',
+      approval: null,
       feedback,
-      rejectedRoles,
+      pendingApprovalRoles: [],
+      rerunRoles: rejectedRoles,
       staleRoles,
+      revisionNumber: (current.revisionNumber ?? 1) + 1,
+      revisionHistory,
+      results: rejectedResults,
+      error: '',
     });
+    const state = await this.getOwnedState(threadId, userId);
+    return this.finalizeRejectedRevision(threadId, state, userId);
+  }
+
+  private async finalizeRejectedRevision(
+    threadId: string,
+    state: ProductionWorkflowStateType,
+    userId: string,
+  ) {
+    const revision = state.revisionHistory.at(-1);
+    if (!revision || state.status !== 'revision_required') {
+      throw new Error('待补齐的驳回记录不存在或状态已变化。');
+    }
+    const nextRevision = state.revisionNumber ?? 1;
+
+    // The outbox derives an idempotency key from this payload, so retrying after
+    // a later event/index failure cannot create a duplicate domain event.
+    await this.domainEvents?.emit({
+      tenantId: state.tenantId,
+      eventType: 'workflow.revision_required',
+      aggregateType: 'production_workflow',
+      aggregateId: state.threadId,
+      payload: {
+        projectId: state.projectId,
+        runId: state.runId ?? null,
+        roles: state.rerunRoles,
+        revision: nextRevision,
+      },
+    });
+
+    await this.emitRevisionRuntimeEventOnce(
+      state,
+      'revision.required',
+      'human_reviewer',
+      {
+        revision: revision.revision,
+        nextRevision,
+        feedback: revision.feedback,
+        rejectedRoles: revision.rejectedRoles,
+        staleRoles: revision.staleRoles,
+      },
+      'nextRevision',
+      nextRevision,
+    );
+    await this.emitRevisionRuntimeEventOnce(
+      state,
+      'workflow.revision_required',
+      'production_workflow',
+      {
+        revision: nextRevision,
+        roles: state.rerunRoles,
+        staleRoles: state.staleRoles,
+        feedback: state.feedback,
+      },
+      'revision',
+      nextRevision,
+    );
+    await this.emitRevisionRuntimeEventOnce(
+      state,
+      'goal.paused',
+      'production_workflow',
+      {
+        objective: state.brief,
+        status: 'paused',
+        round: state.stepCount,
+        maxRounds: state.maxSteps,
+        revision: nextRevision,
+        reason: 'Artifact 已驳回，等待人工确认后启动修订。',
+      },
+      'revision',
+      nextRevision,
+    );
+
+    if (state.runId && this.agentRuns) {
+      const run = await this.agentRuns.get(
+        state.runId,
+        state.tenantId ?? undefined,
+      );
+      const resultSummary = `${state.projectId}：Artifact 已驳回，等待 v${nextRevision} 修订。`;
+      const runUpdatedEventExists = this.runtimeEvents
+        ? await this.runtimeEvents.hasMatchingEvent({
+            tenantId: state.tenantId,
+            threadId: state.threadId,
+            runId: state.runId,
+            eventType: 'run.updated',
+            payload: {
+              status: 'waiting_approval',
+              route: 'production_workflow',
+              costUsd: run.costUsd,
+              resultSummary,
+            },
+          })
+        : false;
+      if (
+        ['running', 'waiting_approval'].includes(run.status) &&
+        (run.resultSummary !== resultSummary || !runUpdatedEventExists)
+      ) {
+        await this.agentRuns.finish(state.runId, {
+          route: 'production_workflow',
+          status: 'waiting_approval',
+          requiresApproval: true,
+          resultSummary,
+        });
+      }
+    }
+
     const result = this.view(threadId, state, userId);
-    await this.emitWorkflowState(state);
     await this.saveWorkflowIndex(result);
     return result;
+  }
+
+  private async emitRevisionRuntimeEventOnce(
+    state: ProductionWorkflowStateType,
+    eventType: string,
+    actor: string,
+    payload: Record<string, unknown>,
+    revisionField: 'revision' | 'nextRevision',
+    revision: number,
+  ): Promise<void> {
+    if (!this.runtimeEvents) return;
+    const events = await this.runtimeEvents.list(
+      state.threadId,
+      state.runId || undefined,
+      state.tenantId?.trim() || 'legacy',
+      undefined,
+      500,
+    );
+    const alreadyEmitted = events.some((event) => {
+      if (event.eventType !== eventType) return false;
+      const eventPayload =
+        event.payload &&
+        typeof event.payload === 'object' &&
+        !Array.isArray(event.payload)
+          ? (event.payload as Record<string, unknown>)
+          : undefined;
+      return eventPayload?.[revisionField] === revision;
+    });
+    if (alreadyEmitted) return;
+    await this.runtimeEvents.emit({
+      tenantId: state.tenantId,
+      threadId: state.threadId,
+      runId: state.runId || undefined,
+      eventType,
+      actor,
+      target: state.projectId,
+      payload,
+    });
   }
 
   private downstreamRoles(

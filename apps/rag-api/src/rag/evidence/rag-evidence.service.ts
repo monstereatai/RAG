@@ -47,6 +47,7 @@ export class RagEvidenceService {
       new GroundedAnswerGenerationService(
         this.llmProvider,
         this.evidencePolicy,
+        this.configService,
       );
   }
 

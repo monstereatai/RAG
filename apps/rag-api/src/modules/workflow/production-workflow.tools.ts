@@ -149,14 +149,15 @@ export class ProductionWorkflowTools {
                 mode: 'production',
                 role,
                 ownerUserId: context.userId,
+                preserveFullOutput: true,
                 pluginKeys: context.pluginKeys,
                 allowedToolNames: context.pluginTools,
                 input: { query, focus: ROLE_SEARCH_FOCUS[role] },
-                execute: () =>
+                execute: (signal) =>
                   this.withTimeout(
                     this.rag.retrieveDetailed(
                       query,
-                      { scope: { role } },
+                      { scope: { role }, signal },
                       context.userId,
                     ),
                     policy.timeoutMs,

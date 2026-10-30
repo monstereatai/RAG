@@ -15,6 +15,7 @@
 ## 细节入口
 
 - [功能步骤流程](interview/功能步骤流程.md)：真实用户请求、知识入库、问答模式和工作流的步骤图。
+- [上下文工程指南逐篇对照](reference/CONTEXT_ENGINEERING_GUIDE_AUDIT.md)：按固定 GitHub 提交逐篇核对 43 篇参考文章、当前实现和适用差距。
 - [Playway 组件清单](reference/playway-component-inventory.md)：项目业务模块使用的组件名称与组合信息。
 - [RAG CLI 与主项目的关系](cli-docs/README.md)：说明 CLI 在系统中的职责、边界，并链接到包内产品、架构、使用和进度文档。
 - [RAG 检索模块说明](../apps/rag-api/src/rag/retrieval/README.md)：检索实现的源码邻近说明。

@@ -2,7 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  Head,
+  HttpException,
   Param,
   Patch,
   Post,
@@ -13,8 +16,11 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { RequireLogin } from '../../common/decorators/require-login.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RagClientService } from '../rag-client/rag-client.service';
+
+const WORKSPACE_PREVIEW_ABORT_TIMEOUT_MS = 80_000;
 
 @ApiTags('Agent Ops')
 @ApiBearerAuth()
@@ -147,6 +153,21 @@ export class AgentOpsController {
     return this.ragClient.reviseProductionWorkflow(threadId, this.userId(req), body);
   }
 
+  @Post('workflows/:threadId/cancel')
+  @ApiOperation({ summary: '取消正在执行或等待审批的产研运工作流' })
+  @RequirePermission('admin:qa-ops:write')
+  cancelWorkflow(
+    @Param('threadId') threadId: string,
+    @Body() body: { reason?: string },
+    @Req() req: Request
+  ) {
+    return this.ragClient.cancelProductionWorkflow(
+      threadId,
+      this.userId(req),
+      body
+    );
+  }
+
   @Get('workflows/:threadId/coding-context')
   @RequirePermission('admin:qa-ops:read')
   getWorkflowCodingContext(@Param('threadId') threadId: string, @Req() req: Request) {
@@ -163,6 +184,367 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:write')
   generateWorkflowProject(@Param('threadId') threadId: string, @Req() req: Request) {
     return this.ragClient.generateProductionWorkflowProject(threadId, this.userId(req));
+  }
+
+  @Get('workflows/:threadId/artifacts')
+  @RequirePermission('admin:qa-ops:read')
+  listWorkflowArtifacts(@Param('threadId') threadId: string, @Req() req: Request) {
+    return this.ragClient.getProductionWorkflowArtifacts(threadId, this.userId(req));
+  }
+
+  @Post('workflows/:threadId/artifacts/generate')
+  @RequirePermission('admin:qa-ops:write')
+  generateWorkflowArtifacts(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.generateProductionWorkflowArtifacts(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/edit')
+  @RequirePermission('admin:qa-ops:write')
+  proposeWorkflowArtifactEdit(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.proposeProductionWorkflowArtifactEdit(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/code-edit')
+  @RequirePermission('admin:qa-ops:write')
+  proposeWorkflowCodeEdit(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.proposeProductionWorkflowCodeEdit(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/code-edit/apply')
+  @RequirePermission('admin:qa-ops:write')
+  applyWorkflowCodeEdit(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.applyProductionWorkflowCodeEdit(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/apply')
+  @RequirePermission('admin:qa-ops:write')
+  applyWorkflowArtifactEdit(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.applyProductionWorkflowArtifactEdit(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/restore')
+  @RequirePermission('admin:qa-ops:write')
+  restoreWorkflowArtifactVersion(
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.restoreProductionWorkflowArtifactVersion(
+      threadId,
+      this.userId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/artifacts/:artifactId/simulated-sync')
+  @RequirePermission('admin:qa-ops:write')
+  simulateWorkflowArtifactSync(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.simulateProductionWorkflowArtifactSync(
+      threadId,
+      this.userId(req),
+      artifactId,
+    );
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/preview')
+  @RequirePermission('admin:qa-ops:read')
+  previewWorkflowArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.previewProductionWorkflowArtifact(
+      threadId,
+      this.userId(req),
+      artifactId,
+    );
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/source')
+  @RequirePermission('admin:qa-ops:read')
+  sourceWorkflowArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.sourceProductionWorkflowArtifact(
+      threadId,
+      this.userId(req),
+      artifactId,
+    );
+  }
+
+  @Get('workflows/:threadId/artifacts/:artifactId/download')
+  @RequirePermission('admin:qa-ops:read')
+  async downloadWorkflowArtifact(
+    @Param('threadId') threadId: string,
+    @Param('artifactId') artifactId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const response = await this.ragClient.downloadProductionWorkflowArtifact(
+      threadId,
+      this.userId(req),
+      artifactId,
+    );
+    res.status(response.status ?? 500);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    return res.send(Buffer.from(await response.arrayBuffer()));
+  }
+
+  @Get('workflows/:threadId/workspace')
+  @RequirePermission('admin:qa-ops:read')
+  workflowWorkspace(@Param('threadId') threadId: string, @Req() req: Request) {
+    return this.ragClient.getProductionWorkflowWorkspace(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/start')
+  @RequirePermission('admin:qa-ops:write')
+  startWorkflowWorkspace(
+    @Param('threadId') threadId: string,
+    @Body() body: { artifactId: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.startProductionWorkflowWorkspace(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/agent')
+  @RequirePermission('admin:qa-ops:write')
+  runWorkflowWorkspaceAgent(
+    @Param('threadId') threadId: string,
+    @Body() body: { artifactId: string; instruction: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.runProductionWorkflowWorkspaceAgent(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/command')
+  @RequirePermission('admin:qa-ops:write')
+  runWorkflowWorkspaceCommand(
+    @Param('threadId') threadId: string,
+    @Body() body: { command: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.runProductionWorkflowWorkspaceCommand(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/dev-server/start')
+  @RequirePermission('admin:qa-ops:write')
+  startWorkflowWorkspaceDevServer(
+    @Param('threadId') threadId: string,
+    @Body() body: { port: number; command?: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.startProductionWorkflowWorkspaceDevServer(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/dev-server/stop')
+  @RequirePermission('admin:qa-ops:write')
+  stopWorkflowWorkspaceDevServer(
+    @Param('threadId') threadId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.stopProductionWorkflowWorkspaceDevServer(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/preview-ticket')
+  @RequirePermission('admin:qa-ops:write')
+  async createWorkflowWorkspacePreviewTicket(
+    @Param('threadId') threadId: string,
+    @Body() body: { port: number },
+    @Req() req: Request,
+  ) {
+    const result = await this.ragClient.createProductionWorkflowWorkspacePreviewTicket(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+    const ticket =
+      result.data && typeof result.data === 'object'
+        ? (result.data as { ticket?: unknown }).ticket
+        : undefined;
+    if (!result.available || typeof ticket !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(ticket)) {
+      throw new HttpException(
+        result.error || 'RAG returned an invalid preview ticket',
+        result.status && result.status >= 400 ? result.status : 502,
+      );
+    }
+    return {
+      url: `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/preview/${encodeURIComponent(ticket)}/`,
+    };
+  }
+
+  // Admin API uses Nest 10 / Express 4; keep separate root and unnamed wildcard routes.
+  @Get('workflows/:threadId/workspace/preview/:ticket')
+  @RequireLogin(false)
+  async previewWorkflowWorkspaceRoot(
+    @Param('threadId') threadId: string,
+    @Param('ticket') ticket: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.pipeWorkflowWorkspacePreview(
+      threadId,
+      ticket,
+      '',
+      req,
+      res,
+    );
+  }
+
+  @Head('workflows/:threadId/workspace/preview/:ticket')
+  @RequireLogin(false)
+  async headWorkflowWorkspacePreviewRoot(
+    @Param('threadId') threadId: string,
+    @Param('ticket') ticket: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.pipeWorkflowWorkspacePreview(
+      threadId,
+      ticket,
+      '',
+      req,
+      res,
+    );
+  }
+
+  @Get('workflows/:threadId/workspace/preview/:ticket/*')
+  @RequireLogin(false)
+  async previewWorkflowWorkspacePath(
+    @Param('threadId') threadId: string,
+    @Param('ticket') ticket: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.pipeWorkflowWorkspacePreview(
+      threadId,
+      ticket,
+      this.workflowWorkspacePreviewPath(req),
+      req,
+      res,
+    );
+  }
+
+  @Head('workflows/:threadId/workspace/preview/:ticket/*')
+  @RequireLogin(false)
+  async headWorkflowWorkspacePreviewPath(
+    @Param('threadId') threadId: string,
+    @Param('ticket') ticket: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.pipeWorkflowWorkspacePreview(
+      threadId,
+      ticket,
+      this.workflowWorkspacePreviewPath(req),
+      req,
+      res,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/export')
+  @RequirePermission('admin:qa-ops:write')
+  exportWorkflowWorkspace(
+    @Param('threadId') threadId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.exportProductionWorkflowWorkspace(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+    );
+  }
+
+  @Delete('workflows/:threadId/workspace')
+  @RequirePermission('admin:qa-ops:write')
+  deleteWorkflowWorkspace(
+    @Param('threadId') threadId: string,
+    @Body() body: { confirmDiscard?: boolean },
+    @Req() req: Request,
+  ) {
+    if (body?.confirmDiscard !== true) {
+      throw new BadRequestException('confirmDiscard must be true to discard workspace changes');
+    }
+    return this.ragClient.deleteProductionWorkflowWorkspace(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      { confirmDiscard: true },
+    );
   }
 
   @Post('workflows/:threadId/generate-project-zip')
@@ -421,4 +803,154 @@ export class AgentOpsController {
     return String(userId).trim();
   }
 
+  private tenantId(req: Request): string | undefined {
+    const tenantId = (
+      req as Request & { user?: { tenantId?: string } }
+    ).user?.tenantId;
+    return typeof tenantId === 'string' && tenantId.length > 0
+      ? tenantId
+      : undefined;
+  }
+
+  private async pipeWorkflowWorkspacePreview(
+    threadId: string,
+    ticket: string,
+    path: string,
+    req: Request,
+    res: Response,
+  ) {
+    const segments = path.split('/').filter(Boolean);
+    if (
+      path.length > 4096 ||
+      segments.some(
+        (segment) =>
+          segment === '.' ||
+          segment === '..' ||
+          segment.length > 255 ||
+          segment.includes('\0'),
+      )
+    ) {
+      throw new BadRequestException('invalid preview path');
+    }
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(ticket)) {
+      throw new BadRequestException('invalid preview ticket');
+    }
+
+    const rawQuery = req.originalUrl.includes('?')
+      ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1)
+      : '';
+    if (rawQuery.length > 8192) {
+      throw new BadRequestException('preview query is too long');
+    }
+    const headers: Record<string, string> = {};
+    for (const name of ['accept', 'if-none-match', 'if-modified-since', 'range']) {
+      const value = req.headers[name];
+      if (typeof value === 'string') headers[name] = value;
+    }
+
+    const abortController = new AbortController();
+    const abortWhenDisconnected = () => {
+      if (!res.writableEnded) abortController.abort();
+    };
+    const timeout = setTimeout(
+      () => abortController.abort(new Error('Preview proxy timed out.')),
+      WORKSPACE_PREVIEW_ABORT_TIMEOUT_MS,
+    );
+    req.once('aborted', abortWhenDisconnected);
+    res.once('close', abortWhenDisconnected);
+    try {
+      const upstream = await this.ragClient.proxyProductionWorkflowWorkspacePreview(
+        ticket,
+        threadId,
+        {
+          method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+          path: segments.join('/'),
+          query: rawQuery,
+          headers,
+          signal: abortController.signal,
+        },
+      );
+      const contentLength = Number(upstream.headers.get('content-length'));
+      if (Number.isFinite(contentLength) && contentLength > 25 * 1024 * 1024) {
+        return res.status(502).send('Preview response exceeds the size limit');
+      }
+      const body = Buffer.from(await upstream.arrayBuffer());
+      if (body.byteLength > 25 * 1024 * 1024) {
+        return res.status(502).send('Preview response exceeds the size limit');
+      }
+      res.status(upstream.status);
+      this.copyWorkflowWorkspaceHeaders(upstream, res, [
+        'accept-ranges',
+        'content-range',
+        'content-type',
+        'etag',
+        'last-modified',
+        'vary',
+      ]);
+      const contentType = upstream.headers.get('content-type')?.toLowerCase() ?? '';
+      if (isSandboxedPreviewDocument(contentType)) {
+        res.setHeader('Content-Security-Policy', 'sandbox allow-scripts');
+      }
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Access-Control-Allow-Credentials');
+      if (req.headers.origin === 'null') {
+        res.setHeader('Access-Control-Allow-Origin', 'null');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD');
+        res.removeHeader('Access-Control-Allow-Headers');
+        const currentVary = res.getHeader('Vary');
+        const varyValues = String(currentVary ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+        if (!varyValues.some((value) => value.toLowerCase() === 'origin')) {
+          varyValues.push('Origin');
+        }
+        res.setHeader('Vary', varyValues.join(', '));
+      }
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(body);
+    } catch {
+      if (res.destroyed) return res;
+      return res.status(502).send('Preview service is unavailable');
+    } finally {
+      clearTimeout(timeout);
+      req.off('aborted', abortWhenDisconnected);
+      res.off('close', abortWhenDisconnected);
+    }
+  }
+
+  private workflowWorkspacePreviewPath(req: Request): string {
+    const params = req.params as Record<string, unknown>;
+    const path = params['0'] ?? params.path;
+    return Array.isArray(path)
+      ? path.map((segment) => String(segment)).join('/')
+      : typeof path === 'string'
+        ? path
+        : '';
+  }
+
+  private copyWorkflowWorkspaceHeaders(
+    upstream: globalThis.Response,
+    res: Response,
+    allowlist: string[],
+  ) {
+    for (const name of allowlist) {
+      const value = upstream.headers.get(name);
+      if (value && !/[\r\n]/.test(value)) res.setHeader(name, value);
+    }
+  }
+
+}
+
+function isSandboxedPreviewDocument(contentType: string): boolean {
+  const mediaType = contentType.split(';', 1)[0].trim();
+  return (
+    mediaType === 'text/html' ||
+    mediaType === 'application/xhtml+xml' ||
+    mediaType === 'image/svg+xml' ||
+    mediaType === 'application/xml' ||
+    mediaType === 'text/xml' ||
+    mediaType.endsWith('+xml')
+  );
 }

@@ -117,10 +117,17 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async setIfAbsentRequired(key: string, value: string): Promise<boolean> {
+  async setIfAbsentRequired(
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<boolean> {
     if (!this.enabled) throw new Error('Redis is unavailable');
     try {
-      return (await this.client.set(key, value, 'NX')) === 'OK';
+      const result = ttlSeconds
+        ? await this.client.set(key, value, 'EX', ttlSeconds, 'NX')
+        : await this.client.set(key, value, 'NX');
+      return result === 'OK';
     } catch (err) {
       this.enabled = false;
       throw err;

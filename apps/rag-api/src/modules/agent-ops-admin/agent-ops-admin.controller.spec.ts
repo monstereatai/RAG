@@ -12,6 +12,18 @@ describe('AgentOpsAdminController task owner isolation', () => {
     delegate: jest.fn(),
   };
   const runs = { reserveDelegation: jest.fn() };
+  const projectWorkspace = {
+    getStatus: jest.fn(),
+    startWorkspace: jest.fn(),
+    runCommand: jest.fn(),
+    startDevServer: jest.fn(),
+    stopDevServer: jest.fn(),
+    issuePreviewTicket: jest.fn(),
+    proxyPreview: jest.fn(),
+    exportWorkspace: jest.fn(),
+    destroyWorkspace: jest.fn(),
+  };
+  const projectWorkspaceAgent = { run: jest.fn() };
   const controller = new AgentOpsAdminController(
     workflows as never,
     {} as never,
@@ -26,6 +38,9 @@ describe('AgentOpsAdminController task owner isolation', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
+    projectWorkspace as never,
+    projectWorkspaceAgent as never,
   );
 
   beforeEach(() => jest.resetAllMocks());
@@ -76,5 +91,55 @@ describe('AgentOpsAdminController task owner isolation', () => {
       title: '实现前端',
       description: '实现页面',
     });
+  });
+
+  it('scopes project workspace operations to the workflow owner and tenant', async () => {
+    projectWorkspace.getStatus.mockResolvedValue({ ready: false });
+    projectWorkspaceAgent.run.mockResolvedValue({ status: 'completed' });
+
+    await expect(
+      controller.productionProjectWorkspaceStatus(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+      ),
+    ).resolves.toEqual({ ready: false });
+    await controller.runProductionProjectWorkspaceAgent(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      { artifactId: 'artifact-1', instruction: '运行测试' },
+    );
+
+    expect(projectWorkspace.getStatus).toHaveBeenCalledWith(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+    );
+    expect(projectWorkspaceAgent.run).toHaveBeenCalledWith(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'artifact-1',
+      '运行测试',
+    );
+  });
+
+  it('requires the explicit discard flag when destroying a project workspace', async () => {
+    projectWorkspace.destroyWorkspace.mockResolvedValue({ destroyed: true });
+
+    await controller.destroyProductionProjectWorkspace(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      { confirmDiscard: true },
+    );
+
+    expect(projectWorkspace.destroyWorkspace).toHaveBeenCalledWith(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      true,
+    );
   });
 });

@@ -9,13 +9,21 @@
  * 防止异步入库任务绕过持久队列后无法跨实例接管。
  */
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueEvents, Worker } from 'bullmq';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DocumentBusinessMetadata } from './document-profile.util';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
+import { RedisProvider } from '../../providers/redis/redis.provider';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
+export const DOCUMENT_GRAPH_INDEX_QUEUE = 'document-graph-index';
 export const OBSIDIAN_NOTE_INGEST_QUEUE = 'obsidian-note-ingest';
 const DOCUMENT_SOURCE_CLEANUP_QUEUE = 'document-processing-source-cleanup';
 const DOCUMENT_PROCESSING_ATTEMPTS = 3;
@@ -72,6 +80,21 @@ export type DocumentProcessingFailureHandler = (
   error: Error,
 ) => Promise<void>;
 
+export interface DocumentGraphIndexJob {
+  docId: string;
+  userId: string;
+  indexGeneration: string;
+}
+
+export type DocumentGraphIndexProcessor = (
+  job: DocumentGraphIndexJob,
+) => Promise<void>;
+
+export type DocumentGraphIndexFailureHandler = (
+  job: DocumentGraphIndexJob,
+  error: Error,
+) => Promise<void>;
+
 export interface PendingDocumentQueueTask {
   taskId: string;
   filename: string;
@@ -87,17 +110,23 @@ export class DocumentQueueService implements OnModuleDestroy {
   private readonly worker: Worker<DocumentProcessingJob>;
   private readonly obsidianQueue: Queue<ObsidianNoteIngestJob>;
   private readonly obsidianWorker: Worker<ObsidianNoteIngestJob>;
+  private readonly graphQueue: Queue<DocumentGraphIndexJob>;
+  private readonly graphQueueEvents: QueueEvents;
+  private readonly graphWorker: Worker<DocumentGraphIndexJob>;
   private readonly cleanupQueue: Queue<{ objectKey: string }>;
   private readonly cleanupWorker: Worker<{ objectKey: string }>;
   private processor: DocumentProcessingProcessor | null = null;
   private failureHandler: DocumentProcessingFailureHandler | null = null;
   private obsidianProcessor: ObsidianNoteIngestProcessor | null = null;
+  private graphProcessor: DocumentGraphIndexProcessor | null = null;
+  private graphFailureHandler: DocumentGraphIndexFailureHandler | null = null;
   readonly enabled: boolean;
   readonly required: boolean;
 
   constructor(
     config: ConfigService,
     private readonly objectStorage: ObjectStorageProvider,
+    @Optional() private readonly redisProvider?: RedisProvider,
   ) {
     const nodeEnv =
       config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
@@ -119,6 +148,9 @@ export class DocumentQueueService implements OnModuleDestroy {
       this.worker = null!;
       this.obsidianQueue = null!;
       this.obsidianWorker = null!;
+      this.graphQueue = null!;
+      this.graphQueueEvents = null!;
+      this.graphWorker = null!;
       this.cleanupQueue = null!;
       this.cleanupWorker = null!;
       return;
@@ -152,6 +184,22 @@ export class DocumentQueueService implements OnModuleDestroy {
         },
       },
     );
+
+    this.graphQueue = new Queue<DocumentGraphIndexJob>(
+      DOCUMENT_GRAPH_INDEX_QUEUE,
+      {
+        connection,
+        defaultJobOptions: {
+          attempts: DOCUMENT_PROCESSING_ATTEMPTS,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: { age: 3600 * 24 },
+          removeOnFail: { age: 3600 * 24 * 7 },
+        },
+      },
+    );
+    this.graphQueueEvents = new QueueEvents(DOCUMENT_GRAPH_INDEX_QUEUE, {
+      connection,
+    });
 
     this.worker = new Worker<DocumentProcessingJob>(
       DOCUMENT_PROCESSING_QUEUE,
@@ -194,6 +242,34 @@ export class DocumentQueueService implements OnModuleDestroy {
         ),
       },
     );
+
+    this.graphWorker = new Worker<DocumentGraphIndexJob>(
+      DOCUMENT_GRAPH_INDEX_QUEUE,
+      async (job) => {
+        if (!this.graphProcessor) {
+          throw new Error('Document graph index processor is not registered.');
+        }
+        await this.withGraphIndexLock(job.data.docId, () =>
+          this.graphProcessor!(job.data),
+        );
+      },
+      { connection, concurrency: 1 },
+    );
+
+    this.graphWorker.on('failed', (job, err) => {
+      if (
+        !job ||
+        job.attemptsMade < Number(job.opts.attempts ?? 1) ||
+        !this.graphFailureHandler
+      ) {
+        return;
+      }
+      void this.graphFailureHandler(job.data, err).catch((handlerError) => {
+        this.logger.error(
+          `Graph index failure callback failed for doc=${job.data.docId}: ${handlerError instanceof Error ? handlerError.message : String(handlerError)}`,
+        );
+      });
+    });
 
     this.obsidianWorker.on('failed', (job, err) => {
       this.logger.error(
@@ -257,6 +333,102 @@ export class DocumentQueueService implements OnModuleDestroy {
 
   registerObsidianNoteProcessor(processor: ObsidianNoteIngestProcessor): void {
     this.obsidianProcessor = processor;
+  }
+
+  registerGraphIndexProcessor(processor: DocumentGraphIndexProcessor): void {
+    this.graphProcessor = processor;
+  }
+
+  registerGraphIndexFailureHandler(
+    handler: DocumentGraphIndexFailureHandler,
+  ): void {
+    this.graphFailureHandler = handler;
+  }
+
+  async enqueueGraphIndex(job: DocumentGraphIndexJob): Promise<boolean> {
+    if (!this.enabled) return false;
+    const jobId = this.graphJobId(job.docId, job.indexGeneration);
+    const existing = await this.graphQueue.getJob(jobId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'failed') {
+        await existing.retry();
+        return true;
+      }
+      if (state === 'completed') await existing.remove();
+      else return true;
+    }
+    await this.graphQueue.add(jobId, job, { jobId });
+    return true;
+  }
+
+  /** 删除文档前移除排队中的图索引，并等待正在写图的任务结束。 */
+  async cancelGraphIndexes(docId: string): Promise<void> {
+    if (!this.enabled) return;
+    const jobs: Awaited<ReturnType<typeof this.graphQueue.getJobs>> = [];
+    const pageSize = 500;
+    let start = 0;
+    while (true) {
+      const page = await this.graphQueue.getJobs(
+        ['waiting', 'delayed', 'paused', 'waiting-children', 'active'],
+        start,
+        start + pageSize - 1,
+      );
+      jobs.push(...page);
+      if (page.length < pageSize) break;
+      start += page.length;
+    }
+    for (const job of jobs.filter((candidate) => candidate.data.docId === docId)) {
+      const state = await job.getState();
+      if (state === 'active') {
+        try {
+          await job.waitUntilFinished(this.graphQueueEvents, 30_000);
+        } catch (error) {
+          if ((await job.getState()) === 'active') throw error;
+        }
+      } else if (state !== 'completed' && state !== 'failed') {
+        await job.remove();
+      }
+    }
+  }
+
+  /** 多实例共享 Redis 锁，避免同一文档的两个图谱重建互相覆盖。 */
+  async withGraphIndexLock<T>(
+    docId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.redisProvider?.isEnabled()) {
+      if (this.required) throw new Error('Redis unavailable for graph index lock');
+      return work();
+    }
+    const lockKey = `rag:document:graph-index-lock:${docId}`;
+    const token = randomUUID();
+    const acquired = await this.redisProvider.setIfAbsentRequired(
+      lockKey,
+      token,
+      300,
+    );
+    if (!acquired) throw new Error(`graph index is already running for ${docId}`);
+    let lockLost = false;
+    const renewalTimer = setInterval(() => {
+      void this.redisProvider!
+        .renewLock(lockKey, token, 300)
+        .then((renewed) => {
+          if (!renewed) lockLost = true;
+        })
+        .catch(() => {
+          lockLost = true;
+        });
+    }, 60_000);
+    renewalTimer.unref?.();
+    try {
+      const result = await work();
+      if (lockLost) throw new Error(`graph index lock was lost for ${docId}`);
+      return result;
+    } finally {
+      clearInterval(renewalTimer);
+      await this.redisProvider.compareAndDeleteRequired(lockKey, token);
+    }
   }
 
   /**
@@ -581,11 +753,22 @@ export class DocumentQueueService implements OnModuleDestroy {
     if (!this.enabled) return;
     await this.cleanupWorker.close();
     await this.cleanupQueue.close();
+    await this.graphWorker.close();
+    await this.graphQueueEvents.close();
+    await this.graphQueue.close();
     await this.obsidianWorker.close();
     await this.obsidianQueue.close();
     await this.worker.close();
     await this.queueEvents.close();
     await this.queue.close();
+  }
+
+  private graphJobId(docId: string, indexGeneration: string): string {
+    const digest = createHash('sha256')
+      .update(`${docId}:${indexGeneration}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `graph-${digest}`;
   }
 
   private async scheduleSourceObjectCleanup(

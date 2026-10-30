@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Observable, tap } from 'rxjs';
+import { redactWorkspacePreviewTicketFromPath } from '../request-path.util';
 import { MetricsService } from '../../modules/metrics/metrics.service';
 
 @Injectable()
@@ -27,7 +28,8 @@ export class InvokeRecordInterceptor implements NestInterceptor {
     const response = context.switchToHttp().getResponse<Response>();
 
     const userAgent = request.headers['user-agent'];
-    const { ip, method, path } = request;
+    const { ip, method } = request;
+    const path = redactWorkspacePreviewTicketFromPath(request.path);
 
     this.logger.log(
       `${method} ${path} ${ip} ${userAgent}: ${

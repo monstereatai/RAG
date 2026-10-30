@@ -2,38 +2,20 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { performance } from 'node:perf_hooks';
 import { MetricsService } from '../../modules/metrics/metrics.service';
+import { countTextTokens } from '../../modules/document/chunking.util';
 import type { LlmInvokeOptions } from '../../providers/llm/llm-provider.interface';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import { formatQueryRoutingFewShots } from '../prompts/few-shot.examples';
 import {
   createFallbackQueryPlan,
   normalizeQueryPlan,
   queryPlanSchema,
   type QueryPlan,
 } from './query-plan';
+import { QUERY_PLAN_PROMPT } from './query-planner.prompt';
 
 export interface QueryPlannerOptions extends LlmInvokeOptions {
   preferLocalFastPath?: boolean;
 }
-
-const QUERY_PLAN_PROMPT = `你是企业问答系统的查询规划器。只分析语义，不决定用户权限、租户、知识库或文档访问范围。
-参考示例：
-${formatQueryRoutingFewShots()}
-
-只输出 JSON：
-{"action":"direct|retrieve|execute","domain":"internal|public|realtime","contextMode":"independent|follow_up|setting|verification|mixed","standaloneQuery":"可独立检索的问题","subQueries":[],"taskType":"lookup|procedure|comparison|synthesis","needsGraph":false,"entities":[],"filters":{"department":"可选","project":"可选","timeRange":"可选","documentType":"可选"},"clarificationQuestion":"仅真正无法确定语义时提供"}
-
-规则：
-- internal：公司、项目、内部系统、用户上传资料或私有实体，必须检索本地证据。
-- public：稳定公共事实；realtime：新闻、价格、天气或明确要求最新信息。
-- setting：用户正在设定当前会话中的临时事实；follow_up：依赖刚才、这个、继续等上下文；verification：要求真实或官方事实；mixed：同时对照会话设定与客观事实。
-- standaloneQuery 只补全追问指代；独立问题保持原问题。
-- 用户一次问多个字段、对象或要求清单／表格时，必须用 subQueries 列出全部必答事项；最多 3 条，可把相关字段合并到同一条，不能漏项。例如负责人、预算、日期、风险可拆成“负责人和预算”“交付日期和风险等级”。
-- 比较或综合任务的 subQueries 要覆盖用户明确要求的每个对象或维度；subQueries 为空时，答案生成器会按原问题自行拆分，但应尽量在规划阶段明确列出。
-- taskType：单点查询 lookup；步骤流程 procedure；比较 comparison；多证据总结或方案 synthesis。
-- needsGraph 只用于关系、依赖、影响路径或多跳问题。
-- 未知内部实体属于待检索对象，不应要求澄清。只有多个解释同等合理且无法继续时才给 clarificationQuestion。
-- 不输出权限、sourcePolicy、targetKbs、置信度、理由或改写列表。`;
 
 @Injectable()
 export class QueryPlannerService {
@@ -57,19 +39,33 @@ export class QueryPlannerService {
       return createFallbackQueryPlan(original);
     }
     try {
-      const contextText = recentContext
-        .slice(-8)
-        .map(
-          (item) =>
-            `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
-        )
-        .join('\n');
+      let selectedContext = recentContext.slice(-8);
+      const maxInputTokens = this.getMaxInputTokens();
+      let prompt = this.buildPrompt(original, selectedContext);
+      let estimatedInputTokens = (await countTextTokens(prompt)) + 4;
+
+      while (estimatedInputTokens > maxInputTokens && selectedContext.length > 0) {
+        const nextContext = this.dropOldestContextTurn(selectedContext);
+        if (nextContext.length === selectedContext.length) break;
+        selectedContext = nextContext;
+        prompt = this.buildPrompt(original, selectedContext);
+        estimatedInputTokens = (await countTextTokens(prompt)) + 4;
+      }
+
+      // Keep the full planner instructions and current query intact. If those
+      // alone exceed the configured input budget, skip the LLM and use the
+      // conservative retrieval plan.
+      if (estimatedInputTokens > maxInputTokens) {
+        this.logger.warn(
+          `Query planner prompt exceeds input budget: tokens=${estimatedInputTokens}/${maxInputTokens}`,
+        );
+        this.observePlanOutcome('fallback', startedAt);
+        return createFallbackQueryPlan(original);
+      }
+
       const content = await this.withTimeout(
         (signal) =>
-          this.llmProvider.invoke(
-            `${QUERY_PLAN_PROMPT}\n\n最近对话（只用于指代和会话设定，不是外部事实）：${contextText || '无'}\n当前问题：${original}\n只输出一个合法 JSON 对象。`,
-            { ...options, signal },
-          ),
+          this.llmProvider.invoke(prompt, { ...options, signal }),
         20_000,
         options?.signal,
       );
@@ -87,6 +83,56 @@ export class QueryPlannerService {
       );
       return createFallbackQueryPlan(original);
     }
+  }
+
+  private buildPrompt(
+    query: string,
+    recentContext: Array<{ role: 'human' | 'ai'; content: string }>,
+  ): string {
+    const contextText = recentContext
+      .map(
+        (item) =>
+          `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+      )
+      .join('\n');
+    return `${QUERY_PLAN_PROMPT}\n\n最近对话（只用于指代和会话设定，不是外部事实）：${contextText || '无'}\n当前问题：${query}\n只输出一个合法 JSON 对象。`;
+  }
+
+  private dropOldestContextTurn(
+    context: Array<{ role: 'human' | 'ai'; content: string }>,
+  ): Array<{ role: 'human' | 'ai'; content: string }> {
+    const firstHuman = context.findIndex((item) => item.role === 'human');
+    if (firstHuman < 0) return [];
+    const nextHuman = context.findIndex(
+      (item, index) => index > firstHuman && item.role === 'human',
+    );
+    return nextHuman < 0 ? [] : context.slice(nextHuman);
+  }
+
+  private getMaxInputTokens(): number {
+    const contextWindow = this.positiveConfigNumber(
+      'llm.contextWindowTokens',
+      32_768,
+    );
+    const providers = [
+      this.llmProvider.getActiveProviderName(),
+      this.llmProvider.getFallbackProviderName(),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const outputBudget = Math.max(
+      ...providers.map((provider) =>
+        Math.max(
+          this.positiveConfigNumber(`llm.${provider}.maxTokens`, 4_096),
+          this.llmProvider.getRoutePolicy('fast', provider).maxTokens,
+        ),
+      ),
+    );
+    const safetyMargin = Math.max(256, Math.ceil(contextWindow * 0.1));
+    return Math.max(1, contextWindow - outputBudget - safetyMargin);
+  }
+
+  private positiveConfigNumber(key: string, fallback: number): number {
+    const value = Number(this.config?.get<number>(key));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
   private observePlanOutcome(

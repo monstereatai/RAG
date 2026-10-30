@@ -44,6 +44,7 @@
     "eval:rag:release": "EVAL_RAG_RELEASE_GATE=true EVAL_RAG_JUDGE_REQUIRED=true PROJECT_EVAL_REQUIRE_LIVE=true node scripts/eval-rag-quality-gate.mjs",
     "eval:prompt-injection": "node scripts/eval-prompt-injection.mjs",
     "eval:agent-tasks": "node scripts/eval-agent-task-metrics.mjs",
+    "eval:conversation-context": "node scripts/eval-conversation-context.mjs",
     "eval:bad-case": "node scripts/eval-bad-case-regression.mjs",
     "eval:bad-case:long-term": "BAD_CASE_REGRESSION_HISTORY=.tmp/evidence/bad-case-regression-history.jsonl node scripts/eval-bad-case-regression.mjs",
     "eval:production-workflow": "node scripts/eval-production-workflow.mjs",
@@ -105,6 +106,7 @@
     "migration:show": "npx typeorm-ts-node-commonjs migration:show -d src/providers/db/typeorm.config.ts"
   },
   "dependencies": {
+    "@alibaba-group/opensandbox": "1.1.1",
     "@elastic/elasticsearch": "8.13.0",
     "@grpc/grpc-js": "1.14.4",
     "@grpc/proto-loader": "0.8.1",

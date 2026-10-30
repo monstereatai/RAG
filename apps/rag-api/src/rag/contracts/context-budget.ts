@@ -4,7 +4,8 @@ export type ContextMessageSource =
   | 'session_memory'
   | 'short_term_summary'
   | 'user_memory'
-  | 'history_search';
+  | 'history_search'
+  | 'agent_skill';
 
 /** One system-context item with explicit provenance and retention priority. */
 export interface ContextMessageCandidate {

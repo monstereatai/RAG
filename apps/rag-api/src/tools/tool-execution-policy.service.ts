@@ -27,6 +27,14 @@ export class ToolExecutionPolicyService {
         reason: '工具未在 Tool Registry 注册，按默认拒绝策略阻断。',
       };
     }
+    if (!Number.isFinite(entry.timeoutMs) || entry.timeoutMs <= 0) {
+      return {
+        allowed: false,
+        entry,
+        requiresApproval: false,
+        reason: `工具 ${toolName} 的 timeoutMs 配置无效，按默认拒绝策略阻断。`,
+      };
+    }
     if (!entry.modes.includes(context.mode)) {
       return {
         allowed: false,
@@ -60,10 +68,18 @@ export class ToolExecutionPolicyService {
     return {
       allowed: true,
       entry,
-      requiresApproval: Boolean(entry.requiresApproval),
-      reason: entry.requiresApproval
-        ? '工具已授权，但写入类动作必须经过执行审批门禁。'
-        : '工具已通过最小权限校验。',
+      // 写权限和高风险标签都必须经过审批；即使未来漏配 requiresApproval 也默认保护。
+      requiresApproval: Boolean(
+        entry.requiresApproval ||
+          entry.permission === 'write' ||
+          entry.risk === 'high',
+      ),
+      reason:
+        entry.requiresApproval ||
+        entry.permission === 'write' ||
+        entry.risk === 'high'
+          ? '工具已授权，但其写入权限或高风险标记要求经过执行审批门禁。'
+          : '工具已通过最小权限校验。',
     };
   }
 }

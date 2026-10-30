@@ -24,6 +24,26 @@ pnpm --dir apps/rag-api run enterprise:readiness
 
 生产发布仍需目标机器、域名、证书、密钥注入、备份恢复和回滚策略。不要把本地服务启动或静态 readiness 结果当成生产已就绪。
 
+### Langfuse 本地观测服务
+
+Langfuse 使用独立 Compose 栈，界面地址为 `http://127.0.0.1:3002`，数据卷与 RAG 开发栈分开。登录与服务密钥保存在仓库外的 owner-only 文件：`$HOME/Library/Application Support/RAG/langfuse.secrets`。
+
+```bash
+docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml up -d
+docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml ps
+docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml stop
+```
+
+`stop` 会停止服务并保留数据卷；之后用 `up -d` 恢复。旧项目 `rag-langfuse` 保留着首次不完整导入的数据卷并处于停止状态，不要与当前 `rag-langfuse-clean` 同时启动。历史数据迁移没有改变 `apps/rag-api/.env`，RAG 应用新产生的 trace 仍发往 Langfuse Cloud。
+
+### OpenSandbox Agent 项目工作区
+
+Agent 项目工作区需要单独部署并配置 OpenSandbox Server、兼容的执行镜像，以及 `OPEN_SANDBOX_DOMAIN`、`OPEN_SANDBOX_IMAGE`；启用认证时再注入 `OPEN_SANDBOX_API_KEY`。其余可选配置见 `apps/rag-api/.env.example`。当前 RAG 适配器默认限制为 2 CPU、4 GiB 内存、6 小时绝对寿命；网络默认拒绝，只放行 npm、npmmirror 和阿里云镜像域名。需要其他包源时，通过 `OPEN_SANDBOX_EGRESS_ALLOWLIST` 显式添加。
+
+沙箱不挂载宿主目录，不注入 RAG、数据库、对象存储或模型凭据，也不挂 Docker Socket。Agent 命令最多运行 240 秒，单次输出保留最近 16 KiB；预览票据绑定工作流与端口、5 分钟过期，并只允许 GET/HEAD。项目预览代理不支持 WebSocket，因此 Vite HMR 不可用，修改后需手动刷新。
+
+RAG 当前通过 SDK 配置 CPU、内存、绝对寿命和网络策略；磁盘配额、PID 上限及底层容器运行参数必须在 OpenSandbox Server/Runtime 部署配置中另行设硬限制。启用前需在目标环境确认这些限制、Server 与 SDK 兼容性、真实 tenant 身份传递、域名路由和包源可达性，并做隔离与超时演练。本地 mock 测试不代表真实 Sandbox 部署验收。
+
 ## 3. 依赖与降级边界
 
 项目可能使用 PostgreSQL、Redis／BullMQ、Milvus、Elasticsearch、Neo4j、对象存储及外部模型／检索服务。具体 compose 配置和环境变量模板是实际运行配置的来源。

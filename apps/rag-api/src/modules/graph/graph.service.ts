@@ -194,7 +194,14 @@ export class GraphService {
 
   /** 移除一个来源的归属；共享实体和关系继续保留其余来源。 */
   async removeSource(sourceId: string, userId: string): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!this.isEnabled()) {
+      if (this.neo4jProvider.isConfigured()) {
+        throw new ServiceUnavailableException(
+          'Neo4j is configured but unavailable; source cleanup was not completed.',
+        );
+      }
+      return;
+    }
 
     await this.neo4jProvider.executeWrite(
       `

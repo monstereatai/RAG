@@ -27,6 +27,18 @@ export class ArtifactGeneratorService {
         return this.architecture(artifact);
       case 'image':
         return this.image(artifact);
+      case 'json':
+        return {
+          body: Buffer.from(`${artifact.sourceText.trim()}\n`, 'utf8'),
+          contentType: 'application/json; charset=utf-8',
+          extension: 'json',
+        };
+      case 'code':
+        return {
+          body: Buffer.from(artifact.sourceText, 'utf8'),
+          contentType: 'application/zip',
+          extension: 'zip',
+        };
     }
   }
 

@@ -12,13 +12,15 @@ import neo4j, { Driver, Session } from 'neo4j-driver';
 export class Neo4jProvider implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(Neo4jProvider.name);
   private driver: Driver | null = null;
+  private configured = false;
   private enabled = false;
   private connected = false;
 
   constructor(private readonly config: ConfigService) {}
 
   async onModuleInit() {
-    this.enabled = this.config.get<boolean>('neo4j.enabled') ?? false;
+    this.configured = this.config.get<boolean>('neo4j.enabled') ?? false;
+    this.enabled = this.configured;
     if (!this.enabled) {
       this.logger.log(
         'GraphRAG is disabled. Set GRAPH_RAG_ENABLED=true to enable Neo4j.',
@@ -61,6 +63,10 @@ export class Neo4jProvider implements OnModuleInit, OnModuleDestroy {
 
   isEnabled(): boolean {
     return this.enabled && this.connected && !!this.driver;
+  }
+
+  isConfigured(): boolean {
+    return this.configured;
   }
 
   getReadSession(): Session {

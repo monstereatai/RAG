@@ -8,6 +8,213 @@ export type ProductionRole =
   | 'qa'
   | 'operations';
 
+export type ProductionArtifactTarget =
+  | 'activity-schema'
+  | 'vue-page'
+  | 'react-page'
+  | 'dashboard-schema'
+  | 'vue-dashboard'
+  | 'react-dashboard';
+
+export interface ProductionArtifactVersion {
+  id: string;
+  title: string;
+  kind: 'json' | 'code' | string;
+  status: string;
+  filename: string;
+  size: number;
+  createdAt: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface ProductionWorkspaceStatus {
+  ready: boolean;
+  projectRoot: string | null;
+  devServer?: { port: number; commandId: string };
+}
+
+const productionWorkspacePath = (threadId: string) =>
+  `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace`;
+
+export const getProductionWorkspaceStatus = (threadId: string) =>
+  authRequest<unknown>(productionWorkspacePath(threadId));
+
+export const startProductionWorkspace = (
+  threadId: string,
+  body: { artifactId: string },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/start`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const runProductionWorkspaceAgent = (
+  threadId: string,
+  body: { artifactId: string; instruction: string },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/agent`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const runProductionWorkspaceCommand = (
+  threadId: string,
+  body: { command: string },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/command`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const startProductionWorkspaceDevServer = (
+  threadId: string,
+  body: { port: number; command?: string },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/dev-server/start`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const stopProductionWorkspaceDevServer = (threadId: string) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/dev-server/stop`, {
+    method: 'POST',
+    data: {},
+  });
+
+export const createProductionWorkspacePreviewTicket = (
+  threadId: string,
+  body: { port: number },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/preview-ticket`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const exportProductionWorkspace = (threadId: string) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/export`, {
+    method: 'POST',
+    data: {},
+  });
+
+export const deleteProductionWorkspace = (
+  threadId: string,
+  body: { confirmDiscard: true },
+) =>
+  authRequest<unknown>(productionWorkspacePath(threadId), {
+    method: 'DELETE',
+    data: body,
+  });
+
+export const getProductionWorkflowArtifacts = (threadId: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts`,
+  );
+
+export const generateProductionWorkflowArtifacts = (
+  threadId: string,
+  targets: ProductionArtifactTarget[],
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/generate`,
+    { method: 'POST', data: { targets } },
+  );
+
+export const proposeProductionArtifactEdit = (
+  threadId: string,
+  body: {
+    target: 'activity-schema' | 'dashboard-schema';
+    baseArtifactId: string;
+    instruction: string;
+  },
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/edit`,
+    { method: 'POST', data: body },
+  );
+
+export const proposeProductionCodeEdit = (
+  threadId: string,
+  body: { baseArtifactId: string; instruction: string },
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/code-edit`,
+    { method: 'POST', data: body },
+  );
+
+export const applyProductionCodeEdit = (
+  threadId: string,
+  body: {
+    baseArtifactId: string;
+    instruction: string;
+    files: Record<string, string>;
+  },
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/code-edit/apply`,
+    { method: 'POST', data: body },
+  );
+
+export const applyProductionArtifactEdit = (
+  threadId: string,
+  body: {
+    target: 'activity-schema' | 'dashboard-schema';
+    baseArtifactId: string;
+    schema: Record<string, unknown>;
+    regenerateTargets: ProductionArtifactTarget[];
+  },
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/apply`,
+    { method: 'POST', data: body },
+  );
+
+export const restoreProductionArtifactVersion = (
+  threadId: string,
+  artifactId: string,
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/restore`,
+    { method: 'POST', data: { artifactId } },
+  );
+
+export const simulateProductionArtifactSync = (
+  threadId: string,
+  artifactId: string,
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/simulated-sync`,
+    { method: 'POST', data: {} },
+  );
+
+export const getProductionArtifactPreview = (
+  threadId: string,
+  artifactId: string,
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
+  );
+
+export const getProductionArtifactSource = (
+  threadId: string,
+  artifactId: string,
+) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/source`,
+  );
+
+export const downloadProductionArtifact = (
+  threadId: string,
+  artifactId: string,
+) =>
+  fetch(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+    {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
+      },
+    },
+  );
+
 export interface ProductionStageResult {
   role: ProductionRole;
   revision: number;
@@ -90,7 +297,8 @@ export interface ProductionWorkflow {
     | 'pending_approval'
     | 'revision_required'
     | 'completed'
-    | 'failed';
+    | 'failed'
+    | 'cancelled';
   rerunRoles: ProductionRole[];
   staleRoles: ProductionRole[];
   revisionNumber: number;
@@ -115,13 +323,18 @@ export interface ProductionWorkflow {
 }
 
 export interface AgentEvalResult {
-  passed: boolean;
-  metrics: Record<string, number>;
+  status: 'evaluated' | 'insufficient_data' | 'not_evaluated';
+  passed: boolean | null;
+  reason: string;
+  metrics: Record<string, number | null>;
+  thresholds: Record<string, number>;
   assertions: {
     unsupportedClaims: string[];
     missingRequirements: string[];
+    missingContextClaims: string[];
     missingTestCaseSections: string[];
   };
+  judge: Record<string, unknown>;
 }
 
 export interface AgentBadCase {
@@ -293,6 +506,12 @@ export const reviseProductionWorkflow = (
   authRequest<unknown>(
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/revise`,
     { method: 'POST', data: body },
+  );
+
+export const cancelProductionWorkflow = (threadId: string, reason?: string) =>
+  authRequest<unknown>(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/cancel`,
+    { method: 'POST', data: { reason } },
   );
 
 export const getProductionWorkflow = (threadId: string) =>
@@ -577,7 +796,13 @@ export const createAgentRuntimePlan = (body: Record<string, unknown>) =>
   });
 
 export const retryAgentRunRecord = (id: string) =>
-  authRequest<unknown>(
+  authRequest<{
+    previousRunId: string;
+    runId: string;
+    threadId: string;
+    status: 'completed' | 'waiting_approval';
+    route: 'agentic';
+  }>(
     `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`,
     { method: 'POST', data: {} },
   );

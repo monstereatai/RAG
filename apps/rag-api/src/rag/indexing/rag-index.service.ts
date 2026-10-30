@@ -54,6 +54,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
   private readonly globalBm25 = new BM25();
   private readonly chunkMeta = new Map<string, RagIndexedChunkMeta>();
   private persistedEntries: Bm25PersistedEntry[] = [];
+  private readonly snapshotPersistenceErrors = new Map<string, string>();
   private bm25Store?: Bm25Store;
   private initialized = false;
 
@@ -225,15 +226,11 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
       });
     }
 
-    // 持久化到磁盘
-    try {
-      this.persistEntries();
-      this.logger.log(
-        `BM25 index saved: ${this.persistedEntries.length} total chunks`,
-      );
-    } catch (err) {
-      this.logger.warn(`BM25 save failed: ${(err as Error).message}`);
-    }
+    // 主索引写入必须确认快照落盘；否则上层不能把入库标记为完成。
+    this.persistEntries(new Set(chunks.map((chunk) => chunk.docId)));
+    this.logger.log(
+      `BM25 index saved: ${this.persistedEntries.length} total chunks`,
+    );
 
     this.logger.log(
       `Indexed ${chunks.length} chunks into BM25 (total: ${this.chunkMeta.size})`,
@@ -277,7 +274,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
 
     // 持久化
     try {
-      this.persistEntries();
+      this.persistEntries(new Set([docId]));
       this.logger.log(
         `BM25 index updated after doc delete: docId=${docId}, remaining=${this.persistedEntries.length} chunks`,
       );
@@ -293,6 +290,15 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
   removeChunkIds(ids: string[], userId?: string): void {
     const idSet = new Set(ids.filter(Boolean));
     if (idSet.size === 0) return;
+    const affectedDocIds = new Set(
+      this.persistedEntries
+        .filter((entry) => idSet.has(entry.id))
+        .map((entry) => entry.docId),
+    );
+    for (const id of idSet) {
+      const docId = this.chunkMeta.get(id)?.docId;
+      if (docId) affectedDocIds.add(docId);
+    }
     this.persistedEntries = this.persistedEntries.filter(
       (entry) => idSet.has(entry.id) === false,
     );
@@ -316,7 +322,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
       })),
     );
     try {
-      this.persistEntries();
+      this.persistEntries(affectedDocIds);
     } catch (err) {
       this.logger.warn(`BM25 save failed: ${(err as Error).message}`);
     }
@@ -326,17 +332,22 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
   updateChunkMetadataByIds(ids: string[], patch: RagChunkMetadataPatch): void {
     const idSet = new Set(ids.filter(Boolean));
     if (idSet.size === 0) return;
+    const affectedDocIds = new Set(
+      this.persistedEntries
+        .filter((entry) => idSet.has(entry.id))
+        .map((entry) => entry.docId),
+    );
+    for (const id of idSet) {
+      const docId = this.chunkMeta.get(id)?.docId;
+      if (docId) affectedDocIds.add(docId);
+    }
     this.persistedEntries = this.persistedEntries.map((entry) =>
       idSet.has(entry.id) ? { ...entry, ...patch } : entry,
     );
     for (const [id, meta] of this.chunkMeta.entries()) {
       if (idSet.has(id)) this.chunkMeta.set(id, { ...meta, ...patch });
     }
-    try {
-      this.persistEntries();
-    } catch (err) {
-      this.logger.warn(`BM25 save failed: ${(err as Error).message}`);
-    }
+    this.persistEntries(affectedDocIds);
   }
 
   updateDocumentLifecycle(
@@ -355,7 +366,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         meta.lifecycleStatus = lifecycleStatus;
       }
     }
-    if (changed) this.persistEntries();
+    if (changed) this.persistEntries(new Set([docId]));
   }
 
   /**
@@ -376,12 +387,28 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
     ).length;
   }
 
+  getSnapshotPersistenceStatus(docId: string): {
+    persisted: boolean;
+    reason?: string;
+  } {
+    const reason = this.snapshotPersistenceErrors.get(docId);
+    if (reason) return { persisted: false, reason };
+    if (!this.bm25Store) {
+      return {
+        persisted: false,
+        reason: 'BM25 snapshot store is not initialized',
+      };
+    }
+    return { persisted: true };
+  }
+
   getIndexedChunkHashes(
     docId: string,
     userId?: string,
   ): {
     hashes: string[];
     generations: string[];
+    lifecycleStatuses: string[];
     complete: boolean;
   } {
     const entries = this.persistedEntries.filter(
@@ -395,6 +422,13 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         ...new Set(
           entries.flatMap((entry) =>
             entry.indexGeneration ? [entry.indexGeneration] : [],
+          ),
+        ),
+      ],
+      lifecycleStatuses: [
+        ...new Set(
+          entries.flatMap((entry) =>
+            entry.lifecycleStatus ? [entry.lifecycleStatus] : [],
           ),
         ),
       ],
@@ -463,12 +497,36 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
       .slice(0, limit);
   }
 
-  private persistEntries(): void {
-    if (this.bm25Store == null) return;
+  private persistEntries(affectedDocIds: ReadonlySet<string>): void {
+    if (this.bm25Store == null) {
+      const reason = 'BM25 snapshot store is not initialized';
+      this.markSnapshotPersistenceFailure(affectedDocIds, reason);
+      throw new Error(reason);
+    }
     try {
       this.bm25Store.save(this.persistedEntries);
+      // The snapshot contains all current entries, so one successful full save
+      // also resolves failures recorded by earlier writes.
+      this.snapshotPersistenceErrors.clear();
     } catch (err) {
-      this.logger.warn(`BM25 save failed: ${(err as Error).message}`);
+      const reason = (err as Error).message;
+      this.markSnapshotPersistenceFailure(affectedDocIds, reason);
+      throw err;
+    }
+  }
+
+  private markSnapshotPersistenceFailure(
+    affectedDocIds: ReadonlySet<string>,
+    reason: string,
+  ): void {
+    // save() overwrites the complete JSON file, so a failed write can leave
+    // any part of the snapshot incomplete, not only the changed document.
+    const uncertainDocIds = new Set([
+      ...this.persistedEntries.map((entry) => entry.docId),
+      ...affectedDocIds,
+    ]);
+    for (const docId of uncertainDocIds) {
+      this.snapshotPersistenceErrors.set(docId, reason);
     }
   }
 }

@@ -6,12 +6,10 @@ import type {
   RetrievedChunk,
 } from '../evidence/retrieval.types';
 import type { RagAnswerResult } from '../contracts/rag-types';
-import { generateAnswerPrompt } from '../prompts/rag.prompts';
-import { sanitizeUntrustedContext } from '../prompts/prompt-injection.guard';
 import { RagAnswerFallbackService } from './rag-answer-fallback.service';
 import { RagEvidenceService } from '../evidence/rag-evidence.service';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
-import { normalizePromptQuery } from '../retrieval/query-normalizer';
+import { rethrowIfAborted } from '../../common/errors/abort.util';
 
 export interface RagGroundedAnswerInput {
   query: string;
@@ -67,12 +65,6 @@ export class RagGroundedAnswerService {
       obsidianGateSufficient,
     } = input;
 
-    const context = evidenceChunks
-      .map(
-        (c, i) =>
-          `[片段 ${i + 1}｜${c.contextRole ?? 'hit'}]\n${sanitizeUntrustedContext(c.content)}`,
-      )
-      .join('\n\n---\n\n');
     this.logger.log(
       `Generating answer with ${ragChunkCount} RAG chunks and ${obsidianChunkCount} Obsidian chunks`,
     );
@@ -85,7 +77,12 @@ export class RagGroundedAnswerService {
     if (deterministicAnswer) {
       return {
         answer: deterministicAnswer,
-        references: this.evidenceService.toReferences(evidenceChunks),
+        references: this.evidenceService.toReferences(
+          this.evidenceService.selectCitedChunks(
+            deterministicAnswer,
+            evidenceChunks,
+          ),
+        ),
         retrievalSufficient: true,
         retrievalReason: '命中明确结构化事实，已使用片段抽取式回答',
         obsidianPaths: obsidianHits.map((hit) => hit.path),
@@ -94,22 +91,45 @@ export class RagGroundedAnswerService {
       };
     }
 
-    const messages = await generateAnswerPrompt.formatMessages({
-      context,
-      query: normalizePromptQuery(query),
-      answerRequirements: this.formatAnswerRequirements(answerRequirements),
+    const prepared = await this.answerGenerationService.prepareGroundedContext(
+      query,
+      answerRequirements,
+      evidenceChunks,
       history,
-      memory: generationMemory,
-    });
+      generationMemory,
+      Math.min(2, generationMemory.length),
+    );
+    if (!prepared.withinBudget) {
+      return {
+        answer: this.answerGenerationService.contextBudgetExceededAnswer(),
+        references: [],
+        retrievalSufficient: false,
+        retrievalReason: `必要上下文仍超出输入预算（估算 ${prepared.estimatedInputTokens}，上限 ${prepared.maxInputTokens} tokens）`,
+        obsidianPaths: obsidianHits.map((hit) => hit.path),
+        obsidianHits,
+        retrievalDiagnostics,
+      };
+    }
+    const selectedEvidenceChunks = prepared.evidenceChunks;
+    const selectedEvidenceIds = new Set(
+      selectedEvidenceChunks.map((chunk) => chunk.id),
+    );
+    const selectedRagChunks = ragChunks.filter((chunk) =>
+      selectedEvidenceIds.has(chunk.id),
+    );
+    const messages = prepared.messages;
     const generationModel = preferFastModel
       ? (this.llmProvider.getAgenticModel?.() ?? this.llmProvider.getModel())
       : this.llmProvider.getModel();
+    let rawAnswer = '';
     const stream = this.answerGenerationService.streamModel(
       generationModel,
       messages,
       signal,
+      () => {
+        rawAnswer = '';
+      },
     );
-    let rawAnswer = '';
     for await (const chunk of stream) {
       const token =
         typeof chunk.content === 'string'
@@ -120,8 +140,11 @@ export class RagGroundedAnswerService {
       onToken?.(token);
     }
     const answer = this.answerQuality.attachMissingClaimCitations(
-      this.fallbackService.addVersionConflictNotice(rawAnswer, ragChunks),
-      evidenceChunks,
+      this.fallbackService.addVersionConflictNotice(
+        rawAnswer,
+        selectedRagChunks,
+      ),
+      selectedEvidenceChunks,
     );
     if (this.fallbackService.isExplicitNoAnswerResponse(answer)) {
       return {
@@ -136,24 +159,24 @@ export class RagGroundedAnswerService {
     }
     const citationGate = this.answerQuality.assessCitationSupport(
       answer,
-      evidenceChunks,
+      selectedEvidenceChunks,
     );
     if (!citationGate.sufficient) {
       const extractiveFallback = hasPlannedAnswerRequirements
         ? null
         : this.evidenceService.buildCitationSafeExtractiveAnswer(
             normalizedQuery,
-            evidenceChunks,
+            selectedEvidenceChunks,
           );
       if (extractiveFallback) {
         const extractiveGate = this.answerQuality.assessCitationSupport(
           extractiveFallback,
-          evidenceChunks,
+          selectedEvidenceChunks,
         );
         if (extractiveGate.sufficient) {
           const citedChunks = this.evidenceService.selectCitedChunks(
             extractiveFallback,
-            evidenceChunks,
+            selectedEvidenceChunks,
           );
           return {
             answer: extractiveFallback,
@@ -169,20 +192,20 @@ export class RagGroundedAnswerService {
       const synthesizedFallback =
         await this.fallbackService.synthesizeEvidenceAnswer(
           normalizedQuery,
-          evidenceChunks,
+          selectedEvidenceChunks,
           signal,
           answerRequirements,
         );
       let repairedSynthesis = synthesizedFallback
         ? this.answerQuality.attachMissingClaimCitations(
             synthesizedFallback,
-            evidenceChunks,
+            selectedEvidenceChunks,
           )
         : null;
       let synthesisGate = repairedSynthesis
         ? this.answerQuality.assessCitationSupport(
             repairedSynthesis,
-            evidenceChunks,
+            selectedEvidenceChunks,
           )
         : null;
       if (this.llmProvider.getActiveProviderName?.() !== 'qwen') {
@@ -194,7 +217,7 @@ export class RagGroundedAnswerService {
             () =>
               this.fallbackService.synthesizeEvidenceAnswer(
                 normalizedQuery,
-                evidenceChunks,
+                selectedEvidenceChunks,
                 signal,
                 answerRequirements,
               ),
@@ -202,16 +225,17 @@ export class RagGroundedAnswerService {
           repairedSynthesis = qwenSynthesis
             ? this.answerQuality.attachMissingClaimCitations(
                 qwenSynthesis,
-                evidenceChunks,
+                selectedEvidenceChunks,
               )
             : null;
           synthesisGate = repairedSynthesis
             ? this.answerQuality.assessCitationSupport(
                 repairedSynthesis,
-                evidenceChunks,
+                selectedEvidenceChunks,
               )
             : null;
         } catch (error) {
+          rethrowIfAborted(error, signal);
           this.logger.warn(
             `Qwen semantic fallback failed: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -220,7 +244,7 @@ export class RagGroundedAnswerService {
       if (repairedSynthesis && synthesisGate?.sufficient) {
         const citedChunks = this.evidenceService.selectCitedChunks(
           repairedSynthesis,
-          evidenceChunks,
+          selectedEvidenceChunks,
         );
         return {
           answer: repairedSynthesis,
@@ -236,12 +260,12 @@ export class RagGroundedAnswerService {
         ? null
         : this.evidenceService.buildEvidenceFirstAnswer(
             normalizedQuery,
-            evidenceChunks,
+            selectedEvidenceChunks,
           );
       if (deterministicFallback) {
         const citedChunks = this.evidenceService.selectCitedChunks(
           deterministicFallback,
-          evidenceChunks,
+          selectedEvidenceChunks,
         );
         return {
           answer: deterministicFallback,
@@ -253,7 +277,6 @@ export class RagGroundedAnswerService {
           retrievalDiagnostics: retrievalDiagnostics,
         };
       }
-
       return {
         answer: this.answerGenerationService.unavailableWithEvidenceAnswer(),
         references: [],
@@ -267,7 +290,9 @@ export class RagGroundedAnswerService {
 
     return {
       answer,
-      references: this.evidenceService.toReferences(evidenceChunks),
+      references: this.evidenceService.toReferences(
+        this.evidenceService.selectCitedChunks(answer, selectedEvidenceChunks),
+      ),
       retrievalSufficient: true,
       retrievalReason: obsidianGateSufficient
         ? `Obsidian fast path 命中；检索片段和答案引用通过本地质量闸门`
@@ -276,11 +301,5 @@ export class RagGroundedAnswerService {
       obsidianHits,
       retrievalDiagnostics: retrievalDiagnostics,
     };
-  }
-
-  private formatAnswerRequirements(requirements: string[]): string {
-    return requirements.length
-      ? requirements.map((item, index) => `${index + 1}. ${item}`).join('\n')
-      : '无（请从用户问题中逐项拆分）';
   }
 }

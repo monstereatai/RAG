@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 import { InjectRepository } from '@nestjs/typeorm';
 import { z } from 'zod';
@@ -13,6 +14,10 @@ import { ConversationEntity } from '../../providers/db/entities/conversation.ent
 import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-event-outbox.entity';
 import { DomainEventsService } from '../domain-events/domain-events.service';
+import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
+import { countTextTokens } from '../document/chunking.util';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import { memoryClassifierSystemPrompt } from './memory.prompts';
 
 const CONVERSATION_MEMORY_PERSIST_EVENT = 'conversation.memory.persist';
 const MESSAGE_META_PREFIX = '<!-- rag-message-meta:';
@@ -30,44 +35,35 @@ const memoryClassifierSchema = z.object({
     .describe(
       '写入会话层：仅当前会话/thread 有效的任务、大纲、进度、待办、临时决策（如「这次先写…」「数据部分明天补」）。',
     ),
+  user_expiration_applies_to_all: z
+    .boolean()
+    .optional()
+    .describe(
+      '仅当本轮所有要写入 user 层的事实都有同一个、由用户明确说出的绝对到期日期时为 true；否则为 false。',
+    ),
   reason: z.string().describe('分类理由，一句话'),
 });
 
 type MemoryClassifierOutput = z.infer<typeof memoryClassifierSchema>;
 
 interface MemoryPersistenceProgress {
-  classification?: Pick<MemoryClassifierOutput, 'write_user' | 'write_session'>;
+  classification?: Pick<
+    MemoryClassifierOutput,
+    'write_user' | 'write_session' | 'user_expiration_applies_to_all'
+  >;
+  promptVersion?: string;
   completedScopes?: Array<'user' | 'session'>;
+  sourceMessageIds?: string[];
+  sourceRecordedAt?: string;
   onProgress?: (progress: {
     classification: Pick<
       MemoryClassifierOutput,
-      'write_user' | 'write_session'
+      'write_user' | 'write_session' | 'user_expiration_applies_to_all'
     >;
+    promptVersion?: string;
     completedScopes: Array<'user' | 'session'>;
   }) => void;
 }
-
-const CLASSIFIER_PROMPT = `你是记忆分层分类器。判断本轮对话是否有「新事实」需写入 Mem0，并分到正确层级。
-
-## user 层（跨会话长期）
-- 用户身份与画像：姓名、职业、居住地、长期爱好
-- 长期偏好与约束：饮食过敏、回答风格、常用技术栈
-- 持续数周以上的个人背景（非单次任务）
-
-## session 层（仅当前会话）
-- 当前正在做的任务、目标、文档大纲、方案草稿
-- 本会话内的进度、决策、待办、临时约定
-- 用户明确用「这次」「本轮」「当前会话」描述的工作上下文
-
-## 均不写入
-- 寒暄、致谢、纯确认
-- 助手生成的通用内容（攻略、示例代码、建议清单），用户未明确采纳为新事实
-- 无信息增量的复述
-
-## 决策原则
-1. 「这次我们先写 Q1 总结」「当前在排查 XX」→ 优先 session，不要标成 user
-2. user 与 session 可同时为 true（如同时说职业+当前任务），但勿把纯会话任务只标 user
-3. 一次性请求（如「帮我做旅行攻略」）且未产生需跨轮记住的约定 → 均为 false`;
 
 export interface MemorySearchResult {
   userMemories: Mem0MemoryResult[];
@@ -87,6 +83,7 @@ export interface MemoryClassifyResult {
   written: string[];
   reason: string;
   failed?: string[];
+  promptVersion?: string;
 }
 
 @Injectable()
@@ -107,6 +104,8 @@ export class MemoryService {
     @InjectRepository(MessageEntity)
     private readonly messageRepository?: Repository<MessageEntity>,
     @Optional() private readonly domainEvents?: DomainEventsService,
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
   ) {
     this.domainEvents?.registerInternalHandler(
       CONVERSATION_MEMORY_PERSIST_EVENT,
@@ -147,8 +146,13 @@ export class MemoryService {
     }
 
     // 并行搜索 user 层和 session 层
-    const [userMemories, sessionMemories] = await Promise.all([
-      this.mem0Provider.search({ query, userId, topK }),
+    const userCandidateLimit = Math.min(Math.max(topK, 1) * 5, 100);
+    const [userCandidates, sessionMemories] = await Promise.all([
+      this.mem0Provider.search({
+        query,
+        userId,
+        topK: userCandidateLimit,
+      }),
       conversationId
         ? this.mem0Provider.search({
             query,
@@ -158,6 +162,11 @@ export class MemoryService {
           })
         : Promise.resolve<Mem0MemoryResult[]>([]),
     ]);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const userMemories = userCandidates
+      .filter((memory) => !this.isExpiredUserMemory(memory, today))
+      .slice(0, Math.max(0, topK));
 
     const systemMessage = this.buildSystemMessage(
       userMemories,
@@ -208,6 +217,10 @@ export class MemoryService {
     }
 
     let result: MemoryClassifierOutput;
+    let promptVersion = progress.promptVersion;
+    const classificationSource = progress.classification
+      ? 'resumed_outbox'
+      : 'llm';
     if (progress.classification) {
       result = {
         ...progress.classification,
@@ -215,22 +228,51 @@ export class MemoryService {
       };
     } else {
       try {
+        const classifierMessages = [
+          new SystemMessage(memoryClassifierSystemPrompt),
+          new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
+        ];
+        const estimatedInputTokens = await this.estimatePromptTokens(
+          classifierMessages,
+        );
+        const maxInputTokens = this.getMaxInputTokens();
+        if (estimatedInputTokens > maxInputTokens) {
+          const reason = `memory classification skipped: protected prompt exceeds input budget (${estimatedInputTokens}/${maxInputTokens} tokens)`;
+          this.logger.warn(reason);
+          return { written: [], reason };
+        }
         const classifier = this.llmProvider
           .getModel()
           .withStructuredOutput(memoryClassifierSchema);
-        result = await classifier.invoke([
-          new SystemMessage(CLASSIFIER_PROMPT),
-          new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
-        ]);
+        promptVersion = getPromptVersion('memory.classifier');
+        result = await classifier.invoke(classifierMessages);
       } catch (err) {
         const message = (err as Error).message;
         this.logger.error(
           `Memory classify failed before persistence: ${message}`,
         );
+        if (conversationId) {
+          try {
+            await this.runtimeEvents?.emit({
+              threadId: conversationId,
+              eventType: 'memory.classification.failed',
+              actor: 'memory',
+              payload: {
+                source: 'llm',
+                ...(promptVersion ? { promptVersion } : {}),
+              },
+            });
+          } catch (auditError) {
+            this.logger.warn(
+              `Memory classification failure audit event failed: ${(auditError as Error).message}`,
+            );
+          }
+        }
         return {
           written: [],
           failed: ['classification'],
           reason: `error: ${message}`,
+          ...(promptVersion ? { promptVersion } : {}),
         };
       }
     }
@@ -243,7 +285,14 @@ export class MemoryService {
         classification: {
           write_user: result.write_user,
           write_session: result.write_session,
+          ...(result.user_expiration_applies_to_all === undefined
+            ? {}
+            : {
+                user_expiration_applies_to_all:
+                  result.user_expiration_applies_to_all,
+              }),
         },
+        ...(promptVersion ? { promptVersion } : {}),
         completedScopes: [...completedScopes],
       });
     };
@@ -252,13 +301,32 @@ export class MemoryService {
       { role: 'user', content: userText },
       { role: 'assistant', content: assistantText },
     ];
+    const sourceRecordedAt = progress.sourceRecordedAt ?? new Date().toISOString();
 
     if (result.write_user) {
       if (completedScopes.has('user')) {
         written.push('user');
       } else {
         try {
-          await this.mem0Provider.add({ messages: turn, userId });
+          const explicitExpiration = result.user_expiration_applies_to_all
+            ? this.extractExplicitUserMemoryExpiration(userText)
+            : null;
+          await this.mem0Provider.add({
+            messages: turn,
+            userId,
+            metadata: {
+              rag_recorded_at: sourceRecordedAt,
+              ...(conversationId
+                ? { rag_source_conversation_id: conversationId }
+                : {}),
+              ...(progress.sourceMessageIds?.length
+                ? { rag_source_message_ids: progress.sourceMessageIds }
+                : {}),
+              ...(explicitExpiration
+                ? { rag_valid_until: explicitExpiration }
+                : {}),
+            },
+          });
           written.push('user');
           completedScopes.add('user');
           saveProgress();
@@ -297,7 +365,36 @@ export class MemoryService {
       `Memory classify: reason="${result.reason}", written=[${written.join(', ')}], failed=[${failed.join(', ')}]`,
     );
 
-    return { written, failed, reason: result.reason };
+    if (conversationId) {
+      try {
+        await this.runtimeEvents?.emit({
+          threadId: conversationId,
+          eventType: 'memory.classification.completed',
+          actor: 'memory',
+          payload: {
+            source: classificationSource,
+            classification: {
+              write_user: result.write_user,
+              write_session: result.write_session,
+            },
+            written,
+            failed,
+            ...(promptVersion ? { promptVersion } : {}),
+          },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Memory classification audit event failed: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    return {
+      written,
+      failed,
+      reason: result.reason,
+      ...(promptVersion ? { promptVersion } : {}),
+    };
   }
 
   private async persistOutboxMemory(
@@ -387,9 +484,17 @@ export class MemoryService {
     }
 
     let classification: MemoryPersistenceProgress['classification'];
+    const promptVersion =
+      typeof payload.memoryClassificationPromptVersion === 'string'
+        ? payload.memoryClassificationPromptVersion
+        : undefined;
     if (payload.memoryClassification !== undefined) {
       const parsedClassification = memoryClassifierSchema
-        .pick({ write_user: true, write_session: true })
+        .pick({
+          write_user: true,
+          write_session: true,
+          user_expiration_applies_to_all: true,
+        })
         .safeParse(payload.memoryClassification);
       if (!parsedClassification.success) {
         throw new Error('Conversation memory event has an invalid classification.');
@@ -404,9 +509,15 @@ export class MemoryService {
       this.decodeStoredMessageContent(assistantMessage.content),
       {
         classification,
+        promptVersion,
         completedScopes,
+        sourceMessageIds: [userMessage.id, assistantMessage.id],
+        sourceRecordedAt: userMessage.createdAt.toISOString(),
         onProgress: (progress) => {
           payload.memoryClassification = progress.classification;
+          if (progress.promptVersion) {
+            payload.memoryClassificationPromptVersion = progress.promptVersion;
+          }
           payload.completedMemoryScopes = progress.completedScopes;
           event.payload = JSON.stringify(payload);
         },
@@ -425,6 +536,50 @@ export class MemoryService {
       return content;
     }
     return content.slice(0, markerStart).trimEnd();
+  }
+
+  private async estimatePromptTokens(
+    messages: Array<{ content: unknown }>,
+  ): Promise<number> {
+    const promptText = messages
+      .map(({ content }) =>
+        typeof content === 'string' ? content : JSON.stringify(content),
+      )
+      .join('\n');
+    return (await countTextTokens(promptText)) + messages.length * 4;
+  }
+
+  private getMaxInputTokens(): number {
+    const configuredWindow = Number(
+      this.config?.get<number>('llm.contextWindowTokens'),
+    );
+    const contextWindow =
+      Number.isFinite(configuredWindow) && configuredWindow > 0
+        ? configuredWindow
+        : 32_768;
+    const activeProvider = this.llmProvider.getActiveProviderName();
+    const providers = [
+      activeProvider,
+      this.llmProvider.getRoutePolicy('structured', activeProvider).fallback,
+    ].filter(
+      (provider): provider is NonNullable<typeof provider> => Boolean(provider),
+    );
+    const outputBudget = Math.max(
+      4_096,
+      ...providers.map((provider) => {
+        const configuredOutput = Number(
+          this.config?.get<number>(`llm.${provider}.maxTokens`),
+        );
+        return Math.max(
+          Number.isFinite(configuredOutput) && configuredOutput > 0
+            ? configuredOutput
+            : 4_096,
+          this.llmProvider.getRoutePolicy('structured', provider).maxTokens,
+        );
+      }),
+    );
+    const safetyMargin = Math.max(256, Math.ceil(contextWindow * 0.1));
+    return Math.max(1, contextWindow - outputBudget - safetyMargin);
   }
 
   /**
@@ -492,6 +647,65 @@ export class MemoryService {
     return new SystemMessage(
       `${buildContextPolicyMessage()}\n\n${blocks.join('\n\n')}\n\n${MEMORY_SCOPE_GUARD}`,
     );
+  }
+
+  private isExpiredUserMemory(
+    memory: Mem0MemoryResult,
+    today: string,
+  ): boolean {
+    const validUntil = memory.metadata?.rag_valid_until;
+    if (
+      typeof validUntil !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(validUntil)
+    ) {
+      return false;
+    }
+    return validUntil < today;
+  }
+
+  /**
+   * Mem0 add metadata applies to every fact extracted from this turn. Only
+   * attach an expiry when the user's own text gives one unambiguous date.
+   */
+  private extractExplicitUserMemoryExpiration(userText: string): string | null {
+    const datePattern =
+      /(?<!\d)(20\d{2})\s*(?:[-/.年])\s*(0?[1-9]|1[0-2])\s*(?:[-/.月])\s*(0?[1-9]|[12]\d|3[01])\s*日?/g;
+    const expirationBeforeDate =
+      /有效(?:期|期限)?(?:至|到|截至)|截止(?:日期|时间)?(?:至|到)?|截至|到期(?:日期|时间)?(?:至|到)?|直到|直至|保留(?:至|到)|使用到|用到|临时到|仅(?:有效)?(?:至|到)/;
+    const expirationAfterDate = /(?:到期|截止|失效|过期|之前|以前|为止)/;
+    const candidates: string[] = [];
+
+    for (const match of userText.matchAll(datePattern)) {
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      const nearbyBefore = userText.slice(Math.max(0, start - 20), start);
+      const nearbyAfter = userText.slice(end, end + 20);
+      if (
+        !expirationBeforeDate.test(nearbyBefore) &&
+        !expirationAfterDate.test(nearbyAfter)
+      ) {
+        continue;
+      }
+
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (
+        date.getUTCFullYear() !== year ||
+        date.getUTCMonth() !== month - 1 ||
+        date.getUTCDate() !== day
+      ) {
+        continue;
+      }
+      candidates.push(
+        `${year.toString().padStart(4, '0')}-${month
+          .toString()
+          .padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+      );
+    }
+
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   private static buildMemoryBlocks(

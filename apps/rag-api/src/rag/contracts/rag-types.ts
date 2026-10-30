@@ -96,6 +96,8 @@ export interface RetrieveOptions {
   sourcePolicy?: EvidenceSourcePolicy;
   /** 运行中心关联 ID，仅用于把 Agent Loop 事件归入当前 Run。 */
   runtimeRunId?: string;
+  /** 管理端重跑时强制走 Agentic，不能被歧义澄清分支改成 Simple。 */
+  forceAgenticRoute?: boolean;
   vectorSearch?: boolean;
   /** 旧版 Simple 自适应向量参数，仅保留调用兼容。 */
   adaptiveVectorSearch?: boolean;

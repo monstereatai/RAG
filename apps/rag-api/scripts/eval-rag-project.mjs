@@ -16,6 +16,17 @@ const requireLive = process.env.PROJECT_EVAL_REQUIRE_LIVE === 'true';
 const allowSkip = process.env.PROJECT_EVAL_ALLOW_SKIP === 'true';
 const dataset = JSON.parse(await readFile(datasetPath, 'utf8'));
 assertDataset(dataset);
+const requestedSplit = process.env.PROJECT_EVAL_SPLIT ?? 'all';
+if (!['all', 'development', 'holdout'].includes(requestedSplit)) {
+  throw new Error('PROJECT_EVAL_SPLIT must be all, development, or holdout');
+}
+const evalQueries =
+  requestedSplit === 'all'
+    ? dataset.queries
+    : dataset.queries.filter((item) => item.split === requestedSplit);
+if (evalQueries.length === 0) {
+  throw new Error(`No evaluation queries found for split: ${requestedSplit}`);
+}
 const defaultModes = Array.isArray(dataset.defaultModes)
   ? dataset.defaultModes
   : ['simple', 'auto', 'agentic'];
@@ -58,7 +69,7 @@ try {
 
   const results = [];
   for (const mode of modes) {
-    for (const [queryIndex, item] of dataset.queries.entries()) {
+    for (const [queryIndex, item] of evalQueries.entries()) {
       // 轮换执行顺序，避免同一配置总是先跑或后跑。
       const orderedVariants =
         queryIndex % 2 === 0 ? variants : [...variants].reverse();
@@ -158,6 +169,7 @@ try {
     baseUrl,
     dataset: datasetPath,
     version: dataset.version,
+    split: requestedSplit,
     score,
     variantScores,
     modeVariantScores,
@@ -177,6 +189,7 @@ try {
       serviceTokenConfigured: Boolean(serviceToken),
     },
     summary: summarize(results),
+    summaryBySplit: summarizeBySplit(results),
     metrics: summarizeMetrics(results),
     costMetrics: summarizeEstimatedUsage(results, variants, modes),
     pairedComparison: compareVariants(results, variants, modes),
@@ -191,7 +204,7 @@ try {
         expectedCaseCount:
           modes.length *
           variants.length *
-          dataset.queries.filter((item) => !isRefusalQuery(item)).length,
+          evalQueries.filter((item) => !isRefusalQuery(item)).length,
       })}\n`,
     );
   }
@@ -210,6 +223,7 @@ try {
     baseUrl,
     dataset: datasetPath,
     version: dataset.version,
+    split: requestedSplit,
     score: 0,
     minScore,
     validatedOnly: true,
@@ -488,6 +502,7 @@ function scoreAnswer(
 
   return {
     id: item.id,
+    split: item.split ?? 'unassigned',
     category: item.category,
     department: item.department,
     mode,
@@ -576,6 +591,7 @@ function toLiveJudgeCase(item, response, mode, variant) {
   return {
     id: `${mode}:${variant}:${item.id}`,
     sourceId: item.id,
+    split: item.split ?? 'unassigned',
     mode,
     variant,
     answer: response.answer ?? '',
@@ -688,6 +704,7 @@ function scoreQueryError(
   const retrievalApplicable = expectedDocIds.length > 0 && shouldRefuse === false;
   return {
     id: item.id,
+    split: item.split ?? 'unassigned',
     category: item.category,
     department: item.department,
     mode,
@@ -767,6 +784,16 @@ function summarize(results) {
     addBucket(byCategory, result.category ?? 'uncategorized', result.passed);
   }
   return { byMode, byVariant, byModeAndVariant, byCategory };
+}
+
+function summarizeBySplit(results) {
+  const splits = [...new Set(results.map((item) => item.split ?? 'unassigned'))];
+  return Object.fromEntries(
+    splits.map((split) => [
+      split,
+      summarize(results.filter((item) => (item.split ?? 'unassigned') === split)),
+    ]),
+  );
 }
 
 function addBucket(target, key, passed) {

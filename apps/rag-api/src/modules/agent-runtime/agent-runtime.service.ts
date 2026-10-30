@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { SkillsService } from '../skills/skills.service';
+import type { SkillMatch } from '../skills/skill.types';
 import type {
   AgentRuntimeMode,
   AgentRuntimePlan,
@@ -51,6 +52,15 @@ export class AgentRuntimeService {
     skillLimit?: number;
     skipSkillMatching?: boolean;
   }): Promise<AgentRuntimePlan> {
+    return (await this.createPlanWithSkills(input)).plan;
+  }
+
+  async createPlanWithSkills(input: {
+    objective: string;
+    mode: AgentRuntimeMode;
+    skillLimit?: number;
+    skipSkillMatching?: boolean;
+  }): Promise<{ plan: AgentRuntimePlan; matchedSkills: SkillMatch[] }> {
     const objective = input.objective.trim();
     const matchedSkills = input.skipSkillMatching
       ? []
@@ -63,17 +73,20 @@ export class AgentRuntimeService {
       /测试|验收|回归|验证|质量|风险|test|review|check/i.test(objective);
     const stages = this.stagesFor(input.mode, isCodeTask, isValidationTask);
     return {
-      planId: `plan_${randomUUID()}`,
-      mode: input.mode,
-      objective,
-      stages,
-      selectedSkills: matchedSkills.map((skill) => skill.name),
-      skillMatching: input.skipSkillMatching ? 'skipped_simple' : 'matched',
-      contextPolicy: {
-        isolatedByThread: true,
-        allowCrossThreadMemory: false,
+      plan: {
+        planId: `plan_${randomUUID()}`,
+        mode: input.mode,
+        objective,
+        stages,
+        selectedSkills: matchedSkills.map((skill) => skill.name),
+        skillMatching: input.skipSkillMatching ? 'skipped_simple' : 'matched',
+        contextPolicy: {
+          isolatedByThread: true,
+          allowCrossThreadMemory: false,
+        },
+        limits: this.limits(input.mode),
       },
-      limits: this.limits(input.mode),
+      matchedSkills,
     };
   }
 

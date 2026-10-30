@@ -543,7 +543,7 @@ docker compose -f infra/docker/docker-compose.prod.yml --profile graphrag up -d
 - W3C `traceparent` 兼容的 in-memory tracing
 - Agent 节点 trace 与指标：记录 LangGraph 节点耗时、首 token、工具成功率、空召回、循环终止原因；单 trace 超过 15 个节点标记 `span_limit`
 - 产研运 FSM：产品、设计、前端、后端、测试、运营顺序执行，每个岗位结构化输出并人工审批，驳回回退一节点，Redis Checkpointer 支持恢复
-- 结构化短期记忆：每轮问答结束后按可用历史 Token 预算检查，超预算或超过 40 条消息才压缩；摘要与近期原文共享预算，模型失败时保留 Redis 原文，完整消息留在 PostgreSQL，并用 Redis 锁避免同一会话并发压缩
+- 结构化短期记忆：每轮问答结束后按可用历史 Token 预算检查，超预算或超过消息安全上限才压缩；消息上限默认 200 条，可配置。摘要与近期原文共享预算，模型失败时保留 Redis 原文，完整消息留在 PostgreSQL，并用 Redis 锁避免同一会话并发压缩
 - Debug chunks 分数面板
 - Agentic workflow Mermaid 导出
 - RAG eval / E2E / perf 脚本

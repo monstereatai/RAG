@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
+import { redactWorkspacePreviewTicketFromPath } from '../../common/request-path.util';
 
 @Injectable()
 @Catch(HttpException)
@@ -13,7 +14,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const errorResponse = {
       statusCode: status,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: redactWorkspacePreviewTicketFromPath(request.url),
       method: request.method,
       message: exception.message,
       error: exception.name,

@@ -1,4 +1,4 @@
-import { MarkdownChunker } from './chunking.util';
+import { countTextTokens, MarkdownChunker } from './chunking.util';
 
 describe('MarkdownChunker', () => {
   it('splits long markdown text into multiple chunks', async () => {
@@ -18,7 +18,8 @@ describe('MarkdownChunker', () => {
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join('\n')).toContain('Title');
     expect(chunks.join('\n')).toContain('中文切分');
-    expect(chunks.every((chunk) => chunk.length <= 45)).toBe(true);
+    const tokenCounts = await Promise.all(chunks.map(countTextTokens));
+    expect(tokenCounts.every((count) => count <= 40)).toBe(true);
   });
 
   it('returns no chunks for empty text', async () => {

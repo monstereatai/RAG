@@ -64,6 +64,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
       NEO4J_URL: bolt://neo4j:7687
       ES_NODE: http://elasticsearch:9200
+      PREVIEW_RUNNER_URL: http://preview-runner:4321
       ALLOW_DEV_ENDPOINTS: 'false'
       # 密钥类从 .env 读取
     env_file:
@@ -84,6 +85,8 @@ services:
       neo4j:
         condition: service_healthy
         required: false
+      preview-runner:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -93,6 +96,39 @@ services:
           memory: 256M
     networks:
       - rag-net
+      - preview-net
+
+  # ---- Isolated generated-source compiler; no DB/API credentials and no data-network access ----
+  preview-runner:
+    build:
+      context: ../..
+      dockerfile: apps/preview-runner/Dockerfile
+    container_name: rag-preview-runner
+    restart: unless-stopped
+    environment:
+      PORT: 4321
+      NODE_ENV: production
+    read_only: true
+    user: '1000:1000'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+    networks:
+      - preview-net
 
   # ---- Frontend（nginx + React 静态资源）----
   frontend:
@@ -306,6 +342,9 @@ services:
 networks:
   rag-net:
     driver: bridge
+  preview-net:
+    driver: bridge
+    internal: true
 
 volumes:
   postgres_data:

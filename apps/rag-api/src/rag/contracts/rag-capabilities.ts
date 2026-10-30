@@ -104,7 +104,16 @@ export interface RagIndexCapability {
   getIndexedChunkHashes(
     docId: string,
     userId?: string,
-  ): { hashes: string[]; generations: string[]; complete: boolean };
+  ): {
+    hashes: string[];
+    generations: string[];
+    lifecycleStatuses: string[];
+    complete: boolean;
+  };
+  getSnapshotPersistenceStatus(docId: string): {
+    persisted: boolean;
+    reason?: string;
+  };
   getStats(): { totalChunks: number; totalDocs: number };
 }
 

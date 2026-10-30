@@ -140,6 +140,21 @@ export const configuration = () => ({
     ),
   },
 
+  // Isolated project workspaces use the OpenSandbox 1.1 lifecycle/execd API.
+  opensandbox: {
+    domain: process.env.OPEN_SANDBOX_DOMAIN ?? '',
+    apiKey: process.env.OPEN_SANDBOX_API_KEY ?? '',
+    protocol: process.env.OPEN_SANDBOX_PROTOCOL ?? 'http',
+    image: process.env.OPEN_SANDBOX_IMAGE ?? '',
+    cpuLimit: process.env.OPEN_SANDBOX_CPU_LIMIT ?? '2',
+    memoryLimit: process.env.OPEN_SANDBOX_MEMORY_LIMIT ?? '4Gi',
+    egressAllowlist: (process.env.OPEN_SANDBOX_EGRESS_ALLOWLIST ??
+      'registry.npmjs.org,npmjs.com,*.npmjs.com,registry.npmmirror.com,*.npmmirror.com,mirrors.aliyun.com')
+      .split(',')
+      .map((host) => host.trim())
+      .filter(Boolean),
+  },
+
   // 外部索引自动对账：生产默认开启，但只有 Redis/BullMQ 可用时才会投递修复任务。
   ragIndexReconciler: {
     enabled:

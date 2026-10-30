@@ -8,7 +8,8 @@ import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import type { RetrievalProfile } from '../../rag/retrieval/context-builder';
 import type { SseEvent } from '../../rag/agentic/sse-event';
-import type { ChatMode } from './chat.dto';
+import type { ChatMode, RetrievalScopeDto } from './chat.dto';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 
 type RunRoute = 'simple' | 'agentic';
 
@@ -49,6 +50,14 @@ type RequestSnapshotInput = {
   mode: ChatMode;
   rolePresetId?: string;
   role: string;
+  scope?: RetrievalScopeDto;
+  knowledgeBaseKey?: string;
+  approvalRequired: boolean;
+  useLongTermMemory: boolean;
+  hasSupplementalEvidence: boolean;
+  model?: string;
+  trustedAdminPrincipal?: boolean;
+  departmentIds?: string[];
   retrievalProfile?: RetrievalProfile;
   historyCount: number;
   memoryEnabled: boolean;
@@ -153,13 +162,21 @@ export class ChatRunObservabilityService {
     const hash = (value: string) =>
       createHash('sha256').update(value).digest('hex').slice(0, 16);
     return {
-      schemaVersion: 1,
+      schemaVersion: 3,
       mode: input.mode,
       threadId: input.threadId,
       queryHash: hash(input.query),
       queryLength: input.query.length,
       role: input.role,
       rolePresetId: input.rolePresetId ?? null,
+      scope: input.scope ?? null,
+      knowledgeBaseKey: input.knowledgeBaseKey ?? null,
+      approvalRequired: input.approvalRequired,
+      useLongTermMemory: input.useLongTermMemory,
+      hasSupplementalEvidence: input.hasSupplementalEvidence,
+      model: input.model ?? null,
+      trustedAdminPrincipal: input.trustedAdminPrincipal === true,
+      departmentIds: input.departmentIds ?? [],
       retrievalProfile: input.retrievalProfile
         ? {
             intent: input.retrievalProfile.intent,
@@ -172,8 +189,44 @@ export class ChatRunObservabilityService {
         : null,
       promptVersions: {
         roleContext: 'role-presets/v1',
-        memory: 'short-term-memory/v1',
-        answer: input.mode === 'simple' ? 'linear_rag/v1' : 'agentic/v1',
+        queryPlanner: getPromptVersion('rag.query_plan'),
+        answer: getPromptVersion('rag.generate_answer'),
+        sufficiency: getPromptVersion('agentic.sufficiency'),
+        reflection: getPromptVersion('agentic.reflection'),
+        memoryClassifier: getPromptVersion('memory.classifier'),
+        shortTermSummaryCompaction: getPromptVersion(
+          'memory.summary_compaction',
+        ),
+        shortTermSummaryRecovery: getPromptVersion(
+          'memory.summary_recovery',
+        ),
+      },
+      promptPath: {
+        routeMode: input.mode,
+        selectedRouteAtSnapshot: null,
+        routeResolvedBy: 'agentic_rag.fast_path',
+        common: ['rag.query_plan'],
+        queryPlanConditional:
+          '命中本地快速路径或预算保护时不调用该提示词，使用本地保守计划。',
+        simple: {
+          prompts: ['rag.generate_answer'],
+          conditional: '仅在进入 grounded LLM 生成分支时调用。',
+        },
+        agentic: {
+          prompts: [
+            'agentic.sufficiency',
+            'rag.generate_answer',
+            'agentic.reflection',
+          ],
+          conditional: '仅在后续 routing event 选择 agentic 路径时调用。',
+        },
+      },
+      memoryPromptPath: {
+        classifier:
+          '仅首次执行 conversation.memory.persist 的分类步骤时调用；复用 outbox 分类结果时不重新调用。',
+        summaryCompaction: '仅短期记忆压缩实际触发且通过预算检查后调用。',
+        summaryRecovery:
+          '仅持久摘要缺失且恢复流程需要 LLM 时调用；读取已有摘要不代表使用了当前版本。',
       },
       historyCount: input.historyCount,
       memoryEnabled: input.memoryEnabled,

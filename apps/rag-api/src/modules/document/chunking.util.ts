@@ -1,4 +1,48 @@
-import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { TokenTextSplitter } from '@langchain/textsplitters';
+
+const TOKEN_ENCODING = 'cl100k_base';
+const tokenSplitters = new Map<string, TokenTextSplitter>();
+
+function getTokenSplitter(
+  chunkSize: number,
+  chunkOverlap = 0,
+): TokenTextSplitter {
+  const key = `${chunkSize}:${chunkOverlap}`;
+  let splitter = tokenSplitters.get(key);
+  if (!splitter) {
+    splitter = new TokenTextSplitter({
+      chunkSize,
+      chunkOverlap,
+      encodingName: TOKEN_ENCODING,
+      disallowedSpecial: [],
+    });
+    tokenSplitters.set(key, splitter);
+  }
+  return splitter;
+}
+
+export async function countTextTokens(text: string): Promise<number> {
+  if (!text) return 0;
+  return (await getTokenSplitter(1).splitText(text)).length;
+}
+
+async function fitsTokenBudget(text: string, budget: number): Promise<boolean> {
+  if (!text) return true;
+  if (budget <= 0) return false;
+  return (await getTokenSplitter(budget).splitText(text)).length === 1;
+}
+
+async function splitByTokenBudget(
+  text: string,
+  budget: number,
+  overlap = 0,
+): Promise<string[]> {
+  if (!text) return [];
+  return getTokenSplitter(
+    Math.max(1, budget),
+    Math.min(overlap, Math.max(0, budget - 1)),
+  ).splitText(text);
+}
 
 interface Section {
   headingPath: string[];
@@ -35,10 +79,9 @@ export interface StructuredChunk {
 
 /**
  * Markdown 文本切分器
- * 使用 RecursiveCharacterTextSplitter，按 Markdown 结构优先切分
+ * 按 Markdown 结构和语义边界优先切分，并用 cl100k_base 估算 Token 预算。
  */
 export class MarkdownChunker {
-  private readonly splitter: RecursiveCharacterTextSplitter;
   private readonly chunkSize: number;
   private readonly chunkOverlap: number;
   private readonly semanticBoundaries: boolean;
@@ -47,11 +90,6 @@ export class MarkdownChunker {
     this.chunkSize = chunkSize;
     this.chunkOverlap = chunkOverlap;
     this.semanticBoundaries = semanticBoundaries;
-    this.splitter = new RecursiveCharacterTextSplitter({
-      chunkSize,
-      chunkOverlap,
-      separators: ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ', ''],
-    });
   }
 
   async split(text: string): Promise<string[]> {
@@ -189,39 +227,22 @@ export class MarkdownChunker {
       section.headingPath.length > 0
         ? `章节路径：${section.headingPath.join(' > ')}\n`
         : '';
-    const contentBudget = Math.max(1, this.chunkSize - prefix.length);
+    const prefixTokens = await countTextTokens(prefix);
+    const contentBudget = Math.max(1, this.chunkSize - prefixTokens);
     const blocks = this.collectBusinessBlocks(body);
     const chunks: string[] = [];
     let regularBlocks: string[] = [];
 
     const flushRegularBlocks = async () => {
       if (regularBlocks.length === 0) return;
-      const splitter =
-        prefix.length === 0
-          ? this.splitter
-          : new RecursiveCharacterTextSplitter({
-              chunkSize: contentBudget,
-              chunkOverlap: Math.min(
-                this.chunkOverlap,
-                Math.max(0, contentBudget - 1),
-              ),
-              separators: [
-                '\n\n',
-                '\n',
-                '。',
-                '！',
-                '？',
-                '.',
-                '!',
-                '?',
-                ' ',
-                '',
-              ],
-            });
       const regularText = regularBlocks.join('\n\n');
       const split = this.semanticBoundaries
-        ? this.splitBySemanticBoundary(regularText, contentBudget)
-        : await splitter.splitText(regularText);
+        ? await this.splitBySemanticBoundary(regularText, contentBudget, prefix)
+        : await splitByTokenBudget(
+            regularText,
+            contentBudget,
+            this.chunkOverlap,
+          );
       chunks.push(...split.map((content) => `${prefix}${content}`));
       regularBlocks = [];
     };
@@ -232,7 +253,7 @@ export class MarkdownChunker {
         await flushRegularBlocks();
         const protectedChunks =
           block.kind === 'table'
-            ? this.splitTableBlock(decorated, contentBudget)
+            ? await this.splitTableBlock(decorated, prefix)
             : [decorated];
         chunks.push(...protectedChunks.map((content) => `${prefix}${content}`));
         continue;
@@ -245,71 +266,65 @@ export class MarkdownChunker {
   }
 
   /** 在句子／段落边界动态装箱，重叠只从完整语义单元中选取，避免半句截断。 */
-  private splitBySemanticBoundary(text: string, budget: number): string[] {
+  private async splitBySemanticBoundary(
+    text: string,
+    budget: number,
+    prefix: string,
+  ): Promise<string[]> {
     const units = text
-      .split(/(?<=[。！？.!?])\s+|\n+/u)
+      .split(/(?<=[。！？])\s*|(?<=[.!?])\s+|\n+/u)
       .map((unit) => unit.trim())
       .filter(Boolean);
     if (units.length === 0) return [];
     const chunks: string[] = [];
     let current: string[] = [];
-    const flush = () => {
+    const flush = async () => {
       if (current.length === 0) return;
       chunks.push(current.join(' '));
       const overlap: string[] = [];
-      let length = 0;
+      if (this.chunkOverlap <= 0) {
+        current = [];
+        return;
+      }
       for (let index = current.length - 1; index >= 0; index -= 1) {
-        const nextLength =
-          length + current[index].length + (overlap.length ? 1 : 0);
-        if (nextLength > this.chunkOverlap && overlap.length > 0) break;
+        const candidate = [current[index], ...overlap].join(' ');
+        if (!(await fitsTokenBudget(candidate, this.chunkOverlap))) break;
         overlap.unshift(current[index]);
-        length = nextLength;
       }
       current = overlap;
     };
     for (const unit of units) {
-      if (unit.length > budget) {
-        flush();
-        chunks.push(...this.splitOversizedUnit(unit, budget));
+      if (!(await fitsTokenBudget(`${prefix}${unit}`, this.chunkSize))) {
+        await flush();
+        chunks.push(...(await this.splitOversizedUnit(unit, budget)));
+        current = [];
         continue;
       }
       const candidate = current.length ? `${current.join(' ')} ${unit}` : unit;
-      if (current.length > 0 && candidate.length > budget) flush();
+      if (
+        current.length > 0 &&
+        !(await fitsTokenBudget(`${prefix}${candidate}`, this.chunkSize))
+      ) {
+        await flush();
+        if (
+          current.length > 0 &&
+          !(await fitsTokenBudget(
+            `${prefix}${current.join(' ')} ${unit}`,
+            this.chunkSize,
+          ))
+        ) {
+          current = [];
+        }
+      }
       current.push(unit);
     }
-    flush();
+    if (current.length > 0) chunks.push(current.join(' '));
     return chunks;
   }
 
-  /** 句子本身超过预算时，优先按词切分；只有单词过长才按字符兜底。 */
-  private splitOversizedUnit(unit: string, budget: number): string[] {
-    const chunks: string[] = [];
-    let current = '';
-    const pushCurrent = () => {
-      const value = current.trim();
-      if (value) chunks.push(value);
-      current = '';
-    };
-
-    for (const part of unit.split(/(\s+)/u)) {
-      if (!part) continue;
-      const candidate = `${current}${part}`;
-      if (candidate.trim().length <= budget) {
-        current = candidate;
-        continue;
-      }
-      pushCurrent();
-      const token = part.trim();
-      if (token.length <= budget) {
-        current = token;
-        continue;
-      }
-      for (let index = 0; index < token.length; index += budget) {
-        chunks.push(token.slice(index, index + budget));
-      }
-    }
-    pushCurrent();
-    return chunks;
+  /** 句子超过预算时按 tokenizer 切分，避免中文按字符切导致预算失真。 */
+  private splitOversizedUnit(unit: string, budget: number): Promise<string[]> {
+    return splitByTokenBudget(unit, budget);
   }
 
   private collectBusinessBlocks(body: string): BusinessBlock[] {
@@ -384,7 +399,10 @@ export class MarkdownChunker {
     return `内容类型：${labels[block.kind]}\n${block.content}`;
   }
 
-  private splitTableBlock(content: string, contentBudget: number): string[] {
+  private async splitTableBlock(
+    content: string,
+    prefix: string,
+  ): Promise<string[]> {
     const lines = content.split('\n');
     const label = lines.find((line) => line.startsWith('内容类型：'));
     const header = lines.find((line) => line.startsWith('表格列：'));
@@ -399,12 +417,29 @@ export class MarkdownChunker {
       const candidate = [...current, row].join('\n');
       if (
         current.length > baseLines.length &&
-        candidate.length > contentBudget
+        !(await fitsTokenBudget(`${prefix}${candidate}`, this.chunkSize))
       ) {
         chunks.push(current.join('\n'));
         current = [...baseLines, row];
       } else {
         current.push(row);
+      }
+
+      const currentContent = current.join('\n');
+      if (
+        !(await fitsTokenBudget(`${prefix}${currentContent}`, this.chunkSize))
+      ) {
+        if (current.length > baseLines.length) {
+          const baseTokens = await countTextTokens(
+            `${prefix}${baseLines.join('\n')}`,
+          );
+          const rowBudget = Math.max(1, this.chunkSize - baseTokens);
+          const rowParts = await splitByTokenBudget(row, rowBudget);
+          chunks.push(
+            ...rowParts.map((part) => [...baseLines, part].join('\n')),
+          );
+          current = [...baseLines];
+        }
       }
     }
     if (current.length > baseLines.length) chunks.push(current.join('\n'));

@@ -2,6 +2,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,16 +22,24 @@ import { PermissionSubject } from './document-permission.service';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
 import { GraphService } from '../graph/graph.service';
-import { DocumentQueueService } from './document-queue.service';
+import {
+  DocumentQueueService,
+  type DocumentGraphIndexJob,
+} from './document-queue.service';
 import { DocumentTaskService } from './document-task.service';
 import { DocumentImageIngestionService } from './document-image-ingestion.service';
 import { DocumentIndexCoordinator } from './document-index-coordinator.service';
 import { DocumentRetrievalDescriptionService } from './document-retrieval-description.service';
 import {
   detectDocumentKind,
+  extractAudioDocumentText,
   extractDocumentText,
+  extractImageDocumentText,
+  type DocumentVideoExtractionOptions,
 } from './document-parser.util';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
+import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
+import { VisionProvider } from '../../providers/vision/vision.provider';
 import {
   assessIngestionQuality,
   detectGameDocumentMetadata,
@@ -158,10 +168,11 @@ type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
  * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
  */
 @Injectable()
-export class DocumentService {
+export class DocumentService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DocumentService.name);
   private readonly pendingGraphIndexes = new Map<string, Promise<void>>();
   private readonly cancelledGraphIndexes = new Set<string>();
+  private graphIndexRecoveryTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     @InjectRepository(DocumentMetaEntity)
@@ -185,7 +196,31 @@ export class DocumentService {
     private readonly knowledgeBaseProfileRepo: Repository<KnowledgeBaseProfileEntity>,
     private readonly documentImageIngestionService: DocumentImageIngestionService,
     @Optional() private readonly dingTalk?: DingTalkProvider,
-  ) {}
+    @Optional() private readonly speechProvider?: TencentSpeechProvider,
+    @Optional() private readonly visionProvider?: VisionProvider,
+  ) {
+    this.documentQueueService.registerGraphIndexProcessor((job) =>
+      this.processGraphIndex(job),
+    );
+    this.documentQueueService.registerGraphIndexFailureHandler(
+      (job, error) => this.markGraphIndexFailed(job, error),
+    );
+  }
+
+  onModuleInit(): void {
+    if (!this.graphService.isEnabled() || !this.documentQueueService.enabled) {
+      return;
+    }
+    void this.requeuePendingGraphIndexes();
+    this.graphIndexRecoveryTimer = setInterval(() => {
+      void this.requeuePendingGraphIndexes();
+    }, 5 * 60 * 1000);
+    this.graphIndexRecoveryTimer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.graphIndexRecoveryTimer) clearInterval(this.graphIndexRecoveryTimer);
+  }
 
   /**
    * 接收解析后的正文并创建可审计的异步入库任务。
@@ -567,7 +602,7 @@ export class DocumentService {
         ? 'pending'
         : 'skipped';
       if (graphIndexStatus === 'pending') {
-        this.scheduleOptionalGraphIndex({ docId, userId, content });
+        this.scheduleOptionalGraphIndex({ docId, userId, indexGeneration });
       }
       await this.documentTaskService.updateTask(taskId, {
         stage: 'metadata',
@@ -672,55 +707,152 @@ export class DocumentService {
     );
   }
 
-  /** 图谱是非阻塞补充索引：失败不回滚主入库，也不影响版本切换。 */
+  /** 图谱用持久队列异步建立；主文档入库不等待图谱，也不因可选图谱失败回滚。 */
   private scheduleOptionalGraphIndex(params: {
     docId: string;
     userId: string;
-    content: string;
+    indexGeneration: string;
   }): void {
+    if (this.documentQueueService.enabled) {
+      void this.documentQueueService
+        .enqueueGraphIndex(params)
+        .catch((error: unknown) =>
+          this.markGraphIndexFailed(params, error instanceof Error ? error : new Error(String(error))),
+        );
+      return;
+    }
+
+    if (this.documentQueueService.required) {
+      void this.markGraphIndexFailed(
+        params,
+        new Error('Redis/BullMQ is required for durable graph indexing.'),
+      );
+      return;
+    }
+
+    // 本地开发允许没有 Redis；生产环境不会走这个进程内兜底。
     const job = new Promise<void>((resolve) => {
       const timer = setImmediate(() => {
-        void (async () => {
-          try {
-            if (this.cancelledGraphIndexes.has(params.docId)) return;
-            const result = await this.graphService.importText(
-              params.content,
-              params.userId,
-              params.docId,
-            );
-            if (this.cancelledGraphIndexes.has(params.docId)) {
-              await this.graphService.removeSource(params.docId, params.userId);
-              return;
-            }
-            await this.docMetaRepo.update(
-              { docId: params.docId, userId: params.userId },
-              {
-                graphIndexStatus: 'indexed',
-                graphIndexedAt: new Date(),
-                graphIndexError: null,
-              },
-            );
-            this.logger.log(
-              `Graph index completed: docId=${params.docId}, nodes=${result.nodeCount}, relationships=${result.relationshipCount}`,
-            );
-          } catch (err) {
-            const message = (err as Error).message;
-            await this.docMetaRepo.update(
-              { docId: params.docId, userId: params.userId },
-              { graphIndexStatus: 'failed', graphIndexError: message },
-            );
-            this.logger.warn(
-              `Graph index failed without blocking document ingestion: docId=${params.docId}, error=${message}`,
-            );
-          } finally {
+        void this.documentQueueService
+          .withGraphIndexLock(params.docId, () => this.processGraphIndex(params))
+          .catch((error: unknown) =>
+            this.markGraphIndexFailed(
+              params,
+              error instanceof Error ? error : new Error(String(error)),
+            ),
+          )
+          .finally(() => {
             this.pendingGraphIndexes.delete(params.docId);
             resolve();
-          }
-        })();
+          });
       });
       timer.unref?.();
     });
     this.pendingGraphIndexes.set(params.docId, job);
+  }
+
+  private async processGraphIndex(job: DocumentGraphIndexJob): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (this.cancelledGraphIndexes.has(job.docId)) return;
+      const document = await this.docMetaRepo.findOne({
+        where: { docId: job.docId, userId: job.userId },
+      });
+      if (!document) {
+        await this.graphService.removeSource(job.docId, job.userId);
+        return;
+      }
+
+      const chunks = await this.docChunkRepo.find({
+        where: {
+          docId: job.docId,
+          userId: job.userId,
+          indexGeneration: document.indexGeneration ?? undefined,
+          chunkType: 'leaf',
+        },
+        order: { chunkIndex: 'ASC' },
+        select: ['content'],
+      });
+      if (chunks.length === 0) {
+        throw new Error('graph indexing found no current document chunks');
+      }
+
+      const result = await this.graphService.importText(
+        chunks.map((chunk) => chunk.content).join('\n\n'),
+        job.userId,
+        job.docId,
+      );
+      if (this.cancelledGraphIndexes.has(job.docId)) {
+        await this.graphService.removeSource(job.docId, job.userId);
+        return;
+      }
+
+      const current = await this.docMetaRepo.findOne({
+        where: { docId: job.docId, userId: job.userId },
+        select: ['indexGeneration'],
+      });
+      if (!current) {
+        await this.graphService.removeSource(job.docId, job.userId);
+        return;
+      }
+      if (current.indexGeneration !== document.indexGeneration) continue;
+
+      await this.docMetaRepo.update(
+        { docId: job.docId, userId: job.userId },
+        {
+          graphIndexStatus: 'indexed',
+          graphIndexedAt: new Date(),
+          graphIndexError: null,
+        },
+      );
+      this.logger.log(
+        `Graph index completed: docId=${job.docId}, nodes=${result.nodeCount}, relationships=${result.relationshipCount}`,
+      );
+      return;
+    }
+
+    throw new Error('document changed repeatedly during graph indexing');
+  }
+
+  private async markGraphIndexFailed(
+    job: DocumentGraphIndexJob,
+    error: Error,
+  ): Promise<void> {
+    const current = await this.docMetaRepo.findOne({
+      where: { docId: job.docId, userId: job.userId },
+      select: ['indexGeneration'],
+    });
+    if (!current || current.indexGeneration !== job.indexGeneration) return;
+
+    await this.docMetaRepo.update(
+      { docId: job.docId, userId: job.userId },
+      { graphIndexStatus: 'failed', graphIndexError: error.message },
+    );
+    this.logger.warn(
+      `Graph index failed without blocking document ingestion: docId=${job.docId}, error=${error.message}`,
+    );
+  }
+
+  private async requeuePendingGraphIndexes(): Promise<void> {
+    try {
+      const pending = await this.docMetaRepo.find({
+        where: { graphIndexStatus: 'pending' },
+        order: { createdAt: 'ASC' },
+        take: 1000,
+        select: ['docId', 'userId', 'indexGeneration'],
+      });
+      for (const document of pending) {
+        if (!document.userId || !document.indexGeneration) continue;
+        await this.documentQueueService.enqueueGraphIndex({
+          docId: document.docId,
+          userId: document.userId,
+          indexGeneration: document.indexGeneration,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Pending graph index recovery scan failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async removeGraphSource(
@@ -729,12 +861,16 @@ export class DocumentService {
   ): Promise<void> {
     this.cancelledGraphIndexes.add(docId);
     try {
+      if (typeof this.documentQueueService.cancelGraphIndexes === 'function') {
+        await this.documentQueueService.cancelGraphIndexes(docId);
+      }
       await this.pendingGraphIndexes.get(docId);
       await this.graphService.removeSource(docId, userId);
     } catch (err) {
       this.logger.warn(
         `Graph source cleanup failed for docId=${docId}: ${(err as Error).message}`,
       );
+      throw err;
     } finally {
       this.cancelledGraphIndexes.delete(docId);
     }
@@ -835,20 +971,39 @@ export class DocumentService {
       const buffer = await this.objectStorageProvider.getObject(
         original.objectKey,
       );
-      const content = await extractDocumentText(
-        buffer,
-        kind,
-        undefined,
+      const userId = document.userId ?? 'system';
+      const capabilities = this.visionProvider?.getCapabilities();
+      const imageOptions =
         kind === 'pdf' || kind === 'pptx'
-          ? this.documentImageIngestionService.buildImageExtractionOptions(
-              docId,
-              document.userId ?? 'system',
-            )
-          : undefined,
-      );
+          ? {
+              ...this.documentImageIngestionService.buildImageExtractionOptions(
+                docId,
+                userId,
+              ),
+              vision: capabilities?.imageUnderstanding
+                ? this.visionProvider
+                : undefined,
+            }
+          : undefined;
+      const content =
+        kind === 'image'
+          ? ''
+          : await extractDocumentText(
+              buffer,
+              kind,
+              capabilities?.ocr ? this.visionProvider : undefined,
+              imageOptions,
+              kind === 'video'
+                ? this.buildVideoExtractionOptions(
+                    original.filename,
+                    docId,
+                    userId,
+                  )
+                : undefined,
+            );
       const assetCount = await this.documentImageIngestionService.indexDocumentImages({
         docId,
-        userId: document.userId ?? 'system',
+        userId,
         filename: original.filename,
         content,
         originalUrl: original.url,
@@ -893,19 +1048,47 @@ export class DocumentService {
     const buffer = await this.objectStorageProvider.getObject(
       original.objectKey,
     );
-    const content = (
-      await extractDocumentText(
-        buffer,
-        detectDocumentKind(original.filename),
-        undefined,
-        this.documentImageIngestionService.buildImageExtractionOptions(
-          docId,
-          userId,
-        ),
-      )
-    )
-      .replace(/\0/g, '')
-      .trim();
+    const kind = detectDocumentKind(original.filename);
+    const capabilities = this.visionProvider?.getCapabilities();
+    const imageOptions =
+      kind === 'pdf' || kind === 'pptx'
+        ? {
+            ...this.documentImageIngestionService.buildImageExtractionOptions(
+              docId,
+              userId,
+            ),
+            vision: capabilities?.imageUnderstanding
+              ? this.visionProvider
+              : undefined,
+          }
+        : undefined;
+    const videoOptions =
+      kind === 'video'
+        ? this.buildVideoExtractionOptions(original.filename, docId, userId)
+        : undefined;
+    const extractedContent =
+      kind === 'audio'
+        ? await extractAudioDocumentText(
+            buffer,
+            original.filename,
+            this.speechProvider,
+          )
+        : kind === 'image'
+          ? await extractImageDocumentText(
+              buffer,
+              original.filename,
+              original.contentType ?? this.imageMimeType(original.filename),
+              this.visionProvider,
+            )
+          : await extractDocumentText(
+              buffer,
+              kind,
+              capabilities?.ocr ? this.visionProvider : undefined,
+              imageOptions,
+              videoOptions,
+              { preservePdfPages: kind === 'pdf' },
+            );
+    const content = extractedContent.replace(/\0/g, '').trim();
     if (!content) throw new Error('original document has no extractable text');
 
     const roleScope = (() => {
@@ -958,6 +1141,9 @@ export class DocumentService {
       `Deleting doc ${docId} (${meta.filename}) for userId=${userId}`,
     );
 
+    // 先停掉图谱写入，避免删除其它索引后，后台 Worker 又把图数据写回来。
+    await this.removeGraphSource(docId, userId);
+
     // 1. 删除 Milvus 中的 chunks
     await this.documentIndexCoordinator.removeVectorIndex(docId);
 
@@ -979,16 +1165,42 @@ export class DocumentService {
       );
     }
 
-    // 4. 删除可选图谱来源；共享实体和关系保留其余文档来源。
-    await this.removeGraphSource(docId, userId);
-
-    // 5. 删除数据库元数据与结构化事实索引
+    // 4. 删除数据库元数据与结构化事实索引
     await this.factConflictRepo.delete({ docId, userId });
     await this.docChunkRepo.delete({ docId, userId });
     await this.resourceRepo.update({ docId, userId }, { docId: null });
     await this.docMetaRepo.delete({ docId, userId });
 
     this.logger.log(`Doc ${docId} deleted successfully`);
+  }
+
+  private imageMimeType(filename: string): string {
+    const extension = filename.split('.').pop()?.toLowerCase();
+    if (extension === 'png') return 'image/png';
+    if (extension === 'gif') return 'image/gif';
+    if (extension === 'webp') return 'image/webp';
+    if (extension === 'bmp') return 'image/bmp';
+    return 'image/jpeg';
+  }
+
+  private buildVideoExtractionOptions(
+    filename: string,
+    docId: string,
+    userId: string,
+  ): DocumentVideoExtractionOptions {
+    const capabilities = this.visionProvider?.getCapabilities();
+    return {
+      storage: this.objectStorageProvider,
+      asr: this.speechProvider?.isEnabled() ? this.speechProvider : undefined,
+      vision: capabilities?.imageUnderstanding
+        ? this.visionProvider
+        : undefined,
+      docId,
+      ownerUserId: userId,
+      filename,
+      urlResolver: (stored) =>
+        `/api/v1/documents/assets/image?key=${encodeURIComponent(stored.key)}`,
+    };
   }
 
   private async saveOriginalResource(params: {
@@ -1425,6 +1637,8 @@ export class DocumentService {
           expiredAt: input.governance.expiredAt ?? existing.expiredAt,
           supersedesDocId:
             input.governance.supersedesDocId ?? existing.supersedesDocId,
+          graphIndexStatus: this.graphService.isEnabled() ? 'pending' : 'skipped',
+          graphIndexError: null,
         },
       );
     });
@@ -1479,7 +1693,7 @@ export class DocumentService {
       this.scheduleOptionalGraphIndex({
         docId: input.docId,
         userId: input.userId,
-        content: input.content,
+        indexGeneration: input.indexGeneration,
       });
     }
 

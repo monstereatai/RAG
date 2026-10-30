@@ -117,11 +117,18 @@ export default function AgentRunDetailPage() {
     if (!run) return;
     setRetrying(true);
     try {
-      await retryAgentRunRecord(run.id);
-      message.success("已重新排队，正在刷新运行状态");
-      await load();
+      const result = unwrapData<{ runId?: string; status?: string }>(
+        await retryAgentRunRecord(run.id),
+      );
+      if (!result?.runId) throw new Error("服务没有返回新的运行记录");
+      message.success(
+        result.status === "waiting_approval"
+          ? "Agentic 重跑已暂停，等待审批"
+          : "Agentic 链路重跑完成",
+      );
+      history.push(`/agent-ops/run-center/${encodeURIComponent(result.runId)}`);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "局部重跑失败");
+      message.error(error instanceof Error ? error.message : "Agentic 重跑失败");
     } finally {
       setRetrying(false);
     }
@@ -140,6 +147,13 @@ export default function AgentRunDetailPage() {
     stages?: Array<Record<string, unknown>>;
   } | undefined;
   const failureOnset = run?.failureOnset;
+  const canRetry = Boolean(
+    run &&
+      (run.status === "failed" || run.status === "cancelled") &&
+      ["auto", "agentic"].includes(run.mode) &&
+      run.route !== "simple" &&
+      run.route !== "production_workflow",
+  );
   const loopEvents = (run?.events ?? []).filter((event: AgentRunEvent) => String(event.eventType).startsWith("agent.loop."));
   const loopFinalEvent = [...loopEvents].reverse().find((event: AgentRunEvent) => /agent\.loop\.(completed|blocked|failed|budget_exceeded)/.test(event.eventType));
   const scrollToArtifacts = () => {
@@ -152,7 +166,7 @@ export default function AgentRunDetailPage() {
     <>
       <Card
         title="运行总览"
-        extra={<span><Button icon={<ArrowLeftOutlined />} onClick={() => history.push("/agent-ops/run-center")}>返回运行中心</Button><Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()} style={{ marginLeft: 8 }}>刷新</Button><Button danger disabled={run.status === "running"} loading={retrying} onClick={() => void retry()} style={{ marginLeft: 8 }}>局部重跑</Button></span>}
+        extra={<span><Button icon={<ArrowLeftOutlined />} onClick={() => history.push("/agent-ops/run-center")}>返回运行中心</Button><Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()} style={{ marginLeft: 8 }}>刷新</Button><Button danger disabled={!canRetry} loading={retrying} onClick={() => void retry()} style={{ marginLeft: 8 }}>重跑 Agentic 链路</Button></span>}
       >
         <Descriptions bordered column={3} items={[
           { key: "id", label: "运行 ID", children: run.id },

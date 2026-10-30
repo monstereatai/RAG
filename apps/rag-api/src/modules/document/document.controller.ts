@@ -24,6 +24,8 @@ import { DocumentQueueService } from './document-queue.service';
 import {
   detectDocumentKind,
   extractDocumentText,
+  extractAudioDocumentText,
+  extractImageDocumentText,
   extractUrlContent,
   SupportedDocumentKind,
   DocumentImageExtractionOptions,
@@ -388,71 +390,47 @@ export class DocumentController {
     userId?: string,
   ): Promise<string> {
     if (kind === 'audio') {
-      try {
-        const format =
-          file.originalname.split('.').pop()?.toLowerCase() ?? 'wav';
-        const transcript = await this.speechProvider.transcribe(
-          file.buffer,
-          format === 'm4a' ? 'mp4' : format,
-        );
-        return [
-          '# Audio Transcript',
-          '',
-          transcript || 'ASR returned an empty transcript.',
-        ].join('\n');
-      } catch (err) {
-        this.logger.warn(
-          `Audio ASR failed for ${file.originalname}: ${
-            (err as Error).message
-          }`,
+      if (!this.speechProvider.isEnabled()) {
+        throw new BadRequestException(
+          '音频入库需要配置腾讯云 ASR；未转写的音频不会作为文本知识入库。',
         );
       }
+      return extractAudioDocumentText(
+        file.buffer,
+        file.originalname,
+        this.speechProvider,
+      );
     }
 
     // 图片：调用视觉 provider 做 OCR / 图像理解
     if (kind === 'image') {
       try {
-        const caps = this.visionProvider.getCapabilities();
-        const blocks: string[] = ['# Image Document', ''];
+        const content = await extractImageDocumentText(
+          file.buffer,
+          file.originalname,
+          file.mimetype,
+          this.visionProvider,
+        );
         const stored = await this.objectStorageProvider.putObject({
           key: `documents/${this.sanitizeObjectKeyPart(userId ?? 'anonymous')}/image-upload-${Date.now()}/original.${this.imageExtension(file.mimetype)}`,
           body: file.buffer,
           contentType: file.mimetype,
         });
-        blocks.push(
+        return [
+          content,
           '## 原始图片',
           '',
           `![${file.originalname.replace(/[[\]\r\n]/g, ' ')}](${this.proxyObjectUrl(stored.key)})`,
-          '',
-        );
-
-        if (caps.ocr) {
-          const ocrResult = await this.visionProvider.ocr(
-            file.buffer,
-            file.mimetype,
-          );
-          blocks.push('## OCR 识别文字', '', ocrResult.text || '(无文字)', '');
-        }
-
-        if (caps.imageUnderstanding) {
-          const desc = await this.visionProvider.describeImage(
-            file.buffer,
-            file.mimetype,
-          );
-          blocks.push('## 图像描述', '', desc.description, '');
-          if (desc.tags.length > 0) {
-            blocks.push('标签：' + desc.tags.join('、'));
-          }
-        }
-
-        return blocks.join('\n');
+        ].join('\n');
       } catch (err) {
         this.logger.warn(
           `Vision processing failed for image ${file.originalname}: ${
             (err as Error).message
           }`,
         );
-        // 降级到默认 fallback
+        throw new BadRequestException(
+          `图片解析失败：${(err as Error).message}`,
+        );
       }
     }
 
@@ -468,6 +446,7 @@ export class DocumentController {
       this.visionProvider,
       this.buildImageExtractionOptions(userId),
       this.buildVideoExtractionOptions(file.originalname, userId),
+      { preservePdfPages: kind === 'pdf' },
     );
   }
 

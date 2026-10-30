@@ -81,7 +81,6 @@ import {
   setGovernancePluginStatus,
   getProductionWorkflow,
   getProductionWorkflows,
-  retryAgentRun,
   resumeProductionWorkflow,
   reviewAgentBadCase,
   startProductionWorkflow,
@@ -97,13 +96,10 @@ const ROLE_LABELS: Record<ProductionRole, string> = {
   operations: "运营",
 };
 const METRIC_LABELS: Record<string, string> = {
-  task_success_rate: "任务成功",
-  faithfulness: "忠实度",
-  prd_coverage: "需求覆盖",
-  test_case_completeness: "用例完整",
-  tool_success_rate: "工具成功",
-  step_accuracy: "步骤准确",
-  human_handoff_rate: "人工接管",
+  faithfulness: "事实有证据支持",
+  context_recall: "检索证据命中",
+  requirement_coverage: "答案要求覆盖",
+  test_case_structure_completeness: "测试用例结构完整",
 };
 
 const ARTIFACT_LABELS: Record<string, string> = {
@@ -345,13 +341,37 @@ export default function AgentOpsPage() {
   }, []);
   const handleRetryRun = async () => {
     if (!runSnapshot?.available) return;
+    const latestRun = runCenter.find(
+      (run) => run.threadId === runSnapshot.threadId,
+    );
+    if (
+      !latestRun ||
+      !['failed', 'cancelled'].includes(latestRun.status) ||
+      !['auto', 'agentic'].includes(latestRun.mode) ||
+      latestRun.route === 'simple' ||
+      latestRun.route === 'production_workflow'
+    ) {
+      message.error('只有当前会话最新的失败或取消 Agentic 运行可以重跑');
+      return;
+    }
     setArtifactLoading(true);
     try {
-      await retryAgentRun(runSnapshot.threadId);
-      message.success("已重新执行 Agentic 链路，请稍后刷新查看新 Artifact");
-      await loadRunArtifacts();
-    } catch {
-      message.error("重新执行失败，请检查模型、索引和 Redis 状态");
+      const response = await retryAgentRunRecord(latestRun.id);
+      const result = unwrapData<{ runId?: string; status?: string }>(response);
+      if (!result?.runId) throw new Error('服务没有返回新的运行记录');
+      message.success(
+        result.status === 'waiting_approval'
+          ? 'Agentic 重跑已暂停，等待审批'
+          : 'Agentic 链路重跑完成',
+      );
+      await loadRunCenter();
+      history.push(
+        `/agent-ops/run-center/${encodeURIComponent(result.runId)}`,
+      );
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : 'Agentic 重跑失败',
+      );
     } finally {
       setArtifactLoading(false);
     }
@@ -674,17 +694,22 @@ export default function AgentOpsPage() {
   const handleEval = async () => {
     const values = await evalForm.validateFields();
     setLoading(true);
+    setEvalResult(null);
     try {
       const result = await evaluateAgent({
         ...values,
-        contexts: values.contexts.split("\n").filter(Boolean),
+        contexts: values.contexts
+          .split("\n")
+          .map((item: string) => item.trim())
+          .filter(Boolean),
         requiredClaims: values.requiredClaims
           ?.split(/[，,\n]/)
           .map((item: string) => item.trim())
           .filter(Boolean),
-        expectedSteps: ["retrieval", "generate"],
-        actualSteps: ["retrieval", "generate"],
-        toolCalls: [{ name: "retrieval", success: true }],
+        expectedContextClaims: values.expectedContextClaims
+          ?.split(/[，,\n]/)
+          .map((item: string) => item.trim())
+          .filter(Boolean),
       });
       setEvalResult(unwrapData<AgentEvalResult>(result));
     } finally {
@@ -1118,8 +1143,37 @@ export default function AgentOpsPage() {
     </section>
   );
 
+  const evalStatus: {
+    title: string;
+    type: "success" | "info" | "warning" | "error";
+  } | null = evalResult
+    ? evalResult.status === "evaluated"
+      ? {
+          title: evalResult.passed ? "评测通过" : "评测未通过",
+          type: evalResult.passed ? "success" : "error",
+        }
+      : evalResult.status === "insufficient_data"
+        ? { title: "资料不足，未评测", type: "warning" }
+        : { title: "未评测", type: "info" }
+    : null;
+  const evalIssues = evalResult
+    ? [
+        { label: "无证据支持的事实", items: evalResult.assertions.unsupportedClaims },
+        { label: "未覆盖的答案要求", items: evalResult.assertions.missingRequirements },
+        { label: "未命中的检索证据", items: evalResult.assertions.missingContextClaims },
+        { label: "缺少的用例结构", items: evalResult.assertions.missingTestCaseSections },
+      ]
+    : [];
+
   const evalPanel = (
     <section className="agent-ops-panel">
+      <Alert
+        showIcon
+        type="info"
+        title="单条样例评测"
+        description="手工提供问题、检索证据、标准要求和应命中的证据；这不读取 Agent 运行轨迹，也不统计步骤或工具成功率。"
+        style={{ marginBottom: 16 }}
+      />
       <Form form={evalForm} layout="vertical">
         <Form.Item label="评测问题" name="query" rules={[{ required: true }]}>
           <Input />
@@ -1138,6 +1192,36 @@ export default function AgentOpsPage() {
         >
           <Input.TextArea rows={6} />
         </Form.Item>
+        <Form.Item dependencies={["useJudge"]} noStyle>
+          {({ getFieldValue }) => (
+            <Form.Item
+              label="答案必须覆盖的标准要求（每行一条）"
+              name="requiredClaims"
+              rules={
+                getFieldValue("useJudge")
+                  ? [{ required: true, message: "请填写至少一条答案要求" }]
+                  : []
+              }
+            >
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          )}
+        </Form.Item>
+        <Form.Item dependencies={["useJudge"]} noStyle>
+          {({ getFieldValue }) => (
+            <Form.Item
+              label="检索证据应包含的标准内容（每行一条）"
+              name="expectedContextClaims"
+              rules={
+                getFieldValue("useJudge")
+                  ? [{ required: true, message: "请填写至少一条应命中的证据" }]
+                  : []
+              }
+            >
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          )}
+        </Form.Item>
         <div className="agent-ops-form-grid">
           <Form.Item label="任务类型" name="taskType" initialValue="general">
             <Select
@@ -1148,8 +1232,14 @@ export default function AgentOpsPage() {
               ]}
             />
           </Form.Item>
-          <Form.Item label="必须覆盖的要求" name="requiredClaims">
-            <Input placeholder="地区，多语言，回滚" />
+          <Form.Item
+            label="启用大模型裁判"
+            name="useJudge"
+            valuePropName="checked"
+            initialValue={true}
+            extra="关闭后只检查测试用例结构，不给回答质量打分。"
+          >
+            <Switch checkedChildren="启用" unCheckedChildren="关闭" />
           </Form.Item>
         </div>
         <Button
@@ -1165,21 +1255,37 @@ export default function AgentOpsPage() {
         <div className="agent-eval-result">
           <Alert
             showIcon
-            title={evalResult.passed ? "评测通过" : "评测未通过"}
-            type={evalResult.passed ? "success" : "error"}
+            title={evalStatus?.title}
+            type={evalStatus?.type}
+            description={evalResult.reason}
           />
           <div className="agent-metric-grid">
-            {Object.entries(evalResult.metrics).map(([key, value]) => (
-              <div key={key}>
-                <span>{METRIC_LABELS[key] ?? key}</span>
-                <Progress
-                  percent={Math.round(value * 100)}
-                  size="small"
-                  status={value >= 0.8 ? "success" : "exception"}
-                />
-              </div>
-            ))}
+            {Object.entries(evalResult.metrics)
+              .filter(([, value]) => value !== null)
+              .map(([key, value]) => (
+                <div key={key}>
+                  <span>{METRIC_LABELS[key] ?? key}</span>
+                  <Progress
+                    percent={Math.round((value ?? 0) * 100)}
+                    size="small"
+                    status={
+                      (value ?? 0) >= (evalResult.thresholds[key] ?? 1)
+                        ? "success"
+                        : "exception"
+                    }
+                  />
+                </div>
+              ))}
           </div>
+          {evalIssues.some(({ items }) => items.length > 0) && (
+            <ul>
+              {evalIssues.flatMap(({ label, items }) =>
+                items.map((item) => (
+                  <li key={`${label}:${item}`}>{label}：{item}</li>
+                )),
+              )}
+            </ul>
+          )}
         </div>
       )}
     </section>
@@ -1304,10 +1410,10 @@ export default function AgentOpsPage() {
             <Select style={{ width: 130 }} options={["prd", "api", "design", "test", "config", "general"].map((value) => ({ value, label: value }))} />
           </Form.Item>
           <Form.Item name="chunkSize" initialValue={500}>
-            <InputNumber min={200} max={4000} addonBefore="Chunk" />
+            <InputNumber min={200} max={4000} addonBefore="Chunk (est. tokens)" />
           </Form.Item>
           <Form.Item name="chunkOverlap" initialValue={50}>
-            <InputNumber min={0} max={1000} addonBefore="Overlap" />
+            <InputNumber min={0} max={1000} addonBefore="Overlap (est. tokens)" />
           </Form.Item>
           <Alert
             type="info"
@@ -1359,7 +1465,7 @@ export default function AgentOpsPage() {
             { title: "配置", dataIndex: "name" },
             { title: "Key", dataIndex: "key" },
             { title: "文档类型", dataIndex: "documentType" },
-            { title: "Chunk", render: (_, row) => `${row.chunkSize}／${row.chunkOverlap}` },
+            { title: "Est. tokens (chunk／overlap)", render: (_, row) => `${row.chunkSize}／${row.chunkOverlap}` },
             { title: "检索参数", render: (_, row) => JSON.stringify(parseRetrievalConfig(row.retrievalConfig)) },
             { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
             {
@@ -1522,17 +1628,41 @@ export default function AgentOpsPage() {
                 <Button size="small" onClick={() => history.push(`/agent-ops/run-center/${encodeURIComponent(record.id)}`)}>运行详情</Button>
                 <Button
                   size="small"
-                  disabled={record.status === "running"}
+                  disabled={
+                    !["failed", "cancelled"].includes(record.status) ||
+                    !["auto", "agentic"].includes(record.mode) ||
+                    record.route === "simple" ||
+                    record.route === "production_workflow"
+                  }
                   onClick={() =>
                     void retryAgentRunRecord(record.id)
-                      .then(() => {
-                        message.success("已创建重跑任务");
-                        return loadRunCenter();
+                      .then((response) => {
+                        const result = unwrapData<{
+                          runId?: string;
+                          status?: string;
+                        }>(response);
+                        if (!result?.runId) {
+                          throw new Error("服务没有返回新的运行记录");
+                        }
+                        message.success(
+                          result.status === "waiting_approval"
+                            ? "Agentic 重跑已暂停，等待审批"
+                            : "Agentic 链路重跑完成",
+                        );
+                        history.push(
+                          `/agent-ops/run-center/${encodeURIComponent(result.runId)}`,
+                        );
                       })
-                      .catch(() => message.error("重跑失败，请检查 Redis 和模型服务"))
+                      .catch((error) =>
+                        message.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Agentic 重跑失败",
+                        ),
+                      )
                   }
                 >
-                  局部重跑
+                  重跑 Agentic 链路
                 </Button>
               </span>
             ),
@@ -1910,6 +2040,16 @@ export default function AgentOpsPage() {
                           />
                           <Button
                             loading={artifactLoading}
+                            disabled={
+                              !runCenter.some(
+                                (run) =>
+                                  run.threadId === runSnapshot.threadId &&
+                                  ['failed', 'cancelled'].includes(run.status) &&
+                                  ['auto', 'agentic'].includes(run.mode) &&
+                                  run.route !== 'simple' &&
+                                  run.route !== 'production_workflow',
+                              )
+                            }
                             onClick={() => void handleRetryRun()}
                             style={{ marginBottom: 16 }}
                           >

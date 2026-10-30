@@ -24,6 +24,8 @@ import { IndexReconcilerService } from './index-reconciler.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { RagAdminGraphService } from './rag-admin-graph.service';
 import { DocumentRetrievalDescriptionModule } from '../document/document-retrieval-description.module';
+import { SpeechModule } from '../../providers/speech/speech.module';
+import { VisionModule } from '../../providers/vision/vision.module';
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { DocumentRetrievalDescriptionModule } from '../document/document-retriev
     DomainEventsModule,
     MemoryModule,
     EmbeddingModule,
+    SpeechModule,
+    VisionModule,
   ],
   controllers: [RagAdminController],
   providers: [

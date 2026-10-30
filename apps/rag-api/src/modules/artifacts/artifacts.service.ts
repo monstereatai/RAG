@@ -85,6 +85,135 @@ export class ArtifactsService implements OnModuleInit {
     return this.toView(artifact);
   }
 
+  /**
+   * Persist an already generated production-workflow artifact as a ready version.
+   * The table's kind column is varchar, so this does not require a DB migration.
+   */
+  async createStudioVersion(input: {
+    ownerUserId: string;
+    tenantId?: string;
+    threadId: string;
+    title: string;
+    kind: 'json' | 'code';
+    filename: string;
+    sourceText: string;
+    body: Buffer;
+    contentType: string;
+    metadata: Record<string, unknown>;
+  }) {
+    const id = randomUUID();
+    const filename = this.safeFilename(input.filename);
+    const artifact = this.artifacts.create({
+      id,
+      tenantId: input.tenantId ?? null,
+      ownerUserId: input.ownerUserId,
+      threadId: input.threadId,
+      title: input.title.trim(),
+      kind: input.kind,
+      status: 'generating',
+      filename,
+      sourceText: input.sourceText,
+      prompt: null,
+      objectKey: null,
+      storageUrl: null,
+      contentType: null,
+      size: 0,
+      metadata: JSON.stringify({ studio: 'production', ...input.metadata }),
+      errorMessage: null,
+    });
+    await this.artifacts.save(artifact);
+    try {
+      const stored = await this.storage.putObject({
+        key: `artifacts/${input.ownerUserId}/${id}/${filename}`,
+        body: input.body,
+        contentType: input.contentType,
+      });
+      artifact.objectKey = stored.key;
+      artifact.storageUrl = stored.url;
+      artifact.contentType = input.contentType;
+      artifact.size = input.body.length;
+      artifact.status = 'ready';
+      await this.artifacts.save(artifact);
+      return this.toView(artifact);
+    } catch (error) {
+      artifact.status = 'failed';
+      artifact.errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Studio artifact storage failed.';
+      await this.artifacts.save(artifact);
+      throw error;
+    }
+  }
+
+  async listStudioVersions(ownerUserId: string, threadId: string) {
+    const items = await this.artifacts.find({
+      where: { ownerUserId, threadId },
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
+    return items
+      .filter(
+        (item) => this.parseMetadata(item.metadata)?.studio === 'production',
+      )
+      .map((item) => this.toView(item));
+  }
+
+  async getStudioVersion(id: string, ownerUserId: string, threadId: string) {
+    const artifact = await this.artifacts.findOne({
+      where: { id, ownerUserId, threadId },
+    });
+    if (
+      this.parseMetadata(artifact?.metadata ?? null)?.studio !== 'production'
+    ) {
+      throw new NotFoundException('Studio artifact version not found.');
+    }
+    return artifact!;
+  }
+
+  async getStudioVersionFile(
+    id: string,
+    ownerUserId: string,
+    threadId: string,
+  ) {
+    const artifact = await this.getStudioVersion(id, ownerUserId, threadId);
+    return this.readReadyFile(artifact);
+  }
+
+  async getStudioVersionSource(
+    id: string,
+    ownerUserId: string,
+    threadId: string,
+  ) {
+    const artifact = await this.getStudioVersion(id, ownerUserId, threadId);
+    if (artifact.status !== 'ready') {
+      throw new ForbiddenException('Studio artifact is not ready.');
+    }
+    return {
+      id: artifact.id,
+      title: artifact.title,
+      filename: artifact.filename,
+      kind: artifact.kind,
+      sourceText: artifact.sourceText,
+      metadata: this.parseMetadata(artifact.metadata),
+    };
+  }
+
+  async updateStudioVersionMetadata(
+    id: string,
+    ownerUserId: string,
+    threadId: string,
+    values: Record<string, unknown>,
+  ) {
+    const artifact = await this.getStudioVersion(id, ownerUserId, threadId);
+    artifact.metadata = JSON.stringify({
+      ...this.parseMetadata(artifact.metadata),
+      ...values,
+    });
+    await this.artifacts.save(artifact);
+    return this.toView(artifact);
+  }
+
   async list(ownerUserId: string, threadId?: string) {
     const items = await this.artifacts.find({
       where: { ownerUserId, ...(threadId ? { threadId } : {}) },
@@ -435,6 +564,8 @@ export class ArtifactsService implements OnModuleInit {
       excel: 'xlsx',
       architecture: 'svg',
       image: 'png',
+      json: 'json',
+      code: 'zip',
     }[kind];
   }
 }

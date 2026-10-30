@@ -11,6 +11,7 @@ import type { AgenticRagStateType } from './agentic-rag.state';
 import { buildAnswerArtifacts } from './answer-artifacts';
 import { getSubQuestionCoverage } from './agentic-rag-planning';
 import type { SseCallback } from './sse-event';
+import { rethrowIfAborted } from '../../common/errors/abort.util';
 
 export interface AgenticAnswerGenerationContext {
   onEvent?: SseCallback;
@@ -211,6 +212,10 @@ export class AgenticAnswerGenerationService {
                     answerRequirements:
                       retrieveOptions.queryPlan?.subQueries ?? [],
                     preferAgenticModel: true,
+                    protectedMemoryMessageCount: Math.min(
+                      2,
+                      memoryMessages.length,
+                    ),
                     signal: retrieveOptions.signal,
                   },
                 );
@@ -322,6 +327,7 @@ export class AgenticAnswerGenerationService {
               )
             : null;
         } catch (error) {
+          rethrowIfAborted(error, retrieveOptions.signal);
           this.logger.warn(
             `Qwen semantic fallback failed: ${(error as Error).message}`,
           );

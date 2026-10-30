@@ -1,6 +1,7 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { redactWorkspacePreviewTicketFromPath } from '../../../common/request-path.util';
 import { SecurityService } from '../security.service';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class SecurityInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const response = context.switchToHttp().getResponse();
+    const requestUrl = redactWorkspacePreviewTicketFromPath(request.url);
 
     // 记录安全事件
     this.securityService.logSecurityEvent({
@@ -18,7 +20,7 @@ export class SecurityInterceptor implements NestInterceptor {
       userAgent: request.get('user-agent') || 'Unknown',
       action: request.method,
       details: {
-        url: request.url,
+        url: requestUrl,
         timestamp: new Date().toISOString(),
       },
     });
@@ -38,7 +40,7 @@ export class SecurityInterceptor implements NestInterceptor {
           userAgent: request.get('user-agent') || 'Unknown',
           action: request.method,
           details: {
-            url: request.url,
+            url: requestUrl,
             statusCode: response.statusCode,
             timestamp: new Date().toISOString(),
           },
@@ -54,7 +56,7 @@ export class SecurityInterceptor implements NestInterceptor {
             userAgent: request.get('user-agent') || 'Unknown',
             action: request.method,
             details: {
-              url: request.url,
+              url: requestUrl,
               error: error.message,
               timestamp: new Date().toISOString(),
             },

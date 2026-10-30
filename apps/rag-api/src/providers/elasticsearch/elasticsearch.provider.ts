@@ -432,6 +432,7 @@ export class ElasticsearchProvider implements OnModuleInit {
       });
     } catch (err) {
       this.logger.warn(`ES indexDocument failed: ${(err as Error).message}`);
+      throw err;
     }
   }
 
@@ -542,13 +543,16 @@ export class ElasticsearchProvider implements OnModuleInit {
         this.logger.warn(
           `ES bulk index had errors for docId=${chunks[0]?.docId}`,
         );
-      } else {
-        this.logger.log(
-          `ES indexed ${chunks.length} chunks for docId=${chunks[0]?.docId}`,
+        throw new Error(
+          `ES bulk index failed for docId=${chunks[0]?.docId}: one or more items failed`,
         );
       }
+      this.logger.log(
+        `ES indexed ${chunks.length} chunks for docId=${chunks[0]?.docId}`,
+      );
     } catch (err) {
       this.logger.warn(`ES indexChunks failed: ${(err as Error).message}`);
+      throw err;
     }
   }
 
@@ -626,13 +630,18 @@ export class ElasticsearchProvider implements OnModuleInit {
     const uniqueIds = [...new Set(ids.filter(Boolean))];
     if (uniqueIds.length === 0) return;
     try {
-      await this.client.bulk({
+      const result = await this.client.bulk({
         operations: uniqueIds.flatMap((id) => [
           { update: { _index: this.indexName, _id: id } },
           { doc: { ...patch, updatedAt: new Date().toISOString() } },
         ]),
         refresh: true,
       });
+      if (result.errors) {
+        throw new Error(
+          `ES metadata update failed for ${uniqueIds.length} chunks: one or more items failed`,
+        );
+      }
       this.logger.log(`ES updated metadata for ${uniqueIds.length} chunks`);
     } catch (err) {
       this.logger.warn(
@@ -655,6 +664,10 @@ export class ElasticsearchProvider implements OnModuleInit {
     documentCount: number;
     contentHashes?: string[];
     indexGenerations?: string[];
+    lifecycleStatusAvailable?: boolean;
+    chunkLifecycleStatuses?: string[];
+    documentLifecycleStatuses?: string[];
+    lifecycleStatusReason?: string;
     reason?: string;
   }> {
     if (!this.enabled) {
@@ -688,12 +701,56 @@ export class ElasticsearchProvider implements OnModuleInit {
         contentHashes?: { buckets?: Array<{ key: string }> };
         indexGenerations?: { buckets?: Array<{ key: string }> };
       } | undefined;
+      let lifecycleStatusAvailable = false;
+      let chunkLifecycleStatuses: string[] = [];
+      let documentLifecycleStatuses: string[] = [];
+      let lifecycleStatusReason: string | undefined;
+      try {
+        const [chunkLifecycle, documentLifecycle] = await Promise.all([
+          this.client.search({
+            index: this.indexName,
+            query,
+            size: 0,
+            aggs: {
+              lifecycleStatuses: {
+                terms: { field: 'lifecycleStatus', size: 20 },
+              },
+            },
+          }),
+          this.client.search({
+            index: this.documentIndexName,
+            query,
+            size: 0,
+            aggs: {
+              lifecycleStatuses: {
+                terms: { field: 'lifecycleStatus', size: 20 },
+              },
+            },
+          }),
+        ]);
+        const readStatuses = (result: typeof chunkLifecycle): string[] => {
+          const aggs = result.aggregations as
+            | { lifecycleStatuses?: { buckets?: Array<{ key: string }> } }
+            | undefined;
+          return aggs?.lifecycleStatuses?.buckets?.map((bucket) => bucket.key) ?? [];
+        };
+        chunkLifecycleStatuses = readStatuses(chunkLifecycle);
+        documentLifecycleStatuses = readStatuses(documentLifecycle);
+        lifecycleStatusAvailable = true;
+      } catch (err) {
+        lifecycleStatusReason = `elasticsearch_lifecycle_audit_failed:${(err as Error).message}`;
+      }
+
       return {
         available: true,
         chunkCount: chunks.count,
         documentCount: documents.count,
         contentHashes: aggregations?.contentHashes?.buckets?.map((bucket) => bucket.key) ?? [],
         indexGenerations: aggregations?.indexGenerations?.buckets?.map((bucket) => bucket.key) ?? [],
+        lifecycleStatusAvailable,
+        chunkLifecycleStatuses,
+        documentLifecycleStatuses,
+        ...(lifecycleStatusReason ? { lifecycleStatusReason } : {}),
       };
     } catch (err) {
       return {
@@ -714,7 +771,7 @@ export class ElasticsearchProvider implements OnModuleInit {
     const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
     if (userId) filter.push({ term: { userId } });
     try {
-      await this.client.updateByQuery({
+      const chunks = await this.client.updateByQuery({
         index: this.indexName,
         query: { bool: { filter } },
         script: {
@@ -723,7 +780,13 @@ export class ElasticsearchProvider implements OnModuleInit {
         },
         refresh: true,
       });
-      await this.client.updateByQuery({
+      const chunkFailureCount = chunks.failures?.length ?? 0;
+      if (chunks.timed_out || chunkFailureCount > 0) {
+        throw new Error(
+          `ES chunk lifecycle update incomplete: timedOut=${chunks.timed_out}, failures=${chunkFailureCount}`,
+        );
+      }
+      const documents = await this.client.updateByQuery({
         index: this.documentIndexName,
         query: { bool: { filter } },
         script: {
@@ -732,10 +795,17 @@ export class ElasticsearchProvider implements OnModuleInit {
         },
         refresh: true,
       });
+      const documentFailureCount = documents.failures?.length ?? 0;
+      if (documents.timed_out || documentFailureCount > 0) {
+        throw new Error(
+          `ES document lifecycle update incomplete: timedOut=${documents.timed_out}, failures=${documentFailureCount}`,
+        );
+      }
     } catch (error) {
       this.logger.warn(
         `ES lifecycle update failed for docId=${docId}: ${(error as Error).message}`,
       );
+      throw error;
     }
   }
 

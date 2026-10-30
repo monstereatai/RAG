@@ -99,8 +99,20 @@ export class RagService
   getIndexedChunkHashes(
     docId: string,
     userId?: string,
-  ): { hashes: string[]; generations: string[]; complete: boolean } {
+  ): {
+    hashes: string[];
+    generations: string[];
+    lifecycleStatuses: string[];
+    complete: boolean;
+  } {
     return this.indexService.getIndexedChunkHashes(docId, userId);
+  }
+
+  getSnapshotPersistenceStatus(docId: string): {
+    persisted: boolean;
+    reason?: string;
+  } {
+    return this.indexService.getSnapshotPersistenceStatus(docId);
   }
 
   getStats(): { totalChunks: number; totalDocs: number } {

@@ -18,6 +18,37 @@
 # ============================================================
 
 services:
+  # ---- Generated Vue / React source preview compiler (host API uses localhost:4321) ----
+  preview-runner:
+    build:
+      context: ../..
+      dockerfile: apps/preview-runner/Dockerfile
+    container_name: rag-dev-preview-runner
+    restart: "no"
+    ports:
+      - '127.0.0.1:4321:4321'
+    environment:
+      PORT: 4321
+      NODE_ENV: production
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - preview-net
+
   # ---- PostgreSQL 16 + pgvector（关系型数据 + 可选向量库）----
   postgres:
     image: pgvector/pgvector:0.8.1-pg16
@@ -180,3 +211,8 @@ volumes:
   dev_milvus_data:
   dev_es_data:
   dev_neo4j_data:
+
+networks:
+  preview-net:
+    driver: bridge
+    internal: true

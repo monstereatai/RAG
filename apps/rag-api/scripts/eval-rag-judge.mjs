@@ -74,6 +74,7 @@ for (const item of items) {
     });
     results.push({
       id: item.id,
+      split: item.split,
       mode: item.mode,
       variant: item.variant,
       claim: claim.text,
@@ -89,11 +90,15 @@ const supported = results.filter((item) => item.label === 'supported').length;
 const supportedRate =
   results.length === 0 ? 1 : Number((supported / results.length).toFixed(3));
 const byModeAndVariant = summarizeByModeAndVariant(results);
+const bySplitModeAndVariant = summarizeBySplitModeAndVariant(results);
 const ok =
   results.every((item) => item.validJson) &&
   Number.isFinite(minSupportedRate) &&
   supportedRate >= minSupportedRate &&
   Object.values(byModeAndVariant).every(
+    (item) => item.supportedRate >= minSupportedRate,
+  ) &&
+  Object.values(bySplitModeAndVariant).every(
     (item) => item.supportedRate >= minSupportedRate,
   );
 
@@ -108,6 +113,7 @@ console.log(
       maxClaims,
       supportedRate,
       byModeAndVariant,
+      bySplitModeAndVariant,
       totalClaims: results.length,
       summary: summarize(results),
       results,
@@ -136,6 +142,7 @@ function normalizeInput(raw) {
           : [];
       return {
         id: row.id,
+        split: row.split ?? 'all',
         mode: row.mode ?? 'default',
         variant: row.variant ?? 'default',
         answer: row.answer ?? row.referenceAnswer ?? '',
@@ -262,6 +269,43 @@ function summarizeByModeAndVariant(results) {
       return [
         key,
         {
+          mode,
+          variant,
+          ...summarize(groupResults),
+          supportedRate: Number(
+            (supportedCount / Math.max(groupResults.length, 1)).toFixed(3),
+          ),
+          totalClaims: groupResults.length,
+        },
+      ];
+    }),
+  );
+}
+
+function summarizeBySplitModeAndVariant(results) {
+  const groups = [
+    ...new Set(
+      results.map(
+        (item) => `${item.split ?? 'all'}:${item.mode ?? 'default'}:${item.variant ?? 'default'}`,
+      ),
+    ),
+  ];
+  return Object.fromEntries(
+    groups.map((key) => {
+      const [split, mode, variant] = key.split(':');
+      const groupResults = results.filter(
+        (item) =>
+          (item.split ?? 'all') === split &&
+          (item.mode ?? 'default') === mode &&
+          (item.variant ?? 'default') === variant,
+      );
+      const supportedCount = groupResults.filter(
+        (item) => item.label === 'supported',
+      ).length;
+      return [
+        key,
+        {
+          split,
           mode,
           variant,
           ...summarize(groupResults),

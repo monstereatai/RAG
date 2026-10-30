@@ -153,9 +153,9 @@ export class ContextBuilder {
       usedCharacters += estimated;
     }
 
-    const arranged = arrangeForLongContext(
-      query ? selected.map((chunk) => compressChunk(chunk, query)) : selected,
-    );
+    // 排序可以改变片段位置，但传给生成器的内容必须保持原文完整，
+    // 避免按关键词删句时把否定、例外或适用条件一并删掉。
+    const arranged = arrangeForLongContext(selected);
     const context = arranged
       .map(
         (chunk, index) =>
@@ -237,22 +237,6 @@ function jaccard(left: Set<string>, right: Set<string>): number {
     if (right.has(item)) intersection += 1;
   });
   return intersection / (left.size + right.size - intersection);
-}
-
-function compressChunk(chunk: RetrievedChunk, query: string): RetrievedChunk {
-  if (chunk.content.length < 900) return chunk;
-  const terms = query
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((term) => term.length > 1);
-  if (terms.length === 0) return chunk;
-  const sentences = chunk.content.split(/(?<=[。！？.!?])\s*/).filter(Boolean);
-  const matched = sentences.filter((sentence) => {
-    const text = sentence.toLowerCase();
-    return terms.some((term) => text.includes(term));
-  });
-  if (matched.length === 0 || matched.length === sentences.length) return chunk;
-  return { ...chunk, content: matched.join(' ') };
 }
 
 function arrangeForLongContext(chunks: RetrievedChunk[]): RetrievedChunk[] {

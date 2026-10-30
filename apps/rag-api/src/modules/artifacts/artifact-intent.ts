@@ -9,6 +9,7 @@ const ACTION_PATTERN =
   /(?:生成|导出|制作|创建|整理成|转换?成|输出|给我(?:一份|一个)?|做成|产出)/i;
 
 const KIND_PATTERNS: Array<[ArtifactKind, RegExp]> = [
+  ['json', /(?:\bjson\b|JSON\s*Schema)/i],
   ['word', /(?:\bword\b|\bworld\b|\bdocx\b|Word\s*文档)/i],
   ['excel', /(?:\bexcel\b|\bxlsx\b|电子表格|Excel\s*表格)/i],
   ['markdown', /(?:\bmarkdown\b|\bmd\b|Markdown\s*文档)/i],
@@ -57,5 +58,7 @@ function defaultTitle(kind: ArtifactKind): string {
     excel: 'AI 问答 Excel',
     architecture: 'AI 问答架构图',
     image: 'AI 问答图片',
+    json: 'AI 问答 JSON',
+    code: 'AI 问答代码包',
   }[kind];
 }

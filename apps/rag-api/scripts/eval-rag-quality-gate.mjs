@@ -184,6 +184,7 @@ async function requireReviewedBusinessDataset() {
   const datasetErrors = validateProjectEvalDataset(dataset, {
     minQueries: 100,
     requireExpectedClaims: true,
+    requireSplits: true,
   });
   if (datasetErrors.length > 0) {
     failReleaseGate(
@@ -210,6 +211,18 @@ async function requireReviewedBusinessDataset() {
 
   const answerableQueries = dataset.queries.filter(
     (query) => query.expectRefusal !== true && query.minKeywordHits !== 0,
+  );
+  const splitCounts = Object.fromEntries(
+    ['development', 'holdout'].map((split) => [
+      split,
+      dataset.queries.filter((query) => query.split === split).length,
+    ]),
+  );
+  const answerableCountsBySplit = Object.fromEntries(
+    ['development', 'holdout'].map((split) => [
+      split,
+      answerableQueries.filter((query) => query.split === split).length,
+    ]),
   );
   const minimumAnswerableCount = Math.max(
     20,
@@ -255,12 +268,16 @@ async function requireReviewedBusinessDataset() {
       reviewed: provenance.reviewed,
       queryCount: dataset.queries.length,
       answerableQueryCount: answerableQueries.length,
+      splitCounts,
+      answerableCountsBySplit,
       note: 'The gate checks the declared provenance fields; it cannot independently verify the source data.',
     }),
   );
   return {
     queryCount: dataset.queries.length,
     answerableQueryCount: answerableQueries.length,
+    splitCounts,
+    answerableCountsBySplit,
   };
 }
 
@@ -342,6 +359,72 @@ function validateReleaseReport(report, datasetStats) {
       ) {
         resultQualityFailures.push(
           `${key}: answerable pass rate ${Math.round(answerablePassRate * 100)}% (expected ${Math.round(minScore * 100)}%, ${answerableResults.filter((result) => result.passed === true).length}/${answerableResults.length}; dataset has ${answerableQueryCount})`,
+        );
+      }
+
+      const splitPassRates = {};
+      for (const split of ['development', 'holdout']) {
+        const expectedSplitCount = datasetStats.splitCounts?.[split] ?? 0;
+        const splitGroup =
+          report.summaryBySplit?.[split]?.byModeAndVariant?.[key];
+        const splitPassRate =
+          Number.isInteger(splitGroup?.passed) &&
+          Number.isInteger(splitGroup?.total) &&
+          splitGroup.total > 0
+            ? splitGroup.passed / splitGroup.total
+            : 0;
+        splitPassRates[split] = splitPassRate;
+        if (
+          splitGroup?.total !== expectedSplitCount ||
+          splitPassRate < minScore
+        ) {
+          resultQualityFailures.push(
+            `${key}:${split} pass rate ${Math.round(splitPassRate * 100)}% (expected ${Math.round(minScore * 100)}%, ${splitGroup?.passed ?? 0}/${splitGroup?.total ?? 0}; dataset has ${expectedSplitCount})`,
+          );
+        }
+
+        const splitAnswerableExpected =
+          datasetStats.answerableCountsBySplit?.[split] ?? 0;
+        const splitAnswerableResults = (report.results ?? []).filter(
+          (result) =>
+            result.mode === mode &&
+            result.variant === variant &&
+            result.split === split &&
+            result.retrievalApplicable === true,
+        );
+        const splitAnswerablePassRate = splitAnswerableResults.length
+          ? splitAnswerableResults.filter((result) => result.passed === true)
+              .length / splitAnswerableResults.length
+          : 0;
+        if (
+          splitAnswerableResults.length !== splitAnswerableExpected ||
+          splitAnswerablePassRate < minScore
+        ) {
+          resultQualityFailures.push(
+            `${key}:${split} answerable pass rate ${Math.round(splitAnswerablePassRate * 100)}% (${splitAnswerableResults.filter((result) => result.passed === true).length}/${splitAnswerableResults.length}; dataset has ${splitAnswerableExpected})`,
+          );
+        }
+      }
+
+      const maxDevHoldoutGap = Number(
+        process.env.EVAL_RAG_MAX_DEV_HOLDOUT_GAP ?? '0.1',
+      );
+      if (
+        !Number.isFinite(maxDevHoldoutGap) ||
+        maxDevHoldoutGap < 0 ||
+        maxDevHoldoutGap > 1
+      ) {
+        failReleaseGate(
+          'EVAL_RAG_MAX_DEV_HOLDOUT_GAP must be between 0 and 1.',
+        );
+      }
+      if (
+        Math.abs(
+          splitPassRates.development - splitPassRates.holdout,
+        ) > maxDevHoldoutGap
+      ) {
+        resultQualityFailures.push(
+          `${key}: development/holdout pass-rate gap ${Math.round(Math.abs(splitPassRates.development - splitPassRates.holdout) * 100)}% exceeds ${Math.round(maxDevHoldoutGap * 100)}%`,
         );
       }
     }

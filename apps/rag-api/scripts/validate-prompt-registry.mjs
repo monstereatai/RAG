@@ -2,19 +2,28 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const registryPath = 'src/rag/prompts/prompt-registry.ts';
 const content = readFileSync(registryPath, 'utf8');
-const names = [...content.matchAll(/name:\s*'([^']+)'/g)].map((match) => match[1]);
-const files = [...content.matchAll(/file:\s*'([^']+)'/g)].map((match) => match[1]);
-const evals = [...content.matchAll(/evals:\s*\[([\s\S]*?)\]/g)].map((match) => match[1]);
+const entries = [...content.matchAll(/\{\s*name:\s*'([^']+)'([\s\S]*?)\n  \},/g)].map(
+  ([, name, body]) => ({ name, body }),
+);
+const names = entries.map((entry) => entry.name);
 
 const errors = [];
 if (names.length === 0) errors.push('prompt registry has no entries');
 if (new Set(names).size !== names.length) errors.push('prompt registry has duplicate names');
-for (const file of files) {
-  if (!existsSync(file)) errors.push(`registered prompt file missing: ${file}`);
-}
-for (const [index, evalBlock] of evals.entries()) {
-  if (!/npm run/.test(evalBlock)) {
-    errors.push(`prompt entry ${names[index] ?? index} has no npm eval command`);
+for (const { name, body } of entries) {
+  const file = body.match(/file:\s*'([^']+)'/)?.[1];
+  const evalBlock = body.match(/evals:\s*\[([\s\S]*?)\]/)?.[1] ?? '';
+  const hasOfflineEval = /npm run/.test(evalBlock);
+  const hasExplicitNoOfflineEvalNote =
+    /evaluationNote:\s*'暂无专用离线质量评测/.test(body);
+
+  if (!file || !existsSync(file)) {
+    errors.push(`prompt entry ${name} has a missing registered prompt file`);
+  }
+  if (!hasOfflineEval && !hasExplicitNoOfflineEvalNote) {
+    errors.push(
+      `prompt entry ${name} needs an npm eval command or an explicit no-offline-eval note`,
+    );
   }
 }
 

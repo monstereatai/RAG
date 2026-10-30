@@ -15,6 +15,15 @@ import {
   LlmRoutePolicy,
 } from './llm-gateway.policy';
 
+class LlmInputBudgetExceededError extends Error {
+  constructor(estimatedTokens: number, maxInputTokens: number) {
+    super(
+      `LLM input exceeds the shared context budget (${estimatedTokens}/${maxInputTokens} estimated tokens); reduce optional context before retrying.`,
+    );
+    this.name = 'LlmInputBudgetExceededError';
+  }
+}
+
 /**
  * LLM Provider 工厂
  * 按 config.llm.provider 注入对应实现
@@ -100,12 +109,19 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
   }
 
   getModel(model?: LlmModelProvider): BaseChatModel {
-    return this.wrapModel(this.resolveProvider(model).getModel());
+    const selected =
+      model ?? this.requestModel.getStore() ?? this.getDefaultProviderName();
+    return this.wrapModel(this.resolveProvider(selected).getModel(), selected);
   }
 
   getAgenticModel(model?: LlmModelProvider): BaseChatModel {
-    const provider = this.resolveProvider(model);
-    return this.wrapModel(provider.getAgenticModel?.() ?? provider.getModel());
+    const selected =
+      model ?? this.requestModel.getStore() ?? this.getDefaultProviderName();
+    const provider = this.resolveProvider(selected);
+    return this.wrapModel(
+      provider.getAgenticModel?.() ?? provider.getModel(),
+      selected,
+    );
   }
 
   getActiveProviderName(): LlmModelProvider {
@@ -171,7 +187,10 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
    * 底层 ChatModel 不经过 `LlmProvider.invoke()`，因此需要在 Runnable 边界补上传播中的
    * AbortSignal。结构化输出返回的 Runnable 也继续包装，避免只取消了外层链而没有取消模型。
    */
-  private wrapModel<T extends object>(model: T): T {
+  private wrapModel<T extends object>(
+    model: T,
+    providerName: LlmModelProvider,
+  ): T {
     const cached = this.modelWrappers.get(model);
     if (cached) return cached as T;
 
@@ -191,11 +210,51 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
               target,
               value as (...args: unknown[]) => unknown,
               args,
+              providerName,
             );
         }
 
+        if (property === 'withStructuredOutput') {
+          return (...args: unknown[]) => {
+            const primaryRunnable = Reflect.apply(
+              value,
+              receiver,
+              args,
+            ) as {
+              withFallbacks?: (fields: { fallbacks: object[] }) => object;
+            };
+            const fallbackProvider = this.gatewayPolicy.resolve(
+              'structured',
+              providerName,
+            ).fallback;
+            if (!fallbackProvider || fallbackProvider === providerName) {
+              return this.wrapModel(primaryRunnable as object, providerName);
+            }
+
+            const fallbackModel =
+              this.resolveProvider(fallbackProvider).getModel();
+            const fallbackMethod = Reflect.get(
+              fallbackModel,
+              'withStructuredOutput',
+            );
+            if (typeof fallbackMethod !== 'function') {
+              return this.wrapModel(primaryRunnable as object, providerName);
+            }
+            const fallbackRunnable = Reflect.apply(
+              fallbackMethod,
+              fallbackModel,
+              args,
+            ) as object;
+            const runnable = primaryRunnable.withFallbacks
+              ? Reflect.apply(primaryRunnable.withFallbacks, primaryRunnable, [
+                  { fallbacks: [fallbackRunnable] },
+                ])
+              : primaryRunnable;
+            return this.wrapModel(runnable as object, providerName);
+          };
+        }
+
         if (
-          property === 'withStructuredOutput' ||
           property === 'withConfig' ||
           property === 'pipe' ||
           property === 'bind' ||
@@ -203,7 +262,7 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
           property === 'withFallbacks'
         ) {
           return (...args: unknown[]) =>
-            this.wrapModel(Reflect.apply(value, receiver, args));
+            this.wrapModel(Reflect.apply(value, receiver, args), providerName);
         }
 
         return value.bind(receiver);
@@ -217,7 +276,11 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     target: object,
     method: (...args: unknown[]) => unknown,
     args: unknown[],
+    providerName: LlmModelProvider,
   ): unknown {
+    if (!this.isStreamingInput(args[0])) {
+      this.assertInputWithinBudget(args[0], providerName);
+    }
     const upstreamSignal = this.requestSignal.getStore();
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const signal = upstreamSignal
@@ -239,6 +302,113 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
       nextOptions,
       ...args.slice(2),
     ]);
+  }
+
+  /**
+   * Last-resort input guard for LangChain calls that bypass `LlmProvider.invoke()`.
+   * Call sites can still trim optional context themselves; this guard prevents
+   * unbounded prompts from reaching a provider when one of those paths is missed.
+   */
+  private assertInputWithinBudget(
+    input: unknown,
+    providerName: LlmModelProvider,
+  ): void {
+    const prompt = this.serializePromptInput(input);
+    const imageCount = (prompt.match(/__LLM_IMAGE_PAYLOAD__/g) ?? []).length;
+    const estimatedTokens =
+      this.estimatePromptTokens(prompt.replaceAll('__LLM_IMAGE_PAYLOAD__', '')) +
+      imageCount * 2_048;
+    const maxInputTokens = this.getMaxInputTokens(providerName);
+    if (estimatedTokens <= maxInputTokens) return;
+
+    throw new LlmInputBudgetExceededError(estimatedTokens, maxInputTokens);
+  }
+
+  private getMaxInputTokens(providerName: LlmModelProvider): number {
+    const configuredWindow = Number(
+      this.config.get<number>('llm.contextWindowTokens'),
+    );
+    const contextWindow =
+      Number.isFinite(configuredWindow) && configuredWindow > 0
+        ? configuredWindow
+        : 32_768;
+    const route = this.gatewayPolicy.resolve('structured', providerName);
+    const providers = [providerName, route.fallback].filter(
+      (provider): provider is LlmModelProvider => Boolean(provider),
+    );
+    const outputBudget = Math.max(
+      ...providers.map((provider) => {
+        const configuredOutput = Number(
+          this.config.get<number>(`llm.${provider}.maxTokens`),
+        );
+        return Number.isFinite(configuredOutput) && configuredOutput > 0
+          ? configuredOutput
+          : 4_096;
+      }),
+    );
+    const safetyMargin = Math.max(256, Math.ceil(contextWindow * 0.1));
+    return Math.max(0, contextWindow - outputBudget - safetyMargin);
+  }
+
+  private serializePromptInput(input: unknown): string {
+    try {
+      let serializableInput = input;
+      if (input && typeof input === 'object') {
+        const promptValue = input as {
+          toChatMessages?: () => unknown;
+          toString?: () => string;
+        };
+        if (typeof promptValue.toChatMessages === 'function') {
+          serializableInput = promptValue.toChatMessages();
+        } else if (
+          typeof promptValue.toString === 'function' &&
+          promptValue.toString !== Object.prototype.toString
+        ) {
+          serializableInput = promptValue.toString();
+        }
+      }
+      return JSON.stringify(serializableInput, (key, value: unknown) => {
+        if (
+          key === 'signal' ||
+          key === 'callbacks'
+        ) {
+          return undefined;
+        }
+        if (
+          typeof value === 'string' &&
+          /^data:image\/[^;]+;base64,/i.test(value)
+        ) {
+          return '__LLM_IMAGE_PAYLOAD__';
+        }
+        if (
+          key === 'image_url' &&
+          value &&
+          typeof value === 'object'
+        ) {
+          return '__LLM_IMAGE_PAYLOAD__';
+        }
+        return value;
+      }) ?? String(serializableInput ?? '');
+    } catch {
+      return String(input ?? '');
+    }
+  }
+
+  private estimatePromptTokens(text: string): number {
+    const cjk = (
+      text.match(
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu,
+      ) ?? []
+    ).length;
+    return Math.ceil(cjk + Math.max(text.length - cjk, 0) / 4);
+  }
+
+  private isStreamingInput(input: unknown): boolean {
+    return Boolean(
+      input &&
+        typeof input === 'object' &&
+        Symbol.asyncIterator in input,
+    );
   }
 
   private async invokeWithFallback(
@@ -263,6 +433,11 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
         this.recordProviderSuccess(providerName);
         return answer;
       } catch (error) {
+        if (error instanceof LlmInputBudgetExceededError) {
+          if (providerName === candidates[candidates.length - 1]) throw error;
+          if (primaryError === undefined) primaryError = error;
+          continue;
+        }
         this.recordProviderFailure(providerName);
         if (options.signal?.aborted === true) throw error;
         if (primaryError === undefined) primaryError = error;
@@ -283,6 +458,7 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     messages: string | Parameters<ILLMProvider['invoke']>[0],
     options: LlmInvokeOptions,
   ): Promise<string> {
+    this.assertInputWithinBudget(messages, providerName);
     const provider = this.resolveProvider(providerName);
     return this.requestModel.run(providerName, () =>
       Object.keys(options).length > 0

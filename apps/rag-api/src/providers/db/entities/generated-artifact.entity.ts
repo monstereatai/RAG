@@ -12,7 +12,9 @@ export type ArtifactKind =
   | 'word'
   | 'excel'
   | 'architecture'
-  | 'image';
+  | 'image'
+  | 'json'
+  | 'code';
 export type ArtifactStatus = 'queued' | 'generating' | 'ready' | 'failed';
 
 @Entity('generated_artifacts')

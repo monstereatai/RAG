@@ -1,0 +1,22 @@
+{
+  "name": "preview-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test src/*.spec.mjs",
+    "build": "node --check src/server.mjs && node --check src/build-preview.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.1.2",
+    "@vitejs/plugin-vue": "6.0.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "vite": "8.3.5",
+    "vue": "3.5.44"
+  }
+}

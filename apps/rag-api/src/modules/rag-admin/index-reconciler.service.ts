@@ -124,6 +124,9 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
             reason.endsWith('_count_mismatch') ||
             reason.endsWith('_content_hash_mismatch') ||
             reason.endsWith('_generation_mismatch') ||
+            reason === 'bm25_snapshot_not_persisted' ||
+            reason === 'bm25_lifecycle_mismatch' ||
+            reason === 'elasticsearch_lifecycle_mismatch' ||
             reason === 'graph_index_missing' ||
             reason === 'graph_index_failed' ||
             reason === 'graph_index_pending',

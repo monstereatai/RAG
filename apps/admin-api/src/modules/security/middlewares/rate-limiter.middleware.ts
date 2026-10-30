@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware, OnModuleDestroy } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
+import { redactWorkspacePreviewTicketFromPath } from '../../../common/request-path.util';
 import { SecurityService } from '../security.service';
 
 @Injectable()
@@ -56,7 +57,7 @@ export class RateLimiterMiddleware implements NestMiddleware, OnModuleDestroy {
         userAgent: req.get('user-agent') || 'Unknown',
         action: req.method,
         details: {
-          url: req.url,
+          url: redactWorkspacePreviewTicketFromPath(req.url),
           currentCount: ipRequest.count,
           maxRequests: rateLimitConfig.max,
           timestamp: new Date().toISOString(),

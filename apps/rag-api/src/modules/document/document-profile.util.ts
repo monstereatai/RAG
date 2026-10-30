@@ -1,4 +1,4 @@
-import type { StructuredChunk } from './chunking.util';
+import { countTextTokens, type StructuredChunk } from './chunking.util';
 
 export type GameDocumentType =
   | 'prd'
@@ -77,7 +77,7 @@ export interface IngestionQualityReport {
 
 export interface ChunkStrategyEvaluation {
   chunkCount: number;
-  averageChunkLength: number;
+  averageChunkTokens: number;
   overlapRatio: number;
   semanticBoundaryRate: number;
   score: number;
@@ -85,8 +85,8 @@ export interface ChunkStrategyEvaluation {
 
 /**
  * 文档类型与切块策略的唯一映射。不同类型的结构密度不同：API／配置更重视完整段落，
- * PRD／复盘需要更多相邻上下文；overlap 统一控制在 chunkSize 的 10%～20% 之间，
- * 以接近 token 重叠目标（当前切分器按字符预算）并避免相邻事实被截断。
+ * PRD／复盘需要更多相邻上下文；chunkSize 与 chunkOverlap 按 cl100k_base Token 估算，
+ * 用于不同文档类型的相对预算。实际模型的 tokenizer 可能略有差异。
  */
 const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
   prd: { chunkSize: 650, chunkOverlap: 100, semanticBoundaries: true },
@@ -130,14 +130,16 @@ export function getChunkStrategy(type: GameDocumentType): ChunkStrategy {
 }
 
 /** 对切分实验给出可比较的离线分数，不代表线上准确率。 */
-export function evaluateChunkStrategy(
+export async function evaluateChunkStrategy(
   source: string,
   chunks: StructuredChunk[],
   strategy: ChunkStrategy,
-): ChunkStrategyEvaluation {
-  const lengths = chunks.map((chunk) => chunk.content.length);
-  const averageChunkLength = lengths.length
-    ? lengths.reduce((sum, value) => sum + value, 0) / lengths.length
+): Promise<ChunkStrategyEvaluation> {
+  const tokenLengths = await Promise.all(
+    chunks.map((chunk) => countTextTokens(chunk.content)),
+  );
+  const averageChunkTokens = tokenLengths.length
+    ? tokenLengths.reduce((sum, value) => sum + value, 0) / tokenLengths.length
     : 0;
   const targetOverlap = strategy.chunkOverlap / Math.max(strategy.chunkSize, 1);
   const overlapRatio = Math.min(1, targetOverlap);
@@ -145,7 +147,9 @@ export function evaluateChunkStrategy(
     /[。！？.!?]$/.test(chunk.content.trim()),
   ).length;
   const semanticBoundaryRate = chunks.length ? boundaries / chunks.length : 0;
-  const sizeScore = averageChunkLength <= strategy.chunkSize ? 1 : 0;
+  const sizeScore = tokenLengths.every((length) => length <= strategy.chunkSize)
+    ? 1
+    : 0;
   const score = Number(
     (
       (semanticBoundaryRate * 0.6 +
@@ -158,7 +162,7 @@ export function evaluateChunkStrategy(
   if (!source.trim() || chunks.length === 0) {
     return {
       chunkCount: chunks.length,
-      averageChunkLength,
+      averageChunkTokens,
       overlapRatio,
       semanticBoundaryRate,
       score: 0,
@@ -166,7 +170,7 @@ export function evaluateChunkStrategy(
   }
   return {
     chunkCount: chunks.length,
-    averageChunkLength,
+    averageChunkTokens,
     overlapRatio,
     semanticBoundaryRate,
     score,

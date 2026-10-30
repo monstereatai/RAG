@@ -13,7 +13,7 @@ export function relatedDocumentIdsForQuery(query) {
 
 export function validateProjectEvalDataset(
   dataset,
-  { minQueries = 10, requireExpectedClaims = false } = {},
+  { minQueries = 10, requireExpectedClaims = false, requireSplits = false } = {},
 ) {
   const errors = [];
   if (!dataset || typeof dataset !== 'object') {
@@ -44,6 +44,7 @@ export function validateProjectEvalDataset(
   const queryIds = new Set();
   let hasNegative = false;
   let hasConflict = false;
+  const splitCounts = { development: 0, holdout: 0 };
   for (const [index, query] of (dataset.queries ?? []).entries()) {
     const label = query?.id || `queries[${index}]`;
     if (typeof query?.id !== 'string' || !query.id.trim()) {
@@ -54,6 +55,13 @@ export function validateProjectEvalDataset(
     if (query?.id) queryIds.add(query.id);
     if (typeof query?.query !== 'string' || !query.query.trim()) {
       errors.push(`${label}: query text is required`);
+    }
+    if (requireSplits) {
+      if (!['development', 'holdout'].includes(query?.split)) {
+        errors.push(`${label}: split must be development or holdout`);
+      } else {
+        splitCounts[query.split] += 1;
+      }
     }
 
     const expectedKeywords = Array.isArray(query?.expectedKeywords)
@@ -114,5 +122,16 @@ export function validateProjectEvalDataset(
 
   if (!hasNegative) errors.push('dataset requires at least one negative refusal query');
   if (!hasConflict) errors.push('dataset requires at least one conflict query');
+  if (requireSplits && dataset.queries?.length) {
+    const minimumHoldout = Math.max(20, Math.ceil(dataset.queries.length * 0.2));
+    if (splitCounts.development === 0) {
+      errors.push('dataset requires at least one development query');
+    }
+    if (splitCounts.holdout < minimumHoldout) {
+      errors.push(
+        `dataset requires at least ${minimumHoldout} holdout queries (20% of the dataset, with a floor of 20)`,
+      );
+    }
+  }
   return errors;
 }

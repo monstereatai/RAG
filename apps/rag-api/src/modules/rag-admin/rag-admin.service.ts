@@ -41,7 +41,9 @@ import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ImageIndexService } from '../image-index/image-index.service';
 import {
   detectDocumentKind,
+  extractAudioDocumentText,
   extractDocumentText,
+  extractImageDocumentText,
 } from '../document/document-parser.util';
 import { DocumentQueueService } from '../document/document-queue.service';
 import { DocumentImageIngestionService } from '../document/document-image-ingestion.service';
@@ -49,6 +51,8 @@ import type { DocumentBusinessMetadata } from '../document/document-profile.util
 import { readEvaluationReportSummaries } from '../evaluation-reports/evaluation-report.store';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
+import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
+import { VisionProvider } from '../../providers/vision/vision.provider';
 import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import {
   DocumentRetrievalDescriptionService,
@@ -132,6 +136,11 @@ type IndexAuditCheck = {
   actualContentHashes?: string[];
   expectedIndexGeneration?: string;
   actualIndexGenerations?: string[];
+  persistenceReason?: string;
+  expectedChunkLifecycleStatuses?: string[];
+  actualChunkLifecycleStatuses?: string[];
+  expectedDocumentLifecycleStatus?: string | null;
+  actualDocumentLifecycleStatuses?: string[];
   pgCount?: number;
   milvusCount?: number;
   missingCount?: number;
@@ -212,6 +221,8 @@ export class RagAdminService implements OnModuleInit {
     @Optional()
     private readonly indexRepairQueue?: IndexRepairQueueService,
     @Optional() private readonly objectStorageProvider?: ObjectStorageProvider,
+    @Optional() private readonly speechProvider?: TencentSpeechProvider,
+    @Optional() private readonly visionProvider?: VisionProvider,
   ) {}
 
   onModuleInit(): void {
@@ -239,7 +250,9 @@ export class RagAdminService implements OnModuleInit {
       trustedAdminPrincipal,
     );
     const kind = detectDocumentKind(file.originalname);
-    const content = (await extractDocumentText(file.buffer, kind)).trim();
+    const content = (
+      await this.extractUploadContent(file, kind, userId)
+    ).trim();
     if (!content) throw new BadRequestException('document content is empty');
     const businessMetadata = { ...fields };
     delete businessMetadata.ownerUserId;
@@ -251,6 +264,72 @@ export class RagAdminService implements OnModuleInit {
       trustedAdminPrincipal,
       businessMetadata: businessMetadata,
     });
+  }
+
+  private async extractUploadContent(
+    file: Express.Multer.File,
+    kind: ReturnType<typeof detectDocumentKind>,
+    userId: string,
+  ): Promise<string> {
+    if (kind === 'audio') {
+      return extractAudioDocumentText(
+        file.buffer,
+        file.originalname,
+        this.speechProvider,
+      );
+    }
+    if (kind === 'image') {
+      return extractImageDocumentText(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        this.visionProvider,
+      );
+    }
+
+    const capabilities = this.visionProvider?.getCapabilities();
+    const imageOptions =
+      (kind === 'pdf' || kind === 'pptx') && this.objectStorageProvider
+        ? {
+            storage: this.objectStorageProvider,
+            vision: capabilities?.imageUnderstanding
+              ? this.visionProvider
+              : undefined,
+            ownerUserId: userId,
+            urlResolver: (stored: { key: string }) =>
+              `/api/v1/documents/assets/image?key=${encodeURIComponent(stored.key)}`,
+          }
+        : undefined;
+    const videoOptions =
+      kind === 'video' && this.objectStorageProvider
+        ? {
+            storage: this.objectStorageProvider,
+            asr: this.speechProvider?.isEnabled()
+              ? this.speechProvider
+              : undefined,
+            vision: capabilities?.imageUnderstanding
+              ? this.visionProvider
+              : undefined,
+            ownerUserId: userId,
+            filename: file.originalname,
+            urlResolver: (stored: { key: string }) =>
+              `/api/v1/documents/assets/image?key=${encodeURIComponent(stored.key)}`,
+          }
+        : undefined;
+    if (kind === 'video' && !videoOptions) {
+      throw new BadRequestException(
+        '视频入库需要可用的对象存储以保存关键帧；当前文件未建立检索索引。',
+      );
+    }
+
+    return extractDocumentText(
+      file.buffer,
+      kind,
+      capabilities?.ocr ? this.visionProvider : undefined,
+      imageOptions,
+      videoOptions,
+      { preservePdfPages: kind === 'pdf' },
+    );
   }
 
   async uploadDocumentAsync(
@@ -1644,14 +1723,21 @@ export class RagAdminService implements OnModuleInit {
     const chunks = docs.length
       ? await this.chunkRepo.find({
           where: { docId: In(docs.map((doc) => doc.docId)) },
-          select: ['docId', 'contentHash', 'indexGeneration'],
+          select: ['docId', 'contentHash', 'indexGeneration', 'lifecycleStatus'],
         })
       : [];
     const dbChunkCounts = new Map<string, number>();
     const dbChunkHashes = new Map<string, Set<string>>();
     const dbGenerations = new Map<string, Set<string>>();
+    const dbChunkLifecycleStatuses = new Map<string, Set<string>>();
     for (const chunk of chunks) {
       dbChunkCounts.set(chunk.docId, (dbChunkCounts.get(chunk.docId) ?? 0) + 1);
+      if (chunk.lifecycleStatus) {
+        const statuses =
+          dbChunkLifecycleStatuses.get(chunk.docId) ?? new Set<string>();
+        statuses.add(chunk.lifecycleStatus);
+        dbChunkLifecycleStatuses.set(chunk.docId, statuses);
+      }
       if (chunk.contentHash) {
         const hashes = dbChunkHashes.get(chunk.docId) ?? new Set<string>();
         hashes.add(chunk.contentHash);
@@ -1673,9 +1759,18 @@ export class RagAdminService implements OnModuleInit {
         const expectedGenerations = [
           ...(dbGenerations.get(doc.docId) ?? new Set()),
         ];
+        const expectedChunkLifecycleStatuses = [
+          ...(dbChunkLifecycleStatuses.get(doc.docId) ?? new Set()),
+        ];
+        const sameValues = (left: string[], right: string[]) =>
+          left.length === right.length &&
+          left.every((value) => right.includes(value));
         const bm25 = this.ragService.getIndexedChunkCount(
           doc.docId,
           doc.userId ?? undefined,
+        );
+        const bm25Persistence = this.ragService.getSnapshotPersistenceStatus(
+          doc.docId,
         );
         const es = await this.elasticsearchProvider.getIndexCountsByDocId(
           doc.docId,
@@ -1687,7 +1782,12 @@ export class RagAdminService implements OnModuleInit {
                 doc.docId,
                 doc.userId ?? undefined,
               )
-            : { hashes: [], generations: [], complete: false };
+            : {
+                hashes: [],
+                generations: [],
+                lifecycleStatuses: [],
+                complete: false,
+              };
         const bm25HashMismatch =
           expectedHashes.length > 0 &&
           (bm25Hashes.hashes.length !== expectedHashes.length ||
@@ -1698,6 +1798,10 @@ export class RagAdminService implements OnModuleInit {
             !expectedGenerations.every((generation) =>
               bm25Hashes.generations.includes(generation),
             ));
+        const bm25LifecycleMismatch = !sameValues(
+          expectedChunkLifecycleStatuses,
+          bm25Hashes.lifecycleStatuses,
+        );
         const esHashMismatch =
           expectedHashes.length > 0 &&
           (es.contentHashes?.length !== expectedHashes.length ||
@@ -1707,6 +1811,16 @@ export class RagAdminService implements OnModuleInit {
           (es.indexGenerations?.length !== expectedGenerations.length ||
             !expectedGenerations.every((generation) =>
               es.indexGenerations?.includes(generation),
+            ));
+        const esLifecycleMismatch =
+          es.lifecycleStatusAvailable === true &&
+          (!sameValues(
+            expectedChunkLifecycleStatuses,
+            es.chunkLifecycleStatuses ?? [],
+          ) ||
+            !sameValues(
+              doc.lifecycleStatus ? [doc.lifecycleStatus] : [],
+              es.documentLifecycleStatuses ?? [],
             ));
         const vectorRuntime = this.vectorStoreProvider.getRuntimeStatus();
         const milvus = await this.readIndexCheck(
@@ -1858,7 +1972,11 @@ export class RagAdminService implements OnModuleInit {
           },
           bm25: {
             status:
-              bm25 === expected && !bm25HashMismatch && !bm25GenerationMismatch
+              bm25 === expected &&
+              !bm25HashMismatch &&
+              !bm25GenerationMismatch &&
+              !bm25LifecycleMismatch &&
+              bm25Persistence.persisted
                 ? 'ok'
                 : 'mismatch',
             expected,
@@ -1867,49 +1985,75 @@ export class RagAdminService implements OnModuleInit {
             actualContentHashes: bm25Hashes.hashes,
             expectedIndexGeneration: expectedGenerations.join(','),
             actualIndexGenerations: bm25Hashes.generations,
+            expectedChunkLifecycleStatuses,
+            actualChunkLifecycleStatuses: bm25Hashes.lifecycleStatuses,
+            persistenceReason: bm25Persistence.reason,
             ...(bm25 === expected &&
             !bm25HashMismatch &&
-            !bm25GenerationMismatch
+            !bm25GenerationMismatch &&
+            !bm25LifecycleMismatch &&
+            bm25Persistence.persisted
               ? {}
               : {
                   reason:
-                    bm25 !== expected
-                      ? 'bm25_chunk_count_mismatch'
-                      : bm25HashMismatch
-                        ? 'bm25_content_hash_mismatch'
-                        : 'bm25_generation_mismatch',
+                    !bm25Persistence.persisted
+                      ? 'bm25_snapshot_not_persisted'
+                      : bm25 !== expected
+                        ? 'bm25_chunk_count_mismatch'
+                        : bm25HashMismatch
+                          ? 'bm25_content_hash_mismatch'
+                          : bm25GenerationMismatch
+                            ? 'bm25_generation_mismatch'
+                            : 'bm25_lifecycle_mismatch',
                 }),
           },
           elasticsearch: es.available
-            ? {
-                status:
+            ? (() => {
+                const countsMatch =
                   es.chunkCount === expected &&
-                  (expected === 0 || es.documentCount === 1) &&
+                  (expected === 0 || es.documentCount === 1);
+                const indexesMatch =
+                  countsMatch &&
                   !esHashMismatch &&
-                  !esGenerationMismatch
-                    ? 'ok'
-                    : 'mismatch',
-                expected,
-                actual: es.chunkCount,
-                documentCount: es.documentCount,
-                expectedContentHash: expectedHashes.join(','),
-                actualContentHashes: es.contentHashes,
-                expectedIndexGeneration: expectedGenerations.join(','),
-                actualIndexGenerations: es.indexGenerations,
-                ...(es.chunkCount === expected &&
-                (expected === 0 || es.documentCount === 1) &&
-                !esHashMismatch &&
-                !esGenerationMismatch
-                  ? {}
-                  : {
-                      reason:
-                        es.chunkCount !== expected || es.documentCount !== 1
+                  !esGenerationMismatch &&
+                  !esLifecycleMismatch;
+                return {
+                  status: !indexesMatch
+                    ? 'mismatch'
+                    : es.lifecycleStatusAvailable === true
+                      ? 'ok'
+                      : 'unverified',
+                  expected,
+                  actual: es.chunkCount,
+                  documentCount: es.documentCount,
+                  expectedContentHash: expectedHashes.join(','),
+                  actualContentHashes: es.contentHashes,
+                  expectedIndexGeneration: expectedGenerations.join(','),
+                  actualIndexGenerations: es.indexGenerations,
+                  expectedChunkLifecycleStatuses,
+                  actualChunkLifecycleStatuses: es.chunkLifecycleStatuses,
+                  expectedDocumentLifecycleStatus: doc.lifecycleStatus,
+                  actualDocumentLifecycleStatuses:
+                    es.documentLifecycleStatuses,
+                  ...(!indexesMatch
+                    ? {
+                        reason: !countsMatch
                           ? 'elasticsearch_index_count_mismatch'
                           : esHashMismatch
                             ? 'elasticsearch_content_hash_mismatch'
-                            : 'elasticsearch_generation_mismatch',
-                    }),
-              }
+                            : esGenerationMismatch
+                              ? 'elasticsearch_generation_mismatch'
+                              : 'elasticsearch_lifecycle_mismatch',
+                      }
+                    : es.lifecycleStatusAvailable !== true
+                      ? {
+                          reason:
+                            es.lifecycleStatusReason ??
+                            'elasticsearch_lifecycle_audit_unavailable',
+                        }
+                      : {}),
+                };
+              })()
             : {
                 status: 'skipped',
                 reason: es.reason ?? 'elasticsearch_disabled',
@@ -1997,6 +2141,7 @@ export class RagAdminService implements OnModuleInit {
         expiredButEffective: count('expired_but_effective'),
         metadataChunkCountMismatch: count('metadata_chunk_count_mismatch'),
         bm25ChunkCountMismatch: count('bm25_chunk_count_mismatch'),
+        bm25SnapshotNotPersisted: count('bm25_snapshot_not_persisted'),
         elasticsearchIndexCountMismatch: count(
           'elasticsearch_index_count_mismatch',
         ),
@@ -2006,8 +2151,12 @@ export class RagAdminService implements OnModuleInit {
           'elasticsearch_content_hash_mismatch',
         ),
         bm25GenerationMismatch: count('bm25_generation_mismatch'),
+        bm25LifecycleMismatch: count('bm25_lifecycle_mismatch'),
         elasticsearchGenerationMismatch: count(
           'elasticsearch_generation_mismatch',
+        ),
+        elasticsearchLifecycleMismatch: count(
+          'elasticsearch_lifecycle_mismatch',
         ),
         milvusUnavailable: count('milvus_unavailable'),
         imageIndexCountMismatch: count('image_index_count_mismatch'),
@@ -2433,6 +2582,16 @@ export class RagAdminService implements OnModuleInit {
               .filter((value): value is string => Boolean(value)),
           ),
         ];
+        const expectedChunkLifecycleStatuses = [
+          ...new Set(
+            chunks
+              .map((chunk) => chunk.lifecycleStatus)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ];
+        const sameValues = (left: string[], right: string[]) =>
+          left.length === right.length &&
+          left.every((value) => right.includes(value));
         const hasExpectedHashes =
           expectedHashes.length === 0 ||
           (es.contentHashes?.length === expectedHashes.length &&
@@ -2443,16 +2602,27 @@ export class RagAdminService implements OnModuleInit {
             expectedGenerations.every((generation) =>
               es.indexGenerations?.includes(generation),
             ));
+        const hasExpectedLifecycleStatuses =
+          es.lifecycleStatusAvailable !== true ||
+          (sameValues(
+            expectedChunkLifecycleStatuses,
+            es.chunkLifecycleStatuses ?? [],
+          ) &&
+            sameValues(
+              [doc.lifecycleStatus],
+              es.documentLifecycleStatuses ?? [],
+            ));
         if (
           !es.available ||
           es.chunkCount !== chunks.length ||
           es.documentCount !== 1 ||
           !hasExpectedHashes ||
-          !hasExpectedGenerations
+          !hasExpectedGenerations ||
+          !hasExpectedLifecycleStatuses
         ) {
           throw new Error(
             es.reason ??
-              'elasticsearch reindex count, content hash, or generation verification failed',
+              'elasticsearch reindex count, content hash, generation, or lifecycle verification failed',
           );
         }
       }
