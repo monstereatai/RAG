@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
+import {
+  LlmProvider,
+  LlmRequestBudgetExceededError,
+} from '../../providers/llm/llm.provider';
 import type {
   ResumeProductionWorkflowDto,
   ReviseProductionWorkflowDto,
@@ -64,7 +68,10 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
     attempt: ProductionWorkflowJobAttempt,
   ) => Promise<void>;
 
-  constructor(@Optional() config?: ConfigService) {
+  constructor(
+    @Optional() config?: ConfigService,
+    @Optional() private readonly llmProvider?: LlmProvider,
+  ) {
     const nodeEnv =
       config?.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
     this.required =
@@ -97,10 +104,21 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
         if (!this.processor) {
           throw new Error('production workflow processor is not registered');
         }
-        await this.processor(job.data, {
+        const attempt = {
           attempt: job.attemptsMade + 1,
           finalAttempt: job.attemptsMade + 1 >= (job.opts.attempts ?? 1),
-        });
+        };
+        try {
+          const process = () => this.processor!(job.data, attempt);
+          if (this.llmProvider) {
+            await this.llmProvider.runWithRequestBudget(process);
+          } else {
+            await process();
+          }
+        } catch (error) {
+          if (error instanceof LlmRequestBudgetExceededError) job.discard();
+          throw error;
+        }
       },
       { connection, concurrency: 1 },
     );

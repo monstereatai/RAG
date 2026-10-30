@@ -1,6 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
+import {
+  LlmProvider,
+  LlmRequestBudgetExceededError,
+} from '../../providers/llm/llm.provider';
 
 const ARTIFACT_QUEUE = 'artifact-generation';
 type Processor = (artifactId: string) => Promise<void>;
@@ -13,7 +17,10 @@ export class ArtifactQueueService implements OnModuleDestroy {
   readonly required: boolean;
   private processor: Processor | null = null;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() private readonly llmProvider?: LlmProvider,
+  ) {
     const nodeEnv =
       config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
     this.required =
@@ -46,7 +53,17 @@ export class ArtifactQueueService implements OnModuleDestroy {
       async (job) => {
         if (!this.processor)
           throw new Error('Artifact processor is not registered.');
-        await this.processor(job.data.artifactId);
+        try {
+          const process = () => this.processor!(job.data.artifactId);
+          if (this.llmProvider) {
+            await this.llmProvider.runWithRequestBudget(process);
+          } else {
+            await process();
+          }
+        } catch (error) {
+          if (error instanceof LlmRequestBudgetExceededError) job.discard();
+          throw error;
+        }
       },
       { connection, concurrency: 1 },
     );
@@ -72,10 +89,12 @@ export class ArtifactQueueService implements OnModuleDestroy {
       );
     }
     setImmediate(() => {
-      void this.processor?.(artifactId).catch((error: Error) => {
-        this.logger.error(
-          `Artifact job ${artifactId} failed: ${error.message}`,
-        );
+      const process = () => this.processor!(artifactId);
+      const execution = this.llmProvider
+        ? this.llmProvider.runWithRequestBudget(process)
+        : process();
+      void execution.catch((error: Error) => {
+        this.logger.error(`Artifact job ${artifactId} failed: ${error.message}`);
       });
     });
   }

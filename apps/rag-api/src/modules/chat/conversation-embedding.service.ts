@@ -342,8 +342,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
             'query',
             'query_key',
           ],
-          expr: 'user_id == {userId}',
-          exprValues: { userId: userId.trim() },
+          expr: `user_id == "${escapeMilvusString(userId.trim())}"`,
           timeout: this.searchTimeoutMs,
         }),
         this.searchTimeoutMs + 200,
@@ -639,8 +638,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
       const result = await this.withTimeout(
         client.deleteEntities({
           collection_name: this.collectionName,
-          filter: 'thread_id == {threadId}',
-          exprValues: { threadId },
+          filter: `thread_id == "${escapeMilvusString(threadId)}"`,
           timeout: this.deleteTimeoutMs,
         }),
         this.deleteTimeoutMs + 200,
@@ -754,4 +752,8 @@ export class ConversationEmbeddingService implements OnModuleInit {
     await this.client.loadCollection({ collection_name: this.collectionName });
     this.logger.log(`Collection ${this.collectionName} created`);
   }
+}
+
+function escapeMilvusString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }

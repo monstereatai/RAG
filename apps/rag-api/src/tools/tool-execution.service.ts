@@ -27,6 +27,8 @@ export interface ExecuteRegisteredToolInput<T> extends ToolExecutionContext {
   input?: unknown;
   approvalPolicy?: ToolApprovalPolicy;
   approvalGranted?: boolean;
+  /** Required alongside approvalGranted for non-automatic approval decisions. */
+  approvalGrantedBy?: string;
   idempotencyKey?: string;
   sideEffect?: boolean;
   createOutputArtifact?: boolean;
@@ -159,39 +161,67 @@ export class ToolExecutionService {
     }
 
     if (decision.requiresApproval) {
-      const approvalId = randomUUID();
-      await this.events.emit({
-        threadId: input.threadId,
-        runId: input.runId,
-        eventType: 'approval.asked',
-        actor,
-        target: input.toolName,
-        payload: {
-          approvalId,
-          callId,
-          reason: 'Tool Registry 将该操作标记为需要审批。',
-        },
-      });
-      const approved =
-        input.approvalGranted === true || input.approvalPolicy === 'auto';
-      await this.events.emit({
-        threadId: input.threadId,
-        runId: input.runId,
-        eventType: 'approval.decided',
-        actor,
-        target: input.toolName,
-        payload: {
-          approvalId,
-          callId,
-          outcome: approved ? 'allowed-once' : 'unavailable',
-          policy: input.approvalPolicy ?? 'auto',
-        },
-      });
-      if (!approved) {
+      const autoApproval =
+        input.approvalPolicy === 'auto' ? decision.entry?.autoApproval : undefined;
+      if (input.approvalPolicy === 'auto' && !autoApproval) {
         return this.finish(input, callId, actor, startedAt, {
           status: 'blocked',
-          error: '该写入型工具等待人工审批，系统按拒绝优先策略未执行。',
+          error: '该工具未加入自动批准白名单，必须经过明确审批。',
         });
+      }
+
+      if (autoApproval) {
+        await this.events.emit({
+          threadId: input.threadId,
+          runId: input.runId,
+          eventType: 'approval.auto_granted',
+          actor: 'tool-policy',
+          target: input.toolName,
+          payload: {
+            callId,
+            policy: autoApproval,
+            reason:
+              autoApproval === 'internal_artifact'
+                ? '只创建当前用户可见的内部 Artifact。'
+                : '命令限定在当前用户所属的隔离工作区内执行。',
+          },
+        });
+      } else {
+        const approved =
+          input.approvalGranted === true &&
+          Boolean(input.approvalGrantedBy?.trim());
+        const approvalId = randomUUID();
+        await this.events.emit({
+          threadId: input.threadId,
+          runId: input.runId,
+          eventType: 'approval.asked',
+          actor,
+          target: input.toolName,
+          payload: {
+            approvalId,
+            callId,
+            reason: 'Tool Registry 将该操作标记为需要审批。',
+          },
+        });
+        await this.events.emit({
+          threadId: input.threadId,
+          runId: input.runId,
+          eventType: 'approval.decided',
+          actor: approved ? input.approvalGrantedBy!.trim() : actor,
+          target: input.toolName,
+          payload: {
+            approvalId,
+            callId,
+            outcome: approved ? 'allowed-once' : 'unavailable',
+            policy: input.approvalPolicy ?? 'required',
+          },
+        });
+        if (!approved) {
+          return this.finish(input, callId, actor, startedAt, {
+            status: 'blocked',
+            error: '该写入型工具没有可验证的审批人，系统按拒绝优先策略未执行。',
+          });
+        }
       }
     }
 

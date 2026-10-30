@@ -159,7 +159,6 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
             },
             // 岗位交付物只写入受权限保护的内部 Artifact；它是否继续流转由后续岗位审批门禁决定。
             approvalPolicy: 'auto',
-            approvalGranted: true,
             sideEffect: true,
             idempotencyKey: `workflow-artifact:${state.threadId}:${result.role}:${this.contentHash(sourceText)}`,
             execute: () =>

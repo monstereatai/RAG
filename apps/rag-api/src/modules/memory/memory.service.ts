@@ -109,7 +109,10 @@ export class MemoryService {
   ) {
     this.domainEvents?.registerInternalHandler(
       CONVERSATION_MEMORY_PERSIST_EVENT,
-      (event) => this.persistOutboxMemory(event),
+      (event) =>
+        this.llmProvider.runWithRequestBudget(() =>
+          this.persistOutboxMemory(event),
+        ),
     );
   }
 

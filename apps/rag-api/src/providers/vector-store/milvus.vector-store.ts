@@ -13,6 +13,7 @@ import {
   ImageVectorRecord,
   RetrievalDescriptionVectorHit,
   RetrievalDescriptionVectorRecord,
+  StoredVectorRecord,
   VectorRecord,
   VectorSearchHit,
 } from './vector-store-provider.interface';
@@ -404,8 +405,7 @@ export class MilvusVectorStoreProvider
       await this.withTimeout(
         this.client.deleteEntities({
           collection_name: this.collection,
-          filter: 'doc_id == {docId}',
-          exprValues: { docId },
+          filter: `doc_id == "${escapeMilvusString(docId)}"`,
           timeout: this.deleteTimeoutMs,
         }),
         this.deleteTimeoutMs + 200,
@@ -426,18 +426,15 @@ export class MilvusVectorStoreProvider
     if (!this.connected || !this.client) {
       throw new Error('Milvus is unavailable');
     }
-    const filters = ['doc_id == {docId}'];
-    const exprValues: Record<string, string> = { docId };
+    const filters = [`doc_id == "${escapeMilvusString(docId)}"`];
     if (userId) {
-      filters.push('user_id == {userId}');
-      exprValues.userId = userId;
+      filters.push(`user_id == "${escapeMilvusString(userId)}"`);
     }
     try {
       const result = await this.withTimeout(
         this.client.query({
           collection_name: this.collection,
           filter: filters.join(' && '),
-          exprValues,
           output_fields: ['id'],
           limit: 16_384,
         }),
@@ -446,6 +443,49 @@ export class MilvusVectorStoreProvider
       );
       this.recordSuccess();
       return Array.isArray(result.data) ? result.data.length : 0;
+    } catch (err) {
+      this.recordFailure(err);
+      throw err;
+    }
+  }
+
+  async getVectorsByIds(ids: string[]): Promise<StoredVectorRecord[]> {
+    if (!this.connected || !this.client) {
+      throw new Error('Milvus is unavailable');
+    }
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+
+    try {
+      const records: StoredVectorRecord[] = [];
+      for (const batch of chunkArray(uniqueIds, 200)) {
+        const result = await this.withTimeout(
+          this.client.get({
+            collection_name: this.collection,
+            ids: batch,
+            output_fields: ['id', 'content', 'vector'],
+            timeout: this.searchTimeoutMs,
+          }),
+          this.searchTimeoutMs + 200,
+          'Milvus get vectors by ids',
+        );
+        for (const row of result.data as Array<Record<string, unknown>>) {
+          const id = String(row['id'] ?? '');
+          const content = row['content'];
+          const vector = row['vector'];
+          if (
+            id &&
+            typeof content === 'string' &&
+            Array.isArray(vector) &&
+            vector.length === this.dimension &&
+            vector.every((value) => typeof value === 'number')
+          ) {
+            records.push({ id, content, vector });
+          }
+        }
+      }
+      this.recordSuccess();
+      return records;
     } catch (err) {
       this.recordFailure(err);
       throw err;
@@ -605,9 +645,15 @@ export class MilvusVectorStoreProvider
           this.client.search({
             ...searchParams,
             ...(batch
-              ? { filter: 'doc_id in {docIds}', exprValues: { docIds: batch } }
+              ? {
+                  filter: `doc_id in [${batch
+                    .map((id) => `"${escapeMilvusString(id)}"`)
+                    .join(',')}]`,
+                }
               : userId
-                ? { filter: 'user_id == {userId}', exprValues: { userId } }
+                ? {
+                    filter: `user_id == "${escapeMilvusString(userId)}"`,
+                  }
                 : {}),
           }),
           this.searchTimeoutMs + 200,
@@ -654,9 +700,8 @@ export class MilvusVectorStoreProvider
           collection_name: this.imageCollection,
           filter:
             userId !== undefined
-              ? 'doc_id == {docId} && user_id == {userId}'
-              : 'doc_id == {docId}',
-          exprValues: userId !== undefined ? { docId, userId } : { docId },
+              ? `doc_id == "${escapeMilvusString(docId)}" && user_id == "${escapeMilvusString(userId)}"`
+              : `doc_id == "${escapeMilvusString(docId)}"`,
           timeout: this.deleteTimeoutMs,
         }),
         this.deleteTimeoutMs + 200,
@@ -679,18 +724,15 @@ export class MilvusVectorStoreProvider
     if (!this.connected || !this.client) {
       throw new Error('Milvus is unavailable');
     }
-    const filters = ['doc_id == {docId}'];
-    const exprValues: Record<string, string> = { docId };
+    const filters = [`doc_id == "${escapeMilvusString(docId)}"`];
     if (userId !== undefined) {
-      filters.push('user_id == {userId}');
-      exprValues.userId = userId;
+      filters.push(`user_id == "${escapeMilvusString(userId)}"`);
     }
     try {
       const result = await this.withTimeout(
         this.client.query({
           collection_name: this.imageCollection,
           filter: filters.join(' && '),
-          exprValues,
           output_fields: ['id'],
           limit: 16_384,
         }),
@@ -819,8 +861,7 @@ export class MilvusVectorStoreProvider
           metric_type: MetricType.COSINE,
           params: this.getSearchParams(),
           output_fields: ['id', 'doc_id', 'tenant_id', 'user_id', 'content'],
-          filter: 'tenant_id == {tenantId}',
-          exprValues: { tenantId: options.tenantId },
+          filter: `tenant_id == "${escapeMilvusString(options.tenantId)}"`,
           timeout: this.searchTimeoutMs,
         }),
         this.searchTimeoutMs + 200,
@@ -849,8 +890,7 @@ export class MilvusVectorStoreProvider
       await this.withTimeout(
         this.client.deleteEntities({
           collection_name: this.descriptionCollection,
-          filter: 'tenant_id == {tenantId} && doc_id == {docId}',
-          exprValues: { tenantId, docId },
+          filter: `tenant_id == "${escapeMilvusString(tenantId)}" && doc_id == "${escapeMilvusString(docId)}"`,
           timeout: this.deleteTimeoutMs,
         }),
         this.deleteTimeoutMs + 200,
@@ -871,8 +911,7 @@ export class MilvusVectorStoreProvider
       const result = await this.withTimeout(
         this.client.query({
           collection_name: this.descriptionCollection,
-          filter: 'tenant_id == {tenantId} && doc_id == {docId}',
-          exprValues: { tenantId, docId },
+          filter: `tenant_id == "${escapeMilvusString(tenantId)}" && doc_id == "${escapeMilvusString(docId)}"`,
           output_fields: ['id'],
           limit: 16_384,
         }),

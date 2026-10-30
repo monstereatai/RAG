@@ -259,6 +259,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
           runId: run?.id,
           ownerUserId: userId,
           mode: 'production',
+          role: 'frontend',
           actor: 'code_delivery',
           input: {
             projectId: context.projectId,
@@ -266,7 +267,6 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
             type: 'runnable_project',
           },
           approvalPolicy: 'auto',
-          approvalGranted: true,
           execute: (signal) => generate(signal),
         })
       : {

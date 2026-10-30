@@ -10,6 +10,8 @@ export interface ToolRegistryEntry {
   modes: Array<'simple' | 'auto' | 'agentic' | 'production'>;
   roles?: string[];
   requiresApproval?: boolean;
+  /** Explicitly allowed automatic approvals for bounded internal operations only. */
+  autoApproval?: 'internal_artifact' | 'isolated_workspace';
 }
 
 export const toolRegistry: ToolRegistryEntry[] = [
@@ -165,6 +167,7 @@ export const toolRegistry: ToolRegistryEntry[] = [
     modes: ['production'],
     roles: ['product', 'design', 'frontend', 'backend', 'qa', 'operations'],
     requiresApproval: true,
+    autoApproval: 'internal_artifact',
   },
   {
     name: 'workspace_agent_command',
@@ -178,5 +181,6 @@ export const toolRegistry: ToolRegistryEntry[] = [
     modes: ['production'],
     roles: ['frontend'],
     requiresApproval: true,
+    autoApproval: 'isolated_workspace',
   },
 ];

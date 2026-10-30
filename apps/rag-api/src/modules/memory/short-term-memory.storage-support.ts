@@ -250,32 +250,44 @@ export abstract class ShortTermMemoryStorageSupport {
     const compactedMessageIds = new Set(
       summaryState?.compactedMessageIds ?? [],
     );
-    const fetchLimit = limit + compactedMessageIds.size + 1;
-    const messages = await this.messageRepo
-      .createQueryBuilder('message')
-      .where('message.conversationId = :conversationId', { conversationId })
-      .orderBy('message.createdAt', 'DESC')
-      .addOrderBy(
-        "CASE WHEN message.role = 'human' THEN 0 WHEN message.role = 'ai' THEN 1 ELSE 2 END",
-        'DESC',
-      )
-      .addOrderBy('message.id', 'DESC')
-      .take(fetchLimit)
-      .getMany();
-    const recentMessages = messages.slice(0, fetchLimit - 1).reverse();
-    const watermarkIndex = summaryState?.compactedThroughMessageId
-      ? recentMessages.findIndex(
-          (message) => message.id === summaryState.compactedThroughMessageId,
+    const recentMessages: MessageEntity[] = [];
+    const pageSize = 100;
+    let offset = 0;
+    let hasMoreUncompressedMessages = false;
+    let reachedWatermark = false;
+
+    while (recentMessages.length <= limit && !reachedWatermark) {
+      const page = await this.messageRepo
+        .createQueryBuilder('message')
+        .where('message.conversationId = :conversationId', { conversationId })
+        .orderBy('message.createdAt', 'DESC')
+        .addOrderBy(
+          "CASE WHEN message.role = 'human' THEN 0 WHEN message.role = 'ai' THEN 1 ELSE 2 END",
+          'DESC',
         )
-      : -1;
-    const afterWatermarkMessages =
-      watermarkIndex >= 0
-        ? recentMessages.slice(watermarkIndex + 1)
-        : recentMessages;
-    const uncompressedMessages = afterWatermarkMessages.filter(
-      (message) => !compactedMessageIds.has(message.id),
-    );
-    const turns = uncompressedMessages.slice(-limit).map((message) => ({
+        .addOrderBy('message.id', 'DESC')
+        .skip(offset)
+        .take(pageSize)
+        .getMany();
+      if (page.length === 0) break;
+
+      for (const message of page) {
+        if (message.id === summaryState?.compactedThroughMessageId) {
+          reachedWatermark = true;
+          break;
+        }
+        if (compactedMessageIds.has(message.id)) continue;
+        recentMessages.push(message);
+        if (recentMessages.length > limit) {
+          hasMoreUncompressedMessages = true;
+          break;
+        }
+      }
+      if (hasMoreUncompressedMessages || page.length < pageSize) break;
+      offset += page.length;
+    }
+
+    const turns = recentMessages.slice(0, limit).reverse().map((message) => ({
       messageId: message.id,
       role: message.role === 'ai' ? ('assistant' as const) : ('user' as const),
       content: this.messageContent(message.content),
@@ -283,39 +295,58 @@ export abstract class ShortTermMemoryStorageSupport {
     }));
     return {
       turns,
-      hasOlderMessages:
-        uncompressedMessages.length > limit || messages.length >= fetchLimit,
+      hasOlderMessages: hasMoreUncompressedMessages,
     };
   }
 
   protected async loadRecentMessageIdsFromPostgres(
     conversationId: string,
     maxMessages: number,
-    compactedMessageIds: string[] = [],
+    summaryState?: StructuredMemorySummary,
   ): Promise<{ ids: string[]; hasOlderMessages: boolean }> {
     const limit = Math.max(1, maxMessages);
-    const excludedIds = new Set(compactedMessageIds);
-    const fetchLimit = limit + excludedIds.size + 1;
-    const messages = await this.messageRepo
-      .createQueryBuilder('message')
-      .select(['message.id', 'message.role'])
-      .where('message.conversationId = :conversationId', { conversationId })
-      .orderBy('message.createdAt', 'DESC')
-      .addOrderBy(
-        "CASE WHEN message.role = 'human' THEN 0 WHEN message.role = 'ai' THEN 1 ELSE 2 END",
-        'DESC',
-      )
-      .addOrderBy('message.id', 'DESC')
-      .take(fetchLimit)
-      .getMany();
-    const uncompressed = messages
-      .slice(0, fetchLimit - 1)
-      .reverse()
-      .filter((message) => !excludedIds.has(message.id));
+    const excludedIds = new Set(summaryState?.compactedMessageIds ?? []);
+    const uncompressed: MessageEntity[] = [];
+    const pageSize = 100;
+    let offset = 0;
+    let hasMoreUncompressedMessages = false;
+    let reachedWatermark = false;
+
+    while (uncompressed.length <= limit && !reachedWatermark) {
+      const page = await this.messageRepo
+        .createQueryBuilder('message')
+        .select(['message.id', 'message.role', 'message.createdAt'])
+        .where('message.conversationId = :conversationId', { conversationId })
+        .orderBy('message.createdAt', 'DESC')
+        .addOrderBy(
+          "CASE WHEN message.role = 'human' THEN 0 WHEN message.role = 'ai' THEN 1 ELSE 2 END",
+          'DESC',
+        )
+        .addOrderBy('message.id', 'DESC')
+        .skip(offset)
+        .take(pageSize)
+        .getMany();
+      if (page.length === 0) break;
+
+      for (const message of page) {
+        if (message.id === summaryState?.compactedThroughMessageId) {
+          reachedWatermark = true;
+          break;
+        }
+        if (excludedIds.has(message.id)) continue;
+        uncompressed.push(message);
+        if (uncompressed.length > limit) {
+          hasMoreUncompressedMessages = true;
+          break;
+        }
+      }
+      if (hasMoreUncompressedMessages || page.length < pageSize) break;
+      offset += page.length;
+    }
+
     return {
-      ids: uncompressed.slice(-limit).map((message) => message.id),
-      hasOlderMessages:
-        uncompressed.length > limit || messages.length >= fetchLimit,
+      ids: uncompressed.slice(0, limit).reverse().map((message) => message.id),
+      hasOlderMessages: hasMoreUncompressedMessages,
     };
   }
 

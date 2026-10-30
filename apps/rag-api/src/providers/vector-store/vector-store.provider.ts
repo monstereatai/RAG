@@ -6,6 +6,7 @@ import {
   ImageVectorRecord,
   RetrievalDescriptionVectorHit,
   RetrievalDescriptionVectorRecord,
+  StoredVectorRecord,
   VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
@@ -70,6 +71,10 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
 
   countByDocId(docId: string, userId?: string): Promise<number> {
     return this.provider.countByDocId(docId, userId);
+  }
+
+  getVectorsByIds(ids: string[]): Promise<StoredVectorRecord[]> {
+    return this.provider.getVectorsByIds(ids);
   }
 
   getIndexInfo(): VectorIndexInfo {

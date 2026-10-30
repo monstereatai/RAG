@@ -48,6 +48,9 @@ const BUSINESS_PROPERTIES = {
   supersedesDocId: { type: 'keyword' },
 } satisfies Record<string, estypes.MappingProperty>;
 
+const ES_CHUNK_BULK_BATCH_SIZE = 100;
+const ES_CHUNK_BULK_TIMEOUT_MS = 30_000;
+
 /**
  * Elasticsearch Provider
  *
@@ -305,68 +308,82 @@ export class ElasticsearchProvider
 
     try {
       let dimMismatchWarned = false;
-      const operations = chunks.flatMap((c, i) => {
-        const rawVector = vectors?.[i] ?? null;
-        const usableVector =
-          rawVector && rawVector.length === this.embeddingDim
-            ? rawVector
-            : null;
-        if (rawVector && !usableVector && !dimMismatchWarned) {
-          dimMismatchWarned = true;
+      for (
+        let start = 0;
+        start < chunks.length;
+        start += ES_CHUNK_BULK_BATCH_SIZE
+      ) {
+        const batch = chunks.slice(start, start + ES_CHUNK_BULK_BATCH_SIZE);
+        const operations = batch.flatMap((c, batchIndex) => {
+          const rawVector = vectors?.[start + batchIndex] ?? null;
+          const usableVector =
+            rawVector && rawVector.length === this.embeddingDim
+              ? rawVector
+              : null;
+          if (rawVector && !usableVector && !dimMismatchWarned) {
+            dimMismatchWarned = true;
+            this.logger.warn(
+              `ES indexChunks: embedding dims mismatch (vector=${rawVector.length}, configured=${this.embeddingDim}), skip embedding for docId=${c.docId}`,
+            );
+          }
+          return [
+            { index: { _index: this.indexName, _id: c.id } },
+            {
+              docId: c.docId,
+              chunkIndex: c.chunkIndex,
+              content: c.content,
+              hypotheticalQuestions: c.hypotheticalQuestions ?? [],
+              userId: c.userId || userId,
+              tenantId: c.tenantId,
+              parentChunkId: c.parentChunkId,
+              headingPath: c.headingPath,
+              sectionId: c.sectionId,
+              clauseId: c.clauseId,
+              tableRef: c.tableRef,
+              sourceStart: c.sourceStart,
+              sourceEnd: c.sourceEnd,
+              docVersion: c.docVersion,
+              contentHash: c.contentHash,
+              indexGeneration: c.indexGeneration,
+              ruleKey: c.ruleKey,
+              changeType: c.changeType,
+              supersedesChunkId: c.supersedesChunkId,
+              effectiveAt: c.effectiveAt?.toISOString() ?? null,
+              expiredAt: c.expiredAt?.toISOString() ?? null,
+              sourceAuthority: c.sourceAuthority,
+              projectId: c.projectId,
+              activityId: c.activityId,
+              region: c.region,
+              locale: c.locale,
+              channel: c.channel,
+              roleScope: c.roleScope,
+              documentType: c.documentType,
+              lifecycleStatus: c.lifecycleStatus,
+              supersedesDocId: c.supersedesDocId,
+              // 有向量写向量（kNN 检索通道）；无向量/维度不符时缺省，不影响关键词字段写入
+              ...(usableVector ? { embedding: usableVector } : {}),
+              createdAt: new Date().toISOString(),
+            },
+          ];
+        });
+
+        const result = await this.client.bulk(
+          { operations, refresh: false },
+          { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+        );
+        if (result.errors) {
           this.logger.warn(
-            `ES indexChunks: embedding dims mismatch (vector=${rawVector.length}, configured=${this.embeddingDim}), skip embedding for docId=${c.docId}`,
+            `ES bulk index had errors for docId=${batch[0]?.docId}`,
+          );
+          throw new Error(
+            `ES bulk index failed for docId=${batch[0]?.docId}: one or more items failed`,
           );
         }
-        return [
-          { index: { _index: this.indexName, _id: c.id } },
-          {
-            docId: c.docId,
-            chunkIndex: c.chunkIndex,
-            content: c.content,
-            hypotheticalQuestions: c.hypotheticalQuestions ?? [],
-            userId: c.userId || userId,
-            tenantId: c.tenantId,
-            parentChunkId: c.parentChunkId,
-            headingPath: c.headingPath,
-            sectionId: c.sectionId,
-            clauseId: c.clauseId,
-            tableRef: c.tableRef,
-            sourceStart: c.sourceStart,
-            sourceEnd: c.sourceEnd,
-            docVersion: c.docVersion,
-            contentHash: c.contentHash,
-            indexGeneration: c.indexGeneration,
-            ruleKey: c.ruleKey,
-            changeType: c.changeType,
-            supersedesChunkId: c.supersedesChunkId,
-            effectiveAt: c.effectiveAt?.toISOString() ?? null,
-            expiredAt: c.expiredAt?.toISOString() ?? null,
-            sourceAuthority: c.sourceAuthority,
-            projectId: c.projectId,
-            activityId: c.activityId,
-            region: c.region,
-            locale: c.locale,
-            channel: c.channel,
-            roleScope: c.roleScope,
-            documentType: c.documentType,
-            lifecycleStatus: c.lifecycleStatus,
-            supersedesDocId: c.supersedesDocId,
-            // 有向量写向量（kNN 检索通道）；无向量/维度不符时缺省，不影响关键词字段写入
-            ...(usableVector ? { embedding: usableVector } : {}),
-            createdAt: new Date().toISOString(),
-          },
-        ];
-      });
-
-      const result = await this.client.bulk({ operations, refresh: true });
-      if (result.errors) {
-        this.logger.warn(
-          `ES bulk index had errors for docId=${chunks[0]?.docId}`,
-        );
-        throw new Error(
-          `ES bulk index failed for docId=${chunks[0]?.docId}: one or more items failed`,
-        );
       }
+      await this.client.indices.refresh(
+        { index: this.indexName },
+        { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+      );
       this.logger.log(
         `ES indexed ${chunks.length} chunks for docId=${chunks[0]?.docId}`,
       );
@@ -387,7 +404,7 @@ export class ElasticsearchProvider
       await this.client.deleteByQuery({
         index: this.indexName,
         query: { bool: { filter } },
-      });
+      }, { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS });
       if (_userId) {
         await this.client
           .deleteByQuery({
@@ -398,11 +415,14 @@ export class ElasticsearchProvider
               },
             },
             refresh: true,
-          })
+          }, { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS })
           .catch(() => undefined);
       } else {
         await this.client
-          .delete({ index: this.documentIndexName, id: docId, refresh: true })
+          .delete(
+            { index: this.documentIndexName, id: docId, refresh: true },
+            { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+          )
           .catch(() => undefined);
       }
       this.logger.log(

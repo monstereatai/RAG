@@ -48,14 +48,19 @@ pnpm typecheck
 
 `pnpm dev` 会同时启动后端、管理后台 API、管理后台前端和用户前台；基础设施仍需先按下方 Docker 步骤启动。
 
-### 1. 启动基础设施
+### 1. 启动本地 Docker 项目
 ```bash
-cd infra/docker
-docker compose up -d
-docker compose ps
+docker compose -p docker \
+  --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" \
+  -f infra/docker/docker-compose.dev.yml \
+  -f infra/docker/docker-compose.langfuse.yml up -d
+docker compose -p docker \
+  --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" \
+  -f infra/docker/docker-compose.dev.yml \
+  -f infra/docker/docker-compose.langfuse.yml ps
 ```
 
-本地基础设施不会随 Docker Desktop 自动恢复；每次需要时手动执行上述 `docker compose up -d` 即可。生产和 Staging 编排仍保留各自的高可用重启策略。
+RAG 与 Langfuse 现在显示在同一个 `docker` Compose 项目下；两者仍使用独立的数据库、缓存、对象存储和数据卷。RAG PostgreSQL 暴露在本机 `5433`，用于避开本机已占用的 `5432`。停止服务时不要添加 `-v`，否则会删除持久数据。生产和 Staging 编排仍保留各自的高可用重启策略。
 
 ### 2. 启动后端服务
 ```bash

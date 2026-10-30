@@ -21,6 +21,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DocumentBusinessMetadata } from './document-profile.util';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { RedisProvider } from '../../providers/redis/redis.provider';
+import {
+  LlmProvider,
+  LlmRequestBudgetExceededError,
+} from '../../providers/llm/llm.provider';
 
 export const DOCUMENT_PROCESSING_QUEUE = 'document-processing';
 export const DOCUMENT_GRAPH_INDEX_QUEUE = 'document-graph-index';
@@ -80,6 +84,21 @@ export type DocumentProcessingFailureHandler = (
   error: Error,
 ) => Promise<void>;
 
+async function runWithinLlmBudget<T>(
+  llmProvider: LlmProvider | undefined,
+  job: { discard: () => void },
+  callback: () => Promise<T>,
+): Promise<T> {
+  try {
+    return llmProvider
+      ? await llmProvider.runWithRequestBudget(callback)
+      : await callback();
+  } catch (error) {
+    if (error instanceof LlmRequestBudgetExceededError) job.discard();
+    throw error;
+  }
+}
+
 export interface DocumentGraphIndexJob {
   docId: string;
   userId: string;
@@ -127,6 +146,7 @@ export class DocumentQueueService implements OnModuleDestroy {
     config: ConfigService,
     private readonly objectStorage: ObjectStorageProvider,
     @Optional() private readonly redisProvider?: RedisProvider,
+    @Optional() private readonly llmProvider?: LlmProvider,
   ) {
     const nodeEnv =
       config.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
@@ -210,7 +230,11 @@ export class DocumentQueueService implements OnModuleDestroy {
         if (!this.processor) {
           throw new Error('Document queue processor is not registered.');
         }
-        const result = await this.processor(job.data);
+        const result = await runWithinLlmBudget(
+          this.llmProvider,
+          job,
+          () => this.processor!(job.data),
+        );
         return {
           taskId: job.data.taskId,
           status: 'completed' as const,
@@ -232,7 +256,9 @@ export class DocumentQueueService implements OnModuleDestroy {
         if (!this.obsidianProcessor) {
           throw new Error('Obsidian note queue processor is not registered.');
         }
-        await this.obsidianProcessor(job.data);
+        await runWithinLlmBudget(this.llmProvider, job, () =>
+          this.obsidianProcessor!(job.data),
+        );
       },
       {
         connection,
@@ -249,8 +275,10 @@ export class DocumentQueueService implements OnModuleDestroy {
         if (!this.graphProcessor) {
           throw new Error('Document graph index processor is not registered.');
         }
-        await this.withGraphIndexLock(job.data.docId, () =>
-          this.graphProcessor!(job.data),
+        await runWithinLlmBudget(this.llmProvider, job, () =>
+          this.withGraphIndexLock(job.data.docId, () =>
+            this.graphProcessor!(job.data),
+          ),
         );
       },
       { connection, concurrency: 1 },

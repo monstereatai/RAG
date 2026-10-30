@@ -1,11 +1,16 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, LessThan, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
@@ -15,7 +20,11 @@ import { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 
 @Injectable()
-export class AgentRunsService {
+export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AgentRunsService.name);
+  private recoveryTimer?: NodeJS.Timeout;
+  private recoveryInFlight = false;
+
   constructor(
     @InjectRepository(AgentRunEntity)
     private readonly runRepo: Repository<AgentRunEntity>,
@@ -25,7 +34,81 @@ export class AgentRunsService {
     private readonly goals: AgentGoalService,
     private readonly runtime: AgentRuntimeService,
     private readonly redis: RedisProvider,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  onModuleInit(): void {
+    this.recoveryTimer = setInterval(() => void this.recoverStaleRuns(), 60_000);
+    this.recoveryTimer.unref();
+    void this.recoverStaleRuns();
+  }
+
+  onModuleDestroy(): void {
+    if (this.recoveryTimer) clearInterval(this.recoveryTimer);
+  }
+
+  private async recoverStaleRuns(): Promise<void> {
+    if (this.recoveryInFlight) return;
+    this.recoveryInFlight = true;
+    const configuredStaleAfterMs = Number(
+      this.config?.get<number>('agentRuns.staleAfterMs'),
+    );
+    const staleAfterMs = Math.max(
+      5 * 60_000,
+      Number.isFinite(configuredStaleAfterMs) && configuredStaleAfterMs > 0
+        ? configuredStaleAfterMs
+        : 30 * 60_000,
+    );
+    const staleAfterMinutes = Math.ceil(staleAfterMs / 60_000);
+    const cutoff = new Date(Date.now() - staleAfterMs);
+    try {
+      const staleRuns = await this.runRepo.find({
+        where: { status: 'running', updatedAt: LessThan(cutoff) },
+        order: { updatedAt: 'ASC' },
+        take: 100,
+      });
+      for (const run of staleRuns) {
+        const errorMessage = `运行超过 ${staleAfterMinutes} 分钟没有进展，已停止自动执行。为避免重复执行结果未知的工具操作，请检查运行事件后再手动重试。`;
+        const update = await this.runRepo.update(
+          { id: run.id, status: 'running', updatedAt: LessThan(cutoff) },
+          {
+            status: 'failed',
+            errorMessage,
+            finishedAt: new Date(),
+          },
+        );
+        if (update.affected !== 1) continue;
+
+        try {
+          await this.events.emit({
+            threadId: run.threadId,
+            tenantId: run.tenantId ?? 'legacy',
+            runId: run.id,
+            eventType: 'run.failed',
+            actor: run.mode,
+            payload: {
+              status: 'failed',
+              recovery: 'stale_run_sweeper',
+              errorMessage,
+            },
+          });
+        } catch (error) {
+          this.logger.error(
+            `Failed to record stale Agent run event runId=${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        this.logger.warn(
+          `Stopped stale Agent run runId=${run.id}; automatic replay was skipped.`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Stale Agent run recovery scan failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      this.recoveryInFlight = false;
+    }
+  }
 
   async start(input: {
     threadId: string;

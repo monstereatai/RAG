@@ -226,28 +226,62 @@ export class RagAdminIndexingWorkflow {
     const content = chunks.map((chunk) => chunk.content).join('\n\n');
 
     try {
-      const vectors = await this.context.embeddingProvider.embedDocuments(
-        chunks.map((chunk) => chunk.content),
+      const storedVectors = await this.context.vectorStoreProvider.getVectorsByIds(
+        chunks.map((chunk) => chunk.id),
       );
-      if (vectors.length !== chunks.length) {
-        throw new Error('embedding count does not match stored chunks');
+      const storedVectorsById = new Map(
+        storedVectors.map((record) => [record.id, record]),
+      );
+      const vectorDimension =
+        this.context.vectorStoreProvider.getIndexInfo().dimension;
+      const vectorsById = new Map<string, number[]>();
+      const chunksNeedingEmbedding = chunks.filter((chunk) => {
+        const stored = storedVectorsById.get(chunk.id);
+        if (
+          !stored ||
+          stored.content !== chunk.content ||
+          stored.vector.length !== vectorDimension
+        ) {
+          return true;
+        }
+        vectorsById.set(chunk.id, stored.vector);
+        return false;
+      });
+      if (chunksNeedingEmbedding.length > 0) {
+        const generatedVectors =
+          await this.context.embeddingProvider.embedDocuments(
+            chunksNeedingEmbedding.map((chunk) => chunk.content),
+          );
+        if (generatedVectors.length !== chunksNeedingEmbedding.length) {
+          throw new Error('embedding count does not match chunks needing repair');
+        }
+        chunksNeedingEmbedding.forEach((chunk, index) => {
+          vectorsById.set(chunk.id, generatedVectors[index]);
+        });
       }
+      const vectors = chunks.map((chunk) => vectorsById.get(chunk.id)!);
+      const currentVectorCount =
+        await this.context.vectorStoreProvider.countByDocId(docId);
+      const vectorIndexNeedsRebuild =
+        currentVectorCount !== chunks.length ||
+        chunksNeedingEmbedding.length > 0;
 
-      // PostgreSQL remains the source of truth. Rebuild only derived indexes;
-      // a failed repair can be retried without deleting the document or its ACL.
-      await this.context.vectorStoreProvider.deleteByDocId(docId);
-      await this.context.vectorStoreProvider.insert(
-        chunks.map((chunk, index) => ({
-          id: chunk.id,
-          vector: vectors[index],
-          content: chunk.content,
-          docId,
-          chunkIndex: chunk.chunkIndex,
-          userId,
-        })),
-      );
+      // 复用与 PostgreSQL 原文一致的现有向量；只有向量缺失或正文变化时才重算。
+      if (vectorIndexNeedsRebuild) {
+        await this.context.vectorStoreProvider.deleteByDocId(docId);
+        await this.context.vectorStoreProvider.insert(
+          chunks.map((chunk, index) => ({
+            id: chunk.id,
+            vector: vectors[index],
+            content: chunk.content,
+            docId,
+            chunkIndex: chunk.chunkIndex,
+            userId,
+          })),
+        );
+      }
       const indexedVectorCount =
-        await this.context.vectorStoreProvider.countByDocId(docId, userId);
+        await this.context.vectorStoreProvider.countByDocId(docId);
       if (indexedVectorCount !== chunks.length) {
         throw new Error(
           `Milvus reindex count mismatch: expected ${chunks.length}, received ${indexedVectorCount}`,
@@ -391,8 +425,11 @@ export class RagAdminIndexingWorkflow {
 
       const retrievalDescriptions =
         await this.rebuildAndAuditRetrievalDescriptions(doc);
-      const imageIndex =
-        await this.context.documentService.rebuildImageIndexFromOriginal(docId);
+      const imageIndex = await this.rebuildImageIndexWhenNeeded(
+        docId,
+        doc.filename,
+        userId,
+      );
       if (imageIndexEnabled && !imageIndex.indexed) {
         throw new Error(
           `Image index rebuild failed: ${imageIndex.reason ?? 'unknown error'}`,
@@ -417,6 +454,28 @@ export class RagAdminIndexingWorkflow {
         reason: (err as Error).message,
       };
     }
+  }
+
+  private async rebuildImageIndexWhenNeeded(
+    docId: string,
+    filename: string,
+    userId: string,
+  ) {
+    if (!this.context.imageIndexService?.isEnabled()) {
+      return { indexed: false, assetCount: 0, reason: 'image embedding disabled' };
+    }
+    const expected =
+      await this.context.documentImageIngestionService.getExpectedIndexAssetCount(
+        docId,
+        filename,
+        userId,
+      );
+    const actual = await this.context.imageIndexService.countByDocId(
+      docId,
+      userId,
+    );
+    if (actual === expected) return { indexed: true, assetCount: actual };
+    return this.context.documentService.rebuildImageIndexFromOriginal(docId);
   }
 
   public async rebuildAndAuditRetrievalDescriptions(

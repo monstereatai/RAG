@@ -3,20 +3,22 @@
 # Langfuse web is exposed on 127.0.0.1:3002 and MinIO on 127.0.0.1:19090 only.
 # All other components are bound to localhost (127.0.0.1) to only accept connections from the local machine.
 # External connections from other machines will not be able to reach these services directly.
-name: rag-langfuse-clean
+name: docker
 services:
   langfuse-worker:
     image: docker.langfuse.com/langfuse/langfuse-worker:4
     restart: unless-stopped
     depends_on: &langfuse-depends-on
-      postgres:
+      langfuse-postgres:
         condition: service_healthy
-      minio:
+      langfuse-minio:
         condition: service_healthy
-      redis:
+      langfuse-redis:
         condition: service_healthy
-      clickhouse:
+      langfuse-clickhouse:
         condition: service_healthy
+    networks:
+      - langfuse-internal
     environment: &langfuse-worker-env
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3002}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
@@ -121,6 +123,8 @@ services:
     image: docker.langfuse.com/langfuse/langfuse:4
     restart: unless-stopped
     depends_on: *langfuse-depends-on
+    networks:
+      - langfuse-internal
     ports:
       - 127.0.0.1:3002:3000
     environment:
@@ -147,7 +151,7 @@ services:
       LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER:-}
       LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG:-}
 
-  clickhouse:
+  langfuse-clickhouse:
     image: docker.io/clickhouse/clickhouse-server:25.12
     restart: unless-stopped
     user: "101:101"
@@ -161,6 +165,10 @@ services:
     ports:
       - 127.0.0.1:18123:8123
       - 127.0.0.1:19000:9000
+    networks:
+      langfuse-internal:
+        aliases:
+          - clickhouse
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 5s
@@ -168,7 +176,7 @@ services:
       retries: 10
       start_period: 1s
 
-  minio:
+  langfuse-minio:
     image: cgr.dev/chainguard/minio
     restart: unless-stopped
     entrypoint: sh
@@ -180,6 +188,10 @@ services:
     ports:
       - 127.0.0.1:19090:9000
       - 127.0.0.1:19091:9001
+    networks:
+      langfuse-internal:
+        aliases:
+          - minio
     volumes:
       - langfuse_minio_data:/data
     healthcheck:
@@ -189,7 +201,7 @@ services:
       retries: 5
       start_period: 1s
 
-  redis:
+  langfuse-redis:
     image: docker.io/redis:7
     restart: unless-stopped
     command: >
@@ -199,6 +211,10 @@ services:
       REDIS_AUTH: ${REDIS_AUTH:?Set REDIS_AUTH}
     ports:
       - 127.0.0.1:16379:6379
+    networks:
+      langfuse-internal:
+        aliases:
+          - redis
     volumes:
       - langfuse_redis_data:/data
     healthcheck:
@@ -207,7 +223,7 @@ services:
       timeout: 10s
       retries: 10
 
-  postgres:
+  langfuse-postgres:
     image: docker.io/postgres:${POSTGRES_VERSION:-17}
     restart: unless-stopped
     healthcheck:
@@ -221,17 +237,30 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       TZ: UTC
       PGTZ: UTC
+    networks:
+      langfuse-internal:
+        aliases:
+          - postgres
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
 
 volumes:
   langfuse_postgres_data:
-    driver: local
+    external: true
+    name: rag-langfuse-clean_langfuse_postgres_data
   langfuse_clickhouse_data:
-    driver: local
+    external: true
+    name: rag-langfuse-clean_langfuse_clickhouse_data
   langfuse_clickhouse_logs:
-    driver: local
+    external: true
+    name: rag-langfuse-clean_langfuse_clickhouse_logs
   langfuse_minio_data:
-    driver: local
+    external: true
+    name: rag-langfuse-clean_langfuse_minio_data
   langfuse_redis_data:
-    driver: local
+    external: true
+    name: rag-langfuse-clean_langfuse_redis_data
+
+networks:
+  langfuse-internal:
+    driver: bridge

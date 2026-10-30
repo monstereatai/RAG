@@ -26,6 +26,7 @@ import { RagAdminGraphService } from './rag-admin-graph.service';
 import { DocumentRetrievalDescriptionModule } from '../document/document-retrieval-description.module';
 import { SpeechModule } from '../../providers/speech/speech.module';
 import { VisionModule } from '../../providers/vision/vision.module';
+import { LlmModule } from '../../providers/llm/llm.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { VisionModule } from '../../providers/vision/vision.module';
     EmbeddingModule,
     SpeechModule,
     VisionModule,
+    LlmModule,
   ],
   controllers: [RagAdminController],
   providers: [

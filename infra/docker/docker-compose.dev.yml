@@ -1,21 +1,11 @@
 # ============================================================
-# RAG 项目开发环境（docker-compose.dev.yml）
-# 包含：PostgreSQL + Redis + Milvus + Elasticsearch
-# 使用：cd infra/docker && docker compose -f docker-compose.dev.yml up -d
-# 热重载：后端 npm run start:dev / 前端 npm run dev（宿主机运行）
-# 本地容器只由上述命令手动启动；Docker Desktop 重启后不会自动恢复。
-#
-# ⚠️ 注意：本文件与 docker-compose.yml 同目录，compose 项目名都取目录名 `docker`，
-#    且两份文件的服务名完全相同（postgres / redis / etcd / minio / milvus / ...），
-#    仅 container_name（rag-* 与 rag-dev-*）与数据卷前缀（docker_* 与 docker_dev_*）不同。
-#    后果：同一时间只应启用其中一份，否则 compose 会把另一份的容器当成 orphan，
-#    带 --remove-orphans 时还会去停掉另一套。
-#    推荐用法：
-#      - 只跑基础栈：cd infra/docker && docker compose up -d
-#      - 只跑 dev 栈：cd infra/docker && docker compose -f docker-compose.dev.yml up -d
-#      - 要组合时显式叠加：docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-#    切勿 docker compose down -v（会删数据卷）；停服务时按容器名精确停。
+# RAG 本地开发栈；与 docker-compose.langfuse.yml 合并为同一个 Docker 项目。
+# PostgreSQL、Redis、Milvus、Elasticsearch、Langfuse 及各自独立的数据卷均在此项目下。
+# 本地端口 5433 用于避开本机已占用的 5432。
+# 停止时不要添加 -v，以保留知识库和 Langfuse 数据。
 # ============================================================
+
+name: docker
 
 services:
   # ---- Generated Vue / React source preview compiler (host API uses localhost:4321) ----
@@ -59,7 +49,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: rag
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5433:5432'
     volumes:
       - dev_postgres_data:/var/lib/postgresql/data
     healthcheck:

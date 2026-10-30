@@ -155,7 +155,6 @@ export class ProductionProjectWorkspaceAgentService {
           role: 'frontend',
           ownerUserId: userId,
           approvalPolicy: 'auto',
-          approvalGranted: true,
           allowedToolNames: ['workspace_agent_command'],
           input: {
             action: action.action,

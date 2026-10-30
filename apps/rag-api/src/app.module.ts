@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
@@ -57,6 +57,8 @@ import { DomainEventsModule } from './modules/domain-events/domain-events.module
 import { IamModule } from './modules/iam/iam.module';
 import { TeamWikiModule } from './modules/team-wiki/team-wiki.module';
 import { FeishuWikiSyncModule } from './modules/feishu/feishu-wiki-sync.module';
+import { LlmModule } from './providers/llm/llm.module';
+import { LlmRequestBudgetInterceptor } from './common/interceptors/llm-request-budget.interceptor';
 
 @Module({
   imports: [
@@ -64,6 +66,7 @@ import { FeishuWikiSyncModule } from './modules/feishu/feishu-wiki-sync.module';
       isGlobal: true,
       load: [configuration],
     }),
+    LlmModule,
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
@@ -133,6 +136,10 @@ import { FeishuWikiSyncModule } from './modules/feishu/feishu-wiki-sync.module';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LlmRequestBudgetInterceptor,
     },
   ],
 })

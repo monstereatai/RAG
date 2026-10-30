@@ -173,7 +173,6 @@ export class ShortTermMemoryService extends ShortTermMemoryCompactionSupport {
     let cacheMatchesPostgres = false;
     const summaryState = summary ? this.tryParseSummary(summary) : null;
     const summaryWatermark = summaryState?.compactedThroughMessageId;
-    const compactedMessageIds = summaryState?.compactedMessageIds ?? [];
     if (
       cacheContentsAreValid &&
       (turns.length > 0 || Boolean(summaryWatermark))
@@ -184,7 +183,7 @@ export class ShortTermMemoryService extends ShortTermMemoryCompactionSupport {
         recentMessageIds = await this.loadRecentMessageIdsFromPostgres(
           conversationId,
           maxMessages,
-          compactedMessageIds,
+          summaryState ?? undefined,
         );
       } finally {
         this.metricsService?.observeCacheOperation(
@@ -197,17 +196,7 @@ export class ShortTermMemoryService extends ShortTermMemoryCompactionSupport {
       const cachedMessageIds = turns
         .slice(-Math.max(1, maxMessages))
         .map((turn) => turn.messageId ?? '');
-      const watermarkIndex = summaryWatermark
-        ? recentMessageIds.ids.indexOf(summaryWatermark)
-        : -1;
-      const expectedMessageIdsWithWatermark =
-        watermarkIndex >= 0
-          ? recentMessageIds.ids.slice(watermarkIndex + 1)
-          : recentMessageIds.ids;
-      const compactedMessageIdSet = new Set(compactedMessageIds);
-      const expectedMessageIds = expectedMessageIdsWithWatermark.filter(
-        (messageId) => !compactedMessageIdSet.has(messageId),
-      );
+      const expectedMessageIds = recentMessageIds.ids;
       cacheMatchesPostgres =
         cachedMessageIds.length === expectedMessageIds.length &&
         cachedMessageIds.every(

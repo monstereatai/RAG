@@ -39,6 +39,13 @@ export const SUMMARY_RECOVERY_RECENT_MESSAGE_COUNT = DEFAULT_MESSAGE_SAFETY_CAP;
 
 export const COMPACTION_STRATEGY_CONFIDENCE_THRESHOLD = 0.6;
 
+/**
+ * Middle-removal can leave exact message IDs after the continuous prefix.
+ * Once this many accumulate, the next compaction deliberately removes an
+ * oldest-first prefix so the persisted marker can advance without losing gaps.
+ */
+export const COMPACTED_MESSAGE_ID_PREFIX_COMPACTION_THRESHOLD = 128;
+
 export const SUMMARY_MAX_LIST_ITEMS = 12;
 
 export const SUMMARY_MAX_ITEM_CHARACTERS = 160;

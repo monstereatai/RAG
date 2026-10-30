@@ -5,6 +5,8 @@ import type {
   IndexedDocument,
 } from './elasticsearch.provider.types';
 
+const ES_DOCUMENT_WRITE_TIMEOUT_MS = 30_000;
+
 export abstract class ElasticsearchDocumentSupport {
   protected abstract readonly logger: Logger;
   protected abstract client: Client;
@@ -130,7 +132,7 @@ export abstract class ElasticsearchDocumentSupport {
           // 每次写入都刷新 updatedAt，供搜索的更新时间筛选使用
           updatedAt: new Date().toISOString(),
         },
-      });
+      }, { requestTimeout: ES_DOCUMENT_WRITE_TIMEOUT_MS });
     } catch (err) {
       this.logger.warn(`ES indexDocument failed: ${(err as Error).message}`);
       throw err;

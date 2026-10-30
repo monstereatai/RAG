@@ -13,6 +13,7 @@ import {
   COMPACTION_RETAINED_MESSAGE_RATIO,
   COMPACTION_STRATEGY_CONFIDENCE_THRESHOLD,
   COMPACTION_TARGET_TOKEN_RATIO,
+  COMPACTED_MESSAGE_ID_PREFIX_COMPACTION_THRESHOLD,
   DEFAULT_MESSAGE_SAFETY_CAP,
   MAX_HISTORY_CONTEXT_TOKENS,
   SUMMARY_MAX_DIGEST_CHARACTERS,
@@ -112,6 +113,12 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     const existingSummary = await this.redis.get(
       this.summaryKey(conversationId),
     );
+    const previousSummary = existingSummary
+      ? this.tryParseSummary(existingSummary)
+      : null;
+    const forcePrefixCompaction =
+      (previousSummary?.compactedMessageIds?.length ?? 0) >=
+      COMPACTED_MESSAGE_ID_PREFIX_COMPACTION_THRESHOLD;
     const summaryTokens = existingSummary
       ? this.estimateTokens(
           this.formatSummary(
@@ -133,6 +140,7 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
       turns,
       retainedMessageLimit,
       rawHistoryBudget,
+      forcePrefixCompaction,
     );
     if (selection.removeIndexes.length === 0) return null;
 
@@ -171,9 +179,6 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     let summary: StructuredMemorySummary;
     let promptVersion: string | undefined;
     try {
-      const previousSummary = existingSummary
-        ? this.tryParseSummary(existingSummary)
-        : null;
       // cd 调用LLM压缩对话历史
       const summaryMessages = [
         new SystemMessage(shortTermSummaryCompactionSystemPrompt),
@@ -580,6 +585,7 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     turns: StoredTurn[],
     maxRetained: number,
     targetTokens: number,
+    forceOldestPrefix = false,
   ): {
     removeIndexes: number[];
     baseStrategy: CompactionStrategy;
@@ -592,6 +598,26 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     );
     const totalTokens = tokens.reduce((total, value) => total + value, 0);
     const baseStrategy = this.getBaseCompactionStrategy();
+    if (forceOldestPrefix) {
+      const removeIndexes = new Set<number>();
+      let remainingTokens = totalTokens;
+      let retainedCount = turns.length;
+      for (const [index, turn] of turns.entries()) {
+        if (remainingTokens <= targetTokens && retainedCount <= maxRetained)
+          break;
+        if (turn.role === 'system') continue;
+        removeIndexes.add(index);
+        remainingTokens -= tokens[index];
+        retainedCount -= 1;
+      }
+      return {
+        removeIndexes: [...removeIndexes],
+        baseStrategy,
+        strategy: 'oldest-removal',
+        confidence: 1,
+      };
+    }
+
     let strategy: RemovalStrategy;
     let confidence = 1;
     let adaptiveComparison: Record<string, number> | undefined;

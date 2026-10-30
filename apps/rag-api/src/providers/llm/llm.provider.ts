@@ -1,5 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  HttpException,
+  HttpStatus,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ILLMProvider, LlmModelProvider } from './llm-provider.interface';
@@ -24,6 +30,21 @@ class LlmInputBudgetExceededError extends Error {
   }
 }
 
+type LlmRequestBudget = {
+  calls: number;
+  estimatedInputTokens: number;
+  reservedTokens: number;
+  maxCalls: number;
+  maxInputTokens: number;
+  maxTotalTokens: number;
+};
+
+export class LlmRequestBudgetExceededError extends HttpException {
+  constructor(message: string) {
+    super(message, HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
 /**
  * LLM Provider 工厂
  * 按 config.llm.provider 注入对应实现
@@ -36,8 +57,10 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
   private readonly requestUsage = new AsyncLocalStorage<
     NonNullable<LlmInvokeOptions['onUsage']>
   >();
+  private readonly requestBudget = new AsyncLocalStorage<LlmRequestBudget>();
   private readonly logger = new Logger(LlmProvider.name);
   private readonly modelWrappers = new WeakMap<object, object>();
+  private readonly runnableMaxCalls = new WeakMap<object, number>();
   private readonly gatewayPolicy: LlmGatewayPolicy;
   private readonly requestTimeoutMs: number;
   private readonly circuitFailureThreshold: number;
@@ -167,6 +190,28 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     );
   }
 
+  /** 同一个 HTTP 请求或后台任务里的所有模型调用共用一个预算。 */
+  runWithRequestBudget<T>(callback: () => T): T {
+    if (this.requestBudget.getStore()) return callback();
+    return this.requestBudget.run(
+      {
+        calls: 0,
+        estimatedInputTokens: 0,
+        reservedTokens: 0,
+        maxCalls: this.positiveBudgetConfig('llm.requestBudget.maxCalls', 64),
+        maxInputTokens: this.positiveBudgetConfig(
+          'llm.requestBudget.maxInputTokens',
+          200_000,
+        ),
+        maxTotalTokens: this.positiveBudgetConfig(
+          'llm.requestBudget.maxTotalTokens',
+          350_000,
+        ),
+      },
+      callback,
+    );
+  }
+
   private resolveProvider(model?: LlmModelProvider): ILLMProvider {
     const selected = model ?? this.requestModel.getStore();
     switch (selected) {
@@ -211,6 +256,7 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
               value as (...args: unknown[]) => unknown,
               args,
               providerName,
+              String(property),
             );
         }
 
@@ -250,6 +296,10 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
                   { fallbacks: [fallbackRunnable] },
                 ])
               : primaryRunnable;
+            this.runnableMaxCalls.set(
+              runnable as object,
+              primaryRunnable.withFallbacks ? 2 : 1,
+            );
             return this.wrapModel(runnable as object, providerName);
           };
         }
@@ -261,8 +311,24 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
           property === 'withRetry' ||
           property === 'withFallbacks'
         ) {
-          return (...args: unknown[]) =>
-            this.wrapModel(Reflect.apply(value, receiver, args), providerName);
+          return (...args: unknown[]) => {
+            const derived = Reflect.apply(value, receiver, args) as object;
+            const inheritedCalls = this.runnableMaxCalls.get(target) ?? 1;
+            const addedFallbacks =
+              property === 'withFallbacks' &&
+              args[0] &&
+              typeof args[0] === 'object' &&
+              Array.isArray(
+                (args[0] as { fallbacks?: unknown }).fallbacks,
+              )
+                ? (args[0] as { fallbacks: unknown[] }).fallbacks.length
+                : 0;
+            this.runnableMaxCalls.set(
+              derived,
+              inheritedCalls + addedFallbacks,
+            );
+            return this.wrapModel(derived, providerName);
+          };
         }
 
         return value.bind(receiver);
@@ -277,10 +343,22 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     method: (...args: unknown[]) => unknown,
     args: unknown[],
     providerName: LlmModelProvider,
+    methodName: string,
   ): unknown {
     if (!this.isStreamingInput(args[0])) {
       this.assertInputWithinBudget(args[0], providerName);
     }
+    const batchCalls =
+      methodName === 'batch' && Array.isArray(args[0])
+        ? Math.max(1, args[0].length)
+        : 1;
+    const maxCalls = this.runnableMaxCalls.get(target) ?? 1;
+    this.reserveRequestBudget(
+      args[0],
+      providerName,
+      batchCalls * maxCalls,
+      maxCalls,
+    );
     const upstreamSignal = this.requestSignal.getStore();
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const signal = upstreamSignal
@@ -322,6 +400,70 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     if (estimatedTokens <= maxInputTokens) return;
 
     throw new LlmInputBudgetExceededError(estimatedTokens, maxInputTokens);
+  }
+
+  private reserveRequestBudget(
+    input: unknown,
+    providerName: LlmModelProvider,
+    calls: number,
+    inputCallMultiplier = 1,
+  ): void {
+    const budget = this.requestBudget.getStore();
+    if (!budget) return;
+
+    const prompt = this.serializePromptInput(input);
+    const imageCount = (prompt.match(/__LLM_IMAGE_PAYLOAD__/g) ?? []).length;
+    const estimatedInputTokens =
+      this.estimatePromptTokens(prompt.replaceAll('__LLM_IMAGE_PAYLOAD__', '')) +
+      imageCount * 2_048;
+    const totalEstimatedInputTokens = estimatedInputTokens * inputCallMultiplier;
+    const reservedTokens =
+      totalEstimatedInputTokens + calls * this.getMaxOutputTokens(providerName);
+    if (budget.calls + calls > budget.maxCalls) {
+      throw new LlmRequestBudgetExceededError(
+        `本次任务的模型调用次数达到上限 ${budget.maxCalls}，已停止继续调用。`,
+      );
+    }
+    if (
+      budget.estimatedInputTokens + totalEstimatedInputTokens >
+      budget.maxInputTokens
+    ) {
+      throw new LlmRequestBudgetExceededError(
+        `本次任务的模型输入预算将超过 ${budget.maxInputTokens} tokens，已停止继续调用。`,
+      );
+    }
+    if (budget.reservedTokens + reservedTokens > budget.maxTotalTokens) {
+      throw new LlmRequestBudgetExceededError(
+        `本次任务的模型总预算将超过 ${budget.maxTotalTokens} tokens，已停止继续调用。`,
+      );
+    }
+
+    budget.calls += calls;
+    budget.estimatedInputTokens += totalEstimatedInputTokens;
+    // 结果用模型配置的最大输出 token 预留，避免模型未返回 usage 时漏算成本。
+    budget.reservedTokens += reservedTokens;
+  }
+
+  private getMaxOutputTokens(providerName: LlmModelProvider): number {
+    const fallback = this.gatewayPolicy.resolve('structured', providerName)
+      .fallback;
+    return [providerName, fallback]
+      .filter((provider): provider is LlmModelProvider => Boolean(provider))
+      .reduce((maximum, provider) => {
+        const configured = Number(
+          this.config.get<number>(`llm.${provider}.maxTokens`),
+        );
+        const output =
+          Number.isFinite(configured) && configured > 0 ? configured : 4_096;
+        return Math.max(maximum, output);
+      }, 0);
+  }
+
+  private positiveBudgetConfig(key: string, fallback: number): number {
+    const configured = Number(this.config.get<number>(key));
+    return Number.isFinite(configured) && configured > 0
+      ? Math.floor(configured)
+      : fallback;
   }
 
   private getMaxInputTokens(providerName: LlmModelProvider): number {
@@ -459,6 +601,7 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     options: LlmInvokeOptions,
   ): Promise<string> {
     this.assertInputWithinBudget(messages, providerName);
+    this.reserveRequestBudget(messages, providerName, 1);
     const provider = this.resolveProvider(providerName);
     return this.requestModel.run(providerName, () =>
       Object.keys(options).length > 0

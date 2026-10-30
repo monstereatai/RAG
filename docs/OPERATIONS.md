@@ -8,10 +8,17 @@
 
 ## 2. 本地运行与部署入口
 
-本地开发基础设施：
+本地 RAG 与 Langfuse 共用一个 Compose 项目；Langfuse 使用独立网络和持久卷，数据库、Redis、MinIO 与 RAG 的同类服务保持隔离：
 
 ```bash
-docker compose -f infra/docker/docker-compose.dev.yml up -d
+docker compose -p docker \
+  --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" \
+  -f infra/docker/docker-compose.dev.yml \
+  -f infra/docker/docker-compose.langfuse.yml up -d
+docker compose -p docker \
+  --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" \
+  -f infra/docker/docker-compose.dev.yml \
+  -f infra/docker/docker-compose.langfuse.yml ps
 pnpm --dir apps/rag-api run start:dev
 ```
 
@@ -26,15 +33,16 @@ pnpm --dir apps/rag-api run enterprise:readiness
 
 ### Langfuse 本地观测服务
 
-Langfuse 使用独立 Compose 栈，界面地址为 `http://127.0.0.1:3002`，数据卷与 RAG 开发栈分开。登录与服务密钥保存在仓库外的 owner-only 文件：`$HOME/Library/Application Support/RAG/langfuse.secrets`。
+Langfuse 界面地址为 `http://127.0.0.1:3002`。登录与服务密钥保存在仓库外的 owner-only 文件：`$HOME/Library/Application Support/RAG/langfuse.secrets`。
 
 ```bash
-docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml up -d
-docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml ps
-docker compose --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" -f infra/docker/docker-compose.langfuse.yml stop
+docker compose -p docker \
+  --env-file "$HOME/Library/Application Support/RAG/langfuse.secrets" \
+  -f infra/docker/docker-compose.dev.yml \
+  -f infra/docker/docker-compose.langfuse.yml stop
 ```
 
-`stop` 会停止服务并保留数据卷；之后用 `up -d` 恢复。旧项目 `rag-langfuse` 保留着首次不完整导入的数据卷并处于停止状态，不要与当前 `rag-langfuse-clean` 同时启动。历史数据迁移没有改变 `apps/rag-api/.env`，RAG 应用新产生的 trace 仍发往 Langfuse Cloud。
+`stop` 会停止整个本地 Compose 项目并保留数据卷；之后用同一组文件执行 `up -d` 恢复。旧项目首次导入时创建的数据卷保留为离线备份，不再启动。RAG 应用新产生的 trace 仍发往 Langfuse Cloud。
 
 ### OpenSandbox Agent 项目工作区
 

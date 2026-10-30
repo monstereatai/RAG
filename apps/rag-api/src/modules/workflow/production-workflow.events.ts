@@ -51,7 +51,6 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     await this.redisProvider.set(
       this.workflowIndexKey(view.userId, view.threadId),
       JSON.stringify(index),
-      86400 * 30,
     );
     await this.redisProvider.zadd(
       `production:workflows:${view.userId}`,

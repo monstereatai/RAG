@@ -140,6 +140,13 @@ export const configuration = () => ({
     ),
   },
 
+  agentRuns: {
+    staleAfterMs: parseInt(
+      process.env.AGENT_RUN_STALE_AFTER_MS ?? '1800000',
+      10,
+    ),
+  },
+
   // Isolated project workspaces use the OpenSandbox 1.1 lifecycle/execd API.
   opensandbox: {
     domain: process.env.OPEN_SANDBOX_DOMAIN ?? '',
@@ -223,6 +230,18 @@ export const configuration = () => ({
       process.env.LLM_REQUEST_TIMEOUT_MS ?? '90000',
       10,
     ),
+    // 一次 API 请求或持久队列任务共享的模型预算；按输入估算和输出上限保守预留。
+    requestBudget: {
+      maxCalls: parseInt(process.env.LLM_REQUEST_MAX_CALLS ?? '64', 10),
+      maxInputTokens: parseInt(
+        process.env.LLM_REQUEST_MAX_INPUT_TOKENS ?? '200000',
+        10,
+      ),
+      maxTotalTokens: parseInt(
+        process.env.LLM_REQUEST_MAX_TOTAL_TOKENS ?? '350000',
+        10,
+      ),
+    },
     // simple 模式下的短问题使用本地 QueryPlan，省掉一次规划模型调用。
     queryPlannerFastPathEnabled:
       process.env.QUERY_PLANNER_FAST_PATH_ENABLED !== 'false',

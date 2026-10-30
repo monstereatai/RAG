@@ -2,6 +2,10 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
 import { createHash } from 'node:crypto';
+import {
+  LlmProvider,
+  LlmRequestBudgetExceededError,
+} from '../../providers/llm/llm.provider';
 
 export const INDEX_REPAIR_QUEUE = 'rag-index-repair';
 
@@ -29,7 +33,10 @@ export class IndexRepairQueueService implements OnModuleDestroy {
   private readonly worker?: Worker<IndexRepairJob>;
   private processor?: IndexRepairProcessor;
 
-  constructor(@Optional() config?: ConfigService) {
+  constructor(
+    @Optional() config?: ConfigService,
+    @Optional() private readonly llmProvider?: LlmProvider,
+  ) {
     const nodeEnv =
       config?.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
     this.required =
@@ -62,7 +69,17 @@ export class IndexRepairQueueService implements OnModuleDestroy {
       INDEX_REPAIR_QUEUE,
       async (job) => {
         if (!this.processor) throw new Error('index repair processor is not registered');
-        await this.processor(job.data);
+        try {
+          const process = () => this.processor!(job.data);
+          if (this.llmProvider) {
+            await this.llmProvider.runWithRequestBudget(process);
+          } else {
+            await process();
+          }
+        } catch (error) {
+          if (error instanceof LlmRequestBudgetExceededError) job.discard();
+          throw error;
+        }
       },
       {
         connection,

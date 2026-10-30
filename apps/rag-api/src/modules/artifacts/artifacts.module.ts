@@ -9,9 +9,11 @@ import { ArtifactsController } from './artifacts.controller';
 import { ArtifactsService } from './artifacts.service';
 import { DashScopeImageService } from './dashscope-image.service';
 import { PublicArtifactsController } from './public-artifacts.controller';
+import { LlmModule } from '../../providers/llm/llm.module';
 
 @Module({
   imports: [
+    LlmModule,
     TypeOrmModule.forFeature([
       GeneratedArtifactEntity,
       ArtifactShareEntity,

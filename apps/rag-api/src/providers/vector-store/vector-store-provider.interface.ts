@@ -19,6 +19,12 @@ export interface VectorSearchHit {
   score: number;
 }
 
+export interface StoredVectorRecord {
+  id: string;
+  content: string;
+  vector: number[];
+}
+
 export interface RetrievalDescriptionVectorRecord {
   id: string;
   vector: number[];
@@ -118,6 +124,9 @@ export interface IVectorStoreProvider {
    * 底层索引不可用时应抛出受控错误，由上层标记为 unavailable，而不是当成 0。
    */
   countByDocId(docId: string, userId?: string): Promise<number>;
+
+  /** 按 chunk ID 读取已存向量，供索引修复复用，避免重复计算 embedding。 */
+  getVectorsByIds(ids: string[]): Promise<StoredVectorRecord[]>;
 
   /**
    * 返回当前索引配置，用于调试和验收。

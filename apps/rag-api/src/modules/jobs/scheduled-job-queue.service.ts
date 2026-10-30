@@ -2,6 +2,10 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
 import { createHash } from 'node:crypto';
+import {
+  LlmProvider,
+  LlmRequestBudgetExceededError,
+} from '../../providers/llm/llm.provider';
 
 export const SCHEDULED_JOB_QUEUE = 'scheduled-analysis-jobs';
 
@@ -14,7 +18,10 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
   readonly enabled: boolean;
   readonly required: boolean;
 
-  constructor(@Optional() private readonly config?: ConfigService) {
+  constructor(
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly llmProvider?: LlmProvider,
+  ) {
     const nodeEnv =
       config?.get<string>('nodeEnv') ?? process.env.NODE_ENV ?? 'development';
     this.required =
@@ -38,7 +45,18 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
       async (job) => {
         if (!this.processor)
           throw new Error('scheduled job processor is not registered');
-        await this.processor(job.data.jobId, job.data.triggerKey);
+        try {
+          const process = () =>
+            this.processor!(job.data.jobId, job.data.triggerKey);
+          if (this.llmProvider) {
+            await this.llmProvider.runWithRequestBudget(process);
+          } else {
+            await process();
+          }
+        } catch (error) {
+          if (error instanceof LlmRequestBudgetExceededError) job.discard();
+          throw error;
+        }
       },
       {
         connection,

@@ -32,6 +32,7 @@ const EVENT_LABELS: Record<string, string> = {
   "tool.unknown": "工具结果未知",
   "approval.asked": "请求审批",
   "approval.decided": "审批决定",
+  "approval.auto_granted": "受限自动批准",
   "approval.required": "需要审批",
   "node.started": "节点开始",
   "node.completed": "节点完成",

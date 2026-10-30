@@ -97,7 +97,7 @@ export abstract class ProductionWorkflowRuntimeBase {
     this.configService = dependencies.configService;
     this.checkpointer = new RedisCheckpointer(
       this.redisProvider,
-      86400 * 30,
+      0, // 产研工作流历史状态长期保留，不设置短期 TTL。
       undefined,
       this.configService?.get<boolean>('core.requireDependencies') === true ||
         this.configService?.get<string>('nodeEnv') === 'production',
