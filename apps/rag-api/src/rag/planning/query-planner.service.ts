@@ -32,6 +32,8 @@ export class QueryPlannerService {
     recentContext: Array<{ role: 'human' | 'ai'; content: string }> = [],
     options?: QueryPlannerOptions,
   ): Promise<QueryPlan> {
+    // LLM 把问题整理成受 schema 约束的 QueryPlan。
+    // 超时、解析失败或预算不足时保留原问题，退回保守计划。
     const startedAt = performance.now();
     const original = query.trim();
     if (this.shouldUseLocalFastPath(original, recentContext, options)) {

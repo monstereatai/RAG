@@ -106,7 +106,8 @@ export class DocumentController {
     });
   }
 
-  // 同步入口：先把文件或媒体转换成可检索正文，再交给统一入库服务写入知识索引。
+  // 同步入口先解析文件；ObsidianIngestService 做去重和来源挂接。
+  // 最终由 DocumentService 统一写入知识索引。
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
   async upload(

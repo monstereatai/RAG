@@ -354,8 +354,8 @@ export class AgenticRagExecution extends AgenticRagResume {
         };
       }
     }
-    // Auto 的 Fast Path 只用于选择执行引擎，并把首轮证据交给升级后的 Agentic 复用。
-    // 显式 Agentic 直接进入状态机，按 QueryPlan 取证。
+    // Auto 先检查快速路径能否用本地证据回答；选中后把证据交给 Simple 复用。
+    // 未命中时继续按 route 分流；只有 Agentic 请求才进入 LangGraph 状态图。
     const fastPathGate =
       !multiIntent && mode === 'auto'
         ? await this.fastPathCapability.assessFastPath(
@@ -461,7 +461,7 @@ export class AgenticRagExecution extends AgenticRagResume {
       });
     }
 
-    // 通过 LangGraph StateGraph 执行 agentic 流程
+    // 只有 route 为 agentic 才运行状态图：按计划取证并检查充分性，再按需补证、重排和生成答案。
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
       {

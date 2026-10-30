@@ -90,6 +90,8 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
     vectors: number[][];
     document: IndexedDocument;
   }): Promise<void> {
+    // Milvus 与 BM25/Elasticsearch 是独立索引组，因此并发写入。
+    // 等两组都返回后再上报失败，让入库流程清理已成功的部分索引。
     const indexResults = await Promise.allSettled([
       (async () => {
         await this.vectorStoreProvider.insert(

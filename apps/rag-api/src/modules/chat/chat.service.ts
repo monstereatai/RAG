@@ -266,6 +266,8 @@ export class ChatService extends ChatServiceFinalizationSupport {
       req.scope?.role,
       req.scope?.documentType,
     ].some((value) => Boolean(value?.trim()));
+    // 先用原问题和可用历史生成结构化计划，决定本轮怎么处理。
+    // 这里只做规划；真正的资料召回发生在后面的执行服务中。
     const queryPlan = await this.queryPlanner.plan(req.query, history, {
       onUsage: collectUsage,
       signal: requestSignal,

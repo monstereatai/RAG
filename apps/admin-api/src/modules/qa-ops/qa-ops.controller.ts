@@ -330,6 +330,7 @@ export class QaOpsController {
     };
   }
 
+  // 浏览器只访问管理 API：这里校验权限、映射管理员身份并转发 SSE，RAG 服务令牌不会下发到浏览器。
   @Get("agui/stream")
   @ApiOperation({ summary: "代理 RAG AG-UI 流式问答" })
   @RequirePermission("admin:qa-ops:read")

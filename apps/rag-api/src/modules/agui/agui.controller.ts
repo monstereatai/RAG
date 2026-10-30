@@ -140,6 +140,7 @@ export class AguiController {
   @Sse('admin/stream')
   @Public()
   @UseGuards(ServiceTokenGuard)
+  // 服务令牌证明请求来自 Admin API；这里继续校验映射后的管理员身份和租户，不能把服务账号当成数据所有者。
   adminStream(
     @Query('query') query: string,
     @Query('mode') mode?: ChatMode,

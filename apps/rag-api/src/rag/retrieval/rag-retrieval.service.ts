@@ -367,7 +367,7 @@ export class RagRetrievalService {
         allowedDocIds ?? undefined,
         options.scope,
       );
-    // cd：图谱搜索
+    // 图谱和图片只是计划允许时才查询的补充证据；召回后仍要经过同一套文档可见性检查。
     const graphProbePromise = graphRequested
       ? this.supplementalEvidenceRetriever.probeGraph(
           normalizedQuery,

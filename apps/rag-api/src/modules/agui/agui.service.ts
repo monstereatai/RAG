@@ -36,10 +36,8 @@ export class AguiService {
 
     let activeThreadId: string | undefined = options.threadId;
     let settled = false;
-    // cd：创建可持续推送数据流
+    // 事件会逐步推到页面；页面断开时用 AbortSignal 停止后续模型或工具调用。
     return new Observable<AguiEvent>((subscriber) => {
-      // cd：创建可取消控制器
-      // 用于在订阅者取消订阅时，取消异步操作
       const abortController = new AbortController();
       void (async () => {
         const runId = randomUUID();
@@ -66,10 +64,9 @@ export class AguiService {
           const selectedModel = options.model ?? 'qwen';
           runState.mode = options.mode;
           runState.model = selectedModel;
-          // cd 用户选择岗位,获取角色对应提示词和能力上下文
-          // 返回对象，包括业务提示词+系统提示词
+          // 岗位预设只补充本轮回答的角色要求，不改变用户权限或知识库范围。
           const roleContext = resolveRoleContext(options.rolePresetId);
-          // cd：分析用户问题，将生成markdown，world，excel
+          // 这里只识别用户是否要求生成文件；实际文件在答案生成后创建。
           const artifactIntent = parseArtifactIntent(query);
           activeThreadId =
             options.threadId ??
@@ -103,6 +100,7 @@ export class AguiService {
           let attachmentContextPromise:
             | Promise<SupplementalEvidenceContext>
             | undefined;
+          // ChatService 先生成 QueryPlan；请求补充证据时，再按计划查询和当前 thread 检索附件。
           const loadAttachmentContext = (
             input: SupplementalEvidenceLoaderInput,
           ) => {
@@ -135,6 +133,8 @@ export class AguiService {
             role: 'assistant',
           });
 
+          // 选择模型后仍复用 ChatService 的问答、检索和保存流程。
+          // 本层把中间事件转换成 AG-UI 事件，不再另建一套问答逻辑。
           const result = await this.llmProvider.runWithModel(
             selectedModel,
             () =>
@@ -196,6 +196,7 @@ export class AguiService {
 
           let generatedArtifacts: unknown[] = [];
           if (artifactIntent) {
+            // 生成文件使用本轮附件内容和最终答案作为输入；没有附件时就只基于答案生成。
             const toolCallId = randomUUID();
             const attachmentContext = attachmentContextPromise
               ? await attachmentContextPromise
