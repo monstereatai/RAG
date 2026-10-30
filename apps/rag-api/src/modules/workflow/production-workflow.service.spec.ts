@@ -53,6 +53,12 @@ describe('ProductionWorkflowService', () => {
         getModel: () => ({
           withStructuredOutput: () => ({ invoke }),
         }),
+        getActiveProviderName: () => undefined,
+        getFallbackProviderName: () => undefined,
+        runWithSignal: (
+          _signal: AbortSignal | undefined,
+          callback: () => Promise<unknown>,
+        ) => callback(),
       } as never,
       {
         isEnabled: () => false,

@@ -2,7 +2,6 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -10,11 +9,30 @@ import {
 import { ConfigService } from '@nestjs/config';
 import JSZip from 'jszip';
 import { Sandbox, SandboxApiException } from '@alibaba-group/opensandbox';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { URL } from 'node:url';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 import { ProductionWorkflowService } from './production-workflow.service';
+import {
+  DEV_SERVER_READY_INTERVAL_MS,
+  DEV_SERVER_READY_TIMEOUT_MS,
+  MAX_COMMAND_LENGTH,
+  MAX_COMMAND_OUTPUT_BYTES,
+  MAX_DEV_COMMAND_LENGTH,
+  MAX_EXPORT_BYTES,
+  MAX_SEED_FILES,
+  MAX_SEED_ZIP_BYTES,
+  MAX_SINGLE_FILE_BYTES,
+  PREVIEW_TICKET_TTL_SECONDS,
+  PREVIEW_UPSTREAM_TIMEOUT_MS,
+  WORKSPACE_ROOT,
+  WORKSPACE_TTL_SECONDS,
+  type SandboxCommandOutput,
+  type PreviewTicketRecord,
+  type WorkspaceRecord,
+} from './production-project-workspace.shared';
+import { ProductionProjectWorkspaceSupport } from './production-project-workspace.support';
 import {
   StartDevServerInput,
   WorkspaceCommandResult,
@@ -25,70 +43,16 @@ import {
   WorkspaceStatus,
 } from './production-project-workspace.dto';
 
-const WORKSPACE_ROOT = '/root/workspace';
-const WORKSPACE_TTL_SECONDS = 6 * 60 * 60;
-const PREVIEW_TICKET_TTL_SECONDS = 5 * 60;
-const MAX_COMMAND_LENGTH = 4096;
-const MAX_COMMAND_OUTPUT_BYTES = 16 * 1024;
-const MAX_DEV_COMMAND_LENGTH = 1024;
-const MAX_SEED_ZIP_BYTES = 25 * 1024 * 1024;
-const MAX_SEED_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
-const MAX_SEED_FILES = 1500;
-const MAX_SINGLE_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_EXPORT_BYTES = 100 * 1024 * 1024;
-const MAX_PROXY_RESPONSE_BYTES = 25 * 1024 * 1024;
-const DEV_SERVER_READY_TIMEOUT_MS = 20_000;
-const DEV_SERVER_READY_INTERVAL_MS = 500;
-const WORKSPACE_LOCK_TTL_SECONDS = 300;
-const WORKSPACE_LOCK_WAIT_MS = 30_000;
-const WORKSPACE_LOCK_RETRY_MS = 100;
-const PREVIEW_UPSTREAM_TIMEOUT_MS = 45_000;
-
-interface WorkspaceRecord {
-  version: 1;
-  tenantId: string | null;
-  ownerUserId: string;
-  threadId: string;
-  sandboxId: string;
-  artifactId: string;
-  createdAt: string;
-  expiresAt: number;
-  devServer: null | {
-    commandId: string;
-    port: number;
-    startedAt: string;
-  };
-}
-
-interface PreviewTicketRecord {
-  version: 1;
-  workspaceKey: string;
-  tenantId: string | null;
-  ownerUserId: string;
-  threadId: string;
-  sandboxId: string;
-  port: number;
-  expiresAt: number;
-}
-
-interface SandboxCommandOutput {
-  logs?: {
-    stdout?: Array<{ text?: string }>;
-    stderr?: Array<{ text?: string }>;
-  };
-  error?: { value?: string };
-  exitCode?: number | null;
-  id?: string;
-}
-
 @Injectable()
-export class ProductionProjectWorkspaceService {
+export class ProductionProjectWorkspaceService extends ProductionProjectWorkspaceSupport {
   constructor(
-    private readonly config: ConfigService,
-    private readonly redis: RedisProvider,
+    protected readonly config: ConfigService,
+    protected readonly redis: RedisProvider,
     private readonly workflow: ProductionWorkflowService,
-    private readonly artifacts: ArtifactsService,
-  ) {}
+    protected readonly artifacts: ArtifactsService,
+  ) {
+    super();
+  }
 
   async getStatus(
     threadId: string,
@@ -764,10 +728,6 @@ export class ProductionProjectWorkspaceService {
     );
   }
 
-  private async wait(ms: number): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
-  }
-
   private async connectSandbox(
     sandboxId: string,
     skipHealthCheck = false,
@@ -809,21 +769,6 @@ export class ProductionProjectWorkspaceService {
       requestTimeoutSeconds: 30,
       disableMetrics: true,
     };
-  }
-
-  private sandboxProtocol(): 'http' | 'https' {
-    const domain = this.config.get<string>('opensandbox.domain')?.trim() ?? '';
-    const configured = this.config.get<string>('opensandbox.protocol');
-    const domainProtocol = /^https:\/\//i.test(domain)
-      ? 'https'
-      : /^http:\/\//i.test(domain)
-        ? 'http'
-        : undefined;
-    const protocol = domainProtocol ?? configured ?? 'http';
-    if (protocol !== 'http' && protocol !== 'https') {
-      throw new ServiceUnavailableException('OpenSandbox is not configured.');
-    }
-    return protocol;
   }
 
   private async getActiveWorkspace(
@@ -869,14 +814,6 @@ export class ProductionProjectWorkspaceService {
     try {
       return await this.redis.getRequired(key);
     } catch {
-      throw new ServiceUnavailableException(
-        'Workspace state storage is unavailable.',
-      );
-    }
-  }
-
-  private assertRedis(): void {
-    if (!this.redis.isEnabled()) {
       throw new ServiceUnavailableException(
         'Workspace state storage is unavailable.',
       );
@@ -934,419 +871,6 @@ export class ProductionProjectWorkspaceService {
       return value;
     } catch {
       throw new NotFoundException('Preview ticket not found.');
-    }
-  }
-
-  private async unpackSeedZip(body: Buffer) {
-    let zip: JSZip;
-    try {
-      zip = await JSZip.loadAsync(body, { checkCRC32: true });
-    } catch {
-      throw new BadRequestException('Artifact is not a valid ZIP archive.');
-    }
-    const entries = Object.values(zip.files).filter((entry) => !entry.dir);
-    if (entries.length > MAX_SEED_FILES) {
-      throw new BadRequestException('Code ZIP contains too many files.');
-    }
-    const output: Array<{ path: string; data: Uint8Array }> = [];
-    let totalBytes = 0;
-    for (const entry of entries) {
-      if (
-        entry.unsafeOriginalName &&
-        this.normalizeArchivePath(entry.unsafeOriginalName) !== entry.name
-      ) {
-        throw new BadRequestException('Code ZIP contains an unsafe path.');
-      }
-      const relativePath = this.normalizeArchivePath(entry.name);
-      if (!relativePath)
-        throw new BadRequestException('Code ZIP contains an unsafe path.');
-      const uncompressedSize = (
-        entry as JSZip.JSZipObject & {
-          _data?: { uncompressedSize?: number };
-        }
-      )._data?.uncompressedSize;
-      if (
-        typeof uncompressedSize !== 'number' ||
-        uncompressedSize > MAX_SINGLE_FILE_BYTES
-      ) {
-        throw new BadRequestException('Code ZIP contains an oversized file.');
-      }
-      totalBytes += uncompressedSize;
-      if (totalBytes > MAX_SEED_UNCOMPRESSED_BYTES) {
-        throw new BadRequestException(
-          'Code ZIP exceeds the uncompressed size limit.',
-        );
-      }
-      const data = await entry.async('uint8array');
-      if (data.length !== uncompressedSize) {
-        throw new BadRequestException(
-          'Code ZIP contains an invalid file entry.',
-        );
-      }
-      output.push({ path: `${WORKSPACE_ROOT}/${relativePath}`, data });
-    }
-    return output;
-  }
-
-  private normalizeArchivePath(value: string): string | null {
-    if (
-      !value ||
-      value.startsWith('/') ||
-      value.includes('\\') ||
-      value.includes('\0')
-    ) {
-      return null;
-    }
-    const parts = value.split('/').filter(Boolean);
-    if (!parts.length || parts.some((part) => part === '.' || part === '..'))
-      return null;
-    return parts.join('/');
-  }
-
-  private validateCommand(command: string, maxLength: number): string {
-    if (
-      typeof command !== 'string' ||
-      !command.trim() ||
-      command.length > maxLength
-    ) {
-      throw new BadRequestException(
-        `command must contain 1 to ${maxLength} characters.`,
-      );
-    }
-    if (command.includes('\0'))
-      throw new BadRequestException('command contains an invalid character.');
-    return command;
-  }
-
-  private validateTimeout(timeoutSeconds: number): number {
-    if (
-      !Number.isInteger(timeoutSeconds) ||
-      timeoutSeconds < 1 ||
-      timeoutSeconds > 240
-    ) {
-      throw new BadRequestException(
-        'timeoutSeconds must be an integer from 1 to 240.',
-      );
-    }
-    return timeoutSeconds;
-  }
-
-  private commandOutput(execution: SandboxCommandOutput): string {
-    const chunks = [
-      ...(execution.logs?.stdout ?? []).map((entry) => entry.text ?? ''),
-      ...(execution.logs?.stderr ?? []).map((entry) => entry.text ?? ''),
-      execution.error?.value ?? '',
-    ];
-    return this.truncateOutput(chunks.filter(Boolean).join(''));
-  }
-
-  private truncateOutput(output: string): string {
-    const bytes = Buffer.from(output);
-    if (bytes.length <= MAX_COMMAND_OUTPUT_BYTES) return output;
-    const marker = '\n[output truncated]';
-    const limit = MAX_COMMAND_OUTPUT_BYTES - Buffer.byteLength(marker);
-    return `${bytes.subarray(bytes.length - limit).toString()}${marker}`;
-  }
-
-  private validatePreviewPath(input: string): string {
-    if (
-      typeof input !== 'string' ||
-      input.length > 2048 ||
-      input.includes('\\')
-    ) {
-      throw new BadRequestException('Preview path is invalid.');
-    }
-    let decoded = input;
-    try {
-      for (let round = 0; round < 8; round += 1) {
-        const next = decodeURIComponent(decoded);
-        if (next === decoded) break;
-        decoded = next;
-        if (round === 7 && /%(?:2e|2f|5c)/i.test(decoded)) {
-          throw new Error('over-encoded preview path');
-        }
-      }
-    } catch {
-      throw new BadRequestException('Preview path is invalid.');
-    }
-    if (
-      decoded.startsWith('/') ||
-      decoded.includes('\\') ||
-      decoded.includes('\0') ||
-      decoded.split('/').some((segment) => segment === '..') ||
-      /^[a-z][a-z0-9+.-]*:/i.test(decoded)
-    ) {
-      throw new BadRequestException('Preview path is invalid.');
-    }
-    return decoded
-      .split('/')
-      .filter((segment) => segment && segment !== '.')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-  }
-
-  private buildEndpointUrl(endpointUrl: string, path: string): URL {
-    const protocol = this.sandboxProtocol();
-    if (
-      !endpointUrl ||
-      endpointUrl.includes('@') ||
-      endpointUrl.includes('#')
-    ) {
-      throw new BadGatewayException(
-        'OpenSandbox returned an invalid endpoint.',
-      );
-    }
-    let url: URL;
-    try {
-      url = new URL(endpointUrl);
-    } catch {
-      throw new BadGatewayException(
-        'OpenSandbox returned an invalid endpoint.',
-      );
-    }
-    if (
-      url.protocol !== `${protocol}:` ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    ) {
-      throw new BadGatewayException(
-        'OpenSandbox returned an invalid endpoint.',
-      );
-    }
-    const endpointPath = url.pathname.replace(/\/+$/, '');
-    url.pathname = `${endpointPath}/${path}`.replace(/\/{2,}/g, '/');
-    return url;
-  }
-
-  private previewRequestHeaders(
-    input: WorkspacePreviewRequest['headers'],
-    endpointHeaders?: Record<string, string>,
-  ): Headers {
-    const headers = new Headers(endpointHeaders ?? {});
-    const allowed = new Set([
-      'accept',
-      'accept-language',
-      'if-none-match',
-      'if-modified-since',
-      'range',
-    ]);
-    for (const [name, value] of Object.entries(input ?? {})) {
-      if (allowed.has(name.toLowerCase()) && typeof value === 'string') {
-        headers.set(name, value);
-      }
-    }
-    headers.delete('host');
-    headers.delete('connection');
-    headers.delete('content-length');
-    return headers;
-  }
-
-  private previewResponseHeaders(
-    headers: Headers,
-    bodyLength: number,
-  ): Record<string, string> {
-    const allowed = [
-      'content-type',
-      'cache-control',
-      'etag',
-      'last-modified',
-      'content-language',
-      'content-disposition',
-    ];
-    const result: Record<string, string> = {
-      'content-length': String(bodyLength),
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'no-referrer',
-      'content-security-policy':
-        'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads',
-    };
-    for (const name of allowed) {
-      const value = headers.get(name);
-      if (value) result[name] = value;
-    }
-    return result;
-  }
-
-  private async readResponseBody(
-    response: Response,
-    signal?: AbortSignal,
-  ): Promise<Buffer> {
-    if (!response.body) return Buffer.alloc(0);
-    const reader = response.body.getReader();
-    const cancelReader = () => {
-      void reader.cancel(signal?.reason).catch(() => undefined);
-    };
-    if (signal?.aborted) cancelReader();
-    else signal?.addEventListener('abort', cancelReader, { once: true });
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = Buffer.from(value);
-        totalBytes += chunk.length;
-        if (totalBytes > MAX_PROXY_RESPONSE_BYTES) {
-          await reader.cancel();
-          throw new BadGatewayException(
-            'Preview response exceeds the size limit.',
-          );
-        }
-        chunks.push(chunk);
-      }
-      if (signal?.aborted) {
-        throw new BadGatewayException('Preview request was cancelled.');
-      }
-    } finally {
-      signal?.removeEventListener('abort', cancelReader);
-    }
-    return Buffer.concat(chunks, totalBytes);
-  }
-
-  private serializeQuery(query: WorkspacePreviewRequest['query']): string {
-    if (!query) return '';
-    if (typeof query === 'string') {
-      if (query.length > 4096 || /[\r\n]/.test(query)) {
-        throw new BadRequestException('Preview query is invalid.');
-      }
-      return query.startsWith('?') ? query.slice(1) : query;
-    }
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(query)) {
-      if (key.length > 256 || /[\r\n]/.test(key)) {
-        throw new BadRequestException('Preview query is invalid.');
-      }
-      for (const item of Array.isArray(value) ? value : [value]) {
-        if (typeof item === 'string') {
-          if (item.length > 2048 || /[\r\n]/.test(item)) {
-            throw new BadRequestException('Preview query is invalid.');
-          }
-          params.append(key, item);
-        }
-      }
-    }
-    return params.toString();
-  }
-
-  private workspaceRelativePath(path: string): string | null {
-    const prefix = `${WORKSPACE_ROOT}/`;
-    if (!path.startsWith(prefix)) return null;
-    const relative = path.slice(prefix.length);
-    return this.normalizeArchivePath(relative);
-  }
-
-  private workspaceKey(
-    threadId: string,
-    userId: string,
-    tenantId?: string,
-  ): string {
-    const identity = JSON.stringify([tenantId ?? null, userId, threadId]);
-    return `workspace:project:v1:${this.hash(identity)}`;
-  }
-
-  private async withWorkspaceLock<T>(
-    workspaceKey: string,
-    operation: 'start' | 'dev-server',
-    callback: () => Promise<T>,
-  ): Promise<T> {
-    this.assertRedis();
-    const lockKey = `${workspaceKey}:lock:${operation}`;
-    const lockValue = randomBytes(16).toString('hex');
-    const deadline = Date.now() + WORKSPACE_LOCK_WAIT_MS;
-    let acquired = false;
-    try {
-      while (Date.now() < deadline) {
-        try {
-          acquired = await this.redis.setIfAbsentRequired(
-            lockKey,
-            lockValue,
-            WORKSPACE_LOCK_TTL_SECONDS,
-          );
-        } catch {
-          throw new ServiceUnavailableException(
-            'Workspace lock storage is unavailable.',
-          );
-        }
-        if (acquired) return await callback();
-        await this.wait(WORKSPACE_LOCK_RETRY_MS);
-      }
-      throw new ConflictException(
-        'A workspace operation is already in progress. Retry shortly.',
-      );
-    } finally {
-      if (acquired) await this.redis.releaseLock(lockKey, lockValue);
-    }
-  }
-
-  private previewKey(ticket: string): string {
-    return `workspace:preview:v1:${this.hash(ticket)}`;
-  }
-
-  private hash(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
-  }
-
-  private assertIdentity(threadId: string, userId: string): void {
-    if (
-      typeof threadId !== 'string' ||
-      !threadId.trim() ||
-      threadId.length > 128 ||
-      typeof userId !== 'string' ||
-      !userId.trim() ||
-      userId.length > 128
-    ) {
-      throw new BadRequestException('Workspace identity is invalid.');
-    }
-  }
-
-  private assertArtifactTenant(
-    artifact: { tenantId?: string | null },
-    tenantId?: string,
-  ): void {
-    if (artifact.tenantId !== (tenantId ?? null)) {
-      throw new ForbiddenException('Artifact does not belong to this tenant.');
-    }
-  }
-
-  private toStatus(record: WorkspaceRecord, ready = true): WorkspaceStatus {
-    return {
-      ready,
-      projectRoot: ready ? WORKSPACE_ROOT : null,
-      active: true,
-      artifactId: record.artifactId,
-      createdAt: record.createdAt,
-      ...(record.devServer
-        ? {
-            devServer: {
-              port: record.devServer.port,
-              commandId: record.devServer.commandId,
-              startedAt: record.devServer.startedAt,
-            },
-          }
-        : {}),
-    };
-  }
-
-  private async artifactFramework(
-    artifactId: string,
-    userId: string,
-    threadId: string,
-  ): Promise<string | null> {
-    const artifact = await this.artifacts.getStudioVersion(
-      artifactId,
-      userId,
-      threadId,
-    );
-    try {
-      const metadata = JSON.parse(artifact.metadata ?? '{}') as Record<
-        string,
-        unknown
-      >;
-      return typeof metadata.framework === 'string' ? metadata.framework : null;
-    } catch {
-      return null;
     }
   }
 }

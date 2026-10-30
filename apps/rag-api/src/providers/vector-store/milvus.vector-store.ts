@@ -13,11 +13,10 @@ import {
   ImageVectorRecord,
   RetrievalDescriptionVectorHit,
   RetrievalDescriptionVectorRecord,
-  VectorIndexInfo,
   VectorRecord,
   VectorSearchHit,
-  VectorStoreRuntimeStatus,
 } from './vector-store-provider.interface';
+import { MilvusVectorStoreDiagnosticsBase } from './milvus.vector-store.diagnostics';
 
 const MAX_VECTOR_CONTENT_BYTES = 8_192;
 
@@ -28,36 +27,34 @@ const MAX_VECTOR_CONTENT_BYTES = 8_192;
  */
 @Injectable()
 export class MilvusVectorStoreProvider
+  extends MilvusVectorStoreDiagnosticsBase
   implements IVectorStoreProvider, OnModuleInit
 {
-  private readonly logger = new Logger(MilvusVectorStoreProvider.name);
+  protected readonly logger = new Logger(MilvusVectorStoreProvider.name);
   private client!: MilvusClient;
-  private readonly collection: string;
-  private readonly dimension: number;
-  private readonly imageCollection: string;
-  private readonly imageDimension: number;
-  private readonly descriptionCollection: string;
+  protected readonly collection: string;
+  protected readonly dimension: number;
+  protected readonly imageCollection: string;
+  protected readonly imageDimension: number;
+  protected readonly descriptionCollection: string;
   private readonly host: string;
   private readonly port: number;
-  private readonly indexType: IndexType;
-  private readonly hnswM: number;
-  private readonly hnswEfConstruction: number;
-  private readonly hnswEfSearch: number;
-  private readonly searchTimeoutMs: number;
-  private readonly deleteTimeoutMs: number;
-  private readonly warmupTimeoutMs: number;
-  private readonly circuitOpenMs: number;
-  private readonly circuitFailureThreshold: number;
-  private circuitOpenUntil = 0;
-  private connected = false;
-  private consecutiveFailures = 0;
-  private lastFailureAt: Date | null = null;
-  private lastFailureMessage: string | null = null;
+  protected readonly indexType: IndexType;
+  protected readonly hnswM: number;
+  protected readonly hnswEfConstruction: number;
+  protected readonly hnswEfSearch: number;
+  protected readonly searchTimeoutMs: number;
+  protected readonly deleteTimeoutMs: number;
+  protected readonly warmupTimeoutMs: number;
+  protected readonly circuitOpenMs: number;
+  protected readonly circuitFailureThreshold: number;
+  protected connected = false;
 
   constructor(
     private readonly config: ConfigService,
-    @Optional() private readonly dingTalk?: DingTalkProvider,
+    @Optional() protected readonly dingTalk?: DingTalkProvider,
   ) {
+    super();
     this.host =
       this.config.get<string>('vectorStore.milvus.host') ?? 'localhost';
     this.port = this.config.get<number>('vectorStore.milvus.port') ?? 19530;
@@ -347,8 +344,7 @@ export class MilvusVectorStoreProvider
                 typeof hit['id'] === 'string' || typeof hit['id'] === 'number'
                   ? String(hit['id'])
                   : '',
-              content:
-                typeof hit['content'] === 'string' ? hit['content'] : '',
+              content: typeof hit['content'] === 'string' ? hit['content'] : '',
               docId:
                 typeof hit['doc_id'] === 'string' ||
                 typeof hit['doc_id'] === 'number'
@@ -454,26 +450,6 @@ export class MilvusVectorStoreProvider
       this.recordFailure(err);
       throw err;
     }
-  }
-
-  getIndexInfo(): VectorIndexInfo {
-    return {
-      provider: 'milvus',
-      collection: this.collection,
-      dimension: this.dimension,
-      indexType: this.indexType,
-      metricType: MetricType.COSINE,
-      params: {
-        M: this.hnswM,
-        efConstruction: this.hnswEfConstruction,
-        ef: this.hnswEfSearch,
-        searchTimeoutMs: this.searchTimeoutMs,
-        deleteTimeoutMs: this.deleteTimeoutMs,
-        warmupTimeoutMs: this.warmupTimeoutMs,
-        circuitOpenMs: this.circuitOpenMs,
-        circuitFailureThreshold: this.circuitFailureThreshold,
-      },
-    };
   }
 
   // ─── 图片集合（rag_images，以图搜图 / 文搜图）──────────────────
@@ -842,13 +818,7 @@ export class MilvusVectorStoreProvider
           limit: options.topK,
           metric_type: MetricType.COSINE,
           params: this.getSearchParams(),
-          output_fields: [
-            'id',
-            'doc_id',
-            'tenant_id',
-            'user_id',
-            'content',
-          ],
+          output_fields: ['id', 'doc_id', 'tenant_id', 'user_id', 'content'],
           filter: 'tenant_id == {tenantId}',
           exprValues: { tenantId: options.tenantId },
           timeout: this.searchTimeoutMs,
@@ -917,106 +887,6 @@ export class MilvusVectorStoreProvider
       this.recordFailure(error);
       throw error;
     }
-  }
-
-  getImageCollectionInfo(): {
-    collection: string;
-    dimension: number;
-    indexType: IndexType;
-  } {
-    return {
-      collection: this.imageCollection,
-      dimension: this.imageDimension,
-      indexType: this.indexType,
-    };
-  }
-
-  getRuntimeStatus(): VectorStoreRuntimeStatus {
-    const circuitState = this.getCircuitState();
-    const available = this.connected && circuitState !== 'open';
-    const status = !this.connected
-      ? 'unavailable'
-      : circuitState === 'open' || this.consecutiveFailures > 0
-        ? 'degraded'
-        : 'healthy';
-
-    return {
-      status,
-      available,
-      circuitState,
-      consecutiveFailures: this.consecutiveFailures,
-      lastFailureAt: this.lastFailureAt?.toISOString() ?? null,
-      lastFailureMessage: this.lastFailureMessage,
-      circuitOpenUntil:
-        this.circuitOpenUntil > Date.now()
-          ? new Date(this.circuitOpenUntil).toISOString()
-          : null,
-    };
-  }
-
-  private resolveIndexType(value: string): IndexType {
-    const normalized = value.trim().toUpperCase();
-    if (normalized === 'HNSW') {
-      return IndexType.HNSW;
-    }
-    this.logger.warn(
-      `Unsupported MILVUS_INDEX_TYPE="${value}", fallback to HNSW`,
-    );
-    return IndexType.HNSW;
-  }
-
-  private getCreateIndexParams(): Record<string, number> {
-    return {
-      M: this.hnswM,
-      efConstruction: this.hnswEfConstruction,
-    };
-  }
-
-  private getSearchParams(): Record<string, number> {
-    return { ef: this.hnswEfSearch };
-  }
-
-  private isCircuitOpen(): boolean {
-    return Date.now() < this.circuitOpenUntil;
-  }
-
-  private getCircuitState(): 'closed' | 'open' | 'half_open' {
-    if (this.circuitOpenUntil === 0) return 'closed';
-    return this.isCircuitOpen() ? 'open' : 'half_open';
-  }
-
-  private recordSuccess(): void {
-    this.consecutiveFailures = 0;
-    this.circuitOpenUntil = 0;
-  }
-
-  private recordFailure(err: unknown): void {
-    this.consecutiveFailures += 1;
-    this.lastFailureAt = new Date();
-    this.lastFailureMessage = this.formatErrorMessage(err);
-    if (this.consecutiveFailures >= this.circuitFailureThreshold) {
-      this.openCircuit();
-    }
-  }
-
-  private formatErrorMessage(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (typeof err === 'string') return err;
-    if (err === null || err === undefined) return 'unknown error';
-    try {
-      return JSON.stringify(err);
-    } catch {
-      return 'unserializable error';
-    }
-  }
-
-  private openCircuit(): void {
-    this.circuitOpenUntil = Date.now() + this.circuitOpenMs;
-    // 钉钉告警（fire-and-forget，节流窗口内同 key 只发一次）
-    void this.dingTalk?.notifyAlert(
-      'milvus.circuit',
-      `**Milvus 熔断打开**（连续失败 ${this.consecutiveFailures} 次，暂停 ${this.circuitOpenMs}ms）\n\n最近错误：${this.lastFailureMessage ?? 'unknown'}`,
-    );
   }
 
   private async withTimeout<T>(

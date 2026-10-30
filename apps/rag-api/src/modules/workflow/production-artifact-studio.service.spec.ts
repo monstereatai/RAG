@@ -67,7 +67,11 @@ describe('ProductionArtifactStudioService', () => {
       getStudioVersionFile: jest.fn(),
       updateStudioVersionMetadata: jest.fn(),
     };
-    const llm = { invoke: jest.fn() };
+    const llm = {
+      invoke: jest.fn(),
+      getActiveProviderName: jest.fn(),
+      getFallbackProviderName: jest.fn(),
+    };
     const config = { get: jest.fn().mockReturnValue('http://127.0.0.1:4321') };
     const service = new ProductionArtifactStudioService(
       workflows as never,

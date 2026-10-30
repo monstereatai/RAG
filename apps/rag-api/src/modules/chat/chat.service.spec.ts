@@ -597,6 +597,7 @@ describe('ChatService', () => {
         maxSteps: 18,
       }),
       recordRuntimeEvent: jest.fn().mockResolvedValue(undefined),
+      beginResume: jest.fn().mockResolvedValue(undefined),
       finish: jest.fn().mockResolvedValue(undefined),
       recordAction: jest.fn().mockResolvedValue(undefined),
     };

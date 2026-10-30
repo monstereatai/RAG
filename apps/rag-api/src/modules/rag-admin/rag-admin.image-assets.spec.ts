@@ -36,6 +36,7 @@ describe('RagAdminService image asset ACL', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     imageIndexService as never,
     undefined,
     undefined,
@@ -78,6 +79,7 @@ describe('RagAdminService image asset ACL', () => {
       'user-1',
       'tenant-a',
       ['editor'],
+      false,
     );
     expect(docMetaRepo.find).toHaveBeenCalled();
     expect(imageIndexService.searchText).toHaveBeenCalledWith('chart', {
@@ -100,6 +102,7 @@ describe('RagAdminService image asset ACL', () => {
       'shared-user',
       'tenant-a',
       ['editor'],
+      false,
     );
     expect(objectStorageProvider.getObject).toHaveBeenCalledWith(
       'documents/owner-1/doc-1/images/page-1.png',

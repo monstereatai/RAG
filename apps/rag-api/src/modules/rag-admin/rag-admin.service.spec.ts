@@ -48,7 +48,13 @@ describe('RagAdminService document versions', () => {
   });
 
   it('delegates document queue status to the existing BullMQ service', async () => {
-    const status = { enabled: true, waiting: 2, active: 1, completed: 8, failed: 3 };
+    const status = {
+      enabled: true,
+      waiting: 2,
+      active: 1,
+      completed: 8,
+      failed: 3,
+    };
     documentQueue.getStatus.mockResolvedValue(status);
 
     await expect(service.getDocumentQueueStatus()).resolves.toEqual(status);
@@ -100,7 +106,7 @@ describe('RagAdminService document versions', () => {
         businessMetadata: expect.objectContaining({
           lifecycleStatus: 'draft',
           supersedesDocId: 'old',
-        }),
+        }) as unknown,
       }),
     );
   });
@@ -188,6 +194,7 @@ describe('RagAdminService image-to-image search', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
     imageIndexService as never,
   );
 
@@ -230,6 +237,7 @@ describe('RagAdminService image-to-image search', () => {
       'user-1',
       'tenant-a',
       ['editor'],
+      false,
     );
     expect(imageIndexService.searchImage).toHaveBeenCalledWith(
       'query-image',
@@ -249,10 +257,15 @@ describe('RagAdminService document listing and archive', () => {
     findOne: jest.fn(),
     find: jest.fn(),
     manager: {
-      transaction: jest.fn(async (work) => work(transactionManager)),
+      transaction: jest.fn(
+        (work: (manager: typeof transactionManager) => unknown) =>
+          work(transactionManager),
+      ),
     },
   };
-  const documentReviewRepo = { create: jest.fn((value) => value) };
+  const documentReviewRepo = {
+    create: jest.fn((value: unknown) => value),
+  };
   const permissionRepo = { find: jest.fn() };
   const obsidianKnowledge = { findNoteByRagDocId: jest.fn() };
   const elasticsearchProvider = { isEnabled: jest.fn(() => false) };
@@ -289,8 +302,9 @@ describe('RagAdminService document listing and archive', () => {
     transactionManager.getRepository
       .mockReturnValueOnce(transactionDocMetaRepo)
       .mockReturnValueOnce(transactionReviewRepo);
-    docMetaRepo.manager.transaction.mockImplementation(async (work) =>
-      work(transactionManager),
+    docMetaRepo.manager.transaction.mockImplementation(
+      (work: (manager: typeof transactionManager) => unknown) =>
+        work(transactionManager),
     );
     documentReviewRepo.create.mockImplementation((value) => value);
     transactionDocMetaRepo.update.mockResolvedValue(undefined);

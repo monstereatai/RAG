@@ -1,5 +1,6 @@
-import type { ChatMode, ChatReference } from './chat.dto';
+import type { ChatMode, ChatReference, ChatResponse } from './chat.dto';
 import type { SseEvent } from '../../rag/agentic/sse-event';
+import type { LlmUsage } from '../../providers/llm/llm-provider.interface';
 
 export type { RequestContext } from '../../rag/contracts/request-context';
 export type {
@@ -43,3 +44,17 @@ export interface ChatResult {
 }
 
 export type ChatEventCallback = (event: SseEvent) => void;
+
+export type FinalizableChatResult = {
+  answer: string;
+  references: ChatResponse['references'];
+  confidence?: number;
+  retryCount?: number;
+  retrievalSufficient?: boolean;
+  retrievalReason?: string;
+  evidenceCoverage?: ChatResponse['evidenceCoverage'];
+  executionState?: ChatResponse['executionState'];
+  interrupted?: boolean;
+};
+
+export type AggregatedLlmUsage = LlmUsage & { calls: number };

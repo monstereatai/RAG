@@ -26,10 +26,10 @@ import {
   LangfuseProvider,
   type RagTraceEvent,
 } from '../../providers/observability/langfuse.provider';
-import type { SseEvent } from '../../rag/agentic/sse-event';
+import type { AggregatedLlmUsage } from './chat-runtime.types';
+import { ChatServiceFinalizationSupport } from './chat-finalization-support';
 import { resolveRoleContext } from './role-presets';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
-import { type RetrievalProfile } from '../../rag/retrieval/context-builder';
 import { AgentRunsService } from '../agent-runs/agent-runs.service';
 import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
@@ -44,17 +44,11 @@ import {
   formatUntrustedHistoryContext,
 } from '../../rag/prompts/context-policy';
 import {
-  adaptStoredQueryPlan,
   isObjectiveKnowledgePlan,
   QUERY_PLAN_VERSION,
-  type QueryPlan,
 } from '../../rag/planning/query-plan';
 import { QueryPlannerService } from '../../rag/planning/query-planner.service';
-import {
-  RetrievalPolicyService,
-  type RetrievalExecutionPlan,
-} from '../../rag/planning/retrieval-policy.service';
-import { sanitizeRetrievalProfileConfig } from '../../rag/planning/retrieval-profile-config';
+import { RetrievalPolicyService } from '../../rag/planning/retrieval-policy.service';
 import type {
   ChatEventCallback,
   RequestContext,
@@ -63,18 +57,6 @@ import type {
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import { ChatRunObservabilityService } from './chat-run-observability.service';
 import { ChatQueryLogService } from './chat-query-log.service';
-
-type FinalizableChatResult = {
-  answer: string;
-  references: ChatResponse['references'];
-  confidence?: number;
-  retryCount?: number;
-  retrievalSufficient?: boolean;
-  retrievalReason?: string;
-  evidenceCoverage?: ChatResponse['evidenceCoverage'];
-  executionState?: ChatResponse['executionState'];
-  interrupted?: boolean;
-};
 
 type ChatExecutionOptions = {
   model?: string;
@@ -88,8 +70,6 @@ type ChatExecutionOptions = {
   supplementalEvidence?: RetrievedChunk[];
   loadSupplementalEvidence?: SupplementalEvidenceLoader;
 };
-
-type AggregatedLlmUsage = LlmUsage & { calls: number };
 
 function formatAgentSkillContext(skill: {
   name: string;
@@ -105,43 +85,45 @@ function formatAgentSkillContext(skill: {
 }
 
 @Injectable()
-export class ChatService {
+export class ChatService extends ChatServiceFinalizationSupport {
   /**
    * 问答主编排入口：只负责准备上下文、选择执行模式和记录审计；
    * 检索细节下沉到 RagService，复杂推理下沉到 AgenticRagService。
    */
-  private readonly logger = new Logger(ChatService.name);
+  protected readonly logger = new Logger(ChatService.name);
 
   constructor(
     @Inject(RAG_QUERY_CAPABILITY)
-    private readonly ragService: RagQueryCapability,
-    private readonly agenticRagService: AgenticRagService,
-    private readonly conversationService: ConversationService,
-    private readonly conversationEmbeddingService: ConversationEmbeddingService,
-    private readonly memoryService: MemoryService,
-    private readonly shortTermMemory: ShortTermMemoryService,
-    private readonly langfuseProvider: LangfuseProvider,
-    private readonly chatQueryLogService: ChatQueryLogService,
-    private readonly queryPlanner: QueryPlannerService,
-    private readonly retrievalPolicy: RetrievalPolicyService,
+    protected readonly ragService: RagQueryCapability,
+    protected readonly agenticRagService: AgenticRagService,
+    protected readonly conversationService: ConversationService,
+    protected readonly conversationEmbeddingService: ConversationEmbeddingService,
+    protected readonly memoryService: MemoryService,
+    protected readonly shortTermMemory: ShortTermMemoryService,
+    protected readonly langfuseProvider: LangfuseProvider,
+    protected readonly chatQueryLogService: ChatQueryLogService,
+    protected readonly queryPlanner: QueryPlannerService,
+    protected readonly retrievalPolicy: RetrievalPolicyService,
     @Optional()
     @InjectRepository(KnowledgeBaseProfileEntity)
-    private readonly knowledgeBaseProfileRepo?: Repository<KnowledgeBaseProfileEntity>,
-    @Optional() private readonly agentRuns?: AgentRunsService,
-    @Optional() private readonly agentGoals?: AgentGoalService,
-    @Optional() private readonly config?: ConfigService,
-    @Optional() private readonly plugins?: PluginRuntimeService,
-    @Optional() private readonly runtime?: AgentRuntimeService,
-    @Optional() private readonly metrics?: MetricsService,
-    @Optional() private readonly securityAudit?: SecurityAuditService,
-    @Optional() private readonly dingTalk?: DingTalkProvider,
-    @Optional() private readonly llmProvider?: LlmProvider,
+    protected readonly knowledgeBaseProfileRepo?: Repository<KnowledgeBaseProfileEntity>,
+    @Optional() protected readonly agentRuns?: AgentRunsService,
+    @Optional() protected readonly agentGoals?: AgentGoalService,
+    @Optional() protected readonly config?: ConfigService,
+    @Optional() protected readonly plugins?: PluginRuntimeService,
+    @Optional() protected readonly runtime?: AgentRuntimeService,
+    @Optional() protected readonly metrics?: MetricsService,
+    @Optional() protected readonly securityAudit?: SecurityAuditService,
+    @Optional() protected readonly dingTalk?: DingTalkProvider,
+    @Optional() protected readonly llmProvider?: LlmProvider,
     @Optional()
-    private readonly chatRunObservability?: ChatRunObservabilityService,
-  ) {}
+    protected readonly chatRunObservability?: ChatRunObservabilityService,
+  ) {
+    super();
+  }
 
   /** 兼容现有手动构造；Nest 正常运行时注入专用观测服务。 */
-  private get runObservability(): ChatRunObservabilityService {
+  protected get runObservability(): ChatRunObservabilityService {
     return (
       this.chatRunObservability ??
       new ChatRunObservabilityService(
@@ -214,7 +196,9 @@ export class ChatService {
     // 所有请求进入同一条问答链路，由 QueryPlan / RetrievalPolicy 做意图路由。
     const requestedMode: ChatMode = req.mode ?? 'auto';
     if (requestedMode !== 'auto' && !executionOptions?.forceAgentic) {
-      this.logger.debug(`legacy mode ${requestedMode} normalized to intent-routed auto`);
+      this.logger.debug(
+        `legacy mode ${requestedMode} normalized to intent-routed auto`,
+      );
     }
     const mode: ChatMode = executionOptions?.forceAgentic ? 'agentic' : 'auto';
     if (req.threadId) {
@@ -436,16 +420,14 @@ export class ChatService {
           ]
         : []),
     ];
-    const systemContextBudget = this.shortTermMemory.budgetSystemContext(
-      contextCandidates,
-    );
-    const {
-      messages: budgetedSystemMessages,
-      ...systemContextSummary
-    } = systemContextBudget;
-    const memoryMessages = budgetedSystemMessages.map(
-      ({ role, content }) => ({ role, content }),
-    );
+    const systemContextBudget =
+      this.shortTermMemory.budgetSystemContext(contextCandidates);
+    const { messages: budgetedSystemMessages, ...systemContextSummary } =
+      systemContextBudget;
+    const memoryMessages = budgetedSystemMessages.map(({ role, content }) => ({
+      role,
+      content,
+    }));
     const injectedSkillNames = matchedSkills
       .filter((skill) =>
         budgetedSystemMessages.some(
@@ -454,8 +436,14 @@ export class ChatService {
       )
       .map((skill) => skill.name);
     if (systemContextBudget.overflowTokens > 0) {
-      requestHistoryTokenBudget = Math.max(0, requestHistoryTokenBudget - systemContextBudget.overflowTokens);
-      history = this.shortTermMemory.limitHistoryToTokenBudget(history, requestHistoryTokenBudget);
+      requestHistoryTokenBudget = Math.max(
+        0,
+        requestHistoryTokenBudget - systemContextBudget.overflowTokens,
+      );
+      history = this.shortTermMemory.limitHistoryToTokenBudget(
+        history,
+        requestHistoryTokenBudget,
+      );
       this.logger.warn(
         `Required system context exceeds its reserve by ${systemContextBudget.overflowTokens} estimated tokens`,
       );
@@ -646,7 +634,10 @@ export class ChatService {
         }),
       });
     }
-    if (memoryResult.userMemories.length || memoryResult.sessionMemories.length) {
+    if (
+      memoryResult.userMemories.length ||
+      memoryResult.sessionMemories.length
+    ) {
       this.logger.debug(
         `Memory candidates loaded: user=${memoryResult.userMemories.length}, session=${memoryResult.sessionMemories.length}`,
       );
@@ -709,10 +700,8 @@ export class ChatService {
         );
       result = await runWithUsage(
         () =>
-          this.llmProvider?.runWithSignal(
-            requestSignal,
-            executeAgentic,
-          ) ?? executeAgentic(),
+          this.llmProvider?.runWithSignal(requestSignal, executeAgentic) ??
+          executeAgentic(),
       );
     } catch (error) {
       const errorResponse =
@@ -753,744 +742,5 @@ export class ChatService {
       actualUsage,
       tenantId: executionOptions?.tenantId,
     });
-  }
-
-  private async finalizeChatResult(input: {
-    result: FinalizableChatResult;
-    mode: ChatMode;
-    route: 'simple' | 'agentic';
-    req: ChatDto;
-    userId: string;
-    threadId: string;
-    startTime: number;
-    queryPlan: QueryPlan;
-    executionPlan: RetrievalExecutionPlan;
-    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
-    onEvent?: ChatEventCallback;
-    model?: string;
-    traceEvents?: RagTraceEvent[];
-    executionState?: ChatResponse['executionState'];
-    includeUserMessage?: boolean;
-    actualUsage?: AggregatedLlmUsage;
-    tenantId?: string;
-  }): Promise<ChatResponse> {
-    // Simple 和 Agentic 在此汇合：同一最终答案与引用用于会话、Query Log、运行审计和完成事件。
-    const result = input.result;
-    if (result.interrupted) {
-      return this.finalizeInterruptedChat(input);
-    }
-    const refused =
-      result.answer === this.ragService.unsupportedReliableAnswer();
-
-    await this.persistConversationResult({
-      threadId: input.threadId,
-      userId: input.userId,
-      query: input.req.query,
-      answer: result.answer,
-      tenantId: input.tenantId,
-      historyTokenBudget: this.shortTermMemory.getAvailableHistoryTokenBudget(
-        input.req.query,
-        input.executionPlan.profile.contextCharacterBudget,
-        input.model,
-      ),
-      includeUserMessage: input.includeUserMessage,
-      skipLongTermMemory:
-        input.queryPlan.contextMode !== 'independent' &&
-        input.queryPlan.contextMode !== 'verification',
-      skipMem0Memory: input.req.useLongTermMemory === false,
-      metadata: {
-        planVersion: QUERY_PLAN_VERSION,
-        queryPlan: input.queryPlan,
-        executionPlanSummary: this.executionPlanSummary(input.executionPlan),
-        contextMode: input.queryPlan.contextMode,
-        entities: input.queryPlan.entities,
-        source: 'session_context',
-      },
-      answerMetadata: {
-        route: input.route,
-        confidence: result.confidence,
-        retryCount: result.retryCount,
-        retrievalSufficient: result.retrievalSufficient,
-        retrievalReason: result.retrievalReason,
-        references: result.references,
-        contextMode: input.queryPlan.contextMode,
-      },
-    });
-
-    const queryLogId = await this.chatQueryLogService.logQuery({
-      userId: input.userId,
-      query: input.req.query,
-      mode: input.mode,
-      threadId: input.threadId,
-      startTime: input.startTime,
-      refused,
-      citationCount: result.references.length,
-      hasAnswer: result.answer.length > 0,
-      answer: result.answer,
-      references: result.references,
-    });
-
-    if (input.run) {
-      await this.agentRuns?.recordRuntimeEvent?.(input.run.id, {
-        eventType: 'route.selected',
-        target: input.route,
-        payload: { requestedMode: input.mode, route: input.route },
-      });
-      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
-        eventType: 'retrieval.completed',
-        target: input.route === 'simple' ? 'linear_rag' : 'agentic_rag',
-        payload: {
-          references: result.references.length,
-          sufficient: result.retrievalSufficient,
-          reason: result.retrievalReason,
-          retryCount: result.retryCount,
-        },
-      });
-    }
-
-    for (const event of input.traceEvents ?? []) {
-      if (
-        input.run &&
-        (event.type === 'tool_call' ||
-          event.type === 'node_start' ||
-          event.type === 'node_end')
-      ) {
-        const data = event.data as Record<string, unknown> | undefined;
-        const actionName =
-          typeof data?.name === 'string' ? data.name : event.type;
-        const riskLevel = /write|delete|send|publish|deploy/i.test(actionName)
-          ? 'high'
-          : 'low';
-        await this.agentRuns?.recordAction(input.run.id, {
-          name: actionName,
-          actionType: event.type,
-          status: data?.error ? 'failed' : 'success',
-          riskLevel,
-          requiresApproval: riskLevel === 'high',
-          input: data,
-          output: data,
-        });
-      }
-    }
-    if (input.run && input.traceEvents?.length) {
-      await this.runObservability.recordTraceTimeline(
-        input.run.id,
-        input.traceEvents,
-        input.route,
-      );
-    }
-
-    const estimatedUsage = this.runObservability.estimateRunUsage(
-      input.req.query,
-      result.answer,
-      input.route,
-      input.traceEvents,
-    );
-    const usage =
-      input.actualUsage &&
-      (input.actualUsage.inputTokens > 0 || input.actualUsage.outputTokens > 0)
-        ? {
-            ...estimatedUsage,
-            modelCallsEstimated: input.actualUsage.calls,
-            inputTokens: input.actualUsage.inputTokens,
-            outputTokens: input.actualUsage.outputTokens,
-            costUsd: this.runObservability.estimateCostUsd(
-              input.actualUsage.inputTokens,
-              input.actualUsage.outputTokens,
-            ),
-            source: 'provider_reported_tokens' as const,
-          }
-        : estimatedUsage;
-    if (input.run) {
-      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
-        eventType: 'cost.estimated',
-        target: input.route,
-        payload: usage,
-      });
-      await this.agentRuns?.finish(input.run.id, {
-        queryLogId,
-        route: input.route,
-        status: 'completed',
-        retryCount: result.retryCount,
-        costUsd: usage.costUsd,
-        requiresApproval:
-          usage.costUsd >
-          (this.config?.get<number>('agentRun.budgetUsd') ?? 0.2),
-        resultSummary: result.answer.slice(0, 2000),
-      });
-      await this.agentGoals?.update({
-        threadId: input.threadId,
-        runId: input.run.id,
-        tenantId: input.run.tenantId?.trim() || 'legacy',
-        actor: input.mode,
-        objective: input.req.query,
-        maxRounds: input.run.maxSteps,
-        status: refused ? 'blocked' : 'completed',
-        reason: refused ? result.retrievalReason : undefined,
-      });
-    }
-
-    this.runObservability.traceAnswer({
-      userId: input.userId,
-      query: input.req.query,
-      mode: input.mode,
-      route: input.route,
-      threadId: input.threadId,
-      startTime: input.startTime,
-      answer: result.answer,
-      references: result.references,
-      refused,
-      model: input.model,
-      events: input.traceEvents,
-      usage,
-    });
-
-    const response: ChatResponse = {
-      answer: result.answer,
-      references: result.references,
-      mode: input.mode,
-      route: input.route,
-      confidence: result.confidence,
-      retryCount: result.retryCount,
-      retrievalSufficient: result.retrievalSufficient,
-      retrievalReason: result.retrievalReason,
-      evidenceCoverage: result.evidenceCoverage,
-      executionState:
-        input.executionState ??
-        (result.executionState
-          ? { phase: 'completed', ...result.executionState }
-          : undefined),
-      threadId: input.threadId,
-      queryLogId,
-      runId: input.run?.id,
-    };
-    input.onEvent?.({ type: 'final', data: response });
-    return response;
-  }
-
-  /**
-   * 审批暂停不是最终回答：仅保存用户请求与检查点关联，不写草稿答案、Query Log
-   * 或长期记忆。恢复后由 resume() 走同一套终态审计收口。
-   */
-  private async finalizeInterruptedChat(input: {
-    result: FinalizableChatResult;
-    mode: ChatMode;
-    route: 'simple' | 'agentic';
-    req: ChatDto;
-    userId: string;
-    threadId: string;
-    startTime: number;
-    queryPlan: QueryPlan;
-    executionPlan: RetrievalExecutionPlan;
-    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined;
-    onEvent?: ChatEventCallback;
-    model?: string;
-    traceEvents?: RagTraceEvent[];
-    executionState?: ChatResponse['executionState'];
-    tenantId?: string;
-  }): Promise<ChatResponse> {
-    const executionState = {
-      phase: 'approval' as const,
-      consumedSteps: input.result.executionState?.consumedSteps ?? 0,
-      consumedToolCalls: input.result.executionState?.consumedToolCalls ?? 0,
-      remainingSteps: input.result.executionState?.remainingSteps,
-      remainingToolCalls: input.result.executionState?.remainingToolCalls,
-      checkpointId: input.result.executionState?.checkpointId,
-      paused: true,
-      lastNode: input.result.executionState?.lastNode ?? 'humanApprovalNode',
-    };
-    const userMessageId = await this.addConversationMessage(
-      input.threadId,
-      'human',
-      input.req.query,
-      input.userId,
-      {
-        pendingApproval: true,
-        runId: input.run?.id,
-        mode: input.mode,
-        planVersion: QUERY_PLAN_VERSION,
-        queryPlan: input.queryPlan,
-        executionPlanSummary: this.executionPlanSummary(input.executionPlan),
-        skipLongTermMemory:
-          input.queryPlan.contextMode !== 'independent' &&
-          input.queryPlan.contextMode !== 'verification',
-        useLongTermMemory: input.req.useLongTermMemory !== false,
-        model: input.model,
-        checkpointId: executionState.checkpointId,
-      },
-      input.tenantId,
-    );
-    void this.shortTermMemory
-      .addTurn(input.threadId, 'user', input.req.query, userMessageId)
-      .catch((error: unknown) => {
-        this.logger.warn(
-          `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-
-    if (input.run) {
-      await this.agentRuns?.recordRuntimeEvent(input.run.id, {
-        eventType: 'approval.requested',
-        target: 'humanApprovalNode',
-        payload: {
-          checkpointId: executionState.checkpointId,
-          remainingSteps: executionState.remainingSteps,
-          remainingToolCalls: executionState.remainingToolCalls,
-        },
-      });
-      if (input.traceEvents?.length) {
-        await this.runObservability.recordTraceTimeline(
-          input.run.id,
-          input.traceEvents,
-          input.route,
-        );
-      }
-      await this.agentRuns?.finish(input.run.id, {
-        route: input.route,
-        status: 'waiting_approval',
-        retryCount: input.result.retryCount,
-        requiresApproval: true,
-        resultSummary: '已生成草稿，等待人工审批。',
-      });
-      await this.agentGoals?.update({
-        threadId: input.threadId,
-        runId: input.run.id,
-        tenantId: input.run.tenantId?.trim() || 'legacy',
-        actor: input.mode,
-        objective: input.req.query,
-        maxRounds: input.run.maxSteps,
-        status: 'paused',
-        reason: '等待人工审批',
-      });
-    }
-
-    return {
-      answer: input.result.answer,
-      references: input.result.references,
-      mode: input.mode,
-      route: input.route,
-      confidence: input.result.confidence,
-      retryCount: input.result.retryCount,
-      retrievalSufficient: input.result.retrievalSufficient,
-      retrievalReason: input.result.retrievalReason,
-      evidenceCoverage: input.result.evidenceCoverage,
-      executionState,
-      threadId: input.threadId,
-      runId: input.run?.id,
-    };
-  }
-
-  /** 审批恢复统一回到 Chat 编排层，禁止 Controller 直接绕过审计与权限边界。 */
-  async resume(
-    threadId: string,
-    approval: 'approved' | 'rejected',
-    feedback: string | undefined,
-    userId: string,
-    tenantId?: string,
-    onEvent?: ChatEventCallback,
-  ): Promise<ChatResponse> {
-    const conversation = await this.getConversation(threadId, userId, tenantId);
-    if (!conversation) {
-      throw new BadRequestException('未找到可恢复的会话或无权访问');
-    }
-    const pending = [...conversation.messages].reverse().find((message) => {
-      const metadata = this.asRecord(message.metadata);
-      return message.role === 'human' && metadata?.pendingApproval === true;
-    });
-    const metadata = this.asRecord(pending?.metadata);
-    if (!pending || !metadata) {
-      throw new BadRequestException('当前会话没有等待审批的请求');
-    }
-    const runId =
-      typeof metadata.runId === 'string' ? metadata.runId : undefined;
-    const run = runId
-      ? await this.agentRuns?.get(runId, tenantId)
-      : await this.agentRuns?.findLatestByThread(threadId, tenantId);
-    if (!this.agentRuns || !runId || !run) {
-      throw new BadRequestException('审批请求缺少运行记录，无法安全恢复');
-    }
-    if (run.userId !== userId) {
-      throw new BadRequestException('无权恢复其他用户的运行');
-    }
-    if (run.status !== 'waiting_approval') {
-      throw new BadRequestException('当前运行不在等待审批状态');
-    }
-
-    const queryPlan = adaptStoredQueryPlan(
-      metadata.queryPlan ?? metadata.queryIntent,
-      pending.content,
-      metadata.planVersion,
-    );
-    const executionPlan = this.retrievalPolicy.build(
-      pending.content,
-      queryPlan,
-    );
-    const mode = this.asChatMode(metadata.mode) ?? 'agentic';
-    const traceEvents: RagTraceEvent[] = [];
-    const resumeEvent = (event: SseEvent) => {
-      traceEvents.push(this.runObservability.toTraceEvent(event));
-      if (event.type !== 'final') onEvent?.(event);
-    };
-    // CAS 状态转换防止同一审批被并发提交两次；之后发生的执行错误会收口为失败。
-    await this.agentRuns.beginResume(run.id);
-    let result;
-    try {
-      result = await this.agenticRagService.resumeGraph(
-        threadId,
-        approval,
-        feedback,
-        resumeEvent,
-        tenantId,
-        run.id,
-      );
-    } catch (error) {
-      const errorResponse =
-        error instanceof BadRequestException ? error.getResponse() : undefined;
-      const explicitlyCancelled =
-        typeof errorResponse === 'object' &&
-        errorResponse !== null &&
-        'code' in errorResponse &&
-        errorResponse.code === 'AGENT_RUN_CANCELLED';
-      await this.finishFailedRun(
-        run,
-        pending.content,
-        mode,
-        error,
-        explicitlyCancelled ? 'cancelled' : 'failed',
-      );
-      throw error;
-    }
-    const startTime = Date.now();
-
-    if (approval === 'rejected') {
-      const rejectionAnswer = feedback?.trim()
-        ? `本次草稿未获批准：${feedback.trim()}`
-        : '本次草稿未获批准，未写入正式答案。';
-      const rejectionMessageId = await this.addConversationMessage(
-        threadId,
-        'ai',
-        rejectionAnswer,
-        userId,
-        {
-          approval: 'rejected',
-          runId: run?.id,
-          planVersion: QUERY_PLAN_VERSION,
-          queryPlan,
-          executionPlanSummary: this.executionPlanSummary(executionPlan),
-        },
-        tenantId,
-      );
-      void this.shortTermMemory
-        .addTurn(threadId, 'assistant', rejectionAnswer, rejectionMessageId)
-        .catch((error: unknown) => {
-          this.logger.warn(
-            `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        });
-      const queryLogId = await this.chatQueryLogService.logQuery({
-        userId,
-        query: pending.content,
-        mode,
-        threadId,
-        startTime,
-        refused: true,
-        citationCount: 0,
-        hasAnswer: false,
-        answer: rejectionAnswer,
-        references: [],
-      });
-      if (run) {
-        await this.runObservability.recordTraceTimeline(
-          run.id,
-          traceEvents,
-          'agentic',
-        );
-        await this.agentRuns?.finish(run.id, {
-          route: 'agentic',
-          status: 'completed',
-          queryLogId,
-          requiresApproval: true,
-          resultSummary: rejectionAnswer,
-        });
-        await this.agentGoals?.update({
-          threadId,
-          runId: run.id,
-          tenantId: run.tenantId?.trim() || 'legacy',
-          actor: mode,
-          objective: pending.content,
-          maxRounds: run.maxSteps,
-          status: 'blocked',
-          reason: feedback?.trim() || '人工审批拒绝',
-        });
-      }
-      const response: ChatResponse = {
-        answer: rejectionAnswer,
-        references: [],
-        mode,
-        route: 'agentic',
-        confidence: 0,
-        retryCount: result.retryCount,
-        retrievalSufficient: false,
-        retrievalReason: '人工审批拒绝',
-        executionState: {
-          phase: 'completed',
-          consumedSteps: result.executionState.consumedSteps,
-          consumedToolCalls: result.executionState.consumedToolCalls,
-          remainingSteps: result.executionState.remainingSteps,
-          remainingToolCalls: result.executionState.remainingToolCalls,
-          checkpointId: result.executionState.checkpointId,
-          paused: false,
-          lastNode: result.executionState.lastNode,
-        },
-        threadId,
-        queryLogId,
-        runId: run?.id,
-      };
-      onEvent?.({ type: 'final', data: response });
-      return response;
-    }
-
-    return this.finalizeChatResult({
-      result: this.ensureNonEmptyAnswer({
-        answer: result.answer,
-        references: result.references,
-        confidence: result.confidence,
-        retryCount: result.retryCount,
-        executionState: result.executionState,
-      }),
-      mode,
-      route: 'agentic',
-      req: {
-        query: pending.content,
-        mode,
-        useLongTermMemory: metadata.useLongTermMemory !== false,
-      },
-      userId,
-      threadId,
-      startTime,
-      queryPlan,
-      executionPlan,
-      run,
-      onEvent,
-      model: typeof metadata.model === 'string' ? metadata.model : undefined,
-      traceEvents,
-      executionState: {
-        phase: 'completed',
-        ...result.executionState,
-        paused: false,
-      },
-      includeUserMessage: false,
-      tenantId,
-    });
-  }
-
-  private createConversation(
-    query: string,
-    mode: ChatMode,
-    userId: string,
-    tenantId?: string,
-  ): Promise<string> {
-    return tenantId?.trim()
-      ? this.conversationService.create(query, mode, userId, tenantId.trim())
-      : this.conversationService.create(query, mode, userId);
-  }
-
-  private getConversationHistory(
-    threadId: string,
-    maxTurns: number,
-    userId: string,
-    tenantId?: string,
-  ) {
-    return tenantId?.trim()
-      ? this.conversationService.getRecentHistory(
-          threadId,
-          maxTurns,
-          userId,
-          tenantId.trim(),
-        )
-      : this.conversationService.getRecentHistory(threadId, maxTurns, userId);
-  }
-
-  private getConversation(threadId: string, userId: string, tenantId?: string) {
-    return tenantId?.trim()
-      ? this.conversationService.get(threadId, userId, tenantId.trim())
-      : this.conversationService.get(threadId, userId);
-  }
-
-  private addConversationMessage(
-    threadId: string,
-    role: 'human' | 'ai',
-    content: string,
-    userId: string,
-    metadata?: Record<string, unknown>,
-    tenantId?: string,
-  ) {
-    return tenantId?.trim()
-      ? this.conversationService.addMessage(
-          threadId,
-          role,
-          content,
-          userId,
-          metadata,
-          tenantId.trim(),
-        )
-      : this.conversationService.addMessage(
-          threadId,
-          role,
-          content,
-          userId,
-          metadata,
-        );
-  }
-
-  /** 两个执行引擎共用同一份会话、记忆与历史向量收口，避免分支漏写。 */
-  private async persistConversationResult(input: {
-    threadId: string;
-    userId: string;
-    query: string;
-    answer: string;
-    tenantId?: string;
-    historyTokenBudget?: number;
-    includeUserMessage?: boolean;
-    skipLongTermMemory?: boolean;
-    skipMem0Memory?: boolean;
-    metadata?: Record<string, unknown>;
-    answerMetadata?: Record<string, unknown>;
-  }): Promise<void> {
-    const persistedMessageIds = await this.conversationService.addCompletedTurn({
-      threadId: input.threadId,
-      query: input.query,
-      answer: input.answer,
-      userId: input.userId,
-      tenantId: input.tenantId,
-      queryMetadata: input.metadata,
-      answerMetadata: input.answerMetadata,
-      includeUserMessage: input.includeUserMessage,
-      indexConversation: !input.skipLongTermMemory,
-      persistMem0Memory:
-        !input.skipLongTermMemory &&
-        !input.skipMem0Memory &&
-        this.memoryService.isEnabled(),
-    });
-    void this.shortTermMemory
-      .addTurns(
-        input.threadId,
-        [
-          ...(input.includeUserMessage !== false
-            ? [{
-                role: 'user' as const,
-                content: input.query,
-                messageId: persistedMessageIds.userMessageId,
-              }]
-            : []),
-          {
-            role: 'assistant' as const,
-            content: input.answer,
-            messageId: persistedMessageIds.assistantMessageId,
-          },
-        ],
-        input.historyTokenBudget,
-      )
-      .catch((error: unknown) => {
-        this.logger.warn(
-          `Short-term memory update failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-  }
-
-  /**
-   * 空回答不是成功结果：禁止写入会话、记忆、日志和 SSE 结束事件，避免前端只剩运行轨迹。
-   */
-  private ensureNonEmptyAnswer<
-    T extends {
-      answer: string;
-      retrievalSufficient?: boolean;
-      retrievalReason?: string;
-    },
-  >(result: T): T {
-    const answer = result.answer?.trim();
-    if (answer) return { ...result, answer };
-
-    this.logger.error('Answer pipeline completed without usable model content');
-    return {
-      ...result,
-      answer: '模型未返回有效内容，请切换模型后重试。',
-      retrievalSufficient: false,
-      retrievalReason: '模型未返回有效内容',
-    };
-  }
-
-  private async resolveRetrievalProfileOverrides(
-    key?: string,
-  ): Promise<Partial<RetrievalProfile> | undefined> {
-    if (!key?.trim()) return undefined;
-    const config = await this.knowledgeBaseProfileRepo?.findOne({
-      where: { key: key.trim(), workspaceId: 'default', status: 'enabled' },
-    });
-    if (!config?.retrievalConfig) return undefined;
-    try {
-      return sanitizeRetrievalProfileConfig(
-        JSON.parse(config.retrievalConfig),
-      );
-    } catch {
-      this.logger.warn(`Invalid retrievalConfig for knowledge base ${key}`);
-      return undefined;
-    }
-  }
-
-  private executionPlanSummary(plan: RetrievalExecutionPlan) {
-    return {
-      planVersion: plan.planVersion,
-      sourcePolicy: plan.sourcePolicy,
-      queries: plan.queries,
-      useGraph: plan.useGraph,
-      scopeRestricted: plan.scopeRestricted,
-      reasonCode: plan.reasonCode,
-      retrievalIntent: plan.profile.intent,
-    };
-  }
-
-  private async finishFailedRun(
-    run: Awaited<ReturnType<AgentRunsService['start']>> | undefined,
-    objective: string,
-    mode: ChatMode,
-    error: unknown,
-    status: 'failed' | 'cancelled' = 'failed',
-  ): Promise<void> {
-    if (!run) return;
-    const reason = error instanceof Error ? error.message : String(error);
-    await this.agentRuns?.finish(run.id, {
-      status,
-      errorMessage: reason.slice(0, 2_000),
-      ...(status === 'cancelled'
-        ? { cancelledAt: new Date(), cancelReason: reason.slice(0, 500) }
-        : {}),
-      resultSummary:
-        status === 'cancelled'
-          ? '运行已取消，未生成可用回答。'
-          : '运行失败，未生成可用回答。',
-    });
-    await this.agentGoals?.update({
-      threadId: run.threadId,
-      runId: run.id,
-      tenantId: run.tenantId?.trim() || 'legacy',
-      actor: mode,
-      objective,
-      maxRounds: run.maxSteps,
-      status: 'blocked',
-      reason,
-    });
-  }
-
-  private asRecord(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : undefined;
-  }
-
-  private asChatMode(value: unknown): ChatMode | undefined {
-    return value === 'simple' || value === 'auto' || value === 'agentic'
-      ? value
-      : undefined;
   }
 }

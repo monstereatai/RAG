@@ -82,6 +82,8 @@ RAG/
 ## 命名约定
 
 - **文件**：业务模块用 kebab-case（`document.service.ts`）；类名用 PascalCase（`DocumentService`）
+- **文件规模**：手写业务代码、测试和脚本单文件不超过 1000 行；超限时按职责在现有 feature/page/package 边界内拆分并保留原入口契约。生成代码、锁文件、纯静态数据和迁移文件单独评估，不为凑行数机械拆分。
+- **RAG 脚本目录**：`apps/rag-api/scripts/` 根目录只放可执行入口；通用脚本工具放 `scripts/lib/`，仅供私有 fixture 准备流程使用的实现放 `scripts/private-fixtures/`。入口文件保留 CLI 参数解析和步骤编排。
 - **接口**：可插拔 Provider 接口以 `Provider` 结尾（`LLMProvider`、`VectorStoreProvider`）
 - **环境变量**：全大写下划线（`VECTOR_STORE_PROVIDER`），分组用前缀（`MILVUS_*`、`REDIS_*`、`TENCENT_*`）
 - **数据库表**：snake_case（`documents`、`conversation_chunks`）

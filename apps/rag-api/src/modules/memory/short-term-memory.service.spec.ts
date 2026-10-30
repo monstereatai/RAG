@@ -143,12 +143,27 @@ describe('ShortTermMemoryService structured compression', () => {
       releaseLock: jest.fn().mockResolvedValue(undefined),
       renewLock: jest.fn().mockResolvedValue(true),
     };
-    const llm = { invoke: jest.fn().mockRejectedValue(new Error('model down')) };
+    const llm = {
+      invoke: jest.fn().mockRejectedValue(new Error('model down')),
+      getActiveProviderName: jest.fn().mockReturnValue('qwen'),
+      getRoutePolicy: jest
+        .fn()
+        .mockReturnValue({ fallback: null, maxTokens: 4096 }),
+    };
     const service = new ShortTermMemoryService(
       redis as never,
       llm as never,
       { findOne: jest.fn(), update: jest.fn() } as never,
-      { find: jest.fn() } as never,
+      {
+        createQueryBuilder: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          addOrderBy: jest.fn().mockReturnThis(),
+          take: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+        })),
+      } as never,
     );
 
     await service.addTurns(
@@ -215,6 +230,10 @@ describe('ShortTermMemoryService structured compression', () => {
       renewLock: jest.fn().mockResolvedValue(true),
     };
     const llm = {
+      getActiveProviderName: jest.fn().mockReturnValue('qwen'),
+      getRoutePolicy: jest
+        .fn()
+        .mockReturnValue({ fallback: null, maxTokens: 4096 }),
       invoke: jest.fn().mockResolvedValue(
         JSON.stringify({
           schemaVersion: 1,
@@ -243,7 +262,16 @@ describe('ShortTermMemoryService structured compression', () => {
       redis as never,
       llm as never,
       conversationRepo as never,
-      { find: jest.fn().mockResolvedValue([]) } as never,
+      {
+        createQueryBuilder: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          addOrderBy: jest.fn().mockReturnThis(),
+          take: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+        })),
+      } as never,
     );
 
     await service.trimAndSummarize('thread-1', 6);
@@ -298,7 +326,13 @@ describe('ShortTermMemoryService structured compression', () => {
     };
     const service = new ShortTermMemoryService(
       redis as never,
-      { invoke: jest.fn().mockRejectedValue(new Error('model down')) } as never,
+      {
+        invoke: jest.fn().mockRejectedValue(new Error('model down')),
+        getActiveProviderName: jest.fn().mockReturnValue('qwen'),
+        getRoutePolicy: jest
+          .fn()
+          .mockReturnValue({ fallback: null, maxTokens: 4096 }),
+      } as never,
       {
         findOne: jest.fn().mockResolvedValue(null),
         update: jest.fn().mockResolvedValue(undefined),
@@ -380,6 +414,10 @@ describe('ShortTermMemoryService structured compression', () => {
     const service = new ShortTermMemoryService(
       { isEnabled: () => false } as never,
       {
+        getActiveProviderName: jest.fn().mockReturnValue('qwen'),
+        getRoutePolicy: jest
+          .fn()
+          .mockReturnValue({ fallback: null, maxTokens: 4096 }),
         invoke: jest.fn().mockResolvedValue(
           JSON.stringify({
             schemaVersion: 1,

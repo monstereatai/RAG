@@ -10,6 +10,8 @@
 
 ## 当前状态
 
+- **代码文件职责拆分**：按现有 feature/page/package 边界拆分 RAG、Agentic、Document、工作流、Provider、Admin API/Web 与评测脚本，保留 Nest Injectable 门面、构造注入和原页面/脚本入口契约。扫描 1,222 个手写 TS/JS 源码与脚本，没有文件超过 1,000 行。RAG 后端、Admin API、Admin Web build 通过；fixture dry-check 和 Admin Web 改动文件 Biome 检查通过。重点 Jest 197 项中 195 项通过，memory 与 chat 各有一条既有断言和当前实现不符；Agentic 23 项、RAG Admin 35 项、RagClient 34 项及 Document 8 项通过。Admin API 全量 verify 在 2 个未改动套件的 9 条测试失败后停止；RAG 全量 ESLint 为 1,038 errors / 29 warnings。Admin Web 全量 lint/tsc 受仓库其他问题阻断，tsc 的 4 个错误都在未改动 `src/app.tsx`。本地 QA Ops 8000 和 RAG API 3000 均未运行，未做真实管理端问答 smoke。
+
 - **RAG 架构重构**：本地代码拆分与能力边界调整已完成。6 个 workspace 构建通过；RAG/Agentic/Chat/Document/Gateway 定向测试 5 suites / 95 tests 通过，检索专项 5 suites / 21 tests 通过，smoke 40/40 通过。全量 Jest 仍有 7 个与重构前相同的既有失败套件。
 - **验收边界**：真实环境 Simple/Auto/Agentic 回放、外部索引故障演练、完整多索引对账、真实业务质量与生产压测尚未完成；不得以本地模拟数据代替生产验收。
 - **仓库结构**：应用位于 `apps/`，CLI/MCP 位于 `packages/`，基础设施位于 `infra/`；迁移所需工作区构建、readiness 和 Compose 配置检查已通过。
@@ -69,23 +71,23 @@
 | `docs/reference/playway-component-inventory.md` | Playway 项目组件清单 |
 
 ## 最近 20 条进展
-1. **2026-10-30｜OpenSandbox Agent 项目工作区代码接入**：完成 RAG Sandbox 适配与限额、Agent 受控命令 Loop、Admin API/预览票据代理和管理端工作区操作；并发创建与 Dev Server 启停加 Redis 锁，预览超时和断开取消贯通两级代理，HTML/SVG/XML 强制 CSP sandbox。RAG 构建及 3 suites / 19 tests、Admin API build / lint / 4 suites / 50 tests / e2e 19 tests / migration check、管理端目标文件 Biome、工具注册表、文档一致性和 Diff 检查通过。Admin API 全量 Jest 有 2 个未改动套件失败；Admin Web 全量 lint/tsc 由既有问题阻断。OpenSandbox 真实 Server 未连接，tenant 身份、磁盘/PID 限制和 Nginx 语法待目标环境验收；文件级参考映射见 plan/future-features.md。
-2. **2026-10-30｜Context Engineering 可适用缺项补齐与复核**：摘要结构化保存目标/约束/下一步并限制文字大小；Mem0 保存 user 记忆来源会话/消息和记录时间，显式日期过期与 Cloud latestOnly 按云端/自托管能力区分；多轮评测新增服务端持久历史、压缩事件核验及压缩后追问指标；聊天模型边界增加最终输入预算拦截；产研岗位/产物编辑增加业务输入预算。追加逐篇核对后，更新 #26–28、#31、#34 的 OpenSandbox 适用边界；审批重试绑定原批次，防止旧批准落到新批次；驳回进入 revision_required 后可按原决定补齐收尾，Run 状态事件缺失可查找后补发。稀疏压缩 ID 不能直接截断，否则会重放历史，需另做连续前缀归并。RAG 后端构建通过；未跑单元测试。真实评测集与 Redis/Worker 故障演练仍待准备。
-3. **2026-10-30｜Langfuse Dataset Experiment 接入**：新增可重复运行的 Langfuse 实验入口；自动同步远端 dataset、以本地 mock ingestion 回放 19 个托管场景，用 item-level `observability_contract` 与 run-level `observability_contract_pass_rate` 评分。构建通过，Experiment `contract-20261030T030008807Z` 在 Experiments API 回读到 19/19 条目及两类分数，全部通过。全量 ESLint 未通过：src/test 共 1,141 errors、29 warnings；新 `.mjs` 不属于当前 TypeScript 项目配置，已用 Node 语法检查和 Prettier 验证。该回归验证 Provider 观测契约，不代表云端 ingestion 传输或真实 RAG 答案质量。
-4. **2026-10-30｜Context Engineering 指南缺口实现**：补上本地受信任 Skill 正文的预算注入、从 Run 事件评估期望轨迹，以及历史移除策略三层选择；中间移除 ID 写入摘要 JSON，PostgreSQL 原始消息不删、不改数据库 schema。RAG 后端构建、文档一致性与 Diff 检查通过；不跑单测。8 条合成事件轨迹通过；故意篡改拒答事件后评测器正确失败，合成数据只验证评测器执行，不代表业务质量。真实任务轨迹、压缩质量收益仍需真实留存数据，Redis/Worker 跨进程取消尚未实机联调。逐篇证据见 `docs/reference/CONTEXT_ENGINEERING_GUIDE_AUDIT.md`。
-5. **2026-10-30｜上下文、评测、索引与任务恢复逐文件对照**：补齐指定模型调用的完整输入预算预检、工具结果上限和提示词 hash 追踪；AgentEval 不再用关键词重合冒充忠实度/覆盖率，离线质量门禁要求开发/留存集；ES/BM25 主写失败上报并加入索引对账。Agentic 运行与审批恢复能接收运行中取消；审批绑定 Run/Checkpoint，恢复异常收口；Thread 重跑入口改为 fail closed，运行中心按快照参数创建新运行。RAG 后端、管理端构建、提示词注册表和 Diff 检查通过；未跑单测。QA Ops 服务未启动，真实问答回放待运行正确环境后完成。逐文件对照和限制见 `docs/CONTEXT_ENGINEERING.md`、`docs/AGENT_RUNTIME.md`。
-6. **2026-10-30｜上下文压缩、工具超时与输出边界**：Simple/Agentic 共用完整 prompt Token 预算；历史利用率超过 90% 时压缩旧消息，保留最新原文并将总量压到约 70%；网页搜索摘要和片段每条最多进入约 2,000 字符，完整 URL 仍保留为来源。Tool Registry 的每工具超时作用于真实执行；完整结构仅供明确标记的程序步骤使用。模型首 token 前失败可切备用；已输出部分答案后不再从头重试，避免把两份答案拼接。此记录当时将指南的压缩策略选择三层列为未实现；随后已按“模型/供应商基线 → Hybrid 特征选择 → 低置信度比较两种结果”补齐，当前状态见本节第 1 条及逐篇审计。指南示例的 0.6/0.4 是打分权重；三类记忆不是三层压缩。RAG 后端构建通过，未跑单测和真实问答回放。
-7. **2026-10-30｜知识入库边界补齐**：同步和异步音视频入口统一解析，图片/音频未识别会明确失败；Neo4j 图索引改用 BullMQ 持久重试/恢复，长文完整分批抽取，删除等待图任务并在已配置的 Neo4j 不可用时失败关闭。RAG 后端构建、70 秒合成音频 ASR mock、图片 OCR/描述 mock、25,002 字图抽取 smoke 通过；Redis/Neo4j 未运行，未做真实队列联调。
-8. **2026-10-30｜Langfuse 历史数据本地迁移**：本地独立栈启动；迁移 639 traces / 6144 observations，失败 0。逐 ID、trace ID 和父级关系核验通过；修复导入器映射后重新迁移，旧的不完整实例停止并保留数据卷。RAG 新 trace 仍写 Cloud；仪表盘、用户权限、组织/项目设置和历史 dataset runs 未迁移。
-9. **2026-10-30｜产研工作流多形态产物**：实现 Schema 和生成代码的自然语言差异编辑与版本、Vue/React/大屏多选生成、ZIP/JSON 下载、隔离预览和模拟低代码同步；本次代码编辑相关 RAG 定向测试 12 项、RAG/admin-api 构建及管理端改动文件 Biome 通过。逐文件对照本地 ai-infrastructure 后，确认 Agent 经常需要项目级依赖安装、测试和开发服务，将 OpenSandbox 项目工作区列为后续核心计划，保留 preview-runner 做固定模板预览。RAG 控制器全文件 ESLint 仍报已有其他方法的类型/格式问题；全量 admin-web tsc 仍被 `src/app.tsx` 隐式 any 阻断，admin-api 全量 Jest 有 2 个未改动模块测试失败。真实平台契约待确认。
-10. **2026-10-30｜全仓 Markdown 去重**：合并重复门禁说明，移除重复快照和已完成的过期计划；评测语料、语言版本及子项目规则保留。剩余 345 个 Markdown，精确重复 0 组；59 篇活动文档的链接检查和 `git diff --check` 通过。
-11. **2026-10-30｜CLI 文档归位**：CLI 主项目文档收敛为职责说明与入口，产品、架构、使用和实现进度由 `packages/rag-cli/` 维护。
-12. **2026-10-30｜项目文档分层**：项目背景、上下文工程、Agent Runtime、架构、运行交付作为主入口，流程和组件清单保留为专题文档。
-13. **2026-10-30｜课程目录清理**：按要求删除根目录 `course/` 与 `course-agent/`，代码不依赖这两个目录。
-14. **2026-10-29｜RAG 架构重构完成**：抽离检索、证据和回答生成能力，完成本地构建、定向回归及 smoke；真实环境验收仍待完成。
-15. **2026-10-29｜RAG 能力边界收敛**：业务模块改用查询、检索、索引和 Admin 能力契约，旧单体 Facade 退场；后端构建及定向测试通过。
-16. **2026-10-25｜功能流程复核补漏**：补上取消/SSE 断开、总 deadline、审批中断、历史压缩写回及评测隔离分支；静态校验和 Diff 检查通过。
-17. **2026-10-25｜功能流程按上下文主线重构**：按知识准备、问答与上下文、Task Agentic、反馈评测及运行治理组织章节与流程图。
-18. **2026-10-25｜功能流程章节与锚点整理**：收敛重复说明并调整岗位 Schema、Outbox 和配置治理内容；Mermaid 结构检查通过。
-19. **2026-10-25｜流程图审查补齐**：补齐审批、版本、导出、压缩和网页补证分支；29 张图完成静态结构检查。
-20. **2026-10-25｜Agent Harness 总体架构图**：补充分层架构图及已实现/部分具备/待闭环图例；7 层、34 个节点通过结构检查。
+1. **2026-10-30｜项目代码目录与超长文件拆分**：在原架构和 Nest Provider/Injectable 入口边界内，按职责拆分 RAG、Agentic、Document、Chat/Memory/Obsidian、工作流、ES/Milvus、Admin API/Web 页面与评测脚本。1,222 个手写 TS/JS 源码与脚本均低于 1,000 行；RAG 后端、Admin API、Admin Web 构建通过；fixture dry-check 和改动页面 Biome 检查通过。重点 Jest 197 项中 195 项通过，memory 与 chat 各有一条原有断言不符合当前实现；Admin API 全量 verify 有 9 项失败，集中在两个未改动控制器套件。全量 RAG ESLint 有 1,038 errors / 29 warnings；Admin Web tsc 的 4 个错误位于未改动 `src/app.tsx`。QA Ops/RAG API 本地服务未运行，真实问答 smoke 待环境可用后执行。
+2. **2026-10-30｜OpenSandbox Agent 项目工作区代码接入**：完成 RAG Sandbox 适配与限额、Agent 受控命令 Loop、Admin API/预览票据代理和管理端工作区操作；并发创建与 Dev Server 启停加 Redis 锁，预览超时和断开取消贯通两级代理，HTML/SVG/XML 强制 CSP sandbox。RAG 构建及 3 suites / 19 tests、Admin API build / lint / 4 suites / 50 tests / e2e 19 tests / migration check、管理端目标文件 Biome、工具注册表、文档一致性和 Diff 检查通过。Admin API 全量 Jest 有 2 个未改动套件失败；Admin Web 全量 lint/tsc 由既有问题阻断。OpenSandbox 真实 Server 未连接，tenant 身份、磁盘/PID 限制和 Nginx 语法待目标环境验收；文件级参考映射见 plan/future-features.md。
+3. **2026-10-30｜Context Engineering 可适用缺项补齐与复核**：摘要结构化保存目标/约束/下一步并限制文字大小；Mem0 保存 user 记忆来源会话/消息和记录时间，显式日期过期与 Cloud latestOnly 按云端/自托管能力区分；多轮评测新增服务端持久历史、压缩事件核验及压缩后追问指标；聊天模型边界增加最终输入预算拦截；产研岗位/产物编辑增加业务输入预算。追加逐篇核对后，更新 #26–28、#31、#34 的 OpenSandbox 适用边界；审批重试绑定原批次，防止旧批准落到新批次；驳回进入 revision_required 后可按原决定补齐收尾，Run 状态事件缺失可查找后补发。稀疏压缩 ID 不能直接截断，否则会重放历史，需另做连续前缀归并。RAG 后端构建通过；未跑单元测试。真实评测集与 Redis/Worker 故障演练仍待准备。
+4. **2026-10-30｜Langfuse Dataset Experiment 接入**：新增可重复运行的 Langfuse 实验入口；自动同步远端 dataset、以本地 mock ingestion 回放 19 个托管场景，用 item-level `observability_contract` 与 run-level `observability_contract_pass_rate` 评分。构建通过，Experiment `contract-20261030T030008807Z` 在 Experiments API 回读到 19/19 条目及两类分数，全部通过。全量 ESLint 未通过：src/test 共 1,141 errors、29 warnings；新 `.mjs` 不属于当前 TypeScript 项目配置，已用 Node 语法检查和 Prettier 验证。该回归验证 Provider 观测契约，不代表云端 ingestion 传输或真实 RAG 答案质量。
+5. **2026-10-30｜Context Engineering 指南缺口实现**：补上本地受信任 Skill 正文的预算注入、从 Run 事件评估期望轨迹，以及历史移除策略三层选择；中间移除 ID 写入摘要 JSON，PostgreSQL 原始消息不删、不改数据库 schema。RAG 后端构建、文档一致性与 Diff 检查通过；不跑单测。8 条合成事件轨迹通过；故意篡改拒答事件后评测器正确失败，合成数据只验证评测器执行，不代表业务质量。真实任务轨迹、压缩质量收益仍需真实留存数据，Redis/Worker 跨进程取消尚未实机联调。逐篇证据见 `docs/reference/CONTEXT_ENGINEERING_GUIDE_AUDIT.md`。
+6. **2026-10-30｜上下文、评测、索引与任务恢复逐文件对照**：补齐指定模型调用的完整输入预算预检、工具结果上限和提示词 hash 追踪；AgentEval 不再用关键词重合冒充忠实度/覆盖率，离线质量门禁要求开发/留存集；ES/BM25 主写失败上报并加入索引对账。Agentic 运行与审批恢复能接收运行中取消；审批绑定 Run/Checkpoint，恢复异常收口；Thread 重跑入口改为 fail closed，运行中心按快照参数创建新运行。RAG 后端、管理端构建、提示词注册表和 Diff 检查通过；未跑单测。QA Ops 服务未启动，真实问答回放待运行正确环境后完成。逐文件对照和限制见 `docs/CONTEXT_ENGINEERING.md`、`docs/AGENT_RUNTIME.md`。
+7. **2026-10-30｜上下文压缩、工具超时与输出边界**：Simple/Agentic 共用完整 prompt Token 预算；历史利用率超过 90% 时压缩旧消息，保留最新原文并将总量压到约 70%；网页搜索摘要和片段每条最多进入约 2,000 字符，完整 URL 仍保留为来源。Tool Registry 的每工具超时作用于真实执行；完整结构仅供明确标记的程序步骤使用。模型首 token 前失败可切备用；已输出部分答案后不再从头重试，避免把两份答案拼接。此记录当时将指南的压缩策略选择三层列为未实现；随后已按“模型/供应商基线 → Hybrid 特征选择 → 低置信度比较两种结果”补齐，当前状态见本节第 1 条及逐篇审计。指南示例的 0.6/0.4 是打分权重；三类记忆不是三层压缩。RAG 后端构建通过，未跑单测和真实问答回放。
+8. **2026-10-30｜知识入库边界补齐**：同步和异步音视频入口统一解析，图片/音频未识别会明确失败；Neo4j 图索引改用 BullMQ 持久重试/恢复，长文完整分批抽取，删除等待图任务并在已配置的 Neo4j 不可用时失败关闭。RAG 后端构建、70 秒合成音频 ASR mock、图片 OCR/描述 mock、25,002 字图抽取 smoke 通过；Redis/Neo4j 未运行，未做真实队列联调。
+9. **2026-10-30｜Langfuse 历史数据本地迁移**：本地独立栈启动；迁移 639 traces / 6144 observations，失败 0。逐 ID、trace ID 和父级关系核验通过；修复导入器映射后重新迁移，旧的不完整实例停止并保留数据卷。RAG 新 trace 仍写 Cloud；仪表盘、用户权限、组织/项目设置和历史 dataset runs 未迁移。
+10. **2026-10-30｜产研工作流多形态产物**：实现 Schema 和生成代码的自然语言差异编辑与版本、Vue/React/大屏多选生成、ZIP/JSON 下载、隔离预览和模拟低代码同步；本次代码编辑相关 RAG 定向测试 12 项、RAG/admin-api 构建及管理端改动文件 Biome 通过。逐文件对照本地 ai-infrastructure 后，确认 Agent 经常需要项目级依赖安装、测试和开发服务，将 OpenSandbox 项目工作区列为后续核心计划，保留 preview-runner 做固定模板预览。RAG 控制器全文件 ESLint 仍报已有其他方法的类型/格式问题；全量 admin-web tsc 仍被 `src/app.tsx` 隐式 any 阻断，admin-api 全量 Jest 有 2 个未改动模块测试失败。真实平台契约待确认。
+11. **2026-10-30｜全仓 Markdown 去重**：合并重复门禁说明，移除重复快照和已完成的过期计划；评测语料、语言版本及子项目规则保留。剩余 345 个 Markdown，精确重复 0 组；59 篇活动文档的链接检查和 `git diff --check` 通过。
+12. **2026-10-30｜CLI 文档归位**：CLI 主项目文档收敛为职责说明与入口，产品、架构、使用和实现进度由 `packages/rag-cli/` 维护。
+13. **2026-10-30｜项目文档分层**：项目背景、上下文工程、Agent Runtime、架构、运行交付作为主入口，流程和组件清单保留为专题文档。
+14. **2026-10-30｜课程目录清理**：按要求删除根目录 `course/` 与 `course-agent/`，代码不依赖这两个目录。
+15. **2026-10-29｜RAG 架构重构完成**：抽离检索、证据和回答生成能力，完成本地构建、定向回归及 smoke；真实环境验收仍待完成。
+16. **2026-10-29｜RAG 能力边界收敛**：业务模块改用查询、检索、索引和 Admin 能力契约，旧单体 Facade 退场；后端构建及定向测试通过。
+17. **2026-10-25｜功能流程复核补漏**：补上取消/SSE 断开、总 deadline、审批中断、历史压缩写回及评测隔离分支；静态校验和 Diff 检查通过。
+18. **2026-10-25｜功能流程按上下文主线重构**：按知识准备、问答与上下文、Task Agentic、反馈评测及运行治理组织章节与流程图。
+19. **2026-10-25｜功能流程章节与锚点整理**：收敛重复说明并调整岗位 Schema、Outbox 和配置治理内容；Mermaid 结构检查通过。
+20. **2026-10-25｜流程图审查补齐**：补齐审批、版本、导出、压缩和网页补证分支；29 张图完成静态结构检查。

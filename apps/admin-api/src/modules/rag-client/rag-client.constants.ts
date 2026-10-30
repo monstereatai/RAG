@@ -1,0 +1,2 @@
+export const LIST_READ_TIMEOUT_MS = 10_000;
+export const WORKSPACE_PREVIEW_TIMEOUT_MS = 90_000;

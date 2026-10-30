@@ -1,4 +1,7 @@
 import { RagAdminService } from './rag-admin.service';
+import { RagAdminAuditWorkflow } from './rag-admin.service.audit';
+import { RagAdminIndexingWorkflow } from './rag-admin.service.indexing';
+import type { RagAdminServiceContext } from './rag-admin.service.context';
 
 describe('RagAdminService index reconciliation', () => {
   const healthyDescriptionAudit = {
@@ -49,12 +52,18 @@ describe('RagAdminService index reconciliation', () => {
       },
       ragService: {
         getIndexedChunkCount: jest.fn().mockReturnValue(2),
+        getSnapshotPersistenceStatus: jest
+          .fn()
+          .mockReturnValue({ persisted: true }),
       },
       elasticsearchProvider: {
         getIndexCountsByDocId: jest.fn().mockResolvedValue({
           available: true,
           chunkCount: 2,
           documentCount: 1,
+          lifecycleStatusAvailable: true,
+          chunkLifecycleStatuses: [],
+          documentLifecycleStatuses: ['draft'],
         }),
       },
       vectorStoreProvider: {
@@ -69,6 +78,66 @@ describe('RagAdminService index reconciliation', () => {
         isEnabled: jest.fn().mockReturnValue(false),
       },
       ...overrides,
+    });
+    const context = service;
+    Object.assign(service, {
+      auditWorkflow: new RagAdminAuditWorkflow({
+        logger: context.logger as never,
+        docMetaRepo: context.docMetaRepo as never,
+        chunkRepo: context.chunkRepo as never,
+        graphService: context.graphService as never,
+        ragService: context.ragService as never,
+        elasticsearchProvider: context.elasticsearchProvider as never,
+        vectorStoreProvider: context.vectorStoreProvider as never,
+        documentImageIngestionService:
+          context.documentImageIngestionService as never,
+        imageIndexService: context.imageIndexService as never,
+        retrievalDescriptionService:
+          context.retrievalDescriptionService as never,
+      }),
+    });
+    const ragAdmin = service as unknown as RagAdminService;
+    const workflowContext = {
+      configService: context.configService,
+      documentService: context.documentService,
+      documentPermissionService: context.documentPermissionService,
+      documentQueue: context.documentQueue,
+      obsidianIngest: context.obsidianIngest,
+      graphService: context.graphService,
+      conversationService: context.conversationService,
+      ragService: context.ragService,
+      elasticsearchProvider: context.elasticsearchProvider,
+      vectorStoreProvider: context.vectorStoreProvider,
+      queryLogService: context.queryLogService,
+      obsidianKnowledge: context.obsidianKnowledge,
+      chunkRepo: context.chunkRepo,
+      docMetaRepo: context.docMetaRepo,
+      documentReviewRepo: context.documentReviewRepo,
+      permissionRepo: context.permissionRepo,
+      domainEvents: context.domainEvents,
+      embeddingProvider: context.embeddingProvider,
+      retrievalDescriptionService: context.retrievalDescriptionService,
+      documentImageIngestionService: context.documentImageIngestionService,
+      imageIndexService: context.imageIndexService,
+      queryLogRepo: context.queryLogRepo,
+      indexRepairQueue: context.indexRepairQueue,
+      objectStorageProvider: context.objectStorageProvider,
+      speechProvider: context.speechProvider,
+      visionProvider: context.visionProvider,
+      logger: context.logger,
+      sanitizeObjectKeyPart: (value: string) => value,
+      reindexDocument: (
+        ...args: Parameters<RagAdminService['reindexDocument']>
+      ) => ragAdmin.reindexDocument(...args),
+      auditDocumentIndexes: (
+        ...args: Parameters<RagAdminService['auditDocumentIndexes']>
+      ) => ragAdmin.auditDocumentIndexes(...args),
+      promoteDocumentVersion: (
+        ...args: Parameters<RagAdminService['promoteDocumentVersion']>
+      ) => ragAdmin.promoteDocumentVersion(...args),
+    } as RagAdminServiceContext;
+    Object.assign(service, {
+      indexingWorkflow: new RagAdminIndexingWorkflow(workflowContext),
     });
     return service as unknown as RagAdminService;
   }
@@ -85,18 +154,27 @@ describe('RagAdminService index reconciliation', () => {
         chunkCount: 2,
         reasons: [],
         checks: expect.objectContaining({
-          postgres: expect.objectContaining({ status: 'ok', actual: 2 }),
-          bm25: expect.objectContaining({ status: 'ok', actual: 2 }),
-          elasticsearch: expect.objectContaining({ status: 'ok', actual: 2 }),
-          milvus: expect.objectContaining({ status: 'ok', actual: 2 }),
-          graph: expect.objectContaining({ status: 'skipped' }),
+          postgres: expect.objectContaining({
+            status: 'ok',
+            actual: 2,
+          }) as unknown,
+          bm25: expect.objectContaining({ status: 'ok', actual: 2 }) as unknown,
+          elasticsearch: expect.objectContaining({
+            status: 'ok',
+            actual: 2,
+          }) as unknown,
+          milvus: expect.objectContaining({
+            status: 'ok',
+            actual: 2,
+          }) as unknown,
+          graph: expect.objectContaining({ status: 'skipped' }) as unknown,
           retrievalDescriptions: expect.objectContaining({
             status: 'ok',
             expected: 1,
             pgCount: 1,
             milvusCount: 1,
-          }),
-        }),
+          }) as unknown,
+        }) as unknown,
       }),
     );
   });
@@ -191,9 +269,13 @@ describe('RagAdminService index reconciliation', () => {
       },
       ragService: {
         getIndexedChunkCount: jest.fn().mockReturnValue(1),
+        getSnapshotPersistenceStatus: jest
+          .fn()
+          .mockReturnValue({ persisted: true }),
         getIndexedChunkHashes: jest.fn().mockReturnValue({
           hashes: ['chunk-hash'],
           generations: ['generation-v1'],
+          lifecycleStatuses: [],
           complete: true,
         }),
       },
@@ -204,6 +286,9 @@ describe('RagAdminService index reconciliation', () => {
           documentCount: 1,
           contentHashes: ['chunk-hash'],
           indexGenerations: ['generation-v1'],
+          lifecycleStatusAvailable: true,
+          chunkLifecycleStatuses: [],
+          documentLifecycleStatuses: ['draft'],
         }),
       },
       vectorStoreProvider: {

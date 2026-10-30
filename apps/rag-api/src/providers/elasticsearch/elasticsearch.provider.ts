@@ -1,6 +1,13 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Client, estypes } from '@elastic/elasticsearch';
+import { ElasticsearchDocumentSupport } from './elasticsearch.document-support';
+import {
+  effectiveTimeFilters,
+  type EffectiveTimeRange,
+  type ElasticsearchSearchScope,
+} from './elasticsearch.provider.types';
+export type { ElasticsearchSearchScope } from './elasticsearch.provider.types';
 
 type IndexedChunk = {
   content: string;
@@ -29,45 +36,6 @@ type IndexedChunk = {
   supersedesDocId?: string | null;
 };
 
-type IndexedDocument = {
-  docId: string;
-  filename: string;
-  title?: string | null;
-  summary?: string | null;
-  content: string;
-  userId?: string | null;
-  sourceAuthority?: string;
-  projectId?: string | null;
-  activityId?: string | null;
-  region?: string | null;
-  locale?: string | null;
-  channel?: string | null;
-  roleScope?: string[];
-  documentType?: string;
-  lifecycleStatus?: string;
-  docVersion?: string | null;
-  effectiveAt?: string | null;
-  expiredAt?: string | null;
-};
-
-type EffectiveTimeRange = { from: string; to: string };
-
-export interface ElasticsearchSearchScope {
-  projectId?: string;
-  activityId?: string;
-  region?: string;
-  locale?: string;
-  channel?: string;
-  role?: string;
-  documentType?: string;
-  includeDeprecated?: boolean;
-  effectiveTime?: EffectiveTimeRange;
-  /** 按文件扩展名过滤（filename.keyword wildcard `*.{fileType}`），如 'pdf' */
-  fileType?: string;
-  /** 按更新时间过滤：day=今天 / week=近7天 / month=近30天（updatedAt date math range） */
-  updatedRange?: 'day' | 'week' | 'month';
-}
-
 const BUSINESS_PROPERTIES = {
   projectId: { type: 'keyword' },
   activityId: { type: 'keyword' },
@@ -80,31 +48,6 @@ const BUSINESS_PROPERTIES = {
   supersedesDocId: { type: 'keyword' },
 } satisfies Record<string, estypes.MappingProperty>;
 
-function effectiveTimeFilters(
-  range: EffectiveTimeRange,
-): estypes.QueryDslQueryContainer[] {
-  return [
-    {
-      bool: {
-        should: [
-          { bool: { must_not: [{ exists: { field: 'effectiveAt' } }] } },
-          { range: { effectiveAt: { lt: range.to } } },
-        ],
-        minimum_should_match: 1,
-      },
-    },
-    {
-      bool: {
-        should: [
-          { bool: { must_not: [{ exists: { field: 'expiredAt' } }] } },
-          { range: { expiredAt: { gt: range.from } } },
-        ],
-        minimum_should_match: 1,
-      },
-    },
-  ];
-}
-
 /**
  * Elasticsearch Provider
  *
@@ -116,16 +59,20 @@ function effectiveTimeFilters(
  * 未配置 ES_NODE 或连接失败时，自动禁用，不阻断服务启动。
  */
 @Injectable()
-export class ElasticsearchProvider implements OnModuleInit {
-  private readonly logger = new Logger(ElasticsearchProvider.name);
-  private client!: Client;
-  private enabled = false;
+export class ElasticsearchProvider
+  extends ElasticsearchDocumentSupport
+  implements OnModuleInit
+{
+  protected readonly logger = new Logger(ElasticsearchProvider.name);
+  protected client!: Client;
+  protected enabled = false;
   private readonly indexName = 'rag_chunks';
-  private readonly documentIndexName = 'kh_document';
+  protected readonly documentIndexName = 'kh_document';
   /** dense_vector 维度：必须与嵌入模型输出维度一致（RAG_ES_EMBEDDING_DIM，默认 1024） */
   private readonly embeddingDim: number;
 
   constructor(private readonly config: ConfigService) {
+    super();
     const rawDim = this.config.get<string | number>('RAG_ES_EMBEDDING_DIM');
     const parsedDim =
       typeof rawDim === 'string' ? Number.parseInt(rawDim, 10) : rawDim;
@@ -309,133 +256,6 @@ export class ElasticsearchProvider implements OnModuleInit {
     this.logger.log(`ES index "${this.indexName}" created`);
   }
 
-  /** 独立文档全文索引：只服务文档搜索，不参与 RAG 分块召回。 */
-  private async ensureDocumentIndex(): Promise<void> {
-    const exists = await this.client.indices.exists({
-      index: this.documentIndexName,
-    });
-    if (exists) {
-      // 幂等补字段：为存量 kh_document 索引补齐 updatedAt（更新时间筛选依赖此字段）
-      // ES 支持给现有索引新增字段；失败仅告警，不阻塞启动，也绝不删除存量索引
-      try {
-        const mapping = await this.client.indices.getMapping({
-          index: this.documentIndexName,
-        });
-        const properties = mapping[this.documentIndexName]?.mappings
-          ?.properties as Record<string, unknown> | undefined;
-        if (properties && !properties.updatedAt) {
-          try {
-            await this.client.indices.putMapping({
-              index: this.documentIndexName,
-              properties: { updatedAt: { type: 'date' } },
-            });
-            this.logger.log(
-              `ES mapping patched for "${this.documentIndexName}": added updatedAt`,
-            );
-          } catch (patchErr) {
-            this.logger.warn(
-              `ES putMapping (updatedAt) for "${this.documentIndexName}" failed, updatedRange filter unavailable until patched, startup continues: ${(patchErr as Error).message}`,
-            );
-          }
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Failed to inspect ES index "${this.documentIndexName}": ${(err as Error).message}`,
-        );
-      }
-      return;
-    }
-
-    await this.client.indices.create({
-      index: this.documentIndexName,
-      settings: {
-        analysis: {
-          analyzer: {
-            ik_smart_analyzer: { type: 'custom', tokenizer: 'ik_smart' },
-          },
-        },
-      },
-      mappings: {
-        properties: {
-          docId: { type: 'keyword' },
-          filename: {
-            type: 'text',
-            analyzer: 'ik_smart_analyzer',
-            fields: { keyword: { type: 'keyword' } },
-          },
-          title: { type: 'text', analyzer: 'ik_smart_analyzer' },
-          summary: { type: 'text', analyzer: 'ik_smart_analyzer' },
-          content: { type: 'text', analyzer: 'ik_smart_analyzer' },
-          userId: { type: 'keyword' },
-          sourceAuthority: { type: 'keyword' },
-          projectId: { type: 'keyword' },
-          activityId: { type: 'keyword' },
-          region: { type: 'keyword' },
-          locale: { type: 'keyword' },
-          channel: { type: 'keyword' },
-          roleScope: { type: 'keyword' },
-          documentType: { type: 'keyword' },
-          lifecycleStatus: { type: 'keyword' },
-          docVersion: { type: 'keyword' },
-          contentHash: { type: 'keyword' },
-          indexGeneration: { type: 'keyword' },
-          ruleKey: { type: 'keyword' },
-          changeType: { type: 'keyword' },
-          supersedesChunkId: { type: 'keyword' },
-          tenantId: { type: 'keyword' },
-          effectiveAt: { type: 'date' },
-          expiredAt: { type: 'date' },
-          updatedAt: { type: 'date' },
-        },
-      },
-    });
-    this.logger.log(`ES document index "${this.documentIndexName}" created`);
-  }
-
-  async indexDocument(document: {
-    docId: string;
-    filename: string;
-    content: string;
-    userId?: string | null;
-    tenantId?: string | null;
-    title?: string | null;
-    summary?: string | null;
-    sourceAuthority?: string;
-    projectId?: string | null;
-    activityId?: string | null;
-    region?: string | null;
-    locale?: string | null;
-    channel?: string | null;
-    roleScope?: string[];
-    documentType?: string;
-    lifecycleStatus?: string;
-    docVersion?: string | null;
-    contentHash?: string | null;
-    indexGeneration?: string | null;
-    changeType?: string;
-    effectiveAt?: Date | null;
-    expiredAt?: Date | null;
-  }): Promise<void> {
-    if (!this.enabled || !document.content.trim()) return;
-    try {
-      await this.client.index({
-        index: this.documentIndexName,
-        id: document.docId,
-        refresh: true,
-        document: {
-          ...document,
-          effectiveAt: document.effectiveAt?.toISOString() ?? null,
-          expiredAt: document.expiredAt?.toISOString() ?? null,
-          // 每次写入都刷新 updatedAt，供搜索的更新时间筛选使用
-          updatedAt: new Date().toISOString(),
-        },
-      });
-    } catch (err) {
-      this.logger.warn(`ES indexDocument failed: ${(err as Error).message}`);
-      throw err;
-    }
-  }
-
   /**
    * 批量写入 chunks 到 ES
    *
@@ -574,10 +394,7 @@ export class ElasticsearchProvider implements OnModuleInit {
             index: this.documentIndexName,
             query: {
               bool: {
-                filter: [
-                  { term: { docId } },
-                  { term: { userId: _userId } },
-                ],
+                filter: [{ term: { docId } }, { term: { userId: _userId } }],
               },
             },
             refresh: true,
@@ -693,14 +510,18 @@ export class ElasticsearchProvider implements OnModuleInit {
           size: 0,
           aggs: {
             contentHashes: { terms: { field: 'contentHash', size: 10000 } },
-            indexGenerations: { terms: { field: 'indexGeneration', size: 100 } },
+            indexGenerations: {
+              terms: { field: 'indexGeneration', size: 100 },
+            },
           },
         }),
       ]);
-      const aggregations = metadata.aggregations as {
-        contentHashes?: { buckets?: Array<{ key: string }> };
-        indexGenerations?: { buckets?: Array<{ key: string }> };
-      } | undefined;
+      const aggregations = metadata.aggregations as
+        | {
+            contentHashes?: { buckets?: Array<{ key: string }> };
+            indexGenerations?: { buckets?: Array<{ key: string }> };
+          }
+        | undefined;
       let lifecycleStatusAvailable = false;
       let chunkLifecycleStatuses: string[] = [];
       let documentLifecycleStatuses: string[] = [];
@@ -732,7 +553,9 @@ export class ElasticsearchProvider implements OnModuleInit {
           const aggs = result.aggregations as
             | { lifecycleStatuses?: { buckets?: Array<{ key: string }> } }
             | undefined;
-          return aggs?.lifecycleStatuses?.buckets?.map((bucket) => bucket.key) ?? [];
+          return (
+            aggs?.lifecycleStatuses?.buckets?.map((bucket) => bucket.key) ?? []
+          );
         };
         chunkLifecycleStatuses = readStatuses(chunkLifecycle);
         documentLifecycleStatuses = readStatuses(documentLifecycle);
@@ -745,8 +568,13 @@ export class ElasticsearchProvider implements OnModuleInit {
         available: true,
         chunkCount: chunks.count,
         documentCount: documents.count,
-        contentHashes: aggregations?.contentHashes?.buckets?.map((bucket) => bucket.key) ?? [],
-        indexGenerations: aggregations?.indexGenerations?.buckets?.map((bucket) => bucket.key) ?? [],
+        contentHashes:
+          aggregations?.contentHashes?.buckets?.map((bucket) => bucket.key) ??
+          [],
+        indexGenerations:
+          aggregations?.indexGenerations?.buckets?.map(
+            (bucket) => bucket.key,
+          ) ?? [],
         lifecycleStatusAvailable,
         chunkLifecycleStatuses,
         documentLifecycleStatuses,
@@ -991,7 +819,8 @@ export class ElasticsearchProvider implements OnModuleInit {
     if (Array.isArray(vector) === false || vector.length === 0) return [];
 
     try {
-      if (opts?.allowedDocIds != null && opts.allowedDocIds.size === 0) return [];
+      if (opts?.allowedDocIds != null && opts.allowedDocIds.size === 0)
+        return [];
       const filter: estypes.QueryDslQueryContainer[] = [];
       if (opts?.allowedDocIds != null) {
         filter.push({ terms: { docId: [...opts.allowedDocIds] } });
@@ -1044,171 +873,6 @@ export class ElasticsearchProvider implements OnModuleInit {
     } catch (err) {
       this.logger.warn(`ES knnSearch failed: ${(err as Error).message}`);
       return [];
-    }
-  }
-
-  /** 独立文档全文检索，返回 ES highlight 片段，不与分块 RAG 检索混用。 */
-  async searchDocuments(
-    query: string,
-    topK = 20,
-    userId?: string,
-    scope: ElasticsearchSearchScope = {},
-  ): Promise<
-    Array<{
-      docId: string;
-      filename: string;
-      title?: string | null;
-      summary?: string | null;
-      score: number;
-      highlightFragments: string[];
-      docVersion?: string | null;
-      lifecycleStatus?: string;
-      sourceAuthority?: string;
-    }>
-  > {
-    if (!this.enabled || !query.trim()) return [];
-    try {
-      const filter: estypes.QueryDslQueryContainer[] = userId
-        ? [{ term: { userId } }]
-        : [];
-      for (const [field, value] of Object.entries({
-        projectId: scope.projectId,
-        activityId: scope.activityId,
-        region: scope.region,
-        locale: scope.locale,
-        channel: scope.channel,
-        documentType: scope.documentType,
-      })) {
-        if (value) filter.push({ term: { [field]: value } });
-      }
-      if (scope.role) filter.push({ term: { roleScope: scope.role } });
-      // 高级筛选：文件类型（filename.keyword 后缀匹配）与更新时间（updatedAt date math range）
-      if (scope.fileType) {
-        filter.push({
-          wildcard: { 'filename.keyword': `*.${scope.fileType}` },
-        });
-      }
-      if (scope.updatedRange) {
-        const gte = {
-          day: 'now-1d/d',
-          week: 'now-7d/d',
-          month: 'now-30d/d',
-        }[scope.updatedRange];
-        if (gte) filter.push({ range: { updatedAt: { gte } } });
-      }
-      if (!scope.includeDeprecated) {
-        filter.push({
-          bool: { must_not: [{ term: { lifecycleStatus: 'deprecated' } }] },
-        });
-      }
-      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
-      filter.push({
-        bool: {
-          must_not: [
-            { term: { lifecycleStatus: 'draft' } },
-            { term: { lifecycleStatus: 'archived' } },
-          ],
-        },
-      });
-      const result = await this.client.search<IndexedDocument>({
-        index: this.documentIndexName,
-        query: {
-          bool: {
-            must: [
-              {
-                multi_match: {
-                  query,
-                  fields: ['title^3', 'filename^2', 'summary', 'content'],
-                  type: 'best_fields',
-                },
-              },
-            ],
-            ...(filter.length ? { filter } : {}),
-          },
-        },
-        size: Math.min(Math.max(topK, 1), 50),
-        highlight: {
-          fields: {
-            content: { fragment_size: 220, number_of_fragments: 3 },
-            title: { number_of_fragments: 1 },
-            summary: { fragment_size: 180, number_of_fragments: 1 },
-          },
-          pre_tags: ['<em>'],
-          post_tags: ['</em>'],
-        },
-      });
-      return result.hits.hits.map((hit) => {
-        const source = hit._source;
-        const highlights = [
-          ...(hit.highlight?.title ?? []),
-          ...(hit.highlight?.summary ?? []),
-          ...(hit.highlight?.content ?? []),
-        ].map(String);
-        return {
-          docId: source?.docId ?? hit._id ?? '',
-          filename: source?.filename ?? '',
-          title: source?.title ?? null,
-          summary: source?.summary ?? null,
-          score: hit._score ?? 0,
-          highlightFragments: highlights,
-          docVersion: source?.docVersion,
-          lifecycleStatus: source?.lifecycleStatus,
-          sourceAuthority: source?.sourceAuthority,
-        };
-      });
-    } catch (err) {
-      this.logger.warn(`ES document search failed: ${(err as Error).message}`);
-      return [];
-    }
-  }
-
-  /**
-   * 文档搜索筛选面板的 facets：对 kh_document 做 terms 聚合，
-   * 返回可筛的文档分类（documentType）与权限范围（roleScope）。
-   * 聚合与检索同口径（排除 draft / deprecated），size 20；ES 未启用或查询失败返回空数组。
-   */
-  async getDocumentSearchFacets(): Promise<{
-    documentTypes: string[];
-    roles: string[];
-  }> {
-    const empty: { documentTypes: string[]; roles: string[] } = {
-      documentTypes: [],
-      roles: [],
-    };
-    if (!this.enabled) return empty;
-    try {
-      const result = await this.client.search<IndexedDocument>({
-        index: this.documentIndexName,
-        size: 0,
-        query: {
-          bool: {
-            must_not: [
-              { term: { lifecycleStatus: 'draft' } },
-              { term: { lifecycleStatus: 'deprecated' } },
-            ],
-          },
-        },
-        aggs: {
-          documentTypes: { terms: { field: 'documentType', size: 20 } },
-          roles: { terms: { field: 'roleScope', size: 20 } },
-        },
-      });
-      const toKeys = (aggregate: unknown): string[] => {
-        const buckets =
-          (aggregate as { buckets?: Array<{ key: unknown }> } | undefined)
-            ?.buckets ?? [];
-        return buckets.map((bucket) => String(bucket.key));
-      };
-      const aggs = result.aggregations as
-        | { documentTypes?: unknown; roles?: unknown }
-        | undefined;
-      return {
-        documentTypes: toKeys(aggs?.documentTypes),
-        roles: toKeys(aggs?.roles),
-      };
-    } catch (err) {
-      this.logger.warn(`ES document facets failed: ${(err as Error).message}`);
-      return empty;
     }
   }
 }

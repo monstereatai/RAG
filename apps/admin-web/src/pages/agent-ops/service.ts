@@ -33,187 +33,28 @@ export interface ProductionWorkspaceStatus {
   devServer?: { port: number; commandId: string };
 }
 
-const productionWorkspacePath = (threadId: string) =>
-  `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace`;
-
-export const getProductionWorkspaceStatus = (threadId: string) =>
-  authRequest<unknown>(productionWorkspacePath(threadId));
-
-export const startProductionWorkspace = (
-  threadId: string,
-  body: { artifactId: string },
-) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/start`, {
-    method: 'POST',
-    data: body,
-  });
-
-export const runProductionWorkspaceAgent = (
-  threadId: string,
-  body: { artifactId: string; instruction: string },
-) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/agent`, {
-    method: 'POST',
-    data: body,
-  });
-
-export const runProductionWorkspaceCommand = (
-  threadId: string,
-  body: { command: string },
-) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/command`, {
-    method: 'POST',
-    data: body,
-  });
-
-export const startProductionWorkspaceDevServer = (
-  threadId: string,
-  body: { port: number; command?: string },
-) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/dev-server/start`, {
-    method: 'POST',
-    data: body,
-  });
-
-export const stopProductionWorkspaceDevServer = (threadId: string) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/dev-server/stop`, {
-    method: 'POST',
-    data: {},
-  });
-
-export const createProductionWorkspacePreviewTicket = (
-  threadId: string,
-  body: { port: number },
-) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/preview-ticket`, {
-    method: 'POST',
-    data: body,
-  });
-
-export const exportProductionWorkspace = (threadId: string) =>
-  authRequest<unknown>(`${productionWorkspacePath(threadId)}/export`, {
-    method: 'POST',
-    data: {},
-  });
-
-export const deleteProductionWorkspace = (
-  threadId: string,
-  body: { confirmDiscard: true },
-) =>
-  authRequest<unknown>(productionWorkspacePath(threadId), {
-    method: 'DELETE',
-    data: body,
-  });
-
-export const getProductionWorkflowArtifacts = (threadId: string) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts`,
-  );
-
-export const generateProductionWorkflowArtifacts = (
-  threadId: string,
-  targets: ProductionArtifactTarget[],
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/generate`,
-    { method: 'POST', data: { targets } },
-  );
-
-export const proposeProductionArtifactEdit = (
-  threadId: string,
-  body: {
-    target: 'activity-schema' | 'dashboard-schema';
-    baseArtifactId: string;
-    instruction: string;
-  },
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/edit`,
-    { method: 'POST', data: body },
-  );
-
-export const proposeProductionCodeEdit = (
-  threadId: string,
-  body: { baseArtifactId: string; instruction: string },
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/code-edit`,
-    { method: 'POST', data: body },
-  );
-
-export const applyProductionCodeEdit = (
-  threadId: string,
-  body: {
-    baseArtifactId: string;
-    instruction: string;
-    files: Record<string, string>;
-  },
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/code-edit/apply`,
-    { method: 'POST', data: body },
-  );
-
-export const applyProductionArtifactEdit = (
-  threadId: string,
-  body: {
-    target: 'activity-schema' | 'dashboard-schema';
-    baseArtifactId: string;
-    schema: Record<string, unknown>;
-    regenerateTargets: ProductionArtifactTarget[];
-  },
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/apply`,
-    { method: 'POST', data: body },
-  );
-
-export const restoreProductionArtifactVersion = (
-  threadId: string,
-  artifactId: string,
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/restore`,
-    { method: 'POST', data: { artifactId } },
-  );
-
-export const simulateProductionArtifactSync = (
-  threadId: string,
-  artifactId: string,
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/simulated-sync`,
-    { method: 'POST', data: {} },
-  );
-
-export const getProductionArtifactPreview = (
-  threadId: string,
-  artifactId: string,
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
-  );
-
-export const getProductionArtifactSource = (
-  threadId: string,
-  artifactId: string,
-) =>
-  authRequest<unknown>(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/source`,
-  );
-
-export const downloadProductionArtifact = (
-  threadId: string,
-  artifactId: string,
-) =>
-  fetch(
-    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
-    {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
-      },
-    },
-  );
+export {
+  applyProductionArtifactEdit,
+  applyProductionCodeEdit,
+  createProductionWorkspacePreviewTicket,
+  deleteProductionWorkspace,
+  downloadProductionArtifact,
+  exportProductionWorkspace,
+  generateProductionWorkflowArtifacts,
+  getProductionArtifactPreview,
+  getProductionArtifactSource,
+  getProductionWorkflowArtifacts,
+  getProductionWorkspaceStatus,
+  proposeProductionArtifactEdit,
+  proposeProductionCodeEdit,
+  restoreProductionArtifactVersion,
+  runProductionWorkspaceAgent,
+  runProductionWorkspaceCommand,
+  simulateProductionArtifactSync,
+  startProductionWorkspace,
+  startProductionWorkspaceDevServer,
+  stopProductionWorkspaceDevServer,
+} from './workspace-service';
 
 export interface ProductionStageResult {
   role: ProductionRole;
@@ -740,17 +581,24 @@ export interface AgentRunSummary {
 }
 
 export const getAgentRunSummary = (limit = 500) =>
-  authRequest<AgentRunSummary>(`/api/admin/agent-ops/runs/summary?limit=${limit}`);
+  authRequest<AgentRunSummary>(
+    `/api/admin/agent-ops/runs/summary?limit=${limit}`,
+  );
 
 export const getSecurityPolicies = () =>
-  authRequest<{ policies?: Array<{ id?: string; name?: string; severity?: string }> }>(
-    "/api/admin/agent-ops/security/policies",
-  );
+  authRequest<{
+    policies?: Array<{ id?: string; name?: string; severity?: string }>;
+  }>('/api/admin/agent-ops/security/policies');
 
 export const getSecurityAudit = (limit = 100) =>
-  authRequest<{ events?: Array<{ id?: string; eventType?: string; payload?: unknown; createdAt?: string }> }>(
-    `/api/admin/agent-ops/security/audit?limit=${limit}`,
-  );
+  authRequest<{
+    events?: Array<{
+      id?: string;
+      eventType?: string;
+      payload?: unknown;
+      createdAt?: string;
+    }>;
+  }>(`/api/admin/agent-ops/security/audit?limit=${limit}`);
 
 export interface RagQualitySummary {
   scanned: number;
@@ -758,11 +606,17 @@ export interface RagQualitySummary {
   citationRate: number;
   refusalRate: number;
   averageLatencyMs: number;
-  gate?: { passed: boolean; reasons: string[]; thresholds: Record<string, number> };
+  gate?: {
+    passed: boolean;
+    reasons: string[];
+    thresholds: Record<string, number>;
+  };
 }
 
 export const getRagQualitySummary = (limit = 500) =>
-  authRequest<RagQualitySummary>(`/api/admin/agent-ops/rag-quality?limit=${limit}`);
+  authRequest<RagQualitySummary>(
+    `/api/admin/agent-ops/rag-quality?limit=${limit}`,
+  );
 
 export interface IntentRoutingSummary {
   scanned: number;
@@ -784,7 +638,9 @@ export interface IntentRoutingSummary {
 }
 
 export const getIntentRoutingSummary = (limit = 200) =>
-  authRequest<IntentRoutingSummary>(`/api/admin/agent-ops/intent-routing?limit=${limit}`);
+  authRequest<IntentRoutingSummary>(
+    `/api/admin/agent-ops/intent-routing?limit=${limit}`,
+  );
 
 export const getAgentRuntimeCapabilities = () =>
   authRequest<unknown>('/api/admin/agent-ops/runtime/capabilities');
@@ -802,10 +658,10 @@ export const retryAgentRunRecord = (id: string) =>
     threadId: string;
     status: 'completed' | 'waiting_approval';
     route: 'agentic';
-  }>(
-    `/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`,
-    { method: 'POST', data: {} },
-  );
+  }>(`/api/admin/agent-ops/run-center/${encodeURIComponent(id)}/retry`, {
+    method: 'POST',
+    data: {},
+  });
 
 export interface AgentRunEvent {
   id: string;
@@ -993,9 +849,12 @@ export const compareGovernanceRetrieval = (
   knowledgeBaseKey: string,
   compareKnowledgeBaseKey: string,
 ) =>
-  authRequest<unknown>('/api/admin/agent-ops/governance/retrieval-debug/compare', {
-    params: { query, knowledgeBaseKey, compareKnowledgeBaseKey },
-  });
+  authRequest<unknown>(
+    '/api/admin/agent-ops/governance/retrieval-debug/compare',
+    {
+      params: { query, knowledgeBaseKey, compareKnowledgeBaseKey },
+    },
+  );
 
 export function unwrapData<T>(value: unknown): T {
   let current = value;

@@ -70,7 +70,11 @@ function createService() {
     mocks.taskRepo as never,
     mocks.documentQueueService as never,
   );
-  Object.assign(service, mocks, { documentTaskService });
+  Object.assign(service, mocks, {
+    documentTaskService,
+    cancelledGraphIndexes: new Set<string>(),
+    pendingGraphIndexes: new Map<string, Promise<void>>(),
+  });
   return { service, mocks };
 }
 

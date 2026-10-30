@@ -1,0 +1,184 @@
+import { syntheticProvenance } from './common.mjs';
+
+export function makeOrganizationFixture() {
+  return {
+    version: 'private-sanitized-2026-06-30',
+    synthetic: true,
+    provenance: syntheticProvenance(),
+    departments: [
+      // Top level
+      { id: 'dept-exec', name: '高管团队', parentId: null },
+      // Business
+      { id: 'dept-sales', name: '销售部', parentId: null },
+      { id: 'dept-cs', name: '客户成功部', parentId: null },
+      { id: 'dept-product', name: '产品部', parentId: null },
+      // Enablement
+      { id: 'dept-hr', name: '人力资源部', parentId: null },
+      { id: 'dept-finance', name: '财务部', parentId: null },
+      { id: 'dept-legal', name: '法务部', parentId: null },
+      { id: 'dept-security', name: '安全部', parentId: null },
+      { id: 'dept-it', name: '信息技术部', parentId: null },
+      { id: 'dept-ops', name: '运维部', parentId: null },
+      { id: 'dept-admin', name: '行政部', parentId: null },
+      { id: 'dept-engineering', name: '研发部', parentId: null },
+      { id: 'dept-data', name: '数据平台部', parentId: null },
+      // Sub-departments
+      { id: 'dept-sales-east', name: '华东销售团队', parentId: 'dept-sales' },
+      { id: 'dept-sales-west', name: '西部销售团队', parentId: 'dept-sales' },
+      { id: 'dept-ops-sre', name: 'SRE 组', parentId: 'dept-ops' },
+      { id: 'dept-ops-noc', name: 'NOC 值班组', parentId: 'dept-ops' },
+      { id: 'dept-eng-frontend', name: '前端架构组', parentId: 'dept-engineering' },
+      { id: 'dept-eng-backend', name: '后端平台组', parentId: 'dept-engineering' },
+      { id: 'dept-eng-efficiency', name: '研发效能组', parentId: 'dept-engineering' },
+    ],
+    positions: [
+      { id: 'pos-ceo', name: 'CEO', departmentId: 'dept-exec' },
+      { id: 'pos-vp-sales', name: '销售 VP', departmentId: 'dept-sales' },
+      { id: 'pos-sales-dir', name: '销售总监', departmentId: 'dept-sales' },
+      { id: 'pos-vp-product', name: '产品 VP', departmentId: 'dept-product' },
+      { id: 'pos-pm-lead', name: 'PM 负责人', departmentId: 'dept-product' },
+      { id: 'pos-hr-owner', name: 'HR 负责人', departmentId: 'dept-hr' },
+      { id: 'pos-finance-owner', name: '财务负责人', departmentId: 'dept-finance' },
+      { id: 'pos-legal-owner', name: '法务负责人', departmentId: 'dept-legal' },
+      { id: 'pos-security-owner', name: '安全负责人', departmentId: 'dept-security' },
+      { id: 'pos-security-reviewer', name: '安全审批人', departmentId: 'dept-security' },
+      { id: 'pos-ciso', name: 'CISO', departmentId: 'dept-security' },
+      { id: 'pos-it-owner', name: 'IT 负责人', departmentId: 'dept-it' },
+      { id: 'pos-ops-owner', name: '运维负责人', departmentId: 'dept-ops' },
+      { id: 'pos-duty-manager', name: '值班经理', departmentId: 'dept-cs' },
+      { id: 'pos-cs-owner', name: '客户成功负责人', departmentId: 'dept-cs' },
+      { id: 'pos-procurement', name: '采购负责人', departmentId: 'dept-finance' },
+      { id: 'pos-admin-owner', name: '行政负责人', departmentId: 'dept-admin' },
+      { id: 'pos-rd-owner', name: '研发负责人', departmentId: 'dept-engineering' },
+      { id: 'pos-frontend-arch', name: '前端架构师', departmentId: 'dept-eng-frontend' },
+      { id: 'pos-backend-arch', name: '后端架构师', departmentId: 'dept-eng-backend' },
+      { id: 'pos-dev-efficiency', name: '研发效能负责人', departmentId: 'dept-eng-efficiency' },
+      { id: 'pos-data-owner', name: '数据负责人', departmentId: 'dept-data' },
+    ],
+    users: [
+      { id: '1', username: 'admin', departmentId: 'dept-finance', positionId: 'pos-finance-owner', roles: ['admin'] },
+      { id: '2', username: 'user', departmentId: 'dept-cs', positionId: 'pos-duty-manager', roles: ['user'] },
+      { id: '3', username: 'zhangsan', departmentId: 'dept-sales', positionId: 'pos-sales-dir', roles: ['user'] },
+      { id: '4', username: 'lisi', departmentId: 'dept-legal', positionId: 'pos-legal-owner', roles: ['knowledge-manager'] },
+      { id: '5', username: 'wangwu', departmentId: 'dept-it', positionId: 'pos-it-owner', roles: ['user'] },
+      { id: '6', username: 'zhaoliu', departmentId: 'dept-eng-frontend', positionId: 'pos-frontend-arch', roles: ['user', 'knowledge-manager'] },
+      { id: '7', username: 'sunqi', departmentId: 'dept-security', positionId: 'pos-security-reviewer', roles: ['security-auditor'] },
+      { id: '8', username: 'zhouba', departmentId: 'dept-data', positionId: 'pos-data-owner', roles: ['user'] },
+    ],
+    roles: [
+      { id: 'admin', name: '管理员', inherits: ['knowledge-manager', 'security-auditor'] },
+      { id: 'knowledge-manager', name: '知识库管理员', inherits: ['user'] },
+      { id: 'security-auditor', name: '安全审计员', inherits: ['user'] },
+      { id: 'user', name: '普通用户', inherits: [] },
+    ],
+    sourceSystem: {
+      name: 'Mock-OA-Directory',
+      syncMode: 'full-and-incremental',
+      primaryKey: 'id',
+      fields: [
+        'id',
+        'username',
+        'departmentId',
+        'positionId',
+        'roles',
+        'managerId',
+        'status',
+        'updatedAt',
+      ],
+    },
+    inheritanceRules: [
+      { type: 'department', rule: 'parent department grants are inherited by child departments unless explicitly denied' },
+      { type: 'role', rule: 'role grants include inherited roles recursively' },
+      { type: 'position', rule: 'position grants do not inherit across departments by default' },
+      { type: 'deny', rule: 'deny has higher priority than allow' },
+    ],
+    permissionEchoSamples: [
+      {
+        userId: '6',
+        docId: 'private-api-standard',
+        decision: 'allow',
+        matchedSubjects: [
+          { subjectType: 'department', subjectId: 'dept-engineering', inheritedBy: 'dept-eng-frontend' },
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+        ],
+      },
+      {
+        userId: '7',
+        docId: 'private-security-incident',
+        decision: 'allow',
+        matchedSubjects: [
+          { subjectType: 'role', subjectId: 'security-auditor' },
+          { subjectType: 'department', subjectId: 'dept-security' },
+        ],
+      },
+      {
+        userId: '2',
+        docId: 'private-legal-contract',
+        decision: 'deny',
+        matchedSubjects: [],
+      },
+    ],
+    permissionExpectations: [
+      {
+        docId: 'private-hr-travel-policy',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+          { subjectType: 'department', subjectId: 'dept-finance' },
+          { subjectType: 'department', subjectId: 'dept-hr' },
+        ],
+      },
+      {
+        docId: 'private-cs-sla-v2',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'user' },
+          { subjectType: 'department', subjectId: 'dept-cs' },
+          { subjectType: 'department', subjectId: 'dept-sales' },
+        ],
+      },
+      {
+        docId: 'private-legal-contract',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+          { subjectType: 'department', subjectId: 'dept-legal' },
+          { subjectType: 'department', subjectId: 'dept-finance' },
+        ],
+      },
+      {
+        docId: 'private-security-incident',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'security-auditor' },
+          { subjectType: 'department', subjectId: 'dept-security' },
+          { subjectType: 'department', subjectId: 'dept-ops' },
+        ],
+      },
+      {
+        docId: 'private-sales-deal',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'user' },
+          { subjectType: 'department', subjectId: 'dept-sales' },
+        ],
+      },
+      {
+        docId: 'private-api-standard',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'knowledge-manager' },
+          { subjectType: 'department', subjectId: 'dept-engineering' },
+        ],
+      },
+      {
+        docId: 'private-permission-matrix',
+        readableBy: [
+          { subjectType: 'role', subjectId: 'security-auditor' },
+          { subjectType: 'department', subjectId: 'dept-security' },
+        ],
+      },
+      {
+        docId: 'private-change-management',
+        readableBy: [
+          { subjectType: 'department', subjectId: 'dept-ops' },
+          { subjectType: 'department', subjectId: 'dept-engineering' },
+        ],
+      },
+    ],
+  };
+}
