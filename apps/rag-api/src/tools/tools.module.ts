@@ -10,6 +10,9 @@ import { AgentRuntimeEventsModule } from '../modules/agent-runtime-events/agent-
 import { RedisModule } from '../providers/redis/redis.module';
 import { ArtifactsModule } from '../modules/artifacts/artifacts.module';
 import { MetricsModule } from '../modules/metrics/metrics.module';
+import { McpModule } from '../providers/mcp/mcp.module';
+import { ToolExecutionReconciliationController } from './tool-execution-reconciliation.controller';
+import { ToolExecutionReconciliationService } from './tool-execution-reconciliation.service';
 
 @Module({
   imports: [
@@ -18,7 +21,9 @@ import { MetricsModule } from '../modules/metrics/metrics.module';
     ArtifactsModule,
     ImageIndexModule,
     MetricsModule,
+    McpModule,
   ],
+  controllers: [ToolExecutionReconciliationController],
   providers: [
     BochaSearchService,
     DashScopeRerankService,
@@ -26,6 +31,7 @@ import { MetricsModule } from '../modules/metrics/metrics.module';
     ImageSearchToolService,
     ToolExecutionPolicyService,
     ToolExecutionService,
+    ToolExecutionReconciliationService,
   ],
   exports: [
     BochaSearchService,

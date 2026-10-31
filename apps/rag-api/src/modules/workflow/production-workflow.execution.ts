@@ -231,6 +231,7 @@ export class ProductionWorkflowExecutionBase extends ProductionWorkflowRoleSuppo
       projectId: state.projectId,
       brief: this.revisionAwareBrief(state),
       userId: state.userId,
+      tenantId: state.tenantId,
       threadId: state.threadId,
       runId: state.runId || undefined,
       pluginKeys: state.pluginKeys,

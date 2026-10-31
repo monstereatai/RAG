@@ -93,16 +93,43 @@ export class LlmProvider implements ILLMProvider, OnModuleInit {
     const providerName = this.config.get<string>('llm.provider') ?? 'qwen';
     switch (providerName) {
       case 'qwen':
+        this.assertSelectedProviderApiKey(
+          'llm.qwen.apiKey',
+          'QWEN_API_KEY',
+          providerName,
+        );
         this.provider = this.qwenProvider;
         break;
       case 'deepseek':
+        this.assertSelectedProviderApiKey(
+          'llm.deepseek.apiKey',
+          'DEEPSEEK_API_KEY',
+          providerName,
+        );
         this.provider = this.deepseekProvider;
         break;
       case 'zhipu':
+        this.assertSelectedProviderApiKey(
+          'llm.zhipu.apiKey',
+          'ZHIPU_API_KEY or ZAI_API_KEY',
+          providerName,
+        );
         this.provider = this.zhipuProvider;
         break;
       default:
         throw new Error(`Unsupported LLM provider: ${providerName}`);
+    }
+  }
+
+  private assertSelectedProviderApiKey(
+    configPath: string,
+    envName: string,
+    providerName: string,
+  ): void {
+    if (!this.config.get<string>(configPath)?.trim()) {
+      throw new Error(
+        `${envName} is required when LLM_PROVIDER=${providerName}`,
+      );
     }
   }
 

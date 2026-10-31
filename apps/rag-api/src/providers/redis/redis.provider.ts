@@ -134,6 +134,32 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Persist the running state and its expiring active lease in one transaction. */
+  async acquireDurableExecutionRequired(
+    legacyKey: string,
+    stateKey: string,
+    leaseKey: string,
+    runningMarker: string,
+    leaseSeconds: number,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "if redis.call('exists', KEYS[1]) == 0 and redis.call('exists', KEYS[2]) == 0 and redis.call('exists', KEYS[3]) == 0 then redis.call('set', KEYS[2], ARGV[1]); redis.call('set', KEYS[3], ARGV[1], 'EX', ARGV[2]); return 1 end; return 0",
+        3,
+        legacyKey,
+        stateKey,
+        leaseKey,
+        runningMarker,
+        String(Math.max(1, Math.trunc(leaseSeconds))),
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
   async compareAndDeleteRequired(
     key: string,
     expectedValue: string,
@@ -147,6 +173,168 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
         expectedValue,
       );
       return Number(deleted) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** Transition a state only while its matching active lease is still held. */
+  async compareAndTransitionWithLeaseRequired(
+    stateKey: string,
+    leaseKey: string,
+    expectedState: string,
+    expectedLease: string,
+    nextState: string,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] and redis.call('get', KEYS[2]) == ARGV[2] then redis.call('set', KEYS[1], ARGV[3]); redis.call('del', KEYS[2]); return 1 end; return 0",
+        2,
+        stateKey,
+        leaseKey,
+        expectedState,
+        expectedLease,
+        nextState,
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** Atomically persist a durable terminal state and a time-limited result payload. */
+  async compareAndTransitionWithLeaseAndResultRequired(
+    stateKey: string,
+    leaseKey: string,
+    resultKey: string,
+    expectedState: string,
+    expectedLease: string,
+    nextState: string,
+    resultValue: string,
+    resultTtlSeconds: number,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] and redis.call('get', KEYS[2]) == ARGV[2] then redis.call('set', KEYS[1], ARGV[3]); redis.call('set', KEYS[3], ARGV[4], 'EX', ARGV[5]); redis.call('del', KEYS[2]); return 1 end; return 0",
+        3,
+        stateKey,
+        leaseKey,
+        resultKey,
+        expectedState,
+        expectedLease,
+        nextState,
+        resultValue,
+        String(Math.max(1, Math.trunc(resultTtlSeconds))),
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** CAS a state after its active lease has expired; never changes a live lease. */
+  async compareAndSetWithLeaseMissingRequired(
+    stateKey: string,
+    leaseKey: string,
+    receiptKey: string,
+    expectedState: string,
+    nextState: string,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] and redis.call('exists', KEYS[2]) == 0 and redis.call('exists', KEYS[3]) == 0 then redis.call('set', KEYS[1], ARGV[2]); return 1 end; return 0",
+        3,
+        stateKey,
+        leaseKey,
+        receiptKey,
+        expectedState,
+        nextState,
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** Write a terminal marker only while both state and lease are absent. */
+  async setStateIfMissingWithLeaseMissingRequired(
+    stateKey: string,
+    leaseKey: string,
+    receiptKey: string,
+    nextState: string,
+  ): Promise<boolean> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "if redis.call('exists', KEYS[1]) == 0 and redis.call('exists', KEYS[2]) == 0 and redis.call('exists', KEYS[3]) == 0 then redis.call('set', KEYS[1], ARGV[1]); return 1 end; return 0",
+        3,
+        stateKey,
+        leaseKey,
+        receiptKey,
+        nextState,
+      );
+      return Number(result) === 1;
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** Delete a matching expired state and write its release receipt atomically. */
+  async compareAndDeleteWithReceiptAndLeaseMissingRequired(
+    stateKey: string,
+    expectedState: string,
+    leaseKey: string,
+    receiptKey: string,
+    receiptValue: string,
+  ): Promise<'applied' | 'already_applied' | 'mismatch'> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "local current = redis.call('get', KEYS[1]); local lease = redis.call('exists', KEYS[2]); local receipt = redis.call('get', KEYS[3]); if current == ARGV[1] and lease == 0 and not receipt then redis.call('del', KEYS[1]); redis.call('set', KEYS[3], ARGV[2]); return 1 end; if not current and lease == 0 and receipt == ARGV[2] then return 2 end; return 0",
+        3,
+        stateKey,
+        leaseKey,
+        receiptKey,
+        expectedState,
+        receiptValue,
+      );
+      if (Number(result) === 1) return 'applied';
+      if (Number(result) === 2) return 'already_applied';
+      return 'mismatch';
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
+  /** Write a release receipt only while state and lease are both absent. */
+  async setReceiptIfStateAndLeaseMissingRequired(
+    stateKey: string,
+    leaseKey: string,
+    receiptKey: string,
+    receiptValue: string,
+  ): Promise<'applied' | 'already_applied' | 'mismatch'> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      const result = await this.client.eval(
+        "local state = redis.call('exists', KEYS[1]); local lease = redis.call('exists', KEYS[2]); local receipt = redis.call('get', KEYS[3]); if state == 0 and lease == 0 and not receipt then redis.call('set', KEYS[3], ARGV[1]); return 1 end; if state == 0 and lease == 0 and receipt == ARGV[1] then return 2 end; return 0",
+        3,
+        stateKey,
+        leaseKey,
+        receiptKey,
+        receiptValue,
+      );
+      if (Number(result) === 1) return 'applied';
+      if (Number(result) === 2) return 'already_applied';
+      return 'mismatch';
     } catch (err) {
       this.enabled = false;
       throw err;

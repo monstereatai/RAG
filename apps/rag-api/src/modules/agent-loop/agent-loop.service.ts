@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { RedisProvider } from '../../providers/redis/redis.provider';
+import { McpProvider } from '../../providers/mcp/mcp.provider';
 import { ToolExecutionService } from '../../tools/tool-execution.service';
 import type {
   AgentLoopDecision,
@@ -28,6 +29,7 @@ export class AgentLoopService {
     private readonly tools: ToolExecutionService,
     private readonly events: AgentRuntimeEventsService,
     private readonly redis: RedisProvider,
+    @Optional() private readonly mcpProvider?: McpProvider,
   ) {}
 
   /**
@@ -128,7 +130,13 @@ export class AgentLoopService {
         decision = await this.withTimeout(
           (signal) =>
             Promise.resolve(
-              input.decide(state, { step, toolCalls, remainingMs, signal }),
+              input.decide(state, {
+                step,
+                toolCalls,
+                remainingMs,
+                signal,
+                mcpTools: this.mcpProvider?.getMcpTools(input.tenantId) ?? [],
+              }),
             ),
           remainingMs,
           'Agent Loop decision',
@@ -233,6 +241,17 @@ export class AgentLoopService {
             execution.error ?? `${decision.name} 被阻断`,
           );
         }
+        if (execution.status === 'unknown') {
+          return this.finish(
+            input,
+            state,
+            step,
+            toolCalls,
+            'blocked',
+            execution.error ??
+              `${decision.name} 的副作用结果未知，已停止后续动作；查询执行结果并人工确认后再继续。`,
+          );
+        }
         if (execution.status === 'failed' || execution.output === undefined) {
           return this.finish(
             input,
@@ -316,6 +335,7 @@ export class AgentLoopService {
           ownerUserId: action.ownerUserId,
           mode: action.mode,
           role: action.role,
+          tenantId: input.tenantId,
           pluginKeys: action.pluginKeys,
           allowedToolNames: action.allowedToolNames,
           input: action.input,
@@ -325,7 +345,15 @@ export class AgentLoopService {
           sideEffect: action.sideEffect,
           createOutputArtifact: !action.preserveFullOutput,
           signal,
-          execute: (toolSignal) => action.execute(toolSignal),
+          execute: (toolSignal) =>
+            this.mcpProvider?.hasAgentTool(action.name, input.tenantId)
+              ? this.mcpProvider.invokeTool(
+                  action.name,
+                  action.input,
+                  toolSignal,
+                  input.tenantId,
+                )
+              : action.execute(toolSignal),
         }),
       remainingMs,
       action.name,
@@ -422,6 +450,7 @@ export class AgentLoopService {
   ) {
     try {
       await this.events.emit({
+        tenantId: input.tenantId?.trim() || 'legacy',
         threadId: input.threadId,
         runId: input.runId,
         eventType,

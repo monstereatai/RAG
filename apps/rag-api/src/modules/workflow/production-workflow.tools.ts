@@ -73,6 +73,7 @@ export interface ProductionRoleToolContext {
   projectId: string;
   brief: string;
   userId: string;
+  tenantId?: string;
   threadId?: string;
   runId?: string;
   pluginKeys?: string[];
@@ -105,6 +106,7 @@ export class ProductionWorkflowTools {
     const authorization = this.toolPolicy.decide(tool, {
       mode: 'production',
       role,
+      tenantId: context.tenantId,
       pluginKeys: context.pluginKeys,
       allowedToolNames: context.pluginTools,
     });
@@ -126,12 +128,15 @@ export class ProductionWorkflowTools {
     const query = `${context.brief}\n请检索与${ROLE_SEARCH_FOCUS[role]}直接相关、当前有效且可引用的证据。`;
     try {
       type GatherLoopState = {
-        retrieval?: Awaited<ReturnType<RagRetrievalCapability['retrieveDetailed']>>;
+        retrieval?: Awaited<
+          ReturnType<RagRetrievalCapability['retrieveDetailed']>
+        >;
       };
       const loop = await this.agentLoop.run<GatherLoopState, GatherLoopState>({
         threadId: context.threadId ?? `production:${context.projectId}`,
         runId: context.runId,
         actor: role,
+        tenantId: context.tenantId,
         initialState: {},
         maxSteps: 2,
         maxToolCalls: policy.maxCalls,

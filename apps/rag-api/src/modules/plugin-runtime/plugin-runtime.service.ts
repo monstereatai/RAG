@@ -2,11 +2,13 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { PlatformPluginEntity } from '../../providers/db/entities/platform-plugin.entity';
+import { McpProvider } from '../../providers/mcp/mcp.provider';
 import {
   BUILTIN_PLUGIN_MANIFESTS,
   isKnownTool,
@@ -25,6 +27,7 @@ export class PluginRuntimeService {
   constructor(
     @InjectRepository(PlatformPluginEntity)
     private readonly pluginRepo: Repository<PlatformPluginEntity>,
+    @Optional() private readonly mcpProvider?: McpProvider,
   ) {}
 
   async list(): Promise<PluginManifest[]> {
@@ -81,6 +84,7 @@ export class PluginRuntimeService {
     keys: string[] | undefined,
     mode: PluginMode,
     fallbackKeys: string[] = [],
+    tenantId?: string,
   ): Promise<{
     pluginKeys: string[];
     toolNames: string[];
@@ -123,7 +127,19 @@ export class PluginRuntimeService {
       selected.set(key, manifest);
     };
     requested.forEach((key) => visit(key));
-    const manifests = [...selected.values()];
+    const manifests = [...selected.values()].map((manifest) => ({
+      ...manifest,
+      tools: manifest.tools.flatMap((tool) =>
+        tool === 'mcp_tools'
+          ? (this.mcpProvider?.getMcpTools(tenantId) ?? []).map(
+              (mcpTool) => mcpTool.name,
+            )
+          : this.mcpProvider?.getToolPolicy(tool)?.tenantScope === 'tenant' &&
+              !tenantId?.trim()
+            ? []
+            : [tool],
+      ),
+    }));
     const selectedKeys = new Set(manifests.map((item) => item.key));
     manifests.forEach((manifest) => {
       const conflict = (manifest.conflicts ?? []).find((item) =>
@@ -134,7 +150,7 @@ export class PluginRuntimeService {
           `插件 ${manifest.key} 与 ${conflict} 不能同时启用。`,
         );
       const incompatibleTool = manifest.tools.find(
-        (tool) => !isToolAllowedInMode(tool, mode),
+        (tool) => !this.isToolAllowedInMode(tool, mode),
       );
       if (incompatibleTool)
         throw new BadRequestException(
@@ -157,7 +173,9 @@ export class PluginRuntimeService {
     const version = String(input.version ?? '1.0.0').trim();
     const modes = this.asModes(input.modes);
     const tools = this.asStrings(input.tools);
-    const unknown = tools.find((tool) => !isKnownTool(tool));
+    const unknown = tools.find(
+      (tool) => !isKnownTool(tool) && !this.mcpProvider?.getToolPolicy(tool),
+    );
     if (unknown)
       throw new BadRequestException(
         `工具 ${unknown} 尚未在 Tool Registry 注册，不能被插件引用。`,
@@ -221,6 +239,14 @@ export class PluginRuntimeService {
   private identity(item: Pick<PluginManifest, 'key' | 'version'>) {
     return `${item.key}@${item.version}`;
   }
+
+  private isToolAllowedInMode(toolName: string, mode: PluginMode): boolean {
+    if (isToolAllowedInMode(toolName, mode)) return true;
+    return (
+      this.mcpProvider?.getToolPolicy(toolName)?.modes.includes(mode) ?? false
+    );
+  }
+
   private parseJson<T>(value: string, fallback: T): T {
     try {
       return JSON.parse(value) as T;

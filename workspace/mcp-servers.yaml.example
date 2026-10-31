@@ -3,9 +3,22 @@ mcpServers:
     transport: stdio
     command: node
     args:
-      - /absolute/path/to/RAG/backend/scripts/mcp-smoke-server.mjs
+      - /absolute/path/to/RAG/apps/rag-api/scripts/mcp-smoke-server.mjs
 
   # SSE 传输协议示例：
   # weather-server:
   #   transport: sse
   #   url: http://localhost:3011/sse
+# Tenant scoped tools require trusted AgentLoop tenant context and a tool schema
+# with a tenantId field. This app only injects tenantId; it does not verify the
+# remote MCP server's ACL. The server must independently validate the tenant.
+mcpToolPolicies:
+  mcp__rag-smoke-mcp__rag_smoke_status:
+    tenantScope: global
+    permission: read
+    risk: low
+    requiresApproval: false
+    modes:
+      - agentic
+      - production
+    timeoutMs: 10000

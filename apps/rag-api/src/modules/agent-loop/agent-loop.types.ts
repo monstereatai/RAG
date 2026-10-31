@@ -1,4 +1,5 @@
 import type { ToolApprovalPolicy } from '../../tools/tool-execution.service';
+import type { McpToolView } from '../../providers/mcp/mcp.provider';
 
 export type AgentLoopStatus =
   | 'completed'
@@ -55,6 +56,8 @@ export interface AgentLoopInput<TState, TOutput> {
   timeoutMs: number;
   checkpointTtlSeconds?: number;
   signal?: AbortSignal;
+  /** Must come from authenticated server context; never accept this value from model tool input. */
+  tenantId?: string;
   decide: (
     state: TState,
     context: {
@@ -62,6 +65,7 @@ export interface AgentLoopInput<TState, TOutput> {
       toolCalls: number;
       remainingMs: number;
       signal: AbortSignal;
+      mcpTools: McpToolView[];
     },
   ) =>
     | Promise<AgentLoopDecision<TState, TOutput>>

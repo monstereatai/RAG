@@ -8,7 +8,22 @@ import {
   ToolExecutionPolicyService,
   type ToolExecutionContext,
 } from './tool-execution-policy.service';
-import { toolRegistry } from './tool-registry';
+import { toolRegistry, type ToolRegistryEntry } from './tool-registry';
+
+type ToolIdempotencyInfo = {
+  legacyKey: string;
+  legacyRedisKey: string;
+  redisKey: string;
+  leaseKey: string;
+  resultKey: string;
+  keyRef: string;
+  scopeFingerprint: string;
+  fingerprint: string;
+  runningMarker: string;
+  unknownMarker: string;
+  completedPrefix: string;
+  completedWritePrefix: string;
+};
 
 export type ToolApprovalPolicy = 'auto' | 'required' | 'risk_based';
 export type ToolExecutionStatus =
@@ -132,8 +147,35 @@ export class ToolExecutionService {
     const callId = randomUUID();
     const startedAt = Date.now();
     const actor = input.actor ?? input.role ?? input.mode;
+    const tenantId = input.tenantId?.trim() || 'legacy';
     const decision = this.policy.decide(input.toolName, input);
+    const idempotency = this.idempotencyInfo(
+      input,
+      callId,
+      decision.entry?.permission,
+    );
+    const hasSideEffect = Boolean(idempotency);
+    let legacyMarkerCheck: 'clear' | 'present' | 'unavailable' | 'not_checked' =
+      'not_checked';
+    if (
+      decision.allowed &&
+      decision.entry?.permission === 'write' &&
+      idempotency
+    ) {
+      try {
+        legacyMarkerCheck =
+          (await this.redis.getRequired(idempotency.legacyRedisKey)) === null
+            ? 'clear'
+            : 'present';
+      } catch {
+        legacyMarkerCheck = 'unavailable';
+      }
+    }
+    const finish = (
+      result: Omit<RegisteredToolExecution<T>, 'callId' | 'durationMs'>,
+    ) => this.finish(input, callId, actor, startedAt, result, idempotency);
     await this.events.emit({
+      tenantId,
       threadId: input.threadId,
       runId: input.runId,
       eventType: 'tool.call',
@@ -142,18 +184,22 @@ export class ToolExecutionService {
       payload: {
         callId,
         input: this.summarize(input.input),
-        sideEffect: Boolean(input.sideEffect),
-        idempotencyKey: input.idempotencyKey ?? null,
+        sideEffect: hasSideEffect,
+        permission: decision.entry?.permission ?? null,
+        legacyMarkerCheck,
+        idempotencyKeyRef: idempotency?.keyRef,
+        idempotencyScopeFingerprint: idempotency?.scopeFingerprint,
+        idempotencyFingerprint: idempotency?.fingerprint,
       },
     });
     if (!decision.allowed) {
-      return this.finish(input, callId, actor, startedAt, {
+      return finish({
         status: 'blocked',
         error: decision.reason,
       });
     }
     if (input.sideEffect && decision.entry?.permission !== 'write') {
-      return this.finish(input, callId, actor, startedAt, {
+      return finish({
         status: 'blocked',
         error:
           '工具调用声明了写入副作用，但注册权限不是 write，按默认拒绝策略阻断。',
@@ -162,9 +208,11 @@ export class ToolExecutionService {
 
     if (decision.requiresApproval) {
       const autoApproval =
-        input.approvalPolicy === 'auto' ? decision.entry?.autoApproval : undefined;
+        input.approvalPolicy === 'auto'
+          ? decision.entry?.autoApproval
+          : undefined;
       if (input.approvalPolicy === 'auto' && !autoApproval) {
-        return this.finish(input, callId, actor, startedAt, {
+        return finish({
           status: 'blocked',
           error: '该工具未加入自动批准白名单，必须经过明确审批。',
         });
@@ -172,6 +220,7 @@ export class ToolExecutionService {
 
       if (autoApproval) {
         await this.events.emit({
+          tenantId,
           threadId: input.threadId,
           runId: input.runId,
           eventType: 'approval.auto_granted',
@@ -192,6 +241,7 @@ export class ToolExecutionService {
           Boolean(input.approvalGrantedBy?.trim());
         const approvalId = randomUUID();
         await this.events.emit({
+          tenantId,
           threadId: input.threadId,
           runId: input.runId,
           eventType: 'approval.asked',
@@ -204,6 +254,7 @@ export class ToolExecutionService {
           },
         });
         await this.events.emit({
+          tenantId,
           threadId: input.threadId,
           runId: input.runId,
           eventType: 'approval.decided',
@@ -217,7 +268,7 @@ export class ToolExecutionService {
           },
         });
         if (!approved) {
-          return this.finish(input, callId, actor, startedAt, {
+          return finish({
             status: 'blocked',
             error: '该写入型工具没有可验证的审批人，系统按拒绝优先策略未执行。',
           });
@@ -227,22 +278,39 @@ export class ToolExecutionService {
 
     // 写入型工具必须依赖 Redis 的跨实例幂等锁。Redis 不可用时无法区分
     // “尚未执行”和“已执行但结果丢失”，继续执行会把未知副作用放大成重复写入。
-    if (input.sideEffect && !this.redis.isEnabled()) {
-      return this.finish(input, callId, actor, startedAt, {
+    if (hasSideEffect && !this.redis.isEnabled()) {
+      return finish({
         status: 'blocked',
         error: '幂等存储不可用，写入型工具按安全策略暂不执行。',
       });
     }
 
-    const idempotencyKey = input.sideEffect
-      ? (input.idempotencyKey ?? this.fingerprint(input))
-      : undefined;
-    const redisKey = idempotencyKey
-      ? `tool-execution:${idempotencyKey}`
-      : undefined;
+    if (idempotency && legacyMarkerCheck !== 'clear') {
+      return finish({
+        status: 'blocked',
+        error:
+          legacyMarkerCheck === 'present'
+            ? '检测到旧版未分 scope 的幂等锁；为避免跨租户复用结果，本次调用已阻断。'
+            : '旧版幂等锁状态无法确认，本次写入按安全策略阻断。',
+      });
+    }
+
+    const redisKey = idempotency?.redisKey;
     if (redisKey) {
       const idempotencyLookupStartedAt = process.hrtime.bigint();
-      const previous = await this.redis.get(redisKey);
+      let previous: string | null;
+      let legacyMarker: string | null;
+      let activeLease: string | null;
+      try {
+        legacyMarker = await this.redis.getRequired(idempotency.legacyRedisKey);
+        previous = await this.redis.getRequired(redisKey);
+        activeLease = await this.redis.getRequired(idempotency.leaseKey);
+      } catch {
+        return finish({
+          status: 'blocked',
+          error: '幂等状态无法确认，本次写入按安全策略阻断。',
+        });
+      }
       this.metricsService?.observeCacheOperation(
         'tool_idempotency',
         'get',
@@ -250,16 +318,81 @@ export class ToolExecutionService {
       );
       this.metricsService?.observeCacheRequest(
         'tool_idempotency',
-        Boolean(previous?.startsWith('completed:')),
+        Boolean(
+          previous?.startsWith(idempotency.completedPrefix) &&
+          activeLease === null,
+        ),
       );
-      if (previous?.startsWith('completed:')) {
+      if (legacyMarker !== null) {
+        return finish({
+          status: 'blocked',
+          error:
+            '检测到旧版未分 scope 的幂等锁；为避免跨租户复用结果，本次调用已阻断。',
+        });
+      }
+      if (
+        previous?.startsWith(idempotency.completedPrefix) &&
+        activeLease === null
+      ) {
         let output: T | undefined;
-        try {
-          output = JSON.parse(previous.slice('completed:'.length)) as T;
-        } catch {
-          /* 已有旧格式结果只保留恢复审计。 */
+        const metadata = previous.slice(idempotency.completedPrefix.length);
+        const callFingerprint = metadata.slice(0, 64);
+        if (/^[0-9a-f]{64}$/i.test(callFingerprint) && metadata[64] === ':') {
+          const resultState = metadata.slice(65);
+          if (resultState === 'unavailable') {
+            return finish({
+              status: 'recovered',
+              recovered: true,
+              error:
+                '该幂等键的写入已完成，但结果超过持久化上限或无法序列化；为避免重复副作用，不会重跑工具。',
+              outputPreview: '检测到相同幂等键已完成，结果无法恢复。',
+            });
+          }
+          if (resultState !== 'stored') {
+            return finish({
+              status: 'blocked',
+              error: '完成标记的结果状态无效，按安全策略阻断。',
+            });
+          }
+          let serializedOutput: string | null;
+          try {
+            serializedOutput = await this.redis.getRequired(
+              idempotency.resultKey,
+            );
+          } catch {
+            return finish({
+              status: 'blocked',
+              error:
+                '该幂等键的写入已完成，但结果读取失败；为避免重复副作用，不会重跑工具。',
+              outputPreview: '检测到相同幂等键已完成，结果无法恢复。',
+            });
+          }
+          if (serializedOutput === null) {
+            return finish({
+              status: 'recovered',
+              recovered: true,
+              error:
+                '该幂等键的写入已完成，但临时结果已过期；为避免重复副作用，不会重跑工具。',
+              outputPreview: '检测到相同幂等键已完成，结果已过期。',
+            });
+          }
+          try {
+            output = JSON.parse(serializedOutput) as T;
+          } catch {
+            return finish({
+              status: 'blocked',
+              error:
+                '该幂等键的写入已完成，但持久化结果无法解析；为避免重复副作用，不会重跑工具。',
+              outputPreview: '检测到相同幂等键已完成，结果无法恢复。',
+            });
+          }
+        } else {
+          return finish({
+            status: 'blocked',
+            error: '完成标记缺少匹配的调用指纹，按安全策略阻断。',
+          });
         }
-        return this.finish(input, callId, actor, startedAt, {
+        return finish({
           status: 'recovered',
           output,
           contextOutput:
@@ -270,15 +403,31 @@ export class ToolExecutionService {
           outputPreview: '检测到相同幂等键已完成，未重复执行写入操作。',
         });
       }
-      const locked = await this.redis.setIfAbsent(
-        redisKey,
-        'running',
-        ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
-      );
-      if (!locked && this.redis.isEnabled()) {
-        return this.finish(input, callId, actor, startedAt, {
+      if (previous !== null || activeLease !== null) {
+        return finish({
           status: 'blocked',
           error: '相同幂等键的操作正在执行或结果未知，需查询结果后再继续。',
+        });
+      }
+      let locked: boolean;
+      try {
+        locked = await this.redis.acquireDurableExecutionRequired(
+          idempotency.legacyRedisKey,
+          redisKey,
+          idempotency.leaseKey,
+          idempotency.runningMarker,
+          ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
+        );
+      } catch {
+        return finish({
+          status: 'blocked',
+          error: '幂等锁无法确认，本次写入按安全策略阻断。',
+        });
+      }
+      if (!locked) {
+        return finish({
+          status: 'blocked',
+          error: '相同幂等键的操作正在执行或结果未知，需人工核验后再继续。',
         });
       }
     }
@@ -291,18 +440,44 @@ export class ToolExecutionService {
         input.signal,
       );
       if (redisKey) {
-        const markerWritten = await this.redis.setRequired(
-          redisKey,
-          `completed:${this.toText(output).slice(0, 20_000)}`,
-          ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
-        );
+        let markerWritten = false;
+        try {
+          const serializedOutput = this.serializeIdempotentOutput(output);
+          markerWritten =
+            await this.redis.compareAndTransitionWithLeaseAndResultRequired(
+              redisKey,
+              idempotency.leaseKey,
+              idempotency.resultKey,
+              idempotency.runningMarker,
+              idempotency.runningMarker,
+              `${idempotency.completedWritePrefix}${serializedOutput === undefined ? 'unavailable' : 'stored'}`,
+              serializedOutput ?? 'unavailable',
+              ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
+            );
+        } catch {
+          markerWritten = false;
+        }
         if (!markerWritten) {
-          return this.finish(input, callId, actor, startedAt, {
+          let unknownMarkerWritten = false;
+          try {
+            unknownMarkerWritten =
+              await this.redis.compareAndTransitionWithLeaseRequired(
+                redisKey,
+                idempotency.leaseKey,
+                idempotency.runningMarker,
+                idempotency.runningMarker,
+                idempotency.unknownMarker,
+              );
+          } catch {
+            unknownMarkerWritten = false;
+          }
+          return finish({
             status: 'unknown',
             output,
             contextOutput: this.toContextOutput(output, this.toText(output)),
-            error:
-              '副作用已经执行，但幂等完成标记未确认；结果状态未知，禁止自动重试。',
+            error: unknownMarkerWritten
+              ? '副作用已经执行，但幂等完成标记未确认；结果状态未知，禁止自动重试。'
+              : '副作用已经执行，但幂等完成标记和 unknown 锁都未确认；先核验副作用结果，当前运行锁或其他状态未被覆盖。',
             outputPreview: this.toText(output).slice(
               0,
               ToolExecutionService.OUTPUT_PREVIEW_LIMIT,
@@ -316,7 +491,7 @@ export class ToolExecutionService {
         output,
         input.createOutputArtifact !== false,
       );
-      return this.finish(input, callId, actor, startedAt, {
+      return finish({
         status: 'success',
         output,
         contextOutput: spilled.contextOutput,
@@ -324,13 +499,29 @@ export class ToolExecutionService {
         outputArtifactId: spilled.artifactId,
       });
     } catch (error) {
-      if (redisKey)
-        await this.redis.set(
-          redisKey,
-          'unknown',
-          ToolExecutionService.IDEMPOTENCY_TTL_SECONDS,
-        );
-      return this.finish(input, callId, actor, startedAt, {
+      if (redisKey && idempotency) {
+        let unknownMarkerWritten = false;
+        try {
+          unknownMarkerWritten =
+            await this.redis.compareAndTransitionWithLeaseRequired(
+              redisKey,
+              idempotency.leaseKey,
+              idempotency.runningMarker,
+              idempotency.runningMarker,
+              idempotency.unknownMarker,
+            );
+        } catch {
+          unknownMarkerWritten = false;
+        }
+        const reason = error instanceof Error ? error.message : String(error);
+        return finish({
+          status: 'unknown',
+          error: unknownMarkerWritten
+            ? `写入型工具调用失败，副作用状态未知；已禁止自动重试。${reason}`
+            : `写入型工具调用失败，持久 running 状态未被覆盖；lease 过期后需人工核验。${reason}`,
+        });
+      }
+      return finish({
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
       });
@@ -343,9 +534,11 @@ export class ToolExecutionService {
     actor: string,
     startedAt: number,
     result: Omit<RegisteredToolExecution<T>, 'callId' | 'durationMs'>,
+    idempotency?: ToolIdempotencyInfo,
   ): Promise<RegisteredToolExecution<T>> {
     const finalized = { ...result, callId, durationMs: Date.now() - startedAt };
     await this.events.emit({
+      tenantId: input.tenantId?.trim() || 'legacy',
       threadId: input.threadId,
       runId: input.runId,
       eventType:
@@ -366,6 +559,9 @@ export class ToolExecutionService {
         outputPreview: result.outputPreview,
         outputArtifactId: result.outputArtifactId,
         recovered: result.recovered ?? false,
+        idempotencyKeyRef: idempotency?.keyRef,
+        idempotencyScopeFingerprint: idempotency?.scopeFingerprint,
+        idempotencyFingerprint: idempotency?.fingerprint,
       },
     });
     return finalized;
@@ -440,12 +636,61 @@ export class ToolExecutionService {
       .digest('hex');
   }
 
+  private idempotencyInfo(
+    input: ExecuteRegisteredToolInput<unknown>,
+    callId: string,
+    effectivePermission?: ToolRegistryEntry['permission'],
+  ): ToolIdempotencyInfo | undefined {
+    const entry = toolRegistry.find((item) => item.name === input.toolName);
+    if (
+      !input.sideEffect &&
+      (effectivePermission ?? entry?.permission) !== 'write'
+    ) {
+      return undefined;
+    }
+    const legacyKey = input.idempotencyKey ?? this.fingerprint(input);
+    const keyRef = createHash('sha256').update(legacyKey).digest('hex');
+    const tenantId = input.tenantId?.trim() || 'legacy';
+    const scopeFingerprint = createHash('sha256')
+      .update(`${tenantId}\0${input.threadId}\0${input.toolName}\0${keyRef}`)
+      .digest('hex');
+    const fingerprint = createHash('sha256')
+      .update(
+        `${tenantId}\0${input.threadId}\0${input.runId ?? ''}\0${callId}\0${input.toolName}\0${keyRef}`,
+      )
+      .digest('hex');
+    const completedPrefix = `completed:${scopeFingerprint}:`;
+    return {
+      legacyKey,
+      legacyRedisKey: `tool-execution:${legacyKey}`,
+      redisKey: `tool-execution:scope:{${scopeFingerprint}}:state`,
+      leaseKey: `tool-execution:scope:{${scopeFingerprint}}:lease`,
+      resultKey: `tool-execution:scope:{${scopeFingerprint}}:result`,
+      keyRef,
+      scopeFingerprint,
+      fingerprint,
+      runningMarker: `running:${scopeFingerprint}:${fingerprint}:${callId}`,
+      unknownMarker: `unknown:${scopeFingerprint}:${fingerprint}:${callId}`,
+      completedPrefix,
+      completedWritePrefix: `${completedPrefix}${fingerprint}:`,
+    };
+  }
+
   private toText(value: unknown): string {
     if (typeof value === 'string') return value;
     try {
       return JSON.stringify(value) ?? '';
     } catch {
       return String(value);
+    }
+  }
+
+  private serializeIdempotentOutput(value: unknown): string | undefined {
+    try {
+      const serialized = JSON.stringify(value);
+      return serialized && serialized.length <= 20_000 ? serialized : undefined;
+    } catch {
+      return undefined;
     }
   }
 }

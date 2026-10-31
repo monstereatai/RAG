@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { McpProvider } from '../providers/mcp/mcp.provider';
 import { toolRegistry, type ToolRegistryEntry } from './tool-registry';
 
 export interface ToolExecutionContext {
   mode: 'simple' | 'auto' | 'agentic' | 'production';
   role?: string;
+  tenantId?: string;
   /** 工作流插件组合解析后的工具白名单；未传时保持既有 Tool Registry 默认行为。 */
   allowedToolNames?: string[];
   pluginKeys?: string[];
@@ -18,13 +20,40 @@ export interface ToolPolicyDecision {
 
 @Injectable()
 export class ToolExecutionPolicyService {
+  constructor(@Optional() private readonly mcpProvider?: McpProvider) {}
+
   decide(toolName: string, context: ToolExecutionContext): ToolPolicyDecision {
-    const entry = toolRegistry.find((item) => item.name === toolName);
+    if (toolName === 'mcp_tools') {
+      return {
+        allowed: false,
+        requiresApproval: false,
+        reason:
+          'mcp_tools 是插件能力占位符，不是可执行工具；必须选择带独立策略的 MCP 工具别名。',
+      };
+    }
+    const entry =
+      toolRegistry.find((item) => item.name === toolName) ??
+      this.mcpProvider?.getToolPolicy(toolName);
     if (!entry) {
       return {
         allowed: false,
         requiresApproval: false,
         reason: '工具未在 Tool Registry 注册，按默认拒绝策略阻断。',
+      };
+    }
+    if (
+      entry.source === 'mcp' &&
+      (entry.tenantScope === undefined ||
+        (entry.tenantScope === 'tenant' && !context.tenantId?.trim()))
+    ) {
+      return {
+        allowed: false,
+        entry,
+        requiresApproval: false,
+        reason:
+          entry.tenantScope === 'tenant'
+            ? `MCP 工具 ${toolName} 需要可信 tenantId，当前上下文未提供。`
+            : `MCP 工具 ${toolName} 缺少有效 tenantScope，按默认拒绝策略阻断。`,
       };
     }
     if (!Number.isFinite(entry.timeoutMs) || entry.timeoutMs <= 0) {
@@ -71,8 +100,8 @@ export class ToolExecutionPolicyService {
       // 写权限和高风险标签都必须经过审批；即使未来漏配 requiresApproval 也默认保护。
       requiresApproval: Boolean(
         entry.requiresApproval ||
-          entry.permission === 'write' ||
-          entry.risk === 'high',
+        entry.permission === 'write' ||
+        entry.risk === 'high',
       ),
       reason:
         entry.requiresApproval ||

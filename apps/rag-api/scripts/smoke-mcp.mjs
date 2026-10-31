@@ -1,20 +1,28 @@
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { MultiServerMCPClient } from '@langchain/mcp-adapters';
 
 const configPath = resolve(
-  process.env.MCP_CONFIG_PATH ?? '../workspace/mcp-servers.yaml',
+  process.env.MCP_CONFIG_PATH ??
+    fileURLToPath(
+      new URL('../../../workspace/mcp-servers.yaml', import.meta.url),
+    ),
 );
 const config = yaml.load(await readFile(configPath, 'utf8'));
 const client = new MultiServerMCPClient({
   mcpServers: config?.mcpServers ?? {},
+  prefixToolNameWithServerName: true,
+  additionalToolNamePrefix: 'mcp',
 });
 
 try {
   const tools = await client.getTools();
   const toolNames = tools.map((tool) => tool.name).sort();
-  const statusTool = tools.find((tool) => tool.name === 'rag_smoke_status');
+  const statusTool = tools.find(
+    (tool) => tool.name === 'mcp__rag-smoke-mcp__rag_smoke_status',
+  );
   const statusResult = statusTool ? await statusTool.invoke({}) : undefined;
 
   console.log(

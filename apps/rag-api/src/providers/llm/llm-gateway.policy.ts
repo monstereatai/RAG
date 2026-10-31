@@ -62,7 +62,9 @@ export class LlmGatewayPolicy {
         : primary === 'qwen'
           ? 'deepseek'
           : 'qwen';
-    return fallback === primary ? null : fallback;
+    if (fallback === primary) return null;
+    const apiKey = this.config.get<string>(`llm.${fallback}.apiKey`);
+    return apiKey?.trim() ? fallback : null;
   }
 
   private number(key: string, fallback: number): number {
