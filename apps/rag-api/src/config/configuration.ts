@@ -96,7 +96,7 @@ export const configuration = () => ({
     pgvector: {
       url:
         process.env.PGVECTOR_URL ??
-        'postgresql://postgres:postgres@localhost:5432/rag',
+        'postgresql://postgres:postgres@localhost:5433/rag',
       tableName: process.env.PGVECTOR_TABLE ?? 'rag_chunks',
     },
   },
@@ -107,7 +107,7 @@ export const configuration = () => ({
     postgres: {
       url:
         process.env.POSTGRES_URL ??
-        'postgresql://postgres:postgres@localhost:5432/rag',
+        'postgresql://postgres:postgres@localhost:5433/rag',
     },
     mysql: {
       url: process.env.MYSQL_URL ?? 'mysql://root:root@localhost:3306/rag',

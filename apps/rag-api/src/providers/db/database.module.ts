@@ -75,7 +75,7 @@ import {
 
         const url = isPostgres
           ? (config.get<string>('relationalDb.postgres.url') ??
-            'postgresql://postgres:postgres@localhost:5432/rag')
+            'postgresql://postgres:postgres@localhost:5433/rag')
           : (config.get<string>('relationalDb.mysql.url') ??
             'mysql://root:root@localhost:3306/rag');
 

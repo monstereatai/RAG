@@ -74,7 +74,7 @@ const isPostgres = provider !== 'mysql';
 
 const url = isPostgres
   ? (process.env.POSTGRES_URL ??
-    'postgresql://postgres:postgres@localhost:5432/rag')
+    'postgresql://postgres:postgres@localhost:5433/rag')
   : (process.env.MYSQL_URL ?? 'mysql://root:root@localhost:3306/rag');
 
 export default new DataSource({
