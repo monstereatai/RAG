@@ -401,21 +401,27 @@ export class ElasticsearchProvider
     try {
       const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
       if (_userId) filter.push({ term: { userId: _userId } });
-      await this.client.deleteByQuery({
-        index: this.indexName,
-        query: { bool: { filter } },
-      }, { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS });
+      await this.client.deleteByQuery(
+        {
+          index: this.indexName,
+          query: { bool: { filter } },
+        },
+        { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+      );
       if (_userId) {
         await this.client
-          .deleteByQuery({
-            index: this.documentIndexName,
-            query: {
-              bool: {
-                filter: [{ term: { docId } }, { term: { userId: _userId } }],
+          .deleteByQuery(
+            {
+              index: this.documentIndexName,
+              query: {
+                bool: {
+                  filter: [{ term: { docId } }, { term: { userId: _userId } }],
+                },
               },
+              refresh: true,
             },
-            refresh: true,
-          }, { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS })
+            { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+          )
           .catch(() => undefined);
       } else {
         await this.client

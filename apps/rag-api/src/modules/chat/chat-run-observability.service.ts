@@ -197,9 +197,7 @@ export class ChatRunObservabilityService {
         shortTermSummaryCompaction: getPromptVersion(
           'memory.summary_compaction',
         ),
-        shortTermSummaryRecovery: getPromptVersion(
-          'memory.summary_recovery',
-        ),
+        shortTermSummaryRecovery: getPromptVersion('memory.summary_recovery'),
       },
       promptPath: {
         routeMode: input.mode,

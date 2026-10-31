@@ -4,11 +4,11 @@ import {
   type RagRetrievalCapability,
 } from '../../rag/contracts/rag-capabilities';
 import { VectorStoreProvider } from '../../providers/vector-store/vector-store.provider';
-import { Public } from '../../common/decorators/public.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
 import { UseGuards } from '@nestjs/common';
+import type { JwtPayload } from '../../common/interfaces/api-response.interface';
 
-@Public()
 @UseGuards(DevOnlyGuard)
 @Controller('debug')
 export class DebugController {
@@ -19,12 +19,16 @@ export class DebugController {
   ) {}
 
   @Get('chunks')
-  async debugChunks(@Query('query') query: string, @Query('k') k?: string) {
+  async debugChunks(
+    @Query('query') query: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('k') k?: string,
+  ) {
     if (!query) {
       return { error: 'query is required' };
     }
     const topK = k ? parseInt(k, 10) : 5;
-    const chunks = await this.ragService.retrieve(query);
+    const chunks = await this.ragService.retrieve(query, {}, user.userId);
     return {
       query,
       topK,

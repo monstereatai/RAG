@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddRuleIncrementalMetadata1788800000000
-  implements MigrationInterface
-{
+export class AddRuleIncrementalMetadata1788800000000 implements MigrationInterface {
   name = 'AddRuleIncrementalMetadata1788800000000';
 
   async up(queryRunner: QueryRunner): Promise<void> {

@@ -99,7 +99,9 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     handler: InternalDomainEventHandler,
   ): void {
     if (this.internalHandlers.has(eventType)) {
-      throw new Error(`Internal domain event handler already registered: ${eventType}`);
+      throw new Error(
+        `Internal domain event handler already registered: ${eventType}`,
+      );
     }
     this.internalHandlers.set(eventType, handler);
   }
@@ -184,9 +186,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       if (result.affected !== 1) {
         const row = await outbox.findOneBy({ id });
         if (!row) return null;
-        throw new ConflictException(
-          'Only failed outbox events can be retried',
-        );
+        throw new ConflictException('Only failed outbox events can be retried');
       }
 
       if (this.deliveries) {
@@ -449,8 +449,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
           row.lastError = delivery.lastError;
         }
         await this.deliveries.save(delivery);
-      }
-      finally {
+      } finally {
         if (deliveryLeaseRequired) {
           await this.redisProvider.releaseLock(
             deliveryLockKey,
@@ -608,7 +607,9 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
           keys.add(`conv:messages:${scope}:${userId}:${threadId}`);
         }
       }
-      await Promise.all([...keys].map((key) => this.redisProvider.delRequired(key)));
+      await Promise.all(
+        [...keys].map((key) => this.redisProvider.delRequired(key)),
+      );
 
       row.status = 'delivered';
       row.deliveredAt = new Date();
@@ -686,14 +687,17 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   }
   private parse(value: string): Record<string, unknown> {
     try {
-      return JSON.parse(value) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
     } catch {
       return {};
     }
   }
   private parseArray(value: string): string[] {
     try {
-      const items = JSON.parse(value);
+      const items: unknown = JSON.parse(value);
       return Array.isArray(items)
         ? items.filter((item): item is string => typeof item === 'string')
         : [];

@@ -1,4 +1,5 @@
 import { ProductionWorkflowService } from './production-workflow.service';
+import type { ProductionWorkflowStateType } from './production-workflow.state';
 
 describe('ProductionWorkflowService', () => {
   const createService = (workflowQueue?: { enqueue: jest.Mock }) => {
@@ -23,24 +24,31 @@ describe('ProductionWorkflowService', () => {
       riskLevel: 'low',
       readyForApproval: true,
     });
-    const gather = jest.fn().mockResolvedValue({
-      evidence: [
-        {
-          id: 'evidence-1',
-          docId: 'doc-1',
-          chunkIndex: 0,
-          excerpt: '当前有效的项目知识证据。',
-          totalScore: 1,
-        },
-      ],
-      executions: [
-        {
-          tool: 'role_knowledge_search',
-          status: 'success',
-          durationMs: 1,
-          evidenceCount: 1,
-        },
-      ],
+    const gatherInputs: Array<{
+      role: string;
+      input: Record<string, unknown>;
+    }> = [];
+    const gather = jest.fn((role: string, input: Record<string, unknown>) => {
+      gatherInputs.push({ role, input });
+      return Promise.resolve({
+        evidence: [
+          {
+            id: 'evidence-1',
+            docId: 'doc-1',
+            chunkIndex: 0,
+            excerpt: '当前有效的项目知识证据。',
+            totalScore: 1,
+          },
+        ],
+        executions: [
+          {
+            tool: 'role_knowledge_search',
+            status: 'success',
+            durationMs: 1,
+            evidenceCount: 1,
+          },
+        ],
+      });
     });
     const createArtifact = jest.fn().mockResolvedValue({
       id: 'artifact-1',
@@ -88,11 +96,11 @@ describe('ProductionWorkflowService', () => {
       undefined,
       workflowQueue as never,
     );
-    return { service, invoke, gather, createArtifact };
+    return { service, invoke, gather, gatherInputs, createArtifact };
   };
 
   it('completes a normal task without manual approval', async () => {
-    const { service, invoke, gather } = createService();
+    const { service, invoke } = createService();
     const state = await service.start(
       {
         projectId: 'anniversary',
@@ -139,8 +147,8 @@ describe('ProductionWorkflowService', () => {
       formatVersion: 1,
       threadId: state.threadId,
       projectId: 'handoff-workflow',
-      markdown: expect.stringContaining('# handoff-workflow 产研运交接包'),
     });
+    expect(handoff.markdown).toContain('# handoff-workflow 产研运交接包');
     expect(handoff.contentHash).toHaveLength(64);
     expect(handoff.manifest.stages[0]).toMatchObject({
       role: 'product',
@@ -177,7 +185,13 @@ describe('ProductionWorkflowService', () => {
   });
 
   it('enqueues asynchronous workflow starts to the durable queue when available', async () => {
-    const workflowQueue = { enqueue: jest.fn().mockResolvedValue(true) };
+    let enqueuedInput: unknown;
+    const workflowQueue = {
+      enqueue: jest.fn((input: unknown) => {
+        enqueuedInput = input;
+        return Promise.resolve(true);
+      }),
+    };
     const { service, invoke } = createService(workflowQueue);
 
     const accepted = await service.startAsync(
@@ -191,17 +205,28 @@ describe('ProductionWorkflowService', () => {
     );
 
     expect(accepted.status).toBe('running');
-    expect(workflowQueue.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        operation: 'start',
-        threadId: accepted.threadId,
-        userId: 'user-1',
-        tenantId: 'tenant-a',
-        id: expect.stringMatching(/^production-workflow-start-[a-f0-9]{32}$/),
-      }),
-    );
+    expect(workflowQueue.enqueue).toHaveBeenCalledTimes(1);
     expect(accepted.tenantId).toBe('tenant-a');
-    expect(workflowQueue.enqueue.mock.calls[0][0].id).not.toContain(':');
+    if (
+      !enqueuedInput ||
+      typeof enqueuedInput !== 'object' ||
+      !('id' in enqueuedInput) ||
+      typeof enqueuedInput.id !== 'string' ||
+      !('operation' in enqueuedInput) ||
+      !('threadId' in enqueuedInput) ||
+      !('userId' in enqueuedInput) ||
+      !('tenantId' in enqueuedInput)
+    ) {
+      throw new Error('Expected a durable workflow queue job ID.');
+    }
+    expect(enqueuedInput.operation).toBe('start');
+    expect(enqueuedInput.threadId).toBe(accepted.threadId);
+    expect(enqueuedInput.userId).toBe('user-1');
+    expect(enqueuedInput.tenantId).toBe('tenant-a');
+    expect(enqueuedInput.id).toMatch(
+      /^production-workflow-start-[a-f0-9]{32}$/,
+    );
+    expect(enqueuedInput.id).not.toContain(':');
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -255,8 +280,27 @@ describe('ProductionWorkflowService', () => {
     const service = Object.create(
       ProductionWorkflowService.prototype,
     ) as ProductionWorkflowService;
-    (service as any).runtimeEvents = runtimeEvents;
-    (service as any).domainEvents = domainEvents;
+    type EventState = Pick<
+      ProductionWorkflowStateType,
+      'tenantId' | 'threadId' | 'runId' | 'projectId'
+    >;
+    const internals = service as unknown as {
+      runtimeEvents: { emit: jest.Mock };
+      domainEvents: { emit: jest.Mock };
+      emitRuntimeEvent(
+        state: EventState,
+        eventType: string,
+        actor: string,
+        payload: unknown,
+      ): Promise<void>;
+      emitDomainEvent(
+        eventType: string,
+        state: EventState,
+        payload: Record<string, unknown>,
+      ): Promise<void>;
+    };
+    internals.runtimeEvents = runtimeEvents;
+    internals.domainEvents = domainEvents;
     const state = {
       tenantId: 'tenant-a',
       threadId: 'thread-a',
@@ -264,10 +308,10 @@ describe('ProductionWorkflowService', () => {
       projectId: 'project-a',
     };
 
-    await (service as any).emitRuntimeEvent(state, 'run.started', 'workflow', {
+    await internals.emitRuntimeEvent(state, 'run.started', 'workflow', {
       source: 'test',
     });
-    await (service as any).emitDomainEvent('workflow.started', state, {
+    await internals.emitDomainEvent('workflow.started', state, {
       source: 'test',
     });
 
@@ -406,7 +450,7 @@ describe('ProductionWorkflowService', () => {
   });
 
   it('pauses on rejection and reruns only after an explicit revision action', async () => {
-    const { service, invoke, gather } = createService();
+    const { service, invoke, gatherInputs } = createService();
     let state = await service.start(
       {
         projectId: 'anniversary',
@@ -455,7 +499,7 @@ describe('ProductionWorkflowService', () => {
     expect(state.revisionHistory.at(-1)?.supplementalMaterials).toContain(
       'compensation_queue',
     );
-    expect(gather.mock.calls.at(-1)?.[1].brief).toContain('compensation_queue');
+    expect(gatherInputs.at(-1)?.input.brief).toContain('compensation_queue');
     expect(invoke).toHaveBeenCalledTimes(4);
   });
 

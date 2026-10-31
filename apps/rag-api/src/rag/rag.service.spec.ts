@@ -1,8 +1,6 @@
 import { createService } from './rag.service.test-utils';
 
 describe('RagService answer and evidence scenarios', () => {
-
-
   it('puts reranked evidence before RRF fallback evidence', () => {
     const { service } = createService();
     const chunks = [
@@ -31,8 +29,6 @@ describe('RagService answer and evidence scenarios', () => {
       ['rerank-lower-rrf', 'rrf-high'],
     );
   });
-
-
 
   it('does not cite persisted BM25 content that is absent from this response evidence', () => {
     const { service, indexService } = createService();
@@ -68,8 +64,6 @@ describe('RagService answer and evidence scenarios', () => {
     ).toBeNull();
   });
 
-
-
   it('merges reviewed Base Case evidence into the Simple answer gate', async () => {
     const { service, llmInvoke, retrieveBadCaseMatches } = createService();
     llmInvoke.mockResolvedValue(
@@ -100,8 +94,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.retrievalReason).toContain('Base Case 纠正证据');
   });
 
-
-
   it('includes Base Case in the Auto Fast Path gate and reusable snapshot', async () => {
     const { service, retrieveBadCaseMatches } = createService();
     retrieveBadCaseMatches.mockResolvedValue([
@@ -129,8 +121,6 @@ describe('RagService answer and evidence scenarios', () => {
     });
     expect(result.reason).toContain('Base Case:');
   });
-
-
 
   it('skips exact Bad Case direct answers for explicitly scoped Simple requests', async () => {
     const {
@@ -167,8 +157,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(obsidianSearch).not.toHaveBeenCalled();
   });
 
-
-
   it('uses tenant-scoped exact Base Case and skips Obsidian when tenant filtering is explicit', async () => {
     const {
       service,
@@ -201,8 +189,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(retrieveBadCaseMatches).not.toHaveBeenCalled();
     expect(obsidianSearch).not.toHaveBeenCalled();
   });
-
-
 
   it('resolves source-note hits to permitted, active, in-scope original chunks', async () => {
     const { service, documentPermissionService } = createService();
@@ -303,8 +289,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.chunks[0].content).not.toContain('摘要');
   });
 
-
-
   it('uses permission-service grants for shared documents regardless of owner', async () => {
     const { service, documentPermissionService } = createService();
     documentPermissionService.getAllowedDocIds.mockResolvedValue(
@@ -341,8 +325,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.chunks.map((chunk) => chunk.id)).toContain('shared-raw');
   });
 
-
-
   it('excludes source notes without a ragDocId instead of treating their summary as evidence', async () => {
     const { service } = createService();
     const result = await service.resolveObsidianSourceEvidence(
@@ -365,8 +347,6 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.mappedDocIds).toEqual(new Set());
     expect(result.sourceNotePaths).toEqual(new Set(['notes/legacy-source.md']));
   });
-
-
 
   it('puts resolved original chunks into the Auto Fast Path and removes their note hits', async () => {
     const { service, obsidianKnowledge } = createService();
@@ -419,8 +399,6 @@ describe('RagService answer and evidence scenarios', () => {
     );
   });
 
-
-
   it('refuses when the knowledge base and web search have no evidence', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('今天是星期三。');
@@ -436,10 +414,9 @@ describe('RagService answer and evidence scenarios', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-
-
   it('does not use a source-note summary when its raw document has no accessible chunks', async () => {
-    const { service, obsidianKnowledge, llmInvoke } = createService();
+    const { service, obsidianKnowledge, obsidianAssessHitsMock, llmInvoke } =
+      createService();
     (obsidianKnowledge.search as jest.Mock).mockResolvedValue([
       {
         path: 'notes/restricted-source.md',
@@ -473,14 +450,9 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.retrievalSufficient).toBe(false);
     expect(result.references).toEqual([]);
     expect(result.obsidianHits).toEqual([]);
-    expect(obsidianKnowledge.assessHits).toHaveBeenCalledWith(
-      expect.any(String),
-      [],
-    );
+    expect(obsidianAssessHitsMock).toHaveBeenCalledWith(expect.any(String), []);
     expect(llmInvoke).not.toHaveBeenCalled();
   });
-
-
 
   it('answers from the resolved raw chunk and cites its original chunk ID', async () => {
     const { service, obsidianKnowledge, llmInvoke } = createService();
@@ -574,14 +546,17 @@ describe('RagService answer and evidence scenarios', () => {
     expect(result.obsidianHits).toEqual([]);
   });
 
-
-
   it('uses the general model for objective questions when routing has no usable intent', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('2');
 
-    await expect(
-      service.answer('量子计算是什么', [], undefined, [], undefined, {
+    const result = await service.answer(
+      '量子计算是什么',
+      [],
+      undefined,
+      [],
+      undefined,
+      {
         queryPlan: {
           action: 'direct',
           domain: 'public',
@@ -593,17 +568,16 @@ describe('RagService answer and evidence scenarios', () => {
           entities: [],
           filters: {},
         },
-      }),
-    ).resolves.toMatchObject({
+      },
+    );
+    expect(result).toMatchObject({
       answer: '2',
       references: [],
       retrievalSufficient: true,
-      retrievalReason: expect.stringContaining('已使用模型通用能力回答'),
     });
+    expect(result.retrievalReason).toContain('已使用模型通用能力回答');
     expect(llmInvoke).toHaveBeenCalled();
   });
-
-
 
   it('answers arithmetic deterministically before mixed-history fallback', async () => {
     const { service, llmInvoke } = createService();
@@ -626,26 +600,26 @@ describe('RagService answer and evidence scenarios', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-
-
   it('prompts conversation settings to include objective facts and the local setting', async () => {
     const { answerService, llmInvoke } = createService();
     const fallbackService = (
       answerService as unknown as {
-        fallbackService: { generateConversationStateAnswer: Function };
+        fallbackService: {
+          generateConversationStateAnswer: (
+            query: string,
+            history: Array<{ role: 'human' | 'ai'; content: string }>,
+          ) => Promise<string | null>;
+        };
       }
     ).fallbackService;
     await fallbackService.generateConversationStateAnswer('React是什么', [
       { role: 'human', content: 'React是一种动物' },
     ]);
 
-    expect(llmInvoke).toHaveBeenCalledWith(expect.stringContaining('客观事实'));
-    expect(llmInvoke).toHaveBeenCalledWith(
-      expect.stringContaining('当前会话设定'),
-    );
+    const prompt = llmInvoke.mock.calls[0]?.[0];
+    expect(prompt).toEqual(expect.stringContaining('客观事实'));
+    expect(prompt).toEqual(expect.stringContaining('当前会话设定'));
   });
-
-
 
   it('uses Bocha web search when local evidence is insufficient', async () => {
     const { service, bochaSearchService } = createService();
@@ -659,20 +633,19 @@ describe('RagService answer and evidence scenarios', () => {
       },
     ]);
 
-    await expect(service.answer('活动什么时候开放？')).resolves.toMatchObject({
+    const result = await service.answer('活动什么时候开放？');
+    expect(result).toMatchObject({
       retrievalSufficient: true,
       references: [
         { docId: 'https://example.com/activity', retrievalSource: 'web' },
       ],
-      retrievalReason: expect.stringContaining('Bocha 联网搜索'),
     });
+    expect(result.retrievalReason).toContain('Bocha 联网搜索');
     expect(bochaSearchService.search).toHaveBeenCalledWith(
       '活动什么时候开放？',
       5,
     );
   });
-
-
 
   it('refuses when no related document or web evidence is found', async () => {
     const { service, llmInvoke } = createService();

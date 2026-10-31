@@ -5,8 +5,10 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
+import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
+import { AgentRuntimeEventEntity } from '../../providers/db/entities/agent-runtime-event.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
@@ -40,6 +42,12 @@ export class RagFeedbackService {
     private readonly evaluationCaseRepo?: Repository<EvaluationCaseEntity>,
     @Optional()
     private readonly documentService?: DocumentService,
+    @Optional()
+    @InjectRepository(AgentRunEntity)
+    private readonly agentRunRepo?: Repository<AgentRunEntity>,
+    @Optional()
+    @InjectRepository(AgentRuntimeEventEntity)
+    private readonly runtimeEventRepo?: Repository<AgentRuntimeEventEntity>,
   ) {}
 
   async create(
@@ -135,12 +143,97 @@ export class RagFeedbackService {
       feedback.map((item) => item.queryLogId).filter(Boolean) as string[],
     );
     const logById = new Map(logs.map((log) => [log.id, log]));
+    const queryLogIds = feedback
+      .map((item) => item.queryLogId)
+      .filter((id): id is string => Boolean(id));
+    const skillsByQueryLogId = new Map<
+      string,
+      Array<{ name: string; version?: string; injected: boolean }>
+    >();
+    if (queryLogIds.length > 0 && this.agentRunRepo && this.runtimeEventRepo) {
+      const runs = await this.agentRunRepo.find({
+        where: { queryLogId: In(queryLogIds) },
+        select: { id: true, queryLogId: true, createdAt: true },
+        order: { createdAt: 'DESC' },
+      });
+      if (runs.length > 0) {
+        const latestRunIdByQueryLogId = new Map<string, string>();
+        for (const run of runs) {
+          if (run.queryLogId && !latestRunIdByQueryLogId.has(run.queryLogId)) {
+            latestRunIdByQueryLogId.set(run.queryLogId, run.id);
+          }
+        }
+        const queryLogIdByRunId = new Map(
+          [...latestRunIdByQueryLogId].map(([queryLogId, runId]) => [
+            runId,
+            queryLogId,
+          ]),
+        );
+        const skillEvents = await this.runtimeEventRepo.find({
+          where: {
+            runId: In([...queryLogIdByRunId.keys()]),
+            eventType: 'skill.selected',
+          },
+          order: { sequence: 'ASC' },
+        });
+        for (const event of skillEvents) {
+          const queryLogId = event.runId
+            ? queryLogIdByRunId.get(event.runId)
+            : undefined;
+          if (!queryLogId) continue;
+          let payload: unknown;
+          try {
+            payload = JSON.parse(event.payload);
+          } catch {
+            continue;
+          }
+          if (
+            !payload ||
+            typeof payload !== 'object' ||
+            Array.isArray(payload)
+          ) {
+            continue;
+          }
+          const data = payload as Record<string, unknown>;
+          const skills = Array.isArray(data['skills'])
+            ? data['skills'].filter(
+                (name): name is string => typeof name === 'string',
+              )
+            : [];
+          const versions =
+            data['versions'] &&
+            typeof data['versions'] === 'object' &&
+            !Array.isArray(data['versions'])
+              ? (data['versions'] as Record<string, unknown>)
+              : {};
+          const injected = new Set(
+            Array.isArray(data['injected'])
+              ? data['injected'].filter(
+                  (name): name is string => typeof name === 'string',
+                )
+              : [],
+          );
+          skillsByQueryLogId.set(
+            queryLogId,
+            skills.map((name) => ({
+              name,
+              version:
+                typeof versions[name] === 'string' ? versions[name] : undefined,
+              injected: injected.has(name),
+            })),
+          );
+        }
+      }
+    }
     return feedback.map((item) => ({
       ...item,
       query: item.queryLogId ? logById.get(item.queryLogId)?.query : undefined,
       answer: item.queryLogId
         ? logById.get(item.queryLogId)?.answer
         : undefined,
+      skills: item.queryLogId
+        ? (skillsByQueryLogId.get(item.queryLogId) ?? [])
+        : [],
     }));
   }
 

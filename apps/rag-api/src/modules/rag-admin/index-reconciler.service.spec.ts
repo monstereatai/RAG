@@ -1,4 +1,3 @@
-import { IndexRepairQueueService } from './index-repair-queue.service';
 import { IndexReconcilerService } from './index-reconciler.service';
 
 describe('IndexReconcilerService', () => {
@@ -67,9 +66,126 @@ describe('IndexReconcilerService', () => {
     );
   });
 
+  it('queues confirmed vector, image, and retrieval-description repairs only', async () => {
+    const { service, ragAdmin, repairQueue } = create();
+    const repairableReasons = [
+      'milvus_chunk_count_mismatch',
+      'image_index_count_mismatch',
+      'retrieval_description_document_missing',
+      'retrieval_description_missing_pg',
+      'retrieval_description_stale_pg',
+      'retrieval_description_missing_milvus',
+      'retrieval_description_stale_milvus',
+      'retrieval_description_content_mismatch',
+      'retrieval_description_source_mapping_mismatch',
+      'retrieval_description_missing',
+      'retrieval_description_stale',
+      'retrieval_description_count_mismatch',
+    ];
+    const skippedReasons = [
+      'milvus_unavailable',
+      'image_index_unavailable',
+      'retrieval_description_audit_unavailable',
+      'metadata_chunk_count_mismatch',
+    ];
+    ragAdmin.auditDocumentIndexes.mockResolvedValue({
+      scanned: repairableReasons.length + skippedReasons.length,
+      issues: [
+        ...repairableReasons.map((reason, index) => ({
+          docId: `repairable-${index}`,
+          reasons: [reason],
+        })),
+        ...skippedReasons.map((reason, index) => ({
+          docId: `skipped-${index}`,
+          reasons: [reason],
+        })),
+      ],
+    });
+
+    await expect(service.runOnce()).resolves.toEqual({
+      available: true,
+      scanned: repairableReasons.length + skippedReasons.length,
+      mismatched: repairableReasons.length,
+      queued: repairableReasons.length,
+      skipped: skippedReasons.length,
+    });
+    expect(repairQueue.enqueue).toHaveBeenCalledTimes(repairableReasons.length);
+    repairableReasons.forEach((_, index) => {
+      expect(repairQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ docId: `repairable-${index}` }),
+      );
+    });
+    skippedReasons.forEach((_, index) => {
+      expect(repairQueue.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ docId: `skipped-${index}` }),
+      );
+    });
+  });
+
+  it('retries the same audit page when enqueueing a repair job fails', async () => {
+    const { service, ragAdmin, repairQueue } = create();
+    const cursor = {
+      createdAt: '2026-10-31T00:00:00.000Z',
+      docId: 'doc-2',
+    };
+    const page = {
+      scanned: 10,
+      nextCursor: cursor,
+      issues: [
+        { docId: 'doc-1', reasons: ['bm25_chunk_count_mismatch'] },
+        { docId: 'doc-2', reasons: ['elasticsearch_index_count_mismatch'] },
+      ],
+    };
+    ragAdmin.auditDocumentIndexes
+      .mockResolvedValueOnce(page)
+      .mockResolvedValueOnce(page)
+      .mockResolvedValueOnce({ scanned: 0, nextCursor: null, issues: [] });
+    repairQueue.enqueue
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('redis unavailable'));
+
+    await expect(service.runOnce()).resolves.toEqual({
+      available: false,
+      reason: 'redis unavailable',
+    });
+    expect(ragAdmin.auditDocumentIndexes).toHaveBeenNthCalledWith(
+      1,
+      10,
+      undefined,
+    );
+
+    await expect(service.runOnce()).resolves.toEqual({
+      available: true,
+      scanned: 10,
+      mismatched: 2,
+      queued: 2,
+      skipped: 0,
+    });
+    expect(ragAdmin.auditDocumentIndexes).toHaveBeenNthCalledWith(
+      2,
+      10,
+      undefined,
+    );
+    expect(repairQueue.enqueue).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ docId: 'doc-1' }),
+    );
+    expect(repairQueue.enqueue).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ docId: 'doc-1' }),
+    );
+
+    await service.runOnce();
+    expect(ragAdmin.auditDocumentIndexes).toHaveBeenNthCalledWith(
+      3,
+      10,
+      cursor,
+    );
+  });
+
   it('fails closed when the persistent repair queue is unavailable', async () => {
-    const { service } = create();
-    (service as any).repairQueue.isEnabled.mockReturnValue(false);
+    const { service, repairQueue } = create();
+    repairQueue.isEnabled.mockReturnValue(false);
 
     await expect(service.runOnce()).resolves.toEqual({
       available: false,

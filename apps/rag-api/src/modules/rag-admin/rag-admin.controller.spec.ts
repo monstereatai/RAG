@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import type { Response } from 'express';
 import { RagAdminController } from './rag-admin.controller';
 
 describe('RagAdminController permission contract', () => {
@@ -23,8 +24,8 @@ describe('RagAdminController permission contract', () => {
     jest.resetAllMocks();
   });
 
-  it('accepts the legacy subjects payload and normalizes public subjects', () => {
-    controller.updateDocumentPermissions('doc-1', {
+  it('accepts the legacy subjects payload and normalizes public subjects', async () => {
+    await controller.updateDocumentPermissions('doc-1', {
       subjects: [
         { type: 'user', id: 'u1' },
         { type: 'public', id: '' },
@@ -37,8 +38,8 @@ describe('RagAdminController permission contract', () => {
     ]);
   });
 
-  it('accepts the admin permissions payload, ignores scope and drops invalid rows', () => {
-    controller.updateDocumentPermissions('doc-1', {
+  it('accepts the admin permissions payload, ignores scope and drops invalid rows', async () => {
+    await controller.updateDocumentPermissions('doc-1', {
       permissions: [
         { subjectType: 'department', subjectId: 'dept-1', scope: 'read' },
         { subjectType: 'user', subjectId: '' },
@@ -51,8 +52,8 @@ describe('RagAdminController permission contract', () => {
     ]);
   });
 
-  it('keeps the clear-all semantics for empty arrays', () => {
-    controller.updateDocumentPermissions('doc-1', { permissions: [] });
+  it('keeps the clear-all semantics for empty arrays', async () => {
+    await controller.updateDocumentPermissions('doc-1', { permissions: [] });
 
     expect(service.updateDocumentPermissions).toHaveBeenCalledWith('doc-1', []);
   });
@@ -96,88 +97,122 @@ describe('RagAdminController permission contract', () => {
     expect(service.cancelQueuedDocumentTask).toHaveBeenCalledWith('task-1');
   });
 
-  it('passes verified user, tenant and role context to image search', () => {
+  it('uses the mapped Admin principal and configured tenant for image search', () => {
     service.searchImages.mockReturnValue({ results: [] });
+    const adminUserId = `admin:${'a'.repeat(58)}`;
+    const originalTenantId = process.env.RAG_ADMIN_TENANT_ID;
+    process.env.RAG_ADMIN_TENANT_ID = 'tenant-a';
 
-    expect(
-      controller.searchImages('chart', '12', 'user-1', 'tenant-a', 'editor'),
-    ).toEqual({ results: [] });
-    expect(service.searchImages).toHaveBeenCalledWith(
-      'chart',
-      12,
-      'user-1',
-      'tenant-a',
-      'editor',
-    );
+    try {
+      expect(controller.searchImages('chart', '12', adminUserId)).toEqual({
+        results: [],
+      });
+      expect(service.searchImages).toHaveBeenCalledWith(
+        'chart',
+        12,
+        adminUserId,
+        'tenant-a',
+        'admin',
+        true,
+      );
+    } finally {
+      if (originalTenantId === undefined) {
+        delete process.env.RAG_ADMIN_TENANT_ID;
+      } else {
+        process.env.RAG_ADMIN_TENANT_ID = originalTenantId;
+      }
+    }
   });
 
-  it('validates and passes the uploaded image with caller scope to image search', () => {
+  it('validates uploaded images and searches within the mapped Admin scope', () => {
     service.searchImagesByImage.mockReturnValue({ results: [] });
+    const adminUserId = `admin:${'b'.repeat(58)}`;
+    const originalTenantId = process.env.RAG_ADMIN_TENANT_ID;
+    process.env.RAG_ADMIN_TENANT_ID = 'tenant-a';
 
-    expect(
-      controller.searchImagesByImage(
-        {
-          buffer: Buffer.from('png'),
-          mimetype: 'image/png',
-        } as Express.Multer.File,
-        '12',
-        'user-1',
+    try {
+      expect(
+        controller.searchImagesByImage(
+          {
+            buffer: Buffer.from('png'),
+            mimetype: 'image/png',
+          } as Express.Multer.File,
+          '12',
+          adminUserId,
+        ),
+      ).toEqual({ results: [] });
+      expect(service.searchImagesByImage).toHaveBeenCalledWith(
+        Buffer.from('png').toString('base64'),
+        'image/png',
+        12,
+        adminUserId,
         'tenant-a',
-        'editor',
-      ),
-    ).toEqual({ results: [] });
-    expect(service.searchImagesByImage).toHaveBeenCalledWith(
-      Buffer.from('png').toString('base64'),
-      'image/png',
-      12,
-      'user-1',
-      'tenant-a',
-      'editor',
-    );
-    expect(() =>
-      controller.searchImagesByImage(undefined as never, undefined, 'user-1'),
-    ).toThrow(BadRequestException);
-    expect(() =>
-      controller.searchImagesByImage(
-        {
-          buffer: Buffer.from('text'),
-          mimetype: 'text/plain',
-        } as Express.Multer.File,
-        undefined,
-        'user-1',
-      ),
-    ).toThrow(BadRequestException);
+        'admin',
+        true,
+      );
+      expect(() =>
+        controller.searchImagesByImage(undefined as never, undefined, 'user-1'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        controller.searchImagesByImage(
+          {
+            buffer: Buffer.from('text'),
+            mimetype: 'text/plain',
+          } as Express.Multer.File,
+          undefined,
+          'user-1',
+        ),
+      ).toThrow(BadRequestException);
+    } finally {
+      if (originalTenantId === undefined) {
+        delete process.env.RAG_ADMIN_TENANT_ID;
+      } else {
+        process.env.RAG_ADMIN_TENANT_ID = originalTenantId;
+      }
+    }
   });
 
   it('streams an image asset only after the service has applied its ACL check', async () => {
     const image = { buffer: Buffer.from('png-data'), contentType: 'image/png' };
-    const response = { setHeader: jest.fn(), send: jest.fn() };
+    const setHeaderMock = jest.fn();
+    const sendMock = jest.fn();
+    const response = {
+      setHeader: setHeaderMock,
+      send: sendMock,
+    } as unknown as Response;
     service.getImageAsset.mockResolvedValue(image);
+    const adminUserId = `admin:${'a'.repeat(58)}`;
+    const originalTenantId = process.env.RAG_ADMIN_TENANT_ID;
+    process.env.RAG_ADMIN_TENANT_ID = 'tenant-a';
 
-    await controller.getImageAsset(
-      'user-1',
-      'tenant-a',
-      'editor',
-      'doc-1',
-      'documents/owner-1/doc-1/images/page-1.png',
-      response as never,
-    );
+    try {
+      await controller.getImageAsset(
+        adminUserId,
+        'doc-1',
+        'documents/owner-1/doc-1/images/page-1.png',
+        response,
+      );
+    } finally {
+      if (originalTenantId === undefined) {
+        delete process.env.RAG_ADMIN_TENANT_ID;
+      } else {
+        process.env.RAG_ADMIN_TENANT_ID = originalTenantId;
+      }
+    }
 
     expect(service.getImageAsset).toHaveBeenCalledWith({
-      userId: 'user-1',
+      userId: adminUserId,
       tenantId: 'tenant-a',
-      role: 'editor',
+      role: 'admin',
+      trustedAdminPrincipal: true,
       docId: 'doc-1',
       key: 'documents/owner-1/doc-1/images/page-1.png',
     });
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
-      'image/png',
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
+    expect(setHeaderMock).toHaveBeenCalledWith('Content-Type', 'image/png');
+    expect(setHeaderMock).toHaveBeenCalledWith(
       'Cache-Control',
       'private, no-store',
     );
-    expect(response.send).toHaveBeenCalledWith(image.buffer);
+    expect(sendMock).toHaveBeenCalledWith(image.buffer);
   });
 });

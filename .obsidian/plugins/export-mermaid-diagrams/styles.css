@@ -1,0 +1,49 @@
+.export-mermaid-batch-render {
+	position: fixed;
+	top: 0;
+	left: -100000px;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.export-mermaid-host {
+	position: relative;
+}
+
+/* Left side so we don't cover Obsidian's code/edit control on the right */
+.export-mermaid-button {
+	position: absolute;
+	top: 0.35rem;
+	left: 0.35rem;
+	z-index: 30;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background-color: var(--background-primary);
+	color: var(--text-muted);
+	box-shadow: var(--shadow-s);
+	cursor: pointer;
+	opacity: 0.55;
+	transition: opacity 120ms ease;
+}
+
+.export-mermaid-host:hover .export-mermaid-button,
+.export-mermaid-button:hover,
+.export-mermaid-button:focus-visible {
+	opacity: 1;
+}
+
+.export-mermaid-button:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.export-mermaid-button svg {
+	width: 16px;
+	height: 16px;
+}

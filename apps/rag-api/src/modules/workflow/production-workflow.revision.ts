@@ -140,17 +140,21 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
           result
             ? {
                 ...result,
-                reviewStatus: rejectedRoles.includes(role as ProductionRole)
+                reviewStatus: rejectedRoles.some(
+                  (rejectedRole) => rejectedRole === role,
+                )
                   ? 'rejected'
-                  : current.currentBatch.includes(role as ProductionRole)
+                  : current.currentBatch.some(
+                        (currentRole) => currentRole === role,
+                      )
                     ? 'approved'
-                    : staleRoles.includes(role as ProductionRole)
+                    : staleRoles.some((staleRole) => staleRole === role)
                       ? 'stale'
                       : result.reviewStatus,
               }
             : result,
         ]),
-      ) as ProductionWorkflowStateType['results'];
+      );
       revisionHistory = [
         ...(current.revisionHistory ?? []),
         {

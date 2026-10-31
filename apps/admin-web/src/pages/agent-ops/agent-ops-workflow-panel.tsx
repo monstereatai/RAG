@@ -131,7 +131,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             </Descriptions.Item>
           </Descriptions>
         ) : (
-          <Alert type="info" showIcon message="暂无运行汇总数据" />
+          <Alert type="info" showIcon title="暂无运行汇总数据" />
         )}
       </Card>
       <Card
@@ -174,7 +174,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             )}
           </Descriptions>
         ) : (
-          <Alert type="info" showIcon message="暂无 RAG 质量汇总数据" />
+          <Alert type="info" showIcon title="暂无 RAG 质量汇总数据" />
         )}
       </Card>
       <Card
@@ -197,7 +197,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
               type={intentRouting.estimated ? 'warning' : 'info'}
               showIcon
               style={{ marginBottom: 12 }}
-              message={intentRouting.note ?? '路由统计已加载'}
+              title={intentRouting.note ?? '路由统计已加载'}
             />
             <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }}>
               <Descriptions.Item label="扫描问答">
@@ -266,7 +266,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             />
           </>
         ) : (
-          <Alert type="info" showIcon message="暂无意图路由数据" />
+          <Alert type="info" showIcon title="暂无意图路由数据" />
         )}
       </Card>
       <Card

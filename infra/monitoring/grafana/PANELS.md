@@ -2,7 +2,7 @@
 
 > 看板文件：`infra/monitoring/grafana/dashboards/rag-overview.json`（uid: `rag-overview`，refresh 30s，默认时间范围 now-6h）
 > 数据源变量：`DS_PROMETHEUS`（type=datasource, query=prometheus），所有面板均通过 `uid: "${DS_PROMETHEUS}"` 引用。
-> 面板总数（不含 row 分组）：**57** 个。
+> 面板总数（不含 row 分组）：**63** 个。
 
 窗口选择总原则：**5m 用于告警 / 实时排查口径**（约含 20 个抓取样本，兼顾平滑与灵敏度）；**1m 仅用于需要时间分辨率的热力图**；**1h 用于趋势与策略复盘**（低频事件需累计样本）；**6h 用于与看板默认时间范围对齐的累计报表口径**；**gauge / up / 比值类指标不套 rate，直接取最近样本**。
 
@@ -57,6 +57,12 @@
 | Token 消耗 Top model (1h) | 条形图 (barchart) | `topk(10, sum by (model) (increase(rag_llm_tokens_estimated_total[1h])))` | 1h — 成本复盘看累计量；increase 覆盖低频模型不被 Top 排序漏掉 |
 | LLM 耗时 P95 by provider + model (1h) | 时序折线 (timeseries) | `histogram_quantile(0.95, sum by (le, provider, model) (rate(rag_llm_call_duration_seconds_bucket[1h])))` | 1h — 跨模型横向对比需充足样本让分位稳定；5m 的差异多为样本噪声 |
 
+## Embedding
+
+| 面板标题 | 图表类型 | 完整 PromQL | rate / 统计窗口选择理由 |
+| --- | --- | --- | --- |
+| Embedding 实际 Token 用量 (5m) | 时序折线 (timeseries) | `sum by (provider, model) (rate(rag_embedding_tokens_actual_total[5m])) * 60` | 5m — 显示供应商响应返回的实际输入 Token 数，不把字符估算混入；该指标不是费用，账单核对需另做 |
+
 ## 缓存
 
 | 面板标题 | 图表类型 | 完整 PromQL | rate / 统计窗口选择理由 |
@@ -84,6 +90,16 @@
 | 定时任务耗时 P95 by task_kind (1h) | 时序折线 (timeseries) | `histogram_quantile(0.95, sum by (le, task_kind) (rate(rag_scheduled_job_duration_seconds_bucket[1h])))` | 1h — 任务样本每分钟 0~1 个，只有 1h 能让分位桶非空，避免 NaN/阶跃 |
 | 危险查询拦截速率 by pattern (5m) | 时序折线 (timeseries) | `sum by (pattern) (rate(rag_dangerous_queries_blocked_total[5m]))` | 5m — 安全指标需高灵敏度，1 分钟内发现集中攻击尝试 |
 | 危险查询拦截累计 (6h) | 状态值 (stat) | `sum(increase(rag_dangerous_queries_blocked_total[6h]))` | 6h — 与看板默认时间范围对齐，用于交接与周报的绝对次数 |
+
+## BullMQ 队列
+
+| 面板标题 | 图表类型 | 完整 PromQL | rate / 统计窗口选择理由 |
+| --- | --- | --- | --- |
+| 队列积压 by queue + state (即时) | 时序折线 (timeseries) | `rag_bullmq_queue_jobs{state=~"waiting|active|delayed|failed"}` | 即时值 — Gauge 表示当前队列水位，不使用 rate；重点观察 waiting/delayed 持续增长和最终 failed 数 |
+| 最老等待任务时长 (即时) | 时序折线 (timeseries) | `max by (queue) (rag_bullmq_oldest_waiting_seconds)` | 即时值 — Gauge 直接显示最老等待 job 的年龄；阈值需按真实队列 SLA 校准 |
+| 队列作业事件速率 by queue + event (5m) | 时序折线 (timeseries) | `sum by (queue, event) (rate(rag_bullmq_job_events_total[5m]))` | 5m — completed 表示成功完成，failed_attempt 包括可重试失败；实际最终失败以 failed 队列水位为准 |
+| 队列等待 / Worker 执行 P95 (5m) | 时序折线 (timeseries) | `histogram_quantile(0.95, sum by (le, queue) (rate(rag_bullmq_queue_wait_duration_seconds_bucket[5m])))`<br>`histogram_quantile(0.95, sum by (le, queue, outcome) (rate(rag_bullmq_job_processing_duration_seconds_bucket[5m])))` | 5m — 分别衡量排队时延和单次执行时长；低流量队列需延长窗口后再看分位数 |
+| 队列监控采集状态 (即时) | 时序折线 (timeseries) | `min by (queue) (rag_bullmq_queue_monitor_up)` | 即时值 — 1 表示最近一次状态采样成功，0 表示采样失败；不能把缺失监控误判成零积压 |
 
 ## 资源与运行时
 

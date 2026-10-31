@@ -1,4 +1,4 @@
-import { Column, Entity, Index, PrimaryColumn } from 'typeorm';
+import { Entity, Index, PrimaryColumn } from 'typeorm';
 
 @Entity('document_retrieval_description_chunks')
 @Index('IDX_document_retrieval_description_chunks_source', ['sourceChunkId'])

@@ -9,7 +9,7 @@ import { renderWorkflowPlayway } from './workflow-detail-playway-sections';
 export function WorkflowDetailView(controller: WorkflowDetailController) {
   const { workflow, loading } = controller;
   const detailContent = loading ? (
-    <Spin tip="正在加载工作流详情" />
+    <Spin description="正在加载工作流详情" />
   ) : !workflow ? (
     <Result
       status="404"

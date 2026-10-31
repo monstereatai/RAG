@@ -89,6 +89,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
       pendingApprovalRoles: state.pendingApprovalRoles,
       stages: Object.values(state.results).map((result) => ({
         role: result.role,
+        promptVersion: result.promptVersion,
         summary: result.summary,
         riskLevel: result.riskLevel,
         evidenceCoverage: result.evidenceCoverage,

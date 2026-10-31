@@ -1,4 +1,23 @@
 import { ProductionProjectWorkspaceAgentService } from './production-project-workspace-agent.service';
+import type { AgentLoopInput } from '../agent-loop/agent-loop.types';
+
+type WorkspaceAgentTestState = {
+  instruction: string;
+  events: Array<{
+    action: 'command' | 'start_dev_server' | 'stop_dev_server' | 'complete';
+    command: string;
+    exitCode: number;
+    detail: string;
+    output: string;
+  }>;
+};
+
+type WorkspaceAgentTestOutput = {
+  summary: string;
+  status: 'completed' | 'failed';
+  steps: Array<{ command: string; exitCode: number; output: string }>;
+  toolCalls: number;
+};
 
 describe('ProductionProjectWorkspaceAgentService', () => {
   it('runs arbitrary project commands only through the registered workspace tool', async () => {
@@ -34,38 +53,49 @@ describe('ProductionProjectWorkspaceAgentService', () => {
       stopDevServer: jest.fn(),
     };
     const agentLoop = {
-      run: jest.fn(async (input: any) => {
-        const signal = new AbortController().signal;
-        let state = input.initialState;
-        const toolDecision = await input.decide(state, {
-          step: 0,
-          toolCalls: 0,
-          remainingMs: 480_000,
-          signal,
-        });
-        expect(toolDecision.type).toBe('tool');
-        expect(toolDecision.name).toBe('workspace_agent_command');
-        expect(toolDecision.allowedToolNames).toEqual([
-          'workspace_agent_command',
-        ]);
-        const toolResult = await toolDecision.execute(signal);
-        state = toolDecision.reduce(state, toolResult);
-        const completion = await input.decide(state, {
-          step: 1,
-          toolCalls: 1,
-          remainingMs: 479_000,
-          signal,
-        });
-        expect(completion.type).toBe('complete');
-        return {
-          status: 'completed',
-          state,
-          output: completion.output,
-          steps: 2,
-          toolCalls: 1,
-          terminationReason: completion.reason,
-        };
-      }),
+      run: jest.fn(
+        async (
+          input: AgentLoopInput<
+            WorkspaceAgentTestState,
+            WorkspaceAgentTestOutput
+          >,
+        ) => {
+          const signal = new AbortController().signal;
+          let state = input.initialState;
+          const toolDecision = await input.decide(state, {
+            step: 0,
+            toolCalls: 0,
+            remainingMs: 480_000,
+            signal,
+          });
+          if (toolDecision.type !== 'tool') {
+            throw new Error('Expected a workspace command tool decision.');
+          }
+          expect(toolDecision.name).toBe('workspace_agent_command');
+          expect(toolDecision.allowedToolNames).toEqual([
+            'workspace_agent_command',
+          ]);
+          const toolResult = await toolDecision.execute(signal);
+          state = toolDecision.reduce(state, toolResult);
+          const completion = await input.decide(state, {
+            step: 1,
+            toolCalls: 1,
+            remainingMs: 479_000,
+            signal,
+          });
+          if (completion.type !== 'complete') {
+            throw new Error('Expected the workspace agent to complete.');
+          }
+          return {
+            status: 'completed',
+            state,
+            output: completion.output,
+            steps: 2,
+            toolCalls: 1,
+            terminationReason: completion.reason,
+          };
+        },
+      ),
     };
     const service = new ProductionProjectWorkspaceAgentService(
       llm as never,

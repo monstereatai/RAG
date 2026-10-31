@@ -23,6 +23,11 @@ export interface ApprovedBadCase {
 
 export type { BadCaseMatch, BadCaseMatchMode } from './bad-case.types';
 
+function readStringField(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === 'string' ? value : '';
+}
+
 @Injectable()
 export class BadCaseFlywheelService implements OnModuleInit {
   private readonly logger = new Logger(BadCaseFlywheelService.name);
@@ -160,12 +165,12 @@ export class BadCaseFlywheelService implements OnModuleInit {
       });
       return (result.results as Array<Record<string, unknown>>)
         .map((item) => {
-          const storedQuery = String(item['query'] ?? '');
+          const storedQuery = readStringField(item, 'query');
           const score = this.scoreOf(item);
           return {
-            id: String(item['id'] ?? item['ID'] ?? ''),
+            id: readStringField(item, 'id') || readStringField(item, 'ID'),
             query: storedQuery,
-            text: String(item['text'] ?? ''),
+            text: readStringField(item, 'text'),
             score,
             mode: this.modeOf(score, query, storedQuery),
           } satisfies BadCaseMatch;
@@ -213,7 +218,7 @@ export class BadCaseFlywheelService implements OnModuleInit {
       }
       params.push(Math.min(Math.max(limit, 1), 2));
       const limitParam = `$${params.length}`;
-      const rows = (await this.feedbackRepo.query(
+      const rawRows: unknown = await this.feedbackRepo.query(
         `SELECT feedback.id AS "feedbackId",
                 query_log.query AS "query",
                 feedback."correctedAnswer" AS "correctedAnswer"
@@ -230,11 +235,29 @@ export class BadCaseFlywheelService implements OnModuleInit {
           ORDER BY feedback."createdAt" DESC
           LIMIT ${limitParam}`,
         params,
-      )) as Array<{
-        feedbackId: string;
-        query: string;
-        correctedAnswer: string;
-      }>;
+      );
+      const rows = Array.isArray(rawRows)
+        ? rawRows.flatMap((row) => {
+            if (!row || typeof row !== 'object' || Array.isArray(row)) {
+              return [];
+            }
+            const record = row as Record<string, unknown>;
+            if (
+              typeof record['feedbackId'] !== 'string' ||
+              typeof record['query'] !== 'string' ||
+              typeof record['correctedAnswer'] !== 'string'
+            ) {
+              return [];
+            }
+            return [
+              {
+                feedbackId: record['feedbackId'],
+                query: record['query'],
+                correctedAnswer: record['correctedAnswer'],
+              },
+            ];
+          })
+        : [];
 
       return rows.map((row) => ({
         id: `db:${row.feedbackId}`,

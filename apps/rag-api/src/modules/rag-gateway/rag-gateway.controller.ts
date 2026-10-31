@@ -14,11 +14,11 @@ export class RagGatewayController {
 
   @Post('search')
   search(@Body() body: RagSearchDto, @CurrentUser() user: JwtPayload) {
-    return this.ragGatewayService.search(body, user.userId);
+    return this.ragGatewayService.search(body, user.userId, user.tenantId);
   }
 
   @Post('context')
   context(@Body() body: RagContextDto, @CurrentUser() user: JwtPayload) {
-    return this.ragGatewayService.context(body, user.userId);
+    return this.ragGatewayService.context(body, user.userId, user.tenantId);
   }
 }

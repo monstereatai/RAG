@@ -10,6 +10,7 @@ import {
   reflectionPrompt,
   sufficiencyPrompt,
 } from '../prompts/agentic.prompts';
+import { getPromptMetadata } from '../prompts/prompt-registry';
 import { RunnableConfig } from '@langchain/core/runnables';
 import {
   appliesToQuery,
@@ -201,6 +202,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         },
         {
           signal: config?.configurable?.abortSignal as AbortSignal | undefined,
+          metadata: getPromptMetadata('agentic.sufficiency'),
         },
       );
 
@@ -610,6 +612,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         },
         {
           signal: config?.configurable?.abortSignal as AbortSignal | undefined,
+          metadata: getPromptMetadata('agentic.reflection'),
         },
       );
 

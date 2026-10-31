@@ -62,9 +62,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
       // 如果没有指定 checkpoint_id，获取最新的
       if (!targetId) {
-        const latestKey = await this.read(
-          `checkpoint:latest:${threadId}`,
-        );
+        const latestKey = await this.read(`checkpoint:latest:${threadId}`);
         if (!latestKey) {
           return undefined;
         }
@@ -138,12 +136,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
     try {
       // 使用 sorted set 获取 checkpoint 列表（按时间倒序）
-      const keys = await this.zrange(
-        `thread:${threadId}`,
-        0,
-        -1,
-        'REV',
-      );
+      const keys = await this.zrange(`thread:${threadId}`, 0, -1, 'REV');
 
       const limit = options?.limit ?? keys.length;
       const before = options?.before?.configurable?.checkpoint_id as
@@ -218,11 +211,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       }
 
       // 更新 latest pointer
-      await this.write(
-        `checkpoint:latest:${threadId}`,
-        checkpointId,
-        this.ttl,
-      );
+      await this.write(`checkpoint:latest:${threadId}`, checkpointId, this.ttl);
 
       // 添加到 thread sorted set（按时间戳排序）
       const score = new Date(checkpoint.ts).getTime();
@@ -285,18 +274,12 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
     try {
       // 获取所有 checkpoint IDs
-      const checkpointIds = await this.zrange(
-        `thread:${threadId}`,
-        0,
-        -1,
-      );
+      const checkpointIds = await this.zrange(`thread:${threadId}`, 0, -1);
 
       // 删除每个 checkpoint 的数据
       for (const checkpointId of checkpointIds) {
         await this.del(`checkpoint:${threadId}:${checkpointId}`);
-        await this.del(
-          `checkpoint:metadata:${threadId}:${checkpointId}`,
-        );
+        await this.del(`checkpoint:metadata:${threadId}:${checkpointId}`);
       }
 
       // 删除 thread sorted set

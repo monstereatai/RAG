@@ -372,6 +372,7 @@ export class RagRetrievalService {
       ? this.supplementalEvidenceRetriever.probeGraph(
           normalizedQuery,
           userId,
+          allowedDocIds ?? undefined,
           isDocumentVisible,
         )
       : Promise.resolve(graphProbeDisabled);

@@ -242,11 +242,12 @@ export class ProductionWorkflowExecutionBase extends ProductionWorkflowRoleSuppo
       evidenceCount: toolResult.evidence.length,
       executions: toolResult.executions,
     });
+    const promptVersion = getPromptVersion('workflow.production_role');
     await this.emitRuntimeEvent(state, 'request.snapshot', role, {
       schemaVersion: 1,
       route: 'production_workflow',
       role,
-      promptVersion: getPromptVersion('workflow.production_role'),
+      promptVersion,
       projectId: state.projectId,
       briefLength: state.brief.length,
       supplementalMaterialsLength: (state.supplementalMaterials ?? '').length,
@@ -294,7 +295,9 @@ export class ProductionWorkflowExecutionBase extends ProductionWorkflowRoleSuppo
         const output = await this.llmProvider.runWithSignal(requestSignal, () =>
           model
             .withStructuredOutput(roleSchema, { method: 'jsonMode' })
-            .invoke(budgetedInput.messages),
+            .invoke(budgetedInput.messages, {
+              metadata: { promptVersion },
+            }),
         );
         this.assertLeaseOwned(state.threadId);
         toolResult.executions.push({
@@ -308,6 +311,7 @@ export class ProductionWorkflowExecutionBase extends ProductionWorkflowRoleSuppo
         const result: ProductionStageResult = {
           role,
           revision: state.revisionNumber ?? 1,
+          promptVersion,
           reviewStatus: 'pending',
           ...output,
           claims,

@@ -193,6 +193,7 @@ export interface AgentBadCase {
   promotionSource?: string | null;
   promotedDocId?: string | null;
   promotedAt?: string | null;
+  skills?: Array<{ name: string; version?: string; injected: boolean }>;
   createdAt: string;
   indexing?: {
     indexed?: boolean;

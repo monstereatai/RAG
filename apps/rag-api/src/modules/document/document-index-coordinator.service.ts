@@ -103,14 +103,23 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
       })(),
       (async () => {
         this.ragService.indexChunks(params.chunks, params.userId);
-        await Promise.all([
-          this.elasticsearchProvider.indexChunks(
-            params.chunks,
-            params.userId,
-            params.vectors,
-          ),
-          this.elasticsearchProvider.indexDocument(params.document),
+        const elasticsearchResults = await Promise.allSettled([
+          (async () => {
+            await this.elasticsearchProvider.indexChunks(
+              params.chunks,
+              params.userId,
+              params.vectors,
+            );
+          })(),
+          (async () => {
+            await this.elasticsearchProvider.indexDocument(params.document);
+          })(),
         ]);
+        const failedElasticsearchWrite = elasticsearchResults.find(
+          (result): result is PromiseRejectedResult =>
+            result.status === 'rejected',
+        );
+        if (failedElasticsearchWrite) throw failedElasticsearchWrite.reason;
       })(),
     ]);
     const failedIndex = indexResults.find(
@@ -148,9 +157,7 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
     patch: ChunkMetadataPatch,
   ): Promise<void> {
     return Promise.all([
-      Promise.resolve(
-        this.ragService.updateChunkMetadataByIds(ids, patch),
-      ),
+      Promise.resolve(this.ragService.updateChunkMetadataByIds(ids, patch)),
       this.elasticsearchProvider.updateChunkMetadataByIds(ids, patch),
     ]).then(() => undefined);
   }
@@ -172,11 +179,7 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
     lifecycleStatus: string,
     userId?: string,
   ): void {
-    this.ragService.updateDocumentLifecycle(
-      docId,
-      lifecycleStatus,
-      userId,
-    );
+    this.ragService.updateDocumentLifecycle(docId, lifecycleStatus, userId);
   }
 
   async updateDocumentLifecycle(

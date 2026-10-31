@@ -21,6 +21,17 @@ import { MilvusVectorStoreDiagnosticsBase } from './milvus.vector-store.diagnost
 
 const MAX_VECTOR_CONTENT_BYTES = 8_192;
 
+function readMilvusString(
+  record: Record<string, unknown>,
+  key: string,
+): string {
+  const value = record[key];
+  if (typeof value === 'string') return value;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? String(value)
+    : '';
+}
+
 /**
  * Milvus VectorStore Provider
  * 集合 schema：id(主键) / vector / content / doc_id / chunk_index
@@ -470,7 +481,7 @@ export class MilvusVectorStoreProvider
           'Milvus get vectors by ids',
         );
         for (const row of result.data as Array<Record<string, unknown>>) {
-          const id = String(row['id'] ?? '');
+          const id = readMilvusString(row, 'id');
           const content = row['content'];
           const vector = row['vector'];
           if (
@@ -869,11 +880,11 @@ export class MilvusVectorStoreProvider
       );
       this.recordSuccess();
       return (result.results as Array<Record<string, unknown>>).map((hit) => ({
-        id: String(hit['id'] ?? ''),
-        docId: String(hit['doc_id'] ?? ''),
-        tenantId: String(hit['tenant_id'] ?? ''),
-        userId: String(hit['user_id'] ?? ''),
-        content: String(hit['content'] ?? ''),
+        id: readMilvusString(hit, 'id'),
+        docId: readMilvusString(hit, 'doc_id'),
+        tenantId: readMilvusString(hit, 'tenant_id'),
+        userId: readMilvusString(hit, 'user_id'),
+        content: readMilvusString(hit, 'content'),
         score: Number(hit['score'] ?? 0),
       }));
     } catch (error) {

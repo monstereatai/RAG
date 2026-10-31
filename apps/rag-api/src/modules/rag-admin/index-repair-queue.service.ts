@@ -48,8 +48,7 @@ export class IndexRepairQueueService implements OnModuleDestroy {
     const failedRetentionSeconds = Math.min(
       Math.max(
         Number(
-          config?.get<number>('workflowQueue.failedRetentionSeconds') ??
-            604800,
+          config?.get<number>('workflowQueue.failedRetentionSeconds') ?? 604800,
         ),
         3600,
       ),
@@ -68,7 +67,8 @@ export class IndexRepairQueueService implements OnModuleDestroy {
     this.worker = new Worker<IndexRepairJob>(
       INDEX_REPAIR_QUEUE,
       async (job) => {
-        if (!this.processor) throw new Error('index repair processor is not registered');
+        if (!this.processor)
+          throw new Error('index repair processor is not registered');
         try {
           const process = () => this.processor!(job.data);
           if (this.llmProvider) {

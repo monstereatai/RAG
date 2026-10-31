@@ -8,12 +8,16 @@ describe('AgentLoopService', () => {
     isEnabled: jest.fn().mockReturnValue(true),
   };
   const tools = {
-    execute: jest.fn(async (input: { execute: () => Promise<unknown> }) => ({
-      callId: 'call-1',
-      status: 'success',
-      output: await input.execute(),
-      durationMs: 1,
-    })),
+    execute: jest.fn(async (input: { execute: () => Promise<unknown> }) => {
+      const output = await input.execute();
+      return {
+        callId: 'call-1',
+        status: 'success',
+        output,
+        contextOutput: output,
+        durationMs: 1,
+      };
+    }),
   };
 
   beforeEach(() => jest.clearAllMocks());
@@ -38,7 +42,7 @@ describe('AgentLoopService', () => {
           return {
             type: 'model',
             name: 'draft',
-            execute: async () => 'answer',
+            execute: () => Promise.resolve('answer'),
             reduce: (current: State, draft: string) => ({ ...current, draft }),
           };
         if (!state.valid)
@@ -46,7 +50,7 @@ describe('AgentLoopService', () => {
             type: 'tool',
             name: 'citation_validate',
             mode: 'agentic',
-            execute: async () => true,
+            execute: () => Promise.resolve(true),
             reduce: (current: State, valid: boolean) => ({ ...current, valid }),
           };
         return { type: 'complete', output: state.draft, reason: 'validated' };
@@ -77,7 +81,7 @@ describe('AgentLoopService', () => {
         type: 'tool',
         name: 'citation_validate',
         mode: 'agentic',
-        execute: async () => true,
+        execute: () => Promise.resolve(true),
         reduce: () => ({ calls: state.calls + 1 }),
       }),
     });
@@ -207,7 +211,10 @@ describe('AgentLoopService', () => {
       redis as never,
     );
     let actionAborted = false;
-    redis.get.mockResolvedValueOnce(null).mockResolvedValue('cancelled');
+    redis.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue('cancelled');
 
     const result = await service.run({
       threadId: 'active-cancel',
@@ -273,14 +280,18 @@ describe('AgentLoopService', () => {
       events as never,
       redis as never,
     );
-    const buildKey = (service as any).checkpointKey as (
-      threadId: string,
-      actor: string,
-      runId?: string,
-    ) => string;
+    const internals = service as unknown as {
+      checkpointKey: (
+        threadId: string,
+        actor: string,
+        runId?: string,
+      ) => string;
+    };
 
-    expect(buildKey.call(service, 'thread-1', 'agent', 'run-1')).not.toBe(
-      buildKey.call(service, 'thread-1', 'agent', 'run-2'),
+    expect(
+      internals.checkpointKey.call(service, 'thread-1', 'agent', 'run-1'),
+    ).not.toBe(
+      internals.checkpointKey.call(service, 'thread-1', 'agent', 'run-2'),
     );
   });
 

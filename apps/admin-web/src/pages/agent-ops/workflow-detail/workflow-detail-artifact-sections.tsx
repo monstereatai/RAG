@@ -37,6 +37,8 @@ export function renderWorkflowArtifacts(
     setCodeEditDraft,
     codeEditBusy,
     workspaceStatus,
+    workspaceStatusLoading,
+    workspaceStatusLoadFailed,
     workspaceArtifactId,
     setWorkspaceArtifactId,
     workspaceBusy,
@@ -460,6 +462,12 @@ export function renderWorkflowArtifacts(
             value={workspaceArtifactId || undefined}
             style={{ minWidth: 360, flex: '1 1 360px' }}
             placeholder="选择用于开发的 Vue / React 项目 ZIP"
+            disabled={
+              workspaceStatusLoading ||
+              workspaceStatusLoadFailed ||
+              !workspaceStatus ||
+              Boolean(workspaceStatus?.artifactId)
+            }
             options={artifactVersions
               .filter((artifact) => artifact.kind === 'code')
               .map((artifact) => ({
@@ -475,7 +483,12 @@ export function renderWorkflowArtifacts(
           <Button
             type="primary"
             loading={workspaceBusy}
-            disabled={!workspaceArtifactId}
+            disabled={
+              !workspaceArtifactId ||
+              workspaceStatusLoading ||
+              workspaceStatusLoadFailed ||
+              !workspaceStatus
+            }
             onClick={() => void startWorkspace()}
           >
             启动 / 恢复工作区
@@ -483,7 +496,9 @@ export function renderWorkflowArtifacts(
           <Tag color={workspaceStatus?.ready ? 'green' : 'default'}>
             {workspaceStatus?.ready
               ? `工作区已就绪${workspaceStatus.projectRoot ? ` · ${workspaceStatus.projectRoot}` : ''}`
-              : '工作区未启动'}
+              : workspaceStatus?.artifactId
+                ? '工作区记录已存在但当前不可用'
+                : '工作区未启动'}
           </Tag>
           <Button
             danger
@@ -494,6 +509,23 @@ export function renderWorkflowArtifacts(
             销毁工作区
           </Button>
         </div>
+        {workspaceStatusLoading ? (
+          <div style={{ marginTop: 8, color: '#667085' }}>
+            正在检查当前工作区
+          </div>
+        ) : workspaceStatusLoadFailed ? (
+          <Alert
+            type="warning"
+            showIcon
+            title="无法确认当前工作区"
+            description="为避免覆盖仍存在的工作区，已禁用选择、启动和 Agent 执行。请刷新页面后重试。"
+            style={{ marginTop: 8 }}
+          />
+        ) : workspaceStatus?.artifactId ? (
+          <div style={{ marginTop: 8, color: '#667085' }}>
+            当前工作区绑定代码版本 {workspaceArtifactId}。切换版本前请先导出当前工作区 ZIP，再销毁工作区。
+          </div>
+        ) : null}
 
         <section
           style={{
@@ -515,7 +547,13 @@ export function renderWorkflowArtifacts(
           <Button
             type="primary"
             loading={workspaceBusy}
-            disabled={!workspaceArtifactId || !workspaceInstruction.trim()}
+            disabled={
+              !workspaceArtifactId ||
+              !workspaceInstruction.trim() ||
+              workspaceStatusLoading ||
+              workspaceStatusLoadFailed ||
+              !workspaceStatus
+            }
             onClick={() => void runWorkspaceAgent()}
             style={{ marginTop: 8 }}
           >

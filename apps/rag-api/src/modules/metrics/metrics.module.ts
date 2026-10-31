@@ -3,6 +3,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { MetricsController } from './metrics.controller';
 import { MetricsInterceptor } from './metrics.interceptor';
 import { MetricsService } from './metrics.service';
+import { BullMqQueueMetricsService } from './bullmq-queue-metrics.service';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { SecurityAuditService } from './security-audit.service';
 
@@ -11,6 +12,7 @@ import { SecurityAuditService } from './security-audit.service';
   controllers: [MetricsController],
   providers: [
     MetricsService,
+    BullMqQueueMetricsService,
     SecurityAuditService,
     {
       provide: APP_INTERCEPTOR,

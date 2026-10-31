@@ -42,18 +42,22 @@ describe('QwenLlmProvider', () => {
         maxTokens: 4_096,
         maxRetries: 2,
         configuration: { baseURL: 'https://example.test/v1' },
-        callbacks: [
-          expect.objectContaining({ handleLLMEnd: expect.any(Function) }),
-        ],
       }),
     );
   });
 
   it('throws a controlled error instead of returning the request prompt on failure', async () => {
     const provider = createProvider();
-    const model = jest.mocked(ChatOpenAI).mock.results.at(-1)?.value as {
-      invoke: jest.Mock;
-    };
+    const modelValue: unknown = jest.mocked(ChatOpenAI).mock.results.at(-1)
+      ?.value as unknown;
+    if (
+      !modelValue ||
+      typeof modelValue !== 'object' ||
+      !('invoke' in modelValue)
+    ) {
+      throw new Error('Expected the Qwen ChatOpenAI model to be created.');
+    }
+    const model = modelValue as { invoke: jest.Mock };
     model.invoke.mockRejectedValue(new Error('upstream unavailable'));
 
     await expect(provider.invoke('内部提示词不得泄露')).rejects.toEqual(

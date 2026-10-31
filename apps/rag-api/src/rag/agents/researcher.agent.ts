@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptVersion } from '../prompts/prompt-registry';
+import { supervisorAgentPromptDefinitions } from './agent-prompts';
 import type { ISubAgent, AgentInput, AgentOutput } from './agent.interface';
 
 /**
@@ -22,12 +24,8 @@ export class ResearcherAgent implements ISubAgent {
     input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
-    const systemPrompt = `你是一个专业的信息研究员。你的任务是根据提供的上下文和问题，提取所有相关的事实、数据和关键信息。
-要求：
-1. 列出所有与问题相关的事实要点
-2. 标注信息来源（如果上下文中有）
-3. 识别信息缺口（哪些方面缺乏数据）
-4. 保持客观，不做推测`;
+    const systemPrompt = supervisorAgentPromptDefinitions.researcher;
+    const promptVersion = getPromptVersion('supervisor_agent.researcher');
 
     const userPrompt = [
       `任务：${input.task}`,
@@ -59,6 +57,7 @@ export class ResearcherAgent implements ISubAgent {
         agent: this.name,
         confidence: 0.8,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     } catch (err) {
       if (input.signal?.aborted) throw err;
@@ -68,6 +67,7 @@ export class ResearcherAgent implements ISubAgent {
         agent: this.name,
         confidence: 0,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     }
   }

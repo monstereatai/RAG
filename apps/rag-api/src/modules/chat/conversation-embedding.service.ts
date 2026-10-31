@@ -21,6 +21,12 @@ const MESSAGE_META_SUFFIX = ' -->';
 const HISTORY_QUERY_BATCH_SIZE = 256;
 const HISTORY_QUERY_GROUPS_PER_BATCH = 8;
 
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const iteratorMethod: unknown = Reflect.get(value, Symbol.asyncIterator);
+  return typeof iteratorMethod === 'function';
+}
+
 interface ConversationHistoryGroup {
   threadId: string;
   queryKey: string;
@@ -144,12 +150,15 @@ export class ConversationEmbeddingService implements OnModuleInit {
   ): Promise<void> {
     await this.ensureInitialized();
     const client = this.client;
-    if (!client) throw new Error('Milvus conversation vector store is unavailable.');
+    if (!client)
+      throw new Error('Milvus conversation vector store is unavailable.');
 
     try {
       const id = assistantMessageId?.trim() ?? '';
       if (!id || id.length > 64) {
-        throw new Error('Conversation history requires a valid assistant message ID.');
+        throw new Error(
+          'Conversation history requires a valid assistant message ID.',
+        );
       }
 
       const content = `Q: ${query}\nA: ${answer.slice(0, 500)}`;
@@ -243,7 +252,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
       throw new Error('Conversation turn event references invalid messages.');
     }
     if ((conversation.tenantId || 'legacy') !== (event.tenantId || 'legacy')) {
-      throw new Error('Conversation turn event tenant does not match its messages.');
+      throw new Error(
+        'Conversation turn event tenant does not match its messages.',
+      );
     }
 
     await this.indexConversation(
@@ -337,11 +348,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
           metric_type: MetricType.COSINE,
           params: { ef: 64 },
           consistency_level: ConsistencyLevelEnum.Strong,
-          output_fields: [
-            'thread_id',
-            'query',
-            'query_key',
-          ],
+          output_fields: ['thread_id', 'query', 'query_key'],
           expr: `user_id == "${escapeMilvusString(userId.trim())}"`,
           timeout: this.searchTimeoutMs,
         }),
@@ -350,7 +357,9 @@ export class ConversationEmbeddingService implements OnModuleInit {
       );
 
       const groups = new Map<string, ConversationHistoryGroup>();
-      for (const hit of searchResult.results as Array<Record<string, unknown>>) {
+      for (const hit of searchResult.results as Array<
+        Record<string, unknown>
+      >) {
         const threadId =
           typeof hit['thread_id'] === 'string' ? hit['thread_id'] : '';
         const query = typeof hit['query'] === 'string' ? hit['query'] : '';
@@ -393,7 +402,10 @@ export class ConversationEmbeddingService implements OnModuleInit {
         this.searchTimeoutMs + 500,
         'Latest conversation history fetch',
       );
-      this.assertMutationSucceeded(latestEntitiesResult, 'latest version fetch');
+      this.assertMutationSucceeded(
+        latestEntitiesResult,
+        'latest version fetch',
+      );
 
       const now = Date.now();
       const candidates = latestEntitiesResult.data
@@ -410,7 +422,10 @@ export class ConversationEmbeddingService implements OnModuleInit {
           const ageDays =
             createdAt > 0 ? Math.max(0, (now - createdAt) / 86_400_000) : 365;
           const recencyScore = Math.exp(-ageDays / 14);
-          const semanticScore = this.cosineSimilarity(queryVector, record.vector);
+          const semanticScore = this.cosineSimilarity(
+            queryVector,
+            record.vector,
+          );
           return {
             content: record.content,
             threadId: record.thread_id,
@@ -472,7 +487,7 @@ export class ConversationEmbeddingService implements OnModuleInit {
           .join(' || ');
 
         const countBefore = await this.countHistoryRecords(client, expression);
-        const iterator = await client.queryIterator({
+        const iterator: unknown = await client.queryIterator({
           collection_name: this.collectionName,
           expr: expression,
           output_fields: [
@@ -485,8 +500,13 @@ export class ConversationEmbeddingService implements OnModuleInit {
           batchSize: HISTORY_QUERY_BATCH_SIZE,
           consistency_level: ConsistencyLevelEnum.Strong,
         });
+        if (!isAsyncIterable(iterator)) {
+          throw new Error(
+            'Milvus conversation history query did not return an async iterator.',
+          );
+        }
         let iteratedCount = 0;
-        for await (const page of iterator as AsyncIterable<unknown>) {
+        for await (const page of iterator) {
           if (!Array.isArray(page)) {
             throw new Error(
               'Milvus conversation history iterator returned an invalid page.',

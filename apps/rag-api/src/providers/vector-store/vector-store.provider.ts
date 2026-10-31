@@ -114,7 +114,9 @@ export class VectorStoreProvider implements IVectorStoreProvider, OnModuleInit {
     return this.provider.ensureDescriptionCollection();
   }
 
-  upsertDescriptions(records: RetrievalDescriptionVectorRecord[]): Promise<void> {
+  upsertDescriptions(
+    records: RetrievalDescriptionVectorRecord[],
+  ): Promise<void> {
     return this.provider.upsertDescriptions(records);
   }
 

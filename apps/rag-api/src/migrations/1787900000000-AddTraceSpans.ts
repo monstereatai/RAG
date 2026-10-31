@@ -1,9 +1,4 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableIndex,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableIndex } from 'typeorm';
 
 export class AddTraceSpans1787900000000 implements MigrationInterface {
   async up(q: QueryRunner): Promise<void> {
@@ -47,7 +42,11 @@ export class AddTraceSpans1787900000000 implements MigrationInterface {
 
     const table = await q.getTable('trace_spans');
     if (!table) return;
-    if (!table.indices.some((index) => index.name === 'IDX_trace_spans_trace_created')) {
+    if (
+      !table.indices.some(
+        (index) => index.name === 'IDX_trace_spans_trace_created',
+      )
+    ) {
       await q.createIndex(
         'trace_spans',
         new TableIndex({
@@ -56,7 +55,11 @@ export class AddTraceSpans1787900000000 implements MigrationInterface {
         }),
       );
     }
-    if (!table.indices.some((index) => index.name === 'IDX_trace_spans_kind_created')) {
+    if (
+      !table.indices.some(
+        (index) => index.name === 'IDX_trace_spans_kind_created',
+      )
+    ) {
       await q.createIndex(
         'trace_spans',
         new TableIndex({

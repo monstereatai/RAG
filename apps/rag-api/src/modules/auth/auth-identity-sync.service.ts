@@ -1,8 +1,8 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { UserEntity } from "../../providers/db/entities/user.entity";
-import type { AuthUserRecord } from "./auth-user.store";
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { UserEntity } from '../../providers/db/entities/user.entity';
+import type { AuthUserRecord } from './auth-user.store';
 
 /**
  * 将认证存储中的用户镜像到 PostgreSQL users 表。
@@ -24,12 +24,12 @@ export class AuthIdentitySyncService {
   ): Promise<void> {
     if (this.userRepo == null) {
       if (options.required) {
-        throw new Error("users repository is unavailable for identity sync");
+        throw new Error('users repository is unavailable for identity sync');
       }
       return;
     }
 
-    const tenantId = user.tenantId?.trim() || "legacy";
+    const tenantId = user.tenantId?.trim() || 'legacy';
     const existingById = await this.userRepo.findOneBy({ id: user.id });
     if (existingById) {
       await this.userRepo.update(
@@ -49,7 +49,7 @@ export class AuthIdentitySyncService {
     });
     if (existingByName && existingByName.id != user.id) {
       throw new Error(
-        "users table already contains the username with a different id",
+        'users table already contains the username with a different id',
       );
     }
 
@@ -65,9 +65,9 @@ export class AuthIdentitySyncService {
       const concurrent = await this.userRepo.findOneBy({ id: user.id });
       if (concurrent == null) {
         this.logger.error(
-          "identity sync failed for " +
+          'identity sync failed for ' +
             user.username +
-            ": " +
+            ': ' +
             (error as Error).message,
         );
         if (options.required) throw error;

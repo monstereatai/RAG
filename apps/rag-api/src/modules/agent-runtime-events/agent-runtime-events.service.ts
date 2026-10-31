@@ -151,8 +151,7 @@ export class AgentRuntimeEventsService {
         return false;
       }
       return Object.entries(input.payload).every(
-        ([key, value]) =>
-          (payload as Record<string, unknown>)[key] === value,
+        ([key, value]) => (payload as Record<string, unknown>)[key] === value,
       );
     });
   }

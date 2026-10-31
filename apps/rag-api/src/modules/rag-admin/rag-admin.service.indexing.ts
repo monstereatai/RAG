@@ -226,9 +226,10 @@ export class RagAdminIndexingWorkflow {
     const content = chunks.map((chunk) => chunk.content).join('\n\n');
 
     try {
-      const storedVectors = await this.context.vectorStoreProvider.getVectorsByIds(
-        chunks.map((chunk) => chunk.id),
-      );
+      const storedVectors =
+        await this.context.vectorStoreProvider.getVectorsByIds(
+          chunks.map((chunk) => chunk.id),
+        );
       const storedVectorsById = new Map(
         storedVectors.map((record) => [record.id, record]),
       );
@@ -253,7 +254,9 @@ export class RagAdminIndexingWorkflow {
             chunksNeedingEmbedding.map((chunk) => chunk.content),
           );
         if (generatedVectors.length !== chunksNeedingEmbedding.length) {
-          throw new Error('embedding count does not match chunks needing repair');
+          throw new Error(
+            'embedding count does not match chunks needing repair',
+          );
         }
         chunksNeedingEmbedding.forEach((chunk, index) => {
           vectorsById.set(chunk.id, generatedVectors[index]);
@@ -462,7 +465,11 @@ export class RagAdminIndexingWorkflow {
     userId: string,
   ) {
     if (!this.context.imageIndexService?.isEnabled()) {
-      return { indexed: false, assetCount: 0, reason: 'image embedding disabled' };
+      return {
+        indexed: false,
+        assetCount: 0,
+        reason: 'image embedding disabled',
+      };
     }
     const expected =
       await this.context.documentImageIngestionService.getExpectedIndexAssetCount(

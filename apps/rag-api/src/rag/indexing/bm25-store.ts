@@ -5,6 +5,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 export interface Bm25PersistedEntry {
   id: string;
@@ -80,7 +81,22 @@ export class Bm25Store {
       updatedAt: new Date().toISOString(),
       entries,
     };
-    fs.writeFileSync(this.filePath, JSON.stringify(store), 'utf-8');
+    // Rename a synced file on the same filesystem so a crash cannot truncate
+    // the last complete snapshot.
+    const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    let fileDescriptor: number | undefined;
+    try {
+      fileDescriptor = fs.openSync(tempPath, 'wx');
+      fs.writeFileSync(fileDescriptor, JSON.stringify(store), 'utf-8');
+      fs.fsyncSync(fileDescriptor);
+      fs.closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      fs.renameSync(tempPath, this.filePath);
+    } catch (error) {
+      if (fileDescriptor !== undefined) fs.closeSync(fileDescriptor);
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      throw error;
+    }
   }
 
   /**

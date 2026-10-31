@@ -11,6 +11,17 @@ import {
 import { ServiceTokenGuard } from '../../common/guards/service-token.guard';
 import { PlatformGovernanceService } from './platform-governance.service';
 import { Public } from '../../common/decorators/public.decorator';
+import {
+  CreateGovernanceEvaluationCaseDto,
+  CreateGovernanceWorkflowDto,
+  CloneGovernanceWorkflowDto,
+  GovernancePluginStatusDto,
+  PublishGovernanceWorkflowDto,
+  ResolvePluginCompositionDto,
+  RegisterGovernanceModelDto,
+  RegisterGovernancePluginDto,
+  RegisterKnowledgeBaseProfileDto,
+} from './platform-governance.dto';
 
 @Public()
 @Controller('platform-governance')
@@ -21,7 +32,7 @@ export class PlatformGovernanceController {
   @Get('workflows') listWorkflows(@Query('workspaceId') workspaceId?: string) {
     return this.service.listWorkflows(workspaceId);
   }
-  @Post('workflows') createWorkflow(@Body() body: any) {
+  @Post('workflows') createWorkflow(@Body() body: CreateGovernanceWorkflowDto) {
     return this.service.createWorkflow({ ...body, ownerId: 'admin-backend' });
   }
   @Get('workflows/:id') getWorkflow(@Param('id') id: string) {
@@ -29,13 +40,13 @@ export class PlatformGovernanceController {
   }
   @Post('workflows/:id/publish') publishWorkflow(
     @Param('id') id: string,
-    @Body('version') version: number,
+    @Body() body: PublishGovernanceWorkflowDto,
   ) {
-    return this.service.publishWorkflow(id, Number(version));
+    return this.service.publishWorkflow(id, body.version);
   }
   @Post('workflows/:id/clone') cloneWorkflow(
     @Param('id') id: string,
-    @Body() body: { key: string; name?: string },
+    @Body() body: CloneGovernanceWorkflowDto,
   ) {
     return this.service.cloneWorkflow(id, {
       ...body,
@@ -45,22 +56,18 @@ export class PlatformGovernanceController {
   @Get('plugins') listPlugins() {
     return this.service.listPlugins();
   }
-  @Post('plugins') registerPlugin(@Body() body: any) {
+  @Post('plugins') registerPlugin(@Body() body: RegisterGovernancePluginDto) {
     return this.service.registerPlugin(body);
   }
   @Post('plugins/:key/:version/status') setPluginStatus(
     @Param('key') key: string,
     @Param('version') version: string,
-    @Body('status') status: 'enabled' | 'disabled' | 'degraded',
+    @Body() body: GovernancePluginStatusDto,
   ) {
-    return this.service.setPluginStatus(key, version, status);
+    return this.service.setPluginStatus(key, version, body.status);
   }
   @Post('plugin-compositions/resolve') resolvePluginComposition(
-    @Body()
-    body: {
-      pluginKeys?: string[];
-      mode?: 'simple' | 'auto' | 'agentic' | 'production';
-    },
+    @Body() body: ResolvePluginCompositionDto,
   ) {
     return this.service.resolvePluginComposition(
       body.pluginKeys,
@@ -70,7 +77,7 @@ export class PlatformGovernanceController {
   @Get('models') listModels() {
     return this.service.listModels();
   }
-  @Post('models') registerModel(@Body() body: any) {
+  @Post('models') registerModel(@Body() body: RegisterGovernanceModelDto) {
     return this.service.registerModel(body);
   }
   @Get('evaluation-cases') listEvaluationCases(
@@ -78,7 +85,8 @@ export class PlatformGovernanceController {
   ) {
     return this.service.listEvaluationCases(workspaceId);
   }
-  @Post('evaluation-cases') createEvaluationCase(@Body() body: any) {
+  @Post('evaluation-cases')
+  createEvaluationCase(@Body() body: CreateGovernanceEvaluationCaseDto) {
     return this.service.createEvaluationCase({
       ...body,
       createdBy: 'admin-backend',
@@ -90,7 +98,7 @@ export class PlatformGovernanceController {
     return this.service.listKnowledgeBaseProfiles(workspaceId);
   }
   @Post('knowledge-base-profiles') registerKnowledgeBaseProfile(
-    @Body() body: any,
+    @Body() body: RegisterKnowledgeBaseProfileDto,
   ) {
     return this.service.registerKnowledgeBaseProfile(body);
   }

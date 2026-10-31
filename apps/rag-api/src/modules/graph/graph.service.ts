@@ -1,12 +1,19 @@
 import {
   Injectable,
   Logger,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Neo4jProvider } from '../../providers/neo4j/neo4j.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
+import {
+  graphAnswerPromptDefinition,
+  graphEntityExtractionPromptDefinition,
+} from './graph.prompts';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 import {
   GraphData,
   GraphExtractorService,
@@ -93,6 +100,7 @@ export class GraphService {
     private readonly neo4jProvider: Neo4jProvider,
     private readonly graphExtractor: GraphExtractorService,
     private readonly llmProvider: LlmProvider,
+    @Optional() private readonly langfuseProvider?: LangfuseProvider,
   ) {}
 
   isEnabled(): boolean {
@@ -247,22 +255,72 @@ export class GraphService {
   async queryGraph(
     query: string,
     userId: string,
-    options: { generateAnswer?: boolean } = {},
+    options: {
+      generateAnswer?: boolean;
+      allowedDocIds?: readonly string[];
+    } = {},
   ): Promise<GraphQueryResult> {
-    this.assertEnabled();
-    const entities = await this.extractQueryEntities(query);
-    const facts = await this.searchFacts(entities, userId);
-    const answer =
-      options.generateAnswer === false
-        ? ''
-        : await this.generateGraphAnswer(query, facts);
-
-    return {
-      answer,
-      entities,
-      facts,
-      cypher: this.factSearchCypher(),
+    const startedAt = Date.now();
+    let entities: string[] = [];
+    let factCount = 0;
+    const promptVersions = {
+      'graph.query_entities': getPromptVersion('graph.query_entities'),
+      ...(options.generateAnswer === false
+        ? {}
+        : {
+            'graph.generate_answer': getPromptVersion('graph.generate_answer'),
+          }),
     };
+    try {
+      this.assertEnabled();
+      entities = await this.extractQueryEntities(query);
+      const facts = await this.searchFacts(
+        entities,
+        userId,
+        options.allowedDocIds,
+      );
+      factCount = facts.length;
+      const answer =
+        options.generateAnswer === false
+          ? ''
+          : await this.generateGraphAnswer(query, facts);
+
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.graph.query',
+        userId,
+        promptVersions,
+        status: 'success',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: { queryChars: query.length },
+        outputSummary: {
+          entityCount: entities.length,
+          factCount,
+          answerChars: answer.length,
+        },
+      });
+
+      return {
+        answer,
+        entities,
+        facts,
+        cypher: this.factSearchCypher(),
+      };
+    } catch (error) {
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.graph.query',
+        userId,
+        promptVersions,
+        status: 'failed',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: { queryChars: query.length },
+        outputSummary: {
+          entityCount: entities.length,
+          factCount,
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+      });
+      throw error;
+    }
   }
 
   async getSchema(userId: string): Promise<GraphSchemaSummary> {
@@ -722,7 +780,15 @@ export class GraphService {
         .getModel()
         .withStructuredOutput(schema);
       const result = await structured.invoke(
-        `从问题中提取适合查询知识图谱的实体名称或关键词，只返回结构化字段 entities。\n问题：${query}`,
+        graphEntityExtractionPromptDefinition.promptTemplate.replace(
+          '{query}',
+          query,
+        ),
+        {
+          metadata: {
+            promptVersion: getPromptVersion('graph.query_entities'),
+          },
+        },
       );
       return result.entities.map((item) => item.trim()).filter(Boolean);
     } catch (err) {
@@ -740,27 +806,64 @@ export class GraphService {
   private async searchFacts(
     entities: string[],
     userId: string,
+    allowedDocIds?: readonly string[],
   ): Promise<GraphFact[]> {
-    if (entities.length === 0) {
+    if (entities.length === 0 || allowedDocIds?.length === 0) {
       return [];
     }
 
     const rows = await this.neo4jProvider.executeRead<GraphFact>(
       this.factSearchCypher(),
-      { entities, userId },
+      { entities, userId, allowedDocIds: allowedDocIds ?? null },
     );
-    return rows;
+    if (allowedDocIds === undefined) return rows;
+
+    const allowedSources = new Set(allowedDocIds);
+    return rows.flatMap((fact) => {
+      const sourceIds = Array.from(
+        new Set(
+          [fact.sourceId, ...(fact.sourceIds ?? [])].filter(
+            (sourceId): sourceId is string =>
+              typeof sourceId === 'string' && allowedSources.has(sourceId),
+          ),
+        ),
+      );
+      return sourceIds.length > 0
+        ? [{ ...fact, sourceId: sourceIds[0], sourceIds }]
+        : [];
+    });
   }
 
   private factSearchCypher(): string {
     return `
-      MATCH (source:GraphEntity {userId: $userId})-[r:GRAPH_RELATION {userId: $userId}]->(target:GraphEntity {userId: $userId})
-      WHERE source.id IN $entities
-         OR target.id IN $entities
-         OR source.label IN $entities
-         OR target.label IN $entities
-         OR any(alias IN coalesce(source.aliases, []) WHERE alias IN $entities)
-         OR any(alias IN coalesce(target.aliases, []) WHERE alias IN $entities)
+      MATCH (source:GraphEntity)-[r:GRAPH_RELATION]->(target:GraphEntity)
+      WHERE (
+        ($allowedDocIds IS NULL
+          AND source.userId = $userId
+          AND r.userId = $userId
+          AND target.userId = $userId)
+        OR
+        ($allowedDocIds IS NOT NULL
+          AND source.userId = r.userId
+          AND target.userId = r.userId
+          AND any(sourceId IN coalesce(r.sourceIds, [coalesce(r.sourceId, '')])
+            WHERE sourceId IN $allowedDocIds))
+      )
+      AND (
+        source.id IN $entities
+        OR target.id IN $entities
+        OR source.label IN $entities
+        OR target.label IN $entities
+        OR any(alias IN coalesce(source.aliases, []) WHERE alias IN $entities)
+        OR any(alias IN coalesce(target.aliases, []) WHERE alias IN $entities)
+      )
+      WITH source, target, r,
+        coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) AS sourceIds
+      WITH source, target, r,
+        CASE
+          WHEN $allowedDocIds IS NULL THEN sourceIds
+          ELSE [sourceId IN sourceIds WHERE sourceId IN $allowedDocIds]
+        END AS visibleSourceIds
       RETURN
         source.id AS source,
         source.label AS sourceLabel,
@@ -768,8 +871,8 @@ export class GraphService {
         target.id AS target,
         target.label AS targetLabel,
         coalesce(r.confidence, 1.0) AS confidence,
-        coalesce(r.sourceId, '') AS sourceId,
-        coalesce(r.sourceIds, [coalesce(r.sourceId, '')]) AS sourceIds
+        head(visibleSourceIds) AS sourceId,
+        visibleSourceIds AS sourceIds
       LIMIT 50
     `;
   }
@@ -789,17 +892,25 @@ export class GraphService {
       )
       .join('\n');
 
-    return this.llmProvider.invoke([
+    const [questionPrefix, factsPrefix] =
+      graphAnswerPromptDefinition.userPromptParts;
+    return this.llmProvider.invoke(
+      [
+        {
+          role: 'system',
+          content: graphAnswerPromptDefinition.system,
+        },
+        {
+          role: 'user',
+          content: [questionPrefix, query, factsPrefix, context].join(''),
+        },
+      ],
       {
-        role: 'system',
-        content:
-          '你是 GraphRAG 回答器。只能基于给定图谱事实回答，缺失信息要明确说明。',
+        metadata: {
+          promptVersion: getPromptVersion('graph.generate_answer'),
+        },
       },
-      {
-        role: 'user',
-        content: `用户问题：${query}\n\n图谱事实：\n${context}`,
-      },
-    ]);
+    );
   }
 
   private assertEnabled(): void {

@@ -46,11 +46,11 @@ docker compose -p docker \
 
 ### OpenSandbox Agent 项目工作区
 
-Agent 项目工作区需要单独部署并配置 OpenSandbox Server、兼容的执行镜像，以及 `OPEN_SANDBOX_DOMAIN`、`OPEN_SANDBOX_IMAGE`；启用认证时再注入 `OPEN_SANDBOX_API_KEY`。其余可选配置见 `apps/rag-api/.env.example`。当前 RAG 适配器默认限制为 2 CPU、4 GiB 内存、6 小时绝对寿命；网络默认拒绝，只放行 npm、npmmirror 和阿里云镜像域名。需要其他包源时，通过 `OPEN_SANDBOX_EGRESS_ALLOWLIST` 显式添加。
+Agent 项目工作区需要单独部署并配置 OpenSandbox Server、兼容的执行镜像，以及 `OPEN_SANDBOX_DOMAIN`、`OPEN_SANDBOX_IMAGE`；启用认证时再注入 `OPEN_SANDBOX_API_KEY`。其余可选配置见 `apps/rag-api/.env.example`。当前 RAG 适配器默认限制为 2 CPU、4 GiB 内存、8 GiB 磁盘和 6 小时绝对寿命；网络默认拒绝，只放行 npm、npmmirror 和阿里云镜像域名。需要其他包源时，通过 `OPEN_SANDBOX_EGRESS_ALLOWLIST` 显式添加。
 
 沙箱不挂载宿主目录，不注入 RAG、数据库、对象存储或模型凭据，也不挂 Docker Socket。Agent 命令最多运行 240 秒，单次输出保留最近 16 KiB；预览票据绑定工作流与端口、5 分钟过期，并只允许 GET/HEAD。项目预览代理不支持 WebSocket，因此 Vite HMR 不可用，修改后需手动刷新。
 
-RAG 当前通过 SDK 配置 CPU、内存、绝对寿命和网络策略；磁盘配额、PID 上限及底层容器运行参数必须在 OpenSandbox Server/Runtime 部署配置中另行设硬限制。启用前需在目标环境确认这些限制、Server 与 SDK 兼容性、真实 tenant 身份传递、域名路由和包源可达性，并做隔离与超时演练。本地 mock 测试不代表真实 Sandbox 部署验收。
+RAG 当前通过 SDK 配置端点安全访问、CPU、内存、磁盘、绝对寿命和网络策略；PID 上限及底层容器运行参数必须在 OpenSandbox Server/Runtime 部署配置中另行设硬限制。启用前需在目标环境确认这些限制、Server 与 SDK 兼容性、真实 tenant 身份传递、域名路由和包源可达性，并做隔离与超时演练。本地 mock 测试不代表真实 Sandbox 部署验收。
 
 ## 3. 依赖与降级边界
 
@@ -60,6 +60,18 @@ RAG 当前通过 SDK 配置 CPU、内存、绝对寿命和网络策略；磁盘�
 - Web Search、Rerank、图谱等可选能力缺少凭据或不可用时应明确跳过或降级，不得虚报已验证。
 - 生产关键队列、共享身份、分布式锁等依赖应按严格配置 fail closed；不能把进程内临时路径当作多实例可靠性。
 - 监控指标和 trace 用于定位链路阶段；真实 SLA、容量和告警责任人需由目标环境验收。
+- BullMQ 暴露各队列 waiting/active/delayed/failed/completed/paused 状态、最老等待任务年龄、成功/失败尝试事件速率，以及排队等待和单次 Worker 执行 P95；持续采样失败有独立告警。Prometheus 抓取指标仍受 `/api/v1/metrics` 的 `DevOnlyGuard` 保护；生产抓取必须经过内网网关或显式运维鉴权，不能公开开启开发端点。积压与等待时长告警阈值需按真实队列 SLA 和负载校准。
+
+### Mem0 周期归纳
+
+`MEM0_CONSOLIDATION_ENABLED` 默认是 `false`。显式启用后，还要求 `MEM0_ENABLED=true` 和 Redis 可用；每周日 03:00（Asia/Shanghai）通过 Redis 分布式锁处理最多 10 个用户，并用 Redis 游标轮转用户。只有至少 20 条符合条件的长期 user 记忆才会生成草案；原始记忆保持不变，草案以 `infer=false` 保存并等待人工审核。
+
+- `GET /api/v1/memories/consolidations/pending` 查看当前用户的草案及来源原文。
+- `POST /api/v1/memories/consolidations/:memoryId/approve` 审批；执行前重新核验全部来源指纹，来源已变化时拒绝审批并将草案标为 stale。
+- `POST /api/v1/memories/consolidations/:memoryId/reject` 驳回草案；不删除草案或来源记忆。
+- `POST /api/v1/memories/consolidations/:memoryId/revoke` 撤销已审批摘要；该摘要停止注入，仍保留的来源记忆恢复正常检索。
+
+这些接口继承 `rag:memory` 权限。审批/驳回在 Redis 不可用时 fail closed。`MEM0_CONSOLIDATION_ENABLED` 不应在未验证目标 Mem0 版本、真实记忆质量和数据治理规则前打开；生成草案不会替代真实召回率/污染率评测。
 
 ## 4. 身份、安全与数据生命周期
 

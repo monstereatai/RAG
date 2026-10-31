@@ -6,6 +6,8 @@ import { WeeklySummaryEntity } from '../../providers/db/entities/weekly-summary.
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
+import { weeklySummaryPromptDefinitions } from './weekly-summary.prompts';
 import { RedisProvider } from '../../providers/redis/redis.provider';
 
 const SUMMARY_INPUT_CHARS = 12_000;
@@ -58,7 +60,7 @@ export class WeeklySummaryService {
         );
         if (!lockAcquired) {
           this.logger.warn(
-        `Weekly summary skipped because its Redis lock is unavailable or held: week=${date}, userId=${normalizedUserId ?? 'system'}`,
+            `Weekly summary skipped because its Redis lock is unavailable or held: week=${date}, userId=${normalizedUserId ?? 'system'}`,
           );
           return null;
         }
@@ -80,7 +82,7 @@ export class WeeklySummaryService {
       } else {
         // Redis disabled 时只保护当前进程；多个实例之间仍可能重复生成。
         this.logger.warn(
-        `Redis disabled; weekly summary lock is process-local only: week=${date}, userId=${normalizedUserId ?? 'system'}`,
+          `Redis disabled; weekly summary lock is process-local only: week=${date}, userId=${normalizedUserId ?? 'system'}`,
         );
       }
 
@@ -247,19 +249,16 @@ export class WeeklySummaryService {
     let summaries: string[] = [];
 
     for (const chunk of chunks) {
-      summaries.push(
-        await this.invokeSummaryModel(
-          '你是一个对话分析助手。总结输入的对话片段，保留主要话题、用户关注点、未解决事项和后续方向；中文，最多 300 字。',
-          chunk,
-        ),
-      );
+      summaries.push(await this.invokeSummaryModel('chunk', chunk));
     }
 
     // 逐层归并分块结果，确保每次发给模型的内容都有明确上限。
     let level = 0;
     while (summaries.length > 1) {
       if (++level > 24) {
-        throw new Error('Weekly summary exceeded the supported hierarchy depth');
+        throw new Error(
+          'Weekly summary exceeded the supported hierarchy depth',
+        );
       }
       const batches = this.batchByCharBudget(summaries, SUMMARY_INPUT_CHARS);
       const next: string[] = [];
@@ -269,13 +268,13 @@ export class WeeklySummaryService {
           continue;
         }
         next.push(
-          await this.invokeSummaryModel(
-            '你是一个对话分析助手。合并输入的分段总结，删除重复内容，保留主要话题、核心关注、未解决事项和后续方向；中文，最多 300 字。',
-            batch.join('\n\n---\n\n'),
-          ),
+          await this.invokeSummaryModel('merge', batch.join('\n\n---\n\n')),
         );
       }
-      const previousChars = summaries.reduce((sum, item) => sum + item.length, 0);
+      const previousChars = summaries.reduce(
+        (sum, item) => sum + item.length,
+        0,
+      );
       const nextChars = next.reduce((sum, item) => sum + item.length, 0);
       if (next.length >= summaries.length && nextChars >= previousChars) {
         throw new Error('Weekly summary hierarchy did not reduce its input');
@@ -286,18 +285,22 @@ export class WeeklySummaryService {
   }
 
   private async invokeSummaryModel(
-    systemPrompt: string,
+    promptKind: keyof typeof weeklySummaryPromptDefinitions,
     input: string,
   ): Promise<string> {
-    const response = await this.llmProvider.getModel().invoke([
-      { role: 'system', content: systemPrompt },
-      { role: 'human', content: input },
-    ]);
+    const response = await this.llmProvider.getModel().invoke(
+      [
+        { role: 'system', content: weeklySummaryPromptDefinitions[promptKind] },
+        { role: 'human', content: input },
+      ],
+      { metadata: getPromptMetadata(`weekly_summary.${promptKind}`) },
+    );
     const content =
       typeof response.content === 'string'
         ? response.content
         : JSON.stringify(response.content);
-    if (!content.trim()) throw new Error('Weekly summary model returned empty content');
+    if (!content.trim())
+      throw new Error('Weekly summary model returned empty content');
     return content;
   }
 
@@ -333,7 +336,10 @@ export class WeeklySummaryService {
       const parts = this.splitText(item, maxChars);
       for (const part of parts) {
         const separatorChars = batch.length ? '\n\n---\n\n'.length : 0;
-        if (batch.length && batchChars + separatorChars + part.length > maxChars) {
+        if (
+          batch.length &&
+          batchChars + separatorChars + part.length > maxChars
+        ) {
           batches.push(batch);
           batch = [];
           batchChars = 0;

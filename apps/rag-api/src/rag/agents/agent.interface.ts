@@ -30,6 +30,8 @@ export interface AgentOutput {
   confidence: number;
   /** 执行耗时(ms) */
   durationMs: number;
+  /** 本阶段系统提示词的内容 hash 版本。 */
+  promptVersion?: string;
   /** 附加元数据 */
   metadata?: Record<string, unknown>;
 }

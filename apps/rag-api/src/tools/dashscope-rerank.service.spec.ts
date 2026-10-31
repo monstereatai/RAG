@@ -81,16 +81,20 @@ describe('DashScopeRerankService', () => {
     const service = new DashScopeRerankService(config);
     const controller = new AbortController();
     controller.abort();
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ results: [] }),
-    });
+    let requestSignal: AbortSignal | null | undefined;
+    const fetchMock = jest.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ results: [] }),
+        });
+      },
+    );
     global.fetch = fetchMock;
 
     await service.rerank('query', chunks, chunks.length, controller.signal);
 
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toEqual(
-      expect.objectContaining({ aborted: true }),
-    );
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

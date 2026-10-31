@@ -17,7 +17,11 @@ describe('SupervisorService cancellation', () => {
               'abort',
               () => {
                 pipelineAborted = true;
-                reject(signal.reason);
+                reject(
+                  signal.reason instanceof Error
+                    ? signal.reason
+                    : new Error('pipeline aborted'),
+                );
               },
               { once: true },
             );
@@ -35,5 +39,46 @@ describe('SupervisorService cancellation', () => {
 
     await expect(result).rejects.toThrow('caller cancelled');
     expect(pipelineAborted).toBe(true);
+  });
+
+  it('returns hashes for the actual routing and agent prompts', async () => {
+    const structuredInvoke = jest
+      .fn()
+      .mockResolvedValue({ domain: 'tech', reason: 'test classification' });
+    const model = {
+      withStructuredOutput: jest.fn(() => ({ invoke: structuredInvoke })),
+    };
+    const pipeline = {
+      runPartial: jest.fn().mockResolvedValue({
+        finalOutput: 'answer',
+        overallConfidence: 0.9,
+        stages: [
+          {
+            agent: 'writer',
+            durationMs: 10,
+            confidence: 0.9,
+            promptVersion: 'sha256:writer-version',
+          },
+        ],
+      }),
+    };
+    const service = new SupervisorService(
+      { getModel: jest.fn(() => model) } as never,
+      pipeline as never,
+      { get: jest.fn().mockReturnValue(30_000) } as never,
+    );
+
+    const result = await service.query('请分析生态系统的演变规律');
+
+    expect(structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(result.routingPromptVersion).toMatch(/^sha256:[a-f0-9]{16}$/);
+    expect(result.stages).toEqual([
+      {
+        agent: 'writer',
+        durationMs: 10,
+        confidence: 0.9,
+        promptVersion: 'sha256:writer-version',
+      },
+    ]);
   });
 });

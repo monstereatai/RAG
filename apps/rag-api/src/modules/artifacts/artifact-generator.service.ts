@@ -206,7 +206,9 @@ export class ArtifactGeneratorService {
     );
   }
 
-  private extractChartData(text: string): Array<{ label: string; value: number }> {
+  private extractChartData(
+    text: string,
+  ): Array<{ label: string; value: number }> {
     const tables = this.extractMarkdownTables(text);
     for (const table of tables) {
       if (table.length < 3) continue;
@@ -214,7 +216,9 @@ export class ArtifactGeneratorService {
       const valueColumns = header
         .map((_, index) => index)
         .filter((index) =>
-          table.slice(1).some((row) => this.parseChartNumber(row[index]) !== null),
+          table
+            .slice(1)
+            .some((row) => this.parseChartNumber(row[index]) !== null),
         );
       if (valueColumns.length !== 1) continue;
       const valueColumn = valueColumns[0];
@@ -230,13 +234,17 @@ export class ArtifactGeneratorService {
 
     const pairs = new Map<string, number>();
     for (const line of text.split(/\r?\n/)) {
-      const match = /^\s*([\p{L}][\p{L}\p{N}_]{0,15})\s*(?::|：|=|\s)\s*([+-]?\d+(?:\.\d+)?)\s*(?:件|个|人|元|美元|%|％|units?)?\s*$/iu.exec(
-        line,
-      );
+      const match =
+        /^\s*([\p{L}][\p{L}\p{N}_]{0,15})\s*(?::|：|=|\s)\s*([+-]?\d+(?:\.\d+)?)\s*(?:件|个|人|元|美元|%|％|units?)?\s*$/iu.exec(
+          line,
+        );
       if (!match) continue;
       pairs.set(match[1], Number(match[2]));
     }
-    const explicitPairs = [...pairs].map(([label, value]) => ({ label, value }));
+    const explicitPairs = [...pairs].map(([label, value]) => ({
+      label,
+      value,
+    }));
     if (explicitPairs.length >= 2) return explicitPairs.slice(0, 12);
 
     const lines = text
@@ -254,7 +262,10 @@ export class ArtifactGeneratorService {
       }
       if (values.length < 2) continue;
       const labels: string[] = [];
-      while (cursor < lines.length && /^[\p{L}][\p{L}\p{N}_-]{0,15}$/u.test(lines[cursor])) {
+      while (
+        cursor < lines.length &&
+        /^[\p{L}][\p{L}\p{N}_-]{0,15}$/u.test(lines[cursor])
+      ) {
         labels.push(lines[cursor]);
         cursor += 1;
       }
@@ -294,8 +305,13 @@ export class ArtifactGeneratorService {
     const magnitude = 10 ** Math.floor(Math.log10(rawStep));
     const normalizedStep = rawStep / magnitude;
     const stepSize =
-      (normalizedStep <= 1 ? 1 : normalizedStep <= 2 ? 2 : normalizedStep <= 5 ? 5 : 10) *
-      magnitude;
+      (normalizedStep <= 1
+        ? 1
+        : normalizedStep <= 2
+          ? 2
+          : normalizedStep <= 5
+            ? 5
+            : 10) * magnitude;
     const minValue = Math.floor(dataMin / stepSize) * stepSize;
     const maxValue = Math.ceil(dataMax / stepSize) * stepSize;
     const range = maxValue - minValue || 1;
@@ -308,25 +324,32 @@ export class ArtifactGeneratorService {
       const y = top + (chartHeight * index) / tickCount;
       return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#e5eaf2"/><text x="${left - 18}" y="${y + 6}" text-anchor="end" font-size="18" fill="#667085">${this.escapeXml(this.formatChartNumber(value))}</text>`;
     }).join('');
-    const bars = data.map((item, index) => {
-      const x = left + step * index + (step - barWidth) / 2;
-      const valueY = top + ((maxValue - item.value) / range) * chartHeight;
-      const barY = Math.min(valueY, zeroY);
-      const barHeight = Math.max(2, Math.abs(zeroY - valueY));
-      const color = index === data.length - 1 ? '#e85d3f' : '#4387d1';
-      return `<rect x="${x}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="10" fill="${color}"/><text x="${x + barWidth / 2}" y="${barY - 14}" text-anchor="middle" font-size="22" font-weight="600" fill="#1d2939">${this.escapeXml(this.formatChartNumber(item.value))}</text><text x="${x + barWidth / 2}" y="${height - bottom + 42}" text-anchor="middle" font-size="20" fill="#475467">${this.escapeXml(item.label)}</text>`;
-    }).join('');
+    const bars = data
+      .map((item, index) => {
+        const x = left + step * index + (step - barWidth) / 2;
+        const valueY = top + ((maxValue - item.value) / range) * chartHeight;
+        const barY = Math.min(valueY, zeroY);
+        const barHeight = Math.max(2, Math.abs(zeroY - valueY));
+        const color = index === data.length - 1 ? '#e85d3f' : '#4387d1';
+        return `<rect x="${x}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="10" fill="${color}"/><text x="${x + barWidth / 2}" y="${barY - 14}" text-anchor="middle" font-size="22" font-weight="600" fill="#1d2939">${this.escapeXml(this.formatChartNumber(item.value))}</text><text x="${x + barWidth / 2}" y="${height - bottom + 42}" text-anchor="middle" font-size="20" fill="#475467">${this.escapeXml(item.label)}</text>`;
+      })
+      .join('');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#ffffff"/><text x="${left}" y="66" font-size="30" font-weight="700" fill="#101828">${this.escapeXml(title)}</text>${grid}<line x1="${left}" y1="${zeroY}" x2="${width - right}" y2="${zeroY}" stroke="#98a2b3" stroke-width="2"/>${bars}</svg>`;
     return {
       body: Buffer.from(svg),
       contentType: 'image/svg+xml; charset=utf-8',
       extension: 'svg',
-      metadata: { renderer: 'deterministic-bar-chart', dataPoints: data.length },
+      metadata: {
+        renderer: 'deterministic-bar-chart',
+        dataPoints: data.length,
+      },
     };
   }
 
   private formatChartNumber(value: number): string {
-    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+    return Number.isInteger(value)
+      ? String(value)
+      : String(Number(value.toFixed(2)));
   }
 
   private extractMarkdownTables(text: string): string[][][] {

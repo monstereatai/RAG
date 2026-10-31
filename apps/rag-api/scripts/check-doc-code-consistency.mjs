@@ -26,6 +26,8 @@ const checks = [
     source: [
       'src/modules/workflow/production-workflow.service.ts',
       'src/modules/workflow/production-workflow-queue.service.ts',
+      'src/modules/workflow/production-workflow.query.ts',
+      'src/modules/workflow/production-workflow.state.ts',
     ],
     terms: ['BullMQ', '交接包', 'MCP', 'pending_approval', 'revision_required'],
   },

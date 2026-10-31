@@ -45,7 +45,10 @@ export class JobsService implements OnModuleInit {
     this.scheduledQueue?.setProcessor(async (jobId) => {
       const execution = await this.run(jobId);
       const current = await this.jobRepo.findOneBy({ id: jobId });
-      if (current?.type === 'at' && execution.status === 'completed') {
+      if (
+        current?.type === 'at' &&
+        ['completed', 'failed'].includes(execution.status)
+      ) {
         current.enabled = false;
         current.running = false;
         current.nextRunAt = null;
@@ -348,7 +351,10 @@ export class JobsService implements OnModuleInit {
     const ref = setTimeout(() => {
       void this.dispatch(job.id, `at:${job.at}`)
         .then(async (execution) => {
-          if (execution && execution.status === 'completed') {
+          if (
+            execution &&
+            ['completed', 'failed'].includes(execution.status)
+          ) {
             const current = await this.jobRepo.findOneBy({ id: job.id });
             if (current) {
               current.enabled = false;
@@ -422,7 +428,7 @@ export class JobsService implements OnModuleInit {
         const result = await this.withRetry(
           () =>
             this.withTimeout(
-              this.scheduledAnalysis.execute(job),
+              (signal) => this.scheduledAnalysis.execute(job, signal),
               120_000,
               `scheduled analysis job ${job.id}`,
             ),
@@ -430,14 +436,10 @@ export class JobsService implements OnModuleInit {
         );
         resultSummary = result.markdown;
       } else {
-        const result = await this.withRetry(
-          () =>
-            this.withTimeout(
-              this.supervisorService.query(job.instruction),
-              30_000,
-              `scheduled job ${job.id}`,
-            ),
-          2,
+        const result = await this.withTimeout(
+          (signal) => this.supervisorService.query(job.instruction, signal),
+          30_000,
+          `scheduled job ${job.id}`,
         );
         resultSummary = `domain=${result.domain}, confidence=${result.confidence.toFixed(2)}\n\n${result.answer}`;
       }
@@ -537,7 +539,10 @@ export class JobsService implements OnModuleInit {
 
   private async stopRuntime(job: ScheduledJobEntity): Promise<void> {
     if (this.scheduledQueue?.enabled) {
-      await this.scheduledQueue.unschedule(job.id);
+      await this.scheduledQueue.unschedule(
+        job.id,
+        job.type === 'at' && job.at ? `at:${job.at}` : undefined,
+      );
       return;
     }
     if (job.type === 'cron') {
@@ -576,21 +581,48 @@ export class JobsService implements OnModuleInit {
   }
 
   private async withTimeout<T>(
-    promise: Promise<T>,
+    operation: (signal: AbortSignal) => Promise<T>,
     ms: number,
     label: string,
   ): Promise<T> {
+    const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
+    const timeoutError = new Error(`${label} timeout after ${ms}ms`);
+    let rejectOnAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectOnAbort = () => {
+        reject(
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error(`${label} aborted`),
+        );
+      };
+      if (controller.signal.aborted) rejectOnAbort();
+      else
+        controller.signal.addEventListener('abort', rejectOnAbort, {
+          once: true,
+        });
+    });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        () => {
+          controller.abort(timeoutError);
+          reject(timeoutError);
+        },
         ms,
       );
     });
     try {
-      return await Promise.race([promise, timeout]);
+      return await Promise.race([
+        Promise.resolve().then(() => operation(controller.signal)),
+        timeout,
+        aborted,
+      ]);
     } finally {
       if (timer) clearTimeout(timer);
+      if (rejectOnAbort) {
+        controller.signal.removeEventListener('abort', rejectOnAbort);
+      }
     }
   }
 

@@ -1,20 +1,21 @@
 import { DomainEventsService } from './domain-events.service';
+import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-event-outbox.entity';
 
 describe('DomainEventsService', () => {
   const config = {
-    get: jest.fn((key: string) => {
+    get: jest.fn((key: string): boolean | number | undefined => {
       if (key === 'domainEvents.requireDistributedLock') return true;
       if (key === 'domainEvents.lockTtlSeconds') return 60;
       return undefined;
     }),
-  } as any;
+  };
 
   function createService(
     redisOverrides: Partial<Record<string, jest.Mock>> = {},
   ) {
     const outbox = {
       findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn((value) => value),
+      create: jest.fn((value: Record<string, unknown>) => value),
       save: jest.fn().mockResolvedValue(undefined),
       createQueryBuilder: jest.fn().mockReturnValue({
         where: jest.fn().mockReturnThis(),
@@ -23,17 +24,22 @@ describe('DomainEventsService', () => {
         take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       }),
-    } as any;
-    const subscriptions = { find: jest.fn().mockResolvedValue([]) } as any;
+    };
+    const subscriptions = { find: jest.fn().mockResolvedValue([]) };
     const redis = {
       isEnabled: jest.fn().mockReturnValue(false),
       setIfAbsent: jest.fn(),
       renewLock: jest.fn().mockResolvedValue(true),
       releaseLock: jest.fn().mockResolvedValue(undefined),
       ...redisOverrides,
-    } as any;
+    };
     return {
-      service: new DomainEventsService(config, outbox, subscriptions, redis),
+      service: new DomainEventsService(
+        config as never,
+        outbox as never,
+        subscriptions as never,
+        redis as never,
+      ),
       outbox,
       redis,
     };
@@ -56,7 +62,7 @@ describe('DomainEventsService', () => {
     const { service } = createService();
     const transactionalOutbox = {
       findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn((value) => value),
+      create: jest.fn((value: Record<string, unknown>) => value),
       save: jest.fn().mockResolvedValue(undefined),
     };
     const manager = {
@@ -100,37 +106,61 @@ describe('DomainEventsService', () => {
   });
 
   it('retries only failed subscription deliveries', async () => {
-    const { outbox, redis, subscriptions } = (() => {
-      const outbox = {
-        findOneBy: jest.fn().mockResolvedValue({ id: 'event-1', status: 'failed' }),
-        save: jest.fn().mockResolvedValue(undefined),
-      };
-      return {
-        outbox,
-        subscriptions: {} as any,
-        redis: {} as any,
-      };
-    })();
-    const where = jest.fn().mockReturnThis();
+    type RetryTransactionManager = {
+      getRepository: (entity: unknown) => unknown;
+    };
+    const outboxWhere = jest.fn().mockReturnThis();
+    const deliveryWhere = jest.fn().mockReturnThis();
+    const transactionalOutbox = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: outboxWhere,
+        execute: jest.fn().mockResolvedValue({ affected: 1 }),
+      }),
+      findOneBy: jest
+        .fn()
+        .mockResolvedValue({ id: 'event-1', status: 'pending' }),
+    };
     const deliveries = {
       createQueryBuilder: jest.fn().mockReturnValue({
         update: jest.fn().mockReturnThis(),
         set: jest.fn().mockReturnThis(),
-        where,
+        where: deliveryWhere,
         execute: jest.fn().mockResolvedValue(undefined),
       }),
     };
+    const manager = {
+      getRepository: jest.fn((entity: unknown) =>
+        entity === DomainEventOutboxEntity ? transactionalOutbox : deliveries,
+      ),
+    };
+    const outbox = {
+      manager: {
+        transaction: jest.fn(
+          async (
+            callback: (manager: RetryTransactionManager) => Promise<unknown>,
+          ) => callback(manager),
+        ),
+      },
+    };
+    const redis = {};
+    const subscriptions = {};
     const service = new DomainEventsService(
-      config,
+      config as never,
       outbox as never,
-      subscriptions,
-      redis,
+      subscriptions as never,
+      redis as never,
       deliveries as never,
     );
 
     await service.retry('event-1');
 
-    expect(where).toHaveBeenCalledWith(
+    expect(outboxWhere).toHaveBeenCalledWith('id = :id AND status = :status', {
+      id: 'event-1',
+      status: 'failed',
+    });
+    expect(deliveryWhere).toHaveBeenCalledWith(
       'eventId = :eventId AND status = :status',
       { eventId: 'event-1', status: 'failed' },
     );
@@ -156,7 +186,9 @@ describe('DomainEventsService', () => {
 
   it('only reads internal cache invalidation events without the required lock', async () => {
     const { service, outbox } = createService();
-    await (service as any).dispatchPending();
+    await (
+      service as unknown as { dispatchPending: () => Promise<void> }
+    ).dispatchPending();
     expect(outbox.createQueryBuilder).toHaveBeenCalled();
   });
 
@@ -165,7 +197,9 @@ describe('DomainEventsService', () => {
       isEnabled: jest.fn().mockReturnValue(true),
       setIfAbsent: jest.fn().mockResolvedValue(true),
     });
-    await (service as any).dispatchPending();
+    await (
+      service as unknown as { dispatchPending: () => Promise<void> }
+    ).dispatchPending();
     expect(outbox.createQueryBuilder).toHaveBeenCalled();
     expect(redis.releaseLock).toHaveBeenCalledWith(
       'rag:domain-events:dispatch-lock',
@@ -194,17 +228,21 @@ describe('DomainEventsService', () => {
     const outbox = { save: jest.fn().mockResolvedValue(undefined) };
     const subscriptions = { find: jest.fn().mockResolvedValue([subscription]) };
     const service = new DomainEventsService(
-      config,
+      config as never,
       outbox as never,
       subscriptions as never,
       { isEnabled: jest.fn().mockReturnValue(false) } as never,
       deliveries as never,
     );
+    const serviceWithPrivateMethods = service as unknown as {
+      post: (...args: unknown[]) => Promise<void>;
+      deliver: (event: Record<string, unknown>) => Promise<void>;
+    };
     const post = jest
-      .spyOn(service as any, 'post')
+      .spyOn(serviceWithPrivateMethods, 'post')
       .mockResolvedValue(undefined);
 
-    await (service as any).deliver({
+    await serviceWithPrivateMethods.deliver({
       id: 'event-1',
       tenantId: 'tenant-1',
       eventType: 'document.created',

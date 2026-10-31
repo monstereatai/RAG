@@ -33,7 +33,14 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
     @Optional() private readonly iamService?: IamService,
-  ) {}
+  ) {
+    if (
+      this.getNodeEnv() === 'production' &&
+      this.configService.get<boolean>('auth.enforceIam') === false
+    ) {
+      throw new Error('AUTH_ENFORCE_IAM=false is not allowed in production');
+    }
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // gRPC 等非 HTTP 上下文由各自的认证实现处理，不能在这里读取 HTTP request。
@@ -82,6 +89,9 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const authenticatedPayload = payload as JwtPayload;
+    const enforceIam =
+      this.configService.get<boolean>('auth.enforceIam') === true ||
+      this.getNodeEnv() === 'production';
     if (
       this.configService.get<boolean>('auth.requireTenantContext') === true &&
       authenticatedPayload.authType !== 'service' &&
@@ -99,7 +109,7 @@ export class JwtAuthGuard implements CanActivate {
     // API scope 解决调用方最小权限，IAM 解决用户在租户内是否有成员权限。
     // 两者不能互相替代：服务令牌走 ServiceTokenGuard，不进入这里。
     if (
-      this.configService.get<boolean>('auth.enforceIam') === true &&
+      enforceIam &&
       authenticatedPayload.authType !== 'service' &&
       requiredScopes?.length
     ) {
@@ -160,5 +170,14 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     return null;
+  }
+
+  private getNodeEnv(): string {
+    const configured = this.configService.get<unknown>('nodeEnv');
+    const nodeEnv =
+      typeof configured === 'string'
+        ? configured
+        : (process.env.NODE_ENV ?? 'development');
+    return nodeEnv.trim().toLowerCase();
   }
 }

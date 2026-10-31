@@ -39,14 +39,15 @@ describe('LLM usage callback', () => {
 
     await runWithLlmUsageObserver(
       (usage) => received.push(usage),
-      async () => {
-        await callback.handleLLMEnd({
-          llmOutput: {
-            tokenUsage: { prompt_tokens: 11, completion_tokens: 7 },
-          },
-          generations: [],
-        });
-      },
+      () =>
+        Promise.resolve(
+          callback.handleLLMEnd({
+            llmOutput: {
+              tokenUsage: { prompt_tokens: 11, completion_tokens: 7 },
+            },
+            generations: [],
+          }),
+        ),
     );
 
     expect(received).toEqual([{ inputTokens: 11, outputTokens: 7 }]);

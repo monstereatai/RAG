@@ -6,7 +6,9 @@ export class AddScheduledJobVersions1787400000000 implements MigrationInterface 
   async up(queryRunner: QueryRunner): Promise<void> {
     const table = await queryRunner.getTable('scheduled_jobs');
     if (!table) return;
-    const add = async (sql: string) => queryRunner.query(sql);
+    const add = async (sql: string): Promise<void> => {
+      await queryRunner.query(sql);
+    };
     if (!table.findColumnByName('versionGroupId')) {
       await add(
         'ALTER TABLE "scheduled_jobs" ADD COLUMN "versionGroupId" varchar(64) NULL',

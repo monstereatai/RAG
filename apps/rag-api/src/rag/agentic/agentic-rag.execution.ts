@@ -8,6 +8,8 @@ import {
   shouldClarifyQueryPlan,
 } from '../planning/query-plan';
 import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
+import { agenticPromptDefinitions } from '../prompts/agentic.prompts';
+import { getPromptMetadata } from '../prompts/prompt-registry';
 import { countTextTokens } from '../../modules/document/chunking.util';
 import { RunnableConfig } from '@langchain/core/runnables';
 import { randomUUID } from 'node:crypto';
@@ -20,6 +22,17 @@ import {
 } from './agentic-rag-planning';
 import { AgenticRagResume } from './agentic-rag.resume';
 import type { AgenticRagRunResult } from './agentic-rag.types';
+
+function hasInterruptingTasks(snapshot: unknown): boolean {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const tasks: unknown = Reflect.get(snapshot, 'tasks');
+  if (!Array.isArray(tasks)) return false;
+  return tasks.some((task) => {
+    if (!task || typeof task !== 'object') return false;
+    const interrupts: unknown = Reflect.get(task, 'interrupts');
+    return Array.isArray(interrupts) && interrupts.length > 0;
+  });
+}
 
 export class AgenticRagExecution extends AgenticRagResume {
   /**
@@ -282,7 +295,10 @@ export class AgenticRagExecution extends AgenticRagResume {
       retrieveOptions.sourcePolicy !== 'local_only'
     ) {
       const modelName = this.llmProvider.getActiveProviderName();
-      const prompt = `你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：${query}`;
+      const prompt = agenticPromptDefinitions.directAnswer.replace(
+        '{query}',
+        query,
+      );
       const estimatedInputTokens = (await countTextTokens(prompt)) + 4;
       const maxInputTokens = this.getMaxInputTokens('fast');
       if (estimatedInputTokens > maxInputTokens) {
@@ -305,6 +321,7 @@ export class AgenticRagExecution extends AgenticRagResume {
         try {
           answer = await this.llmProvider.invoke(prompt, {
             signal: this.composeSignal(retrieveOptions.signal, 30_000),
+            metadata: getPromptMetadata('agentic.direct_answer'),
           });
           if (!answer.trim()) {
             throw new Error('LLM returned an empty direct answer');
@@ -534,16 +551,16 @@ export class AgenticRagExecution extends AgenticRagResume {
     )) as AgenticRagStateType;
 
     // 原生 interrupt 不以业务字段伪造暂停状态；从保存的图任务读取中断标记。
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    const graphSnapshot = await this.app.getState({
-      configurable: { thread_id: threadId },
-    });
-    const interrupted =
-      Array.isArray(graphSnapshot?.tasks) &&
-      graphSnapshot.tasks.some(
-        (task: { interrupts?: unknown[] }) =>
-          Array.isArray(task.interrupts) && task.interrupts.length > 0,
-      );
+    const getGraphState: unknown = Reflect.get(this.app, 'getState');
+    if (typeof getGraphState !== 'function') {
+      throw new Error('Agentic graph state lookup is unavailable.');
+    }
+    const graphSnapshot: unknown = await Reflect.apply(
+      getGraphState,
+      this.app,
+      [{ configurable: { thread_id: threadId } }],
+    );
+    const interrupted = hasInterruptingTasks(graphSnapshot);
     const obsidianPaths = Array.from(
       new Set([
         ...obsidianContext.hits.map((hit) => hit.path),

@@ -1,4 +1,5 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { redactWorkspacePreviewTicketFromPath } from '../common/request-path.util';
@@ -19,6 +20,8 @@ export class TracingInterceptor implements NestInterceptor {
     );
     const userAgent = request.get('user-agent');
     const ip = request.ip;
+    const requestId = randomUUID();
+    request.requestId = requestId;
 
     // 创建trace context
     const traceContext = this.tracingService.startSpan(
@@ -27,6 +30,7 @@ export class TracingInterceptor implements NestInterceptor {
       {
         method,
         path,
+        requestId,
         userAgent,
         ip,
       }

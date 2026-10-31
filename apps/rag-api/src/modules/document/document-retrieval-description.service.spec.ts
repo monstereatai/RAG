@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { DocumentRetrievalDescriptionChunkEntity } from '../../providers/db/entities/document-retrieval-description-chunk.entity';
 import { DocumentRetrievalDescriptionEntity } from '../../providers/db/entities/document-retrieval-description.entity';
 import { DocumentRetrievalDescriptionService } from './document-retrieval-description.service';
 
@@ -7,7 +6,7 @@ describe('DocumentRetrievalDescriptionService', () => {
   function createService() {
     const txDescriptions = {
       find: jest.fn().mockResolvedValue([]),
-      save: jest.fn().mockImplementation((rows) => rows),
+      save: jest.fn((rows: DocumentRetrievalDescriptionEntity[]) => rows),
       delete: jest.fn().mockResolvedValue(undefined),
     };
     const txLinks = {
@@ -28,17 +27,31 @@ describe('DocumentRetrievalDescriptionService', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     };
     manager.transaction.mockImplementation(
-      async (work: (manager: unknown) => unknown) => work(manager),
+      (work: (manager: unknown) => unknown) => Promise.resolve(work(manager)),
     );
     const descriptionRepo = {
-      create: jest.fn((row) => row),
+      create: jest.fn(
+        (row: Partial<DocumentRetrievalDescriptionEntity>) => row,
+      ),
       find: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
       manager,
     };
     const sourceChunkRepo = { find: jest.fn().mockResolvedValue([]) };
-    const documentMetaRepo = { find: jest.fn().mockResolvedValue([]) };
-    const documentChunkRepo = { find: jest.fn().mockResolvedValue([]) };
+    let documentMetaFindOptions: Record<string, unknown> | undefined;
+    const documentMetaRepo = {
+      find: jest.fn((options: Record<string, unknown>) => {
+        documentMetaFindOptions = options;
+        return Promise.resolve([]);
+      }),
+    };
+    let documentChunkFindOptions: Record<string, unknown> | undefined;
+    const documentChunkRepo = {
+      find: jest.fn((options: Record<string, unknown>) => {
+        documentChunkFindOptions = options;
+        return Promise.resolve([]);
+      }),
+    };
     const embedding = {
       embedQuery: jest.fn().mockResolvedValue([0.1, 0.2]),
       embedDocuments: jest.fn().mockResolvedValue([[0.1, 0.2]]),
@@ -64,6 +77,11 @@ describe('DocumentRetrievalDescriptionService', () => {
       sourceChunkRepo,
       documentMetaRepo,
       documentChunkRepo,
+      getDocumentMetaFindOptions: () =>
+        documentMetaFindOptions ?? documentMetaRepo.find.mock.calls.at(-1)?.[0],
+      getDocumentChunkFindOptions: () =>
+        documentChunkFindOptions ??
+        documentChunkRepo.find.mock.calls.at(-1)?.[0],
       embedding,
       vectorStore,
       txDescriptions,
@@ -390,6 +408,8 @@ describe('DocumentRetrievalDescriptionService', () => {
       descriptionRepo,
       documentMetaRepo,
       documentChunkRepo,
+      getDocumentMetaFindOptions,
+      getDocumentChunkFindOptions,
     } = createService();
     documentMetaRepo.find.mockResolvedValue([
       {
@@ -421,10 +441,12 @@ describe('DocumentRetrievalDescriptionService', () => {
     await expect(
       service.rebuild({ tenantId: 'legacy', docId: 'legacy-doc' }),
     ).resolves.toEqual({ documents: 1, descriptions: 0 });
-    const rebuildMetaWhere = documentMetaRepo.find.mock.calls[0][0]
-      .where as Array<Record<string, unknown>>;
-    const rebuildChunkWhere = documentChunkRepo.find.mock.calls[0][0]
-      .where as Array<Record<string, unknown>>;
+    const rebuildMetaWhere = getDocumentMetaFindOptions()?.where as Array<
+      Record<string, unknown>
+    >;
+    const rebuildChunkWhere = getDocumentChunkFindOptions()?.where as Array<
+      Record<string, unknown>
+    >;
     expect(rebuildMetaWhere.some((where) => where.tenantId === 'legacy')).toBe(
       true,
     );

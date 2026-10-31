@@ -17,6 +17,10 @@ export function resolveRequestTimeoutMs(
   request: TimeoutRequest,
 ): number {
   const requestPath = request.path ?? request.originalUrl ?? '';
+  if (request.method === 'GET' && path.includes('/documents/operations')) {
+    return 110_000;
+  }
+
   return path.includes('/workspace/preview/')
     ? WORKSPACE_PREVIEW_TIMEOUT_MS
     : path.includes('/workspace/agent')

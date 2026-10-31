@@ -1,0 +1,9 @@
+{
+  "pngScale": "1",
+  "pngBackground": "theme",
+  "exportAppearance": "as-shown",
+  "defaultSaveFolder": "mermaid-diagram-exports",
+  "primaryClickAction": "menu",
+  "clickFollowUp": "action-only",
+  "openLocationOnSave": true
+}

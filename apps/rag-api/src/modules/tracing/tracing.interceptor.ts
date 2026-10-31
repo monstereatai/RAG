@@ -24,7 +24,14 @@ export class TracingInterceptor implements NestInterceptor {
 
     res.setHeader('traceparent', this.tracingService.toTraceparent(trace));
 
-    return next.handle().pipe(finalize(() => this.record(req, res, trace)));
+    return new Observable((subscriber) =>
+      this.tracingService.runWithTrace(trace, () =>
+        next
+          .handle()
+          .pipe(finalize(() => this.record(req, res, trace)))
+          .subscribe(subscriber),
+      ),
+    );
   }
 
   private record(

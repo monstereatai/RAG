@@ -18,8 +18,10 @@ import {
 
 @Injectable()
 export class MockVisionProvider implements IVisionProvider {
-  async ocr(_imageBuffer: Buffer, _mimeType: string): Promise<OcrResult> {
-    return {
+  ocr(_imageBuffer: Buffer, _mimeType: string): Promise<OcrResult> {
+    void _imageBuffer;
+    void _mimeType;
+    return Promise.resolve({
       text: 'Mock OCR: Dashboard 截图识别结果。包含模块：SLA、工单统计、响应时间。',
       confidence: 0.85,
       blocks: [
@@ -39,28 +41,33 @@ export class MockVisionProvider implements IVisionProvider {
           confidence: 0.82,
         },
       ],
-    };
+    });
   }
 
-  async describeImage(
+  describeImage(
     _imageBuffer: Buffer,
     _mimeType: string,
     _prompt?: string,
   ): Promise<ImageDescription> {
-    return {
+    void _imageBuffer;
+    void _mimeType;
+    void _prompt;
+    return Promise.resolve({
       description:
         'Mock 图片描述：这是一个企业管理后台 Dashboard 截图，' +
         '展示了客户 SLA 概览看板，包含一级工单响应时间、待处理工单数量和升级状态。',
       tags: ['dashboard', 'SLA', '工单', '企业后台'],
       confidence: 0.82,
-    };
+    });
   }
 
-  async describeVideo(
+  describeVideo(
     _videoBuffer: Buffer,
     _mimeType: string,
   ): Promise<VideoDescription> {
-    return {
+    void _videoBuffer;
+    void _mimeType;
+    return Promise.resolve({
       summary:
         'Mock 视频理解：这是一个审批培训视频。' +
         '讲解了采购合同超过 50 万元时需要法务复核和财务复核，以及新供应商准入的材料要求。',
@@ -74,16 +81,17 @@ export class MockVisionProvider implements IVisionProvider {
         '新供应商准入必须提供营业执照、对公账户证明和近一年合规承诺书。',
       entities: ['法务复核', '财务复核', '供应商准入', '合规承诺书'],
       confidence: 0.78,
-    };
+    });
   }
 
-  async generateImage(
+  generateImage(
     _request: ImageGenerationRequest,
   ): Promise<ImageGenerationResult> {
-    return {
+    void _request;
+    return Promise.resolve({
       base64: '',
       mimeType: 'image/png',
-    };
+    });
   }
 
   getCapabilities(): VisionCapabilities {

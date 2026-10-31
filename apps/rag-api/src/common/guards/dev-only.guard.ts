@@ -1,9 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { CanActivate, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 /**
@@ -17,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 export class DevOnlyGuard implements CanActivate {
   constructor(private readonly configService: ConfigService) {}
 
-  canActivate(_context: ExecutionContext): boolean {
+  canActivate(): boolean {
     const nodeEnv =
       this.configService.get<string>('nodeEnv') ??
       process.env.NODE_ENV ??

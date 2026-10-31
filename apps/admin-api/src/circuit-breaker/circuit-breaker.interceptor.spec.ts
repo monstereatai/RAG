@@ -1,6 +1,15 @@
 import { resolveRequestTimeoutMs } from './circuit-breaker.interceptor';
 
 describe('resolveRequestTimeoutMs', () => {
+  it('allows document operations aggregation to finish its upstream reads', () => {
+    expect(
+      resolveRequestTimeoutMs(
+        '/admin/documents/operations',
+        { method: 'GET' },
+      ),
+    ).toBe(110_000);
+  });
+
   it('gives ticketed previews the coordinated preview timeout', () => {
     expect(
       resolveRequestTimeoutMs(

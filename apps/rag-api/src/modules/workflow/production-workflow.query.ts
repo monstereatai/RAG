@@ -12,6 +12,8 @@ import {
 } from '../../tools/tool-execution.service';
 import { projectSchema } from './production-workflow.shared';
 import { ProductionWorkflowControlBase } from './production-workflow.control';
+import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
+import { productionProjectGenerationPromptDefinitions } from './production-project-generation.prompts';
 
 export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowControlBase {
   async status(threadId: string, userId: string, tenantId?: string) {
@@ -67,7 +69,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     );
     const merged = new Map<string, Record<string, unknown>>();
     [...redisItems, ...memoryItems].forEach((item) => {
-      const threadId = String(item.threadId ?? '');
+      const threadId = typeof item.threadId === 'string' ? item.threadId : '';
       if (threadId) merged.set(threadId, item);
     });
     const workflows = [...merged.values()].sort((a, b) =>
@@ -209,8 +211,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     const messages = [
       {
         role: 'system',
-        content:
-          '你是资深前端工程师。只返回一个 JSON 对象，不要返回解释文字、Markdown 围栏或只返回 notes。JSON 必须严格包含且只能包含这些字段：projectName（字符串）、framework（字符串）、files（数组）、runCommand（字符串）、notes（字符串数组）。files 至少 4 项，每项必须包含 path、content、purpose 三个字段；content 必须是完整可运行源码，不能用省略号代替。优先生成 React + Vite + TypeScript；不确定的后端接口使用 mock 数据并在 notes 数组说明。文件路径必须是相对路径，禁止绝对路径、..、node_modules 和二进制文件。',
+        content: productionProjectGenerationPromptDefinitions.system,
       },
       {
         role: 'user',
@@ -225,7 +226,19 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
             this.llmProvider
               .getModel()
               .withStructuredOutput(projectSchema, { method: 'jsonMode' })
-              .invoke(messages),
+              .invoke(messages, {
+                metadata: {
+                  ...getPromptMetadata('workflow.project_generation'),
+                  ...(attempt > 1
+                    ? {
+                        repairPromptName: 'workflow.project_generation.repair',
+                        repairPromptVersion: getPromptMetadata(
+                          'workflow.project_generation.repair',
+                        ).promptVersion,
+                      }
+                    : {}),
+                },
+              }),
           );
           const normalized = {
             ...output,
@@ -243,8 +256,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
           if (attempt === 1)
             messages.push({
               role: 'user',
-              content:
-                '上一次输出不符合 JSON schema 或无法运行。请重新输出完整 JSON，禁止只返回 notes；files 必须是包含完整源码的数组，package.json 要有 dev 与 build 脚本，入口文件要实际挂载页面。',
+              content: productionProjectGenerationPromptDefinitions.repair,
             });
         }
       }

@@ -20,16 +20,22 @@ describe('AgentRuntimeEventsService', () => {
     ).rejects.toThrow('database unavailable');
 
     await new Promise((resolve) => setImmediate(resolve));
-    expect((service as any).threadQueues.has('thread-a')).toBe(false);
+    const internals = service as unknown as {
+      threadQueues: { has(key: string): boolean };
+    };
+    expect(internals.threadQueues.has('thread-a')).toBe(false);
   });
 
   it('allocates MySQL event sequences and reads the value on the same connection', async () => {
+    const queries: string[] = [];
     const runner = {
       connect: jest.fn().mockResolvedValue(undefined),
-      query: jest
-        .fn()
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ nextSequence: 42 }]),
+      query: jest.fn((query: string) => {
+        queries.push(query);
+        return Promise.resolve(
+          queries.length === 1 ? [] : [{ nextSequence: 42 }],
+        );
+      }),
       release: jest.fn().mockResolvedValue(undefined),
     };
     const service = new AgentRuntimeEventsService(
@@ -40,12 +46,15 @@ describe('AgentRuntimeEventsService', () => {
       } as never,
     );
 
-    await expect(
-      (service as any).nextSequence('tenant-a', 'thread-a'),
-    ).resolves.toBe(42);
+    const internals = service as unknown as {
+      nextSequence(tenantId: string, threadId: string): Promise<number>;
+    };
+    await expect(internals.nextSequence('tenant-a', 'thread-a')).resolves.toBe(
+      42,
+    );
     expect(runner.query).toHaveBeenCalledTimes(2);
-    expect(runner.query.mock.calls[0][0]).toContain('LAST_INSERT_ID');
-    expect(runner.query.mock.calls[1][0]).toContain('SELECT LAST_INSERT_ID()');
+    expect(queries[0]).toContain('LAST_INSERT_ID');
+    expect(queries[1]).toContain('SELECT LAST_INSERT_ID()');
     expect(runner.release).toHaveBeenCalled();
   });
 

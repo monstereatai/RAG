@@ -182,7 +182,7 @@ describe('DocumentQueueService', () => {
       cleanupCompleted: false,
     });
     expect(pendingJob.remove).toHaveBeenCalledTimes(1);
-    expect(queueInstances[2].add).toHaveBeenCalledWith(
+    expect(queueInstances[3].add).toHaveBeenCalledWith(
       job.taskId,
       { objectKey: job.objectKey },
       { jobId: job.taskId, delay: 0 },
@@ -200,9 +200,9 @@ describe('DocumentQueueService', () => {
     const racingJob = {
       data: job,
       getState: jest.fn(() => Promise.resolve(state)),
-      remove: jest.fn(async () => {
+      remove: jest.fn(() => {
         state = 'active';
-        throw new Error('job is locked by a worker');
+        return Promise.reject(new Error('job is locked by a worker'));
       }),
     };
     queueInstances[0].getJob.mockResolvedValue(racingJob);
@@ -211,7 +211,7 @@ describe('DocumentQueueService', () => {
       cancelled: false,
       reason: '任务已处理中，无法中断。',
     });
-    expect(queueInstances[2].add).toHaveBeenCalledTimes(1);
+    expect(queueInstances[3].add).toHaveBeenCalledTimes(1);
   });
 
   it('does not report queue cancellation success when Redis is disabled', async () => {
@@ -271,7 +271,7 @@ describe('DocumentQueueService', () => {
       } as never,
       storage as never,
     );
-    queues[2].add.mockRejectedValue(new Error('redis unavailable'));
+    queues[3].add.mockRejectedValue(new Error('redis unavailable'));
 
     await expect(service.cancelPending(job.taskId)).resolves.toEqual({
       taskId: job.taskId,
@@ -337,7 +337,7 @@ describe('DocumentQueueService', () => {
       { data: job, attemptsMade: 3, opts: { attempts: 3 } },
       new Error('terminal failure'),
     );
-    expect(queueInstances[2].add).toHaveBeenCalledWith(
+    expect(queueInstances[3].add).toHaveBeenCalledWith(
       job.taskId,
       { objectKey: job.objectKey },
       expect.objectContaining({
@@ -361,7 +361,7 @@ describe('DocumentQueueService', () => {
 
     workerHandlers['document-processing'].completed({ data: job });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(queueInstances[2].add).toHaveBeenLastCalledWith(
+    expect(queueInstances[3].add).toHaveBeenLastCalledWith(
       job.taskId,
       { objectKey: job.objectKey },
       { jobId: job.taskId, delay: 0 },

@@ -95,7 +95,10 @@ export function readEvaluationReportSummaries(): EvaluationReportSummary[] {
 
 function normalizeProjectReport(
   report: Record<string, unknown>,
-): Omit<EvaluationReportSummary, 'datasetName' | 'available' | 'lastRunAt' | 'source'> {
+): Omit<
+  EvaluationReportSummary,
+  'datasetName' | 'available' | 'lastRunAt' | 'source'
+> {
   const summaryByMode = recordOf(recordOf(report.summary).byMode);
   const modeResults = Object.values(summaryByMode).map(recordOf);
   const totalSamples = modeResults.reduce(
@@ -111,13 +114,17 @@ function normalizeProjectReport(
     recordOf(report.costMetrics).byModeAndVariant,
   );
   const pairedComparison = recordOf(report.pairedComparison);
-  const qualityMeasured = report.qualityMeasured === true && report.skipped !== true;
-  const synthetic = typeof report.synthetic === 'boolean' ? report.synthetic : undefined;
+  const qualityMeasured =
+    report.qualityMeasured === true && report.skipped !== true;
+  const synthetic =
+    typeof report.synthetic === 'boolean' ? report.synthetic : undefined;
   const passed = qualityMeasured && report.ok === true && totalSamples > 0;
 
   return {
     mode: Array.isArray(report.modes)
-      ? report.modes.filter((mode): mode is string => typeof mode === 'string').join('/')
+      ? report.modes
+          .filter((mode): mode is string => typeof mode === 'string')
+          .join('/')
       : 'simple/auto/agentic',
     passed,
     averageScore:
@@ -177,11 +184,16 @@ function unavailable(
 function normalizeReport(
   definition: (typeof REPORTS)[number],
   report: Record<string, unknown>,
-): Omit<EvaluationReportSummary, 'datasetName' | 'available' | 'lastRunAt' | 'source'> {
+): Omit<
+  EvaluationReportSummary,
+  'datasetName' | 'available' | 'lastRunAt' | 'source'
+> {
   // golden-business 的离线文件只证明数据集结构和样本可读，不能冒充真实问答通过。
   // 之前直接读取 ok:true，导致后台同时显示“通过”和 86 个失败样本。
   if (definition.datasetName === 'golden-business' && report.live !== true) {
-    const caseCount = numberValue(report.caseCount ?? report.total ?? report.cases);
+    const caseCount = numberValue(
+      report.caseCount ?? report.total ?? report.cases,
+    );
     const validationFailed = report.ok === false;
     return {
       mode: definition.mode,
@@ -191,7 +203,7 @@ function normalizeReport(
       refusalRate: 0,
       citationRate: 0,
       reason: validationFailed
-        ? stringValue(report.reason) ?? '数据集结构校验失败'
+        ? (stringValue(report.reason) ?? '数据集结构校验失败')
         : '仅完成数据集结构校验，未执行真实问答',
       outcome: validationFailed ? 'failed' : 'skipped',
       failedSamples: 0,
@@ -199,17 +211,20 @@ function normalizeReport(
   }
   const summary = recordOf(report.summary);
   const platform = platformSummary(report);
-  const totalSamples = platform.totalSamples || numberValue(
-    report.total ?? report.caseCount ?? report.cases,
-  );
-  const passedSamples = platform.passedSamples || numberValue(report.passed);
+  const totalSamples = platform.hasDetailedStats
+    ? platform.totalSamples
+    : numberValue(report.total ?? report.caseCount ?? report.cases);
+  const passedSamples = platform.hasDetailedStats
+    ? platform.passedSamples
+    : numberValue(report.passed);
   const skipped = report.skipped === true || platform.skipped;
   // 有逐样本统计时，以统计结果为准；顶层 ok:true 不能覆盖失败样本。
   const passed =
     !skipped &&
     platform.checksPassed &&
-    (platform.totalSamples > 0
-      ? platform.passedSamples === platform.totalSamples
+    (platform.hasDetailedStats
+      ? platform.totalSamples > 0 &&
+        platform.passedSamples === platform.totalSamples
       : passedValue(report));
   return {
     mode: platform.live || report.live === true ? 'live' : definition.mode,
@@ -222,7 +237,7 @@ function normalizeReport(
     refusalRate: numberValue(report.refusalRate ?? summary.refusalRate),
     citationRate: numberValue(report.citationRate ?? summary.citationRate),
     reason: skipped
-      ? stringValue(report.reason) ?? '本次评测已跳过'
+      ? (stringValue(report.reason) ?? '本次评测已跳过')
       : passed
         ? undefined
         : stringValue(report.reason),
@@ -234,6 +249,7 @@ function normalizeReport(
 function platformSummary(report: Record<string, unknown>): {
   totalSamples: number;
   passedSamples: number;
+  hasDetailedStats: boolean;
   skipped: boolean;
   live: boolean;
   checksPassed: boolean;
@@ -250,12 +266,25 @@ function platformSummary(report: Record<string, unknown>): {
   for (const check of liveChecks) {
     const byMode = recordOf(recordOf(check.summary).byMode);
     const values = Object.values(byMode).map(recordOf);
-    totalSamples += values.reduce((sum, value) => sum + numberValue(value.total), 0);
-    passedSamples += values.reduce((sum, value) => sum + numberValue(value.passed), 0);
+    totalSamples += values.reduce(
+      (sum, value) => sum + numberValue(value.total),
+      0,
+    );
+    passedSamples += values.reduce(
+      (sum, value) => sum + numberValue(value.passed),
+      0,
+    );
     skipped &&= check.skipped === true;
     live ||= check.live === true;
   }
-  return { totalSamples, passedSamples, skipped, live, checksPassed };
+  return {
+    totalSamples,
+    passedSamples,
+    hasDetailedStats: liveChecks.length > 0,
+    skipped,
+    live,
+    checksPassed,
+  };
 }
 
 function recordOf(value: unknown): Record<string, unknown> {

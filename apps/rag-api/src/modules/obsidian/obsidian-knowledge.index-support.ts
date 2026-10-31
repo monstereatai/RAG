@@ -66,11 +66,10 @@ export abstract class ObsidianCompiledIndexSupport extends ObsidianKnowledgeFile
 
     for (const note of notes) {
       const frontmatter = this.parseFrontmatter(note.content);
-      const title = String(
-        frontmatter.title ||
-          this.titleFromMarkdown(note.content) ||
-          basename(note.path, '.md'),
-      );
+      const title =
+        this.frontmatterString(frontmatter.title) ??
+        this.titleFromMarkdown(note.content) ??
+        basename(note.path, '.md');
       const summary = this.extractSection(note.content, '摘要')
         .split('\n')
         .slice(0, 4)

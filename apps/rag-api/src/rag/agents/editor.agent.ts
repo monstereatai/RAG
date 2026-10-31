@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptVersion } from '../prompts/prompt-registry';
+import { supervisorAgentPromptDefinitions } from './agent-prompts';
 import type { ISubAgent, AgentInput, AgentOutput } from './agent.interface';
 
 /**
@@ -20,13 +22,8 @@ export class EditorAgent implements ISubAgent {
     input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
-    const systemPrompt = `你是一个专业的编辑。你的任务是根据评审意见对文本进行最终修改和润色。
-要求：
-1. 根据评审意见修正问题
-2. 改善语言表达的流畅性和专业性
-3. 统一术语和格式
-4. 确保内容简洁但不遗漏要点
-5. 输出修改后的最终版本（不要输出修改说明，直接输出改好的内容）`;
+    const systemPrompt = supervisorAgentPromptDefinitions.editor;
+    const promptVersion = getPromptVersion('supervisor_agent.editor');
 
     const userPrompt = [
       `编辑任务：润色关于「${input.task}」的回答`,
@@ -58,6 +55,7 @@ export class EditorAgent implements ISubAgent {
         agent: this.name,
         confidence: 0.95,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     } catch (err) {
       if (input.signal?.aborted) throw err;
@@ -67,6 +65,7 @@ export class EditorAgent implements ISubAgent {
         agent: this.name,
         confidence: 0,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     }
   }

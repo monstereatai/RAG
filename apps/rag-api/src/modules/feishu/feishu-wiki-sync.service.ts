@@ -122,7 +122,10 @@ export class FeishuWikiSyncService {
           throw new ConflictException('Feishu Wiki sync is already running');
         throw error;
       }
-    } else if (!trustedAdminPrincipal && connector.ownerUserId !== user.userId) {
+    } else if (
+      !trustedAdminPrincipal &&
+      connector.ownerUserId !== user.userId
+    ) {
       throw new ForbiddenException(
         'Feishu Wiki connector belongs to another sync owner',
       );
@@ -478,10 +481,11 @@ export class FeishuWikiSyncService {
 
   private resolveAdmin(ownerUserId: string): SyncPrincipal {
     const normalized = ownerUserId?.trim();
-    if (!normalized)
-      throw new BadRequestException('ownerUserId is required');
+    if (!normalized) throw new BadRequestException('ownerUserId is required');
     if (!/^admin:[a-f0-9]{58}$/.test(normalized)) {
-      throw new BadRequestException('ownerUserId must be a mapped Admin principal');
+      throw new BadRequestException(
+        'ownerUserId must be a mapped Admin principal',
+      );
     }
     const tenantId = process.env.RAG_ADMIN_TENANT_ID?.trim();
     if (!tenantId) {

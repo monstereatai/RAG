@@ -69,7 +69,7 @@ const isGraphDisabled = (value: any) =>
 const DemoAlert: React.FC<{ meta?: GraphResponseMeta }> = ({ meta }) =>
   meta?.demo ? (
     <Alert
-      message="当前展示的是演示图谱数据，尚未接入真实 Neo4j 图谱。"
+      title="当前展示的是演示图谱数据，尚未接入真实 Neo4j 图谱。"
       showIcon
       style={{ marginBottom: 12 }}
       type="warning"
@@ -431,7 +431,7 @@ const NodeManagementView: React.FC = () => {
         onClose={() => setActiveNode(null)}
         open={!!activeNode}
         title={activeNode?.label ?? '节点详情'}
-        width={520}
+        size={520}
       >
         {activeNode && <NodeDetail node={activeNode} onEdit={() => openEditNode(activeNode)} />}
       </Drawer>

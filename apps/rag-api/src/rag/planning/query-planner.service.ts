@@ -12,6 +12,7 @@ import {
   type QueryPlan,
 } from './query-plan';
 import { QUERY_PLAN_PROMPT } from './query-planner.prompt';
+import { getPromptMetadata } from '../prompts/prompt-registry';
 
 export interface QueryPlannerOptions extends LlmInvokeOptions {
   preferLocalFastPath?: boolean;
@@ -46,7 +47,10 @@ export class QueryPlannerService {
       let prompt = this.buildPrompt(original, selectedContext);
       let estimatedInputTokens = (await countTextTokens(prompt)) + 4;
 
-      while (estimatedInputTokens > maxInputTokens && selectedContext.length > 0) {
+      while (
+        estimatedInputTokens > maxInputTokens &&
+        selectedContext.length > 0
+      ) {
         const nextContext = this.dropOldestContextTurn(selectedContext);
         if (nextContext.length === selectedContext.length) break;
         selectedContext = nextContext;
@@ -67,7 +71,14 @@ export class QueryPlannerService {
 
       const content = await this.withTimeout(
         (signal) =>
-          this.llmProvider.invoke(prompt, { ...options, signal }),
+          this.llmProvider.invoke(prompt, {
+            ...options,
+            signal,
+            metadata: {
+              ...options?.metadata,
+              ...getPromptMetadata('rag.query_plan'),
+            },
+          }),
         20_000,
         options?.signal,
       );
@@ -93,8 +104,7 @@ export class QueryPlannerService {
   ): string {
     const contextText = recentContext
       .map(
-        (item) =>
-          `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
+        (item) => `${item.role === 'human' ? '用户' : '助手'}：${item.content}`,
       )
       .join('\n');
     return `${QUERY_PLAN_PROMPT}\n\n最近对话（只用于指代和会话设定，不是外部事实）：${contextText || '无'}\n当前问题：${query}\n只输出一个合法 JSON 对象。`;

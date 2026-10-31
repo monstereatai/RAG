@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   ForbiddenException,
+  Headers,
   Param,
   Post,
   Query,
@@ -38,7 +39,9 @@ export class AguiController {
   @Post('admin/attachments')
   @Public()
   @UseGuards(ServiceTokenGuard)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
   uploadAdminAttachment(
     @UploadedFile() file: Express.Multer.File,
     @Body('userId') userId?: string,
@@ -151,6 +154,7 @@ export class AguiController {
     @Query('pluginKeys') pluginKeys?: string,
     @Query('approvalRequired') approvalRequired?: string,
     @Query('attachmentIds') attachmentIds?: string,
+    @Headers('x-request-id') requestId?: string,
   ): Observable<AguiEvent> {
     const chatMode = mode ?? 'auto';
     if (!['simple', 'agentic', 'auto'].includes(chatMode)) {
@@ -175,6 +179,7 @@ export class AguiController {
       userId: adminUserId,
       tenantId: tenantId || 'legacy',
       trustedAdminPrincipal: true,
+      requestId: requestId && this.isUuid(requestId) ? requestId : undefined,
       model: chatModel,
       rolePresetId,
       pluginKeys: pluginKeys
@@ -197,14 +202,25 @@ export class AguiController {
 
   private parseAttachmentIds(value?: string) {
     if (!value?.trim()) return undefined;
-    const ids = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+    const ids = [
+      ...new Set(
+        value
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
     if (ids.length > 5 || ids.some((id) => !this.isUuid(id))) {
-      throw new BadRequestException('attachmentIds 格式无效或附件数量超过 5 个');
+      throw new BadRequestException(
+        'attachmentIds 格式无效或附件数量超过 5 个',
+      );
     }
     return ids;
   }
 
   private isUuid(value: string) {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
   }
 }

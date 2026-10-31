@@ -219,8 +219,8 @@ export class ConversationService {
     tenantId?: string,
   ): Promise<string> {
     const messageId = randomUUID();
-    const persistedConversation = await this.conversationRepo.manager.transaction(
-      async (manager) => {
+    const persistedConversation =
+      await this.conversationRepo.manager.transaction(async (manager) => {
         const conversation = await manager
           .getRepository(ConversationEntity)
           .findOne({
@@ -259,8 +259,7 @@ export class ConversationService {
           tenantId: conversation.tenantId || 'legacy',
           userId: conversation.userId,
         };
-      },
-    );
+      });
     this.logger.log(`Message saved to DB: threadId=${threadId}, role=${role}`);
 
     // Outbox 负责故障重试；这里仍立即清缓存，保持原有读后写语义。
@@ -270,9 +269,7 @@ export class ConversationService {
         persistedConversation.tenantId,
         persistedConversation.userId,
       );
-      await Promise.all(
-        [...keys].map((key) => this.redisProvider.del(key)),
-      );
+      await Promise.all([...keys].map((key) => this.redisProvider.del(key)));
     }
     return persistedConversation.messageId;
   }
@@ -291,9 +288,10 @@ export class ConversationService {
     persistMem0Memory: boolean;
   }): Promise<{ userMessageId?: string; assistantMessageId: string }> {
     const assistantMessageId = randomUUID();
-    const userMessageId = input.includeUserMessage === false ? undefined : randomUUID();
-    const persistedConversation = await this.conversationRepo.manager.transaction(
-      async (manager) => {
+    const userMessageId =
+      input.includeUserMessage === false ? undefined : randomUUID();
+    const persistedConversation =
+      await this.conversationRepo.manager.transaction(async (manager) => {
         const conversation = await manager
           .getRepository(ConversationEntity)
           .findOne({
@@ -323,7 +321,8 @@ export class ConversationService {
               conversationId: input.threadId,
               role: 'human',
               content: storedContent,
-              tenantId: input.tenantId?.trim() || conversation.tenantId || 'legacy',
+              tenantId:
+                input.tenantId?.trim() || conversation.tenantId || 'legacy',
             }),
           );
         } else {
@@ -353,7 +352,8 @@ export class ConversationService {
             conversationId: input.threadId,
             role: 'ai',
             content: storedAnswer,
-            tenantId: input.tenantId?.trim() || conversation.tenantId || 'legacy',
+            tenantId:
+              input.tenantId?.trim() || conversation.tenantId || 'legacy',
           }),
         );
 
@@ -410,8 +410,7 @@ export class ConversationService {
           tenantId,
           userId: conversation.userId,
         };
-      },
-    );
+      });
 
     if (this.redisProvider.isEnabled()) {
       const keys = this.conversationCacheKeys(
@@ -595,37 +594,39 @@ export class ConversationService {
       );
     }
 
-    const deleted = await this.conversationRepo.manager.transaction(async (manager) => {
-      const conversation = await manager
-        .getRepository(ConversationEntity)
-        .findOne({ where });
-      if (!conversation) return false;
+    const deleted = await this.conversationRepo.manager.transaction(
+      async (manager) => {
+        const conversation = await manager
+          .getRepository(ConversationEntity)
+          .findOne({ where });
+        if (!conversation) return false;
 
-      await manager.getRepository(MessageEntity).delete({
-        conversationId: threadId,
-        ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
-      });
-      await manager.getRepository(ConversationEntity).delete(where);
+        await manager.getRepository(MessageEntity).delete({
+          conversationId: threadId,
+          ...(tenantId?.trim() ? { tenantId: tenantId.trim() } : {}),
+        });
+        await manager.getRepository(ConversationEntity).delete(where);
 
-      const eventTenantId = conversation.tenantId || 'legacy';
-      await this.domainEvents.emitInTransaction(manager, {
-        tenantId: eventTenantId,
-        eventType: 'conversation.cache_invalidate',
-        aggregateType: 'conversation',
-        aggregateId: threadId,
-        payload: { userId: conversation.userId ?? null },
-        idempotencyKey: `conversation-delete-cache-invalidate:${threadId}`,
-      });
-      await this.domainEvents.emitInTransaction(manager, {
-        tenantId: eventTenantId,
-        eventType: CONVERSATION_DELETED_EVENT,
-        aggregateType: 'conversation',
-        aggregateId: threadId,
-        payload: { userId: conversation.userId ?? null },
-        idempotencyKey: `conversation-deleted:${threadId}`,
-      });
-      return true;
-    });
+        const eventTenantId = conversation.tenantId || 'legacy';
+        await this.domainEvents.emitInTransaction(manager, {
+          tenantId: eventTenantId,
+          eventType: 'conversation.cache_invalidate',
+          aggregateType: 'conversation',
+          aggregateId: threadId,
+          payload: { userId: conversation.userId ?? null },
+          idempotencyKey: `conversation-delete-cache-invalidate:${threadId}`,
+        });
+        await this.domainEvents.emitInTransaction(manager, {
+          tenantId: eventTenantId,
+          eventType: CONVERSATION_DELETED_EVENT,
+          aggregateType: 'conversation',
+          aggregateId: threadId,
+          payload: { userId: conversation.userId ?? null },
+          idempotencyKey: `conversation-deleted:${threadId}`,
+        });
+        return true;
+      },
+    );
     if (!deleted) return false;
     this.logger.log(`Conversation deleted from DB: threadId=${threadId}`);
     return true;
@@ -635,7 +636,8 @@ export class ConversationService {
     event: DomainEventOutboxEntity,
   ): Promise<void> {
     const threadId = event.aggregateId.trim();
-    if (!threadId) throw new Error('Conversation deletion event is missing threadId.');
+    if (!threadId)
+      throw new Error('Conversation deletion event is missing threadId.');
 
     let payload: Record<string, unknown>;
     try {
@@ -660,7 +662,9 @@ export class ConversationService {
       select: { id: true },
     });
     if (existing) {
-      throw new Error('Conversation still exists; deletion cleanup is premature.');
+      throw new Error(
+        'Conversation still exists; deletion cleanup is premature.',
+      );
     }
 
     await this.cleanupConversationArtifacts(
@@ -704,7 +708,9 @@ export class ConversationService {
     }
   }
 
-  private async clearConversationCache(keys: ReadonlySet<string>): Promise<void> {
+  private async clearConversationCache(
+    keys: ReadonlySet<string>,
+  ): Promise<void> {
     if (!this.redisProvider.isConfigured()) return;
     await Promise.all(
       [...keys].map((key) => this.redisProvider.delRequired(key)),

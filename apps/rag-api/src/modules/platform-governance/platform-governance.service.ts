@@ -19,6 +19,7 @@ import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledg
 import { retrievalProfileForTaskType } from '../../rag/retrieval/context-builder';
 import { sanitizeRetrievalProfileConfig } from '../../rag/planning/retrieval-profile-config';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
+import type { PluginManifest } from '../plugin-runtime/plugin-manifest';
 
 const DEFAULT_MODELS = [
   {
@@ -215,7 +216,7 @@ export class PlatformGovernanceService {
         }));
   }
 
-  async registerPlugin(input: Record<string, unknown>) {
+  async registerPlugin(input: Partial<PluginManifest>) {
     return this.pluginRuntime.register(input);
   }
 
@@ -389,7 +390,10 @@ export class PlatformGovernanceService {
       const defaultConfig = DEFAULT_KNOWLEDGE_BASE_PROFILES.find(
         (item) => item.key === options.profile,
       );
-      if ((config && config.status !== 'enabled') || (!config && !defaultConfig))
+      if (
+        (config && config.status !== 'enabled') ||
+        (!config && !defaultConfig)
+      )
         throw new NotFoundException(
           `enabled knowledge base profile ${options.profile} was not found`,
         );
@@ -424,7 +428,8 @@ export class PlatformGovernanceService {
 
   private parseJson(value: string, fallback: unknown) {
     try {
-      return JSON.parse(value);
+      const parsed: unknown = JSON.parse(value);
+      return parsed;
     } catch {
       return fallback;
     }

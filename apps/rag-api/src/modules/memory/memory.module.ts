@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MemoryService } from './memory.service';
+import { MemoryConsolidationService } from './memory-consolidation.service';
 import { ShortTermMemoryService } from './short-term-memory.service';
 import { MemoryController } from './memory.controller';
 import { LlmModule } from '../../providers/llm/llm.module';
@@ -8,7 +9,9 @@ import { MetricsModule } from '../metrics/metrics.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
+import { UserEntity } from '../../providers/db/entities/user.entity';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { RedisModule } from '../../providers/redis/redis.module';
 
 @Module({
   imports: [
@@ -16,10 +19,15 @@ import { DomainEventsModule } from '../domain-events/domain-events.module';
     AgentRuntimeEventsModule,
     MetricsModule,
     DomainEventsModule,
-    TypeOrmModule.forFeature([ConversationEntity, MessageEntity]),
+    RedisModule,
+    TypeOrmModule.forFeature([ConversationEntity, MessageEntity, UserEntity]),
   ],
   controllers: [MemoryController],
-  providers: [MemoryService, ShortTermMemoryService],
+  providers: [
+    MemoryService,
+    MemoryConsolidationService,
+    ShortTermMemoryService,
+  ],
   exports: [MemoryService, ShortTermMemoryService],
 })
 export class MemoryModule {}

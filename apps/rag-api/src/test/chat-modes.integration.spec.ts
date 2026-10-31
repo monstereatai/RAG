@@ -100,7 +100,9 @@ describe('Unified chat pipeline', () => {
       addTurn: jest.fn().mockResolvedValue(undefined),
       addTurns: jest.fn().mockResolvedValue(null),
       getAvailableHistoryTokenBudget: jest.fn().mockReturnValue(8_000),
-      limitHistoryToTokenBudget: jest.fn((turns) => turns),
+      limitHistoryToTokenBudget: jest.fn(
+        <T extends { content: string; role?: string }>(turns: T[]) => turns,
+      ),
     };
     const mockLangfuseProvider = {
       estimateTextTokens: jest.fn().mockReturnValue(1),
@@ -163,9 +165,9 @@ describe('Unified chat pipeline', () => {
     await expect(chatService.chat({ query: '' }, 'user-1')).rejects.toThrow(
       BadRequestException,
     );
-    await expect(
-      chatService.chat({ query: '   ' }, 'user-1'),
-    ).rejects.toThrow(BadRequestException);
+    await expect(chatService.chat({ query: '   ' }, 'user-1')).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('normalizes every legacy mode into one auto-routed pipeline', async () => {
@@ -226,18 +228,15 @@ describe('Unified chat pipeline', () => {
     expect(result.route).toBe('agentic');
     expect(result.references).toEqual([reference]);
     expect(result.retrievalSufficient).toBe(true);
-    expect(agenticRagService.run).toHaveBeenCalledWith(
-      '复杂对比问题',
-      'auto',
-      expect.any(Function),
-      [],
-      'new-thread-123',
-      'user-1',
-      expect.any(Array),
-      false,
-      expect.objectContaining({ scope: { role: undefined } }),
-      expect.objectContaining({ signal: expect.anything() }),
-    );
+    const call = agenticRagService.run.mock.calls.at(-1);
+    expect(call?.[0]).toBe('复杂对比问题');
+    expect(call?.[1]).toBe('auto');
+    expect(call?.[3]).toEqual([]);
+    expect(call?.[4]).toBe('new-thread-123');
+    expect(call?.[5]).toBe('user-1');
+    expect(call?.[7]).toBe(false);
+    expect(call?.[8].scope).toEqual({ role: undefined });
+    expect(call?.[9].signal).toBeInstanceOf(AbortSignal);
   });
 
   it('forwards history context and the selected role to the unified pipeline', async () => {
@@ -271,17 +270,15 @@ describe('Unified chat pipeline', () => {
       'user-1',
       undefined,
     );
-    const call = agenticRagService.run.mock.calls[0];
-    expect(call?.[6]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          content: expect.stringContaining('相关历史对话'),
-        }),
-        expect.objectContaining({
-          content: expect.stringContaining('当前服务对象岗位：产品经理'),
-        }),
-      ]),
-    );
+    const call = agenticRagService.run.mock.calls.at(-1);
+    expect(
+      call?.[6].some((message) => message.content.includes('相关历史对话')),
+    ).toBe(true);
+    expect(
+      call?.[6].some((message) =>
+        message.content.includes('当前服务对象岗位：产品经理'),
+      ),
+    ).toBe(true);
     expect(call?.[8]).toEqual(
       expect.objectContaining({
         scope: { role: 'product-manager' },

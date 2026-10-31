@@ -87,7 +87,10 @@ export class RagAdminController {
   runIndexReconciler() {
     return (
       this.indexReconciler?.runOnce('manual') ??
-      Promise.resolve({ available: false, reason: 'reconciler is not registered' })
+      Promise.resolve({
+        available: false,
+        reason: 'reconciler is not registered',
+      })
     );
   }
 
@@ -470,13 +473,10 @@ export class RagAdminController {
       validityMonths?: number;
     },
   ) {
-    const result = await this.ragAdminService.incrementalUpdateDocument(
-      docId,
-      {
-        ...body,
-        documentType: body.documentType as never,
-      },
-    );
+    const result = await this.ragAdminService.incrementalUpdateDocument(docId, {
+      ...body,
+      documentType: body.documentType as never,
+    });
     if (result === null) throw new NotFoundException(`doc ${docId} not found`);
     return result;
   }

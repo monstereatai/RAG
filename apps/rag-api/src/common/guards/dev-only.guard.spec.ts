@@ -12,18 +12,18 @@ describe('DevOnlyGuard', () => {
   });
 
   it('allows developer endpoints outside production', () => {
-    expect(guardFor('development').canActivate({} as never)).toBe(true);
-    expect(guardFor('test').canActivate({} as never)).toBe(true);
+    expect(guardFor('development').canActivate()).toBe(true);
+    expect(guardFor('test').canActivate()).toBe(true);
   });
 
   it('hides developer endpoints in production by default', () => {
-    expect(() => guardFor('production').canActivate({} as never)).toThrow(
+    expect(() => guardFor('production').canActivate()).toThrow(
       NotFoundException,
     );
   });
 
   it('allows an explicit production override for internal gateways', () => {
     process.env.ALLOW_DEV_ENDPOINTS = 'true';
-    expect(guardFor('production').canActivate({} as never)).toBe(true);
+    expect(guardFor('production').canActivate()).toBe(true);
   });
 });

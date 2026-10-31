@@ -2,6 +2,7 @@ export interface SkillMetadata {
   name: string;
   description: string;
   sourcePath: string;
+  version: string;
   tags: string[];
   content: string;
 }

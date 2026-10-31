@@ -7,13 +7,14 @@ import type { DashScopeRerankService } from '../../tools/dashscope-rerank.servic
 import type { RedisProvider } from '../../providers/redis/redis.provider';
 import type { RetrievedChunk } from '../evidence/retrieval.types';
 import type { EvidencePolicyService } from '../evidence/evidence-policy.service';
+import type { QueryTaskType } from '../planning/query-plan';
 
-interface AgenticRagServiceInternals {
+export interface AgenticRagServiceInternals {
   rankEvidenceChunks(chunks: RetrievedChunk[]): RetrievedChunk[];
   assessRetrievedChunks(
     query: string,
     chunks: RetrievedChunk[],
-    taskType?: string,
+    taskType?: QueryTaskType,
   ): { sufficient: boolean; reason: string };
   buildEvidenceFirstAnswer(
     query: string,
@@ -22,9 +23,9 @@ interface AgenticRagServiceInternals {
   answerGenerationService: {
     synthesizeEvidenceAnswer(
       query: string,
-      chunks: Array<{ content: string }>,
+      chunks: RetrievedChunk[],
       signal?: AbortSignal,
-    ): Promise<string>;
+    ): Promise<string | null>;
   };
 }
 
@@ -59,9 +60,7 @@ export function createService(overrides: Record<string, unknown> = {}) {
     formatObsidianContext: jest.fn().mockReturnValue(''),
     retrieve: jest.fn(),
     retrieveBm25Only: jest.fn(),
-    getObsidianContext: jest
-      .fn()
-      .mockResolvedValue({ hits: [], context: '' }),
+    getObsidianContext: jest.fn().mockResolvedValue({ hits: [], context: '' }),
     resolveObsidianSourceEvidence: jest.fn().mockResolvedValue({
       chunks: [],
       mappedDocIds: new Set<string>(),

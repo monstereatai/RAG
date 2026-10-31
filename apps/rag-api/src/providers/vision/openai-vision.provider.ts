@@ -11,6 +11,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '../../modules/metrics/metrics.service';
+import { LlmProvider } from '../llm/llm.provider';
 import {
   IVisionProvider,
   OcrResult,
@@ -29,7 +31,11 @@ export class OpenAiVisionProvider implements IVisionProvider {
   private readonly model: string;
   private readonly enabled: boolean;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly llmProvider: LlmProvider,
+    private readonly metricsService: MetricsService,
+  ) {
     this.apiKey =
       config.get<string>('vision.apiKey') ||
       config.get<string>('vision.qwenVlApiKey') ||
@@ -87,20 +93,27 @@ export class OpenAiVisionProvider implements IVisionProvider {
     return { description, tags: [], confidence: 0.88 };
   }
 
-  async describeVideo(
+  describeVideo(
     _videoBuffer: Buffer,
     _mimeType: string,
   ): Promise<VideoDescription> {
-    throw new Error(
-      'Direct video understanding not supported by this provider. ' +
-        'Use ffmpeg to extract keyframes and audio first, then call describeImage/ocr individually.',
+    void _videoBuffer;
+    void _mimeType;
+    return Promise.reject(
+      new Error(
+        'Direct video understanding not supported by this provider. ' +
+          'Use ffmpeg to extract keyframes and audio first, then call describeImage/ocr individually.',
+      ),
     );
   }
 
-  async generateImage(
+  generateImage(
     _request: ImageGenerationRequest,
   ): Promise<ImageGenerationResult> {
-    throw new Error('Image generation not supported by this provider.');
+    void _request;
+    return Promise.reject(
+      new Error('Image generation not supported by this provider.'),
+    );
   }
 
   getCapabilities(): VisionCapabilities {
@@ -137,26 +150,66 @@ export class OpenAiVisionProvider implements IVisionProvider {
   }
 
   private async postChat(body: object): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
+    return this.llmProvider.runWithExternalModelBudget(
+      body,
+      1024,
+      async (requestSignal) => {
+        const startedAt = Date.now();
+        let status: 'success' | 'error' = 'success';
+        try {
+          const response = await fetch(`${this.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.apiKey}`,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.any([
+              requestSignal,
+              AbortSignal.timeout(30_000),
+            ]),
+          });
+
+          if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new Error(
+              `Vision API error: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`,
+            );
+          }
+
+          const data = (await response.json()) as {
+            choices: Array<{ message: { content: string } }>;
+            usage?: {
+              prompt_tokens?: unknown;
+              completion_tokens?: unknown;
+            };
+          };
+          const readTokenCount = (value: unknown): number =>
+            typeof value === 'number' &&
+            Number.isSafeInteger(value) &&
+            value >= 0
+              ? value
+              : 0;
+          this.metricsService.observeLlmUsage('openai-compatible', this.model, {
+            inputTokens: readTokenCount(data.usage?.prompt_tokens),
+            outputTokens: readTokenCount(data.usage?.completion_tokens),
+          });
+          return data.choices?.[0]?.message?.content ?? '';
+        } catch (error) {
+          status = 'error';
+          throw error;
+        } finally {
+          this.metricsService.observeLlmCall(
+            'openai-compatible',
+            this.model,
+            status,
+            (Date.now() - startedAt) / 1000,
+            0,
+            0,
+          );
+        }
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vision API error: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`,
-      );
-    }
-
-    const data = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    return data.choices?.[0]?.message?.content ?? '';
+    );
   }
+
 }

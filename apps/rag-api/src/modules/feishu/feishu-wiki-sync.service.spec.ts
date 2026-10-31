@@ -4,9 +4,7 @@ import {
   FeishuWikiConnectorEntity,
   FeishuWikiItemEntity,
 } from '../../providers/db/entities/feishu-wiki-connector.entity';
-import { UserEntity } from '../../providers/db/entities/user.entity';
 import { DocumentService } from '../document/document.service';
-import { DocumentPermissionService } from '../document/document-permission.service';
 import { FeishuWikiApiClient } from './feishu-wiki-api.client';
 import { FeishuWikiSyncService } from './feishu-wiki-sync.service';
 
@@ -84,14 +82,6 @@ describe('FeishuWikiSyncService', () => {
         return item;
       }),
     } as unknown as Repository<FeishuWikiItemEntity>;
-    const userRepo = {
-      findOne: jest.fn(() => ({
-        id: 'admin-1',
-        role: 'admin',
-        tenantId: 'tenant-1',
-      })),
-    } as unknown as Repository<UserEntity>;
-
     let contentText = 'Initial source content';
     let documentVisible = true;
     const feishu = {
@@ -154,10 +144,9 @@ describe('FeishuWikiSyncService', () => {
     const service = new FeishuWikiSyncService(
       connectorRepo,
       itemRepo,
-      userRepo,
       feishu,
       documents,
-      permissions as unknown as DocumentPermissionService,
+      permissions,
     );
     const user = {
       userId: 'admin-1',
@@ -301,8 +290,9 @@ describe('FeishuWikiSyncService', () => {
       subjects: [{ type: 'user', id: 'admin-1' }],
     });
     expect(setPermissionsMock.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      (documents.updateLifecycle as jest.Mock).mock.invocationCallOrder.at(-1) ??
-        0,
+      (documents.updateLifecycle as jest.Mock).mock.invocationCallOrder.at(
+        -1,
+      ) ?? 0,
     );
   });
 
@@ -313,10 +303,9 @@ describe('FeishuWikiSyncService', () => {
     const service = new FeishuWikiSyncService(
       connectorRepo as unknown as Repository<FeishuWikiConnectorEntity>,
       {} as Repository<FeishuWikiItemEntity>,
-      {} as Repository<UserEntity>,
       feishu as unknown as FeishuWikiApiClient,
       {} as DocumentService,
-      {} as DocumentPermissionService,
+      {},
     );
     const user = { userId: 'admin-1', tenantId: 'tenant-1' } as JwtPayload;
 

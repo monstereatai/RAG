@@ -39,15 +39,11 @@ export class QwenLlmProvider implements ILLMProvider {
     const maxRetries = this.config.get<number>('llm.qwen.maxRetries') ?? 2;
     const temperature = this.config.get<number>('llm.qwen.temperature') ?? 0.2;
 
-    if (!apiKey) {
-      throw new Error('QWEN_API_KEY is required');
-    }
-
     const createModel = (selectedModelName: string) =>
       new ChatOpenAI({
         temperature,
         model: selectedModelName,
-        apiKey,
+        apiKey: apiKey || 'missing-qwen-api-key',
         timeout: timeoutMs,
         maxTokens,
         maxRetries,
@@ -84,8 +80,11 @@ export class QwenLlmProvider implements ILLMProvider {
       const signal = options.signal
         ? AbortSignal.any([options.signal, timeoutSignal])
         : timeoutSignal;
-        // cd： 调用langchain new ChatOpenAI的 invoke 方法
-      const response = await this.model.invoke(messages, { signal });
+      // cd： 调用langchain new ChatOpenAI的 invoke 方法
+      const response = await this.model.invoke(messages, {
+        signal,
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
       // cd：统计token用量
       const usage = readLlmUsage(response);
       if (usage) {

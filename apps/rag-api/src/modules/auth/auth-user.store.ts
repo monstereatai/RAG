@@ -338,7 +338,9 @@ export class AuthUserStore {
     if (!this.allowSeedUsers) return file;
     let mutated = false;
     for (const seed of SEED_USERS) {
-      if (file.users.some((user) => user.username.toLowerCase() === seed.username)) {
+      if (
+        file.users.some((user) => user.username.toLowerCase() === seed.username)
+      ) {
         continue;
       }
       const now = new Date().toISOString();

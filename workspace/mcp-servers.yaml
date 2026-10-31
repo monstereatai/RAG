@@ -3,4 +3,14 @@ mcpServers:
     transport: stdio
     command: node
     args:
-      - /Users/monster/Documents/GitHub/code/RAG/backend/scripts/mcp-smoke-server.mjs
+      - /Users/monster/Documents/GitHub/code/RAG/apps/rag-api/scripts/mcp-smoke-server.mjs
+mcpToolPolicies:
+  mcp__rag-smoke-mcp__rag_smoke_status:
+    tenantScope: global
+    permission: read
+    risk: low
+    requiresApproval: false
+    modes:
+      - agentic
+      - production
+    timeoutMs: 10000

@@ -15,13 +15,19 @@ import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-even
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime-events.service';
 import { countTextTokens } from '../document/chunking.util';
-import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import {
+  getPromptMetadata,
+  getPromptVersion,
+} from '../../rag/prompts/prompt-registry';
 import { memoryClassifierSystemPrompt } from './memory.prompts';
+import { MemoryConsolidationService } from './memory-consolidation.service';
 import {
   buildMemorySystemMessage,
   extractExplicitUserMemoryExpiration,
   formatMemoryContextBlocks,
   isExpiredUserMemory,
+  isSupersededUserMemory,
+  isUserScopedMemory,
   type MemoryContextBlock,
 } from './memory-context.support';
 
@@ -49,6 +55,12 @@ const memoryClassifierSchema = z.object({
     .describe(
       '仅当本轮所有要写入 user 层的事实都有同一个、由用户明确说出的绝对到期日期时为 true；否则为 false。',
     ),
+  superseded_memory_ids: z
+    .array(z.string().min(1))
+    .default([])
+    .describe(
+      '只列出被用户本轮明确更正或替换、且来自当前长期记忆候选列表的记忆 ID。没有明确更正时返回空数组。',
+    ),
   reason: z.string().describe('分类理由，一句话'),
 });
 
@@ -57,19 +69,36 @@ type MemoryClassifierOutput = z.infer<typeof memoryClassifierSchema>;
 interface MemoryPersistenceProgress {
   classification?: Pick<
     MemoryClassifierOutput,
-    'write_user' | 'write_session' | 'user_expiration_applies_to_all'
+    | 'write_user'
+    | 'write_session'
+    | 'user_expiration_applies_to_all'
+    | 'superseded_memory_ids'
   >;
   promptVersion?: string;
   completedScopes?: Array<'user' | 'session'>;
+  completedSupersededMemoryIds?: string[];
+  supersededMemoryCandidates?: Array<{
+    id: string;
+    metadata?: Record<string, unknown>;
+  }>;
   sourceMessageIds?: string[];
   sourceRecordedAt?: string;
+  sourceEventId?: string;
   onProgress?: (progress: {
     classification: Pick<
       MemoryClassifierOutput,
-      'write_user' | 'write_session' | 'user_expiration_applies_to_all'
+      | 'write_user'
+      | 'write_session'
+      | 'user_expiration_applies_to_all'
+      | 'superseded_memory_ids'
     >;
     promptVersion?: string;
     completedScopes: Array<'user' | 'session'>;
+    completedSupersededMemoryIds: string[];
+    supersededMemoryCandidates: Array<{
+      id: string;
+      metadata?: Record<string, unknown>;
+    }>;
   }) => void;
 }
 
@@ -106,6 +135,8 @@ export class MemoryService {
     @Optional() private readonly domainEvents?: DomainEventsService,
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly runtimeEvents?: AgentRuntimeEventsService,
+    @Optional()
+    private readonly consolidationService?: MemoryConsolidationService,
   ) {
     this.domainEvents?.registerInternalHandler(
       CONVERSATION_MEMORY_PERSIST_EVENT,
@@ -129,7 +160,7 @@ export class MemoryService {
       enabled: this.mem0Provider.isEnabled(),
       scopes: ['user', 'session'],
       writePolicy:
-        'LLM classifier writes durable profile/preferences to user scope and temporary task context to session scope.',
+        'LLM classifier writes durable user facts and temporary session context; explicit user corrections supersede older user memories.',
     };
   }
 
@@ -167,8 +198,40 @@ export class MemoryService {
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
+    const approvedSummaries = userCandidates.filter(
+      (memory) =>
+        memory.metadata?.rag_memory_kind === 'consolidation' &&
+        memory.metadata?.rag_consolidation_status === 'approved' &&
+        !isExpiredUserMemory(memory, today) &&
+        !isSupersededUserMemory(memory),
+    );
+    const consolidatedSourceIds = new Set(
+      approvedSummaries.flatMap((summary) => {
+        const sources = summary.metadata?.rag_consolidation_sources;
+        return Array.isArray(sources)
+          ? sources.flatMap((source) =>
+              source &&
+              typeof source === 'object' &&
+              typeof (source as Record<string, unknown>).id === 'string'
+                ? [(source as Record<string, unknown>).id as string]
+                : [],
+            )
+          : [];
+      }),
+    );
     const userMemories = userCandidates
-      .filter((memory) => !isExpiredUserMemory(memory, today))
+      .filter((memory) => {
+        const isConsolidation =
+          memory.metadata?.rag_memory_kind === 'consolidation';
+        return (
+          isUserScopedMemory(memory) &&
+          !isExpiredUserMemory(memory, today) &&
+          !isSupersededUserMemory(memory) &&
+          (!isConsolidation ||
+            memory.metadata?.rag_consolidation_status === 'approved') &&
+          (isConsolidation || !consolidatedSourceIds.has(memory.id))
+        );
+      })
       .slice(0, Math.max(0, topK));
 
     const systemMessage = buildMemorySystemMessage(
@@ -215,6 +278,8 @@ export class MemoryService {
     }
 
     let result: MemoryClassifierOutput;
+    let existingUserMemories: Mem0MemoryResult[] = [];
+    let supersededMemoryCandidates = progress.supersededMemoryCandidates ?? [];
     let promptVersion = progress.promptVersion;
     const classificationSource = progress.classification
       ? 'resumed_outbox'
@@ -222,13 +287,41 @@ export class MemoryService {
     if (progress.classification) {
       result = {
         ...progress.classification,
+        superseded_memory_ids:
+          progress.classification.superseded_memory_ids ?? [],
         reason: 'resumed from persisted outbox classification',
       };
     } else {
       try {
+        existingUserMemories = (
+          (await this.mem0Provider.search({
+            query: userText,
+            userId,
+            topK: 10,
+          })) ?? []
+        ).filter(
+          (memory) =>
+            !isSupersededUserMemory(memory) &&
+            !isExpiredUserMemory(memory, new Date().toISOString().slice(0, 10)),
+        );
+        const userMemoryCandidates = existingUserMemories.map((memory) => ({
+          id: memory.id,
+          memory: memory.memory.slice(0, 500),
+          recordedAt:
+            typeof memory.metadata?.rag_recorded_at === 'string'
+              ? memory.metadata.rag_recorded_at
+              : null,
+        }));
         const classifierMessages = [
           new SystemMessage(memoryClassifierSystemPrompt),
-          new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
+          new HumanMessage(
+            [
+              `用户：${userText}`,
+              `助手：${assistantText}`,
+              '当前长期记忆候选（仅用于判断是否有被用户明确更正的旧事实）：',
+              JSON.stringify(userMemoryCandidates),
+            ].join('\n'),
+          ),
         ];
         const estimatedInputTokens =
           await this.estimatePromptTokens(classifierMessages);
@@ -242,7 +335,25 @@ export class MemoryService {
           .getModel()
           .withStructuredOutput(memoryClassifierSchema);
         promptVersion = getPromptVersion('memory.classifier');
-        result = await classifier.invoke(classifierMessages);
+        const classification = await classifier.invoke(classifierMessages, {
+          metadata: getPromptMetadata('memory.classifier'),
+        });
+        result = {
+          ...classification,
+          superseded_memory_ids: classification.superseded_memory_ids ?? [],
+        };
+        const candidateIds = new Set(
+          existingUserMemories.map((memory) => memory.id),
+        );
+        result.superseded_memory_ids = [
+          ...new Set(result.superseded_memory_ids ?? []),
+        ].filter((id) => candidateIds.has(id));
+        supersededMemoryCandidates = existingUserMemories
+          .filter((memory) => result.superseded_memory_ids.includes(memory.id))
+          .map(({ id, metadata }) => ({
+            id,
+            ...(metadata ? { metadata } : {}),
+          }));
       } catch (err) {
         const message = (err as Error).message;
         this.logger.error(
@@ -277,6 +388,9 @@ export class MemoryService {
     const written: string[] = [];
     const failed: string[] = [];
     const completedScopes = new Set(progress.completedScopes ?? []);
+    const completedSupersededMemoryIds = new Set(
+      progress.completedSupersededMemoryIds ?? [],
+    );
     const saveProgress = () => {
       progress.onProgress?.({
         classification: {
@@ -288,9 +402,12 @@ export class MemoryService {
                 user_expiration_applies_to_all:
                   result.user_expiration_applies_to_all,
               }),
+          superseded_memory_ids: result.superseded_memory_ids ?? [],
         },
         ...(promptVersion ? { promptVersion } : {}),
         completedScopes: [...completedScopes],
+        completedSupersededMemoryIds: [...completedSupersededMemoryIds],
+        supersededMemoryCandidates,
       });
     };
     saveProgress();
@@ -300,31 +417,65 @@ export class MemoryService {
     ];
     const sourceRecordedAt =
       progress.sourceRecordedAt ?? new Date().toISOString();
+    const sourceUserMessageId = progress.sourceMessageIds?.[0];
+    const wasPersistedBeforeOutboxCheckpoint = async (
+      scope: 'user' | 'session',
+    ): Promise<boolean> => {
+      if (!progress.sourceEventId) return false;
+      const priorMemories = await this.mem0Provider.getAll(
+        userId,
+        scope === 'session' ? conversationId : undefined,
+        false,
+        true,
+      );
+      return priorMemories.some(
+        (memory) =>
+          memory.metadata?.rag_source_event_id === progress.sourceEventId &&
+          memory.metadata?.rag_memory_scope === scope &&
+          memory.metadata?.rag_source_conversation_id === conversationId,
+      );
+    };
 
     if (result.write_user) {
       if (completedScopes.has('user')) {
         written.push('user');
       } else {
         try {
-          const explicitExpiration = result.user_expiration_applies_to_all
-            ? extractExplicitUserMemoryExpiration(userText)
-            : null;
-          await this.mem0Provider.add({
-            messages: turn,
-            userId,
-            metadata: {
-              rag_recorded_at: sourceRecordedAt,
-              ...(conversationId
-                ? { rag_source_conversation_id: conversationId }
-                : {}),
-              ...(progress.sourceMessageIds?.length
-                ? { rag_source_message_ids: progress.sourceMessageIds }
-                : {}),
-              ...(explicitExpiration
-                ? { rag_valid_until: explicitExpiration }
-                : {}),
-            },
-          });
+          const alreadyPersisted =
+            await wasPersistedBeforeOutboxCheckpoint('user');
+          if (alreadyPersisted) {
+            this.logger.warn(
+              `Mem0 outbox replay detected existing user memory: eventId=${progress.sourceEventId}`,
+            );
+          } else {
+            const explicitExpiration = result.user_expiration_applies_to_all
+              ? extractExplicitUserMemoryExpiration(userText)
+              : null;
+            await this.mem0Provider.add({
+              messages: [{ role: 'user', content: userText }],
+              userId,
+              metadata: {
+                rag_memory_scope: 'user',
+                rag_recorded_at: sourceRecordedAt,
+                ...(progress.sourceEventId
+                  ? { rag_source_event_id: progress.sourceEventId }
+                  : {}),
+                ...(conversationId
+                  ? { rag_source_conversation_id: conversationId }
+                  : {}),
+                ...(sourceUserMessageId
+                  ? {
+                      rag_source_role: 'user',
+                      rag_source_message_id: sourceUserMessageId,
+                      rag_source_message_ids: [sourceUserMessageId],
+                    }
+                  : {}),
+                ...(explicitExpiration
+                  ? { rag_valid_until: explicitExpiration }
+                  : {}),
+              },
+            });
+          }
           written.push('user');
           completedScopes.add('user');
           saveProgress();
@@ -335,6 +486,66 @@ export class MemoryService {
           );
         }
       }
+
+      if (completedScopes.has('user')) {
+        if (!written.includes('user')) written.push('user');
+        const pendingSupersededIds = (
+          result.superseded_memory_ids ?? []
+        ).filter((id) => !completedSupersededMemoryIds.has(id));
+        if (pendingSupersededIds.length > 0) {
+          try {
+            const candidatesById = new Map(
+              supersededMemoryCandidates.map((memory) => [memory.id, memory]),
+            );
+            for (const memoryId of pendingSupersededIds) {
+              const memory = candidatesById.get(memoryId);
+              if (
+                !memory ||
+                isSupersededUserMemory({
+                  id: memory.id,
+                  memory: '',
+                  metadata: memory.metadata,
+                })
+              ) {
+                completedSupersededMemoryIds.add(memoryId);
+                saveProgress();
+                continue;
+              }
+
+              const previousRecordedAt = memory.metadata?.rag_recorded_at;
+              if (
+                typeof previousRecordedAt !== 'string' ||
+                previousRecordedAt >= sourceRecordedAt
+              ) {
+                completedSupersededMemoryIds.add(memoryId);
+                saveProgress();
+                continue;
+              }
+
+              await this.mem0Provider.updateMetadata(memoryId, {
+                ...(memory.metadata ?? {}),
+                rag_superseded_at: sourceRecordedAt,
+                ...(sourceUserMessageId
+                  ? {
+                      rag_superseded_by_source_message_id: sourceUserMessageId,
+                    }
+                  : {}),
+              });
+              await this.consolidationService?.invalidateForSupersededSources(
+                userId,
+                [memoryId],
+              );
+              completedSupersededMemoryIds.add(memoryId);
+              saveProgress();
+            }
+          } catch (err) {
+            failed.push('user_conflict_resolution');
+            this.logger.error(
+              `Mem0 user-memory conflict resolution failed: ${(err as Error).message}`,
+            );
+          }
+        }
+      }
     }
 
     if (result.write_session && conversationId) {
@@ -342,11 +553,36 @@ export class MemoryService {
         written.push('session');
       } else {
         try {
-          await this.mem0Provider.add({
-            messages: turn,
-            userId,
-            runId: conversationId,
-          });
+          const alreadyPersisted =
+            await wasPersistedBeforeOutboxCheckpoint('session');
+          if (alreadyPersisted) {
+            this.logger.warn(
+              `Mem0 outbox replay detected existing session memory: eventId=${progress.sourceEventId}`,
+            );
+          } else {
+            await this.mem0Provider.add({
+              messages: turn,
+              userId,
+              runId: conversationId,
+              metadata: {
+                rag_memory_scope: 'session',
+                rag_recorded_at: sourceRecordedAt,
+                ...(progress.sourceEventId
+                  ? { rag_source_event_id: progress.sourceEventId }
+                  : {}),
+                rag_source_conversation_id: conversationId,
+                ...(sourceUserMessageId
+                  ? {
+                      rag_source_role: 'user',
+                      rag_source_message_id: sourceUserMessageId,
+                      rag_source_message_ids: progress.sourceMessageIds ?? [
+                        sourceUserMessageId,
+                      ],
+                    }
+                  : {}),
+              },
+            });
+          }
           written.push('session');
           completedScopes.add('session');
           saveProgress();
@@ -374,6 +610,7 @@ export class MemoryService {
             classification: {
               write_user: result.write_user,
               write_session: result.write_session,
+              superseded_memory_ids: result.superseded_memory_ids ?? [],
             },
             written,
             failed,
@@ -480,12 +717,13 @@ export class MemoryService {
 
     const completedScopes: Array<'user' | 'session'> = [];
     if (payload.completedMemoryScopes !== undefined) {
-      if (!Array.isArray(payload.completedMemoryScopes)) {
+      const scopes: unknown = payload.completedMemoryScopes;
+      if (!Array.isArray(scopes)) {
         throw new Error(
           'Conversation memory event has invalid completed scopes.',
         );
       }
-      for (const scope of payload.completedMemoryScopes) {
+      for (const scope of scopes as unknown[]) {
         if (scope !== 'user' && scope !== 'session') {
           throw new Error(
             'Conversation memory event has invalid completed scopes.',
@@ -493,6 +731,64 @@ export class MemoryService {
         }
         completedScopes.push(scope);
       }
+    }
+
+    const completedSupersededMemoryIds: string[] = [];
+    if (payload.completedSupersededMemoryIds !== undefined) {
+      if (
+        !Array.isArray(payload.completedSupersededMemoryIds) ||
+        payload.completedSupersededMemoryIds.some(
+          (id) => typeof id !== 'string' || !id.trim(),
+        )
+      ) {
+        throw new Error(
+          'Conversation memory event has invalid superseded memory IDs.',
+        );
+      }
+      completedSupersededMemoryIds.push(
+        ...(payload.completedSupersededMemoryIds as string[]),
+      );
+    }
+
+    let supersededMemoryCandidates: MemoryPersistenceProgress['supersededMemoryCandidates'];
+    if (payload.supersededMemoryCandidates !== undefined) {
+      if (!Array.isArray(payload.supersededMemoryCandidates)) {
+        throw new Error(
+          'Conversation memory event has invalid superseded memory candidates.',
+        );
+      }
+      supersededMemoryCandidates = payload.supersededMemoryCandidates.map(
+        (candidate) => {
+          if (
+            !candidate ||
+            typeof candidate !== 'object' ||
+            Array.isArray(candidate) ||
+            typeof (candidate as Record<string, unknown>).id !== 'string' ||
+            !(candidate as Record<string, unknown>).id
+          ) {
+            throw new Error(
+              'Conversation memory event has invalid superseded memory candidates.',
+            );
+          }
+          const metadata = (candidate as Record<string, unknown>).metadata;
+          if (
+            metadata !== undefined &&
+            (!metadata ||
+              typeof metadata !== 'object' ||
+              Array.isArray(metadata))
+          ) {
+            throw new Error(
+              'Conversation memory event has invalid superseded memory metadata.',
+            );
+          }
+          return {
+            id: (candidate as Record<string, unknown>).id as string,
+            ...(metadata
+              ? { metadata: metadata as Record<string, unknown> }
+              : {}),
+          };
+        },
+      );
     }
 
     let classification: MemoryPersistenceProgress['classification'];
@@ -506,6 +802,7 @@ export class MemoryService {
           write_user: true,
           write_session: true,
           user_expiration_applies_to_all: true,
+          superseded_memory_ids: true,
         })
         .safeParse(payload.memoryClassification);
       if (!parsedClassification.success) {
@@ -524,7 +821,10 @@ export class MemoryService {
       {
         classification,
         promptVersion,
+        sourceEventId: event.id,
         completedScopes,
+        completedSupersededMemoryIds,
+        supersededMemoryCandidates,
         sourceMessageIds: [userMessage.id, assistantMessage.id],
         sourceRecordedAt: userMessage.createdAt.toISOString(),
         onProgress: (progress) => {
@@ -533,6 +833,10 @@ export class MemoryService {
             payload.memoryClassificationPromptVersion = progress.promptVersion;
           }
           payload.completedMemoryScopes = progress.completedScopes;
+          payload.completedSupersededMemoryIds =
+            progress.completedSupersededMemoryIds;
+          payload.supersededMemoryCandidates =
+            progress.supersededMemoryCandidates;
           event.payload = JSON.stringify(payload);
         },
       },

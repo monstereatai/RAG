@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { AgentPipelineService } from '../../rag/agents/agent-pipeline.service';
+import { getPromptContentVersion } from '../../rag/prompts/prompt-registry';
+import { buildSupervisorRouterSystemPrompt } from './supervisor-router.prompts';
+import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
 import { z } from 'zod';
 
 /**
@@ -21,11 +24,23 @@ export interface DomainConfig {
 
 export interface SupervisorResult {
   domain: string;
+  /** 实际用于 LLM 路由的提示词哈希；关键词路由时为 null。 */
+  routingPromptVersion: string | null;
   answer: string;
   confidence: number;
-  stages: Array<{ agent: string; durationMs: number; confidence: number }>;
+  stages: Array<{
+    agent: string;
+    durationMs: number;
+    confidence: number;
+    promptVersion?: string;
+  }>;
   totalDurationMs: number;
 }
+
+type SupervisorRoute = {
+  domain: DomainConfig;
+  promptVersion: string | null;
+};
 
 @Injectable()
 export class SupervisorService {
@@ -164,7 +179,8 @@ export class SupervisorService {
       // 1. 领域路由
       return await Promise.race([
         (async () => {
-          const domain = await this.routeToDomain(task, controller.signal);
+          const route = await this.routeToDomain(task, controller.signal);
+          const domain = route.domain;
           this.logger.log(
             `Routed to domain: ${domain.name} (${domain.description})`,
           );
@@ -179,12 +195,14 @@ export class SupervisorService {
 
           return {
             domain: domain.name,
+            routingPromptVersion: route.promptVersion,
             answer: pipelineResult.finalOutput ?? '',
             confidence: pipelineResult.overallConfidence,
             stages: pipelineResult.stages.map((s) => ({
               agent: s.agent,
               durationMs: s.durationMs,
               confidence: s.confidence,
+              promptVersion: s.promptVersion,
             })),
             totalDurationMs: Date.now() - start,
           };
@@ -205,13 +223,13 @@ export class SupervisorService {
   private async routeToDomain(
     task: string,
     signal?: AbortSignal,
-  ): Promise<DomainConfig> {
+  ): Promise<SupervisorRoute> {
     signal?.throwIfAborted();
     // 关键词快速匹配
     const keywordMatch = this.matchByKeywords(task);
     if (keywordMatch) {
       this.logger.log(`Domain matched by keywords: ${keywordMatch.name}`);
-      return keywordMatch;
+      return { domain: keywordMatch, promptVersion: null };
     }
 
     // LLM 分类
@@ -239,7 +257,7 @@ export class SupervisorService {
   private async classifyByLlm(
     task: string,
     signal?: AbortSignal,
-  ): Promise<DomainConfig> {
+  ): Promise<SupervisorRoute> {
     const model = this.llmProvider.getModel();
     const domainNames = this.domains.map((d) => d.name);
 
@@ -249,20 +267,34 @@ export class SupervisorService {
         .describe('最匹配的领域'),
       reason: z.string().describe('分类理由'),
     });
+    const systemPrompt = buildSupervisorRouterSystemPrompt(this.domains);
+    const promptVersion = getPromptContentVersion({
+      systemPrompt,
+      userTemplate: '{task}',
+      outputSchema: {
+        domain: {
+          type: 'enum',
+          options: domainNames,
+          description: '最匹配的领域',
+        },
+        reason: { type: 'string', description: '分类理由' },
+      },
+    });
 
     try {
       const structured = model.withStructuredOutput(schema);
       const result = await structured.invoke(
         [
-          {
-            role: 'system',
-            content: `你是一个智能路由器。根据用户问题判断它属于哪个领域。
-可选领域：
-${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
-          },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: task },
         ],
-        { signal },
+        {
+          signal,
+          metadata: {
+            ...getPromptMetadata('supervisor.dynamic_router'),
+            promptVariantVersion: promptVersion,
+          },
+        },
       );
 
       const matched = this.domains.find((d) => d.name === result.domain);
@@ -270,7 +302,7 @@ ${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
         this.logger.log(
           `Domain classified by LLM: ${matched.name}, reason: ${result.reason}`,
         );
-        return matched;
+        return { domain: matched, promptVersion };
       }
     } catch (err) {
       if (signal?.aborted) throw err;
@@ -280,7 +312,7 @@ ${this.domains.map((d) => `- ${d.name}：${d.description}`).join('\n')}`,
     }
 
     // 默认回退到 tech
-    return this.domains[0];
+    return { domain: this.domains[0], promptVersion };
   }
 
   /**

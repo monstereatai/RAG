@@ -9,6 +9,7 @@ import type { RagAnswerResult } from '../contracts/rag-types';
 import { RagAnswerFallbackService } from './rag-answer-fallback.service';
 import { RagEvidenceService } from '../evidence/rag-evidence.service';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
+import { getPromptMetadata } from '../prompts/prompt-registry';
 import { rethrowIfAborted } from '../../common/errors/abort.util';
 
 export interface RagGroundedAnswerInput {
@@ -129,6 +130,7 @@ export class RagGroundedAnswerService {
       () => {
         rawAnswer = '';
       },
+      getPromptMetadata('rag.generate_answer'),
     );
     for await (const chunk of stream) {
       const token =

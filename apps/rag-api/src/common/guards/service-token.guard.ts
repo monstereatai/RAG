@@ -27,9 +27,7 @@ interface AuthenticatedRequest {
 export class ServiceTokenGuard implements CanActivate {
   private readonly serviceToken: string;
 
-  constructor(
-    private readonly configService: ConfigService,
-  ) {
+  constructor(private readonly configService: ConfigService) {
     this.serviceToken = this.resolveServiceToken();
   }
 

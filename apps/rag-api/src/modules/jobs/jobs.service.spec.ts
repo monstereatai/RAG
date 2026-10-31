@@ -6,6 +6,7 @@ import { JobsService } from './jobs.service';
 
 const flushPromises = () =>
   new Promise(jest.requireActual('timers').setImmediate);
+let redisEnabled = false;
 
 describe('JobsService', () => {
   let service: JobsService;
@@ -19,10 +20,11 @@ describe('JobsService', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    redisEnabled = false;
     scheduler = new SchedulerRegistry();
     mockJobsMap = new Map();
     mockJobRepo = {
-      create: jest.fn().mockImplementation((dto) => {
+      create: jest.fn().mockImplementation((dto: Record<string, unknown>) => {
         return {
           ...dto,
           createdAt: new Date(),
@@ -45,7 +47,7 @@ describe('JobsService', () => {
       }),
     };
     mockExecutionRepo = {
-      create: jest.fn().mockImplementation((dto) => dto),
+      create: jest.fn((dto: unknown) => dto),
       save: jest.fn().mockResolvedValue({}),
       find: jest.fn().mockResolvedValue([]),
     };
@@ -68,14 +70,14 @@ describe('JobsService', () => {
       }),
     };
     mockRedisProvider = {
-      isEnabled: jest.fn().mockReturnValue(false),
+      isEnabled: jest.fn(() => redisEnabled),
       setIfAbsent: jest.fn().mockResolvedValue(true),
       releaseLock: jest.fn().mockResolvedValue(undefined),
     };
     service = new JobsService(
       scheduler,
       mockJobRepo,
-      mockExecutionRepo as any,
+      mockExecutionRepo,
       mockSupervisorService,
       mockScheduledAnalysis,
       { observeScheduledJob: jest.fn() } as any,
@@ -133,7 +135,7 @@ describe('JobsService', () => {
   });
 
   it('uses a Redis lease when running in a multi-instance deployment', async () => {
-    mockRedisProvider.isEnabled.mockReturnValue(true);
+    redisEnabled = true;
     const job = await service.create({
       type: 'every',
       everyMs: 60_000,
@@ -182,7 +184,7 @@ describe('JobsService', () => {
     const guardedService = new JobsService(
       scheduler,
       mockJobRepo,
-      mockExecutionRepo as any,
+      mockExecutionRepo,
       mockSupervisorService,
       mockScheduledAnalysis,
       { observeScheduledJob: jest.fn() } as any,
@@ -224,7 +226,10 @@ describe('JobsService', () => {
     expect(updated.enabled).toBe(false);
     expect(updated.running).toBe(false);
     expect(updated.lastRun).toBeDefined();
-    expect(mockSupervisorService.query).toHaveBeenCalledWith('run once');
+    expect(mockSupervisorService.query).toHaveBeenCalledWith(
+      'run once',
+      expect.any(AbortSignal),
+    );
   });
 
   it('rejects invalid every jobs', async () => {

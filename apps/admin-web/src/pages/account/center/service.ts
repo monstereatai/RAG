@@ -1,5 +1,4 @@
 import { authRequest } from '@/services/rag-admin/api';
-import type { CurrentUser, ListItemDataType } from './data.d';
 
 export interface ProfileData {
   department: string;

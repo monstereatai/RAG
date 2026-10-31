@@ -1,18 +1,7 @@
-import { LikeOutlined, MessageFilled, StarTwoTone } from '@ant-design/icons';
-import { Flex, List, Tag } from 'antd';
+import { List } from 'antd';
 import React from 'react';
-import { ArticleListContent } from '@/components';
 import type { ListItemDataType } from '../../data.d';
 import useStyles from './index.style';
-
-const IconText: React.FC<{
-  icon: React.ReactNode;
-  text: React.ReactNode;
-}> = ({ icon, text }) => (
-  <span>
-    {icon} {text}
-  </span>
-);
 
 const Articles: React.FC = () => {
   const { styles } = useStyles();

@@ -108,6 +108,7 @@ describe('TeamWikiService', () => {
       'user-2',
       [],
       'tenant-a',
+      false,
     );
   });
 
@@ -139,6 +140,7 @@ describe('TeamWikiService', () => {
       'user-2',
       [],
       'tenant-a',
+      false,
     );
   });
 
@@ -341,6 +343,7 @@ describe('TeamWikiService', () => {
       'editor-2',
       [],
       'tenant-a',
+      false,
     );
     expect(pageUpdate).toHaveBeenCalledWith(
       { id: 'page-1', tenantId: 'tenant-a' },

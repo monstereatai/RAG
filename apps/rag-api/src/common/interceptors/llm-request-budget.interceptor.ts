@@ -11,7 +11,10 @@ import { LlmProvider } from '../../providers/llm/llm.provider';
 export class LlmRequestBudgetInterceptor implements NestInterceptor {
   constructor(private readonly llmProvider: LlmProvider) {}
 
-  intercept(_context: ExecutionContext, next: CallHandler): Observable<unknown> {
+  intercept(
+    _context: ExecutionContext,
+    next: CallHandler,
+  ): Observable<unknown> {
     return new Observable((subscriber) =>
       this.llmProvider.runWithRequestBudget(() =>
         next.handle().subscribe({

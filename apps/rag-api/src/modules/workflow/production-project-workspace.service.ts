@@ -200,7 +200,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         .toString();
     };
     try {
-      execution = (await sandbox.commands.run(
+      execution = await sandbox.commands.run(
         normalizedCommand,
         {
           workingDirectory: WORKSPACE_ROOT,
@@ -212,7 +212,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
           skipAccumulation: true,
         },
         controller.signal,
-      )) as SandboxCommandOutput;
+      );
     } catch (error) {
       if (signal?.aborted && !timedOut) throw error;
       if (!timedOut) throw new BadGatewayException('Sandbox command failed.');
@@ -504,7 +504,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
   ): Promise<Awaited<ReturnType<ArtifactsService['createStudioVersion']>>> {
     this.assertIdentity(threadId, userId);
     await this.workflow.codingContext(threadId, userId, tenantId);
-    const { key, record, sandbox } = await this.getActiveWorkspace(
+    const { record, sandbox } = await this.getActiveWorkspace(
       threadId,
       userId,
       tenantId,
@@ -654,9 +654,11 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         image,
         timeoutSeconds: WORKSPACE_TTL_SECONDS,
         readyTimeoutSeconds: 120,
+        secureAccess: true,
         resource: {
           cpu: this.config.get<string>('opensandbox.cpuLimit') ?? '2',
           memory: this.config.get<string>('opensandbox.memoryLimit') ?? '4Gi',
+          disk: this.config.get<string>('opensandbox.diskLimit') ?? '8Gi',
         },
         networkPolicy: {
           defaultAction: 'deny',

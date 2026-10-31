@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptVersion } from '../prompts/prompt-registry';
+import { supervisorAgentPromptDefinitions } from './agent-prompts';
 import type { ISubAgent, AgentInput, AgentOutput } from './agent.interface';
 
 /**
@@ -20,14 +22,8 @@ export class CriticAgent implements ISubAgent {
     input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
-    const systemPrompt = `你是一个严格的质量评审员。你的任务是对文本内容进行全面质量检查。
-要求：
-1. 检查逻辑一致性：是否存在自相矛盾
-2. 事实准确性：是否有明显的事实错误或无依据的断言
-3. 完整性：是否遗漏了关键信息
-4. 可读性：结构和表达是否清晰
-5. 给出具体的修改建议（如有）
-6. 给出总体评分（0-10）和评审结论`;
+    const systemPrompt = supervisorAgentPromptDefinitions.critic;
+    const promptVersion = getPromptVersion('supervisor_agent.critic');
 
     const userPrompt = [
       `评审任务：审查以下关于「${input.task}」的回答`,
@@ -64,6 +60,7 @@ export class CriticAgent implements ISubAgent {
         agent: this.name,
         confidence,
         durationMs: Date.now() - start,
+        promptVersion,
         metadata: { score },
       };
     } catch (err) {
@@ -74,6 +71,7 @@ export class CriticAgent implements ISubAgent {
         agent: this.name,
         confidence: 0,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     }
   }

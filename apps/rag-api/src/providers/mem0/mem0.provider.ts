@@ -14,6 +14,7 @@ export interface Mem0AddParams {
   userId: string;
   runId?: string;
   metadata?: Record<string, unknown>;
+  infer?: boolean;
 }
 
 export interface Mem0MemoryResult {
@@ -90,6 +91,39 @@ export class Mem0Provider implements OnModuleInit {
     return this._requested;
   }
 
+  /** Update metadata on one memory while keeping its history in Mem0. */
+  async updateMetadata(
+    memoryId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._isEnabled) return;
+
+    const scopedMemoryId = memoryId.trim();
+    if (!scopedMemoryId) {
+      throw new Error('Mem0 metadata update requires memoryId.');
+    }
+
+    try {
+      if (this.cloudClient) {
+        await this.cloudClient.update(scopedMemoryId, { metadata });
+        return;
+      }
+
+      await this.localRequest(
+        `/memories/${encodeURIComponent(scopedMemoryId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ metadata }),
+        },
+      );
+    } catch (err) {
+      this.logger.error(
+        `Mem0 metadata update failed: ${(err as Error).message}`,
+      );
+      throw err;
+    }
+  }
+
   /**
    * 搜索记忆
    */
@@ -108,12 +142,9 @@ export class Mem0Provider implements OnModuleInit {
           topK,
           latestOnly: true,
         });
-        return (result.results ?? []).map((m) => ({
-          id: m.id,
-          memory: m.memory ?? '',
-          score: m.score,
-          metadata: m.metadata as Record<string, unknown> | undefined,
-        }));
+        return (result.results ?? []).map((memory) =>
+          this.toMemoryResult(memory as unknown as Record<string, unknown>),
+        );
       }
 
       // local mode
@@ -130,12 +161,7 @@ export class Mem0Provider implements OnModuleInit {
       });
       const results =
         (result.results as Record<string, unknown>[] | undefined) ?? [];
-      return results.map((m) => ({
-        id: m.id as string,
-        memory: (m.memory as string) ?? '',
-        score: m.score as number | undefined,
-        metadata: m.metadata as Record<string, unknown> | undefined,
-      }));
+      return results.map((memory) => this.toMemoryResult(memory));
     } catch (err) {
       this.logger.error(`Mem0 search failed: ${(err as Error).message}`);
       return [];
@@ -148,7 +174,7 @@ export class Mem0Provider implements OnModuleInit {
   async add(params: Mem0AddParams): Promise<void> {
     if (!this._isEnabled) return;
 
-    const { messages, userId, runId, metadata } = params;
+    const { messages, userId, runId, metadata, infer } = params;
 
     try {
       if (this.cloudClient) {
@@ -156,6 +182,7 @@ export class Mem0Provider implements OnModuleInit {
           userId,
           ...(runId ? { runId } : {}),
           ...(metadata ? { metadata } : {}),
+          ...(infer === undefined ? {} : { infer }),
         });
         return;
       }
@@ -168,6 +195,7 @@ export class Mem0Provider implements OnModuleInit {
           user_id: userId,
           run_id: runId,
           ...(metadata ? { metadata } : {}),
+          ...(infer === undefined ? {} : { infer }),
         }),
       });
     } catch (err) {
@@ -178,8 +206,15 @@ export class Mem0Provider implements OnModuleInit {
 
   /**
    * 列出用户所有记忆
+   * latestOnly=false 包含已被替代的记忆，供 Outbox 重放查重。
+   * failOnError=true 时保留服务错误，避免把查询失败当作“尚未写入”。
    */
-  async getAll(userId: string, runId?: string): Promise<Mem0MemoryResult[]> {
+  async getAll(
+    userId: string,
+    runId?: string,
+    latestOnly = true,
+    failOnError = false,
+  ): Promise<Mem0MemoryResult[]> {
     if (!this._isEnabled) return [];
 
     try {
@@ -187,17 +222,27 @@ export class Mem0Provider implements OnModuleInit {
         ? { AND: [{ user_id: userId }, { run_id: runId }] }
         : { user_id: userId };
       if (this.cloudClient) {
-        const result = await this.cloudClient.getAll({
-          filters,
-          pageSize: 50,
-          latestOnly: true,
-        });
-        return (result.results ?? []).map((m) => ({
-          id: m.id,
-          memory: m.memory ?? '',
-          score: m.score,
-          metadata: m.metadata as Record<string, unknown> | undefined,
-        }));
+        const memories: Awaited<ReturnType<MemoryClient['getAll']>>['results'] =
+          [];
+        let page = 1;
+        let hasNextPage = true;
+
+        while (hasNextPage) {
+          const result = await this.cloudClient.getAll({
+            filters,
+            page,
+            pageSize: 50,
+            latestOnly,
+          });
+          const pageMemories = result.results ?? [];
+          memories.push(...pageMemories);
+          hasNextPage = Boolean(result.next) && pageMemories.length > 0;
+          page += 1;
+        }
+
+        return memories.map((memory) =>
+          this.toMemoryResult(memory as unknown as Record<string, unknown>),
+        );
       }
 
       // local mode
@@ -209,14 +254,10 @@ export class Mem0Provider implements OnModuleInit {
       const items =
         (result.results as Record<string, unknown>[] | undefined) ??
         (Array.isArray(result) ? (result as Record<string, unknown>[]) : []);
-      return items.map((m) => ({
-        id: m.id as string,
-        memory: (m.memory as string) ?? '',
-        score: m.score as number | undefined,
-        metadata: m.metadata as Record<string, unknown> | undefined,
-      }));
+      return items.map((memory) => this.toMemoryResult(memory));
     } catch (err) {
       this.logger.error(`Mem0 getAll failed: ${(err as Error).message}`);
+      if (failOnError) throw err;
       return [];
     }
   }
@@ -233,12 +274,9 @@ export class Mem0Provider implements OnModuleInit {
     }
 
     // local mode
-    await this.localRequest(
-      `/memories?user_id=${encodeURIComponent(userId)}`,
-      {
-        method: 'DELETE',
-      },
-    );
+    await this.localRequest(`/memories?user_id=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+    });
   }
 
   /**
@@ -271,6 +309,38 @@ export class Mem0Provider implements OnModuleInit {
   }
 
   // --- private helpers ---
+
+  private toMemoryResult(memory: Record<string, unknown>): Mem0MemoryResult {
+    const metadata =
+      memory.metadata &&
+      typeof memory.metadata === 'object' &&
+      !Array.isArray(memory.metadata)
+        ? (memory.metadata as Record<string, unknown>)
+        : undefined;
+    const runId = memory.run_id ?? memory.runId;
+    const expirationDate = memory.expiration_date ?? memory.expirationDate;
+    const validUntil =
+      typeof expirationDate === 'string' ? expirationDate.slice(0, 10) : null;
+    const normalizedMetadata =
+      metadata || typeof runId === 'string' || validUntil
+        ? {
+            ...(metadata ?? {}),
+            ...(typeof runId === 'string' && metadata?.run_id === undefined
+              ? { run_id: runId }
+              : {}),
+            ...(validUntil && metadata?.rag_valid_until === undefined
+              ? { rag_valid_until: validUntil }
+              : {}),
+          }
+        : undefined;
+
+    return {
+      id: typeof memory.id === 'string' ? memory.id : '',
+      memory: typeof memory.memory === 'string' ? memory.memory : '',
+      score: typeof memory.score === 'number' ? memory.score : undefined,
+      metadata: normalizedMetadata,
+    };
+  }
 
   private async localRequest(
     path: string,

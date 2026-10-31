@@ -28,7 +28,8 @@ export class HealthController {
         true ||
       this.configService.get<boolean>('tenantQuota.requireDistributed') ===
         true ||
-      this.configService.get<boolean>('redis.requireDistributedLock') === true ||
+      this.configService.get<boolean>('redis.requireDistributedLock') ===
+        true ||
       this.configService.get<boolean>('domainEvents.requireDistributedLock') ===
         true;
     const response = {

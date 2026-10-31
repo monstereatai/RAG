@@ -38,7 +38,10 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    this.recoveryTimer = setInterval(() => void this.recoverStaleRuns(), 60_000);
+    this.recoveryTimer = setInterval(
+      () => void this.recoverStaleRuns(),
+      60_000,
+    );
     this.recoveryTimer.unref();
     void this.recoverStaleRuns();
   }
@@ -62,6 +65,7 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
     const staleAfterMinutes = Math.ceil(staleAfterMs / 60_000);
     const cutoff = new Date(Date.now() - staleAfterMs);
     try {
+      await this.retryPendingStaleCancellationSignals();
       const staleRuns = await this.runRepo.find({
         where: { status: 'running', updatedAt: LessThan(cutoff) },
         order: { updatedAt: 'ASC' },
@@ -75,9 +79,12 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
             status: 'failed',
             errorMessage,
             finishedAt: new Date(),
+            cancelSignalPending: true,
           },
         );
         if (update.affected !== 1) continue;
+
+        await this.retryStaleCancellationSignal(run);
 
         try {
           await this.events.emit({
@@ -107,6 +114,44 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
       );
     } finally {
       this.recoveryInFlight = false;
+    }
+  }
+
+  private async retryPendingStaleCancellationSignals(): Promise<void> {
+    let pendingRuns: AgentRunEntity[];
+    try {
+      pendingRuns = await this.runRepo.find({
+        where: { status: 'failed', cancelSignalPending: true },
+        order: { createdAt: 'ASC' },
+        take: 100,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to load pending stale Agent run cancellations: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+
+    for (const run of pendingRuns) await this.retryStaleCancellationSignal(run);
+  }
+
+  private async retryStaleCancellationSignal(
+    run: Pick<AgentRunEntity, 'id' | 'threadId'>,
+  ): Promise<void> {
+    try {
+      await this.redis.setRequiredOrThrow(
+        `agent-loop:cancel:${run.threadId}:${run.id}`,
+        'cancelled',
+        24 * 60 * 60,
+      );
+      await this.runRepo.update(
+        { id: run.id, status: 'failed', cancelSignalPending: true },
+        { cancelSignalPending: false },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to signal stale Agent run cancellation runId=${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -236,11 +281,7 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     try {
-      await this.redis.setRequiredOrThrow(
-        cancelKey,
-        'cancelled',
-        24 * 60 * 60,
-      );
+      await this.redis.setRequiredOrThrow(cancelKey, 'cancelled', 24 * 60 * 60);
     } catch {
       throw new ServiceUnavailableException(
         '取消标记写入失败，运行状态未更改。',
@@ -261,7 +302,8 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
       typeof updateResult.affected === 'number' &&
       updateResult.affected === 0
     ) {
-      await this.redis.del(cancelKey);
+      // CAS 可能被 stale-run recovery 并发抢先完成；不能删除它刚写入的
+      // 取消信号，否则数据库里的 pending 标志可能已清零，之后不会再补发。
       return this.get(id, run.tenantId ?? undefined);
     }
     const saved = await this.runRepo.findOne({ where: { id } });

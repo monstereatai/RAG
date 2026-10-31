@@ -3,7 +3,12 @@ import type { RagAguiStreamQuery } from './rag-client.types';
 
 export abstract class RagClientQaBase extends RagClientDocumentsBase {
   // 建立服务端到服务端的 SSE 请求：传递映射后的管理员身份，RAG 服务令牌只留在后端。
-  streamAgui(query: RagAguiStreamQuery, signal: AbortSignal) {
+  streamAgui(
+    query: RagAguiStreamQuery,
+    signal: AbortSignal,
+    traceparent?: string,
+    requestId?: string,
+  ) {
     const params = new URLSearchParams({
       query: query.query,
       mode: query.mode ?? "agentic",
@@ -26,6 +31,8 @@ export abstract class RagClientQaBase extends RagClientDocumentsBase {
     if (this.serviceToken) {
       headers.Authorization = `Bearer ${this.serviceToken}`;
     }
+    if (traceparent) headers.traceparent = traceparent;
+    if (requestId) headers['x-request-id'] = requestId;
     return fetch(`${this.baseUrl}/agui/admin/stream?${params.toString()}`, {
       headers,
       signal,

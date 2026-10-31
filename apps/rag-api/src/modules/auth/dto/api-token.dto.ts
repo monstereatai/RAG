@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsDateString,
   IsOptional,
   IsString,
   MaxLength,
@@ -18,7 +19,8 @@ export class CreateApiTokenDto {
   scopes?: string[];
 
   @IsOptional()
-  @IsString()
+  @IsDateString({ strict: true })
+  @MaxLength(64)
   expiresAt?: string;
 }
 

@@ -66,6 +66,8 @@ type ChatExecutionOptions = {
   forceAgentic?: boolean;
   /** Supplied only by the guarded Admin AG-UI adapter. */
   trustedAdminPrincipal?: boolean;
+  /** Correlation ID supplied only by the guarded Admin AG-UI adapter. */
+  requestId?: string;
   departmentIds?: string[];
   supplementalEvidence?: RetrievedChunk[];
   loadSupplementalEvidence?: SupplementalEvidenceLoader;
@@ -211,7 +213,12 @@ export class ChatService extends ChatServiceFinalizationSupport {
     }
     const [pluginComposition, threadId] = await Promise.all([
       req.pluginKeys?.length && this.plugins
-        ? this.plugins.resolve(req.pluginKeys, mode)
+        ? this.plugins.resolve(
+            req.pluginKeys,
+            mode,
+            [],
+            executionOptions?.tenantId,
+          )
         : Promise.resolve(undefined),
       req.threadId
         ? Promise.resolve(req.threadId)
@@ -454,7 +461,7 @@ export class ChatService extends ChatServiceFinalizationSupport {
     const maxToolCalls =
       this.config?.get<number>('agentRun.maxToolCalls') ?? 24;
     const requestContext: RequestContext = {
-      requestId: randomUUID(),
+      requestId: executionOptions?.requestId ?? randomUUID(),
       userId,
       tenantId: executionOptions?.tenantId,
       threadId,
@@ -603,6 +610,7 @@ export class ChatService extends ChatServiceFinalizationSupport {
           target: 'skill-system',
           payload: {
             skills: runtimePlan.selectedSkills,
+            versions: runtimePlan.selectedSkillVersions,
             injected: injectedSkillNames,
             dropped: runtimePlan.selectedSkills.filter(
               (name) => !injectedSkillNames.includes(name),

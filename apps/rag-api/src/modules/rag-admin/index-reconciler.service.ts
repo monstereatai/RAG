@@ -15,6 +15,34 @@ type ReconcileResult = {
   skipped: number;
 };
 
+const REPAIRABLE_AUDIT_REASONS = new Set([
+  'missing_chunks',
+  'bm25_chunk_count_mismatch',
+  'elasticsearch_index_count_mismatch',
+  'milvus_chunk_count_mismatch',
+  'image_index_count_mismatch',
+  'bm25_content_hash_mismatch',
+  'elasticsearch_content_hash_mismatch',
+  'bm25_generation_mismatch',
+  'elasticsearch_generation_mismatch',
+  'bm25_snapshot_not_persisted',
+  'bm25_lifecycle_mismatch',
+  'elasticsearch_lifecycle_mismatch',
+  'graph_index_missing',
+  'graph_index_failed',
+  'graph_index_pending',
+  'retrieval_description_document_missing',
+  'retrieval_description_missing_pg',
+  'retrieval_description_stale_pg',
+  'retrieval_description_missing_milvus',
+  'retrieval_description_stale_milvus',
+  'retrieval_description_content_mismatch',
+  'retrieval_description_source_mapping_mismatch',
+  'retrieval_description_missing',
+  'retrieval_description_stale',
+  'retrieval_description_count_mismatch',
+]);
+
 /**
  * 定期把只读索引对账结果转换成持久修复任务。
  *
@@ -117,20 +145,8 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
         this.batchSize,
         this.cursor,
       );
-      this.cursor = audit.nextCursor ?? undefined;
       const repairable = audit.issues.filter((issue) =>
-        issue.reasons.some(
-          (reason) =>
-            reason.endsWith('_count_mismatch') ||
-            reason.endsWith('_content_hash_mismatch') ||
-            reason.endsWith('_generation_mismatch') ||
-            reason === 'bm25_snapshot_not_persisted' ||
-            reason === 'bm25_lifecycle_mismatch' ||
-            reason === 'elasticsearch_lifecycle_mismatch' ||
-            reason === 'graph_index_missing' ||
-            reason === 'graph_index_failed' ||
-            reason === 'graph_index_pending',
-        ),
+        issue.reasons.some((reason) => REPAIRABLE_AUDIT_REASONS.has(reason)),
       );
       let queued = 0;
       for (const issue of repairable) {
@@ -145,6 +161,9 @@ export class IndexReconcilerService implements OnModuleInit, OnModuleDestroy {
         });
         queued += 1;
       }
+      // Keep the page cursor unchanged unless every repair job was durably enqueued.
+      // A retry then re-audits this page; stable job IDs make already-enqueued items safe.
+      this.cursor = audit.nextCursor ?? undefined;
       const result: ReconcileResult = {
         scanned: audit.scanned,
         mismatched: repairable.length,

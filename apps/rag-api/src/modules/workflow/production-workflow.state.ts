@@ -28,6 +28,7 @@ export type ProductionWorkflowStatus =
 export interface ProductionStageResult {
   role: ProductionRole;
   revision: number;
+  promptVersion?: string;
   reviewStatus: 'pending' | 'approved' | 'rejected' | 'stale';
   summary: string;
   deliverables: ProductionDeliverable[];

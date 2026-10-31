@@ -358,7 +358,11 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async zaddRequired(key: string, score: number, member: string): Promise<void> {
+  async zaddRequired(
+    key: string,
+    score: number,
+    member: string,
+  ): Promise<void> {
     if (!this.enabled) throw new Error('Redis is unavailable');
     try {
       await this.client.zadd(key, score, member);

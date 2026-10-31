@@ -16,9 +16,10 @@ describe('ImageIndexService', () => {
     userId?: string;
     allowedDocIds?: ReadonlySet<string>;
   }> = [];
+  const embedImageMock = jest.fn(() => Promise.resolve([1, 0]));
   const embedding = {
     isEnabled: jest.fn(() => true),
-    embedImage: jest.fn(() => Promise.resolve([1, 0])),
+    embedImage: embedImageMock,
     embedText: jest.fn(() => Promise.resolve([1, 0])),
   } as unknown as MultimodalEmbeddingProvider;
   const vectorStore: ImageVectorStorePort = {
@@ -112,7 +113,7 @@ describe('ImageIndexService', () => {
     expect(first).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
     expect(second.map((item) => item.id)).toEqual(ids);
-    expect(embedding.embedImage).toHaveBeenCalledWith({
+    expect(embedImageMock).toHaveBeenCalledWith({
       url: undefined,
       base64: 'data:image/png;base64,chart',
       mimeType: 'image/png',
@@ -184,7 +185,7 @@ describe('ImageIndexService', () => {
       allowedDocIds: new Set(['doc-allowed']),
     });
 
-    expect((embedding.embedImage as jest.Mock).mock.calls).toContainEqual([
+    expect(embedImageMock.mock.calls).toContainEqual([
       { base64: 'query-image', mimeType: 'image/png' },
     ]);
     expect(searched.at(-1)).toEqual({

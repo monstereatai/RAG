@@ -198,7 +198,9 @@ export class ApiTokenService {
         JSON.stringify(store),
       );
       if (!saved) {
-        throw new ServiceUnavailableException('shared API token store write failed');
+        throw new ServiceUnavailableException(
+          'shared API token store write failed',
+        );
       }
       return;
     }

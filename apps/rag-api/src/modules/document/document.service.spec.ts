@@ -92,11 +92,10 @@ describe('DocumentService retrieval descriptions', () => {
         callOrder.push('transaction');
       },
     );
-    mocks.retrievalDescriptionService.rebuild.mockImplementationOnce(
-      async () => {
-        callOrder.push('rebuild');
-      },
-    );
+    mocks.retrievalDescriptionService.rebuild.mockImplementationOnce(() => {
+      callOrder.push('rebuild');
+      return Promise.resolve();
+    });
 
     await expect(
       service.updateLifecycle('doc-1', 'user-1', 'effective'),

@@ -170,7 +170,9 @@ export interface IVectorStoreProvider {
   ensureDescriptionCollection(): Promise<void>;
 
   /** 按描述 ID upsert 向量记录。 */
-  upsertDescriptions(records: RetrievalDescriptionVectorRecord[]): Promise<void>;
+  upsertDescriptions(
+    records: RetrievalDescriptionVectorRecord[],
+  ): Promise<void>;
 
   /** 仅按 tenantId 限定候选；文档 ACL 由上层复核。 */
   searchDescriptions(

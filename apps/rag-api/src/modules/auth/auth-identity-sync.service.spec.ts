@@ -14,7 +14,10 @@ describe('AuthIdentitySyncService', () => {
 
   it('inserts the auth user into the PostgreSQL identity table', async () => {
     const repo = {
-      findOneBy: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null),
+      findOneBy: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null),
       insert: jest.fn().mockResolvedValue(undefined),
     };
     const service = new AuthIdentitySyncService(repo as never);

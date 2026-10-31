@@ -70,6 +70,7 @@ export class SupplementalEvidenceRetriever {
   async probeGraph(
     query: string,
     userId: string | undefined,
+    allowedDocIds: ReadonlySet<string> | undefined,
     isDocumentVisible: (docId: string) => boolean,
   ): Promise<GraphProbeResult> {
     const startedAt = Date.now();
@@ -85,7 +86,7 @@ export class SupplementalEvidenceRetriever {
         skippedReason: 'disabled',
       };
     }
-    if (!userId) {
+    if (!userId || !allowedDocIds) {
       return {
         attempted: false,
         enabled: true,
@@ -93,7 +94,7 @@ export class SupplementalEvidenceRetriever {
         factCount: 0,
         elapsedMs: 0,
         facts: [],
-        skippedReason: 'missing_user',
+        skippedReason: userId ? 'missing_user_acl' : 'missing_user',
       };
     }
 
@@ -101,6 +102,7 @@ export class SupplementalEvidenceRetriever {
       const result = await Promise.race([
         this.graphService!.queryGraph(query, userId, {
           generateAnswer: false,
+          allowedDocIds: [...allowedDocIds],
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('timeout')), 1200),

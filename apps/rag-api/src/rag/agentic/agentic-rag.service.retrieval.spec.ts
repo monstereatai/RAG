@@ -35,9 +35,9 @@ describe('AgenticRagService budget boundaries', () => {
       route: 'simple',
       retrievalSufficient: true,
     });
-    expect(ragService.answerDirect).not.toHaveBeenCalled();
-    expect(ragService.assessFastPath).toHaveBeenCalledTimes(1);
-    expect(ragService.answer).toHaveBeenCalledWith(
+    expect(serviceMock(ragService, 'answerDirect')).not.toHaveBeenCalled();
+    expect(serviceMock(ragService, 'assessFastPath')).toHaveBeenCalledTimes(1);
+    expect(serviceMock(ragService, 'answer')).toHaveBeenCalledWith(
       'ACT100 的状态是什么？',
       [],
       undefined,
@@ -172,12 +172,12 @@ describe('AgenticRagService budget boundaries', () => {
       { configurable: { userId: 'user-1' } },
     );
 
-    expect(ragService.getObsidianContext).toHaveBeenCalledWith(
+    expect(serviceMock(ragService, 'getObsidianContext')).toHaveBeenCalledWith(
       '请分析活动方案风险',
       'user-1',
       undefined,
     );
-    expect(ragService.toObsidianChunks).toHaveBeenCalledWith([
+    expect(serviceMock(ragService, 'toObsidianChunks')).toHaveBeenCalledWith([
       expect.objectContaining({ path: 'notes/rag.md', type: 'note' }),
     ]);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual(
@@ -242,22 +242,47 @@ describe('AgenticRagService budget boundaries', () => {
       { configurable: { userId: 'user-1' } },
     );
 
-    expect(ragService.resolveObsidianSourceEvidence).toHaveBeenCalledWith(
+    expect(
+      serviceMock(ragService, 'resolveObsidianSourceEvidence'),
+    ).toHaveBeenCalledWith(
       '发布前必须由谁复核？',
       [sourceHit, legacySourceHit, manualHit],
       'user-1',
       {},
     );
-    expect(ragService.toObsidianChunks).toHaveBeenCalledWith([manualHit]);
+    expect(serviceMock(ragService, 'toObsidianChunks')).toHaveBeenCalledWith([
+      manualHit,
+    ]);
     expect(result.retrievedChunks).toContainEqual(raw);
     expect(result.retrievedChunks?.map((item) => item.id)).not.toContain(
       'obsidian:notes/source.md',
     );
     expect(result.subQuestions?.[0].evidenceIds).toContain('source-raw');
-    expect(
-      result.artifacts?.find((artifact) => artifact.type === 'evidence_bundle')
-        ?.payload,
-    ).toMatchObject({ chunkIds: expect.arrayContaining(['source-raw']) });
+    const artifacts: unknown = (result as unknown as { artifacts?: unknown })
+      .artifacts;
+    if (!Array.isArray(artifacts)) {
+      throw new Error('Expected retrieval artifacts.');
+    }
+    const evidenceBundle: unknown = artifacts.find(
+      (artifact: unknown) =>
+        typeof artifact === 'object' &&
+        artifact !== null &&
+        'type' in artifact &&
+        artifact.type === 'evidence_bundle',
+    );
+    const payload: unknown =
+      typeof evidenceBundle === 'object' &&
+      evidenceBundle !== null &&
+      'payload' in evidenceBundle
+        ? evidenceBundle.payload
+        : undefined;
+    const chunkIds: unknown =
+      typeof payload === 'object' && payload !== null && 'chunkIds' in payload
+        ? payload.chunkIds
+        : undefined;
+    expect(Array.isArray(chunkIds) && chunkIds.includes('source-raw')).toBe(
+      true,
+    );
   });
 
   it('reuses fast-path evidence when agentic retrieval starts', async () => {

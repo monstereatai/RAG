@@ -261,7 +261,10 @@ export class ArtifactsService implements OnModuleInit {
   }
 
   /** 内容或交付物重新生成后，旧审批版本必须失效，避免审批凭证跨版本复用。 */
-  async invalidateApproval(id: string, reason = 'artifact regenerated'): Promise<void> {
+  async invalidateApproval(
+    id: string,
+    reason = 'artifact regenerated',
+  ): Promise<void> {
     const artifact = await this.artifacts.findOne({ where: { id } });
     if (!artifact) return;
     const metadata = this.parseMetadata(artifact.metadata) ?? {};

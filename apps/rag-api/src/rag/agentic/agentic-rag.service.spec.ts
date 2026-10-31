@@ -1,8 +1,13 @@
 import type { RagService } from '../rag.service';
 import type { RetrieveOptions } from '../contracts/rag-types';
 import { createFallbackQueryPlan } from '../planning/query-plan';
-import { chunk, createService } from './agentic-rag.service.test-utils';
+import {
+  chunk,
+  createService,
+  serviceMock,
+} from './agentic-rag.service.test-utils';
 import type { AgenticRagServiceInternals } from './agentic-rag.service.test-utils';
+import type { LlmInvokeOptions } from '../../providers/llm/llm-provider.interface';
 
 describe('AgenticRagService budget boundaries', () => {
   it('routes Auto from the structured plan and evidence sufficiency', () => {
@@ -64,26 +69,34 @@ describe('AgenticRagService budget boundaries', () => {
 
   it('passes request cancellation into evidence synthesis fallback', async () => {
     const { service, llmProvider } = createService();
-    const invoke = jest.fn().mockResolvedValue('结论[片段1]');
-    (llmProvider as any).invoke = invoke;
-    (llmProvider as any).getActiveProviderName = jest
-      .fn()
-      .mockReturnValue('qwen');
+    let invokeOptions: LlmInvokeOptions | undefined;
+    const invoke = jest.fn(
+      (
+        _messages: string | Array<{ role: string; content: unknown }>,
+        options?: LlmInvokeOptions,
+      ) => {
+        invokeOptions = options;
+        return Promise.resolve('结论[片段1]');
+      },
+    );
+    const llmProviderMock = llmProvider as unknown as {
+      invoke: jest.Mock;
+      getActiveProviderName: jest.Mock;
+    };
+    llmProviderMock.invoke = invoke;
+    llmProviderMock.getActiveProviderName = jest.fn().mockReturnValue('qwen');
     const controller = new AbortController();
 
     const internals = service as unknown as AgenticRagServiceInternals;
     await expect(
       internals.answerGenerationService.synthesizeEvidenceAnswer(
         '问题',
-        [{ content: '证据' }],
+        [chunk('evidence-1', 1)],
         controller.signal,
       ),
     ).resolves.toBe('结论[片段1]');
 
-    expect(invoke).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    expect(invokeOptions?.signal).toBeInstanceOf(AbortSignal);
     controller.abort();
   });
 
@@ -147,7 +160,7 @@ describe('AgenticRagService budget boundaries', () => {
       ),
     ).resolves.toMatchObject({ route: 'agentic' });
 
-    expect(ragService.assessFastPath).not.toHaveBeenCalled();
+    expect(serviceMock(ragService, 'assessFastPath')).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 

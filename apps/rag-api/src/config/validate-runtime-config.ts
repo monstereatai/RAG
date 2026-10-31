@@ -26,7 +26,9 @@ export function assertRuntimeConfig(): void {
   }
 
   if ((process.env.AUTH_REQUIRE_EMAIL_VERIFIED ?? 'true') === 'false') {
-    errors.push('AUTH_REQUIRE_EMAIL_VERIFIED=false is not allowed in production');
+    errors.push(
+      'AUTH_REQUIRE_EMAIL_VERIFIED=false is not allowed in production',
+    );
   }
 
   if (errors.length > 0) {

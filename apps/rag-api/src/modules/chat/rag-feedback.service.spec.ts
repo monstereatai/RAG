@@ -9,9 +9,12 @@ describe('RagFeedbackService', () => {
     queryLog: Partial<QueryLogEntity> | null,
     documentService?: { upload: jest.Mock },
   ) {
+    const feedbackCreateMock = jest.fn(
+      (value: Partial<RagFeedbackEntity>) => value,
+    );
     const feedbackRepo = {
-      create: jest.fn((value) => value),
-      save: jest.fn(async (value) => value),
+      create: feedbackCreateMock,
+      save: jest.fn((value) => Promise.resolve(value)),
     } as unknown as Repository<RagFeedbackEntity>;
     const queryLogRepo = {
       findOne: jest.fn().mockResolvedValue(queryLog),
@@ -35,12 +38,13 @@ describe('RagFeedbackService', () => {
         documentService as never,
       ),
       feedbackRepo,
+      feedbackCreateMock,
       badCaseFlywheel,
     };
   }
 
   it('copies the server-side retrieval snapshot into a bad case', async () => {
-    const { service, feedbackRepo } = createService({
+    const { service, feedbackCreateMock } = createService({
       id: '11111111-1111-4111-8111-111111111111',
       threadId: '22222222-2222-4222-8222-222222222222',
       userId: 'user-1',
@@ -57,7 +61,7 @@ describe('RagFeedbackService', () => {
       'user-1',
     );
 
-    expect(feedbackRepo.create).toHaveBeenCalledWith(
+    expect(feedbackCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         queryLogId: '11111111-1111-4111-8111-111111111111',
         retrievalSnapshot: '[{"docId":"doc-1"}]',
@@ -158,11 +162,29 @@ describe('RagFeedbackService', () => {
       query: '泰语活动页换行规则是什么？',
       answer: '错误回答',
     } as QueryLogEntity;
-    const documentService = {
-      upload: jest
-        .fn()
-        .mockResolvedValue({ docId: 'formal-doc-1', docVersion: '2026-08-v2' }),
-    };
+    let uploadedRequest:
+      | {
+          filename: string;
+          content: string;
+          userId: string;
+          options?: { businessMetadata?: Record<string, unknown> };
+        }
+      | undefined;
+    const uploadMock = jest.fn(
+      (
+        filename: string,
+        content: string,
+        userId: string,
+        options?: { businessMetadata?: Record<string, unknown> },
+      ) => {
+        uploadedRequest = { filename, content, userId, options };
+        return Promise.resolve({
+          docId: 'formal-doc-1',
+          docVersion: '2026-08-v2',
+        });
+      },
+    );
+    const documentService = { upload: uploadMock };
     const { service, feedbackRepo, badCaseFlywheel } = createService(
       queryLog,
       documentService,
@@ -189,13 +211,13 @@ describe('RagFeedbackService', () => {
       promotionVersion: '2026-08-v2',
     });
 
-    expect(documentService.upload).toHaveBeenCalledWith(
-      expect.stringContaining('bad-case-feedback'),
-      expect.stringContaining('https://example.com/official-spec'),
-      'user-1',
-      expect.objectContaining({
-        businessMetadata: expect.objectContaining({ docVersion: '2026-08-v2' }),
-      }),
+    expect(uploadedRequest?.filename).toContain('bad-case-feedback');
+    expect(uploadedRequest?.content).toContain(
+      'https://example.com/official-spec',
+    );
+    expect(uploadedRequest?.userId).toBe('user-1');
+    expect(uploadedRequest?.options?.businessMetadata?.docVersion).toBe(
+      '2026-08-v2',
     );
     expect(result.knowledgeLayer).toBe('formal');
     expect(result.promotedDocument?.docId).toBe('formal-doc-1');

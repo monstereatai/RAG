@@ -8,6 +8,8 @@ import { RagClientService } from '../rag-client/rag-client.service';
 import { unwrapRagResponse } from '../rag-client/rag-response.adapter';
 
 const MAX_DOCUMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
+const DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS = 15_000;
+const FAILED_DOCUMENT_TASKS_UPSTREAM_TIMEOUT_MS = 90_000;
 
 @ApiTags('admin-documents')
 @ApiBearerAuth()
@@ -47,12 +49,27 @@ export class AdminDocumentsController {
       failedIndexRepairs,
       indexReconciler,
     ] = await Promise.all([
-      this.ragClient.getDocumentQueueStatus(),
-      this.ragClient.getPendingDocumentTasks(50),
-      this.ragClient.getFailedDocumentTasks(50),
-      this.ragClient.getIndexRepairQueueStatus(),
-      this.ragClient.getFailedIndexRepairs(50),
-      this.ragClient.getIndexReconcilerStatus(),
+      this.ragClient.getDocumentQueueStatus(
+        DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS,
+      ),
+      this.ragClient.getPendingDocumentTasks(
+        50,
+        DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS,
+      ),
+      this.ragClient.getFailedDocumentTasks(
+        50,
+        FAILED_DOCUMENT_TASKS_UPSTREAM_TIMEOUT_MS,
+      ),
+      this.ragClient.getIndexRepairQueueStatus(
+        DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS,
+      ),
+      this.ragClient.getFailedIndexRepairs(
+        50,
+        DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS,
+      ),
+      this.ragClient.getIndexReconcilerStatus(
+        DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS,
+      ),
     ]);
 
     const results = [

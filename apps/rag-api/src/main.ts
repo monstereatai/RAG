@@ -180,7 +180,9 @@ async function bootstrap() {
 }
 
 function configureUploadConcurrencyLimit(app: INestApplication): void {
-  const parsedLimit = Number(process.env.DOCUMENT_UPLOAD_MAX_CONCURRENCY ?? '2');
+  const parsedLimit = Number(
+    process.env.DOCUMENT_UPLOAD_MAX_CONCURRENCY ?? '2',
+  );
   const limit =
     Number.isFinite(parsedLimit) && parsedLimit > 0
       ? Math.min(16, Math.floor(parsedLimit))
@@ -188,7 +190,11 @@ function configureUploadConcurrencyLimit(app: INestApplication): void {
   let activeUploads = 0;
 
   app.use(
-    (request: ExpressRequest, response: ExpressResponse, next: NextFunction) => {
+    (
+      request: ExpressRequest,
+      response: ExpressResponse,
+      next: NextFunction,
+    ) => {
       const isDocumentUpload =
         request.path.endsWith('/documents/upload') ||
         request.path.endsWith('/documents/upload/async');

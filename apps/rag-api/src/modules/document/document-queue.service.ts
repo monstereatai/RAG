@@ -9,12 +9,7 @@
  * 防止异步入库任务绕过持久队列后无法跨实例接管。
  */
 
-import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueEvents, Worker } from 'bullmq';
 import { createHash, randomUUID } from 'node:crypto';
@@ -230,10 +225,8 @@ export class DocumentQueueService implements OnModuleDestroy {
         if (!this.processor) {
           throw new Error('Document queue processor is not registered.');
         }
-        const result = await runWithinLlmBudget(
-          this.llmProvider,
-          job,
-          () => this.processor!(job.data),
+        const result = await runWithinLlmBudget(this.llmProvider, job, () =>
+          this.processor!(job.data),
         );
         return {
           taskId: job.data.taskId,
@@ -406,7 +399,9 @@ export class DocumentQueueService implements OnModuleDestroy {
       if (page.length < pageSize) break;
       start += page.length;
     }
-    for (const job of jobs.filter((candidate) => candidate.data.docId === docId)) {
+    for (const job of jobs.filter(
+      (candidate) => candidate.data.docId === docId,
+    )) {
       const state = await job.getState();
       if (state === 'active') {
         try {
@@ -426,7 +421,8 @@ export class DocumentQueueService implements OnModuleDestroy {
     work: () => Promise<T>,
   ): Promise<T> {
     if (!this.redisProvider?.isEnabled()) {
-      if (this.required) throw new Error('Redis unavailable for graph index lock');
+      if (this.required)
+        throw new Error('Redis unavailable for graph index lock');
       return work();
     }
     const lockKey = `rag:document:graph-index-lock:${docId}`;
@@ -436,11 +432,11 @@ export class DocumentQueueService implements OnModuleDestroy {
       token,
       300,
     );
-    if (!acquired) throw new Error(`graph index is already running for ${docId}`);
+    if (!acquired)
+      throw new Error(`graph index is already running for ${docId}`);
     let lockLost = false;
     const renewalTimer = setInterval(() => {
-      void this.redisProvider!
-        .renewLock(lockKey, token, 300)
+      void this.redisProvider!.renewLock(lockKey, token, 300)
         .then((renewed) => {
           if (!renewed) lockLost = true;
         })

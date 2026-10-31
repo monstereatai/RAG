@@ -403,7 +403,8 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
     if (await q.hasTable('agent_runtime_events')) {
       const table = await q.getTable('agent_runtime_events');
       const sequenceIndex = table?.indices.find(
-        (index) => index.name === 'UQ_agent_runtime_events_tenant_thread_sequence',
+        (index) =>
+          index.name === 'UQ_agent_runtime_events_tenant_thread_sequence',
       );
       if (sequenceIndex) {
         await q.dropIndex('agent_runtime_events', sequenceIndex);
@@ -429,7 +430,8 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
       if (
         table &&
         !table.indices.some(
-          (index) => index.name === 'UQ_agent_runtime_events_tenant_thread_sequence',
+          (index) =>
+            index.name === 'UQ_agent_runtime_events_tenant_thread_sequence',
         )
       ) {
         await q.createIndex(
@@ -455,8 +457,7 @@ export class AddTenantIamRuntimeGovernance1788100000000 implements MigrationInte
     if (!(await q.hasTable('agent_runtime_events'))) return;
 
     const isMysql = q.connection.options.type === 'mysql';
-    const id = (name: string) =>
-      isMysql ? `\`${name}\`` : `"${name}"`;
+    const id = (name: string) => (isMysql ? `\`${name}\`` : `"${name}"`);
     const parameter = (index: number) => (isMysql ? '?' : `$${index}`);
     const tableName = id('agent_runtime_events');
     const tenantId = id('tenantId');

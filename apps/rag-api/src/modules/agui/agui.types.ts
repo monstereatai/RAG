@@ -55,6 +55,8 @@ export interface AguiStreamOptions {
   tenantId?: string;
   /** Set only by a ServiceTokenGuard-protected Admin controller. */
   trustedAdminPrincipal?: boolean;
+  /** Correlation ID forwarded by the guarded Admin QA SSE adapter. */
+  requestId?: string;
   departmentIds?: string[];
   threadId?: string;
   model?: LlmModelProvider;

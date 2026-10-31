@@ -2,12 +2,6 @@ import request from 'supertest';
 
 const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 
-interface ApiEnvelope<T> {
-  code?: number;
-  data?: T;
-  message?: string;
-}
-
 interface LoginResponse {
   accessToken: string;
 }
@@ -20,15 +14,6 @@ interface UploadResponse {
 interface ChatResponse {
   answer: string;
   route?: string;
-}
-
-function hasData<T>(body: ApiEnvelope<T> | T): body is ApiEnvelope<T> {
-  return (
-    body !== null &&
-    typeof body === 'object' &&
-    'data' in body &&
-    body.data !== undefined
-  );
 }
 
 function unwrap<T>(body: unknown): T {

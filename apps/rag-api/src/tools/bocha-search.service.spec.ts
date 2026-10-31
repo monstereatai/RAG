@@ -84,16 +84,20 @@ describe('BochaSearchService', () => {
     } as unknown as ConfigService);
     const controller = new AbortController();
     controller.abort();
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ data: { webPages: { value: [] } } }),
-    });
+    let requestSignal: AbortSignal | null | undefined;
+    const fetchMock = jest.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: { webPages: { value: [] } } }),
+        });
+      },
+    );
     global.fetch = fetchMock;
 
     await service.search('query', 3, controller.signal);
 
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toEqual(
-      expect.objectContaining({ aborted: true }),
-    );
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ export class SeedRuntimeEventSequences1788400000000 implements MigrationInterfac
     );
   }
 
-  async down(_queryRunner: QueryRunner): Promise<void> {
+  async down(): Promise<void> {
     // 序列表属于运行时治理状态，回滚迁移不删除已经观察到的最大序号。
   }
 }

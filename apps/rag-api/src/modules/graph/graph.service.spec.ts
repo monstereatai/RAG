@@ -8,9 +8,10 @@ describe('GraphService governance metadata', () => {
     const executeWrite = jest
       .fn<Promise<void>, [string, Record<string, unknown>]>()
       .mockResolvedValue(undefined);
+    const executeRead = jest.fn();
     const neo4jProvider = {
       isEnabled: jest.fn().mockReturnValue(true),
-      executeRead: jest.fn(),
+      executeRead,
       executeWrite,
     } as unknown as Neo4jProvider;
     const graphExtractor = {
@@ -45,6 +46,7 @@ describe('GraphService governance metadata', () => {
     return {
       service: new GraphService(neo4jProvider, graphExtractor, llmProvider),
       neo4jProvider,
+      executeRead,
       executeWrite,
     };
   }
@@ -140,8 +142,93 @@ describe('GraphService governance metadata', () => {
       {
         entities: ['Atlas Knowledge Base'],
         userId: 'user-1',
+        allowedDocIds: null,
       },
     );
+    expect(executeRead).toHaveBeenCalledWith(
+      expect.stringContaining('source.userId = $userId'),
+      expect.objectContaining({ userId: 'user-1' }),
+    );
     expect(result.facts).toHaveLength(1);
+  });
+
+  it('queries shared graph facts by allowed source documents and filters returned provenance', async () => {
+    const executeRead = jest.fn().mockResolvedValue([
+      {
+        source: 'Atlas Knowledge Base',
+        sourceLabel: 'Product',
+        relationship: 'DEPENDS_ON',
+        target: 'Redis',
+        targetLabel: 'Technology',
+        confidence: 0.82,
+        sourceId: 'source-private',
+        sourceIds: ['source-private', 'source-shared'],
+      },
+      {
+        source: 'Internal Service',
+        sourceLabel: 'Product',
+        relationship: 'USES',
+        target: 'Kafka',
+        targetLabel: 'Technology',
+        confidence: 0.9,
+        sourceId: 'source-private-only',
+        sourceIds: ['source-private-only'],
+      },
+    ]);
+    const neo4jProvider = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      executeRead,
+      executeWrite: jest.fn(),
+    } as unknown as Neo4jProvider;
+    const graphExtractor = {
+      extractFromText: jest.fn(),
+    } as unknown as GraphExtractorService;
+    const llmProvider = {
+      getModel: jest.fn().mockReturnValue({
+        withStructuredOutput: jest.fn().mockReturnValue({
+          invoke: jest.fn().mockResolvedValue({
+            entities: ['Atlas Knowledge Base'],
+          }),
+        }),
+      }),
+      invoke: jest.fn(),
+    } as unknown as LlmProvider;
+    const service = new GraphService(
+      neo4jProvider,
+      graphExtractor,
+      llmProvider,
+    );
+
+    const result = await service.queryGraph('Atlas Knowledge Base', 'user-2', {
+      generateAnswer: false,
+      allowedDocIds: ['source-shared'],
+    });
+
+    expect(executeRead).toHaveBeenCalledWith(
+      expect.stringContaining('sourceId IN $allowedDocIds'),
+      {
+        entities: ['Atlas Knowledge Base'],
+        userId: 'user-2',
+        allowedDocIds: ['source-shared'],
+      },
+    );
+    expect(result.facts).toEqual([
+      expect.objectContaining({
+        sourceId: 'source-shared',
+        sourceIds: ['source-shared'],
+      }),
+    ]);
+  });
+
+  it('does not query graph facts when the allowed document list is empty', async () => {
+    const { service, executeRead } = createService();
+
+    const result = await service.queryGraph('Atlas Knowledge Base', 'user-1', {
+      generateAnswer: false,
+      allowedDocIds: [],
+    });
+
+    expect(executeRead).not.toHaveBeenCalled();
+    expect(result.facts).toEqual([]);
   });
 });

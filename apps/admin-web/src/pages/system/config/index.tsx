@@ -116,7 +116,7 @@ const SystemConfigPage: React.FC = () => {
         <Alert
           showIcon
           type="info"
-          message="用于 Codex / Trae / Claude Code / Cursor 等 MCP 客户端长期访问 RAG。明文只在生成后展示一次，服务端只保存 hash。"
+          title="用于 Codex / Trae / Claude Code / Cursor 等 MCP 客户端长期访问 RAG。明文只在生成后展示一次，服务端只保存 hash。"
           style={{ marginBottom: 16 }}
         />
         <Table<ApiTokenView>
@@ -154,9 +154,9 @@ const SystemConfigPage: React.FC = () => {
           <Alert
             type="warning"
             showIcon
-            message="请立即复制保存"
+            title="请立即复制保存"
             description={
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Paragraph copyable={{ text: createdToken }} style={{ marginBottom: 0 }}>
                   <Text code>{createdToken}</Text>
                 </Paragraph>

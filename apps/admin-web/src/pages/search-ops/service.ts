@@ -48,7 +48,7 @@ export interface FullTextResult {
 
 export interface GraphSearchResult {
   nodes: Array<{ id: string; label: string; type: string; sourceId?: string; confidence?: number }>;
-  edges: Array<{ source: string; target: string; label: string; sourceLabel?: string; targetLabel?: string; confidence?: number }>;
+  edges: Array<{ id?: string; source: string; target: string; label: string; sourceLabel?: string; targetLabel?: string; sourceId?: string; confidence?: number }>;
 }
 
 export async function searchDocuments(query: string, limit = 20, filters?: SearchFilters) {

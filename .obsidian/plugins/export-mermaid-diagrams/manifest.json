@@ -1,0 +1,13 @@
+{
+	"id": "export-mermaid-diagrams",
+	"name": "Export Mermaid Diagrams",
+	"version": "1.0.5",
+	"minAppVersion": "1.5.0",
+	"description": "Export rendered Mermaid diagrams as SVG or PNG — copy to clipboard or save to disk.",
+	"author": "Ameer Jamal",
+	"authorUrl": "https://github.com/Ameer-Jamal",
+	"fundingUrl": {
+		"Buy Me a Coffee": "https://buymeacoffee.com/ameerjamal"
+	},
+	"isDesktopOnly": false
+}

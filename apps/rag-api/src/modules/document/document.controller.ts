@@ -41,7 +41,6 @@ import { ObsidianIngestService } from './obsidian-ingest.service';
 import {
   DocumentLifecycleStatus,
   DocumentBusinessMetadata,
-  GameDocumentMetadata,
   GameDocumentType,
 } from './document-profile.util';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
@@ -189,11 +188,13 @@ export class DocumentController {
               `staged document job cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
             ),
           );
-        await this.objectStorageProvider.deleteObject(objectKey).catch((cleanupError: unknown) =>
-          this.logger.warn(
-            `uploaded object cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
-          ),
-        );
+        await this.objectStorageProvider
+          .deleteObject(objectKey)
+          .catch((cleanupError: unknown) =>
+            this.logger.warn(
+              `uploaded object cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            ),
+          );
         const message =
           error instanceof Error ? error.message : 'document queue unavailable';
         await this.documentService.markTaskFailed(task.id, message);
@@ -266,7 +267,7 @@ export class DocumentController {
       throw new BadRequestException('content is required');
     }
 
-    const filename = `${normalizedTitle.replace(/[\\/:*?"<>|#\[\]\n\r\t]+/g, ' ').trim() || 'manual-note'}.md`;
+    const filename = `${normalizedTitle.replace(/[\\/:*?"<>|#\x5B\x5D\n\r\t]+/g, ' ').trim() || 'manual-note'}.md`;
     const result = await this.obsidianIngest.ingestText({
       title: normalizedTitle,
       content: normalizedContent,

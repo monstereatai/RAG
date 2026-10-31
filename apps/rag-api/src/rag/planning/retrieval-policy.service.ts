@@ -33,7 +33,10 @@ export class RetrievalPolicyService {
     const contextualMode = ['setting', 'follow_up', 'mixed'].includes(
       plan.contextMode,
     );
-    const narrowedScope = scopeForEffectiveTime(original, this.narrowScope(scope));
+    const narrowedScope = scopeForEffectiveTime(
+      original,
+      this.narrowScope(scope),
+    );
     const scopeRestricted = Boolean(
       options.forceLocal ||
       narrowedScope?.effectiveTime ||

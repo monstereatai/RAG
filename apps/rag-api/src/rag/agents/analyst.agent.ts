@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptVersion } from '../prompts/prompt-registry';
+import { supervisorAgentPromptDefinitions } from './agent-prompts';
 import type { ISubAgent, AgentInput, AgentOutput } from './agent.interface';
 
 type DeepAgentFactory = {
@@ -39,9 +41,8 @@ export class AnalystAgent implements ISubAgent {
     input.signal?.throwIfAborted();
     const model = this.llmProvider.getModel();
 
-    const systemPrompt = `你是一个专业的分析师。对于任何复杂的计算、排序、数据对比，你必须使用 JavaScript 代码并在沙箱执行环境（js_eval 工具）中运行它，以确保结果的绝对正确。
-禁止猜测数字。你的分析报告中必须包含你的计算逻辑或运行过的 JavaScript 代码片段，以便最终结果可以被复现。
-所有分析和输出必须使用中文。`;
+    const systemPrompt = supervisorAgentPromptDefinitions.analyst;
+    const promptVersion = getPromptVersion('supervisor_agent.analyst');
 
     const userPrompt = [
       `分析任务：${input.task}`,
@@ -120,6 +121,7 @@ export class AnalystAgent implements ISubAgent {
         agent: this.name,
         confidence: 0.9,
         durationMs: Date.now() - start,
+        promptVersion,
       };
     } catch (err) {
       if (input.signal?.aborted) throw err;
@@ -146,6 +148,7 @@ export class AnalystAgent implements ISubAgent {
           agent: this.name,
           confidence: 0.8,
           durationMs: Date.now() - start,
+          promptVersion,
         };
       } catch (fallbackErr) {
         if (input.signal?.aborted) throw fallbackErr;
@@ -157,6 +160,7 @@ export class AnalystAgent implements ISubAgent {
           agent: this.name,
           confidence: 0,
           durationMs: Date.now() - start,
+          promptVersion,
         };
       }
     }

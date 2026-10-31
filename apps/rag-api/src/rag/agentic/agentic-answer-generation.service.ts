@@ -3,7 +3,10 @@ import { LlmProvider } from '../../providers/llm/llm.provider';
 import type { RetrieveOptions } from '../contracts/rag-types';
 import type { RetrievedChunk } from '../evidence/retrieval.types';
 import { EvidencePolicyService } from '../evidence/evidence-policy.service';
-import { AGENTIC_RETRIEVAL_CAPABILITY, type AgenticRetrievalCapability } from '../contracts/agentic-rag-capabilities';
+import {
+  AGENTIC_RETRIEVAL_CAPABILITY,
+  type AgenticRetrievalCapability,
+} from '../contracts/agentic-rag-capabilities';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
 import { AgentLoopService } from '../../modules/agent-loop/agent-loop.service';
 import { BadCaseFlywheelService } from '../prompts/bad-case-flywheel.service';
@@ -90,20 +93,19 @@ export class AgenticAnswerGenerationService {
       (match) => match.mode === 'exact',
     );
     const correction = strongBadCase
-      ? this.groundedAnswerGeneration.extractCorrectedAnswer(
-          strongBadCase.text,
-        )
+      ? this.groundedAnswerGeneration.extractCorrectedAnswer(strongBadCase.text)
       : '';
     if (strongBadCase && correction) {
-      const answer = await this.groundedAnswerGeneration.generateCorrectionAnswer(
-        state.query,
-        correction,
-        history,
-        memoryMessages,
-        (token) => onEvent?.({ type: 'token', data: token }),
-        strongBadCase.query,
-        retrieveOptions.signal,
-      );
+      const answer =
+        await this.groundedAnswerGeneration.generateCorrectionAnswer(
+          state.query,
+          correction,
+          history,
+          memoryMessages,
+          (token) => onEvent?.({ type: 'token', data: token }),
+          strongBadCase.query,
+          retrieveOptions.signal,
+        );
       onEvent?.({ type: 'citation', data: state.retrievedChunks });
       const artifacts = buildAnswerArtifacts(
         state,
@@ -147,10 +149,11 @@ export class AgenticAnswerGenerationService {
     }
 
     if (deterministicEvidenceAnswer) {
-      const deterministicGate = this.evidencePolicy.validateAnswerCitationSupport(
-        deterministicEvidenceAnswer,
-        state.retrievedChunks,
-      );
+      const deterministicGate =
+        this.evidencePolicy.validateAnswerCitationSupport(
+          deterministicEvidenceAnswer,
+          state.retrievedChunks,
+        );
       if (deterministicGate.sufficient) {
         const citedChunks = this.evidencePolicy.selectCitedChunks(
           deterministicEvidenceAnswer,
@@ -188,6 +191,7 @@ export class AgenticAnswerGenerationService {
       threadId: threadId || 'agentic-rag',
       runId,
       actor: 'agentic_answer',
+      tenantId: retrieveOptions.tenantId,
       initialState: { answer: '' },
       maxSteps: 3,
       maxToolCalls: 1,
@@ -237,10 +241,12 @@ export class AgenticAnswerGenerationService {
               answerLength: loopState.answer.length,
               evidenceCount: state.retrievedChunks.length,
             },
-            execute: async () =>
-              this.evidencePolicy.validateAnswerCitationSupport(
-                loopState.answer,
-                state.retrievedChunks,
+            execute: () =>
+              Promise.resolve(
+                this.evidencePolicy.validateAnswerCitationSupport(
+                  loopState.answer,
+                  state.retrievedChunks,
+                ),
               ),
             reduce: (
               current: GenerationLoopState,
@@ -360,7 +366,8 @@ export class AgenticAnswerGenerationService {
         };
       }
 
-      const safeAnswer = this.groundedAnswerGeneration.unsupportedReliableAnswer();
+      const safeAnswer =
+        this.groundedAnswerGeneration.unsupportedReliableAnswer();
       onEvent?.({ type: 'token', data: safeAnswer });
       onEvent?.({ type: 'citation', data: [] });
       const artifacts = buildAnswerArtifacts(
@@ -411,6 +418,11 @@ export class AgenticAnswerGenerationService {
     signal?: AbortSignal,
     answerRequirements: string[] = [],
   ): Promise<string | null> {
-    return this.groundedAnswerGeneration.synthesizeAgenticEvidenceAnswer(query, chunks, signal, answerRequirements);
+    return this.groundedAnswerGeneration.synthesizeAgenticEvidenceAnswer(
+      query,
+      chunks,
+      signal,
+      answerRequirements,
+    );
   }
 }

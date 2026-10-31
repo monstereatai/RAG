@@ -21,10 +21,7 @@ import { LlmModule } from '../../providers/llm/llm.module';
     EmbeddingModule,
     TypeOrmModule.forFeature([RagFeedbackEntity, QueryLogEntity]),
   ],
-  providers: [
-    SemanticExampleSelector,
-    BadCaseFlywheelService,
-  ],
+  providers: [SemanticExampleSelector, BadCaseFlywheelService],
   exports: [SemanticExampleSelector, BadCaseFlywheelService],
 })
 export class PromptModule {}

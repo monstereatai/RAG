@@ -9,6 +9,20 @@ import type { ProductionWorkflowJob } from './production-workflow-queue.service'
 import { ProductionWorkflowCancelledError } from './production-workflow.shared';
 import { ProductionWorkflowEventBase } from './production-workflow.events';
 
+function workflowText(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.message;
+  if (
+    value &&
+    typeof value === 'object' &&
+    'message' in value &&
+    typeof value.message === 'string'
+  ) {
+    return value.message;
+  }
+  return fallback;
+}
+
 export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEventBase {
   protected async createInitialState(
     dto: StartProductionWorkflowDto,
@@ -18,9 +32,12 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
   ): Promise<ProductionWorkflowStateType> {
     const selectedRoles = normalizeProductionRoles(dto.roles);
     const composition = this.plugins
-      ? await this.plugins.resolve(dto.pluginKeys, 'production', [
-          'workflow.production-base',
-        ])
+      ? await this.plugins.resolve(
+          dto.pluginKeys,
+          'production',
+          ['workflow.production-base'],
+          tenantId,
+        )
       : {
           pluginKeys: dto.pluginKeys?.length
             ? dto.pluginKeys
@@ -117,7 +134,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     userId: string,
   ): Promise<void> {
     if (!this.agentRuns) return;
-    const threadId = String(item.threadId ?? '');
+    const threadId = workflowText(item.threadId, '');
     if (!threadId || (await this.agentRuns.findLatestByThread(threadId)))
       return;
     const selectedRoles = Array.isArray(item.selectedRoles)
@@ -126,8 +143,8 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     const completedRoles = Array.isArray(item.completedRoles)
       ? item.completedRoles
       : [];
-    const status = String(item.status ?? 'running');
-    const projectId = String(item.projectId ?? '未命名活动');
+    const status = workflowText(item.status, 'running');
+    const projectId = workflowText(item.projectId, '未命名活动');
     const maxSteps = Number(item.maxSteps ?? 18);
     const run = await this.agentRuns.start({
       threadId,
@@ -145,7 +162,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       runId: run.id,
       tenantId: run.tenantId?.trim() || 'legacy',
       actor: 'production_workflow',
-      objective: String(item.brief ?? projectId),
+      objective: workflowText(item.brief, projectId),
       maxRounds: maxSteps,
     });
     if (
@@ -165,17 +182,15 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
           status === 'pending_approval' || status === 'revision_required',
         errorMessage:
           status === 'failed' || status === 'cancelled'
-            ? String(
-                item.error ??
-                  (status === 'cancelled'
-                    ? '用户取消工作流'
-                    : '历史工作流失败'),
+            ? workflowText(
+                item.error,
+                status === 'cancelled' ? '用户取消工作流' : '历史工作流失败',
               )
             : undefined,
         cancelledAt: status === 'cancelled' ? new Date() : undefined,
         cancelReason:
           status === 'cancelled'
-            ? String(item.error ?? '用户取消工作流')
+            ? workflowText(item.error, '用户取消工作流')
             : undefined,
         resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
       });
@@ -462,7 +477,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
 
   protected async getState(threadId: string) {
     const snapshot = await this.app.getState(this.config(threadId));
-    return snapshot?.values as ProductionWorkflowStateType | undefined;
+    return snapshot?.values;
   }
 
   protected async runUntilSettled(

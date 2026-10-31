@@ -287,12 +287,16 @@ export abstract class ShortTermMemoryStorageSupport {
       offset += page.length;
     }
 
-    const turns = recentMessages.slice(0, limit).reverse().map((message) => ({
-      messageId: message.id,
-      role: message.role === 'ai' ? ('assistant' as const) : ('user' as const),
-      content: this.messageContent(message.content),
-      ts: message.createdAt.getTime(),
-    }));
+    const turns = recentMessages
+      .slice(0, limit)
+      .reverse()
+      .map((message) => ({
+        messageId: message.id,
+        role:
+          message.role === 'ai' ? ('assistant' as const) : ('user' as const),
+        content: this.messageContent(message.content),
+        ts: message.createdAt.getTime(),
+      }));
     return {
       turns,
       hasOlderMessages: hasMoreUncompressedMessages,
@@ -345,7 +349,10 @@ export abstract class ShortTermMemoryStorageSupport {
     }
 
     return {
-      ids: uncompressed.slice(0, limit).reverse().map((message) => message.id),
+      ids: uncompressed
+        .slice(0, limit)
+        .reverse()
+        .map((message) => message.id),
       hasOlderMessages: hasMoreUncompressedMessages,
     };
   }

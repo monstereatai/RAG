@@ -74,19 +74,19 @@ const AccountCenter: React.FC = () => {
           <h3>个人信息</h3>
           <div className="profile-body">
             <div>
-              <Avatar size={138} src={profile!.avatar || user?.avatar} />
+              <Avatar size={138} src={profile?.avatar || user?.avatar} />
               <Button>更换头像</Button>
             </div>
             <dl>
-              <dt>用户名</dt><dd>{profile!.username}</dd>
-              <dt>真实姓名</dt><dd>{profile!.name}</dd>
-              <dt>所属部门</dt><dd>{profile!.department}</dd>
-              <dt>职位</dt><dd>{profile!.position}</dd>
-              <dt>手机</dt><dd>{profile!.phone}</dd>
-              <dt>邮箱</dt><dd>{profile!.email}</dd>
+              <dt>用户名</dt><dd>{profile?.username ?? ''}</dd>
+              <dt>真实姓名</dt><dd>{profile?.name ?? ''}</dd>
+              <dt>所属部门</dt><dd>{profile?.department ?? ''}</dd>
+              <dt>职位</dt><dd>{profile?.position ?? ''}</dd>
+              <dt>手机</dt><dd>{profile?.phone ?? ''}</dd>
+              <dt>邮箱</dt><dd>{profile?.email ?? ''}</dd>
               <dt>用户状态</dt><dd><Tag color="success">正常</Tag></dd>
-              <dt>创建时间</dt><dd>{profile!.createdAt}</dd>
-              <dt>更新时间</dt><dd>{profile!.updatedAt}</dd>
+              <dt>创建时间</dt><dd>{profile?.createdAt ?? ''}</dd>
+              <dt>更新时间</dt><dd>{profile?.updatedAt ?? ''}</dd>
             </dl>
           </div>
         </section>

@@ -9,6 +9,25 @@ import {
 
 export const SCHEDULED_JOB_QUEUE = 'scheduled-analysis-jobs';
 
+type ScheduledJobData = { jobId: string; triggerKey: string };
+type SchedulerRepeat = { pattern: string; tz: string } | { every: number };
+type SchedulerTemplate = {
+  name: string;
+  data: ScheduledJobData;
+  opts: {
+    attempts: number;
+    backoff: { type: 'exponential'; delay: number };
+  };
+};
+type SchedulerQueueApi = {
+  upsertJobScheduler?: (
+    key: string,
+    repeat: SchedulerRepeat,
+    template: SchedulerTemplate,
+  ) => Promise<unknown>;
+  removeJobScheduler?: (key: string) => Promise<unknown>;
+};
+
 @Injectable()
 export class ScheduledJobQueueService implements OnModuleDestroy {
   private readonly logger = new Logger(ScheduledJobQueueService.name);
@@ -118,7 +137,7 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
       }
       return false;
     }
-    const queue = this.queue as Queue & { upsertJobScheduler?: Function };
+    const queue = this.queue as Queue<ScheduledJobData> & SchedulerQueueApi;
     if (input.type === 'at') {
       const delay = Math.max(
         0,
@@ -142,11 +161,22 @@ export class ScheduledJobQueueService implements OnModuleDestroy {
     return true;
   }
 
-  async unschedule(id: string): Promise<void> {
+  async unschedule(id: string, oneTimeTriggerKey?: string): Promise<void> {
     if (!this.enabled || !this.queue) return;
-    const queue = this.queue as Queue & { removeJobScheduler?: Function };
+    const queue = this.queue as Queue<ScheduledJobData> & SchedulerQueueApi;
     if (typeof queue.removeJobScheduler === 'function') {
       await queue.removeJobScheduler(`scheduled:${id}`);
+    }
+    if (!oneTimeTriggerKey) return;
+
+    const oneTimeJob = await this.queue.getJob(
+      this.queueJobId(id, oneTimeTriggerKey),
+    );
+    if (!oneTimeJob) return;
+
+    const state = await oneTimeJob.getState();
+    if (state === 'waiting' || state === 'delayed') {
+      await oneTimeJob.remove();
     }
   }
 

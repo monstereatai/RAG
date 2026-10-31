@@ -2,10 +2,18 @@ import { BadCaseFlywheelService } from './bad-case-flywheel.service';
 
 describe('BadCaseFlywheelService', () => {
   const createService = () => {
+    let insertedData: Array<Record<string, unknown>> | undefined;
+    let deletedExpression: string | undefined;
     const client = {
       search: jest.fn(),
-      deleteEntities: jest.fn().mockResolvedValue(undefined),
-      insert: jest.fn().mockResolvedValue(undefined),
+      deleteEntities: jest.fn((input: { expr: string }) => {
+        deletedExpression = input.expr;
+        return Promise.resolve(undefined);
+      }),
+      insert: jest.fn((input: { data: Array<Record<string, unknown>> }) => {
+        insertedData = input.data;
+        return Promise.resolve(undefined);
+      }),
       flushSync: jest.fn().mockResolvedValue(undefined),
     };
     const service = new BadCaseFlywheelService(
@@ -17,7 +25,12 @@ describe('BadCaseFlywheelService', () => {
       { embedQuery: jest.fn().mockResolvedValue([0.1, 0.2]) } as never,
     );
     Object.assign(service, { client, initialized: true });
-    return { service, client };
+    return {
+      service,
+      client,
+      getInsertedData: () => insertedData,
+      getDeletedExpression: () => deletedExpression,
+    };
   };
 
   it('injects at most two reviewed examples above the similarity gate', async () => {
@@ -99,7 +112,7 @@ describe('BadCaseFlywheelService', () => {
   });
 
   it('upserts only the approved correction payload passed by the review gate', async () => {
-    const { service, client } = createService();
+    const { service, client, getInsertedData } = createService();
 
     const result = await service.indexApproved({
       id: 'feedback-1',
@@ -111,29 +124,18 @@ describe('BadCaseFlywheelService', () => {
 
     expect(result.indexed).toBe(true);
     expect(client.deleteEntities).toHaveBeenCalled();
-    expect(client.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: [
-          expect.objectContaining({
-            id: 'badcase_feedback-1',
-            text: expect.stringContaining('按词组断行'),
-          }),
-        ],
-      }),
-    );
+    const inserted = getInsertedData()?.[0];
+    expect(inserted?.id).toBe('badcase_feedback-1');
+    expect(inserted?.text).toContain('按词组断行');
   });
 
   it('removes a previously indexed bad case when the review is revoked', async () => {
-    const { service, client } = createService();
+    const { service, client, getDeletedExpression } = createService();
 
     const result = await service.removeApproved('feedback-1');
 
     expect(result.removed).toBe(true);
-    expect(client.deleteEntities).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expr: expect.stringContaining('badcase_feedback-1'),
-      }),
-    );
+    expect(getDeletedExpression()).toContain('badcase_feedback-1');
     expect(client.flushSync).toHaveBeenCalled();
   });
 });

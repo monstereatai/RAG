@@ -1,6 +1,9 @@
 import type { RetrieveOptions } from '../contracts/rag-types';
 import type { QueryPlan } from '../planning/query-plan';
-import type { AgenticRagStateType, AgenticSubQuestion } from './agentic-rag.state';
+import type {
+  AgenticRagStateType,
+  AgenticSubQuestion,
+} from './agentic-rag.state';
 
 /** Auto 用已确认的 QueryPlan 和 Fast Path 证据决定是否升级。 */
 export function resolveAutoRoute(

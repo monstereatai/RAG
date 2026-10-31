@@ -351,6 +351,15 @@ export function makeBusinessDataset() {
   ];
   items.push(...multiHop);
 
+  for (const item of items) {
+    const sourceDocument = item.sourceDocument;
+    if (!sourceDocument || sourceDocument.content.trim().length >= 80) continue;
+    sourceDocument.content = [
+      sourceDocument.content.trim(),
+      `资料标题：${sourceDocument.title}。适用部门：${item.department}。资料类型：${item.documentType}。以下内容为该资料的业务条款摘录。`,
+    ].join('\n');
+  }
+
   return {
     version: 'private-sanitized-2026-06-30',
     synthetic: true,

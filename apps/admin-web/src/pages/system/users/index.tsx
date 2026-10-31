@@ -119,7 +119,7 @@ const Users: React.FC = () => {
       setGrantTreeData(buildPermissionTree(permissionList));
       setGrantInitialKeys(directIds);
       setGrantCheckedKeys(directIds);
-    } catch (e) {
+    } catch {
       message.error('权限加载失败');
       setGrantOpen(false);
     } finally {
@@ -156,7 +156,7 @@ const Users: React.FC = () => {
       }
       message.success('直接授权已保存，用户重新登录/刷新令牌后生效');
       setGrantOpen(false);
-    } catch (e) {
+    } catch {
       message.error('保存失败，请重试');
     } finally {
       setGrantSaving(false);
@@ -218,7 +218,6 @@ const Users: React.FC = () => {
             subTitle="当前没有用户记录"
           />
         );
-      case 'data':
       default:
         return (
           <>

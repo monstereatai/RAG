@@ -1,8 +1,20 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
-export class UsePrecisionForTraceSpanDuration1788000000000
-  implements MigrationInterface
-{
+function readColumnDefault(
+  value: unknown,
+): string | number | boolean | null | undefined {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+export class UsePrecisionForTraceSpanDuration1788000000000 implements MigrationInterface {
   async up(q: QueryRunner): Promise<void> {
     if (!(await q.hasTable('trace_spans'))) return;
 
@@ -17,7 +29,7 @@ export class UsePrecisionForTraceSpanDuration1788000000000
         name: 'durationMs',
         type: 'double precision',
         isNullable: durationColumn.isNullable,
-        default: durationColumn.default,
+        default: readColumnDefault(durationColumn.default),
       }),
     );
   }
@@ -36,7 +48,7 @@ export class UsePrecisionForTraceSpanDuration1788000000000
         name: 'durationMs',
         type: 'int',
         isNullable: durationColumn.isNullable,
-        default: durationColumn.default,
+        default: readColumnDefault(durationColumn.default),
       }),
     );
   }

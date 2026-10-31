@@ -79,13 +79,8 @@ describe('RagGatewayService', () => {
       totalScore: 1,
       sourceAuthority: 'reviewed_bad_case',
     };
-    const { service, ragService } = createService(
-      true,
-      '命中已审核纠错证据',
-    );
-    ragService.retrieveReviewedEvidence.mockResolvedValue([
-      reviewedChunk,
-    ]);
+    const { service, ragService } = createService(true, '命中已审核纠错证据');
+    ragService.retrieveReviewedEvidence.mockResolvedValue([reviewedChunk]);
 
     const result = await service.search(
       { query: '韦水春是谁', limit: 5 },

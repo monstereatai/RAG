@@ -253,7 +253,7 @@ export class AgentCollaborationService {
 
   async detectConflicts(threadId: string) {
     const messages = await this.listMessages(threadId);
-    const bySubject = new Map<string, any[]>();
+    const bySubject = new Map<string, (typeof messages)[number][]>();
     for (const message of messages) {
       const list = bySubject.get(message.subject) ?? [];
       list.push(message);
@@ -264,9 +264,9 @@ export class AgentCollaborationService {
         ...new Set(
           list.map((item) =>
             JSON.stringify(
-              item.payload?.decision ??
-                item.payload?.recommendation ??
-                item.payload?.status ??
+              item.payload.decision ??
+                item.payload.recommendation ??
+                item.payload.status ??
                 item.payload,
             ),
           ),
@@ -309,7 +309,7 @@ export class AgentCollaborationService {
       actions,
       artifacts: artifacts.map((item) => ({
         ...item,
-        payload: this.parse(item.payload, {}),
+        payload: this.parseObject(item.payload),
       })),
       messages,
       dependencies,
@@ -320,36 +320,55 @@ export class AgentCollaborationService {
   private viewSop(item: AgentSopEntity) {
     return {
       ...item,
-      inputContract: this.parse(item.inputContract, []),
-      actions: this.parse(item.actions, []),
-      outputContract: this.parse(item.outputContract, []),
-      dependencies: this.parse(item.dependencies, []),
+      inputContract: this.parseArray(item.inputContract),
+      actions: this.parseArray(item.actions),
+      outputContract: this.parseArray(item.outputContract),
+      dependencies: this.parseArray(item.dependencies),
     };
   }
   private viewMessage(item: AgentCollaborationMessageEntity) {
     return {
       ...item,
-      payload: this.parse(item.payload, {}),
-      artifactIds: this.parse(item.artifactIds, []),
+      payload: this.parseObject(item.payload),
+      artifactIds: this.parseStringArray(item.artifactIds),
     };
   }
   private viewDecision(item: DecisionRecordEntity) {
     return {
       ...item,
-      conflicts: this.parse(item.conflicts, []),
-      options: this.parse(item.options, []),
-      decision: this.parse(item.decision, {}),
-      sourceArtifactIds: this.parse(item.sourceArtifactIds, []),
+      conflicts: this.parseArray(item.conflicts),
+      options: this.parseArray(item.options),
+      decision: this.parseObject(item.decision),
+      sourceArtifactIds: this.parseStringArray(item.sourceArtifactIds),
     };
   }
   private json(value: unknown) {
     return JSON.stringify(value ?? {});
   }
-  private parse(value: string, fallback: unknown) {
+  private parseObject(value: string): Record<string, unknown> {
     try {
-      return JSON.parse(value);
+      const parsed: unknown = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
     } catch {
-      return fallback;
+      return {};
     }
+    return {};
+  }
+
+  private parseArray(value: string): unknown[] {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private parseStringArray(value: string): string[] {
+    return this.parseArray(value).filter(
+      (item): item is string => typeof item === 'string',
+    );
   }
 }

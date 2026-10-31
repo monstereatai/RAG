@@ -64,9 +64,16 @@ export function validateProjectEvalDataset(
       }
     }
 
+    if (
+      query?.expectedKeywords !== undefined &&
+      !Array.isArray(query.expectedKeywords)
+    ) {
+      errors.push(`${label}: expectedKeywords must be an array`);
+    }
     const expectedKeywords = Array.isArray(query?.expectedKeywords)
       ? query.expectedKeywords
       : [];
+    validateKeywordList(expectedKeywords, `${label}.expectedKeywords`, errors);
     const isNegative = query?.expectRefusal === true || query?.minKeywordHits === 0;
     hasNegative ||= isNegative;
     hasConflict ||= query?.expectConflictHandling === true;
@@ -114,6 +121,12 @@ export function validateProjectEvalDataset(
             claim.supportKeywords.length === 0
           ) {
             errors.push(`${label}: expectedClaims[${claimIndex}].supportKeywords is required`);
+          } else {
+            validateKeywordList(
+              claim.supportKeywords,
+              `${label}.expectedClaims[${claimIndex}].supportKeywords`,
+              errors,
+            );
           }
         }
       }
@@ -134,4 +147,23 @@ export function validateProjectEvalDataset(
     }
   }
   return errors;
+}
+
+function validateKeywordList(keywords, label, errors) {
+  const seen = new Set();
+  for (const [index, keyword] of keywords.entries()) {
+    if (typeof keyword !== 'string' || !keyword.trim()) {
+      errors.push(`${label}[${index}] must be a non-empty string`);
+      continue;
+    }
+
+    const normalized = keyword.trim().toLowerCase();
+    if (keyword !== keyword.trim()) {
+      errors.push(`${label}[${index}] must not have surrounding whitespace`);
+    }
+    if (seen.has(normalized)) {
+      errors.push(`${label}[${index}] duplicates another keyword`);
+    }
+    seen.add(normalized);
+  }
 }

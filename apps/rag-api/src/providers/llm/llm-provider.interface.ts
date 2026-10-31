@@ -17,6 +17,8 @@ export interface LlmInvokeOptions {
   signal?: AbortSignal;
   /** 供应商返回真实 usage 时回调；未返回时调用方继续使用估算值。 */
   onUsage?: (usage: LlmUsage) => void;
+  /** 传递给 LangChain RunnableConfig，供调用链追踪提示词版本等调用元数据。 */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ILLMProvider {

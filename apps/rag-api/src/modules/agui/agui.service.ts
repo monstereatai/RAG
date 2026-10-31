@@ -164,6 +164,7 @@ export class AguiService {
                   signal: abortController.signal,
                   tenantId: options.tenantId,
                   trustedAdminPrincipal: options.trustedAdminPrincipal,
+                  requestId: options.requestId,
                   departmentIds: options.departmentIds,
                   loadSupplementalEvidence: loadAttachmentContext,
                 },

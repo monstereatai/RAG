@@ -45,6 +45,8 @@ export class AgentRunEntity {
   cancelledAt!: Date | null;
   @Column({ type: 'text', nullable: true, default: null })
   cancelReason!: string | null;
+  @Column({ type: 'boolean', default: false })
+  cancelSignalPending!: boolean;
   @Column({ type: 'timestamp', nullable: true, default: null })
   lastCheckpointAt!: Date | null;
   @Column({ type: 'text', nullable: true, default: null }) errorMessage!:

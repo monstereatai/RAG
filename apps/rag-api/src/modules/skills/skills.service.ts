@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OpenAIEmbeddings } from '@langchain/openai';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { EmbeddingProvider } from '../../providers/embedding/embedding.provider';
 import type { SkillMatch, SkillMetadata } from './skill.types';
 
 interface ParsedSkillFile {
@@ -14,13 +15,18 @@ interface ParsedSkillFile {
 export class SkillsService {
   private readonly logger = new Logger(SkillsService.name);
   private readonly rootDir: string;
-  private readonly embeddings: OpenAIEmbeddings | null;
+  private readonly embeddingsEnabled: boolean;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly embeddingProvider: EmbeddingProvider,
+  ) {
     this.rootDir =
       config.get<string>('skills.rootDir') ??
       path.resolve(process.cwd(), '../../skills');
-    this.embeddings = this.createEmbeddings();
+    this.embeddingsEnabled = Boolean(
+      config.get<string>('embedding.qwen.apiKey'),
+    );
   }
 
   async list(): Promise<SkillMetadata[]> {
@@ -34,7 +40,10 @@ export class SkillsService {
 
   async match(query: string, limit = 5): Promise<SkillMatch[]> {
     const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
+    const resultLimit = Number.isFinite(limit)
+      ? Math.max(0, Math.trunc(limit))
+      : 5;
+    if (!normalizedQuery || resultLimit === 0) {
       return [];
     }
 
@@ -43,8 +52,12 @@ export class SkillsService {
       return [];
     }
 
-    const tokenMatches = this.matchByToken(normalizedQuery, skills, limit);
-    if (!this.embeddings) {
+    const tokenMatches = this.matchByToken(
+      normalizedQuery,
+      skills,
+      resultLimit,
+    );
+    if (!this.embeddingsEnabled) {
       return tokenMatches;
     }
 
@@ -53,7 +66,7 @@ export class SkillsService {
         normalizedQuery,
         skills,
         tokenMatches,
-        limit,
+        resultLimit,
       );
     } catch (err) {
       this.logger.warn(
@@ -61,22 +74,6 @@ export class SkillsService {
       );
       return tokenMatches;
     }
-  }
-
-  private createEmbeddings(): OpenAIEmbeddings | null {
-    const apiKey = this.config.get<string>('embedding.qwen.apiKey');
-    if (!apiKey) {
-      return null;
-    }
-
-    return new OpenAIEmbeddings({
-      apiKey,
-      model: this.config.get<string>('embedding.qwen.model'),
-      configuration: {
-        baseURL: this.config.get<string>('embedding.qwen.baseUrl'),
-      },
-      dimensions: this.config.get<number>('embedding.qwen.dimension') ?? 1024,
-    });
   }
 
   private matchByToken(
@@ -102,7 +99,7 @@ export class SkillsService {
     tokenMatches: SkillMatch[],
     limit: number,
   ): Promise<SkillMatch[]> {
-    if (!this.embeddings) {
+    if (!this.embeddingsEnabled) {
       return tokenMatches;
     }
 
@@ -110,8 +107,8 @@ export class SkillsService {
       tokenMatches.map((match) => [match.name, match]),
     );
     const [queryVector, skillVectors] = await Promise.all([
-      this.embeddings.embedQuery(query),
-      this.embeddings.embedDocuments(
+      this.embeddingProvider.embedQuery(query),
+      this.embeddingProvider.embedDocuments(
         skills.map((skill) => this.skillSearchText(skill)),
       ),
     ]);
@@ -170,6 +167,7 @@ export class SkillsService {
       name: parsed.metadata.name || fallbackName,
       description: parsed.metadata.description || '',
       sourcePath: filePath,
+      version: createHash('sha256').update(raw).digest('hex'),
       tags,
       content: parsed.content.trim(),
     };

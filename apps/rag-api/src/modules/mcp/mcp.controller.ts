@@ -8,6 +8,14 @@ interface McpToolView {
   description?: string;
   schema?: unknown;
   source?: string;
+  policy: {
+    permission: string;
+    risk: string;
+    requiresApproval?: boolean;
+    tenantScope: 'global' | 'tenant';
+    modes: string[];
+    timeoutMs: number;
+  };
 }
 
 @Controller('mcp')
@@ -25,6 +33,14 @@ export class McpController {
       description: tool.description,
       schema: tool.schema,
       source: tool.source,
+      policy: {
+        permission: tool.policy.permission,
+        risk: tool.policy.risk,
+        requiresApproval: tool.policy.requiresApproval,
+        tenantScope: tool.policy.tenantScope ?? 'global',
+        modes: tool.policy.modes,
+        timeoutMs: tool.policy.timeoutMs,
+      },
     }));
   }
 }

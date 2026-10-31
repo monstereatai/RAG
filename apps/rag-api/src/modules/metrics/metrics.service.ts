@@ -133,6 +133,31 @@ export class MetricsService implements OnModuleInit {
     labelNames: ['provider', 'model', 'type'] as const,
   });
 
+  private readonly embeddingRequestsTotal = new Counter({
+    name: 'rag_embedding_requests_total',
+    help: 'Embedding provider requests by provider, model and status',
+    labelNames: ['provider', 'model', 'status'] as const,
+  });
+
+  private readonly embeddingRequestDuration = new Histogram({
+    name: 'rag_embedding_request_duration_seconds',
+    help: 'Embedding provider request duration in seconds',
+    labelNames: ['provider', 'model', 'status'] as const,
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.5, 3, 5, 8],
+  });
+
+  private readonly embeddedDocumentsTotal = new Counter({
+    name: 'rag_embedding_documents_total',
+    help: 'Documents sent to embedding providers',
+    labelNames: ['provider', 'model'] as const,
+  });
+
+  private readonly embeddingTokensActualTotal = new Counter({
+    name: 'rag_embedding_tokens_actual_total',
+    help: 'Provider-reported embedding input tokens by provider and model',
+    labelNames: ['provider', 'model'] as const,
+  });
+
   /** 缓存命中：result 只取 hit / miss，命中率用 rate(...{result="hit"}) / rate(...[w]) 计算。 */
   private readonly cacheRequestsTotal = new Counter({
     name: 'rag_cache_requests_total',
@@ -299,6 +324,40 @@ export class MetricsService implements OnModuleInit {
         usage.outputTokens,
       );
     }
+  }
+
+  observeEmbeddingCall(
+    provider: string,
+    model: string,
+    status: 'success' | 'error',
+    durationSeconds: number,
+    documentCount: number,
+  ): void {
+    const labels = {
+      provider: provider || 'unknown',
+      model: model || 'unknown',
+      status,
+    };
+    this.embeddingRequestsTotal.inc(labels);
+    this.embeddingRequestDuration.observe(labels, durationSeconds);
+    if (documentCount > 0) {
+      this.embeddedDocumentsTotal.inc(
+        { provider: labels.provider, model: labels.model },
+        documentCount,
+      );
+    }
+  }
+
+  observeEmbeddingUsage(
+    provider: string,
+    model: string,
+    inputTokens: number,
+  ): void {
+    if (!Number.isSafeInteger(inputTokens) || inputTokens <= 0) return;
+    this.embeddingTokensActualTotal.inc(
+      { provider: provider || 'unknown', model: model || 'unknown' },
+      inputTokens,
+    );
   }
 
   observeCacheRequest(cache: string, hit: boolean): void {

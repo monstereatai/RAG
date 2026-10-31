@@ -48,6 +48,7 @@ export interface ProductionWorkflowTracePayload {
   pendingApprovalRoles: string[];
   stages: Array<{
     role: string;
+    promptVersion?: string;
     summary: string;
     riskLevel: string;
     evidenceCoverage: number;
@@ -75,8 +76,20 @@ export interface ScheduledAnalysisTracePayload {
   instruction: string;
   window: string;
   dataScopes: string[];
+  promptVersion?: string;
   snapshotCounts: Record<string, number>;
   report: string;
+}
+
+export interface PromptOperationTracePayload {
+  name: string;
+  userId?: string;
+  sessionId?: string;
+  promptVersions: Record<string, string>;
+  status: 'success' | 'fallback' | 'failed';
+  latencyMs: number;
+  inputSummary: Record<string, string | number | boolean>;
+  outputSummary: Record<string, string | number | boolean>;
 }
 
 @Injectable()
@@ -273,6 +286,13 @@ export class LangfuseProvider implements OnModuleDestroy {
           completedRoles: payload.completedRoles,
           pendingApprovalRoles: payload.pendingApprovalRoles,
           stageCount: payload.stages.length,
+          promptVersions: [
+            ...new Set(
+              payload.stages
+                .map((stage) => stage.promptVersion)
+                .filter((version): version is string => Boolean(version)),
+            ),
+          ],
         },
       });
 
@@ -300,6 +320,7 @@ export class LangfuseProvider implements OnModuleDestroy {
           output: stageOutput,
           metadata: {
             role: stage.role,
+            promptVersion: stage.promptVersion,
             riskLevel: stage.riskLevel,
             evidenceCoverage: stage.evidenceCoverage,
             completedAt: stage.completedAt,
@@ -325,6 +346,7 @@ export class LangfuseProvider implements OnModuleDestroy {
           model: 'production-workflow-role',
           metadata: {
             role: stage.role,
+            promptVersion: stage.promptVersion,
             toolExecutions: stage.toolExecutions.length,
           },
         });
@@ -370,14 +392,22 @@ export class LangfuseProvider implements OnModuleDestroy {
           snapshotCounts: payload.snapshotCounts,
           report: this.observabilityText(payload.report),
         },
-        metadata: { taskKind: 'analysis', jobId: payload.jobId },
+        metadata: {
+          taskKind: 'analysis',
+          jobId: payload.jobId,
+          promptVersion: payload.promptVersion,
+        },
       });
       trace.generation({
         name: 'agent.scheduled.analysis.report',
         input: payload.snapshotCounts,
         output: this.observabilityText(payload.report),
         model: 'scheduled-analysis',
-        metadata: { window: payload.window, dataScopes: payload.dataScopes },
+        metadata: {
+          window: payload.window,
+          dataScopes: payload.dataScopes,
+          promptVersion: payload.promptVersion,
+        },
       });
       this.tracesSent += 1;
       await this.flush();
@@ -385,6 +415,39 @@ export class LangfuseProvider implements OnModuleDestroy {
       this.lastError = (err as Error).message;
       this.logger.warn(
         `LangFuse scheduled analysis trace failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  tracePromptOperation(payload: PromptOperationTracePayload): void {
+    if (!this.client) return;
+
+    try {
+      const metadata = {
+        status: payload.status,
+        latencyMs: payload.latencyMs,
+        promptVersions: payload.promptVersions,
+      };
+      const trace = this.client.trace({
+        name: payload.name,
+        userId: payload.userId,
+        sessionId: payload.sessionId,
+        input: payload.inputSummary,
+        output: payload.outputSummary,
+        metadata,
+      });
+      trace.generation({
+        name: `${payload.name}.generation`,
+        input: payload.inputSummary,
+        output: payload.outputSummary,
+        metadata,
+      });
+      this.tracesSent += 1;
+      void this.flush();
+    } catch (err) {
+      this.lastError = (err as Error).message;
+      this.logger.warn(
+        `LangFuse prompt operation trace failed: ${(err as Error).message}`,
       );
     }
   }

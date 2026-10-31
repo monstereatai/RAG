@@ -3,6 +3,7 @@ import {
   Get,
   Delete,
   Param,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -11,12 +12,16 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/api-response.interface';
 import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
+import { MemoryConsolidationService } from './memory-consolidation.service';
 
 @Controller('memories')
 @UseGuards(JwtAuthGuard)
 @ApiScopes('rag:memory')
 export class MemoryController {
-  constructor(private readonly memoryService: MemoryService) {}
+  constructor(
+    private readonly memoryService: MemoryService,
+    private readonly consolidationService: MemoryConsolidationService,
+  ) {}
 
   @Get('status')
   getStatus() {
@@ -75,6 +80,39 @@ export class MemoryController {
     }
     const memories = await this.memoryService.listMemories(user.userId);
     return { enabled: true, memories };
+  }
+
+  @Get('consolidations/pending')
+  async listPendingConsolidations(@CurrentUser() user: JwtPayload) {
+    if (!this.memoryService.isEnabled()) {
+      return { enabled: false, proposals: [] };
+    }
+    const proposals = await this.consolidationService.listPending(user.userId);
+    return { enabled: true, proposals };
+  }
+
+  @Post('consolidations/:memoryId/approve')
+  async approveConsolidation(
+    @Param('memoryId') memoryId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.consolidationService.approve(user.userId, memoryId);
+  }
+
+  @Post('consolidations/:memoryId/reject')
+  async rejectConsolidation(
+    @Param('memoryId') memoryId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.consolidationService.reject(user.userId, memoryId);
+  }
+
+  @Post('consolidations/:memoryId/revoke')
+  async revokeConsolidation(
+    @Param('memoryId') memoryId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.consolidationService.revoke(user.userId, memoryId);
   }
 
   /**

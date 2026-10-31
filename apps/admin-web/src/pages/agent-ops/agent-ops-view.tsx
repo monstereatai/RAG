@@ -21,6 +21,7 @@ import { ARTIFACT_LABELS } from './agent-ops-shared';
 import { ScheduledAnalysisPanel } from './scheduled-analysis-panel';
 import {
   type AgenticRunSnapshot,
+  type AgentBadCase,
   getAgentRunArtifacts,
   unwrapData,
 } from './service';
@@ -154,6 +155,18 @@ export function AgentOpsView(controller: AgentOpsController) {
                         title: '错误类型',
                         dataIndex: 'errorType',
                         render: (value) => value || '-',
+                      },
+                      {
+                        title: '关联 Skill',
+                        dataIndex: 'skills',
+                        render: (skills: AgentBadCase['skills']) =>
+                          skills?.length
+                            ? skills.map((skill) => (
+                                <Tag key={`${skill.name}:${skill.version ?? 'unknown'}`}>
+                                  {skill.name}
+                                </Tag>
+                              ))
+                            : '-',
                       },
                       {
                         title: '状态',
@@ -299,7 +312,6 @@ export function AgentOpsView(controller: AgentOpsController) {
                   <div className="agent-ops-form-grid">
                     <Select
                       allowClear
-                      showSearch
                       loading={runOptionsLoading}
                       value={
                         runOptions.some(
@@ -320,7 +332,7 @@ export function AgentOpsView(controller: AgentOpsController) {
                           setRunSnapshot(null);
                         }
                       }}
-                      optionFilterProp="label"
+                      showSearch={{ optionFilterProp: 'label' }}
                       options={runOptions.map((item) => ({
                         value: item.threadId,
                         label: `${item.title} · ${item.mode} · ${new Date(item.updatedAt).toLocaleString('zh-CN')}${item.checkpointAvailable ? ' · 已保存 Checkpoint' : ' · 无 Checkpoint'}`,
@@ -521,6 +533,32 @@ export function AgentOpsView(controller: AgentOpsController) {
         onOk={() => void handleReview()}
       >
         <Form form={reviewForm} layout="vertical">
+          {selectedBadCase?.skills?.length ? (
+            <Form.Item label="关联 Skill 版本">
+              <div>
+                {selectedBadCase.skills.map((skill) => (
+                  <Tag key={`${skill.name}:${skill.version ?? 'unknown'}`} title={skill.version}>
+                    {skill.name}@{skill.version?.slice(0, 12) ?? '旧运行未记录版本'} · {skill.injected ? '已注入' : '未注入'}
+                  </Tag>
+                ))}
+              </div>
+            </Form.Item>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              title="本次运行未记录关联 Skill 版本"
+              description="历史运行或未选中 Skill 的回答无法关联到具体 Skill。"
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          <Alert
+            type="info"
+            showIcon
+            title="Skill 修改需要人工审核"
+            description="依据关联版本在 Git 中审查并修改 SKILL.md；将本案例加入回归集后，再用 Agent Evals 验证改动。失败轨迹不会自动改写 Skill。"
+            style={{ marginBottom: 16 }}
+          />
           <Form.Item
             label="审核状态"
             name="status"

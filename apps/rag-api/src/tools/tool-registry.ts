@@ -10,6 +10,8 @@ export interface ToolRegistryEntry {
   modes: Array<'simple' | 'auto' | 'agentic' | 'production'>;
   roles?: string[];
   requiresApproval?: boolean;
+  /** MCP tenant tools require a trusted AgentLoop tenantId and remote ACL enforcement. */
+  tenantScope?: 'global' | 'tenant';
   /** Explicitly allowed automatic approvals for bounded internal operations only. */
   autoApproval?: 'internal_artifact' | 'isolated_workspace';
 }

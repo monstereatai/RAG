@@ -155,8 +155,11 @@ export const configuration = () => ({
     image: process.env.OPEN_SANDBOX_IMAGE ?? '',
     cpuLimit: process.env.OPEN_SANDBOX_CPU_LIMIT ?? '2',
     memoryLimit: process.env.OPEN_SANDBOX_MEMORY_LIMIT ?? '4Gi',
-    egressAllowlist: (process.env.OPEN_SANDBOX_EGRESS_ALLOWLIST ??
-      'registry.npmjs.org,npmjs.com,*.npmjs.com,registry.npmmirror.com,*.npmmirror.com,mirrors.aliyun.com')
+    diskLimit: process.env.OPEN_SANDBOX_DISK_LIMIT ?? '8Gi',
+    egressAllowlist: (
+      process.env.OPEN_SANDBOX_EGRESS_ALLOWLIST ??
+      'registry.npmjs.org,npmjs.com,*.npmjs.com,registry.npmmirror.com,*.npmmirror.com,mirrors.aliyun.com'
+    )
       .split(',')
       .map((host) => host.trim())
       .filter(Boolean),
@@ -455,6 +458,9 @@ export const configuration = () => ({
     provider: process.env.MEM0_PROVIDER ?? 'cloud',
     apiKey: process.env.MEM0_API_KEY ?? '',
     baseUrl: process.env.MEM0_BASE_URL ?? '',
+    consolidation: {
+      enabled: process.env.MEM0_CONSOLIDATION_ENABLED === 'true',
+    },
   },
 
   // MCP 工具协议（默认关闭，避免示例 server 影响本地启动）
@@ -497,6 +503,7 @@ export const configuration = () => ({
 
   // Skills 技能系统
   skills: {
-    rootDir: process.env.SKILLS_DIR ?? path.resolve(process.cwd(), '../../skills'),
+    rootDir:
+      process.env.SKILLS_DIR ?? path.resolve(process.cwd(), '../../skills'),
   },
 });

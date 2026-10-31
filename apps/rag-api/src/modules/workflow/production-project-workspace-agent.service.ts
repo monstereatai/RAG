@@ -5,6 +5,8 @@ import { LlmProvider } from '../../providers/llm/llm.provider';
 import { AgentLoopService } from '../agent-loop/agent-loop.service';
 import type { AgentLoopDecision } from '../agent-loop/agent-loop.types';
 import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
+import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
+import { buildProductionProjectWorkspaceAgentPrompt } from './production-project-workspace-agent.prompts';
 
 const workspaceActionSchema = z.object({
   action: z.enum([
@@ -81,6 +83,7 @@ export class ProductionProjectWorkspaceAgentService {
       threadId,
       runId,
       actor: 'production-workspace-agent',
+      tenantId,
       initialState: { instruction: normalizedInstruction, events: [] },
       maxSteps: MAX_AGENT_STEPS,
       maxToolCalls: MAX_AGENT_TOOL_CALLS,
@@ -89,7 +92,8 @@ export class ProductionProjectWorkspaceAgentService {
         const messages = [
           {
             role: 'system',
-            content: `你是在一次性隔离项目工作区里协助修改前端项目的编码 Agent。你只能通过一次一个命令完成用户要求；命令只能访问当前项目工作区。用户明确要求后，可以安装项目依赖、运行测试或启动/停止开发服务。不要尝试读取工作区外的文件、环境变量、密钥或宿主信息；不要声称未执行过的验证已经通过。先检查项目文件和 package scripts，再按需要编辑、安装、验证。每次只输出一个结构化动作：command 执行同步命令；start_dev_server / stop_dev_server 管理后台开发服务；complete 结束任务。若开发服务需要绑定网络接口，请选择 0.0.0.0 并使用适当端口。达到验证目标后立即 complete。最多 ${MAX_AGENT_TOOL_CALLS} 次工具调用。`,
+            content:
+              buildProductionProjectWorkspaceAgentPrompt(MAX_AGENT_TOOL_CALLS),
           },
           {
             role: 'user',
@@ -99,7 +103,10 @@ export class ProductionProjectWorkspaceAgentService {
         const decision = await this.llmProvider
           .getAgenticModel()
           .withStructuredOutput(workspaceActionSchema, { method: 'jsonMode' })
-          .invoke(messages, { signal });
+          .invoke(messages, {
+            signal,
+            metadata: getPromptMetadata('workflow.workspace_agent'),
+          });
 
         if (decision.action === 'complete') {
           return {

@@ -3,8 +3,6 @@ import { retrievalProfileForTaskType } from './retrieval/context-builder';
 import type { RetrievalExecutionPlan } from './planning/retrieval-policy.service';
 
 describe('RagService retrieval sources and ranking', () => {
-
-
   it('refuses for vector-only hits with no query token overlap', async () => {
     const { service, llmInvoke } = createService({
       vectorStoreProvider: {
@@ -45,8 +43,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-
-
   it('refuses for weak Chinese overlap when only a generic word matches', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
@@ -80,8 +76,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
-
-
   it('falls back to BM25 when vector search is unavailable', async () => {
     const { service, observeRetrievalHits } = createService({
       embeddingProvider: {
@@ -111,8 +105,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(results[0].bm25Score).toBeGreaterThan(0);
     expect(observeRetrievalHits).toHaveBeenCalledWith('bm25', 'hybrid', 1);
   });
-
-
 
   it('uses RRF so chunks found by both keyword and vector rank first', async () => {
     const { service } = createService({
@@ -163,8 +155,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(results[0].cosineScore).toBeGreaterThan(0);
   });
 
-
-
   it('normalizes Unicode spacing before retrieval', async () => {
     const { service } = createService({
       embeddingProvider: {
@@ -197,8 +187,6 @@ describe('RagService retrieval sources and ranking', () => {
     });
   });
 
-
-
   it("keeps the user's query wording in the generated answer prompt", async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
@@ -223,8 +211,6 @@ describe('RagService retrieval sources and ranking', () => {
     const firstPrompt = llmInvoke.mock.calls.at(0)?.at(0);
     expect(JSON.stringify(firstPrompt)).toContain('企业知识库 是什么');
   });
-
-
 
   it("retrieves versioned policy using the user's complete question", async () => {
     const { service, llmInvoke } = createService();
@@ -254,8 +240,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(result.answer).toContain('2026 版优先生效');
     expect(llmInvoke).not.toHaveBeenCalled();
   });
-
-
 
   it('applies configured source authority weights to retrieval ranking', async () => {
     const { service } = createService({
@@ -295,8 +279,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(results).toHaveLength(1);
   });
 
-
-
   it('filters stale vector hits whose docId is no longer active', async () => {
     const { service } = createService({
       vectorStoreProvider: {
@@ -327,8 +309,6 @@ describe('RagService retrieval sources and ranking', () => {
 
     expect(results).toHaveLength(0);
   });
-
-
 
   it('keeps structured governance metadata in references', async () => {
     const { service, llmInvoke } = createService();
@@ -368,8 +348,6 @@ describe('RagService retrieval sources and ranking', () => {
       sourceAuthority: 'official',
     });
   });
-
-
 
   it('filters by game project and expands neighboring procedure chunks', async () => {
     const { service } = createService();
@@ -421,24 +399,30 @@ describe('RagService retrieval sources and ranking', () => {
     expect(result.diagnostics.expandedChunks).toBeGreaterThan(0);
   });
 
-
-
   it('uses a description hit to return its original chunk without embedding the query twice', async () => {
-    const searchByVector = jest.fn().mockResolvedValue([
-      {
-        id: 'description-1',
-        tenantId: 'tenant-1',
-        docId: 'doc-1',
-        userId: 'user-1',
-        descriptionType: 'document_summary',
-        indexGeneration: 'generation-1',
-        docVersion: 'v1',
-        content: '描述里的内容不应进入最终回答。',
-        sourceChunkIds: ['source-1'],
-        score: 0.91,
+    let searchOptions: { tenantId?: string; topK?: number } | undefined;
+    const embedQuery = jest.fn().mockResolvedValue([1, 0, 0]);
+    const searchByVector = jest.fn(
+      (_vector: number[], options: { tenantId?: string; topK?: number }) => {
+        searchOptions = options;
+        return Promise.resolve([
+          {
+            id: 'description-1',
+            tenantId: 'tenant-1',
+            docId: 'doc-1',
+            userId: 'user-1',
+            descriptionType: 'document_summary',
+            indexGeneration: 'generation-1',
+            docVersion: 'v1',
+            content: '描述里的内容不应进入最终回答。',
+            sourceChunkIds: ['source-1'],
+            score: 0.91,
+          },
+        ]);
       },
-    ]);
-    const { service, embeddingProvider } = createService({
+    );
+    const { service } = createService({
+      embeddingProvider: { embedQuery },
       retrievalDescriptionService: { searchByVector },
     });
     service.indexChunks(
@@ -462,11 +446,9 @@ describe('RagService retrieval sources and ranking', () => {
       'user-1',
     );
 
-    expect(embeddingProvider.embedQuery).toHaveBeenCalledTimes(1);
-    expect(searchByVector).toHaveBeenCalledWith([1, 0, 0], {
-      tenantId: 'tenant-1',
-      topK: expect.any(Number),
-    });
+    expect(embedQuery).toHaveBeenCalledTimes(1);
+    expect(searchOptions?.tenantId).toBe('tenant-1');
+    expect(typeof searchOptions?.topK).toBe('number');
     expect(result.chunks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -485,8 +467,6 @@ describe('RagService retrieval sources and ranking', () => {
       }),
     );
   });
-
-
 
   it('drops description hits with stale versions, expired sources, or denied document ACLs', async () => {
     const searchByVector = jest.fn().mockResolvedValue([
@@ -577,8 +557,6 @@ describe('RagService retrieval sources and ranking', () => {
     expect(result.chunks).toHaveLength(0);
   });
 
-
-
   it('removes a superseded document from default retrieval', async () => {
     const { service } = createService();
     service.indexChunks(
@@ -607,8 +585,6 @@ describe('RagService retrieval sources and ranking', () => {
     ).resolves.toHaveLength(1);
   });
 
-
-
   it('accepts strongly reranked evidence when instruction wording is absent from the source', () => {
     const { service } = createService();
 
@@ -628,15 +604,9 @@ describe('RagService retrieval sources and ranking', () => {
       ],
     );
 
-    expect(result).toEqual(
-      expect.objectContaining({
-        sufficient: true,
-        reason: expect.stringContaining('重排语义相关度'),
-      }),
-    );
+    expect(result.sufficient).toBe(true);
+    expect(result.reason).toContain('重排语义相关度');
   });
-
-
 
   it('uses QueryPlan graph retrieval and filters graph facts by ACL, scope, and lifecycle', async () => {
     const graphFacts = [
@@ -767,6 +737,12 @@ describe('RagService retrieval sources and ranking', () => {
 
     expect(queryGraph).toHaveBeenCalledWith('部署方案', 'user-1', {
       generateAnswer: false,
+      allowedDocIds: [
+        'doc-active',
+        'doc-active-shared',
+        'doc-other-project',
+        'doc-expired',
+      ],
     });
     expect(documentPermissionService.getAllowedDocIds).toHaveBeenCalledWith(
       'user-1',
@@ -790,8 +766,6 @@ describe('RagService retrieval sources and ranking', () => {
     );
     expect(result.diagnostics.graphProbe?.factCount).toBe(2);
   });
-
-
 
   it('searches image candidates without keyword gating and filters ACL, scope, and lifecycle', async () => {
     const searchText = jest.fn().mockResolvedValue([

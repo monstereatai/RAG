@@ -164,13 +164,9 @@ describe('AgenticRagService budget boundaries', () => {
       { configurable: { enableInterrupt: true } },
     );
 
-    expect(result).toEqual({
-      humanApproval: 'pending',
-      executionState: expect.objectContaining({
-        paused: true,
-        lastNode: 'approvalPending',
-      }),
-    });
+    expect(result.humanApproval).toBe('pending');
+    expect(result.executionState?.paused).toBe(true);
+    expect(result.executionState?.lastNode).toBe('approvalPending');
   });
 
   it('recognizes a cancellation marker at the run boundary', async () => {

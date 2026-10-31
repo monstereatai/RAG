@@ -4,25 +4,29 @@ import * as path from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { SkillsService } from './skills.service';
 
-jest.mock('@langchain/openai', () => ({
-  OpenAIEmbeddings: jest.fn().mockImplementation(() => ({
-    embedQuery: jest.fn().mockResolvedValue([1, 0]),
-    embedDocuments: jest.fn().mockResolvedValue([
-      [0.9, 0.1],
-      [0.1, 0.9],
-    ]),
-  })),
-}));
-
 describe('SkillsService', () => {
   let rootDir: string;
   let service: SkillsService;
+  let embeddingProvider: {
+    embedQuery: jest.Mock;
+    embedDocuments: jest.Mock;
+  };
 
   beforeEach(async () => {
     rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rag-skills-'));
-    service = new SkillsService({
-      get: (key: string) => (key === 'skills.rootDir' ? rootDir : undefined),
-    } as ConfigService);
+    embeddingProvider = {
+      embedQuery: jest.fn().mockResolvedValue([1, 0]),
+      embedDocuments: jest.fn().mockResolvedValue([
+        [0.9, 0.1],
+        [0.1, 0.9],
+      ]),
+    };
+    service = new SkillsService(
+      {
+        get: (key: string) => (key === 'skills.rootDir' ? rootDir : undefined),
+      } as ConfigService,
+      embeddingProvider as never,
+    );
   });
 
   afterEach(async () => {
@@ -93,19 +97,25 @@ describe('SkillsService', () => {
     expect(matches[0].matchedTerms).toEqual(
       expect.arrayContaining(['retrieval']),
     );
+    expect(embeddingProvider.embedQuery).not.toHaveBeenCalled();
+    expect(embeddingProvider.embedDocuments).not.toHaveBeenCalled();
   });
 
   it('uses embeddings for semantic ranking when an embedding key is configured', async () => {
-    service = new SkillsService({
-      get: (key: string) => {
-        if (key === 'skills.rootDir') return rootDir;
-        if (key === 'embedding.qwen.apiKey') return 'test-key';
-        if (key === 'embedding.qwen.model') return 'text-embedding-v3';
-        if (key === 'embedding.qwen.baseUrl') return 'https://example.test/v1';
-        if (key === 'embedding.qwen.dimension') return 2;
-        return undefined;
-      },
-    } as ConfigService);
+    service = new SkillsService(
+      {
+        get: (key: string) => {
+          if (key === 'skills.rootDir') return rootDir;
+          if (key === 'embedding.qwen.apiKey') return 'test-key';
+          if (key === 'embedding.qwen.model') return 'text-embedding-v3';
+          if (key === 'embedding.qwen.baseUrl')
+            return 'https://example.test/v1';
+          if (key === 'embedding.qwen.dimension') return 2;
+          return undefined;
+        },
+      } as ConfigService,
+      embeddingProvider as never,
+    );
     await writeSkill(
       'writing',
       [
@@ -135,6 +145,11 @@ describe('SkillsService', () => {
     ]);
     expect(matches[0].matchMode).toBe('embedding');
     expect(matches[0].semanticScore).toBeGreaterThan(matches[1].semanticScore!);
+    expect(embeddingProvider.embedQuery).toHaveBeenCalledWith('semantic query');
+    expect(embeddingProvider.embedDocuments).toHaveBeenCalledWith([
+      expect.stringContaining('检索增强生成'),
+      expect.stringContaining('写文章和内容润色'),
+    ]);
   });
 
   async function writeSkill(dirName: string, content: string) {

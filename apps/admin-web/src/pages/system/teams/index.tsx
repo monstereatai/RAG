@@ -7,7 +7,6 @@ import {
 import {
   ModalForm,
   type ProColumns,
-  ProFormSelect,
   ProFormText,
   ProFormTextArea,
   ProTable,
@@ -52,7 +51,7 @@ const Teams: React.FC = () => {
       const res = await getTeamMembers(team.id);
       const data = (res as any)?.data ?? res ?? [];
       setMembers(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       setMembers([]);
     } finally {
       setMembersLoading(false);
@@ -72,7 +71,7 @@ const Teams: React.FC = () => {
       const res = await getUserOptions();
       const data = (res as any)?.data ?? res ?? [];
       setUserOptions(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       setUserOptions([]);
     }
   };
@@ -277,7 +276,7 @@ const Teams: React.FC = () => {
         <Drawer
           title={`成员管理 - ${currentTeam?.name ?? ''}`}
           open={membersOpen}
-          width={640}
+          size={640}
           onClose={() => {
             setMembersOpen(false);
             setCurrentTeam(null);
@@ -314,8 +313,7 @@ const Teams: React.FC = () => {
             >
               <Select
                 placeholder="请选择用户"
-                showSearch
-                optionFilterProp="label"
+                showSearch={{ optionFilterProp: 'label' }}
                 options={userOptions.map((user) => ({
                   label: `${user.username}${user.email ? ` (${user.email})` : ''}`,
                   value: user.id,

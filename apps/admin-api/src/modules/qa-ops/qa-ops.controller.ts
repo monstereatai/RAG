@@ -15,6 +15,7 @@ import {
   UploadedFile,
   UseInterceptors,
 } from "@nestjs/common";
+import { once } from "node:events";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request, Response } from "express";
@@ -361,6 +362,19 @@ export class QaOpsController {
     };
     res.on("close", abortUpstreamOnDisconnect);
 
+    const traceContext = (
+      req as Request & {
+        traceContext?: { traceId: string; spanId: string };
+      }
+    ).traceContext;
+    const requestId = (req as Request & { requestId?: string }).requestId;
+    const traceparent =
+      traceContext &&
+      /^[0-9a-f]{32}$/i.test(traceContext.traceId) &&
+      /^[0-9a-f]{16}$/i.test(traceContext.spanId)
+        ? `00-${traceContext.traceId}-${traceContext.spanId}-01`
+        : undefined;
+
     try {
       const upstream = await this.ragClient.streamAgui(
         {
@@ -373,7 +387,9 @@ export class QaOpsController {
           attachmentIds: attachmentIds?.split(",").map((item) => item.trim()).filter(Boolean),
           userId: this.getUserId(req),
         },
-        controller.signal
+        controller.signal,
+        traceparent,
+        requestId,
       );
 
       if (!upstream.ok || !upstream.body) {
@@ -387,13 +403,27 @@ export class QaOpsController {
 
       const reader = upstream.body.getReader();
       const pump = async (): Promise<void> => {
-        const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          return;
+        try {
+          while (
+            !controller.signal.aborted &&
+            !res.destroyed &&
+            !res.writableEnded
+          ) {
+            const { done, value } = await reader.read();
+            if (done) {
+              res.end();
+              return;
+            }
+            // 浏览器接收较慢时暂停读取上游，避免 SSE 数据在 Admin API 内存中不断堆积。
+            if (!res.write(Buffer.from(value))) {
+              await once(res, "drain", { signal: controller.signal });
+            }
+          }
+        } finally {
+          if (controller.signal.aborted) {
+            await reader.cancel().catch(() => undefined);
+          }
         }
-        res.write(Buffer.from(value));
-        await pump();
       };
 
       await pump();

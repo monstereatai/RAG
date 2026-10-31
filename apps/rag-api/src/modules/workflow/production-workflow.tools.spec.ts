@@ -58,11 +58,13 @@ describe('ProductionWorkflowTools', () => {
       } as never,
       { decide: jest.fn().mockReturnValue({ allowed: true }) },
       {
-        execute: jest.fn().mockImplementation(async (input) => ({
-          status: 'success',
-          output: await input.execute(),
-          durationMs: 1,
-        })),
+        execute: jest.fn(
+          async (input: { execute: () => Promise<unknown> }) => ({
+            status: 'success',
+            output: await input.execute(),
+            durationMs: 1,
+          }),
+        ),
       } as never,
     );
 

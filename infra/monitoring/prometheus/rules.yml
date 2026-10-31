@@ -35,6 +35,17 @@ groups:
           summary: 'RAG 指标接口返回异常：抓取成功但拿不到 rag_http_requests_total'
           description: '通常是指标路由被统一响应拦截器包成 JSON、或指标注册表被重建导致序列清空，Prometheus 无法解析。'
 
+      - alert: RagBullMqQueueMonitorUnavailable
+        # monitor_up 是明确的 0/1 采样状态，不依赖业务队列 SLA；持续为 0 代表 Redis 查询或队列状态采样失败。
+        expr: rag_bullmq_queue_monitor_up{job="rag-backend"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: rag-backend
+        annotations:
+          summary: 'BullMQ 队列状态采样不可用（queue={{ $labels.queue }}）'
+          description: '检查 RAG 服务到 Redis 的连接和队列指标采样错误；指标恢复后确认 backlog 与失败 job 水位。'
+
       # ---------- 2. 错误率超阈值 ----------
       - alert: RagHttpErrorRateHigh
         # 5m 窗口：比例型指标在低 QPS 下需要更长窗口才有统计意义，

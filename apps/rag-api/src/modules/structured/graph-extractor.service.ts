@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { graphExtractionPromptDefinition } from './graph-extractor.prompts';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 
 export interface GraphNode {
   id: string;
@@ -99,22 +101,21 @@ export class GraphExtractorService {
     const model = this.llmProvider.getModel();
     try {
       const structuredLlm = model.withStructuredOutput(this.graphSchema);
+      const promptVersion = getPromptVersion('graph.extract_entities');
       const results: Array<{
         nodes: ParsedGraphNode[];
         relationships: ParsedGraphRelationship[];
       }> = [];
       for (const batch of this.splitTextIntoBatches(text)) {
-        const prompt = `请从以下文本中提取实体和实体之间的关系，用于构建知识图谱。
-
-文本内容：
-${batch}
-
-要求：
-1. 节点 id 保持前后一致，优先使用实体原名。
-2. label 使用简短英文类型，例如 Person、Company、Product、Concept、Location。
-3. relationship.type 使用大写蛇形命名，例如 FOUNDED、WORKS_AT、DEPENDS_ON。
-4. 只提取文本直接支持的事实，不要编造。`;
-        results.push(await structuredLlm.invoke(prompt));
+        const prompt = graphExtractionPromptDefinition.promptTemplate.replace(
+          '{text}',
+          batch,
+        );
+        results.push(
+          await structuredLlm.invoke(prompt, {
+            metadata: { promptVersion },
+          }),
+        );
       }
 
       const nodes = results.flatMap((result) => result.nodes);
@@ -142,7 +143,10 @@ ${batch}
     for (const paragraph of paragraphs) {
       let remaining = paragraph;
       while (remaining.length > GRAPH_EXTRACTION_BATCH_CHARS) {
-        const boundary = remaining.lastIndexOf('\n', GRAPH_EXTRACTION_BATCH_CHARS);
+        const boundary = remaining.lastIndexOf(
+          '\n',
+          GRAPH_EXTRACTION_BATCH_CHARS,
+        );
         const splitAt =
           boundary >= GRAPH_EXTRACTION_BATCH_CHARS * 0.7
             ? boundary + 1

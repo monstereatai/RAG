@@ -46,7 +46,7 @@ export class TeamWikiService {
   ) {}
 
   /** The ServiceTokenGuard-protected Admin bridge supplies a mapped Admin identity. */
-  async resolveTenant(userId: string): Promise<string> {
+  resolveTenant(userId: string): Promise<string> {
     if (!/^admin:[a-f0-9]{58}$/.test(userId?.trim() ?? '')) {
       throw new ForbiddenException('mapped Admin principal is required');
     }
@@ -54,7 +54,7 @@ export class TeamWikiService {
     if (!tenantId) {
       throw new ForbiddenException('RAG_ADMIN_TENANT_ID must be configured');
     }
-    return tenantId;
+    return Promise.resolve(tenantId);
   }
 
   async list(tenantId: string, query?: string, limit = 100) {

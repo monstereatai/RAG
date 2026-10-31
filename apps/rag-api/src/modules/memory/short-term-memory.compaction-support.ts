@@ -2,7 +2,10 @@ import { SystemMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import { IsNull } from 'typeorm';
 import { countTextTokens } from '../document/chunking.util';
-import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import {
+  getPromptMetadata,
+  getPromptVersion,
+} from '../../rag/prompts/prompt-registry';
 import {
   shortTermSummaryCompactionSystemPrompt,
   shortTermSummaryRecoverySystemPrompt,
@@ -144,7 +147,23 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     );
     if (selection.removeIndexes.length === 0) return null;
 
-    const toTrim = selection.removeIndexes.map((index) => all[index]);
+    const removeIndexes = new Set(selection.removeIndexes);
+    for (const index of selection.removeIndexes) {
+      if (
+        turns[index].role === 'user' &&
+        turns[index + 1]?.role === 'assistant'
+      ) {
+        removeIndexes.add(index + 1);
+      } else if (
+        turns[index].role === 'assistant' &&
+        turns[index - 1]?.role === 'user'
+      ) {
+        removeIndexes.add(index - 1);
+      }
+    }
+    const toTrim = [...removeIndexes]
+      .sort((left, right) => left - right)
+      .map((index) => all[index]);
     const retainedCount = all.length - toTrim.length;
 
     const trimmedContent = toTrim
@@ -189,7 +208,9 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
       ];
       await this.assertPromptWithinBudget(summaryMessages, '会话摘要压缩');
       promptVersion = getPromptVersion('memory.summary_compaction');
-      const raw = await this.llmProvider.invoke(summaryMessages);
+      const raw = await this.llmProvider.invoke(summaryMessages, {
+        metadata: getPromptMetadata('memory.summary_compaction'),
+      });
       const compactedIds = new Set([
         ...(previousSummary?.compactedMessageIds ?? []),
         ...toTrim.flatMap((rawTurn) => {
@@ -466,7 +487,9 @@ export abstract class ShortTermMemoryCompactionSupport extends ShortTermMemorySt
     ];
     await this.assertPromptWithinBudget(summaryMessages, '会话摘要恢复');
     promptVersions.add(getPromptVersion('memory.summary_recovery'));
-    const raw = await this.llmProvider.invoke(summaryMessages);
+    const raw = await this.llmProvider.invoke(summaryMessages, {
+      metadata: getPromptMetadata('memory.summary_recovery'),
+    });
     return this.parseStructuredSummary(raw);
   }
 

@@ -2,8 +2,16 @@ import { SecurityAuditService } from './security-audit.service';
 
 describe('SecurityAuditService', () => {
   it('persists only a hashed query through the domain event outbox', async () => {
-    const emit = jest.fn().mockResolvedValue(undefined);
-    const service = new SecurityAuditService({ emit } as any);
+    let emittedEvent:
+      | { eventType: string; payload: Record<string, unknown> }
+      | undefined;
+    const emit = jest.fn(
+      (event: { eventType: string; payload: Record<string, unknown> }) => {
+        emittedEvent = event;
+        return Promise.resolve(undefined);
+      },
+    );
+    const service = new SecurityAuditService({ emit } as never);
     service.record({
       pattern: 'database_destructive_operation',
       route: 'chat',
@@ -11,12 +19,8 @@ describe('SecurityAuditService', () => {
       query: 'drop database secret',
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(emit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'security.query_blocked',
-        payload: expect.not.objectContaining({ query: expect.any(String) }),
-      }),
-    );
-    expect(emit.mock.calls[0][0].payload.queryHash).toHaveLength(64);
+    expect(emittedEvent?.eventType).toBe('security.query_blocked');
+    expect(emittedEvent?.payload.query).toBeUndefined();
+    expect(emittedEvent?.payload.queryHash).toMatch(/^[a-f0-9]{64}$/);
   });
 });

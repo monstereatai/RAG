@@ -66,9 +66,12 @@ describe('AdminDocumentsController document operations', () => {
       failedIndexRepairs: [{ id: 'repair-1', failedReason: 'timeout' }],
       indexReconciler: { enabled: true, running: false },
     });
-    expect(ragClient.getFailedDocumentTasks).toHaveBeenCalledWith(50);
-    expect(ragClient.getPendingDocumentTasks).toHaveBeenCalledWith(50);
-    expect(ragClient.getFailedIndexRepairs).toHaveBeenCalledWith(50);
+    expect(ragClient.getDocumentQueueStatus).toHaveBeenCalledWith(15_000);
+    expect(ragClient.getPendingDocumentTasks).toHaveBeenCalledWith(50, 15_000);
+    expect(ragClient.getFailedDocumentTasks).toHaveBeenCalledWith(50, 90_000);
+    expect(ragClient.getIndexRepairQueueStatus).toHaveBeenCalledWith(15_000);
+    expect(ragClient.getFailedIndexRepairs).toHaveBeenCalledWith(50, 15_000);
+    expect(ragClient.getIndexReconcilerStatus).toHaveBeenCalledWith(15_000);
   });
 
   it('fails the operations response when the upstream status is unavailable', async () => {

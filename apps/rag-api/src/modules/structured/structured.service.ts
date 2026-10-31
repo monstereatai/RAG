@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
+import { buildStructuredReportPrompt } from './structured.prompts';
 
 export interface StructuredReport {
   title: string;
@@ -26,6 +28,7 @@ export class StructuredService {
   async streamReport(
     topic: string,
     onEvent: (event: StructuredStreamEvent) => void,
+    signal?: AbortSignal,
   ): Promise<StructuredReport> {
     const model = this.llmProvider.getModel();
 
@@ -42,8 +45,11 @@ export class StructuredService {
       // 注意：流式返回结构化输出时，LangChain 可能会发出 Partial 的 JSON 对象
       const structuredLlm = model.withStructuredOutput(reportSchema);
 
-      const stream = await structuredLlm.stream(
-        `请为我生成一份关于 "${topic}" 的结构化分析报告。`,
+      const stream = await this.llmProvider.runWithSignal(signal, () =>
+        structuredLlm.stream(buildStructuredReportPrompt(topic), {
+          signal,
+          metadata: getPromptMetadata('structured.report'),
+        }),
       );
 
       let finalChunk: Partial<StructuredReport> = {};
@@ -61,7 +67,9 @@ export class StructuredService {
       onEvent({ type: 'final', data: final });
       return final;
     } catch (err) {
-      this.logger.error(`Error in streamReport: ${(err as Error).message}`);
+      if (!signal?.aborted) {
+        this.logger.error(`Error in streamReport: ${(err as Error).message}`);
+      }
       throw err;
     }
   }

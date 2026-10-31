@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import { AgentRunsService } from './agent-runs.service';
 
 describe('AgentRunsService runtime controls', () => {
@@ -16,10 +15,11 @@ describe('AgentRunsService runtime controls', () => {
     };
     const repo = {
       findOne: jest.fn().mockResolvedValue(run),
-      save: jest.fn().mockImplementation(async (value) => value),
-      update: jest.fn().mockImplementation(async (_where, values) => {
+      save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
+      find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockImplementation((_where, values) => {
         Object.assign(run, values);
-        return { affected: 1 };
+        return Promise.resolve({ affected: 1 });
       }),
     };
     const events = {
@@ -28,7 +28,8 @@ describe('AgentRunsService runtime controls', () => {
       metrics: jest.fn().mockResolvedValue({}),
     };
     const redis = {
-      set: jest.fn().mockResolvedValue(undefined),
+      isEnabled: jest.fn().mockReturnValue(true),
+      setRequiredOrThrow: jest.fn().mockResolvedValue(undefined),
       del: jest.fn().mockResolvedValue(undefined),
     };
     const service = new AgentRunsService(
@@ -36,7 +37,9 @@ describe('AgentRunsService runtime controls', () => {
       { find: jest.fn().mockResolvedValue([]) } as never,
       events as never,
       { get: jest.fn() } as never,
-      { analyzeFailureOnset: jest.fn().mockReturnValue({ found: false }) } as never,
+      {
+        analyzeFailureOnset: jest.fn().mockReturnValue({ found: false }),
+      } as never,
       redis as never,
     );
     return { service, repo, events, redis, run };
@@ -54,7 +57,7 @@ describe('AgentRunsService runtime controls', () => {
         cancelReason: '人工停止',
       }),
     );
-    expect(redis.set).toHaveBeenCalledWith(
+    expect(redis.setRequiredOrThrow).toHaveBeenCalledWith(
       'agent-loop:cancel:thread-1:run-1',
       'cancelled',
       86_400,
@@ -64,11 +67,86 @@ describe('AgentRunsService runtime controls', () => {
     );
   });
 
-  it('rejects retrying a non-terminal run', async () => {
-    const { service } = createService();
-    await expect(service.retry('run-1')).rejects.toBeInstanceOf(
-      BadRequestException,
+  it('rejects resuming a run after cancellation won the state transition', async () => {
+    const { service, repo, run } = createService();
+    run.status = 'cancelled';
+    repo.update.mockResolvedValueOnce({ affected: 0 });
+
+    await expect(service.beginResume('run-1')).rejects.toThrow(
+      '当前运行已被恢复或取消',
     );
+    expect(repo.update).toHaveBeenCalledWith(
+      { id: 'run-1', status: 'waiting_approval' },
+      { status: 'running' },
+    );
+  });
+
+  it('signals the live agent loop after a stale run is marked failed', async () => {
+    const { service, repo, events, redis, run } = createService();
+    const staleRun = {
+      ...run,
+      updatedAt: new Date(Date.now() - 31 * 60_000),
+    };
+    repo.find.mockResolvedValueOnce([staleRun]);
+
+    await (
+      service as unknown as { recoverStaleRuns: () => Promise<void> }
+    ).recoverStaleRuns();
+
+    expect(repo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'run-1', status: 'running' }),
+      expect.objectContaining({ status: 'failed' }),
+    );
+    expect(redis.setRequiredOrThrow).toHaveBeenCalledWith(
+      'agent-loop:cancel:thread-1:run-1',
+      'cancelled',
+      86_400,
+    );
+    expect(events.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-1',
+        eventType: 'run.failed',
+      }),
+    );
+  });
+
+  it('does not signal cancellation when another transition wins stale-run CAS', async () => {
+    const { service, repo, events, redis, run } = createService();
+    const staleRun = {
+      ...run,
+      updatedAt: new Date(Date.now() - 31 * 60_000),
+    };
+    repo.find.mockResolvedValueOnce([staleRun]);
+    repo.update.mockResolvedValueOnce({ affected: 0 });
+
+    await (
+      service as unknown as { recoverStaleRuns: () => Promise<void> }
+    ).recoverStaleRuns();
+
+    expect(redis.setRequiredOrThrow).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('retries a stale-run cancellation signal on the next recovery scan', async () => {
+    const { service, repo, events, redis, run } = createService();
+    const staleRun = {
+      ...run,
+      updatedAt: new Date(Date.now() - 31 * 60_000),
+    };
+    repo.find.mockResolvedValueOnce([staleRun]);
+    redis.setRequiredOrThrow.mockRejectedValueOnce(
+      new Error('Redis temporarily unavailable'),
+    );
+
+    await (
+      service as unknown as { recoverStaleRuns: () => Promise<void> }
+    ).recoverStaleRuns();
+    await (
+      service as unknown as { recoverStaleRuns: () => Promise<void> }
+    ).recoverStaleRuns();
+
+    expect(redis.setRequiredOrThrow).toHaveBeenCalledTimes(2);
+    expect(events.emit).toHaveBeenCalledTimes(1);
   });
 
   it('does not overwrite a cancelled run during a late completion', async () => {
@@ -117,6 +195,6 @@ describe('AgentRunsService runtime controls', () => {
         ],
       }),
     );
-    expect(redis.set).toHaveBeenCalled();
+    expect(redis.setRequiredOrThrow).toHaveBeenCalled();
   });
 });

@@ -7,6 +7,8 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
  */
 
 export const agenticPromptDefinitions = {
+  directAnswer:
+    '你正在回答一个可由通用知识直接判断的客观事实问题。请独立计算或依据可靠通用知识直接回答，不要使用历史对话、用户未验证的说法或知识库片段，不要声称资料不足，也不要添加引用标记。用户问题：{query}',
   reflection: {
     system: `你是一个答案质量评估器。请评估以下答案的置信度（0~1）：
 - 答案是否完整回答了用户问题？

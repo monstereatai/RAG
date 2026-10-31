@@ -1,7 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import { API_SCOPES_KEY } from '../decorators/api-scopes.decorator';
 
 describe('JwtAuthGuard API Token scopes', () => {
   const context = (
@@ -28,6 +27,7 @@ describe('JwtAuthGuard API Token scopes', () => {
     requireTenantContext = false,
     enforceIam = false,
     iamService?: { hasPermission: jest.Mock },
+    nodeEnv = process.env.NODE_ENV ?? 'test',
   ) {
     return new JwtAuthGuard(
       { verifyToken: jest.fn().mockResolvedValue(payload) } as never,
@@ -35,11 +35,12 @@ describe('JwtAuthGuard API Token scopes', () => {
       { consume: jest.fn() } as never,
       reflector as never,
       {
-        get: jest.fn((key: string) =>
-          key === 'auth.requireTenantContext'
-            ? requireTenantContext
-            : enforceIam,
-        ),
+        get: jest.fn((key: string) => {
+          if (key === 'nodeEnv') return nodeEnv;
+          if (key === 'auth.requireTenantContext') return requireTenantContext;
+          if (key === 'auth.enforceIam') return enforceIam;
+          return undefined;
+        }),
       } as never,
       iamService as never,
     );
@@ -206,5 +207,11 @@ describe('JwtAuthGuard API Token scopes', () => {
       'rag:token:manage',
       'tenant-a',
     );
+  });
+
+  it('rejects an explicit IAM disablement in production', () => {
+    expect(() =>
+      createGuard({}, false, false, undefined, 'production'),
+    ).toThrow('AUTH_ENFORCE_IAM=false is not allowed in production');
   });
 });

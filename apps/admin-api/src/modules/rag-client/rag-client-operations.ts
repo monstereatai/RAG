@@ -145,13 +145,17 @@ export abstract class RagClientOperationsBase extends RagClientWorkflowBase {
     return this.postJson<Record<string, unknown>>('/rag/admin/documents/index-audit/repair', body);
   }
 
-  getDocumentQueueStatus() {
-    return this.getJson<Record<string, unknown>>('/rag/admin/documents/queue/status');
+  getDocumentQueueStatus(timeoutMs?: number) {
+    return this.getJson<Record<string, unknown>>(
+      '/rag/admin/documents/queue/status',
+      timeoutMs,
+    );
   }
 
-  getPendingDocumentTasks(limit = 50) {
+  getPendingDocumentTasks(limit = 50, timeoutMs?: number) {
     return this.getJson<Record<string, unknown>>(
       `/rag/admin/documents/tasks/pending${this.toQueryString({ limit })}`,
+      timeoutMs,
     );
   }
 
@@ -162,13 +166,17 @@ export abstract class RagClientOperationsBase extends RagClientWorkflowBase {
     );
   }
 
-  getIndexRepairQueueStatus() {
-    return this.getJson<Record<string, unknown>>('/rag/admin/documents/index-repair/status');
+  getIndexRepairQueueStatus(timeoutMs?: number) {
+    return this.getJson<Record<string, unknown>>(
+      '/rag/admin/documents/index-repair/status',
+      timeoutMs,
+    );
   }
 
-  getFailedIndexRepairs(limit = 50) {
+  getFailedIndexRepairs(limit = 50, timeoutMs?: number) {
     return this.getJson<Record<string, unknown>[]>(
       `/rag/admin/documents/index-repair/failed${this.toQueryString({ limit })}`,
+      timeoutMs,
     );
   }
 
@@ -179,8 +187,11 @@ export abstract class RagClientOperationsBase extends RagClientWorkflowBase {
     );
   }
 
-  getIndexReconcilerStatus() {
-    return this.getJson<Record<string, unknown>>('/rag/admin/documents/index-reconciler/status');
+  getIndexReconcilerStatus(timeoutMs?: number) {
+    return this.getJson<Record<string, unknown>>(
+      '/rag/admin/documents/index-reconciler/status',
+      timeoutMs,
+    );
   }
 
   runIndexReconciler() {

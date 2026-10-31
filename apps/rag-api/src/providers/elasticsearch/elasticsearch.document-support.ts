@@ -121,18 +121,21 @@ export abstract class ElasticsearchDocumentSupport {
   }): Promise<void> {
     if (!this.enabled || !document.content.trim()) return;
     try {
-      await this.client.index({
-        index: this.documentIndexName,
-        id: document.docId,
-        refresh: true,
-        document: {
-          ...document,
-          effectiveAt: document.effectiveAt?.toISOString() ?? null,
-          expiredAt: document.expiredAt?.toISOString() ?? null,
-          // 每次写入都刷新 updatedAt，供搜索的更新时间筛选使用
-          updatedAt: new Date().toISOString(),
+      await this.client.index(
+        {
+          index: this.documentIndexName,
+          id: document.docId,
+          refresh: true,
+          document: {
+            ...document,
+            effectiveAt: document.effectiveAt?.toISOString() ?? null,
+            expiredAt: document.expiredAt?.toISOString() ?? null,
+            // 每次写入都刷新 updatedAt，供搜索的更新时间筛选使用
+            updatedAt: new Date().toISOString(),
+          },
         },
-      }, { requestTimeout: ES_DOCUMENT_WRITE_TIMEOUT_MS });
+        { requestTimeout: ES_DOCUMENT_WRITE_TIMEOUT_MS },
+      );
     } catch (err) {
       this.logger.warn(`ES indexDocument failed: ${(err as Error).message}`);
       throw err;

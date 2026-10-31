@@ -95,9 +95,10 @@ export abstract class RagClientDocumentsBase extends RagClientArtifactsBase {
     );
   }
 
-  getFailedDocumentTasks(limit = 50) {
+  getFailedDocumentTasks(limit = 50, timeoutMs?: number) {
     return this.getJson<Record<string, unknown>[]>(
       `/rag/admin/documents/tasks/failed${this.toQueryString({ limit })}`,
+      timeoutMs,
     );
   }
 

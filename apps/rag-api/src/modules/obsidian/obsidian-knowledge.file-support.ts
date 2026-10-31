@@ -51,11 +51,10 @@ export abstract class ObsidianKnowledgeFileSupport {
 
     for (const note of notes) {
       const frontmatter = this.parseFrontmatter(note.content);
-      const title = String(
-        frontmatter.title ||
-          this.titleFromMarkdown(note.content) ||
-          basename(note.path, '.md'),
-      );
+      const title =
+        this.frontmatterString(frontmatter.title) ??
+        this.titleFromMarkdown(note.content) ??
+        basename(note.path, '.md');
       const sourceId =
         this.frontmatterString(frontmatter.rag_doc_id) ??
         this.vaultRelative(note.path);
@@ -521,11 +520,23 @@ export abstract class ObsidianKnowledgeFileSupport {
   }
 
   protected frontmatterString(value: unknown): string | undefined {
-    return typeof value === 'string' && value ? value : undefined;
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return undefined;
   }
 
   protected frontmatterTags(value: unknown): string[] {
-    return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+    return Array.isArray(value)
+      ? value.flatMap((item) => {
+          if (typeof item === 'string') return item ? [item] : [];
+          if (typeof item === 'number' && Number.isFinite(item)) {
+            return [String(item)];
+          }
+          return [];
+        })
+      : [];
   }
 
   protected async ensureVault(): Promise<void> {
@@ -561,7 +572,7 @@ export abstract class ObsidianKnowledgeFileSupport {
   protected safeFilename(title: string): string {
     return (
       this.normalizeTitle(title)
-        .replace(/[\\/:*?"<>|#\[\]\n\r\t]+/g, ' ')
+        .replace(/[\\/:*?"<>|#\x5B\x5D\n\r\t]+/g, ' ')
         .replace(/\s+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 80) || 'untitled'

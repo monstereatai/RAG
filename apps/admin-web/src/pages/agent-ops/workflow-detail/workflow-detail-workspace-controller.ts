@@ -20,6 +20,10 @@ import type {
   ProductionWorkspaceCommandResult,
 } from './workflow-detail-shared';
 
+type WorkspaceStatusWithArtifact = ProductionWorkspaceStatus & {
+  artifactId?: string;
+};
+
 interface WorkflowWorkspaceControllerOptions {
   workflow: ProductionWorkflow | null;
   refreshArtifactVersions: () => Promise<void>;
@@ -32,45 +36,59 @@ export function useWorkflowWorkspaceController({
   downloadArtifact,
 }: WorkflowWorkspaceControllerOptions) {
   const [workspaceStatus, setWorkspaceStatus] =
-    React.useState<ProductionWorkspaceStatus | null>(null);
-
+    React.useState<WorkspaceStatusWithArtifact | null>(null);
+  const [workspaceStatusLoading, setWorkspaceStatusLoading] =
+    React.useState(false);
+  const [workspaceStatusLoadFailed, setWorkspaceStatusLoadFailed] =
+    React.useState(false);
   const [workspaceArtifactId, setWorkspaceArtifactId] = React.useState('');
-
   const [workspaceBusy, setWorkspaceBusy] = React.useState(false);
-
   const [workspaceInstruction, setWorkspaceInstruction] = React.useState('');
-
   const [workspaceAgentResult, setWorkspaceAgentResult] =
     React.useState<ProductionWorkspaceAgentResult | null>(null);
-
   const [workspaceCommand, setWorkspaceCommand] = React.useState('');
-
   const [workspaceCommandResult, setWorkspaceCommandResult] =
     React.useState<ProductionWorkspaceCommandResult | null>(null);
-
   const [workspaceDevServerCommand, setWorkspaceDevServerCommand] =
     React.useState('npm run dev -- --host 0.0.0.0');
-
   const [workspacePort, setWorkspacePort] = React.useState('5173');
-
   const [workspacePreviewUrl, setWorkspacePreviewUrl] = React.useState('');
 
   React.useEffect(() => {
     if (!workflow?.threadId) {
       setWorkspaceStatus(null);
+      setWorkspaceArtifactId('');
+      setWorkspaceStatusLoading(false);
+      setWorkspaceStatusLoadFailed(false);
       return;
     }
     let active = true;
+    setWorkspaceStatusLoading(true);
+    setWorkspaceStatusLoadFailed(false);
+    setWorkspaceArtifactId('');
     getProductionWorkspaceStatus(workflow.threadId)
       .then((response) => {
         if (active) {
-          setWorkspaceStatus(
-            unwrapData<ProductionWorkspaceStatus>(response) ?? null,
-          );
+          const status =
+            unwrapData<WorkspaceStatusWithArtifact>(response) ?? null;
+          if (!status) {
+            setWorkspaceStatus(null);
+            setWorkspaceStatusLoadFailed(true);
+            return;
+          }
+          setWorkspaceStatus(status);
+          setWorkspaceArtifactId(status.artifactId ?? '');
+          setWorkspaceStatusLoadFailed(false);
         }
       })
       .catch(() => {
-        if (active) setWorkspaceStatus(null);
+        if (active) {
+          setWorkspaceStatus(null);
+          setWorkspaceStatusLoadFailed(true);
+        }
+      })
+      .finally(() => {
+        if (active) setWorkspaceStatusLoading(false);
       });
     return () => {
       active = false;
@@ -78,6 +96,14 @@ export function useWorkflowWorkspaceController({
   }, [workflow?.threadId]);
 
   const startWorkspace = async () => {
+    if (
+      workspaceStatusLoading ||
+      workspaceStatusLoadFailed ||
+      !workspaceStatus
+    ) {
+      message.warning('当前工作区状态未确认，请刷新页面后重试');
+      return false;
+    }
     if (!workflow || !workspaceArtifactId) {
       message.error('请选择要放入开发工作区的代码版本');
       return false;
@@ -87,9 +113,16 @@ export function useWorkflowWorkspaceController({
       const response = await startProductionWorkspace(workflow.threadId, {
         artifactId: workspaceArtifactId,
       });
-      const status = unwrapData<ProductionWorkspaceStatus>(response);
-      if (!status?.ready) throw new Error('开发工作区尚未就绪');
+      const status = unwrapData<WorkspaceStatusWithArtifact>(response);
+      if (!status) {
+        setWorkspaceStatus(null);
+        setWorkspaceStatusLoadFailed(true);
+        throw new Error('工作区状态响应为空，无法确认启动结果');
+      }
       setWorkspaceStatus(status);
+      setWorkspaceArtifactId(status.artifactId ?? workspaceArtifactId);
+      setWorkspaceStatusLoadFailed(false);
+      if (!status.ready) throw new Error('开发工作区尚未就绪');
       message.success('开发工作区已就绪');
       return true;
     } catch (error) {
@@ -103,6 +136,14 @@ export function useWorkflowWorkspaceController({
   };
 
   const runWorkspaceAgent = async () => {
+    if (
+      workspaceStatusLoading ||
+      workspaceStatusLoadFailed ||
+      !workspaceStatus
+    ) {
+      message.warning('当前工作区状态未确认，请刷新页面后重试');
+      return;
+    }
     if (!workflow || !workspaceArtifactId || !workspaceInstruction.trim()) {
       message.error('请选择代码版本并填写开发要求');
       return;
@@ -111,13 +152,20 @@ export function useWorkflowWorkspaceController({
     setWorkspaceAgentResult(null);
     setWorkspaceCommandResult(null);
     try {
-      if (!workspaceStatus?.ready) {
+      if (!workspaceStatus.ready) {
         const started = await startProductionWorkspace(workflow.threadId, {
           artifactId: workspaceArtifactId,
         });
-        const status = unwrapData<ProductionWorkspaceStatus>(started);
-        if (!status?.ready) throw new Error('开发工作区尚未就绪');
+        const status = unwrapData<WorkspaceStatusWithArtifact>(started);
+        if (!status) {
+          setWorkspaceStatus(null);
+          setWorkspaceStatusLoadFailed(true);
+          throw new Error('工作区状态响应为空，无法确认启动结果');
+        }
         setWorkspaceStatus(status);
+        setWorkspaceArtifactId(status.artifactId ?? workspaceArtifactId);
+        setWorkspaceStatusLoadFailed(false);
+        if (!status.ready) throw new Error('开发工作区尚未就绪');
       }
       const response = await runProductionWorkspaceAgent(workflow.threadId, {
         artifactId: workspaceArtifactId,
@@ -130,9 +178,17 @@ export function useWorkflowWorkspaceController({
         const statusResponse = await getProductionWorkspaceStatus(
           workflow.threadId,
         );
-        const status = unwrapData<ProductionWorkspaceStatus>(statusResponse);
-        if (status) setWorkspaceStatus(status);
+        const status = unwrapData<WorkspaceStatusWithArtifact>(statusResponse);
+        if (!status) {
+          setWorkspaceStatus(null);
+          setWorkspaceStatusLoadFailed(true);
+        } else {
+          setWorkspaceStatus(status);
+          setWorkspaceArtifactId(status.artifactId ?? workspaceArtifactId);
+          setWorkspaceStatusLoadFailed(false);
+        }
       } catch {
+        setWorkspaceStatusLoadFailed(true);
         message.warning('Agent 结果已返回，但工作区状态刷新失败');
       }
       if (result.status === 'completed') {
@@ -195,6 +251,7 @@ export function useWorkflowWorkspaceController({
       setWorkspaceStatus((current) => ({
         ready: true,
         projectRoot: current?.projectRoot ?? null,
+        artifactId: current?.artifactId,
         devServer: { port: result.port, commandId: result.commandId },
       }));
       setWorkspacePort(String(result.port));
@@ -245,15 +302,20 @@ export function useWorkflowWorkspaceController({
           setWorkspacePreviewUrl('');
           setWorkspaceAgentResult(null);
           setWorkspaceCommandResult(null);
+          setWorkspaceArtifactId('');
           try {
             const response = await getProductionWorkspaceStatus(
               workflow.threadId,
             );
-            setWorkspaceStatus(
-              unwrapData<ProductionWorkspaceStatus>(response) ?? null,
-            );
+            const status =
+              unwrapData<WorkspaceStatusWithArtifact>(response) ?? null;
+            if (!status) throw new Error('工作区状态响应为空');
+            setWorkspaceStatus(status);
+            setWorkspaceArtifactId(status.artifactId ?? '');
+            setWorkspaceStatusLoadFailed(false);
           } catch {
             setWorkspaceStatus(null);
+            setWorkspaceStatusLoadFailed(true);
           }
           message.success('工作区已销毁');
         } catch (error) {
@@ -321,6 +383,8 @@ export function useWorkflowWorkspaceController({
 
   return {
     workspaceStatus,
+    workspaceStatusLoading,
+    workspaceStatusLoadFailed,
     workspaceArtifactId,
     setWorkspaceArtifactId,
     workspaceBusy,

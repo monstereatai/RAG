@@ -150,7 +150,7 @@ const SecurityView: React.FC = () => {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 48 }}>
-        <Spin tip="正在加载安全设置..." />
+        <Spin description="正在加载安全设置..." />
       </div>
     );
   }

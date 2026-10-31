@@ -14,6 +14,7 @@ export interface AgentRuntimePlan {
   objective: string;
   stages: AgentRuntimeStage[];
   selectedSkills: string[];
+  selectedSkillVersions: Record<string, string>;
   skillMatching?: 'matched' | 'skipped_simple';
   contextPolicy: {
     isolatedByThread: boolean;

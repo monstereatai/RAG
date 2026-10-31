@@ -51,7 +51,9 @@ export class DocumentPermissionService {
         throw new ForbiddenException('trusted Admin principal is invalid');
       }
       if (tenantId !== configuredTenantId) {
-        throw new ForbiddenException('tenant scope does not match Admin tenant');
+        throw new ForbiddenException(
+          'tenant scope does not match Admin tenant',
+        );
       }
       return;
     }
@@ -256,14 +258,14 @@ export class DocumentPermissionService {
     });
     const ownerIds = [
       ...new Set(
-      docs
+        docs
           .map((doc) => doc.userId)
-        .filter(
-          (ownerId): ownerId is string =>
-            typeof ownerId === 'string' &&
-            ownerId !== trustedAdminOwnerId &&
-            !(trustedAdminOwnerId && ADMIN_PRINCIPAL_PATTERN.test(ownerId)),
-        ),
+          .filter(
+            (ownerId): ownerId is string =>
+              typeof ownerId === 'string' &&
+              ownerId !== trustedAdminOwnerId &&
+              !(trustedAdminOwnerId && ADMIN_PRINCIPAL_PATTERN.test(ownerId)),
+          ),
       ),
     ];
     const tenantOwners = ownerIds.length
@@ -280,8 +282,7 @@ export class DocumentPermissionService {
           (allowedOwners.has(doc.userId) ||
             doc.userId === trustedAdminOwnerId ||
             Boolean(
-              trustedAdminOwnerId &&
-                ADMIN_PRINCIPAL_PATTERN.test(doc.userId),
+              trustedAdminOwnerId && ADMIN_PRINCIPAL_PATTERN.test(doc.userId),
             )),
       )
       .map((doc) => doc.docId);

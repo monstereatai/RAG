@@ -1,4 +1,7 @@
 [
   "config-sync",
-  "mermaid-zoom"
+  "mermaid-zoom",
+  "obsidian-vault-sync",
+  "obsidian-excalidraw-plugin",
+  "export-mermaid-diagrams"
 ]

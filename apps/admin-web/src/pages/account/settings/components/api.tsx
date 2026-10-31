@@ -65,7 +65,7 @@ const ApiView: React.FC = () => {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 48 }}>
-        <Spin tip="正在检测服务状态..." />
+        <Spin description="正在检测服务状态..." />
       </div>
     );
   }

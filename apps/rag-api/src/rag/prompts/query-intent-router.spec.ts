@@ -2,23 +2,31 @@ import { QueryPlannerService } from '../planning/query-planner.service';
 import { RetrievalPolicyService } from '../planning/retrieval-policy.service';
 import { adaptStoredQueryPlan } from '../planning/query-plan';
 
+function createPlanner(invoke: jest.Mock): QueryPlannerService {
+  return new QueryPlannerService({
+    invoke,
+    getActiveProviderName: jest.fn().mockReturnValue('qwen'),
+    getFallbackProviderName: jest.fn().mockReturnValue(null),
+    getRoutePolicy: jest.fn().mockReturnValue({ maxTokens: 4_096 }),
+  } as never);
+}
+
 describe('QueryPlannerService', () => {
   it('returns the compact structured plan without permission fields', async () => {
-    const planner = new QueryPlannerService({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          action: 'retrieve',
-          domain: 'internal',
-          contextMode: 'independent',
-          standaloneQuery: '公司的研发流程是什么',
-          subQueries: [],
-          taskType: 'procedure',
-          needsGraph: false,
-          entities: [],
-          filters: {},
-        }),
-      ),
-    } as never);
+    const invoke = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        action: 'retrieve',
+        domain: 'internal',
+        contextMode: 'independent',
+        standaloneQuery: '公司的研发流程是什么',
+        subQueries: [],
+        taskType: 'procedure',
+        needsGraph: false,
+        entities: [],
+        filters: {},
+      }),
+    );
+    const planner = createPlanner(invoke);
 
     const plan = await planner.plan('公司的研发流程是什么');
     expect(plan).toMatchObject({
@@ -32,20 +40,24 @@ describe('QueryPlannerService', () => {
   });
 
   it('keeps the original query and adds only a contextual follow-up query', async () => {
-    const invoke = jest.fn().mockResolvedValue(
-      JSON.stringify({
-        action: 'retrieve',
-        domain: 'internal',
-        contextMode: 'follow_up',
-        standaloneQuery: 'React 吃什么？',
-        subQueries: [],
-        taskType: 'lookup',
-        needsGraph: false,
-        entities: ['React'],
-        filters: {},
-      }),
-    );
-    const planner = new QueryPlannerService({ invoke } as never);
+    let invokedPrompt: string | undefined;
+    const invoke = jest.fn((prompt: string) => {
+      invokedPrompt = prompt;
+      return Promise.resolve(
+        JSON.stringify({
+          action: 'retrieve',
+          domain: 'internal',
+          contextMode: 'follow_up',
+          standaloneQuery: 'React 吃什么？',
+          subQueries: [],
+          taskType: 'lookup',
+          needsGraph: false,
+          entities: ['React'],
+          filters: {},
+        }),
+      );
+    });
+    const planner = createPlanner(invoke);
     const plan = await planner.plan('那它吃什么？', [
       { role: 'human', content: 'React 是一种动物' },
     ]);
@@ -55,13 +67,12 @@ describe('QueryPlannerService', () => {
       { text: '那它吃什么？', kind: 'original', weight: 1 },
       { text: 'React 吃什么？', kind: 'standalone', weight: 0.85 },
     ]);
-    expect(invoke.mock.calls[0][0]).toContain('React 是一种动物');
+    expect(invokedPrompt).toContain('React 是一种动物');
   });
 
   it('uses a conservative local retrieval fallback on planner failure', async () => {
-    const planner = new QueryPlannerService({
-      invoke: jest.fn().mockRejectedValue(new Error('provider failed')),
-    } as never);
+    const invoke = jest.fn().mockRejectedValue(new Error('provider failed'));
+    const planner = createPlanner(invoke);
     const plan = await planner.plan('1+1 等于多少？');
     const execution = new RetrievalPolicyService().build(
       '1+1 等于多少？',
@@ -77,21 +88,20 @@ describe('QueryPlannerService', () => {
   });
 
   it('derives multi-intent from subQueries and caps them at three', async () => {
-    const planner = new QueryPlannerService({
-      invoke: jest.fn().mockResolvedValue(
-        JSON.stringify({
-          action: 'retrieve',
-          domain: 'public',
-          contextMode: 'independent',
-          standaloneQuery: '比较四种方案',
-          subQueries: ['方案 A', '方案 B', '方案 C', '方案 D'],
-          taskType: 'comparison',
-          needsGraph: false,
-          entities: [],
-          filters: {},
-        }),
-      ),
-    } as never);
+    const invoke = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        action: 'retrieve',
+        domain: 'public',
+        contextMode: 'independent',
+        standaloneQuery: '比较四种方案',
+        subQueries: ['方案 A', '方案 B', '方案 C', '方案 D'],
+        taskType: 'comparison',
+        needsGraph: false,
+        entities: [],
+        filters: {},
+      }),
+    );
+    const planner = createPlanner(invoke);
     const plan = await planner.plan('比较四种方案');
     expect(plan.subQueries).toEqual(['方案 A', '方案 B', '方案 C']);
   });
@@ -159,13 +169,11 @@ describe('QueryPlannerService', () => {
 
   it('uses the local QueryPlan fast path for a short simple lookup', async () => {
     const invoke = jest.fn();
-    const planner = new QueryPlannerService({ invoke } as never);
+    const planner = createPlanner(invoke);
 
-    const plan = await planner.plan(
-      '生产系统权限默认有效期是多久？',
-      [],
-      { preferLocalFastPath: true },
-    );
+    const plan = await planner.plan('生产系统权限默认有效期是多久？', [], {
+      preferLocalFastPath: true,
+    });
 
     expect(invoke).not.toHaveBeenCalled();
     expect(plan).toMatchObject({

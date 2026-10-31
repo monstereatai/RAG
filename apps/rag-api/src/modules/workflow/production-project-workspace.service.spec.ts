@@ -44,6 +44,7 @@ describe('ProductionProjectWorkspaceService', () => {
   let service: ProductionProjectWorkspaceService;
   let redis: Record<string, jest.Mock>;
   let artifacts: Record<string, jest.Mock>;
+  let createdStudioVersionInput: Record<string, unknown> | undefined;
   let createSandbox: jest.SpyInstance;
   let connectSandbox: jest.SpyInstance;
 
@@ -82,45 +83,56 @@ describe('ProductionProjectWorkspaceService', () => {
   function setup() {
     redisValues.clear();
     redisLocks.clear();
+    createdStudioVersionInput = undefined;
     sandbox = makeSandbox();
     redis = {
       isEnabled: jest.fn(() => true),
-      getRequired: jest.fn(async (key: string) => redisValues.get(key) ?? null),
-      setIfAbsentRequired: jest.fn(async (key: string) => {
-        if (redisLocks.has(key)) return false;
+      getRequired: jest.fn((key: string) =>
+        Promise.resolve(redisValues.get(key) ?? null),
+      ),
+      setIfAbsentRequired: jest.fn((key: string) => {
+        if (redisLocks.has(key)) return Promise.resolve(false);
         redisLocks.add(key);
-        return true;
+        return Promise.resolve(true);
       }),
-      releaseLock: jest.fn(async (key: string) => {
+      releaseLock: jest.fn((key: string) => {
         redisLocks.delete(key);
+        return Promise.resolve();
       }),
-      setRequiredOrThrow: jest.fn(async (key: string, value: string) => {
+      setRequiredOrThrow: jest.fn((key: string, value: string) => {
         redisValues.set(key, value);
+        return Promise.resolve();
       }),
-      delRequired: jest.fn(async (key: string) => {
+      delRequired: jest.fn((key: string) => {
         redisValues.delete(key);
+        return Promise.resolve();
       }),
       expireRequired: jest.fn().mockResolvedValue(undefined),
     };
     artifacts = {
-      getStudioVersion: jest.fn(async (id: string) => ({
-        id,
-        tenantId: 'tenant-1',
-        ownerUserId: 'owner-1',
-        threadId: 'thread-1',
-        status: 'ready',
-        kind: 'code',
-        filename: `${id}.zip`,
-        metadata: JSON.stringify({ studio: 'production', framework: 'vue' }),
-      })),
+      getStudioVersion: jest.fn((id: string) =>
+        Promise.resolve({
+          id,
+          tenantId: 'tenant-1',
+          ownerUserId: 'owner-1',
+          threadId: 'thread-1',
+          status: 'ready',
+          kind: 'code',
+          filename: `${id}.zip`,
+          metadata: JSON.stringify({ studio: 'production', framework: 'vue' }),
+        }),
+      ),
       getStudioVersionFile: jest.fn(async () => ({
         body: await makeArchive(),
       })),
-      createStudioVersion: jest.fn(async (input: Record<string, unknown>) => ({
-        id: 'artifact-export-1',
-        status: 'ready',
-        ...input,
-      })),
+      createStudioVersion: jest.fn((input: Record<string, unknown>) => {
+        createdStudioVersionInput = input;
+        return Promise.resolve({
+          id: 'artifact-export-1',
+          status: 'ready',
+          ...input,
+        });
+      }),
     };
     const configValues: Record<string, unknown> = {
       'opensandbox.domain': 'opensandbox.test:8090',
@@ -129,6 +141,7 @@ describe('ProductionProjectWorkspaceService', () => {
       'opensandbox.image': 'workspace-node:test',
       'opensandbox.cpuLimit': '2',
       'opensandbox.memoryLimit': '4Gi',
+      'opensandbox.diskLimit': '8Gi',
       'opensandbox.egressAllowlist': ['registry.npmjs.org'],
     };
     const config = { get: jest.fn((key: string) => configValues[key]) };
@@ -191,6 +204,22 @@ describe('ProductionProjectWorkspaceService', () => {
       redisValues.has(identityKey('tenant-1', 'owner-1', 'thread-1')),
     ).toBe(true);
     expect(connectSandbox).not.toHaveBeenCalled();
+  });
+
+  it('applies CPU, memory, and disk limits when creating a workspace', async () => {
+    await service.startWorkspace(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'artifact-1',
+    );
+
+    expect(createSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secureAccess: true,
+        resource: { cpu: '2', memory: '4Gi', disk: '8Gi' },
+      }),
+    );
   });
 
   it('does not replace a workspace seeded from another artifact', async () => {
@@ -258,7 +287,13 @@ describe('ProductionProjectWorkspaceService', () => {
       JSON.stringify(workspaceRecord()),
     );
     sandbox.commands.run.mockImplementation(
-      async (_command, _options, handlers) => {
+      async (
+        _command,
+        _options,
+        handlers: {
+          onStdout(event: { text: string; timestamp: number }): Promise<void>;
+        },
+      ) => {
         await handlers.onStdout({ text: 'x'.repeat(20_000), timestamp: 1 });
         return { logs: { stdout: [], stderr: [] }, exitCode: 0 };
       },
@@ -285,7 +320,7 @@ describe('ProductionProjectWorkspaceService', () => {
       JSON.stringify(workspaceRecord()),
     );
     sandbox.commands.run.mockImplementation(
-      (_command, _options, _handlers, signal) =>
+      (_command, _options, _handlers, signal: AbortSignal) =>
         new Promise((_resolve, reject) => {
           signal.addEventListener('abort', () => reject(new Error('aborted')));
         }),
@@ -346,11 +381,10 @@ describe('ProductionProjectWorkspaceService', () => {
       }),
     ).rejects.toBeInstanceOf(Error);
     expect(sandbox.commands.interrupt).toHaveBeenCalledWith('command-1');
-    expect(
-      JSON.parse(
-        redisValues.get(identityKey('tenant-1', 'owner-1', 'thread-1'))!,
-      ).devServer,
-    ).toBeNull();
+    const persistedWorkspace = JSON.parse(
+      redisValues.get(identityKey('tenant-1', 'owner-1', 'thread-1'))!,
+    ) as unknown as { devServer: unknown };
+    expect(persistedWorkspace.devServer).toBeNull();
   });
 
   it('binds short lived preview tickets to their thread and rejects traversal', async () => {
@@ -511,6 +545,9 @@ describe('ProductionProjectWorkspaceService', () => {
         size: 20,
       },
       { path: '/root/workspace/.git/config', type: 'file', size: 20 },
+      { path: '/root/workspace/src/outside.ts', type: 'symlink', size: 10 },
+      { path: '/root/workspace-escape/secrets.txt', type: 'file', size: 10 },
+      { path: '/root/workspace/src/../outside.ts', type: 'file', size: 10 },
     ]);
     sandbox.files.readBytes.mockResolvedValue(Buffer.from('export {};'));
 
@@ -522,13 +559,22 @@ describe('ProductionProjectWorkspaceService', () => {
       'owner-1',
       'tenant-1',
     );
-    const input = artifacts.createStudioVersion.mock.calls[0][0] as {
-      body: Buffer;
-      filename: string;
-      metadata: Record<string, unknown>;
-    };
+    const input = createdStudioVersionInput;
+    if (
+      !input ||
+      !(input.body instanceof Buffer) ||
+      typeof input.filename !== 'string' ||
+      !input.metadata ||
+      typeof input.metadata !== 'object'
+    ) {
+      throw new Error('Expected a complete exported workspace artifact.');
+    }
     const exported = await JSZip.loadAsync(input.body);
     expect(Object.keys(exported.files)).toEqual(['src/', 'src/main.ts']);
+    expect(sandbox.files.readBytes).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.readBytes).toHaveBeenCalledWith(
+      '/root/workspace/src/main.ts',
+    );
     expect(input.filename).toMatch(/^workspace-export-v\d+\.zip$/);
     expect(input.metadata.target).toBe('workspace-export');
     expect(artifact.status).toBe('ready');

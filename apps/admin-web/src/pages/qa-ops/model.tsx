@@ -63,7 +63,7 @@ const ModelConfigPage: React.FC = () => {
           }
         >
           <Alert
-            message="这里保存的是后台 AI 问答的非敏感偏好配置。API Key 仍通过后端 .env 配置，不会写入前端。"
+            title="这里保存的是后台 AI 问答的非敏感偏好配置。API Key 仍通过后端 .env 配置，不会写入前端。"
             showIcon
             style={{ marginBottom: 18 }}
             type="info"

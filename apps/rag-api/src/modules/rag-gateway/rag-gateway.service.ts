@@ -14,21 +14,18 @@ export class RagGatewayService {
     private readonly skillsService: SkillsService,
   ) {}
 
-  async search(input: RagSearchDto, userId: string) {
+  async search(input: RagSearchDto, userId: string, tenantId?: string) {
     const limit = input.limit ?? 5;
     const [retrieval, reviewedEvidence] = await Promise.all([
-      this.ragService.retrieveDetailed(input.query, {}, userId),
-      this.ragService.retrieveReviewedEvidence(input.query, 2),
+      this.ragService.retrieveDetailed(input.query, { tenantId }, userId),
+      this.ragService.retrieveReviewedEvidence(input.query, 2, userId, tenantId),
     ]);
     const retrievedChunks = retrieval.chunks;
     const chunks = [...reviewedEvidence, ...retrievedChunks];
     const selectedChunks = chunks.slice(0, limit);
     const assessment =
       selectedChunks.length > 0
-        ? this.ragService.assessRetrievedChunks(
-            input.query,
-            selectedChunks,
-          )
+        ? this.ragService.assessRetrievedChunks(input.query, selectedChunks)
         : {
             sufficient: false,
             reason: 'RAG 没有检索到候选片段',
@@ -67,10 +64,11 @@ export class RagGatewayService {
     };
   }
 
-  async context(input: RagContextDto, userId: string) {
+  async context(input: RagContextDto, userId: string, tenantId?: string) {
     const search = await this.search(
       { query: input.task, limit: input.limit ?? 5 },
       userId,
+      tenantId,
     );
     const matchedSkills = input.matchSkill
       ? await this.skillsService.match(input.task, input.skillLimit ?? 3)

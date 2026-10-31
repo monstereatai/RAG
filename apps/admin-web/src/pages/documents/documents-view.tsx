@@ -138,8 +138,7 @@ export function DocumentsView({
                 }}
                 options={departmentOptions}
                 placeholder="按部门筛选"
-                showSearch
-                optionFilterProp="label"
+                showSearch={{ optionFilterProp: 'label' }}
                 style={{ minWidth: 120 }}
                 value={departmentFilter}
               />
@@ -174,7 +173,7 @@ export function DocumentsView({
         >
           {operationsError && (
             <Alert
-              message="运维状态暂不可用"
+              title="运维状态暂不可用"
               description={operationsError}
               showIcon
               style={{ marginBottom: 16 }}
@@ -193,10 +192,12 @@ export function DocumentsView({
                     value={
                       operations.documentQueue.enabled ? '运行中' : '未启用'
                     }
-                    valueStyle={{
-                      color: operations.documentQueue.enabled
-                        ? '#389e0d'
-                        : '#8c8c8c',
+                    styles={{
+                      content: {
+                        color: operations.documentQueue.enabled
+                          ? '#389e0d'
+                          : '#8c8c8c',
+                      },
                     }}
                   />
                   <Space size={4} wrap>
@@ -218,10 +219,12 @@ export function DocumentsView({
                     value={
                       operations.indexRepairQueue.enabled ? '运行中' : '未启用'
                     }
-                    valueStyle={{
-                      color: operations.indexRepairQueue.enabled
-                        ? '#389e0d'
-                        : '#8c8c8c',
+                    styles={{
+                      content: {
+                        color: operations.indexRepairQueue.enabled
+                          ? '#389e0d'
+                          : '#8c8c8c',
+                      },
                     }}
                   />
                   <Space size={4} wrap>
@@ -243,10 +246,12 @@ export function DocumentsView({
                     value={
                       operations.indexReconciler.enabled ? '已启用' : '未启用'
                     }
-                    valueStyle={{
-                      color: operations.indexReconciler.enabled
-                        ? '#389e0d'
-                        : '#8c8c8c',
+                    styles={{
+                      content: {
+                        color: operations.indexReconciler.enabled
+                          ? '#389e0d'
+                          : '#8c8c8c',
+                      },
                     }}
                   />
                   <div style={{ color: '#8c8c8c', marginTop: 4 }}>
@@ -264,12 +269,14 @@ export function DocumentsView({
                       operations.failedDocumentTasks.length +
                       operations.failedIndexRepairs.length
                     }
-                    valueStyle={{
-                      color:
-                        operations.failedDocumentTasks.length +
-                        operations.failedIndexRepairs.length
-                          ? '#cf1322'
-                          : '#389e0d',
+                    styles={{
+                      content: {
+                        color:
+                          operations.failedDocumentTasks.length +
+                          operations.failedIndexRepairs.length
+                            ? '#cf1322'
+                            : '#389e0d',
+                      },
                     }}
                   />
                   <Button
@@ -288,7 +295,7 @@ export function DocumentsView({
               </Row>
               {operations.indexReconciler.lastError && (
                 <Alert
-                  message="最近一次对账失败"
+                  title="最近一次对账失败"
                   description={operations.indexReconciler.lastError}
                   showIcon
                   style={{ marginTop: 16 }}
@@ -299,7 +306,7 @@ export function DocumentsView({
                 <Col xs={24}>
                   <h4>待处理的入库任务</h4>
                   <Alert
-                    message="仅可取消尚未开始的任务；处理中任务无法中断。"
+                    title="仅可取消尚未开始的任务；处理中任务无法中断。"
                     showIcon
                     style={{ marginBottom: 12 }}
                     type="info"
@@ -541,7 +548,7 @@ export function DocumentsView({
       </div>
       <Modal
         confirmLoading={permissionSaving}
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setPermissionDoc(null)}
         onOk={handleSavePermissions}
         open={!!permissionDoc}
@@ -607,7 +614,6 @@ export function DocumentsView({
                             type === 'department' ? (
                               <Select
                                 disabled={type === 'public'}
-                                optionFilterProp="label"
                                 options={options}
                                 placeholder={
                                   type === 'user'
@@ -616,7 +622,7 @@ export function DocumentsView({
                                       ? '选择角色'
                                       : '选择部门'
                                 }
-                                showSearch
+                                showSearch={{ optionFilterProp: 'label' }}
                                 style={{ width: 280 }}
                               />
                             ) : (
@@ -650,7 +656,7 @@ export function DocumentsView({
         </Form>
       </Modal>
       <Modal
-        destroyOnClose
+        destroyOnHidden
         onCancel={() => setVersionDoc(null)}
         onOk={handleCreateVersion}
         confirmLoading={versionSaving}

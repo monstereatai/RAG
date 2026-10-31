@@ -436,25 +436,23 @@ export function renderEvalPanelAndGovernancePanel(
               ].map((value) => ({ value, label: value }))}
             />
           </Form.Item>
-          <Form.Item name="chunkSize" initialValue={500}>
+          <Form.Item name="chunkSize" label="Chunk (est. tokens)" initialValue={500}>
             <InputNumber
               min={200}
               max={4000}
-              addonBefore="Chunk (est. tokens)"
             />
           </Form.Item>
-          <Form.Item name="chunkOverlap" initialValue={50}>
+          <Form.Item name="chunkOverlap" label="Overlap (est. tokens)" initialValue={50}>
             <InputNumber
               min={0}
               max={1000}
-              addonBefore="Overlap (est. tokens)"
             />
           </Form.Item>
           <Alert
             type="info"
             showIcon
             style={{ width: '100%', marginBottom: 12 }}
-            message="Chunk 大小和重叠量只影响后续按该配置入库的文档；已有文档不会自动重切。下面的检索参数可用同一问题做 A/B 对照。"
+            title="Chunk 大小和重叠量只影响后续按该配置入库的文档；已有文档不会自动重切。下面的检索参数可用同一问题做 A/B 对照。"
           />
           <Collapse
             style={{ width: '100%', marginBottom: 12 }}
@@ -464,56 +462,52 @@ export function renderEvalPanelAndGovernancePanel(
                 label: '检索调优参数（可选）',
                 children: (
                   <Space wrap>
-                    <Form.Item name={['retrievalConfig', 'candidateDepth']}>
+                    <Form.Item name={['retrievalConfig', 'candidateDepth']} label="候选深度">
                       <InputNumber
                         min={1}
                         max={50}
-                        addonBefore="候选深度"
                         placeholder="默认值"
                       />
                     </Form.Item>
-                    <Form.Item name={['retrievalConfig', 'finalTopK']}>
+                    <Form.Item name={['retrievalConfig', 'finalTopK']} label="最终片段数">
                       <InputNumber
                         min={1}
                         max={20}
-                        addonBefore="最终片段数"
                         placeholder="默认值"
                       />
                     </Form.Item>
-                    <Form.Item name={['retrievalConfig', 'neighborWindow']}>
+                    <Form.Item name={['retrievalConfig', 'neighborWindow']} label="邻近片段">
                       <InputNumber
                         min={0}
                         max={2}
-                        addonBefore="邻近片段"
                         placeholder="默认值"
                       />
                     </Form.Item>
-                    <Form.Item name={['retrievalConfig', 'sameSectionLimit']}>
+                    <Form.Item name={['retrievalConfig', 'sameSectionLimit']} label="同节上限">
                       <InputNumber
                         min={0}
                         max={4}
-                        addonBefore="同节上限"
                         placeholder="默认值"
                       />
                     </Form.Item>
                     <Form.Item
                       name={['retrievalConfig', 'contextCharacterBudget']}
+                      label="上下文字符数"
                     >
                       <InputNumber
                         min={1000}
                         max={12000}
                         step={500}
-                        addonBefore="上下文字符数"
                         placeholder="默认值"
                       />
                     </Form.Item>
                     <Form.Item
                       name={['retrievalConfig', 'maxChunksPerDocument']}
+                      label="单文档片段上限"
                     >
                       <InputNumber
                         min={1}
                         max={8}
-                        addonBefore="单文档片段上限"
                         placeholder="默认值"
                       />
                     </Form.Item>

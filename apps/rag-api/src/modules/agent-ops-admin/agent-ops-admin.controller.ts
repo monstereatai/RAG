@@ -5,6 +5,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Optional,
   Param,
   Patch,
@@ -64,6 +65,35 @@ import {
   searchPlaywayComponents,
 } from '../workflow/playway-component-registry';
 
+type AgentTaskDelegationBody = {
+  ownerUserId?: unknown;
+  threadId?: unknown;
+  runId?: unknown;
+  parentTaskId?: unknown;
+  role?: unknown;
+  title?: unknown;
+  description?: unknown;
+  processType?: unknown;
+  dependsOnTaskIds?: unknown;
+};
+
+function readRequiredBodyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new BadRequestException(`${field} is required`);
+  }
+  return value.trim();
+}
+
+function readOptionalBodyString(
+  value: unknown,
+  field: string,
+): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new BadRequestException(`${field} must be a non-empty string`);
+  }
+  return value.trim();
+}
 
 @Public()
 @Controller('rag/admin/agent-ops')
@@ -234,12 +264,7 @@ export class AgentOpsAdminController {
     @Query('ownerUserId') ownerUserId: string,
     @Body() body: { reason?: string },
   ) {
-    return this.workflows.cancel(
-      threadId,
-      ownerUserId,
-      undefined,
-      body.reason,
-    );
+    return this.workflows.cancel(threadId, ownerUserId, undefined, body.reason);
   }
 
   @Get('workflows/:threadId/coding-context')
@@ -463,10 +488,15 @@ export class AgentOpsAdminController {
     @Query('tenantId') tenantId: string | undefined,
     @Body() body: StartProductionProjectWorkspaceDevServerDto,
   ) {
-    return this.projectWorkspace.startDevServer(threadId, ownerUserId, tenantId, {
-      port: body.port,
-      command: body.command,
-    });
+    return this.projectWorkspace.startDevServer(
+      threadId,
+      ownerUserId,
+      tenantId,
+      {
+        port: body.port,
+        command: body.command,
+      },
+    );
   }
 
   @Post('workflows/:threadId/workspace/dev-server/stop')
@@ -530,23 +560,26 @@ export class AgentOpsAdminController {
     request.once('aborted', abortWhenDisconnected);
     response.once('close', abortWhenDisconnected);
     const headers: Record<string, string> = {};
-    for (const name of ['accept', 'if-none-match', 'if-modified-since', 'range']) {
+    for (const name of [
+      'accept',
+      'if-none-match',
+      'if-modified-since',
+      'range',
+    ]) {
       const value = request.headers[name];
       if (typeof value === 'string') headers[name] = value.slice(0, 2_000);
     }
-    let result: Awaited<ReturnType<ProductionProjectWorkspaceService['proxyPreview']>>;
+    let result: Awaited<
+      ReturnType<ProductionProjectWorkspaceService['proxyPreview']>
+    >;
     try {
-      result = await this.projectWorkspace.proxyPreview(
-        ticket,
-        threadId,
-        {
-          method: request.method as 'GET' | 'HEAD',
-          headers,
-          query,
-          path: segments.join('/'),
-          signal: abortController.signal,
-        },
-      );
+      result = await this.projectWorkspace.proxyPreview(ticket, threadId, {
+        method: request.method as 'GET' | 'HEAD',
+        headers,
+        query,
+        path: segments.join('/'),
+        signal: abortController.signal,
+      });
     } finally {
       request.off('aborted', abortWhenDisconnected);
       response.off('close', abortWhenDisconnected);
@@ -734,14 +767,9 @@ export class AgentOpsAdminController {
     };
   }
 
-    @Post('run-center/:id/retry')
+  @Post('run-center/:id/retry')
   async retryRunRecord(@Param('id') id: string) {
-    return retryAgentRunRecord(
-      id,
-      this.runs,
-      this.agenticRag,
-      this.chat,
-    );
+    return retryAgentRunRecord(id, this.runs, this.agenticRag, this.chat);
   }
 
   @Post('run-center/:id/cancel')
@@ -755,7 +783,9 @@ export class AgentOpsAdminController {
   }
 
   @Post('collaboration/sops')
-  saveCollaborationSop(@Body() body: any) {
+  saveCollaborationSop(
+    @Body() body: Parameters<AgentCollaborationService['upsertSop']>[0],
+  ) {
     return this.collaboration.upsertSop(body);
   }
 
@@ -765,7 +795,9 @@ export class AgentOpsAdminController {
   }
 
   @Post('collaboration/messages')
-  publishCollaborationMessage(@Body() body: any) {
+  publishCollaborationMessage(
+    @Body() body: Parameters<AgentCollaborationService['publishMessage']>[0],
+  ) {
     return this.collaboration.publishMessage(body);
   }
 
@@ -775,7 +807,9 @@ export class AgentOpsAdminController {
   }
 
   @Post('collaboration/decisions')
-  createCollaborationDecision(@Body() body: any) {
+  createCollaborationDecision(
+    @Body() body: Parameters<AgentCollaborationService['createDecision']>[0],
+  ) {
     return this.collaboration.createDecision({
       ...body,
       createdBy: body.createdBy ?? 'admin-backend',
@@ -826,15 +860,75 @@ export class AgentOpsAdminController {
   }
 
   @Post('tasks/delegate')
-  async delegateAgentTask(@Body() body: any) {
-    const ownerUserId = String(body.ownerUserId ?? '').trim();
-    if (!body.threadId || !ownerUserId) {
-      throw new Error('threadId and ownerUserId are required for task delegation');
+  async delegateAgentTask(@Body() body: AgentTaskDelegationBody) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Request body must be an object.');
     }
-    await this.workflows.assertOwnedThread(body.threadId, ownerUserId);
-    if (body.runId) await this.runs.reserveDelegation(body.runId);
-    const { ownerUserId: _ownerUserId, ...taskInput } = body;
-    return this.tasks.delegate(taskInput);
+    const ownerUserId = readRequiredBodyString(body.ownerUserId, 'ownerUserId');
+    const threadId = readRequiredBodyString(body.threadId, 'threadId');
+    const runId = readOptionalBodyString(body.runId, 'runId');
+    const parentTaskId = readOptionalBodyString(
+      body.parentTaskId,
+      'parentTaskId',
+    );
+    const role = readRequiredBodyString(body.role, 'role');
+    const title = readRequiredBodyString(body.title, 'title');
+    const description = readRequiredBodyString(body.description, 'description');
+    const processType = readOptionalBodyString(body.processType, 'processType');
+    const rawDependencies = body.dependsOnTaskIds;
+    if (
+      rawDependencies !== undefined &&
+      rawDependencies !== null &&
+      (!Array.isArray(rawDependencies) ||
+        rawDependencies.length > 50 ||
+        !rawDependencies.every(
+          (item) =>
+            typeof item === 'string' &&
+            item.trim().length > 0 &&
+            item.length <= 64,
+        ))
+    ) {
+      throw new BadRequestException(
+        'dependsOnTaskIds must contain at most 50 non-empty task IDs',
+      );
+    }
+
+    await this.workflows.assertOwnedThread(threadId, ownerUserId);
+    if (runId) {
+      const run = await this.runs.get(runId);
+      if (run.threadId !== threadId || run.userId !== ownerUserId) {
+        throw new NotFoundException('Agent run not found.');
+      }
+    }
+    const referencedTaskIds = [
+      ...(parentTaskId ? [parentTaskId] : []),
+      ...(Array.isArray(rawDependencies) ? rawDependencies : []),
+    ];
+    const referencedTasks = await Promise.all(
+      referencedTaskIds.map((id) => this.tasks.findById(id)),
+    );
+    const expectedRunId = runId ?? null;
+    if (
+      referencedTasks.some(
+        (task) =>
+          task.threadId !== threadId || task.runId !== expectedRunId,
+      )
+    ) {
+      throw new NotFoundException('Agent task not found.');
+    }
+    if (runId) await this.runs.reserveDelegation(runId);
+    return this.tasks.delegate({
+      threadId,
+      runId,
+      parentTaskId,
+      role,
+      title,
+      description,
+      processType,
+      dependsOnTaskIds: Array.isArray(rawDependencies)
+        ? rawDependencies.map((item) => (item as string).trim())
+        : undefined,
+    });
   }
 
   @Get('runtime-events')

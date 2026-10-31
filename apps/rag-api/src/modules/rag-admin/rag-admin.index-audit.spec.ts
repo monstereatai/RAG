@@ -499,6 +499,8 @@ describe('RagAdminService index reconciliation', () => {
         deleteByDocId: jest.fn().mockResolvedValue(undefined),
         insert: jest.fn().mockResolvedValue(undefined),
         countByDocId: jest.fn().mockResolvedValue(1),
+        getVectorsByIds: jest.fn().mockResolvedValue([]),
+        getIndexInfo: jest.fn().mockReturnValue({ dimension: 1 }),
       },
       ragService: {
         removeDocChunks: jest.fn(),

@@ -27,9 +27,12 @@ export class DocumentTaskService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     if (!this.documentQueueService.enabled) return;
-    this.staleTaskReaper = setInterval(() => {
-      void this.failOrphanedQueuedTasks();
-    }, 5 * 60 * 1000);
+    this.staleTaskReaper = setInterval(
+      () => {
+        void this.failOrphanedQueuedTasks();
+      },
+      5 * 60 * 1000,
+    );
     this.staleTaskReaper.unref?.();
   }
 
@@ -112,8 +115,7 @@ export class DocumentTaskService implements OnModuleInit, OnModuleDestroy {
         status: 'cancelled',
         stage: 'cancelled',
         errorMessage:
-          result.cleanupScheduled === false &&
-          result.cleanupCompleted !== true
+          result.cleanupScheduled === false && result.cleanupCompleted !== true
             ? result.reason
             : null,
         finishedAt: new Date(),

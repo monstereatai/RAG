@@ -8,6 +8,8 @@ import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 import { ScheduledJobEntity } from '../../providers/db/entities/job.entity';
 import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import { scheduledAnalysisReportSystemPrompt } from './scheduled-analysis.prompts';
 import type {
   AnalysisDataScope,
   ParsedScheduledAnalysis,
@@ -98,46 +100,46 @@ export class ScheduledAnalysisService {
     };
   }
 
-  async execute(job: ScheduledJobEntity): Promise<{
+  async execute(job: ScheduledJobEntity, signal?: AbortSignal): Promise<{
     markdown: string;
     snapshot: AnalysisSnapshot;
   }> {
+    signal?.throwIfAborted();
     const config = this.parseConfig(job.analysisConfig);
     const range = this.resolveRange(config.window);
     const snapshot = await this.collectSnapshot(config, range.start, range.end);
+    signal?.throwIfAborted();
     const deterministic = this.renderMetrics(job, config, snapshot);
+    let promptVersion: string | undefined;
     try {
       const model = this.llmProvider.getModel();
-      const response = await model.invoke([
-        {
-          role: 'system',
-          content: [
-            '你是企业运营数据分析 Agent。只能依据给定统计快照生成 Markdown 报告，不得编造数量、客户、规则或部门事实。',
-            '报告必须包含：执行范围、关键统计、异常与趋势、岗位建议、部门建议、待人工确认、数据来源说明。',
-            '投诉数据来自系统负反馈代理指标，除非快照明确提供，不得声称它等于真实客服工单总量。',
-            '建议要对应快照中的证据；数据不足时明确写“数据不足”。',
-            '禁止补充快照中不存在的系统版本、行业基准、SLA、百分比、截止时间、用户身份或数据来源。',
-            '禁止给建议编号；报告中出现的任何数字都必须原样来自统计快照。',
-          ].join('\n'),
-        },
-        {
-          role: 'human',
-          content: [
-            `任务名称：${job.name ?? '运营分析任务'}`,
-            `原始任务定义：\n${job.instruction.slice(0, 6_000)}`,
-            `关注岗位：${config.roles.join('、') || '未指定'}`,
-            `关注部门：${config.departments.join('、') || '未指定'}`,
-            `统计快照：\n${JSON.stringify(snapshot).slice(0, 20_000)}`,
-          ].join('\n\n'),
-        },
-      ]);
+      promptVersion = getPromptVersion('scheduled_analysis.report');
+      const response = await model.invoke(
+        [
+          {
+            role: 'system',
+            content: scheduledAnalysisReportSystemPrompt,
+          },
+          {
+            role: 'human',
+            content: [
+              `任务名称：${job.name ?? '运营分析任务'}`,
+              `原始任务定义：\n${job.instruction.slice(0, 6_000)}`,
+              `关注岗位：${config.roles.join('、') || '未指定'}`,
+              `关注部门：${config.departments.join('、') || '未指定'}`,
+              `统计快照：\n${JSON.stringify(snapshot).slice(0, 20_000)}`,
+            ].join('\n\n'),
+          },
+        ],
+        { metadata: { promptVersion }, signal },
+      );
       const generated =
         typeof response.content === 'string'
           ? response.content.trim()
           : JSON.stringify(response.content);
       if (generated && this.isGroundedGenerated(generated, snapshot)) {
         const markdown = `${deterministic}\n\n## Agent 分析与建议\n\n${generated}`;
-        await this.trace(job, config, snapshot, markdown);
+        await this.trace(job, config, snapshot, markdown, promptVersion);
         return {
           markdown,
           snapshot,
@@ -149,12 +151,14 @@ export class ScheduledAnalysisService {
         );
       }
     } catch (error) {
+      if (signal?.aborted) throw error;
       this.logger.warn(
         `Scheduled analysis LLM generation failed: ${(error as Error).message}`,
       );
     }
+    signal?.throwIfAborted();
     const markdown = `${deterministic}\n\n${this.renderFallbackSuggestions(config, snapshot)}`;
-    await this.trace(job, config, snapshot, markdown);
+    await this.trace(job, config, snapshot, markdown, promptVersion);
     return {
       markdown,
       snapshot,
@@ -166,6 +170,7 @@ export class ScheduledAnalysisService {
     config: ScheduledAnalysisConfig,
     snapshot: AnalysisSnapshot,
     report: string,
+    promptVersion?: string,
   ): Promise<void> {
     await this.langfuseProvider.traceScheduledAnalysis({
       jobId: job.id,
@@ -174,6 +179,7 @@ export class ScheduledAnalysisService {
       instruction: job.instruction.slice(0, 6_000),
       window: config.window,
       dataScopes: config.dataScopes,
+      promptVersion,
       snapshotCounts: {
         rules: snapshot.rules?.length ?? 0,
         complaintsProxy: snapshot.complaints?.total ?? 0,

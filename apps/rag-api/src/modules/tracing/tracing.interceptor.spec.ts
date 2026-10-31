@@ -7,6 +7,9 @@ describe('TracingInterceptor', () => {
     const tracing = {
       start: jest.fn().mockReturnValue({}),
       toTraceparent: jest.fn().mockReturnValue('traceparent'),
+      runWithTrace: jest.fn((_trace: unknown, callback: () => unknown) =>
+        callback(),
+      ),
       finish: jest.fn(),
     };
     const request = {

@@ -143,6 +143,7 @@ export default function AgentRunDetailPage() {
     planId?: string;
     mode?: string;
     selectedSkills?: string[];
+    selectedSkillVersions?: Record<string, string>;
     skillMatching?: 'matched' | 'skipped_simple';
     contextPolicy?: { maxHistoryTurns?: number; maxContextCharacters?: number; compressionThreshold?: number; isolatedByThread?: boolean };
     stages?: Array<Record<string, unknown>>;
@@ -161,7 +162,7 @@ export default function AgentRunDetailPage() {
     document.getElementById("run-artifacts")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const content = loading ? <Spin tip="正在加载运行详情" /> : !run ? (
+  const content = loading ? <Spin description="正在加载运行详情" /> : !run ? (
     <Result status="404" title="运行记录不存在" extra={<Button onClick={() => history.push("/agent-ops/run-center")}>返回运行中心</Button>} />
   ) : (
     <>
@@ -203,7 +204,7 @@ export default function AgentRunDetailPage() {
             <Descriptions bordered column={3} size="small" items={[
               { key: "plan", label: "计划 ID", children: runtimePlan.planId },
               { key: "mode", label: "模式", children: runtimePlan.mode },
-              { key: "skills", label: "已选 Skill", children: runtimePlan.skillMatching === "skipped_simple" ? "Simple 模式跳过匹配" : runtimePlan.selectedSkills?.join("、") || "未匹配" },
+              { key: "skills", label: "已选 Skill／版本", children: runtimePlan.skillMatching === "skipped_simple" ? "Simple 模式跳过匹配" : runtimePlan.selectedSkills?.map((name) => `${name}@${runtimePlan.selectedSkillVersions?.[name]?.slice(0, 12) ?? "版本未记录"}`).join("、") || "未匹配" },
               { key: "context", label: "上下文策略", span: 3, children: `历史 ${runtimePlan.contextPolicy?.maxHistoryTurns ?? "-"} 轮；预算 ${runtimePlan.contextPolicy?.maxContextCharacters ?? "-"} 字符；压缩阈值 ${runtimePlan.contextPolicy?.compressionThreshold ?? "-"} 字符；Thread 隔离：${runtimePlan.contextPolicy?.isolatedByThread ? "是" : "否"}` },
             ]} />
             <Table rowKey="id" size="small" pagination={false} style={{ marginTop: 12 }} dataSource={runtimePlan.stages ?? []} columns={[

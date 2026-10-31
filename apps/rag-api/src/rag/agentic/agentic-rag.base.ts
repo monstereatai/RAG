@@ -278,12 +278,12 @@ export class AgenticRagBase {
   }
 
   protected threadIdFromConfig(config?: RunnableConfig): string {
-    const value = config?.configurable?.thread_id;
+    const value: unknown = config?.configurable?.thread_id;
     return typeof value === 'string' ? value : '';
   }
 
   protected userIdFromConfig(config?: RunnableConfig): string | undefined {
-    const value = config?.configurable?.userId;
+    const value: unknown = config?.configurable?.userId;
     return typeof value === 'string' && value ? value : undefined;
   }
 

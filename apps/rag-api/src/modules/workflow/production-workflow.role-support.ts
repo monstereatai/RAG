@@ -270,7 +270,8 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
   ): ProductionLowCodeSchema | null {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
     const record = item as Record<string, unknown>;
-    const kind = String(record.kind ?? '') as ProductionLowCodeSchemaKind;
+    if (typeof record.kind !== 'string') return null;
+    const kind = record.kind as ProductionLowCodeSchemaKind;
     if (
       ![
         'pageSchema',
@@ -289,7 +290,10 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
       schemaVersion: 1,
       role: ownerRole,
       kind,
-      title: String(record.title ?? `${ownerRole}-${kind}`),
+      title:
+        typeof record.title === 'string'
+          ? record.title
+          : `${ownerRole}-${kind}`,
       source: record.source === 'fallback' ? 'fallback' : 'llm',
       components: this.recordArray(record.components),
       apis: this.recordArray(record.apis),

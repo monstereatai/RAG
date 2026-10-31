@@ -79,7 +79,9 @@ describe('evaluation report summaries', () => {
 
     const reports = readEvaluationReportSummaries();
 
-    expect(reports.find((report) => report.datasetName === 'agent-platform')).toMatchObject({
+    expect(
+      reports.find((report) => report.datasetName === 'agent-platform'),
+    ).toMatchObject({
       mode: 'live',
       totalSamples: 6,
       failedSamples: 1,
@@ -87,7 +89,9 @@ describe('evaluation report summaries', () => {
       passed: false,
       outcome: 'failed',
     });
-    expect(reports.find((report) => report.datasetName === 'bad-case-regression')).toMatchObject({
+    expect(
+      reports.find((report) => report.datasetName === 'bad-case-regression'),
+    ).toMatchObject({
       totalSamples: 0,
       passed: false,
       outcome: 'skipped',
@@ -138,9 +142,11 @@ describe('evaluation report summaries', () => {
       }),
     );
 
-    expect(readEvaluationReportSummaries().find(
-      (report) => report.datasetName === 'agent-platform',
-    )).toMatchObject({
+    expect(
+      readEvaluationReportSummaries().find(
+        (report) => report.datasetName === 'agent-platform',
+      ),
+    ).toMatchObject({
       passed: false,
       outcome: 'failed',
       totalSamples: 1,
@@ -160,9 +166,11 @@ describe('evaluation report summaries', () => {
       }),
     );
 
-    expect(readEvaluationReportSummaries().find(
-      (report) => report.datasetName === 'golden-business',
-    )).toMatchObject({
+    expect(
+      readEvaluationReportSummaries().find(
+        (report) => report.datasetName === 'golden-business',
+      ),
+    ).toMatchObject({
       passed: false,
       outcome: 'failed',
       reason: '缺少 sourceDocument',

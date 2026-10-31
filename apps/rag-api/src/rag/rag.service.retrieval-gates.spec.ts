@@ -1,8 +1,6 @@
 import { createService } from './rag.service.test-utils';
 
 describe('RagService retrieval and answer gates', () => {
-
-
   it('returns an answer only when retrieval and citation support pass', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce('LangChain 用于构建 RAG 应用。[片段1]');
@@ -28,10 +26,12 @@ describe('RagService retrieval and answer gates', () => {
     expect(result.references).toHaveLength(1);
   });
 
-
-
   it('Simple 直答未命中后对精确查询也执行统一混合检索', async () => {
-    const { service, llmInvoke, vectorStoreProvider } = createService();
+    const {
+      service,
+      llmInvoke,
+      vectorStoreSearchMock: vectorSearch,
+    } = createService();
     llmInvoke.mockResolvedValueOnce('活动 ID ACT100 的状态是已上线。[片段1]');
     service.indexChunks(
       [
@@ -55,13 +55,15 @@ describe('RagService retrieval and answer gates', () => {
     );
 
     expect(result.retrievalSufficient).toBe(true);
-    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalled();
+    expect(vectorSearch).toHaveBeenCalled();
   });
 
-
-
   it('Simple 自适应检索对流程类问题直接使用混合检索', async () => {
-    const { service, llmInvoke, vectorStoreProvider } = createService();
+    const {
+      service,
+      llmInvoke,
+      vectorStoreSearchMock: vectorSearch,
+    } = createService();
     llmInvoke.mockResolvedValueOnce('先创建活动，再配置奖池。[片段1]');
     service.indexChunks(
       [
@@ -84,26 +86,28 @@ describe('RagService retrieval and answer gates', () => {
       { adaptiveVectorSearch: true },
     );
 
-    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(vectorSearch).toHaveBeenCalledTimes(1);
   });
 
-
-
   it('Simple 关键词证据不足时补查向量库', async () => {
-    const { service, llmInvoke, vectorStoreProvider, indexService } =
-      createService({
-        vectorStoreProvider: {
-          similaritySearch: jest.fn().mockResolvedValue([
-            {
-              id: 'chunk-semantic',
-              content: '活动 ID ACT100 的状态是已上线。',
-              docId: 'activity-semantic-doc',
-              chunkIndex: 0,
-              score: 0.98,
-            },
-          ]),
-        },
-      });
+    const {
+      service,
+      llmInvoke,
+      vectorStoreSearchMock: vectorSearch,
+      indexService,
+    } = createService({
+      vectorStoreProvider: {
+        similaritySearch: jest.fn().mockResolvedValue([
+          {
+            id: 'chunk-semantic',
+            content: '活动 ID ACT100 的状态是已上线。',
+            docId: 'activity-semantic-doc',
+            chunkIndex: 0,
+            score: 0.98,
+          },
+        ]),
+      },
+    });
     llmInvoke.mockResolvedValueOnce('活动 ID ACT100 的状态是已上线。[片段1]');
     service.indexChunks(
       [
@@ -127,14 +131,16 @@ describe('RagService retrieval and answer gates', () => {
       { adaptiveVectorSearch: true },
     );
 
-    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(vectorSearch).toHaveBeenCalledTimes(1);
     expect(result.retrievalSufficient).toBe(true);
   });
 
-
-
   it('非结构化片段命中不绕过完整生成链路', async () => {
-    const { service, llmInvoke, vectorStoreProvider } = createService();
+    const {
+      service,
+      llmInvoke,
+      vectorStoreSearchMock: vectorSearch,
+    } = createService();
     llmInvoke.mockResolvedValue('活动 ID ACT100 的状态是已上线。[片段1]');
     service.indexChunks(
       [
@@ -163,14 +169,12 @@ describe('RagService retrieval and answer gates', () => {
 
     expect(result.answer).toContain('活动 ID ACT100 的状态是已上线');
     expect(result.retrievalReason).toContain('检索片段和答案引用通过');
-    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(vectorSearch).toHaveBeenCalledTimes(1);
     expect(llmInvoke).toHaveBeenCalled();
   });
 
-
-
   it('缺少版本元数据的 RAG 知识不能绕过检索与生成门禁', async () => {
-    const { service, vectorStoreProvider } = createService();
+    const { service, vectorStoreSearchMock: vectorSearch } = createService();
     service.indexChunks(
       [
         {
@@ -196,10 +200,8 @@ describe('RagService retrieval and answer gates', () => {
     );
 
     expect(result.retrievalReason).not.toContain('受治理 受治理编译知识');
-    expect(vectorStoreProvider.similaritySearch).toHaveBeenCalledTimes(1);
+    expect(vectorSearch).toHaveBeenCalledTimes(1);
   });
-
-
 
   it('rejects an LLM answer without citations when no extractive answer can be built', async () => {
     const { service, llmInvoke } = createService();
@@ -216,20 +218,14 @@ describe('RagService retrieval and answer gates', () => {
       'user-1',
     );
 
-    await expect(
-      service.answer('LangChain RAG', [], 'user-1'),
-    ).resolves.toMatchObject({
-      answer:
-        '已检索到相关资料，但回答生成服务未返回符合引用约束的完整答案。为避免把原始片段误当作结论展示，请稍后重试。',
-      references: [],
-      retrievalSufficient: false,
-      retrievalReason: expect.stringContaining('已禁止输出原始片段'),
-    });
+    const result = await service.answer('LangChain RAG', [], 'user-1');
+    expect(result.answer).toContain('回答生成服务未返回');
+    expect(result.references).toEqual([]);
+    expect(result.retrievalSufficient).toBe(false);
+    expect(result.retrievalReason).toContain('已禁止输出原始片段');
   });
 
-
-
-  it('uses only current evidence for a cited extractive fallback', async () => {
+  it('uses only current evidence for a cited extractive fallback', () => {
     const { service } = createService();
     const visibleEvidence = [
       {
@@ -284,8 +280,6 @@ describe('RagService retrieval and answer gates', () => {
     ).toContain('procurement-1');
   });
 
-
-
   it('keeps deterministic facts when Agentic requests synthesis', async () => {
     const { service, llmInvoke } = createService();
     const result = await service.generateGroundedAnswer(
@@ -313,8 +307,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(result.retrievalSufficient).toBe(true);
     expect(llmInvoke).not.toHaveBeenCalled();
   });
-
-
 
   it('passes planned answer requirements into the grounded answer prompt', async () => {
     const { service, llmInvoke } = createService();
@@ -347,8 +339,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(prompt).toContain('2. 交付日期和风险等级');
   });
 
-
-
   it('extracts the salary date from current evidence instead of a fixed demo value', () => {
     const { service } = createService();
     const answer = service.buildEvidenceFirstAnswer('薪资什么时候发放？', [
@@ -368,8 +358,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(answer).not.toContain('10 日');
   });
 
-
-
   it('does not turn an unrelated payroll schedule into a tax answer', () => {
     const { service } = createService();
     const answer = service.buildEvidenceFirstAnswer('工资需要缴纳哪些税？', [
@@ -386,8 +374,6 @@ describe('RagService retrieval and answer gates', () => {
 
     expect(answer).toBeNull();
   });
-
-
 
   it('does not mark a multi-question answer sufficient when one sub-question is missing', () => {
     const { service } = createService();
@@ -409,8 +395,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(answer).toBeNull();
   });
 
-
-
   it('does not turn a positive schedule sentence into a conditional answer', () => {
     const { service } = createService();
     const answer = service.buildEvidenceFirstAnswer(
@@ -430,8 +414,6 @@ describe('RagService retrieval and answer gates', () => {
 
     expect(answer).toBeNull();
   });
-
-
 
   it('repairs a missing citation when the generated claim is supported', async () => {
     const { service, llmInvoke } = createService();
@@ -463,8 +445,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(result.references).toHaveLength(1);
   });
 
-
-
   it('does not expose raw evidence when a later claim is not cited', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
@@ -484,15 +464,11 @@ describe('RagService retrieval and answer gates', () => {
 
     const result = await service.answer('LangChain RAG', [], 'user-1');
 
-    expect(result).toMatchObject({
-      retrievalSufficient: false,
-      retrievalReason: expect.stringContaining('已禁止输出原始片段'),
-    });
+    expect(result.retrievalSufficient).toBe(false);
+    expect(result.retrievalReason).toContain('已禁止输出原始片段');
     expect(result.answer).toContain('回答生成服务未返回');
     expect(result.answer).not.toContain('LangChain builds RAG applications');
   });
-
-
 
   it('never exposes a literary chunk as a governed direct answer', async () => {
     const { answerService, retrievalService } = createService();
@@ -531,8 +507,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(direct).toBeNull();
   });
 
-
-
   it('accepts multi-claim answers when every claim has support citations', async () => {
     const { service, llmInvoke } = createService();
     llmInvoke.mockResolvedValueOnce(
@@ -556,8 +530,6 @@ describe('RagService retrieval and answer gates', () => {
     expect(result.references).toHaveLength(1);
   });
 
-
-
   it('accepts an uncited structural lead-in before cited conclusions', () => {
     const { service } = createService();
     const gate = service.validateAnswerCitationSupport(
@@ -577,8 +549,6 @@ describe('RagService retrieval and answer gates', () => {
 
     expect(gate).toEqual(expect.objectContaining({ sufficient: true }));
   });
-
-
 
   it('accepts a cited markdown table when every data row is supported', () => {
     const { service } = createService();
@@ -607,8 +577,6 @@ describe('RagService retrieval and answer gates', () => {
 
     expect(gate).toEqual(expect.objectContaining({ sufficient: true }));
   });
-
-
 
   it('adds a cited version conflict notice when retrieved chunks contain multiple versions', async () => {
     const { service, llmInvoke } = createService();

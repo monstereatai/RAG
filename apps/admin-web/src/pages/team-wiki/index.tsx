@@ -413,7 +413,7 @@ const TeamWiki: React.FC = () => {
                   <Alert
                     type="error"
                     showIcon
-                    message="最近发布失败"
+                    title="最近发布失败"
                     description={selected.publishError}
                     style={{ marginBottom: 16 }}
                   />
@@ -422,7 +422,7 @@ const TeamWiki: React.FC = () => {
                   <Alert
                     type="success"
                     showIcon
-                    message="当前版本已发布到知识库"
+                    title="当前版本已发布到知识库"
                     description={`RAG 文档 ID：${selected.publishedDocumentId ?? '—'}`}
                     style={{ marginBottom: 16 }}
                   />
@@ -432,7 +432,7 @@ const TeamWiki: React.FC = () => {
                   <Alert
                     type="warning"
                     showIcon
-                    message="已提交入库，等待审核后可被检索"
+                    title="已提交入库，等待审核后可被检索"
                     description={`RAG 文档 ID：${selected.publishedDocumentId ?? '—'}`}
                     style={{ marginBottom: 16 }}
                   />
@@ -460,7 +460,7 @@ const TeamWiki: React.FC = () => {
                   <Form.Item label={`来源引用（${referenceCount}）`}>
                     <Form.List name="references">
                       {(fields, { add, remove }) => (
-                        <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space orientation="vertical" style={{ width: '100%' }}>
                           {fields.map(({ key, name, ...restField }) => (
                             <Row gutter={8} key={key} align="middle">
                               <Col flex="1">

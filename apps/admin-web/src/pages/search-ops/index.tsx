@@ -39,14 +39,6 @@ const iconMap: Record<string, React.ReactNode> = {
   pptx: <FileWordOutlined className="file-icon ppt" />,
 };
 
-/** 筛选表单的一行（label + 控件） */
-const FilterRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-    <span style={{ width: 72, flexShrink: 0, color: '#667085' }}>{label}</span>
-    <div style={{ flex: 1 }}>{children}</div>
-  </div>
-);
-
 const graphNodePalette: Record<string, { fill: string; stroke: string; text: string }> = {
   Concept: { fill: '#e8f3ff', stroke: '#91caff', text: '#0958d9' },
   Artifact: { fill: '#f6edff', stroke: '#d3adf7', text: '#531dab' },
@@ -55,6 +47,9 @@ const graphNodePalette: Record<string, { fill: string; stroke: string; text: str
 };
 
 const getGraphNodeColor = (type: string) => graphNodePalette[type] ?? graphNodePalette.default;
+
+const getGraphEdgeKey = (edge: GraphSearchResult['edges'][number]) =>
+  edge.id ?? JSON.stringify([edge.source, edge.label, edge.target, edge.sourceId ?? null]);
 
 const shortenGraphLabel = (value: string, length = 12) => (
   value.length > length ? `${value.slice(0, length - 1)}…` : value
@@ -118,7 +113,7 @@ const GraphSearchCanvas: React.FC<{
               <path d="M0,0 L8,4 L0,8 Z" fill="#91a4bd" />
             </marker>
           </defs>
-          {graph.edges.map((edge, index) => {
+          {graph.edges.map((edge) => {
             const source = layout.positions.get(edge.source);
             const target = layout.positions.get(edge.target);
             if (!source || !target || edge.source === edge.target) return null;
@@ -131,7 +126,7 @@ const GraphSearchCanvas: React.FC<{
             const endX = target.x - (deltaX / distance) * (nodeRadius + 5);
             const endY = target.y - (deltaY / distance) * (nodeRadius + 5);
             return (
-              <line key={`${edge.source}-${edge.target}-${edge.label}-${index}`} x1={startX} y1={startY} x2={endX} y2={endY} stroke="#91a4bd" strokeWidth="1.5" markerEnd="url(#graph-arrow)">
+              <line key={getGraphEdgeKey(edge)} x1={startX} y1={startY} x2={endX} y2={endY} stroke="#91a4bd" strokeWidth="1.5" markerEnd="url(#graph-arrow)">
                 <title>{`${edge.sourceLabel ?? nodeById.get(edge.source)?.label ?? edge.source} → ${edge.label} → ${edge.targetLabel ?? nodeById.get(edge.target)?.label ?? edge.target}`}</title>
               </line>
             );
@@ -142,20 +137,45 @@ const GraphSearchCanvas: React.FC<{
             const color = getGraphNodeColor(node.type);
             const selected = node.id === selectedNodeId;
             return (
-              <g
-                key={node.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`查看节点 ${node.label}`}
-                onClick={() => onSelectNode(node.id)}
-                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelectNode(node.id); }}
-                style={{ cursor: 'pointer' }}
-              >
-                <title>{`${node.label}（${node.type}）${node.sourceId ? `，来源：${node.sourceId}` : ''}`}</title>
-                <circle cx={position.x} cy={position.y} r="29" fill={color.fill} stroke={selected ? '#1677ff' : color.stroke} strokeWidth={selected ? '3' : '1.5'} />
-                <text x={position.x} y={position.y + 4} textAnchor="middle" fontSize="12" fill={color.text} fontWeight="600">{shortenGraphLabel(node.label, 9)}</text>
-                <text x={position.x} y={position.y + 48} textAnchor="middle" fontSize="11" fill="#8c8c8c">{shortenGraphLabel(node.type || '其他', 14)}</text>
-              </g>
+              <foreignObject key={node.id} x={position.x - 48} y={position.y - 29} width="96" height="82">
+                <button
+                  type="button"
+                  aria-label={`查看节点 ${node.label}`}
+                  title={`${node.label}（${node.type}）${node.sourceId ? `，来源：${node.sourceId}` : ''}`}
+                  onClick={() => onSelectNode(node.id)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    width: '96px',
+                    height: '82px',
+                    padding: 0,
+                    border: 0,
+                    background: 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 58,
+                    height: 58,
+                    boxSizing: 'border-box',
+                    border: `${selected ? 3 : 1.5}px solid ${selected ? '#1677ff' : color.stroke}`,
+                    borderRadius: '50%',
+                    background: color.fill,
+                    color: color.text,
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}>
+                    {shortenGraphLabel(node.label, 9)}
+                  </span>
+                  <span style={{ marginTop: 2, color: '#8c8c8c', fontSize: 11, lineHeight: '14px' }}>
+                    {shortenGraphLabel(node.type || '其他', 14)}
+                  </span>
+                </button>
+              </foreignObject>
             );
           })}
         </svg>
@@ -164,8 +184,8 @@ const GraphSearchCanvas: React.FC<{
         <div>
           <Typography.Text strong>关系明细</Typography.Text>
           <Space wrap style={{ display: 'flex', marginTop: 8 }}>
-            {graph.edges.map((edge, index) => (
-              <Tag key={`${edge.source}-${edge.target}-${edge.label}-${index}`} style={{ whiteSpace: 'normal', margin: 0 }}>
+            {graph.edges.map((edge) => (
+              <Tag key={getGraphEdgeKey(edge)} style={{ whiteSpace: 'normal', margin: 0 }}>
                 {shortenGraphLabel(edge.sourceLabel ?? nodeById.get(edge.source)?.label ?? edge.source, 16)} → {edge.label} → {shortenGraphLabel(edge.targetLabel ?? nodeById.get(edge.target)?.label ?? edge.target, 16)}
               </Tag>
             ))}
@@ -306,11 +326,29 @@ const SearchOps: React.FC = () => {
 
   const renderHighlight = (fragment: string) => {
     const parts = fragment.split(/(<em>|<\/em>)/g);
+    const occurrences = new Map<string, number>();
     let highlighted = false;
-    return parts.map((part, index) => {
+    return parts.map((part) => {
       if (part === '<em>') { highlighted = true; return null; }
       if (part === '</em>') { highlighted = false; return null; }
-      return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+      const keyBase = `${highlighted ? 'match' : 'text'}:${part}`;
+      const occurrence = occurrences.get(keyBase) ?? 0;
+      occurrences.set(keyBase, occurrence + 1);
+      const key = `${keyBase}:${occurrence}`;
+      return highlighted ? <mark key={key}>{part}</mark> : <span key={key}>{part}</span>;
+    });
+  };
+
+  const renderHighlightFragments = (item: FullTextResult) => {
+    const occurrences = new Map<string, number>();
+    return item.highlightFragments.map((fragment) => {
+      const occurrence = occurrences.get(fragment) ?? 0;
+      occurrences.set(fragment, occurrence + 1);
+      return (
+        <Typography.Paragraph key={`${item.docId}:${fragment}:${occurrence}`} style={{ marginBottom: 4 }}>
+          {renderHighlight(fragment)}
+        </Typography.Paragraph>
+      );
     });
   };
 
@@ -358,7 +396,7 @@ const SearchOps: React.FC = () => {
             <List.Item key={item.docId}>
               <List.Item.Meta
                 title={<span>{item.title || item.filename} <Tag color="blue">{item.docVersion || '未标版本'}</Tag></span>}
-                description={<div>{item.highlightFragments.length ? item.highlightFragments.map((fragment, index) => <Typography.Paragraph key={index} style={{ marginBottom: 4 }}>{renderHighlight(fragment)}</Typography.Paragraph>) : item.summary || '正文命中，但没有返回高亮片段。'}</div>}
+                description={<div>{item.highlightFragments.length ? renderHighlightFragments(item) : item.summary || '正文命中，但没有返回高亮片段。'}</div>}
               />
             </List.Item>
           ))}
@@ -384,7 +422,7 @@ const SearchOps: React.FC = () => {
 
       {sideView === 'filter' && (
         <Card title="搜索筛选" style={{ marginBottom: 12 }}>
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <Typography.Text type="secondary">筛选条件会和关键词一起提交，只对文档全文检索生效；草稿、归档和已废弃版本不会出现在结果中。</Typography.Text>
             <Space wrap>
               <Select style={{ width: 150 }} value={filters.fileType ?? ''} options={fileTypeOptions} onChange={(value) => setFilters((current) => ({ ...current, fileType: value || undefined }))} />

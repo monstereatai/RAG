@@ -15,6 +15,13 @@
 ## 细节入口
 
 - [功能步骤流程](interview/功能步骤流程.md)：真实用户请求、知识入库、问答模式和工作流的步骤图。
+- [AI Agent 面试与 JD 对照 RAG 项目差距清单](interview/ai-agent-interview-rag-gap-analysis.md)：按 T00–T43 和 J01–J14 对照仓库实现，区分代码优化、真实数据/目标环境验收和非项目范围。
+- 四窗口并行执行任务单（共享工作树时按文件范围协作）：
+  - [窗口 1：Agent、模型与工具](interview/ai-agent-rag-window-1-agent-model-tools.md)
+  - [窗口 1：面试证据与模型对比手册](interview/ai-agent-rag-window-1-evidence-and-model-comparison.md)
+  - [窗口 2：记忆、知识入库与 RAG](interview/ai-agent-rag-window-2-memory-retrieval-data.md)
+  - [窗口 3：评测、可观测与运行可靠性](interview/ai-agent-rag-window-3-evaluation-reliability.md)
+  - [窗口 4：Sandbox、安全、产品化与 JD](interview/ai-agent-rag-window-4-sandbox-product-jd.md)
 - [上下文工程指南逐篇对照](reference/CONTEXT_ENGINEERING_GUIDE_AUDIT.md)：按固定 GitHub 提交逐篇核对 43 篇参考文章、当前实现和适用差距。
 - [Playway 组件清单](reference/playway-component-inventory.md)：项目业务模块使用的组件名称与组合信息。
 - [RAG CLI 与主项目的关系](cli-docs/README.md)：说明 CLI 在系统中的职责、边界，并链接到包内产品、架构、使用和进度文档。

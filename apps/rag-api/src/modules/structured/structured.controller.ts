@@ -28,24 +28,35 @@ export class StructuredController {
     }
 
     return new Observable<SseEvent>((subscriber) => {
+      const abortController = new AbortController();
       void (async () => {
         try {
-          await this.structuredService.streamReport(topic, (event) => {
-            subscriber.next({
-              type: event.type,
-              data: event.data,
-            });
-          });
+          await this.structuredService.streamReport(
+            topic,
+            (event) => {
+              subscriber.next({
+                type: event.type,
+                data: event.data,
+              });
+            },
+            abortController.signal,
+          );
           subscriber.next({ type: 'done', data: { ok: true } });
           subscriber.complete();
-        } catch (err) {
+        } catch {
+          if (abortController.signal.aborted) return;
           subscriber.next({
             type: 'error',
-            data: { message: (err as Error).message },
+            data: {
+              code: 'STRUCTURED_REPORT_FAILED',
+              message: '结构化报告生成失败，请稍后重试。',
+            },
           });
           subscriber.complete();
         }
       })();
+
+      return () => abortController.abort();
     });
   }
 }

@@ -102,7 +102,7 @@ const FeishuWikiPage: React.FC = () => {
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={8}>
           <Card title="知识空间同步">
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
               <div>
                 <div style={{ marginBottom: 8 }}>飞书 Wiki Space ID</div>
                 <Input
@@ -140,7 +140,7 @@ const FeishuWikiPage: React.FC = () => {
                 </Button>
               </Space>
               <Alert
-                message="凭据由 RAG Backend 服务端读取"
+                title="凭据由 RAG Backend 服务端读取"
                 description="此页面不读取或保存飞书 App ID、App Secret 等凭据。RAG Backend 还需配置 FEISHU_WIKI_ALLOWED_RAG_TENANT_IDS 才能启用连接器。共享默认关闭；开启共享时，服务端会从当前管理员账户读取租户归属并限制索引 ACL。"
                 showIcon
                 type="info"
@@ -169,7 +169,7 @@ const FeishuWikiPage: React.FC = () => {
                 </Descriptions>
                 {status.lastError && (
                   <Alert
-                    message="最近同步错误"
+                    title="最近同步错误"
                     description={status.lastError}
                     showIcon
                     style={{ marginTop: 16 }}

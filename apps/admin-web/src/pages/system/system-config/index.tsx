@@ -74,7 +74,6 @@ const SystemConfigPage: React.FC = () => {
         );
       case 'empty':
         return <Empty description="暂无系统配置数据" />;
-      case 'data':
       default:
         return Object.entries(grouped).map(([group, items]) => (
           <Card
@@ -97,7 +96,7 @@ const SystemConfigPage: React.FC = () => {
                   disabled
                 />
               ))}
-              <Alert type="info" showIcon message="当前配置为只读状态" description="配置来自环境变量或启动默认值，修改环境变量并重启对应服务后生效；后台暂不提供持久化保存。" />
+              <Alert type="info" showIcon title="当前配置为只读状态" description="配置来自环境变量或启动默认值，修改环境变量并重启对应服务后生效；后台暂不提供持久化保存。" />
             </ProForm>
           </Card>
         ));

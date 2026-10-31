@@ -14,6 +14,8 @@ import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { QueryLogEntity } from '../../providers/db/entities/query-log.entity';
 import { RagFeedbackEntity } from '../../providers/db/entities/rag-feedback.entity';
 import { EvaluationCaseEntity } from '../../providers/db/entities/evaluation-case.entity';
+import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
+import { AgentRuntimeEventEntity } from '../../providers/db/entities/agent-runtime-event.entity';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { AgentRunsModule } from '../agent-runs/agent-runs.module';
 import { RagFeedbackService } from './rag-feedback.service';
@@ -37,6 +39,8 @@ import { ChatQueryLogService } from './chat-query-log.service';
       RagFeedbackEntity,
       EvaluationCaseEntity,
       KnowledgeBaseProfileEntity,
+      AgentRunEntity,
+      AgentRuntimeEventEntity,
     ]),
     ConfigModule,
     RagModule,

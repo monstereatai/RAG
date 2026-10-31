@@ -252,7 +252,10 @@ export class AuthService {
 
     const passwordHash = AuthUserStore.hashPassword(dto.newPassword);
     await this.userStore.updatePassword(user.id, passwordHash);
-    await this.identitySync?.sync({ ...user, passwordHash }, { required: true });
+    await this.identitySync?.sync(
+      { ...user, passwordHash },
+      { required: true },
+    );
     await this.tokenStore.delete(this.passwordResetCodeKey(email));
     return { reset: true, message: '密码已重置，请使用新密码登录' };
   }

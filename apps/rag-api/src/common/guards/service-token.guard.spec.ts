@@ -56,7 +56,7 @@ describe('ServiceTokenGuard', () => {
     expect(guard.canActivate(createContext(request))).toBe(true);
   });
 
-  it('rejects a valid-looking user JWT instead of treating it as a service identity', async () => {
+  it('rejects a valid-looking user JWT instead of treating it as a service identity', () => {
     const guard = createGuard('configured-token');
     const request = {
       headers: { authorization: 'Bearer user-jwt' },

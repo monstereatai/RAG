@@ -94,7 +94,9 @@ export class ArtifactQueueService implements OnModuleDestroy {
         ? this.llmProvider.runWithRequestBudget(process)
         : process();
       void execution.catch((error: Error) => {
-        this.logger.error(`Artifact job ${artifactId} failed: ${error.message}`);
+        this.logger.error(
+          `Artifact job ${artifactId} failed: ${error.message}`,
+        );
       });
     });
   }

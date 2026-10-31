@@ -3,7 +3,7 @@ import { ArtifactQueueService } from './artifact-queue.service';
 
 describe('ArtifactQueueService', () => {
   const config = (values: Record<string, unknown>) =>
-    ({ get: (key: string) => values[key] } as unknown as ConfigService);
+    ({ get: (key: string) => values[key] }) as unknown as ConfigService;
 
   it('fails closed in production without Redis', async () => {
     const queue = new ArtifactQueueService(

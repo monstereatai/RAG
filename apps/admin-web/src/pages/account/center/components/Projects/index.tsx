@@ -5,7 +5,6 @@ import React from 'react';
 
 dayjs.extend(relativeTime);
 
-import { AvatarList } from '@/components';
 import type { ListItemDataType } from '../../data.d';
 import useStyles from './index.style';
 

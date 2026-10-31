@@ -1,5 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '../../modules/metrics/metrics.service';
+import { LlmProvider } from '../llm/llm.provider';
 import {
   IMultimodalEmbeddingProvider,
   MultimodalImageInput,
@@ -32,6 +34,10 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_TEXT_LENGTH = 512; // multimodal-embedding-v1 文本上限 512 token，提前截断兜底
 
 interface DashScopeMultimodalEmbeddingResponse {
+  usage?: {
+    prompt_tokens?: unknown;
+    total_tokens?: unknown;
+  };
   output?: {
     embeddings?: Array<{
       index?: unknown;
@@ -58,6 +64,8 @@ export class MultimodalEmbeddingProvider implements IMultimodalEmbeddingProvider
 
   constructor(
     private readonly config: ConfigService,
+    private readonly llmProvider: LlmProvider,
+    private readonly metricsService: MetricsService,
     @Optional()
     @Inject(MULTIMODAL_EMBEDDING_FETCH_TOKEN)
     fetchImpl?: MultimodalEmbeddingFetch,
@@ -135,50 +143,88 @@ export class MultimodalEmbeddingProvider implements IMultimodalEmbeddingProvider
     }
 
     const url = `${this.baseUrl}${EMBEDDING_PATH}`;
-    const response = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.model,
-        input: { contents },
-        parameters,
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `DashScope multimodal embedding failed: ${response.status} ${body.slice(0, 200)}`,
-      );
-    }
-
-    const payload =
-      (await response.json()) as DashScopeMultimodalEmbeddingResponse;
-    const embeddingItem = payload.output?.embeddings?.[0];
-    const vector = embeddingItem?.embedding;
-    const embeddingType =
-      typeof embeddingItem?.type === 'string' ? embeddingItem.type : '';
-
-    if (!Array.isArray(vector) || vector.length === 0) {
-      throw new Error(
-        `DashScope multimodal embedding 返回无效向量：code=${payload.code ?? 'unknown'} message=${payload.message ?? 'empty embeddings'}`,
-      );
-    }
-
-    if (vector.length !== this.dimension) {
-      throw new Error(
-        `多模态嵌入维度不匹配：模型返回 ${vector.length} 维，配置 MULTIMODAL_EMBEDDING_DIM=${this.dimension}。` +
-          '请调整 MULTIMODAL_EMBEDDING_DIM / MILVUS_IMAGE_DIMENSION 与模型输出保持一致。',
-      );
-    }
-
-    this.logger.debug(
-      `Multimodal embedding ok: model=${this.model} dim=${vector.length} type=${embeddingType}`,
+    const request = {
+      model: this.model,
+      input: { contents },
+      parameters,
+    };
+    const budgetInput = contents.map((content) =>
+      'image' in content ? '__LLM_IMAGE_PAYLOAD__' : content.text,
     );
-    return vector.map((v) => (typeof v === 'number' ? v : Number(v)));
+    return this.llmProvider.runWithExternalModelBudget(
+      budgetInput,
+      0,
+      async (requestSignal) => {
+        const startedAt = Date.now();
+        let status: 'success' | 'error' = 'success';
+        try {
+          const response = await this.fetchImpl(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(request),
+            signal: AbortSignal.any([
+              requestSignal,
+              AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            ]),
+          });
+
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(
+              `DashScope multimodal embedding failed: ${response.status} ${body.slice(0, 200)}`,
+            );
+          }
+
+          const payload =
+            (await response.json()) as DashScopeMultimodalEmbeddingResponse;
+          const embeddingItem = payload.output?.embeddings?.[0];
+          const vector = embeddingItem?.embedding;
+          const embeddingType =
+            typeof embeddingItem?.type === 'string' ? embeddingItem.type : '';
+
+          if (!Array.isArray(vector) || vector.length === 0) {
+            throw new Error(
+              `DashScope multimodal embedding 返回无效向量：code=${payload.code ?? 'unknown'} message=${payload.message ?? 'empty embeddings'}`,
+            );
+          }
+
+          if (vector.length !== this.dimension) {
+            throw new Error(
+              `多模态嵌入维度不匹配：模型返回 ${vector.length} 维，配置 MULTIMODAL_EMBEDDING_DIM=${this.dimension}。` +
+                '请调整 MULTIMODAL_EMBEDDING_DIM / MILVUS_IMAGE_DIMENSION 与模型输出保持一致。',
+            );
+          }
+
+          const actualInputTokens =
+            payload.usage?.prompt_tokens ?? payload.usage?.total_tokens;
+          if (typeof actualInputTokens === 'number') {
+            this.metricsService.observeEmbeddingUsage(
+              'dashscope-multimodal',
+              this.model,
+              actualInputTokens,
+            );
+          }
+
+          this.logger.debug(
+            `Multimodal embedding ok: model=${this.model} dim=${vector.length} type=${embeddingType}`,
+          );
+          return vector.map((v) => (typeof v === 'number' ? v : Number(v)));
+        } catch (error) {
+          status = 'error';
+          throw error;
+        } finally {
+          this.metricsService.observeEmbeddingCall(
+            'dashscope-multimodal',
+            this.model,
+            status,
+            (Date.now() - startedAt) / 1000,
+            contents.length,
+          );
+        }
+      },
+    );
   }
 }

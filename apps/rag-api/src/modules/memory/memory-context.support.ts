@@ -46,6 +46,15 @@ export function isExpiredUserMemory(
   return validUntil < today;
 }
 
+export function isUserScopedMemory(memory: Mem0MemoryResult): boolean {
+  const scope = memory.metadata?.rag_memory_scope;
+  return scope === 'user' || (scope === undefined && !memory.metadata?.run_id);
+}
+
+export function isSupersededUserMemory(memory: Mem0MemoryResult): boolean {
+  return typeof memory.metadata?.rag_superseded_at === 'string';
+}
+
 /** Only accept a single valid expiry date explicitly stated by the user. */
 export function extractExplicitUserMemoryExpiration(
   userText: string,

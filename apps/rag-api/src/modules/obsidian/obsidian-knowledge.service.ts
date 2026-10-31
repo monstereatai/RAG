@@ -23,11 +23,17 @@ export type {
   ProjectWorkflowType,
 } from './obsidian-knowledge.types';
 import { ObsidianCompiledIndexSupport } from './obsidian-knowledge.index-support';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
+import {
+  obsidianNoteDraftPromptDefinition,
+  obsidianProjectWorkflowPromptDefinition,
+} from './obsidian-knowledge.prompts';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 
 @Injectable()
 export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
@@ -36,6 +42,7 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
   constructor(
     protected readonly config: ConfigService,
     private readonly llmProvider: LlmProvider,
+    @Optional() private readonly langfuseProvider?: LangfuseProvider,
   ) {
     super();
   }
@@ -70,7 +77,7 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
         };
       }
 
-      const draft = await this.buildDraft(content, title);
+      const draft = await this.buildDraft(content, title, input.userId);
       const date = this.today();
       const rawPath = await this.writeRaw({
         date,
@@ -138,17 +145,16 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
           const body = content.replace(/^---[\s\S]*?---\s*/m, '').trim();
           const score = this.scoreText(
             tokens,
-            `${frontmatter.title ?? ''}\n${body}`,
+            `${this.frontmatterString(frontmatter.title) ?? ''}\n${body}`,
           );
           if (score <= 0) return null;
           return {
             path: file.path,
             type: file.type,
-            title: String(
-              frontmatter.title ||
-                this.titleFromMarkdown(body) ||
-                basename(file.path, '.md'),
-            ),
+            title:
+              this.frontmatterString(frontmatter.title) ??
+              this.titleFromMarkdown(body) ??
+              basename(file.path, '.md'),
             content: this.snippet(body, tokens),
             ...(this.frontmatterString(frontmatter.type) === 'source_note'
               ? { isSourceNote: true }
@@ -210,11 +216,10 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
     return {
       notePath,
       ragDocId: this.frontmatterString(frontmatter.rag_doc_id),
-      title: String(
-        frontmatter.title ||
-          this.titleFromMarkdown(content) ||
-          basename(notePath, '.md'),
-      ),
+      title:
+        this.frontmatterString(frontmatter.title) ??
+        this.titleFromMarkdown(content) ??
+        basename(notePath, '.md'),
       tags: this.frontmatterTags(frontmatter.tags),
       contentHash,
     };
@@ -246,7 +251,11 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
       .trim();
     const hits = await this.search(query, 8, access);
     const evidence = this.formatHitsForPrompt(hits);
-    const body = await this.buildProjectWorkflowMarkdown(input, evidence);
+    const body = await this.buildProjectWorkflowMarkdown(
+      input,
+      evidence,
+      access.userId,
+    );
     const date = this.today();
     const dir = resolve(this.compiledDir(), 'project-workflows', input.type);
     await mkdir(dir, { recursive: true });
@@ -350,35 +359,64 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
   private async buildDraft(
     content: string,
     title: string,
+    userId?: string,
   ): Promise<ObsidianNoteDraft> {
+    const startedAt = Date.now();
+    const promptVersion = getPromptVersion('obsidian.note_draft');
     try {
-      const response = await this.llmProvider.invoke([
+      const response = await this.llmProvider.invoke(
+        [
+          {
+            role: 'system',
+            content: obsidianNoteDraftPromptDefinition.system,
+          },
+          {
+            role: 'user',
+            content: [
+              ...obsidianNoteDraftPromptDefinition.instructions,
+              '',
+              `${obsidianNoteDraftPromptDefinition.inputLabels.title}${title}`,
+              '',
+              obsidianNoteDraftPromptDefinition.inputLabels.content,
+              content.slice(0, obsidianNoteDraftPromptDefinition.contentLimit),
+            ].join('\n'),
+          },
+        ],
         {
-          role: 'system',
-          content:
-            '你是个人知识库整理助手。只返回 JSON，不要 Markdown，不要解释。',
+          metadata: {
+            promptVersion,
+          },
         },
-        {
-          role: 'user',
-          content: [
-            '请完整阅读下面文章，生成个人知识库笔记元信息。',
-            '要求：',
-            '1. summary 写 2-3 句话，每句话独立成数组项。',
-            '2. keyPoints 写 3-5 条要点。',
-            '3. tags 写 3-5 个中文标签，不够就少写，别硬凑。',
-            '4. topics 写 2-5 个主题，entities 写 2-8 个人/产品/公司/技术/模块实体。',
-            '5. keyConclusions 写关键结论，objections 写反对意见，boundaries 写适用边界，risks 写落地风险，acceptanceCriteria 写验收口径。',
-            '6. 只返回 JSON：{"summary":[],"keyPoints":[],"tags":[],"topics":[],"entities":[],"keyConclusions":[],"objections":[],"boundaries":[],"risks":[],"acceptanceCriteria":[]}',
-            '',
-            `标题：${title}`,
-            '',
-            '正文：',
-            content.slice(0, 20_000),
-          ].join('\n'),
+      );
+      const draft = this.normalizeDraft(JSON.parse(this.extractJson(response)));
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.obsidian.note_draft',
+        userId,
+        promptVersions: { 'obsidian.note_draft': promptVersion },
+        status: 'success',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: { contentChars: content.length },
+        outputSummary: {
+          summaryCount: draft.summary.length,
+          keyPointCount: draft.keyPoints.length,
+          tagCount: draft.tags.length,
+          topicCount: draft.topics.length,
         },
-      ]);
-      return this.normalizeDraft(JSON.parse(this.extractJson(response)));
+      });
+      return draft;
     } catch (error) {
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.obsidian.note_draft',
+        userId,
+        promptVersions: { 'obsidian.note_draft': promptVersion },
+        status: 'fallback',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: { contentChars: content.length },
+        outputSummary: {
+          fallback: true,
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+      });
       this.logger.warn(
         `Obsidian draft failed, fallback to heuristic: ${
           error instanceof Error ? error.message : String(error)
@@ -496,36 +534,75 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
   private async buildProjectWorkflowMarkdown(
     input: ProjectWorkflowInput,
     evidence: string,
+    userId?: string,
   ): Promise<string> {
+    const startedAt = Date.now();
+    const promptVersion = getPromptVersion('obsidian.project_workflow');
     const prompt = [
-      '你是软件项目决策编排助手。请基于输入和 Obsidian 证据输出 Markdown，不要输出代码围栏。',
-      `工作流类型：${this.workflowLabel(input.type)}`,
+      obsidianProjectWorkflowPromptDefinition.system,
+      `${obsidianProjectWorkflowPromptDefinition.labels.workflowType}${this.workflowLabel(input.type)}`,
       '',
-      '固定要求：',
-      '- 结论先行。',
-      '- 明确方案取舍，不要含糊。',
-      '- 每个关键判断都要写依据或待确认项。',
-      '- 输出要能直接放进 Obsidian 作为项目决策记录。',
+      obsidianProjectWorkflowPromptDefinition.labels.commonRequirements,
+      ...obsidianProjectWorkflowPromptDefinition.commonRequirements.map(
+        (requirement) =>
+          `${obsidianProjectWorkflowPromptDefinition.labels.bullet} ${requirement}`,
+      ),
       '',
       this.workflowInstruction(input.type),
       '',
-      `标题：${input.title}`,
-      `问题：${input.question}`,
-      input.context ? `背景：${input.context}` : '',
+      `${obsidianProjectWorkflowPromptDefinition.labels.title}${input.title}`,
+      `${obsidianProjectWorkflowPromptDefinition.labels.question}${input.question}`,
+      input.context
+        ? `${obsidianProjectWorkflowPromptDefinition.labels.context}${input.context}`
+        : '',
       input.constraints?.length
-        ? `约束：\n${input.constraints.map((item) => `- ${item}`).join('\n')}`
+        ? `${obsidianProjectWorkflowPromptDefinition.labels.constraints}\n${input.constraints.map((item) => `${obsidianProjectWorkflowPromptDefinition.labels.bullet} ${item}`).join('\n')}`
         : '',
       input.options?.length
-        ? `候选方案：\n${input.options.map((item) => `- ${item}`).join('\n')}`
+        ? `${obsidianProjectWorkflowPromptDefinition.labels.options}\n${input.options.map((item) => `${obsidianProjectWorkflowPromptDefinition.labels.bullet} ${item}`).join('\n')}`
         : '',
       '',
-      'Obsidian 证据：',
-      evidence || '无',
+      obsidianProjectWorkflowPromptDefinition.labels.evidence,
+      evidence || obsidianProjectWorkflowPromptDefinition.labels.emptyEvidence,
     ].join('\n');
 
     try {
-      return (await this.llmProvider.invoke(prompt)).trim();
+      const markdown = (
+        await this.llmProvider.invoke(prompt, {
+          metadata: { promptVersion },
+        })
+      ).trim();
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.obsidian.project_workflow',
+        userId,
+        promptVersions: { 'obsidian.project_workflow': promptVersion },
+        status: 'success',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: {
+          workflowType: input.type,
+          questionChars: input.question.length,
+          evidenceChars: evidence.length,
+        },
+        outputSummary: { markdownChars: markdown.length },
+      });
+      return markdown;
     } catch (error) {
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.obsidian.project_workflow',
+        userId,
+        promptVersions: { 'obsidian.project_workflow': promptVersion },
+        status: 'fallback',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: {
+          workflowType: input.type,
+          questionChars: input.question.length,
+          evidenceChars: evidence.length,
+        },
+        outputSummary: {
+          fallback: true,
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+      });
       this.logger.warn(
         `Project workflow generation failed, fallback to template: ${
           error instanceof Error ? error.message : String(error)
@@ -536,58 +613,13 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
   }
 
   private workflowInstruction(type: ProjectWorkflowType): string {
-    if (type === 'solution') {
-      return [
-        '请输出以下小节：',
-        '## 推荐方案',
-        '## 方案对比',
-        '## 取舍理由',
-        '## 适用边界',
-        '## 风险与缓解',
-        '## 待确认问题',
-      ].join('\n');
-    }
-    if (type === 'tech-selection') {
-      return [
-        '请输出以下小节：',
-        '## 最终技术选型',
-        '## 候选技术评分',
-        '## 关键约束',
-        '## 集成影响',
-        '## 迁移/替换成本',
-        '## 待验证点',
-      ].join('\n');
-    }
-    if (type === 'adr') {
-      return [
-        '请按 ADR 格式输出以下小节：',
-        '## Status',
-        '## Context',
-        '## Decision',
-        '## Alternatives',
-        '## Consequences',
-        '## Rollback Conditions',
-      ].join('\n');
-    }
-    return [
-      '请输出以下小节：',
-      '## 模块拆解',
-      '## 接口清单',
-      '## 数据流',
-      '## 里程碑',
-      '## 风险清单',
-      '## 验收标准',
+    return obsidianProjectWorkflowPromptDefinition.workflowInstructions[
+      type
     ].join('\n');
   }
 
   private workflowLabel(type: ProjectWorkflowType): string {
-    const labels: Record<ProjectWorkflowType, string> = {
-      solution: '方案选择',
-      'tech-selection': '技术选型',
-      adr: '架构决策 ADR',
-      'task-breakdown': '任务拆解',
-    };
-    return labels[type];
+    return obsidianProjectWorkflowPromptDefinition.workflowLabels[type];
   }
 
   private fallbackProjectWorkflowMarkdown(input: ProjectWorkflowInput): string {
@@ -719,11 +751,10 @@ export class ObsidianKnowledgeService extends ObsidianCompiledIndexSupport {
       const content = await readFile(file.path, 'utf8');
       const frontmatter = this.parseFrontmatter(content);
       if (!this.isPublicFrontmatter(frontmatter)) continue;
-      const title = String(
-        frontmatter.title ||
-          this.titleFromMarkdown(content) ||
-          basename(file.path, '.md'),
-      );
+      const title =
+        this.frontmatterString(frontmatter.title) ??
+        this.titleFromMarkdown(content) ??
+        basename(file.path, '.md');
       const type =
         this.frontmatterString(frontmatter.workflow_type) ?? 'unknown';
       lines.push(

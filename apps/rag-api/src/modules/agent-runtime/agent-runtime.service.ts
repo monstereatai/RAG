@@ -79,6 +79,9 @@ export class AgentRuntimeService {
         objective,
         stages,
         selectedSkills: matchedSkills.map((skill) => skill.name),
+        selectedSkillVersions: Object.fromEntries(
+          matchedSkills.map((skill) => [skill.name, skill.version]),
+        ),
         skillMatching: input.skipSkillMatching ? 'skipped_simple' : 'matched',
         contextPolicy: {
           isolatedByThread: true,
@@ -129,12 +132,18 @@ export class AgentRuntimeService {
       failure.payload && typeof failure.payload === 'object'
         ? (failure.payload as Record<string, unknown>)
         : {};
-    const reason = String(
-      payload.error ??
-        payload.reason ??
-        payload.message ??
-        '运行事件标记为失败',
-    );
+    const reasonCandidate = payload.error ?? payload.reason ?? payload.message;
+    const reason =
+      typeof reasonCandidate === 'string'
+        ? reasonCandidate
+        : reasonCandidate instanceof Error
+          ? reasonCandidate.message
+          : reasonCandidate &&
+              typeof reasonCandidate === 'object' &&
+              'message' in reasonCandidate &&
+              typeof reasonCandidate.message === 'string'
+            ? reasonCandidate.message
+            : '运行事件标记为失败';
     return {
       found: true,
       sequence: failure.sequence,

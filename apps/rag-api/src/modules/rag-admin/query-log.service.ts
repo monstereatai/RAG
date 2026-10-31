@@ -91,7 +91,9 @@ export class QueryLogService {
     if (now - this.lastRetentionSweepAt < 60 * 60 * 1000) return;
     this.lastRetentionSweepAt = now;
     void this.purgeExpired().catch((error: unknown) => {
-      this.logger.warn(`Failed to purge expired query logs: ${(error as Error).message}`);
+      this.logger.warn(
+        `Failed to purge expired query logs: ${(error as Error).message}`,
+      );
     });
   }
 

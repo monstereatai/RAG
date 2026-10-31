@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import { countTextTokens } from '../document/chunking.util';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import {
+  getPromptMetadata,
+  getPromptVersion,
+} from '../../rag/prompts/prompt-registry';
 import { AgentEvalDto } from './agent-eval.dto';
 import { agentEvalJudgeSystemPrompt } from './agent-eval.prompts';
 
@@ -12,10 +15,18 @@ const judgeSchema = z.object({
     z.object({ claim: z.string(), supported: z.boolean(), reason: z.string() }),
   ),
   coverageAssertions: z.array(
-    z.object({ requirement: z.string(), covered: z.boolean(), reason: z.string() }),
+    z.object({
+      requirement: z.string(),
+      covered: z.boolean(),
+      reason: z.string(),
+    }),
   ),
   contextRecallAssertions: z.array(
-    z.object({ expectedClaim: z.string(), present: z.boolean(), reason: z.string() }),
+    z.object({
+      expectedClaim: z.string(),
+      present: z.boolean(),
+      reason: z.string(),
+    }),
   ),
   reason: z.string(),
 });
@@ -69,7 +80,9 @@ export class AgentEvalService {
     );
     const missingGoldens = [
       ...(requiredClaims.length === 0 ? ['答案必须覆盖的标准要求'] : []),
-      ...(expectedContextClaims.length === 0 ? ['检索上下文应包含的标准证据'] : []),
+      ...(expectedContextClaims.length === 0
+        ? ['检索上下文应包含的标准证据']
+        : []),
     ];
     if (missingGoldens.length > 0) {
       return this.result(
@@ -98,7 +111,9 @@ export class AgentEvalService {
     const outputProviders = [
       structuredPolicy.primary,
       structuredPolicy.fallback,
-    ].filter((provider): provider is NonNullable<typeof provider> => !!provider);
+    ].filter(
+      (provider): provider is NonNullable<typeof provider> => !!provider,
+    );
     const outputReserveTokens = Math.max(
       ...outputProviders.map((provider) =>
         Math.max(
@@ -146,7 +161,10 @@ export class AgentEvalService {
         `大模型裁判不可用：${error instanceof Error ? error.message : String(error)}`,
         baseMetrics,
         structure.missing,
-        { available: false, error: error instanceof Error ? error.message : String(error) },
+        {
+          available: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
       );
     }
 
@@ -163,8 +181,12 @@ export class AgentEvalService {
       ]),
     );
     const assertionsComplete =
-      requiredClaims.every((claim) => coverageByRequirement.has(this.normalizeClaim(claim))) &&
-      expectedContextClaims.every((claim) => contextByClaim.has(this.normalizeClaim(claim))) &&
+      requiredClaims.every((claim) =>
+        coverageByRequirement.has(this.normalizeClaim(claim)),
+      ) &&
+      expectedContextClaims.every((claim) =>
+        contextByClaim.has(this.normalizeClaim(claim)),
+      ) &&
       (input.output.trim().length === 0 || judged.answerAssertions.length > 0);
 
     if (!assertionsComplete) {
@@ -179,13 +201,18 @@ export class AgentEvalService {
     }
 
     const coverageAssertions = requiredClaims.map(
-      (requirement) => coverageByRequirement.get(this.normalizeClaim(requirement))!,
+      (requirement) =>
+        coverageByRequirement.get(this.normalizeClaim(requirement))!,
     );
     const contextRecallAssertions = expectedContextClaims.map(
-      (expectedClaim) => contextByClaim.get(this.normalizeClaim(expectedClaim))!,
+      (expectedClaim) =>
+        contextByClaim.get(this.normalizeClaim(expectedClaim))!,
     );
     const faithfulness = input.output.trim()
-      ? this.ratio(judged.answerAssertions.filter((item) => item.supported).length, judged.answerAssertions.length)
+      ? this.ratio(
+          judged.answerAssertions.filter((item) => item.supported).length,
+          judged.answerAssertions.length,
+        )
       : 0;
     const contextRecall = this.ratio(
       contextRecallAssertions.filter((item) => item.present).length,
@@ -257,11 +284,13 @@ export class AgentEvalService {
     ];
   }
 
-  private async judge(messages: JudgeMessages): Promise<z.infer<typeof judgeSchema>> {
+  private async judge(
+    messages: JudgeMessages,
+  ): Promise<z.infer<typeof judgeSchema>> {
     return this.llmProvider
       .getModel()
       .withStructuredOutput(judgeSchema)
-      .invoke(messages);
+      .invoke(messages, { metadata: getPromptMetadata('agent_eval.judge') });
   }
 
   private positiveNumber(value: number | undefined, fallback: number): number {
@@ -269,7 +298,8 @@ export class AgentEvalService {
   }
 
   private testCaseStructureCompleteness(output: string, taskType: string) {
-    if (taskType !== 'test_case') return { score: null, missing: [] as string[] };
+    if (taskType !== 'test_case')
+      return { score: null, missing: [] as string[] };
     const sections: Array<[string, RegExp]> = [
       ['前置条件', /前置条件|前提/],
       ['测试步骤', /测试步骤|操作步骤/],

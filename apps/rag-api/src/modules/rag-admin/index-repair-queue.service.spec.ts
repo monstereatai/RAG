@@ -1,10 +1,11 @@
+import { ConfigService } from '@nestjs/config';
 import { IndexRepairQueueService } from './index-repair-queue.service';
 
 describe('IndexRepairQueueService', () => {
   it('keeps local repair synchronous when Redis is absent in development', async () => {
     const service = new IndexRepairQueueService({
       get: () => undefined,
-    } as any);
+    } as unknown as ConfigService);
 
     expect(service.isEnabled()).toBe(false);
     expect(service.isRequired()).toBe(false);
@@ -20,9 +21,8 @@ describe('IndexRepairQueueService', () => {
 
   it('rejects in-process repair when strict dependencies require Redis', async () => {
     const service = new IndexRepairQueueService({
-      get: (key: string) =>
-        key === 'nodeEnv' ? 'production' : undefined,
-    } as any);
+      get: (key: string) => (key === 'nodeEnv' ? 'production' : undefined),
+    } as unknown as ConfigService);
 
     await expect(
       service.enqueue({

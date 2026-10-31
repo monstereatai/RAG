@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Repository } from 'typeorm';
 import { TraceSpanEntity } from '../../providers/db/entities/trace-span.entity';
@@ -30,6 +31,10 @@ export class TracingService {
   private readonly logger = new Logger(TracingService.name);
   private readonly spans: TraceSnapshot[] = [];
   private readonly maxSpans = 200;
+  private readonly activeTrace = new AsyncLocalStorage<{
+    traceId: string;
+    spanId: string;
+  }>();
 
   constructor(
     @Optional()
@@ -46,6 +51,16 @@ export class TracingService {
       startedAt: new Date(),
       startNs: process.hrtime.bigint(),
     };
+  }
+
+  runWithTrace<T>(
+    trace: Pick<StartedTrace, 'traceId' | 'spanId'>,
+    callback: () => T,
+  ): T {
+    return this.activeTrace.run(
+      { traceId: trace.traceId, spanId: trace.spanId },
+      callback,
+    );
   }
 
   finish(
@@ -83,13 +98,16 @@ export class TracingService {
     durationMs: number;
     startedAt: Date;
   }): TraceSnapshot {
-    const traceId = this.normalizeTraceId(input.threadId);
+    const activeTrace = this.activeTrace.getStore();
+    const traceId =
+      activeTrace?.traceId ?? this.normalizeTraceId(input.threadId);
     const nodeSpanCount = this.spans.filter(
       (span) => span.traceId === traceId && span.kind === 'agent_node',
     ).length;
     const snapshot: TraceSnapshot = {
       traceId,
       spanId: randomBytes(8).toString('hex'),
+      ...(activeTrace ? { parentSpanId: activeTrace.spanId } : {}),
       method: 'AGENT',
       route: input.node,
       status: input.status === 'success' ? 200 : 500,

@@ -72,7 +72,10 @@ export class DeepseekLlmProvider implements ILLMProvider {
       const signal = options.signal
         ? AbortSignal.any([options.signal, timeoutSignal])
         : timeoutSignal;
-      const response = await this.model.invoke(messages, { signal });
+      const response = await this.model.invoke(messages, {
+        signal,
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
       const usage = readLlmUsage(response);
       if (usage) {
         // 经由 LlmProvider.runWithUsage 时，模型回调已采集真实 usage；避免重复计数。

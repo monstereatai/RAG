@@ -4,15 +4,15 @@ describe('SpeechTicketService', () => {
   it('stores a speech-purpose ticket briefly and consumes it once', async () => {
     let value: string | null = null;
     const redis = {
-      setRequired: jest.fn(async (_key: string, next: string, ttl: number) => {
+      setRequired: jest.fn((_key: string, next: string, ttl: number) => {
         value = next;
         expect(ttl).toBe(30);
-        return true;
+        return Promise.resolve(true);
       }),
-      getdel: jest.fn(async () => {
+      getdel: jest.fn(() => {
         const current = value;
         value = null;
-        return current;
+        return Promise.resolve(current);
       }),
     };
     const service = new SpeechTicketService(redis as never);

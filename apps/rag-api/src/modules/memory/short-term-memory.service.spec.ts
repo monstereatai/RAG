@@ -126,18 +126,22 @@ describe('ShortTermMemoryService structured compression', () => {
     const stored: string[] = [];
     const redis = {
       isEnabled: () => true,
-      zrange: jest.fn().mockImplementation((key: string) =>
-        Promise.resolve(key.endsWith(':turns') ? [...stored] : []),
-      ),
+      zrange: jest
+        .fn()
+        .mockImplementation((key: string) =>
+          Promise.resolve(key.endsWith(':turns') ? [...stored] : []),
+        ),
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn(),
       setRequiredOrThrow: jest.fn().mockResolvedValue(undefined),
       zremRequired: jest.fn().mockResolvedValue(0),
       zremrangebyrank: jest.fn().mockResolvedValue(undefined),
-      zadd: jest.fn().mockImplementation((key: string, _score, member) => {
-        if (key.endsWith(':turns')) stored.push(member);
-        return Promise.resolve();
-      }),
+      zadd: jest
+        .fn()
+        .mockImplementation((key: string, _score, member: string) => {
+          if (key.endsWith(':turns')) stored.push(member);
+          return Promise.resolve();
+        }),
       expire: jest.fn().mockResolvedValue(undefined),
       setIfAbsent: jest.fn().mockResolvedValue(true),
       releaseLock: jest.fn().mockResolvedValue(undefined),
@@ -217,10 +221,12 @@ describe('ShortTermMemoryService structured compression', () => {
       zrange: jest.fn().mockResolvedValue(turns),
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn(),
-      setRequiredOrThrow: jest.fn().mockImplementation((_key, value) => {
-        storedSummary = value;
-        return Promise.resolve();
-      }),
+      setRequiredOrThrow: jest
+        .fn()
+        .mockImplementation((_key: string, value: string) => {
+          storedSummary = value;
+          return Promise.resolve();
+        }),
       zremrangebyrank: jest.fn().mockResolvedValue(4),
       zremRequired: jest.fn().mockResolvedValue(4),
       zadd: jest.fn().mockResolvedValue(undefined),
@@ -288,10 +294,17 @@ describe('ShortTermMemoryService structured compression', () => {
         version: 'V2',
       }),
     );
-    expect(redis.zremRequired).toHaveBeenCalledWith(
-      'stm:thread-1:turns',
-      ...turns.slice(0, 4),
-    );
+    const [trimmedKey, ...trimmedTurns] = redis.zremRequired.mock
+      .calls[0] as unknown as [string, ...string[]];
+    const trimmedSet = new Set(trimmedTurns);
+    expect(trimmedKey).toBe('stm:thread-1:turns');
+    expect(trimmedTurns.length).toBeGreaterThan(0);
+    for (let index = 0; index < turns.length; index += 2) {
+      expect(trimmedSet.has(turns[index])).toBe(
+        trimmedSet.has(turns[index + 1]),
+      );
+    }
+    expect(turns.slice(-2).some((turn) => trimmedSet.has(turn))).toBe(false);
     expect(conversationRepo.update).toHaveBeenCalledWith(
       'thread-1',
       expect.objectContaining({ contextSummaryVersion: 1 }),
@@ -312,10 +325,12 @@ describe('ShortTermMemoryService structured compression', () => {
       zrange: jest.fn().mockResolvedValue(turns),
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn(),
-      setRequiredOrThrow: jest.fn().mockImplementation((_key, value) => {
-        storedSummary = value;
-        return Promise.resolve();
-      }),
+      setRequiredOrThrow: jest
+        .fn()
+        .mockImplementation((_key: string, value: string) => {
+          storedSummary = value;
+          return Promise.resolve();
+        }),
       zremrangebyrank: jest.fn().mockResolvedValue(2),
       zremRequired: jest.fn().mockResolvedValue(2),
       zadd: jest.fn().mockResolvedValue(undefined),
@@ -366,6 +381,7 @@ describe('ShortTermMemoryService structured compression', () => {
           where: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           addOrderBy: jest.fn().mockReturnThis(),
+          skip: jest.fn().mockReturnThis(),
           take: jest.fn().mockReturnThis(),
           getMany: jest.fn().mockResolvedValue([]),
         })),

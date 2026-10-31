@@ -108,22 +108,24 @@ export class AgenticRagResume extends AgenticRagEvidence {
    * 原生 interrupt 不会提交同一节点中 interrupt 之后的返回值，因此 pending
    * 必须由前置节点单独写入 Checkpoint，供 API、Run 和前端在断线后恢复判断。
    */
-  async approvalPendingNode(
+  approvalPendingNode(
     state: AgenticRagStateType,
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType>> {
     const enableInterrupt = config?.configurable?.enableInterrupt as
       | boolean
       | undefined;
-    if (!enableInterrupt) return { humanApproval: 'approved' };
-    return {
+    if (!enableInterrupt) {
+      return Promise.resolve({ humanApproval: 'approved' });
+    }
+    return Promise.resolve({
       humanApproval: 'pending',
       executionState: {
         ...state.executionState,
         paused: true,
         lastNode: 'approvalPending',
       },
-    };
+    });
   }
 
   /**
@@ -394,9 +396,13 @@ export class AgenticRagResume extends AgenticRagEvidence {
    * 旧接口只有 Thread ID，不能恢复原运行的用户、租户、资料范围和审批参数。
    * 保留路由以便旧客户端得到明确错误，但拒绝以空权限上下文盲目重跑。
    */
-  async retryRun(_threadId: string, _onEvent?: SseCallback): Promise<never> {
-    throw new BadRequestException(
-      '旧版 Thread 重跑入口已停用，请使用 run-center/:id/retry 运行记录入口',
+  retryRun(_threadId: string, _onEvent?: SseCallback): Promise<never> {
+    void _threadId;
+    void _onEvent;
+    return Promise.reject(
+      new BadRequestException(
+        '旧版 Thread 重跑入口已停用，请使用 run-center/:id/retry 运行记录入口',
+      ),
     );
   }
 

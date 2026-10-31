@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "bd16ac002451a860",
+        "id": "ee2605a9abe30c06",
         "type": "tabs",
         "children": [
           {
-            "id": "0a035e0bb2d727d2",
+            "id": "64bc0bddf4b09fb5",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/interview/功能步骤流程.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "功能步骤流程"
+              "title": "新标签页"
             }
           }
         ]
@@ -158,7 +154,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/interview/功能步骤流程.md",
+                "file": "ai-agent-interview-questions-tech-stack-jd_副本.md",
                 "followCursor": true,
                 "showSearch": false,
                 "searchQuery": ""
@@ -183,24 +179,36 @@
       "templates:插入模板": false,
       "command-palette:打开命令面板": false,
       "bases:新建数据库": false,
-      "config-sync:Config Sync": false
+      "config-sync:Config Sync": false,
+      "obsidian-excalidraw-plugin:新建绘图文件": false
     }
   },
-  "active": "fb77c0ea0cbfa8a8",
+  "active": "5f8e80d77bbc57b6",
   "lastOpenFiles": [
-    "backend/dist/modules/grpc/rag.proto",
-    "backend/dist/modules/grpc",
-    "backend/dist/modules",
-    "backend/dist/tsconfig.build.tsbuildinfo",
-    "backend/dist/src/rag/karpathy/cosine.util.js",
-    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.js",
-    "backend/dist/src/migrations/1787500000000-AddDocumentReviewWorkflow.d.ts",
-    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.js.map",
-    "backend/dist/src/migrations/1787700000000-AddHypotheticalQuestions.d.ts",
-    "backend/dist/src/migrations/1787600000000-AddDomainEventOutbox.js",
-    "backend/dist/src/migrations/1787600000000-AddDomainEventOutbox.js.map",
-    "docs/interview/resume/resume-rag-project-game-marketing.md",
+    "apps/rag-api/dist/modules/grpc/rag.proto",
+    "apps/rag-api/dist/modules/grpc",
+    "apps/rag-api/dist/modules",
+    "apps/rag-api/dist/tsconfig.build.tsbuildinfo",
+    "apps/rag-api/dist/src/rag/retrieval/cosine.util.d.ts",
+    "apps/rag-api/dist/src/rag/retrieval/cosine.util.js",
+    "apps/rag-api/dist/src/rag/retrieval/cosine.util.js.map",
+    "apps/rag-api/dist/src/rag/prompts/query-similarity.d.ts",
+    "apps/rag-api/dist/src/rag/prompts/query-similarity.js",
+    "apps/rag-api/dist/src/rag/prompts/query-similarity.js.map",
+    "apps/rag-api/dist/src/rag/prompts/query-intent-router.d.ts",
+    "Users/monster/Downloads/Agent 求职经验分享及面经（一） - 非我莫属 _ 非我莫属, Lv1 - LINUX DO.mhtml.md",
+    "ai-agent-interview-questions-tech-stack-jd_副本.md",
     "docs/interview/功能步骤流程.md",
+    "docs/architecture/ARCHITECTURE.md",
+    "docs/interview/岗位产物验收标准.md",
+    "docs/interview/开源项目参考能力归档.md",
+    "docs/architecture/DEPLOYMENT.md",
+    "docs/plans/RAG检索优化记录.md",
+    "docs/plans/image-to-image-search-spec.md",
+    "docs/plans/游戏运营营销公开资料与编译知识方案.md",
+    "docs/plans/历史上下文事实污染与模型切换优化方案.md",
+    "docs/interview/3小时AI应用Agent面试突击.md",
+    "docs/interview/resume/resume-rag-project-game-marketing.md",
     "monitoring/grafana/PANELS.md",
     "docs/architecture/MONITORING_PROMETHEUS_GRAFANA.md",
     "docs/architecture/DOCKER_SERVICES_INVENTORY.md",
@@ -213,17 +221,6 @@
     "docs/BOSS_FULLSTACK_20K_PLUS.md",
     "docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_KNOWLEDGE.md",
     "docs/BOSS_AI_AGENT_FULLSTACK_INTERVIEW_GUIDE.md",
-    "docs/BOSS_AI_AGENT_FULLSTACK_20K_PLUS.md",
-    "docs/interview/resume/游戏营销RAG项目完整描述.md",
-    "docs/interview/开源项目参考能力归档.md",
-    "docs/interview/resume/resume-rag-project.md",
-    "docs/interview/resume/game-marketing-rag-evidence.md",
-    "docs/interview/resume/deepseek-高级资深Agent全栈简历定位与面试口径.md",
-    "docs/interview/jd/jd-requirements-project-mapping.md",
-    "docs/interview/jd/jd-gap-implementation-status.md",
-    "docs/evidence/EVIDENCE_COLLECTION_TEMPLATES.md",
-    "docs/interview/SEVEN_DIFFICULTIES_INTERVIEW_GUIDE.md",
-    "docs/interview/SENIOR_AGENT_INTERVIEW_READINESS.md",
     "admin/dist/pro_icon.svg",
     "admin/dist/logo.svg",
     "admin/dist/icons/icon-512x512.png",

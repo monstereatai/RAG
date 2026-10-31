@@ -8,8 +8,8 @@ describe('DocumentPermissionService ACL replacement', () => {
     };
     const permissionRepo = {
       manager: {
-        transaction: jest.fn(async (work: (tx: typeof manager) => unknown) =>
-          work(manager),
+        transaction: jest.fn((work: (tx: typeof manager) => unknown) =>
+          Promise.resolve(work(manager)),
         ),
       },
     };

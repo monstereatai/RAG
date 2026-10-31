@@ -13,10 +13,7 @@ import { FeishuWikiSyncService } from './feishu-wiki-sync.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      FeishuWikiConnectorEntity,
-      FeishuWikiItemEntity,
-    ]),
+    TypeOrmModule.forFeature([FeishuWikiConnectorEntity, FeishuWikiItemEntity]),
     DocumentModule,
     DocumentPermissionModule,
   ],

@@ -1,14 +1,32 @@
 import { ToolExecutionService } from './tool-execution.service';
+import { toolRegistry } from './tool-registry';
 
 describe('ToolExecutionService', () => {
+  type Event = { eventType: string };
+
+  const createEventRecorder = () => {
+    const events: Event[] = [];
+    const emit = jest.fn((event: Event) => {
+      events.push(event);
+      return Promise.resolve(undefined);
+    });
+    return { emit, events };
+  };
+
+  const allowedPolicyDecision = (toolName: string) => ({
+    allowed: true,
+    requiresApproval: false,
+    reason: 'allowed by test policy',
+    entry: toolRegistry.find((entry) => entry.name === toolName),
+  });
+
   const createService = () => {
-    const emit = jest.fn().mockResolvedValue(undefined);
+    const { emit, events } = createEventRecorder();
+    const policy = {
+      decide: jest.fn().mockImplementation(allowedPolicyDecision),
+    };
     const service = new ToolExecutionService(
-      {
-        decide: jest
-          .fn()
-          .mockReturnValue({ allowed: true, requiresApproval: false }),
-      },
+      policy,
       { emit } as never,
       {
         isEnabled: () => false,
@@ -18,46 +36,43 @@ describe('ToolExecutionService', () => {
         setRequired: jest.fn(),
       } as never,
     );
-    return { service, emit };
+    return { service, emit, events, policy };
   };
 
   it('writes a call event before the immutable result event', async () => {
-    const { service, emit } = createService();
+    const { service, events } = createService();
     const output = await service.execute({
       toolName: 'dashscope_rerank',
       threadId: 'thread-1',
       mode: 'simple',
-      execute: async () => ({ ok: true }),
+      execute: () => Promise.resolve({ ok: true }),
     });
     expect(output.status).toBe('success');
-    expect(emit.mock.calls.map(([event]) => event.eventType)).toEqual([
+    expect(events.map((event) => event.eventType)).toEqual([
       'tool.call',
       'tool.result',
     ]);
   });
 
   it('fails closed when a write tool has no approval', async () => {
-    const { service } = createService();
-    const policy = (service as any).policy;
+    const { service, policy } = createService();
     policy.decide.mockReturnValue({ allowed: true, requiresApproval: true });
     const output = await service.execute({
       toolName: 'artifact_generate',
       threadId: 'thread-1',
       mode: 'production',
       approvalPolicy: 'required',
-      execute: async () => 'not-run',
+      execute: () => Promise.resolve('not-run'),
     });
     expect(output.status).toBe('blocked');
   });
 
   it('recovers a completed idempotent write without executing it twice', async () => {
-    const emit = jest.fn().mockResolvedValue(undefined);
+    const { emit } = createEventRecorder();
     const execute = jest.fn();
     const service = new ToolExecutionService(
       {
-        decide: jest
-          .fn()
-          .mockReturnValue({ allowed: true, requiresApproval: false }),
+        decide: jest.fn().mockImplementation(allowedPolicyDecision),
       },
       { emit } as never,
       {
@@ -84,11 +99,11 @@ describe('ToolExecutionService', () => {
   });
 
   it('returns unknown when a side effect completes but its idempotency marker is not confirmed', async () => {
-    const emit = jest.fn().mockResolvedValue(undefined);
+    const { emit, events } = createEventRecorder();
     const execute = jest.fn().mockResolvedValue({ id: 'artifact-2' });
     const service = new ToolExecutionService(
       {
-        decide: jest.fn().mockReturnValue({ allowed: true, requiresApproval: false }),
+        decide: jest.fn().mockImplementation(allowedPolicyDecision),
       },
       { emit } as never,
       {
@@ -111,9 +126,7 @@ describe('ToolExecutionService', () => {
 
     expect(result.status).toBe('unknown');
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({
-      eventType: 'tool.unknown',
-    });
+    expect(events.at(-1)?.eventType).toBe('tool.unknown');
   });
 
   it('blocks side effects when Redis cannot provide an idempotency lock', async () => {

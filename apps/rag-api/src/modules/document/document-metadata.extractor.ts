@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { z } from 'zod';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { LlmProvider } from '../../providers/llm/llm.provider';
+import { documentMetadataPromptDefinition } from './document-metadata.prompts';
+import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import { LangfuseProvider } from '../../providers/observability/langfuse.provider';
 
 /**
  * 文档元数据抽取结果
@@ -19,19 +22,8 @@ export interface ExtractedMetadata {
  * 文档元数据抽取 Prompt
  */
 const extractMetadataPrompt = ChatPromptTemplate.fromMessages([
-  [
-    'system',
-    `你是一个文档分析助手。请从给定的文档内容中抽取以下元数据：
-- title：文档标题（如果有明确标题则提取，否则根据内容生成一个简洁标题）
-- author：作者（如果文档中提及，否则填"未知"）
-- summary：内容摘要（100字以内，概括文档核心内容）
-- keywords：关键词列表（3-8个，提取最重要的术语/概念）
-- language：语言（如"中文"、"英文"）
-- category：文档类别（如"技术文档"、"教程"、"报告"、"笔记"、"其他"）
-
-只输出结构化字段，不要额外解释。`,
-  ],
-  ['human', '{content}'],
+  ['system', documentMetadataPromptDefinition.system],
+  ['human', documentMetadataPromptDefinition.userTemplate],
 ]);
 
 /**
@@ -44,7 +36,10 @@ const extractMetadataPrompt = ChatPromptTemplate.fromMessages([
 export class DocumentMetadataExtractor {
   private readonly logger = new Logger(DocumentMetadataExtractor.name);
 
-  constructor(private readonly llmProvider: LlmProvider) {}
+  constructor(
+    private readonly llmProvider: LlmProvider,
+    @Optional() private readonly langfuseProvider?: LangfuseProvider,
+  ) {}
 
   /**
    * 从文档内容中抽取元数据
@@ -53,22 +48,32 @@ export class DocumentMetadataExtractor {
    * @returns 抽取的元数据，失败时返回默认值
    */
   async extract(content: string): Promise<ExtractedMetadata> {
+    const startedAt = Date.now();
+    const promptVersion = getPromptVersion('document.extract_metadata');
     const model = this.llmProvider.getModel();
 
     // 定义结构化输出的 zod schema
     const metadataSchema = z.object({
-      title: z.string().describe('文档标题'),
-      author: z.string().describe('作者（未知则填"未知"）'),
-      summary: z.string().describe('内容摘要（100字以内）'),
+      title: z
+        .string()
+        .describe(documentMetadataPromptDefinition.outputSchema.title),
+      author: z
+        .string()
+        .describe(documentMetadataPromptDefinition.outputSchema.author),
+      summary: z
+        .string()
+        .describe(documentMetadataPromptDefinition.outputSchema.summary),
       keywords: z
         .array(z.string())
         .min(1)
         .max(8)
-        .describe('关键词列表（3-8个）'),
-      language: z.string().describe('文档语言（如"中文"、"英文"）'),
+        .describe(documentMetadataPromptDefinition.outputSchema.keywords),
+      language: z
+        .string()
+        .describe(documentMetadataPromptDefinition.outputSchema.language),
       category: z
         .enum(['技术文档', '教程', '报告', '笔记', '其他'])
-        .describe('文档类别'),
+        .describe(documentMetadataPromptDefinition.outputSchema.category),
     });
 
     try {
@@ -77,7 +82,31 @@ export class DocumentMetadataExtractor {
 
       // 截取前 2000 字以节省 token 和延迟
       const truncatedContent = content.slice(0, 2000);
-      const result = await chain.invoke({ content: truncatedContent });
+      const result = await chain.invoke(
+        { content: truncatedContent },
+        {
+          metadata: {
+            promptVersion: getPromptVersion('document.extract_metadata'),
+          },
+        },
+      );
+
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.document.metadata',
+        promptVersions: { 'document.extract_metadata': promptVersion },
+        status: 'success',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: {
+          contentChars: content.length,
+          promptChars: truncatedContent.length,
+        },
+        outputSummary: {
+          titlePresent: Boolean(result.title),
+          keywordCount: result.keywords.length,
+          category: result.category,
+          language: result.language,
+        },
+      });
 
       this.logger.log(
         `Metadata extracted: title="${result.title}", category=${result.category}, keywords=${result.keywords.length}`,
@@ -92,6 +121,17 @@ export class DocumentMetadataExtractor {
         category: result.category,
       };
     } catch (err) {
+      this.langfuseProvider?.tracePromptOperation({
+        name: 'rag.document.metadata',
+        promptVersions: { 'document.extract_metadata': promptVersion },
+        status: 'fallback',
+        latencyMs: Date.now() - startedAt,
+        inputSummary: { contentChars: content.length },
+        outputSummary: {
+          fallback: true,
+          errorType: err instanceof Error ? err.name : typeof err,
+        },
+      });
       this.logger.warn(
         `Metadata extraction failed: ${(err as Error).message}. Using defaults.`,
       );

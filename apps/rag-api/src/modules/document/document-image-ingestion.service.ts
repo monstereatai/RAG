@@ -4,7 +4,10 @@ import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
-import { ImageIndexService, type ImageIndexInput } from '../image-index/image-index.service';
+import {
+  ImageIndexService,
+  type ImageIndexInput,
+} from '../image-index/image-index.service';
 import {
   detectDocumentKind,
   type DocumentImageExtractionOptions,
