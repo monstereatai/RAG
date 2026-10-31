@@ -5,10 +5,7 @@ import {
   applyProductionArtifactEdit,
   applyProductionCodeEdit,
   cancelProductionWorkflow,
-  createProductionWorkspacePreviewTicket,
-  deleteProductionWorkspace,
   downloadProductionArtifact,
-  exportProductionWorkspace,
   generateProductionWorkflowArtifacts,
   getProductionActivityTemplates,
   getProductionArtifactPreview,
@@ -18,25 +15,18 @@ import {
   getProductionWorkflow,
   getProductionWorkflowArtifacts,
   getProductionWorkflowHandoff,
-  getProductionWorkspaceStatus,
   importProductionPlaywayGraph,
   type PlaywayActivityTemplate,
   type PlaywayComponentRule,
   type ProductionArtifactTarget,
   type ProductionArtifactVersion,
   type ProductionWorkflow,
-  type ProductionWorkspaceStatus,
   proposeProductionArtifactEdit,
   proposeProductionCodeEdit,
   restoreProductionArtifactVersion,
   resumeProductionWorkflow,
   reviseProductionWorkflow,
-  runProductionWorkspaceAgent,
-  runProductionWorkspaceCommand,
   simulateProductionArtifactSync,
-  startProductionWorkspace,
-  startProductionWorkspaceDevServer,
-  stopProductionWorkspaceDevServer,
   unwrapData,
 } from '../service';
 import { buildHandoffFiles } from './workflow-detail-export';
@@ -44,9 +34,8 @@ import { generateRunnableProjectFile } from './workflow-detail-project';
 import type {
   ProductionArtifactEditDraft,
   ProductionCodeEditDraft,
-  ProductionWorkspaceAgentResult,
-  ProductionWorkspaceCommandResult,
 } from './workflow-detail-shared';
+import { useWorkflowWorkspaceController } from './workflow-detail-workspace-controller';
 
 export function useWorkflowDetailController() {
   const { threadId = '' } = useParams<{ threadId: string }>();
@@ -107,30 +96,6 @@ export function useWorkflowDetailController() {
     React.useState<ProductionCodeEditDraft | null>(null);
 
   const [codeEditBusy, setCodeEditBusy] = React.useState(false);
-
-  const [workspaceStatus, setWorkspaceStatus] =
-    React.useState<ProductionWorkspaceStatus | null>(null);
-
-  const [workspaceArtifactId, setWorkspaceArtifactId] = React.useState('');
-
-  const [workspaceBusy, setWorkspaceBusy] = React.useState(false);
-
-  const [workspaceInstruction, setWorkspaceInstruction] = React.useState('');
-
-  const [workspaceAgentResult, setWorkspaceAgentResult] =
-    React.useState<ProductionWorkspaceAgentResult | null>(null);
-
-  const [workspaceCommand, setWorkspaceCommand] = React.useState('');
-
-  const [workspaceCommandResult, setWorkspaceCommandResult] =
-    React.useState<ProductionWorkspaceCommandResult | null>(null);
-
-  const [workspaceDevServerCommand, setWorkspaceDevServerCommand] =
-    React.useState('npm run dev -- --host 0.0.0.0');
-
-  const [workspacePort, setWorkspacePort] = React.useState('5173');
-
-  const [workspacePreviewUrl, setWorkspacePreviewUrl] = React.useState('');
 
   const [previewOpen, setPreviewOpen] = React.useState(false);
 
@@ -213,28 +178,6 @@ export function useWorkflowDetailController() {
       active = false;
     };
   }, [workflow?.threadId, workflow?.status]);
-
-  React.useEffect(() => {
-    if (!workflow?.threadId) {
-      setWorkspaceStatus(null);
-      return;
-    }
-    let active = true;
-    getProductionWorkspaceStatus(workflow.threadId)
-      .then((response) => {
-        if (active) {
-          setWorkspaceStatus(
-            unwrapData<ProductionWorkspaceStatus>(response) ?? null,
-          );
-        }
-      })
-      .catch(() => {
-        if (active) setWorkspaceStatus(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [workflow?.threadId]);
 
   const refreshArtifactVersions = async () => {
     if (!workflow) return;
@@ -373,248 +316,6 @@ export function useWorkflowDetailController() {
     }
   };
 
-  const startWorkspace = async () => {
-    if (!workflow || !workspaceArtifactId) {
-      message.error('请选择要放入开发工作区的代码版本');
-      return false;
-    }
-    setWorkspaceBusy(true);
-    try {
-      const response = await startProductionWorkspace(workflow.threadId, {
-        artifactId: workspaceArtifactId,
-      });
-      const status = unwrapData<ProductionWorkspaceStatus>(response);
-      if (!status?.ready) throw new Error('开发工作区尚未就绪');
-      setWorkspaceStatus(status);
-      message.success('开发工作区已就绪');
-      return true;
-    } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : '启动开发工作区失败',
-      );
-      return false;
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const runWorkspaceAgent = async () => {
-    if (!workflow || !workspaceArtifactId || !workspaceInstruction.trim()) {
-      message.error('请选择代码版本并填写开发要求');
-      return;
-    }
-    setWorkspaceBusy(true);
-    setWorkspaceAgentResult(null);
-    setWorkspaceCommandResult(null);
-    try {
-      if (!workspaceStatus?.ready) {
-        const started = await startProductionWorkspace(workflow.threadId, {
-          artifactId: workspaceArtifactId,
-        });
-        const status = unwrapData<ProductionWorkspaceStatus>(started);
-        if (!status?.ready) throw new Error('开发工作区尚未就绪');
-        setWorkspaceStatus(status);
-      }
-      const response = await runProductionWorkspaceAgent(workflow.threadId, {
-        artifactId: workspaceArtifactId,
-        instruction: workspaceInstruction.trim(),
-      });
-      const result = unwrapData<ProductionWorkspaceAgentResult>(response);
-      if (!result) throw new Error('Agent 未返回执行结果');
-      setWorkspaceAgentResult(result);
-      try {
-        const statusResponse = await getProductionWorkspaceStatus(
-          workflow.threadId,
-        );
-        const status = unwrapData<ProductionWorkspaceStatus>(statusResponse);
-        if (status) setWorkspaceStatus(status);
-      } catch {
-        message.warning('Agent 结果已返回，但工作区状态刷新失败');
-      }
-      if (result.status === 'completed') {
-        message.success('Agent 开发任务已完成');
-      } else {
-        message.warning(result.summary || 'Agent 开发任务未完成');
-      }
-    } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : 'Agent 开发任务失败',
-      );
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const runWorkspaceCommand = async () => {
-    if (!workflow || !workspaceCommand.trim()) return;
-    setWorkspaceBusy(true);
-    setWorkspaceCommandResult(null);
-    try {
-      const response = await runProductionWorkspaceCommand(workflow.threadId, {
-        command: workspaceCommand.trim(),
-      });
-      const result = unwrapData<ProductionWorkspaceCommandResult>(response);
-      if (!result) throw new Error('命令没有返回执行结果');
-      setWorkspaceCommandResult(result);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '执行命令失败');
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const startWorkspaceDevServer = async () => {
-    if (!workflow || !workspaceStatus?.ready) {
-      message.error('请先启动开发工作区');
-      return;
-    }
-    const port = Number(workspacePort);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      message.error('请输入 1–65535 之间的端口');
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      const response = await startProductionWorkspaceDevServer(
-        workflow.threadId,
-        {
-          port,
-          command: workspaceDevServerCommand.trim() || undefined,
-        },
-      );
-      const result = unwrapData<{
-        port: number;
-        commandId: string;
-        status: string;
-      }>(response);
-      if (!result) throw new Error('开发服务器没有返回状态');
-      setWorkspaceStatus((current) => ({
-        ready: true,
-        projectRoot: current?.projectRoot ?? null,
-        devServer: { port: result.port, commandId: result.commandId },
-      }));
-      setWorkspacePort(String(result.port));
-      message.success(`开发服务器已启动（端口 ${result.port}）`);
-    } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : '启动开发服务器失败',
-      );
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const stopWorkspaceDevServer = async () => {
-    if (!workflow) return;
-    setWorkspaceBusy(true);
-    try {
-      await stopProductionWorkspaceDevServer(workflow.threadId);
-      setWorkspaceStatus((current) =>
-        current ? { ...current, devServer: undefined } : current,
-      );
-      setWorkspacePreviewUrl('');
-      message.success('开发服务器已停止');
-    } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : '停止开发服务器失败',
-      );
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const destroyWorkspace = () => {
-    if (!workflow) return;
-    Modal.confirm({
-      title: '销毁开发工作区？',
-      content:
-        '未导出的修改会丢失。销毁后，若要继续开发，需要重新选择代码产物并启动工作区。',
-      okText: '销毁工作区',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        setWorkspaceBusy(true);
-        try {
-          await deleteProductionWorkspace(workflow.threadId, {
-            confirmDiscard: true,
-          });
-          setWorkspacePreviewUrl('');
-          setWorkspaceAgentResult(null);
-          setWorkspaceCommandResult(null);
-          try {
-            const response = await getProductionWorkspaceStatus(
-              workflow.threadId,
-            );
-            setWorkspaceStatus(
-              unwrapData<ProductionWorkspaceStatus>(response) ?? null,
-            );
-          } catch {
-            setWorkspaceStatus(null);
-          }
-          message.success('工作区已销毁');
-        } catch (error) {
-          message.error(
-            error instanceof Error ? error.message : '销毁工作区失败',
-          );
-        } finally {
-          setWorkspaceBusy(false);
-        }
-      },
-    });
-  };
-
-  const openWorkspacePreview = async () => {
-    if (!workflow || !workspaceStatus?.ready) {
-      message.error('请先启动开发工作区');
-      return;
-    }
-    const port = Number(workspacePort);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      message.error('请输入 1–65535 之间的端口');
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      const response = await createProductionWorkspacePreviewTicket(
-        workflow.threadId,
-        { port },
-      );
-      const result = unwrapData<{ url?: string }>(response);
-      if (!result?.url?.startsWith('/api/')) {
-        throw new Error('预览地址不是当前站点的受权代理地址');
-      }
-      setWorkspacePreviewUrl(result.url);
-    } catch (error) {
-      message.error(
-        error instanceof Error ? error.message : '创建开发预览失败',
-      );
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
-  const exportWorkspace = async () => {
-    if (!workflow || !workspaceStatus?.ready) {
-      message.error('请先启动开发工作区');
-      return;
-    }
-    setWorkspaceBusy(true);
-    try {
-      const response = await exportProductionWorkspace(workflow.threadId);
-      const result = unwrapData<{ artifact?: ProductionArtifactVersion }>(
-        response,
-      );
-      if (!result?.artifact?.id) throw new Error('导出接口未返回 ZIP 产物');
-      await refreshArtifactVersions();
-      await downloadArtifact(result.artifact);
-      message.success('工作区已保存为新 ZIP 版本');
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '导出工作区失败');
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  };
-
   const previewArtifact = async (artifact: ProductionArtifactVersion) => {
     if (!workflow) return;
     try {
@@ -670,6 +371,12 @@ export function useWorkflowDetailController() {
       message.error(error instanceof Error ? error.message : '产物下载失败');
     }
   };
+
+  const workspaceController = useWorkflowWorkspaceController({
+    workflow,
+    refreshArtifactVersions,
+    downloadArtifact,
+  });
 
   const simulateArtifactSync = async (artifact: ProductionArtifactVersion) => {
     if (!workflow) return;
@@ -909,23 +616,7 @@ export function useWorkflowDetailController() {
     codeEditDraft,
     setCodeEditDraft,
     codeEditBusy,
-    workspaceStatus,
-    workspaceArtifactId,
-    setWorkspaceArtifactId,
-    workspaceBusy,
-    workspaceInstruction,
-    setWorkspaceInstruction,
-    workspaceAgentResult,
-    setWorkspaceAgentResult,
-    workspaceCommand,
-    setWorkspaceCommand,
-    workspaceCommandResult,
-    workspaceDevServerCommand,
-    setWorkspaceDevServerCommand,
-    workspacePort,
-    setWorkspacePort,
-    workspacePreviewUrl,
-    setWorkspacePreviewUrl,
+    ...workspaceController,
     previewOpen,
     setPreviewOpen,
     previewTitle,
@@ -944,14 +635,6 @@ export function useWorkflowDetailController() {
     applyArtifactEdit,
     proposeCodeArtifactEdit,
     applyCodeArtifactEdit,
-    startWorkspace,
-    runWorkspaceAgent,
-    runWorkspaceCommand,
-    startWorkspaceDevServer,
-    stopWorkspaceDevServer,
-    destroyWorkspace,
-    openWorkspacePreview,
-    exportWorkspace,
     previewArtifact,
     viewArtifactSource,
     downloadArtifact,

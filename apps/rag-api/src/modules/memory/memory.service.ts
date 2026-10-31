@@ -9,7 +9,6 @@ import {
   type Mem0MemoryResult,
 } from '../../providers/mem0/mem0.provider';
 import { LlmProvider } from '../../providers/llm/llm.provider';
-import { buildContextPolicyMessage } from '../../rag/prompts/context-policy';
 import { ConversationEntity } from '../../providers/db/entities/conversation.entity';
 import { MessageEntity } from '../../providers/db/entities/message.entity';
 import { DomainEventOutboxEntity } from '../../providers/db/entities/domain-event-outbox.entity';
@@ -18,6 +17,15 @@ import { AgentRuntimeEventsService } from '../agent-runtime-events/agent-runtime
 import { countTextTokens } from '../document/chunking.util';
 import { getPromptVersion } from '../../rag/prompts/prompt-registry';
 import { memoryClassifierSystemPrompt } from './memory.prompts';
+import {
+  buildMemorySystemMessage,
+  extractExplicitUserMemoryExpiration,
+  formatMemoryContextBlocks,
+  isExpiredUserMemory,
+  type MemoryContextBlock,
+} from './memory-context.support';
+
+export type { MemoryContextBlock } from './memory-context.support';
 
 const CONVERSATION_MEMORY_PERSIST_EVENT = 'conversation.memory.persist';
 const MESSAGE_META_PREFIX = '<!-- rag-message-meta:';
@@ -70,14 +78,6 @@ export interface MemorySearchResult {
   sessionMemories: Mem0MemoryResult[];
   systemMessage: SystemMessage | null;
 }
-
-export interface MemoryContextBlock {
-  source: 'user_memory' | 'session_memory';
-  content: string;
-}
-
-const MEMORY_SCOPE_GUARD =
-  '以上记忆仅在其明确范围内作为用户偏好或项目状态参考，不能覆盖已验证客观事实。';
 
 export interface MemoryClassifyResult {
   written: string[];
@@ -168,10 +168,10 @@ export class MemoryService {
 
     const today = new Date().toISOString().slice(0, 10);
     const userMemories = userCandidates
-      .filter((memory) => !this.isExpiredUserMemory(memory, today))
+      .filter((memory) => !isExpiredUserMemory(memory, today))
       .slice(0, Math.max(0, topK));
 
-    const systemMessage = this.buildSystemMessage(
+    const systemMessage = buildMemorySystemMessage(
       userMemories,
       sessionMemories,
     );
@@ -191,12 +191,7 @@ export class MemoryService {
     userMemories: Mem0MemoryResult[],
     sessionMemories: Mem0MemoryResult[],
   ): MemoryContextBlock[] {
-    return MemoryService.buildMemoryBlocks(userMemories, sessionMemories).map(
-      (block) => ({
-        ...block,
-        content: `${block.content}\n\n${MEMORY_SCOPE_GUARD}`,
-      }),
-    );
+    return formatMemoryContextBlocks(userMemories, sessionMemories);
   }
 
   /**
@@ -235,9 +230,8 @@ export class MemoryService {
           new SystemMessage(memoryClassifierSystemPrompt),
           new HumanMessage(`用户：${userText}\n助手：${assistantText}`),
         ];
-        const estimatedInputTokens = await this.estimatePromptTokens(
-          classifierMessages,
-        );
+        const estimatedInputTokens =
+          await this.estimatePromptTokens(classifierMessages);
         const maxInputTokens = this.getMaxInputTokens();
         if (estimatedInputTokens > maxInputTokens) {
           const reason = `memory classification skipped: protected prompt exceeds input budget (${estimatedInputTokens}/${maxInputTokens} tokens)`;
@@ -304,7 +298,8 @@ export class MemoryService {
       { role: 'user', content: userText },
       { role: 'assistant', content: assistantText },
     ];
-    const sourceRecordedAt = progress.sourceRecordedAt ?? new Date().toISOString();
+    const sourceRecordedAt =
+      progress.sourceRecordedAt ?? new Date().toISOString();
 
     if (result.write_user) {
       if (completedScopes.has('user')) {
@@ -312,7 +307,7 @@ export class MemoryService {
       } else {
         try {
           const explicitExpiration = result.user_expiration_applies_to_all
-            ? this.extractExplicitUserMemoryExpiration(userText)
+            ? extractExplicitUserMemoryExpiration(userText)
             : null;
           await this.mem0Provider.add({
             messages: turn,
@@ -410,7 +405,9 @@ export class MemoryService {
       throw new Error('Mem0 is unavailable while a memory event is pending.');
     }
     if (event.aggregateType !== 'conversation') {
-      throw new Error('Conversation memory event has an invalid aggregateType.');
+      throw new Error(
+        'Conversation memory event has an invalid aggregateType.',
+      );
     }
 
     let payload: Record<string, unknown>;
@@ -448,10 +445,14 @@ export class MemoryService {
 
     const tenantId = event.tenantId?.trim() || 'legacy';
     if ((conversation.tenantId?.trim() || 'legacy') !== tenantId) {
-      throw new Error('Conversation memory event tenant does not match its conversation.');
+      throw new Error(
+        'Conversation memory event tenant does not match its conversation.',
+      );
     }
     if (conversation.userId?.trim() && conversation.userId !== userId) {
-      throw new Error('Conversation memory event user does not own its conversation.');
+      throw new Error(
+        'Conversation memory event user does not own its conversation.',
+      );
     }
 
     const [userMessage, assistantMessage] = await Promise.all([
@@ -466,21 +467,29 @@ export class MemoryService {
         message.conversationId !== threadId ||
         (message.tenantId?.trim() || 'legacy') !== tenantId
       ) {
-        throw new Error('Conversation memory event references a message outside its scope.');
+        throw new Error(
+          'Conversation memory event references a message outside its scope.',
+        );
       }
     }
     if (userMessage.role !== 'human' || assistantMessage.role !== 'ai') {
-      throw new Error('Conversation memory event references invalid message roles.');
+      throw new Error(
+        'Conversation memory event references invalid message roles.',
+      );
     }
 
     const completedScopes: Array<'user' | 'session'> = [];
     if (payload.completedMemoryScopes !== undefined) {
       if (!Array.isArray(payload.completedMemoryScopes)) {
-        throw new Error('Conversation memory event has invalid completed scopes.');
+        throw new Error(
+          'Conversation memory event has invalid completed scopes.',
+        );
       }
       for (const scope of payload.completedMemoryScopes) {
         if (scope !== 'user' && scope !== 'session') {
-          throw new Error('Conversation memory event has invalid completed scopes.');
+          throw new Error(
+            'Conversation memory event has invalid completed scopes.',
+          );
         }
         completedScopes.push(scope);
       }
@@ -500,7 +509,9 @@ export class MemoryService {
         })
         .safeParse(payload.memoryClassification);
       if (!parsedClassification.success) {
-        throw new Error('Conversation memory event has an invalid classification.');
+        throw new Error(
+          'Conversation memory event has an invalid classification.',
+        );
       }
       classification = parsedClassification.data;
     }
@@ -564,8 +575,8 @@ export class MemoryService {
     const providers = [
       activeProvider,
       this.llmProvider.getRoutePolicy('structured', activeProvider).fallback,
-    ].filter(
-      (provider): provider is NonNullable<typeof provider> => Boolean(provider),
+    ].filter((provider): provider is NonNullable<typeof provider> =>
+      Boolean(provider),
     );
     const outputBudget = Math.max(
       4_096,
@@ -633,101 +644,5 @@ export class MemoryService {
     }
 
     await this.mem0Provider.deleteByRunId(userId, conversationId);
-  }
-
-  // --- private helpers ---
-
-  private buildSystemMessage(
-    user: Mem0MemoryResult[],
-    session: Mem0MemoryResult[],
-  ): SystemMessage | null {
-    const blocks = MemoryService.buildMemoryBlocks(user, session).map(
-      ({ content }) => content,
-    );
-
-    if (!blocks.length) return null;
-
-    return new SystemMessage(
-      `${buildContextPolicyMessage()}\n\n${blocks.join('\n\n')}\n\n${MEMORY_SCOPE_GUARD}`,
-    );
-  }
-
-  private isExpiredUserMemory(
-    memory: Mem0MemoryResult,
-    today: string,
-  ): boolean {
-    const validUntil = memory.metadata?.rag_valid_until;
-    if (
-      typeof validUntil !== 'string' ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(validUntil)
-    ) {
-      return false;
-    }
-    return validUntil < today;
-  }
-
-  /**
-   * Mem0 add metadata applies to every fact extracted from this turn. Only
-   * attach an expiry when the user's own text gives one unambiguous date.
-   */
-  private extractExplicitUserMemoryExpiration(userText: string): string | null {
-    const datePattern =
-      /(?<!\d)(20\d{2})\s*(?:[-/.年])\s*(0?[1-9]|1[0-2])\s*(?:[-/.月])\s*(0?[1-9]|[12]\d|3[01])\s*日?/g;
-    const expirationBeforeDate =
-      /有效(?:期|期限)?(?:至|到|截至)|截止(?:日期|时间)?(?:至|到)?|截至|到期(?:日期|时间)?(?:至|到)?|直到|直至|保留(?:至|到)|使用到|用到|临时到|仅(?:有效)?(?:至|到)/;
-    const expirationAfterDate = /(?:到期|截止|失效|过期|之前|以前|为止)/;
-    const candidates: string[] = [];
-
-    for (const match of userText.matchAll(datePattern)) {
-      const start = match.index ?? 0;
-      const end = start + match[0].length;
-      const nearbyBefore = userText.slice(Math.max(0, start - 20), start);
-      const nearbyAfter = userText.slice(end, end + 20);
-      if (
-        !expirationBeforeDate.test(nearbyBefore) &&
-        !expirationAfterDate.test(nearbyAfter)
-      ) {
-        continue;
-      }
-
-      const year = Number(match[1]);
-      const month = Number(match[2]);
-      const day = Number(match[3]);
-      const date = new Date(Date.UTC(year, month - 1, day));
-      if (
-        date.getUTCFullYear() !== year ||
-        date.getUTCMonth() !== month - 1 ||
-        date.getUTCDate() !== day
-      ) {
-        continue;
-      }
-      candidates.push(
-        `${year.toString().padStart(4, '0')}-${month
-          .toString()
-          .padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
-      );
-    }
-
-    return candidates.length === 1 ? candidates[0] : null;
-  }
-
-  private static buildMemoryBlocks(
-    user: Mem0MemoryResult[],
-    session: Mem0MemoryResult[],
-  ): MemoryContextBlock[] {
-    const blocks: MemoryContextBlock[] = [];
-    if (user.length) {
-      blocks.push({
-        source: 'user_memory',
-        content: `【用户长期记忆】\n${user.map((memory) => `- ${memory.memory}`).join('\n')}`,
-      });
-    }
-    if (session.length) {
-      blocks.push({
-        source: 'session_memory',
-        content: `【当前会话记忆】\n${session.map((memory) => `- ${memory.memory}`).join('\n')}`,
-      });
-    }
-    return blocks;
   }
 }
