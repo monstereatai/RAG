@@ -19,7 +19,8 @@ export abstract class RagClientSearchBase extends RagClientGraphBase {
 
   getDocumentSearchFacets() {
     return this.getJson<Record<string, unknown>>(
-      "/rag/admin/documents/search/facets"
+      "/rag/admin/documents/search/facets",
+      LIST_READ_TIMEOUT_MS,
     );
   }
 
