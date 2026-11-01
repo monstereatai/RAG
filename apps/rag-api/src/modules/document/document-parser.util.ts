@@ -1,24 +1,33 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
   DocumentImageExtractionOptions,
+  DocumentAsrDelegate,
   DocumentOcrDelegate,
+  ParsedBlock,
+  ParsedDocument,
+  ParsedDocumentWarning,
   DocumentVideoExtractionOptions,
   SupportedDocumentKind,
 } from './document-parser.types';
-import { extractPdfText } from './document-parser.pdf-content';
-import {
-  extractDocxText,
-  extractWorkbookText,
-  extractPptxText,
-  extractPrintableText,
-} from './document-parser.office';
+import { parsePdfDocument } from './document-parser.pdf-content';
+import { parseOfficeDocument } from './document-parser.office';
 import {
   csvToMarkdown,
   htmlToText,
   jsonToMarkdown,
 } from './document-parser.text';
-import { extractVideoDocumentText } from './document-parser.media';
+import {
+  parseAudioDocument,
+  parseVideoDocument,
+} from './document-parser.media';
+import { validateDocumentFormat } from './document-parser.validation';
+export { validateDocumentFormat } from './document-parser.validation';
 export type {
+  ParsedBlock,
+  ParsedBlockType,
+  ParsedDocument,
+  ParsedDocumentStatus,
+  ParsedDocumentWarning,
   SupportedDocumentKind,
   UrlExtractionResult,
   DocumentOcrDelegate,
@@ -90,71 +99,232 @@ export function detectDocumentKind(filename: string): SupportedDocumentKind {
   );
 }
 
-/**
- * 提取文档文本。
- *
- * 仅 PDF 分支支持可选的 OCR 兜底：当 PDF 没有文本层（扫描件）时，
- * 会把页面渲染成图片并调用 `ocr` 识别，其他格式行为与原先完全一致。
- *
- * PDF / PPTX 分支额外支持可选的内嵌图片提取（`images`）：把文档里的内嵌图
- * 上传到对象存储并在 Markdown 中插入 `![alt](url)`；扫描件走 OCR 路径时
- * 不再重复提取（OCR 页图是渲染产物，不是内嵌图）。
- *
- * video 分支支持可选的视频入库参数（`video`）：ffmpeg 抽音轨 + 关键帧，
- * 音轨走 ASR、关键帧走 Vision，合成带概览/转写/画面要点的 Markdown。
- *
- * @param buffer 文档二进制内容
- * @param kind 文档类型
- * @param ocr 可选的 OCR 依赖（通常传 VisionProvider）；扫描件 PDF 缺少它时会抛出明确错误
- * @param images 可选的内嵌图片提取参数；未提供或对象存储异常时保持纯文本提取
- * @param video 可选的视频入库参数；未提供时视频退回元数据占位 Markdown
- */
+/** 兼容旧调用的 string API；新入库链路应使用结构化的 `parseDocument`。 */
 export async function extractDocumentText(
   buffer: Buffer,
   kind: SupportedDocumentKind,
   ocr?: DocumentOcrDelegate,
   images?: DocumentImageExtractionOptions,
   video?: DocumentVideoExtractionOptions,
-  options: { preservePdfPages?: boolean } = {},
+  options: {
+    preservePdfPages?: boolean;
+    filename?: string;
+    audioAsr?: DocumentAsrDelegate;
+  } = {},
 ): Promise<string> {
-  // 不同格式在这里归一成正文 Markdown；下游切块和索引无需感知原始文件格式。
+  const parsed = await parseDocument(buffer, kind, ocr, images, video, options);
+  if (parsed.status === 'failed') {
+    throw new BadRequestException(
+      parsed.warnings.map((warning) => warning.message).join('; ') ||
+        'document parser produced no usable content',
+    );
+  }
+  return parsed.markdown;
+}
+
+/** 统一解析入口：格式校验和各格式解析结果都归一到 ParsedDocument。 */
+export async function parseDocument(
+  buffer: Buffer,
+  kind: SupportedDocumentKind,
+  ocr?: DocumentOcrDelegate,
+  images?: DocumentImageExtractionOptions,
+  video?: DocumentVideoExtractionOptions,
+  options: {
+    preservePdfPages?: boolean;
+    filename?: string;
+    audioAsr?: DocumentAsrDelegate;
+  } = {},
+): Promise<ParsedDocument> {
+  const filename = options.filename ?? `upload.${kind}`;
+  await validateDocumentFormat(buffer, kind, filename);
+
   switch (kind) {
     case 'markdown':
     case 'text':
-      return buffer.toString('utf-8');
-    case 'pdf':
-      return extractPdfText(buffer, ocr, images, options.preservePdfPages);
-    case 'docx':
-      return extractDocxText(buffer);
-    case 'doc':
-      return extractPrintableText(buffer, 'Legacy Word Document');
-    case 'xlsx':
-    case 'xls':
-      return extractWorkbookText(buffer);
-    case 'pptx':
-      return extractPptxText(buffer, images);
-    case 'ppt':
-      return extractPrintableText(buffer, 'Legacy PowerPoint Document');
     case 'csv':
-      return csvToMarkdown(buffer.toString('utf-8'));
     case 'json':
-      return jsonToMarkdown(buffer.toString('utf-8'));
-    case 'html':
-      return htmlToText(buffer.toString('utf-8'));
-    case 'image':
-      throw new BadRequestException(
-        'Image must be analyzed with extractImageDocumentText before it can be indexed.',
-      );
-    case 'audio':
-      throw new BadRequestException(
-        'Audio must be transcribed with extractAudioDocumentText before it can be indexed.',
-      );
-    case 'video':
-      if (!video) {
+    case 'html': {
+      const text = buffer.toString('utf-8');
+      if (text.includes('\u0000')) {
         throw new BadRequestException(
-          'Video must be parsed with extractVideoDocumentText before it can be indexed.',
+          `text document contains binary data: ${filename}`,
         );
       }
-      return extractVideoDocumentText(buffer, video);
+      let markdown = text;
+      if (kind === 'csv') markdown = csvToMarkdown(text);
+      if (kind === 'json') {
+        try {
+          markdown = jsonToMarkdown(text);
+        } catch {
+          throw new BadRequestException(`invalid JSON document: ${filename}`);
+        }
+      }
+      if (kind === 'html') markdown = htmlToText(text);
+      return createParsedDocument(kind, filename, markdown);
+    }
+    case 'pdf':
+      try {
+        return await parsePdfDocument(
+          buffer,
+          ocr,
+          images,
+          options.preservePdfPages ?? false,
+        );
+      } catch (error) {
+        return failedParsedDocument(kind, filename, 'pdf_parse_failed', error);
+      }
+    case 'docx':
+    case 'xlsx':
+    case 'xls':
+    case 'pptx':
+      return parseOfficeDocument(buffer, kind, images);
+    case 'doc':
+      return failedParsedDocument(
+        kind,
+        filename,
+        'legacy_format_unsupported',
+        new Error(
+          'Legacy .doc files require a verified binary document parser; convert the file to .docx.',
+        ),
+      );
+    case 'ppt':
+      return failedParsedDocument(
+        kind,
+        filename,
+        'legacy_format_unsupported',
+        new Error(
+          'Legacy .ppt files require a verified binary presentation parser; convert the file to .pptx.',
+        ),
+      );
+    case 'image':
+      return failedParsedDocument(
+        kind,
+        filename,
+        'image_parser_not_configured',
+        new Error(
+          'Image must be analyzed with extractImageDocumentText before it can be indexed.',
+        ),
+      );
+    case 'audio':
+      try {
+        return await parseAudioDocument(buffer, filename, options.audioAsr);
+      } catch (error) {
+        return failedParsedDocument(kind, filename, 'audio_parse_failed', error);
+      }
+    case 'video':
+      try {
+        return await parseVideoDocument(buffer, video);
+      } catch (error) {
+        return failedParsedDocument(kind, filename, 'video_parse_failed', error);
+      }
   }
+}
+
+/** 把纯文本/Markdown 解析为定位信息有限但结构可用的统一结果。 */
+export function createParsedDocument(
+  kind: SupportedDocumentKind,
+  filename: string,
+  markdown: string,
+  warnings: ParsedDocumentWarning[] = [],
+): ParsedDocument {
+  const normalized = markdown.trim();
+  const blocks = markdownToParsedBlocks(normalized);
+  const usable = blocks.some((block) => block.text.trim() || block.asset?.url);
+  return {
+    kind,
+    title: filename.replace(/\\/g, '/').split('/').pop() ?? filename,
+    blocks,
+    markdown: normalized,
+    status: !usable ? 'failed' : warnings.length > 0 ? 'partial' : 'complete',
+    completeness: !usable ? 0 : warnings.length > 0 ? 0.9 : 1,
+    warnings,
+  };
+}
+
+function failedParsedDocument(
+  kind: SupportedDocumentKind,
+  filename: string,
+  code: string,
+  error: unknown,
+): ParsedDocument {
+  return {
+    kind,
+    title: filename,
+    blocks: [],
+    markdown: '',
+    status: 'failed',
+    completeness: 0,
+    warnings: [
+      {
+        code,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    ],
+  };
+}
+
+function markdownToParsedBlocks(markdown: string): ParsedBlock[] {
+  const blocks: ParsedBlock[] = [];
+  const headingPath: string[] = [];
+  const lines = markdown.split('\n');
+  let offset = 0;
+  let pageNumber: number | undefined;
+  let sheetName: string | undefined;
+
+  for (const line of lines) {
+    const start = offset;
+    const end = start + line.length;
+    offset = end + 1;
+    if (!line.trim()) continue;
+
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line.trim());
+    if (heading) {
+      const level = heading[1].length;
+      const text = heading[2].trim();
+      headingPath.length = level - 1;
+      headingPath.push(text);
+      const page = /^第\s*(\d+)\s*页$/.exec(text);
+      const sheet = /^(?:工作表|Sheet)\s*[:：]?\s*(.+)$/i.exec(text);
+      if (page) pageNumber = Number(page[1]);
+      if (sheet) sheetName = sheet[1].trim();
+      blocks.push({
+        type: level === 1 ? 'title' : 'heading',
+        text,
+        level,
+        headingPath: [...headingPath],
+        pageNumber,
+        sheetName,
+        sourceStart: start,
+        sourceEnd: end,
+      });
+      continue;
+    }
+
+    const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(line.trim());
+    if (image) {
+      blocks.push({
+        type: 'image',
+        text: image[1] || '图片',
+        asset: { url: image[2], alt: image[1] || '图片' },
+        headingPath: [...headingPath],
+        pageNumber,
+        sheetName,
+        sourceStart: start,
+        sourceEnd: end,
+      });
+      continue;
+    }
+
+    blocks.push({
+      type: /^\s*\|.+\|\s*$/.test(line) ? 'table' : 'paragraph',
+      text: line.trim(),
+      headingPath: [...headingPath],
+      pageNumber,
+      sheetName,
+      sourceStart: start,
+      sourceEnd: end,
+    });
+  }
+
+  return blocks;
 }

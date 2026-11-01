@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   uploadEmbeddedImages,
   groupImagesByPosition,
@@ -5,18 +6,21 @@ import {
   hasImageStorage,
 } from './document-parser.image';
 import {
-  isScannedPdf,
-  ocrScannedPdf,
+  countSignificantChars,
+  isScannedPdfPage,
+  ocrPdfPages,
   loadNapiCanvas,
   loadPdfjs,
   polyfillCanvasGlobals,
   lockPdfjsFakeWorker,
 } from './document-parser.pdf-render';
-import { envPositiveNumber } from './document-parser.shared';
+import { dynamicImport, envPositiveNumber } from './document-parser.shared';
 import type {
   DocumentOcrDelegate,
   DocumentImageExtractionOptions,
   EmbeddedImageAsset,
+  ParsedDocument,
+  ParsedDocumentWarning,
   UploadedEmbeddedImage,
   PdfjsPage,
   PdfjsImageData,
@@ -30,9 +34,28 @@ export async function extractPdfText(
   images?: DocumentImageExtractionOptions,
   preservePages = false,
 ): Promise<string> {
+  const parsed = await parsePdfDocument(buffer, ocr, images, preservePages);
+  if (preservePages || parsed.blocks.some((block) => block.type === 'image')) {
+    return parsed.markdown;
+  }
+  return parsed.blocks
+    .filter((block) => block.type === 'paragraph')
+    .map((block) => block.text)
+    .join('\n\n')
+    .trim();
+}
+
+/** 解析 PDF 为带页码、状态和告警的结构化结果。 */
+export async function parsePdfDocument(
+  buffer: Buffer,
+  ocr?: DocumentOcrDelegate,
+  images?: DocumentImageExtractionOptions,
+  preservePages = true,
+): Promise<ParsedDocument> {
   // pdf-parse 会在模块加载时初始化 @napi-rs/canvas 的 native GC 句柄。
   // 延迟到真正解析 PDF 时再加载，避免普通文本/Office 入库和 Jest 启动阶段泄漏句柄。
-  const { PDFParse } = await import('pdf-parse');
+  const { PDFParse } =
+    await dynamicImport<typeof import('pdf-parse')>('pdf-parse');
   const parser = new PDFParse({ data: buffer });
   let textResult;
   try {
@@ -41,34 +64,167 @@ export async function extractPdfText(
     await parser.destroy();
   }
 
-  if (isScannedPdf(textResult)) {
-    // 扫描件走 OCR 兜底：页图是渲染产物而非内嵌图，与内嵌图片提取互斥，不再重复提取
-    return ocrScannedPdf(buffer, textResult.total, ocr);
+  const totalPages = Math.max(
+    1,
+    textResult.total || 0,
+    textResult.pages.length,
+  );
+  const nativePages = new Map(
+    textResult.pages.map((page) => [page.num, page.text.trim()]),
+  );
+  if (textResult.pages.length === 0 && textResult.text.trim()) {
+    nativePages.set(1, textResult.text.trim());
   }
 
-  const text = textResult.text;
-  const paginatedText = preservePages
-    ? composePdfMarkdownWithPages(textResult, new Map())
-    : text;
-  if (!images || !isImageExtractionEnabled() || !hasImageStorage(images)) {
-    return paginatedText;
+  const pageNumbers = Array.from(
+    { length: totalPages },
+    (_, index) => index + 1,
+  );
+  const scanPages = pageNumbers.filter((pageNumber) =>
+    isScannedPdfPage({ text: nativePages.get(pageNumber) ?? '' }),
+  );
+  const warnings: ParsedDocumentWarning[] = [];
+  const pageTexts = new Map(nativePages);
+  const ocrResult = await ocrPdfPages(buffer, scanPages, totalPages, ocr);
+  warnings.push(...ocrResult.warnings);
+  for (const page of ocrResult.pages) {
+    if (page.text.trim()) {
+      pageTexts.set(page.num, page.text.trim());
+    }
   }
-  try {
-    return await composeTextPdfWithImages(
-      buffer,
-      textResult,
-      images,
-      preservePages,
+
+  const uploadedByPage = new Map<number, UploadedEmbeddedImage[]>();
+  if (images && isImageExtractionEnabled() && hasImageStorage(images)) {
+    const nativeTextPageNumbers = pageNumbers.filter(
+      (pageNumber) => !scanPages.includes(pageNumber),
     );
-  } catch (err) {
-    // 内嵌图片提取属于增强能力：对象存储不可用等任何异常都静默降级为纯文本，绝不阻塞入库
-    console.warn(
-      `PDF embedded image extraction skipped, falling back to plain text: ${
-        (err as Error).message
-      }`,
-    );
-    return paginatedText;
+    if (nativeTextPageNumbers.length > 0) {
+      const imagePageLimit = Math.min(
+        Math.max(
+          1,
+          envPositiveNumber(
+            'PDF_IMAGE_MAX_PAGES',
+            envPositiveNumber('PDF_OCR_MAX_PAGES', 20),
+          ),
+        ),
+        totalPages,
+      );
+      const pagesForImages = nativeTextPageNumbers.filter(
+        (pageNumber) => pageNumber <= imagePageLimit,
+      );
+      for (const pageNumber of nativeTextPageNumbers) {
+        if (pageNumber > imagePageLimit) {
+          warnings.push({
+            code: 'pdf_image_page_limit',
+            message: `超过 PDF_IMAGE_MAX_PAGES=${imagePageLimit}，第 ${pageNumber} 页未提取内嵌图片。`,
+            pageNumber,
+          });
+        }
+      }
+      try {
+        const { assets, skipped } = await extractPdfEmbeddedImages(
+          buffer,
+          imagePageLimit,
+          pagesForImages,
+        );
+        if (skipped > 0) {
+          warnings.push({
+            code: 'pdf_image_extraction_partial',
+            message: `有 ${skipped} 个 PDF 内嵌图片对象未能提取。`,
+          });
+        }
+        if (assets.length > 0) {
+          const uploaded = await uploadEmbeddedImages(assets, images);
+          for (const image of uploaded) {
+            const pageImages = uploadedByPage.get(image.position) ?? [];
+            pageImages.push(image);
+            uploadedByPage.set(image.position, pageImages);
+          }
+        }
+      } catch (err) {
+        warnings.push({
+          code: 'pdf_image_extraction_failed',
+          message: `PDF 内嵌图片提取失败：${(err as Error).message}`,
+        });
+      }
+    }
   }
+
+  const blocks: ParsedDocument['blocks'] = [];
+  for (const pageNumber of pageNumbers) {
+    const pageText = pageTexts.get(pageNumber)?.trim() ?? '';
+    if (pageText) {
+      blocks.push({ type: 'paragraph', text: pageText, pageNumber });
+    }
+    for (const image of uploadedByPage.get(pageNumber) ?? []) {
+      blocks.push({
+        type: 'image',
+        text: image.alt,
+        pageNumber,
+        asset: { url: image.url, alt: image.alt },
+      });
+    }
+  }
+
+  if (
+    !blocks.some(
+      (block) =>
+        block.type === 'paragraph' && countSignificantChars(block.text) > 0,
+    )
+  ) {
+    throw new BadRequestException(
+      'PDF parsing produced no searchable text; refusing to index an empty document.',
+    );
+  }
+
+  const markdown = composeParsedPdfMarkdown(blocks, preservePages);
+  const affectedPages = new Set(
+    warnings
+      .map((warning) => warning.pageNumber)
+      .filter((pageNumber): pageNumber is number => pageNumber !== undefined),
+  );
+  const hasDocumentWarning = warnings.some(
+    (warning) => warning.pageNumber === undefined,
+  );
+  const incompletePages = Math.min(
+    totalPages,
+    affectedPages.size + (hasDocumentWarning ? 1 : 0),
+  );
+
+  return {
+    kind: 'pdf',
+    title: 'PDF Document',
+    blocks,
+    markdown,
+    status: warnings.length > 0 ? 'partial' : 'complete',
+    completeness: Math.max(0, (totalPages - incompletePages) / totalPages),
+    warnings,
+  };
+}
+
+function composeParsedPdfMarkdown(
+  blocks: ParsedDocument['blocks'],
+  preservePages: boolean,
+): string {
+  const sections: string[] = [];
+  let currentPage: number | undefined;
+  for (const block of blocks) {
+    if (preservePages && block.pageNumber !== currentPage) {
+      currentPage = block.pageNumber;
+      sections.push(`## 第 ${currentPage} 页`);
+    }
+    if (block.type === 'image') {
+      sections.push(
+        `![${block.asset?.alt ?? block.text}](${block.asset?.url ?? ''})`,
+      );
+    } else if (block.text.trim()) {
+      sections.push(block.text.trim());
+    }
+  }
+  return [preservePages ? '# PDF Document' : '', ...sections]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
 }
 
 /* ── PDF 内嵌图片提取 ──
@@ -172,6 +328,7 @@ export function composePdfMarkdownWithPages(
 export async function extractPdfEmbeddedImages(
   buffer: Buffer,
   maxPages: number,
+  requestedPageNumbers?: number[],
 ): Promise<{ assets: EmbeddedImageAsset[]; skipped: number }> {
   const canvasModule = await loadNapiCanvas();
   polyfillCanvasGlobals(canvasModule);
@@ -192,7 +349,16 @@ export async function extractPdfEmbeddedImages(
     try {
       const seenRefs = new Set<string>();
       const seqByPage = new Map<number, number>();
-      for (let num = 1; num <= Math.min(doc.numPages, maxPages); num += 1) {
+      const pageNumbers =
+        requestedPageNumbers ??
+        Array.from(
+          { length: Math.min(doc.numPages, maxPages) },
+          (_, index) => index + 1,
+        );
+      for (const num of pageNumbers) {
+        if (num < 1 || num > doc.numPages || num > maxPages) {
+          continue;
+        }
         if (assets.length >= maxCount) {
           break;
         }

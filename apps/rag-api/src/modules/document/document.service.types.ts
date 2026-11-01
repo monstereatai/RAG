@@ -6,6 +6,7 @@ import type {
   GameDocumentType,
   IngestionQualityReport,
 } from './document-profile.util';
+import type { ParsedDocument } from './document-parser.types';
 
 export interface UploadResult {
   docId: string;
@@ -98,6 +99,7 @@ export interface UploadOptions {
   trustedAdminPrincipal?: boolean;
   originalBuffer?: Buffer;
   contentType?: string;
+  parsedDocument?: ParsedDocument;
   businessMetadata?: DocumentBusinessMetadata;
   onQualityAccepted?: (docId: string) => Promise<void>;
 }

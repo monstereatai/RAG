@@ -114,6 +114,24 @@ export class DocumentUploadWorkflow {
         });
       }
 
+      if (options.parsedDocument) {
+        const hasUsableBlock = options.parsedDocument.blocks.some(
+          (block) => block.text.trim() || block.asset?.url,
+        );
+        if (
+          options.parsedDocument.status === 'failed' ||
+          !options.parsedDocument.markdown.trim() ||
+          !hasUsableBlock
+        ) {
+          const details = options.parsedDocument.warnings
+            .map((warning) => `${warning.code}: ${warning.message}`)
+            .join('; ');
+          throw new Error(
+            `document parsing failed; refusing to index invalid content${details ? `: ${details}` : ''}`,
+          );
+        }
+      }
+
       // 安全门禁必须在切块与索引之前：高风险内容只能保留原始证据供人工审核，
       // 不能进入任何可被检索或被模型读取的存储。
       const promptInjectionFindings = detectPromptInjection(content);
@@ -164,6 +182,7 @@ export class DocumentUploadWorkflow {
       const ingestionQuality = assessIngestionQuality(
         content,
         structuredChunks,
+        options.parsedDocument,
       );
       const contentSha256 = createHash('sha256').update(content).digest('hex');
       const indexGeneration = createHash('sha256')
@@ -217,7 +236,13 @@ export class DocumentUploadWorkflow {
         validityMonths: business.validityMonths,
       };
       if (!ingestionQuality.accepted) {
-        throw new Error('document failed ingestion quality gate');
+        throw new Error(
+          `document failed ingestion quality gate: ${JSON.stringify({
+            parseStatus: ingestionQuality.parseStatus,
+            parseCompleteness: ingestionQuality.parseCompleteness,
+            warnings: ingestionQuality.warnings,
+          })}`,
+        );
       }
       this.context.logger.log(`Split into ${chunks.length} chunks`);
       // 入库阶段统一先写 draft；若治理元数据指定了其它状态，主索引完成后再切换。

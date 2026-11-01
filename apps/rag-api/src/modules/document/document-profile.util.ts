@@ -1,4 +1,8 @@
 import { countTextTokens, type StructuredChunk } from './chunking.util';
+import type {
+  ParsedDocumentStatus,
+  ParsedDocumentWarning,
+} from './document-parser.types';
 
 export type GameDocumentType =
   | 'prd'
@@ -62,6 +66,9 @@ export interface IngestionQualityReport {
   score: number;
   accepted: boolean;
   warnings: string[];
+  parseStatus?: ParsedDocumentStatus;
+  parseCompleteness?: number;
+  parseWarnings?: ParsedDocumentWarning[];
   stats: {
     characters: number;
     headings: number;
@@ -184,6 +191,11 @@ export async function evaluateChunkStrategy(
 export function assessIngestionQuality(
   content: string,
   chunks: StructuredChunk[],
+  parse?: {
+    status: ParsedDocumentStatus;
+    completeness: number;
+    warnings: ParsedDocumentWarning[];
+  },
 ): IngestionQualityReport {
   const normalizedChunks = chunks
     .map((chunk) => chunk.content.replace(/\s+/g, ' ').trim())
@@ -212,6 +224,18 @@ export function assessIngestionQuality(
   if (maxChunkLength > 2_000) warnings.push('存在超过 2000 字符的原子 Chunk');
   if (duplicateChunkRatio >= 0.2) warnings.push('重复 Chunk 比例较高');
   if (chunks.length === 0) warnings.push('未生成任何 Chunk');
+  if (parse?.status === 'partial') warnings.push('文档解析部分完成');
+  if (parse?.status === 'failed') warnings.push('文档解析失败');
+  if (parse && parse.completeness < MIN_PARSE_COMPLETENESS) {
+    warnings.push(
+      `解析完整性低于 ${Math.round(MIN_PARSE_COMPLETENESS * 100)}% 门槛`,
+    );
+  }
+  if (parse) {
+    warnings.push(
+      ...parse.warnings.map((warning) => formatParsedDocumentWarning(warning)),
+    );
+  }
 
   const score = Math.max(
     0,
@@ -227,8 +251,17 @@ export function assessIngestionQuality(
       content.trim().length >= 40 &&
       chunks.length > 0 &&
       replacementCharacterRatio <= 0.05 &&
-      duplicateChunkRatio < 0.6,
+      duplicateChunkRatio < 0.6 &&
+      parse?.status !== 'failed' &&
+      (!parse || parse.completeness >= MIN_PARSE_COMPLETENESS),
     warnings,
+    ...(parse
+      ? {
+          parseStatus: parse.status,
+          parseCompleteness: roundRatio(parse.completeness),
+          parseWarnings: parse.warnings,
+        }
+      : {}),
     stats: {
       characters: content.length,
       headings: (content.match(/^#{1,6}\s+/gm) ?? []).length,
@@ -241,6 +274,22 @@ export function assessIngestionQuality(
       replacementCharacterRatio: roundRatio(replacementCharacterRatio),
     },
   };
+}
+
+export const MIN_PARSE_COMPLETENESS = 0.8;
+
+function formatParsedDocumentWarning(warning: ParsedDocumentWarning): string {
+  const location = [
+    warning.pageNumber ? `第 ${warning.pageNumber} 页` : undefined,
+    warning.slideNumber ? `第 ${warning.slideNumber} 张幻灯片` : undefined,
+    warning.sheetName ? `工作表 ${warning.sheetName}` : undefined,
+    warning.startSeconds !== undefined
+      ? `${warning.startSeconds.toFixed(1)}s 起`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join('，');
+  return `解析告警${location ? `（${location}）` : ''}：${warning.message}`;
 }
 
 function detectDocumentType(haystack: string): GameDocumentType {

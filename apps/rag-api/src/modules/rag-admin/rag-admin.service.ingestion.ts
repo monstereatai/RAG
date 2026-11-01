@@ -1,11 +1,16 @@
 import type { RagAdminServiceContext } from './rag-admin.service.context';
 import { BadRequestException } from '@nestjs/common';
 import {
+  createParsedDocument,
   detectDocumentKind,
-  extractAudioDocumentText,
-  extractDocumentText,
   extractImageDocumentText,
+  parseDocument,
+  validateDocumentFormat,
 } from '../document/document-parser.util';
+import type {
+  ParsedDocument,
+  SupportedDocumentKind,
+} from '../document/document-parser.types';
 
 export class RagAdminIngestionWorkflow {
   constructor(private readonly context: RagAdminServiceContext) {}
@@ -22,10 +27,16 @@ export class RagAdminIngestionWorkflow {
       trustedAdminPrincipal,
     );
     const kind = detectDocumentKind(file.originalname);
-    const content = (
-      await this.extractUploadContent(file, kind, userId)
-    ).trim();
-    if (!content) throw new BadRequestException('document content is empty');
+    const parsedDocument = await this.extractUploadDocument(file, kind, userId);
+    const content = parsedDocument.markdown.trim();
+    if (!content || parsedDocument.status === 'failed') {
+      const details = parsedDocument.warnings
+        .map((warning) => `${warning.code}: ${warning.message}`)
+        .join('; ');
+      throw new BadRequestException(
+        `document parsing failed${details ? `: ${details}` : ': document content is empty'}`,
+      );
+    }
     const businessMetadata = { ...fields };
     delete businessMetadata.ownerUserId;
     delete businessMetadata.tenantId;
@@ -39,6 +50,7 @@ export class RagAdminIngestionWorkflow {
         tenantId,
         trustedAdminPrincipal,
         businessMetadata: businessMetadata,
+        parsedDocument,
       },
     );
   }
@@ -135,23 +147,26 @@ export class RagAdminIngestionWorkflow {
 
   public async extractUploadContent(
     file: Express.Multer.File,
-    kind: ReturnType<typeof detectDocumentKind>,
+    kind: SupportedDocumentKind,
     userId: string,
   ): Promise<string> {
-    if (kind === 'audio') {
-      return extractAudioDocumentText(
-        file.buffer,
-        file.originalname,
-        this.context.speechProvider,
-      );
-    }
+    return (await this.extractUploadDocument(file, kind, userId)).markdown;
+  }
+
+  public async extractUploadDocument(
+    file: Express.Multer.File,
+    kind: SupportedDocumentKind,
+    userId: string,
+  ): Promise<ParsedDocument> {
     if (kind === 'image') {
-      return extractImageDocumentText(
+      await validateDocumentFormat(file.buffer, kind, file.originalname);
+      const content = await extractImageDocumentText(
         file.buffer,
         file.originalname,
         file.mimetype,
         this.context.visionProvider,
       );
+      return createParsedDocument(kind, file.originalname, content);
     }
 
     const capabilities = this.context.visionProvider?.getCapabilities();
@@ -189,13 +204,17 @@ export class RagAdminIngestionWorkflow {
       );
     }
 
-    return extractDocumentText(
+    return parseDocument(
       file.buffer,
       kind,
       capabilities?.ocr ? this.context.visionProvider : undefined,
       imageOptions,
       videoOptions,
-      { preservePdfPages: kind === 'pdf' },
+      {
+        preservePdfPages: kind === 'pdf',
+        filename: file.originalname,
+        audioAsr: this.context.speechProvider,
+      },
     );
   }
 

@@ -22,11 +22,15 @@ import { DocumentService } from './document.service';
 import { DocumentPermissionService } from './document-permission.service';
 import { DocumentQueueService } from './document-queue.service';
 import {
+  createParsedDocument,
   detectDocumentKind,
-  extractDocumentText,
-  extractAudioDocumentText,
   extractImageDocumentText,
   extractUrlContent,
+  parseDocument,
+  validateDocumentFormat,
+} from './document-parser.util';
+import type {
+  ParsedDocument,
   SupportedDocumentKind,
   DocumentImageExtractionOptions,
   DocumentVideoExtractionOptions,
@@ -118,12 +122,22 @@ export class DocumentController {
       throw new BadRequestException('file is required');
     }
     await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    // cd 获取文件类型，调用 extractDocumentText 提取文本内容；ObsidianIngestService 做去重和来源挂接。
     const kind = detectDocumentKind(file.originalname);
-    const content = (
-      await this.extractUploadContent(file, kind, user.userId)
-    ).trim();
-    if (!content) {
-      throw new BadRequestException('document text is empty');
+
+    const parsedDocument = await this.extractUploadContent(
+      file,
+      kind,
+      user.userId,
+    );
+    const content = parsedDocument.markdown.trim();
+    if (!content || parsedDocument.status === 'failed') {
+      const details = parsedDocument.warnings
+        .map((warning) => `${warning.code}: ${warning.message}`)
+        .join('; ');
+      throw new BadRequestException(
+        `document parsing failed${details ? `: ${details}` : ': document text is empty'}`,
+      );
     }
 
     this.logger.log(
@@ -139,6 +153,7 @@ export class DocumentController {
       contentType: file.mimetype,
       originalBuffer: file.buffer,
       businessMetadata: this.parseBusinessMetadata(body),
+      parsedDocument,
     });
     return { ...result.rag, obsidian: result.obsidian };
   }
@@ -313,15 +328,18 @@ export class DocumentController {
     trustedAdminPrincipal = false,
   ): Promise<{ chunkCount: number }> {
     const kind = detectDocumentKind(file.originalname);
-    const content = (
-      await this.extractUploadContent(file, kind, userId)
-    ).trim();
-    if (!content) {
+    const parsedDocument = await this.extractUploadContent(file, kind, userId);
+    const content = parsedDocument.markdown.trim();
+    if (!content || parsedDocument.status === 'failed') {
+      const details = parsedDocument.warnings
+        .map((warning) => `${warning.code}: ${warning.message}`)
+        .join('; ');
+      const message = `document parsing failed${details ? `: ${details}` : ': document text is empty'}`;
       await this.documentService.markTaskFailed(
         taskId,
-        'document text is empty',
+        message,
       );
-      throw new BadRequestException('document text is empty');
+      throw new BadRequestException(message);
     }
     const result = await this.obsidianIngest.ingestText({
       title: file.originalname,
@@ -335,6 +353,7 @@ export class DocumentController {
       originalBuffer: file.buffer,
       taskId,
       businessMetadata,
+      parsedDocument,
     });
     return { chunkCount: result.rag.chunkCount };
   }
@@ -390,23 +409,12 @@ export class DocumentController {
     file: Express.Multer.File,
     kind: SupportedDocumentKind,
     userId?: string,
-  ): Promise<string> {
-    if (kind === 'audio') {
-      if (!this.speechProvider.isEnabled()) {
-        throw new BadRequestException(
-          '音频入库需要配置腾讯云 ASR；未转写的音频不会作为文本知识入库。',
-        );
-      }
-      return extractAudioDocumentText(
-        file.buffer,
-        file.originalname,
-        this.speechProvider,
-      );
-    }
+  ): Promise<ParsedDocument> {
 
     // 图片：调用视觉 provider 做 OCR / 图像理解
     if (kind === 'image') {
       try {
+        await validateDocumentFormat(file.buffer, kind, file.originalname);
         const content = await extractImageDocumentText(
           file.buffer,
           file.originalname,
@@ -418,12 +426,13 @@ export class DocumentController {
           body: file.buffer,
           contentType: file.mimetype,
         });
-        return [
+        const markdown = [
           content,
           '## 原始图片',
           '',
           `![${file.originalname.replace(/[[\]\r\n]/g, ' ')}](${this.proxyObjectUrl(stored.key)})`,
         ].join('\n');
+        return createParsedDocument(kind, file.originalname, markdown);
       } catch (err) {
         this.logger.warn(
           `Vision processing failed for image ${file.originalname}: ${
@@ -438,17 +447,21 @@ export class DocumentController {
 
     // 视频：ffmpeg 抽音轨（腾讯 ASR 转写）+ 关键帧（Vision 逐帧描述）后合成 Markdown。
     // 大小护栏超限、ffmpeg/ffprobe 缺失、封装损坏、抽轨/抽帧失败都会抛出明确错误，不静默降级；
-    // ASR / Vision 未配置时对应段落写降级文案，帧图仍上传，不阻塞入库。
-    // PDF 无文本层（扫描件）时，extractDocumentText 会用 vision provider 兜底 OCR；
+    // ASR / Vision 未配置时由 ParsedDocument 返回部分状态与告警，质量门禁决定是否入库。
+    // PDF 扫描页由统一解析器用 vision provider 兜底 OCR；
     // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
     // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
-    return extractDocumentText(
+    return parseDocument(
       file.buffer,
       kind,
       this.visionProvider,
       this.buildImageExtractionOptions(userId),
       this.buildVideoExtractionOptions(file.originalname, userId),
-      { preservePdfPages: kind === 'pdf' },
+      {
+        preservePdfPages: kind === 'pdf',
+        filename: file.originalname,
+        audioAsr: this.speechProvider,
+      },
     );
   }
 

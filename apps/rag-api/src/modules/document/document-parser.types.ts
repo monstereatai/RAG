@@ -15,6 +15,60 @@ export type SupportedDocumentKind =
   | 'audio'
   | 'video';
 
+export type ParsedDocumentStatus = 'complete' | 'partial' | 'failed';
+
+export type ParsedBlockType =
+  | 'title'
+  | 'heading'
+  | 'paragraph'
+  | 'table'
+  | 'image'
+  | 'chart'
+  | 'transcript'
+  | 'frame';
+
+/** 文档解析后保留的一个可定位内容块。 */
+export interface ParsedBlock {
+  type: ParsedBlockType;
+  text: string;
+  level?: number;
+  headingPath?: string[];
+  pageNumber?: number;
+  slideNumber?: number;
+  sheetName?: string;
+  sourceStart?: number;
+  sourceEnd?: number;
+  startSeconds?: number;
+  endSeconds?: number;
+  asset?: {
+    url?: string;
+    mimeType?: string;
+    alt?: string;
+  };
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface ParsedDocumentWarning {
+  code: string;
+  message: string;
+  pageNumber?: number;
+  slideNumber?: number;
+  sheetName?: string;
+  startSeconds?: number;
+  endSeconds?: number;
+}
+
+/** 解析结果只描述文件内容，不持有入库、权限或索引行为。 */
+export interface ParsedDocument {
+  kind: SupportedDocumentKind;
+  title: string;
+  blocks: ParsedBlock[];
+  markdown: string;
+  status: ParsedDocumentStatus;
+  completeness: number;
+  warnings: ParsedDocumentWarning[];
+}
+
 export interface UrlExtractionResult {
   content: string;
   title?: string;

@@ -9,6 +9,7 @@ import {
 import { UrlExtractionResult } from './document-parser.util';
 import { DocumentService, UploadResult } from './document.service';
 import type { DocumentBusinessMetadata } from './document-profile.util';
+import type { ParsedDocument } from './document-parser.types';
 import { DocumentQueueService } from './document-queue.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 
@@ -173,6 +174,7 @@ export class ObsidianIngestService {
     businessMetadata?: DocumentBusinessMetadata;
     docId?: string;
     incrementalUpdate?: boolean;
+    parsedDocument?: ParsedDocument;
   }): Promise<ObsidianIngestResult> {
     // 文本已由入口完成解析；这里处理内容去重，并把 RAG 文档索引与 Obsidian 来源记录关联起来。
     const duplicate = await this.findDuplicate(params.content, params.userId);
@@ -199,6 +201,9 @@ export class ObsidianIngestService {
               params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
             contentType: params.contentType ?? 'text/markdown',
             businessMetadata: params.businessMetadata,
+            ...(params.parsedDocument
+              ? { parsedDocument: params.parsedDocument }
+              : {}),
           },
         );
         return {
@@ -245,6 +250,9 @@ export class ObsidianIngestService {
           params.originalBuffer ?? Buffer.from(params.content, 'utf8'),
         contentType: params.contentType ?? 'text/markdown',
         businessMetadata: params.businessMetadata,
+        ...(params.parsedDocument
+          ? { parsedDocument: params.parsedDocument }
+          : {}),
       },
     );
     const obsidian = await this.enqueueNote({

@@ -13,6 +13,7 @@ import {
 } from './document-parser.shared';
 import type {
   DocumentOcrDelegate,
+  ParsedDocumentWarning,
   PdfPageImage,
   PdfjsModule,
   NapiCanvasModule,
@@ -48,6 +49,107 @@ export function countSignificantChars(text: string): number {
   return text.replace(/\s+/g, '').length;
 }
 
+/** 单页有效文本低于阈值时作为扫描页候选，避免文字页掩盖同一 PDF 中的扫描页。 */
+export function isScannedPdfPage(page: { text: string }): boolean {
+  return (
+    countSignificantChars(page.text) <
+    envPositiveNumber('PDF_SCANNED_MIN_CHARS_PER_PAGE', 10)
+  );
+}
+
+/** 按页尝试 OCR；单页失败/空结果成为 warning，其他页继续解析。 */
+export async function ocrPdfPages(
+  buffer: Buffer,
+  pageNumbers: number[],
+  totalPages: number,
+  ocr?: DocumentOcrDelegate,
+): Promise<{
+  pages: Array<{ num: number; text: string }>;
+  warnings: ParsedDocumentWarning[];
+}> {
+  const requestedPages = [...new Set(pageNumbers)]
+    .filter((num) => Number.isInteger(num) && num > 0 && num <= totalPages)
+    .sort((a, b) => a - b);
+  const maxPages = Math.min(
+    Math.max(1, envPositiveNumber('PDF_OCR_MAX_PAGES', 20)),
+    Math.max(1, totalPages),
+  );
+  const pagesToOcr = requestedPages.slice(0, maxPages);
+  const warnings: ParsedDocumentWarning[] = requestedPages
+    .slice(maxPages)
+    .map((pageNumber) => ({
+      code: 'pdf_ocr_page_limit',
+      message: `超过 PDF_OCR_MAX_PAGES=${maxPages}，第 ${pageNumber} 页未执行 OCR。`,
+      pageNumber,
+    }));
+
+  if (pagesToOcr.length === 0) {
+    return { pages: [], warnings };
+  }
+  if (!ocr || typeof ocr.ocr !== 'function') {
+    warnings.push(
+      ...pagesToOcr.map((pageNumber) => ({
+        code: 'pdf_ocr_unavailable',
+        message: `第 ${pageNumber} 页需要 OCR，但未配置 OCR 服务。`,
+        pageNumber,
+      })),
+    );
+    return { pages: [], warnings };
+  }
+
+  let pageImages: PdfPageImage[];
+  try {
+    pageImages = await renderPdfPageImages(buffer, totalPages, pagesToOcr);
+  } catch (err) {
+    warnings.push(
+      ...pagesToOcr.map((pageNumber) => ({
+        code: 'pdf_page_render_failed',
+        message: `第 ${pageNumber} 页渲染失败：${(err as Error).message}`,
+        pageNumber,
+      })),
+    );
+    return { pages: [], warnings };
+  }
+
+  const imagesByPage = new Map(pageImages.map((image) => [image.num, image]));
+  for (const pageNumber of pagesToOcr) {
+    if (!imagesByPage.has(pageNumber)) {
+      warnings.push({
+        code: 'pdf_page_render_missing',
+        message: `第 ${pageNumber} 页未生成 OCR 图片。`,
+        pageNumber,
+      });
+    }
+  }
+
+  const results = await mapWithConcurrency(
+    pageImages,
+    Math.max(1, envPositiveNumber('PDF_OCR_CONCURRENCY', 3)),
+    async (image) => {
+      try {
+        const text = await ocrPageWithRetry(ocr, image);
+        if (!text.trim()) {
+          warnings.push({
+            code: 'pdf_page_ocr_empty',
+            message: `第 ${image.num} 页 OCR 未识别到正文。`,
+            pageNumber: image.num,
+          });
+        }
+        return { num: image.num, text: text.trim() };
+      } catch (err) {
+        warnings.push({
+          code: 'pdf_page_ocr_failed',
+          message: (err as Error).message,
+          pageNumber: image.num,
+        });
+        return { num: image.num, text: '' };
+      }
+    },
+  );
+  results.sort((a, b) => a.num - b.num);
+  return { pages: results, warnings };
+}
+
 /**
  * 扫描件兜底 OCR 主流程：渲染页图 → 并发 OCR（并发 ≤ N、失败重试 1 次）→ 合成 Markdown。
  *
@@ -59,48 +161,22 @@ export async function ocrScannedPdf(
   totalPages: number,
   ocr?: DocumentOcrDelegate,
 ): Promise<string> {
-  if (!ocr || typeof ocr.ocr !== 'function') {
-    throw new BadRequestException(
-      'PDF has no text layer (looks like a scanned document) and needs OCR, ' +
-        'but no vision provider is wired in. ' +
-        'Configure VISION_PROVIDER (and the matching API key) to ingest scanned PDFs.',
-    );
-  }
-
-  const maxPages = Math.min(
-    Math.max(1, envPositiveNumber('PDF_OCR_MAX_PAGES', 20)),
-    Math.max(1, totalPages || 1),
+  const pageNumbers = Array.from(
+    { length: Math.max(0, totalPages) },
+    (_, index) => index + 1,
   );
-  const concurrency = Math.max(1, envPositiveNumber('PDF_OCR_CONCURRENCY', 3));
-  const pageImages = await renderPdfPageImages(buffer, maxPages);
-  if (pageImages.length === 0) {
-    throw new BadRequestException(
-      `Scanned PDF fallback OCR failed: no page image could be rendered (total pages=${totalPages}).`,
-    );
-  }
-
-  const pages = await mapWithConcurrency(
-    pageImages,
-    concurrency,
-    async (image) => ({
-      num: image.num,
-      text: await ocrPageWithRetry(ocr, image),
-    }),
-  );
-  pages.sort((a, b) => a.num - b.num);
-
-  const recognizedChars = pages.reduce(
+  const result = await ocrPdfPages(buffer, pageNumbers, totalPages, ocr);
+  const recognizedChars = result.pages.reduce(
     (sum, page) => sum + countSignificantChars(page.text),
     0,
   );
   if (recognizedChars === 0) {
     throw new BadRequestException(
-      `Scanned PDF fallback OCR finished but recognized no text in ${pages.length} page(s); ` +
+      `Scanned PDF fallback OCR finished but recognized no text in ${pageNumbers.length} page(s); ` +
         'refusing to ingest an empty document. Check the vision provider model/key.',
     );
   }
-
-  return composeOcrMarkdown(pages);
+  return composeOcrMarkdown(result.pages);
 }
 
 /** 单页 OCR：失败自动重试 1 次，仍失败则抛出带页码语义的错误 */
@@ -126,11 +202,9 @@ export async function ocrPageWithRetry(
 export function composeOcrMarkdown(
   pages: Array<{ num: number; text: string }>,
 ): string {
-  const sections = pages.map((page) =>
-    [`## 第 ${page.num} 页`, '', page.text.trim() || '（本页未识别出文字）']
-      .join('\n')
-      .trim(),
-  );
+  const sections = pages
+    .filter((page) => page.text.trim())
+    .map((page) => [`## 第 ${page.num} 页`, '', page.text.trim()].join('\n'));
   return ['# Scanned PDF Document (OCR)', '', ...sections].join('\n\n').trim();
 }
 
@@ -143,10 +217,19 @@ export function composeOcrMarkdown(
 export async function renderPdfPageImages(
   buffer: Buffer,
   maxPages: number,
+  requestedPageNumbers?: number[],
 ): Promise<PdfPageImage[]> {
+  const pageNumbers = normalizePageNumbers(maxPages, requestedPageNumbers);
+  if (pageNumbers.length === 0) {
+    return [];
+  }
   if (hasPdftoppm()) {
     try {
-      return await renderPdfPageImagesWithPdftoppm(buffer, maxPages);
+      return await renderPdfPageImagesWithPdftoppm(
+        buffer,
+        maxPages,
+        pageNumbers,
+      );
     } catch (err) {
       // poppler 调用异常时降级到内置渲染器，不让扫描件 OCR 因环境问题直接失败
       console.warn(
@@ -154,7 +237,19 @@ export async function renderPdfPageImages(
       );
     }
   }
-  return renderPdfPageImagesWithPdfjs(buffer, maxPages);
+  return renderPdfPageImagesWithPdfjs(buffer, maxPages, pageNumbers);
+}
+
+function normalizePageNumbers(
+  maxPages: number,
+  requestedPageNumbers?: number[],
+): number[] {
+  const source =
+    requestedPageNumbers ??
+    Array.from({ length: Math.max(0, maxPages) }, (_, index) => index + 1);
+  return [...new Set(source)]
+    .filter((num) => Number.isInteger(num) && num > 0 && num <= maxPages)
+    .sort((a, b) => a - b);
 }
 
 export let pdftoppmAvailable: boolean | null = null;
@@ -172,33 +267,49 @@ export function hasPdftoppm(): boolean {
 export async function renderPdfPageImagesWithPdftoppm(
   buffer: Buffer,
   maxPages: number,
+  requestedPageNumbers?: number[],
 ): Promise<PdfPageImage[]> {
   const dir = await mkdtemp(join(tmpdir(), 'pdf-ocr-'));
   const prefix = join(dir, 'page');
   const dpi = envPositiveNumber('PDF_OCR_DPI', 150);
   try {
     await writeFile(`${prefix}.pdf`, buffer);
-    await new Promise<void>((resolveP, rejectP) => {
-      const child = spawn('pdftoppm', [
-        '-png',
-        '-r',
-        String(dpi),
-        '-f',
-        '1',
-        '-l',
-        String(maxPages),
-        `${prefix}.pdf`,
-        prefix,
-      ]);
-      child.on('error', rejectP);
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolveP();
+    const pageNumbers = normalizePageNumbers(maxPages, requestedPageNumbers);
+    const ranges = pageNumbers.reduce<Array<[number, number]>>(
+      (result, num) => {
+        const last = result[result.length - 1];
+        if (last && num === last[1] + 1) {
+          last[1] = num;
         } else {
-          rejectP(new Error(`pdftoppm exited with code ${code}`));
+          result.push([num, num]);
         }
+        return result;
+      },
+      [],
+    );
+    for (const [firstPage, lastPage] of ranges) {
+      await new Promise<void>((resolveP, rejectP) => {
+        const child = spawn('pdftoppm', [
+          '-png',
+          '-r',
+          String(dpi),
+          '-f',
+          String(firstPage),
+          '-l',
+          String(lastPage),
+          `${prefix}.pdf`,
+          prefix,
+        ]);
+        child.on('error', rejectP);
+        child.on('close', (code) => {
+          if (code === 0) {
+            resolveP();
+          } else {
+            rejectP(new Error(`pdftoppm exited with code ${code}`));
+          }
+        });
       });
-    });
+    }
 
     const files = await readdir(dir);
     const pageFiles = files
@@ -208,7 +319,7 @@ export async function renderPdfPageImagesWithPdftoppm(
     const pages: PdfPageImage[] = [];
     for (const match of pageFiles) {
       const num = Number(match![1]);
-      if (num > maxPages) {
+      if (!pageNumbers.includes(num)) {
         continue;
       }
       pages.push({
@@ -302,6 +413,7 @@ export async function lockPdfjsFakeWorker(
 export async function renderPdfPageImagesWithPdfjs(
   buffer: Buffer,
   maxPages: number,
+  requestedPageNumbers?: number[],
 ): Promise<PdfPageImage[]> {
   try {
     const canvasModule = await loadNapiCanvas();
@@ -343,8 +455,11 @@ export async function renderPdfPageImagesWithPdfjs(
     const doc = await loadingTask.promise;
     try {
       const pages: PdfPageImage[] = [];
-      const pageCount = Math.min(doc.numPages, maxPages);
-      for (let num = 1; num <= pageCount; num += 1) {
+      const pageNumbers = normalizePageNumbers(
+        Math.min(doc.numPages, maxPages),
+        requestedPageNumbers,
+      );
+      for (const num of pageNumbers) {
         const page = await doc.getPage(num);
         try {
           const viewport = page.getViewport({ scale: dpi / 72 });
