@@ -9,11 +9,12 @@ const OOXML_MAIN_PARTS: Partial<Record<SupportedDocumentKind, string>> = {
   pptx: 'ppt/presentation.xml',
   xlsx: 'xl/workbook.xml',
 };
-const OOXML_MAIN_CONTENT_TYPES: Partial<Record<SupportedDocumentKind, string>> = {
-  docx: 'wordprocessingml.document.main+xml',
-  pptx: 'presentationml.presentation.main+xml',
-  xlsx: 'spreadsheetml.sheet.main+xml',
-};
+const OOXML_MAIN_CONTENT_TYPES: Partial<Record<SupportedDocumentKind, string>> =
+  {
+    docx: 'wordprocessingml.document.main+xml',
+    pptx: 'presentationml.presentation.main+xml',
+    xlsx: 'spreadsheetml.sheet.main+xml',
+  };
 
 /** 根据文件内容校验扩展名对应的容器，不能只相信客户端文件名或 MIME。 */
 export async function validateDocumentFormat(
@@ -40,7 +41,11 @@ export async function validateDocumentFormat(
   }
 
   if (kind === 'xls' || kind === 'doc' || kind === 'ppt') {
-    if (!buffer.subarray(0, OLE_COMPOUND_FILE_SIGNATURE.length).equals(OLE_COMPOUND_FILE_SIGNATURE)) {
+    if (
+      !buffer
+        .subarray(0, OLE_COMPOUND_FILE_SIGNATURE.length)
+        .equals(OLE_COMPOUND_FILE_SIGNATURE)
+    ) {
       throw formatMismatch(filename, kind);
     }
     return;
@@ -92,13 +97,28 @@ function validateImageSignature(buffer: Buffer, filename: string): void {
     switch (extension) {
       case 'jpg':
       case 'jpeg':
-        return buffer.length >= 3 && buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+        return (
+          buffer.length >= 3 &&
+          buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+        );
       case 'png':
-        return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+        return buffer
+          .subarray(0, 8)
+          .equals(
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          );
       case 'gif':
-        return buffer.subarray(0, 6).toString('ascii').match(/^GIF8[79]a$/) !== null;
+        return (
+          buffer
+            .subarray(0, 6)
+            .toString('ascii')
+            .match(/^GIF8[79]a$/) !== null
+        );
       case 'webp':
-        return buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+        return (
+          buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+          buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+        );
       case 'bmp':
         return buffer.subarray(0, 2).toString('ascii') === 'BM';
       default:

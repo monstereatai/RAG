@@ -209,13 +209,26 @@ export async function parseDocument(
       try {
         return await parseAudioDocument(buffer, filename, options.audioAsr);
       } catch (error) {
-        return failedParsedDocument(kind, filename, 'audio_parse_failed', error);
+        return failedParsedDocument(
+          kind,
+          filename,
+          'audio_parse_failed',
+          error,
+        );
       }
     case 'video':
       try {
-        return await parseVideoDocument(buffer, video);
+        return await parseVideoDocument(
+          buffer,
+          video ? { ...video, filename: video.filename ?? filename } : video,
+        );
       } catch (error) {
-        return failedParsedDocument(kind, filename, 'video_parse_failed', error);
+        return failedParsedDocument(
+          kind,
+          filename,
+          'video_parse_failed',
+          error,
+        );
       }
   }
 }

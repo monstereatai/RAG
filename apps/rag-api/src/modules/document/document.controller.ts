@@ -335,10 +335,7 @@ export class DocumentController {
         .map((warning) => `${warning.code}: ${warning.message}`)
         .join('; ');
       const message = `document parsing failed${details ? `: ${details}` : ': document text is empty'}`;
-      await this.documentService.markTaskFailed(
-        taskId,
-        message,
-      );
+      await this.documentService.markTaskFailed(taskId, message);
       throw new BadRequestException(message);
     }
     const result = await this.obsidianIngest.ingestText({
@@ -410,7 +407,6 @@ export class DocumentController {
     kind: SupportedDocumentKind,
     userId?: string,
   ): Promise<ParsedDocument> {
-
     // 图片：调用视觉 provider 做 OCR / 图像理解
     if (kind === 'image') {
       try {

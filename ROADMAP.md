@@ -9,6 +9,7 @@
 - 外部依赖或目标环境尚未验证时，标为待办或阻塞，不作生产就绪结论。
 
 ## 当前状态
+- **文档解析模块重构（2026-11-01）**：已统一 ParsedDocument/ParsedBlock，覆盖 PDF 页面 OCR、DOCX/PPTX/XLSX 结构、音视频分段与解析状态告警，并接入现有入库质量门禁；旧式 `.doc/.ppt` 不再做二进制伪解析，明确失败。定向回归 9 suites / 57 tests、RAG API build、目标 ESLint/Prettier 通过。PDF/Office 使用有效格式二进制样本，音视频测试读取 WAV/MP4 文件；旧格式依赖仍待验证后再支持。
 - **新员工 RAG 服务熟悉指南**：`docs/新员工项目熟悉指南.md` 明确以 `apps/rag-api` 为学习主体，补充身份与权限、知识入库、问答检索、Agent/工具/长任务、会话记忆、运营观测、多模态功能地图和入口；保留问答与文档入库两条主流程。相对源码核对，文档内本地链接检查通过。
 
 - **本机启动与数据库端口对齐（2026-11-01）**：RAG API 本机 `POSTGRES_URL`、`.env.example`、应用默认值及 TypeORM CLI 默认值统一使用宿主机 `localhost:5433`，与 Docker 映射一致；2026-11-01 检查时宿主机 5432 无监听；本地 `.env` 显式设置 `TYPEORM_SYNCHRONIZE=false`。普通 `pnpm --filter backend start:dev` 无进程级端口覆盖启动成功，PostgreSQL `SELECT 1` 和 RAG API health 均通过。全 workspace build、目标 ESLint 通过；用户端 5173、管理端 8000、RAG API 3000、Admin API 3001、Langfuse 3002 均返回 HTTP 200。Neo4j 当前不可用，Graph 功能关闭；Milvus 启动时有 warmup timeout，故本地启动通过不代表生产验收。Search Ops 文档 facets 曾因 Admin→RAG 默认 2 秒超时短于 5.7–6.4 秒的实测查询而返回 503；客户端已改用现有 10 秒列表读取超时，重编译后调用实测 HTTP 200（约 6.1 秒）。

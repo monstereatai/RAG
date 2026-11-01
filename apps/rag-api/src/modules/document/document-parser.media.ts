@@ -298,7 +298,7 @@ export async function parseVideoDocument(
         ? await transcribeAudioBuffer(
             audio.buffer,
             dir,
-            video.asr!,
+            video.asr,
             videoSegmentSeconds,
           )
         : {

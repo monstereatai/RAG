@@ -92,6 +92,60 @@ describe('game document profile', () => {
     expect(assessIngestionQuality(content, chunks).accepted).toBe(true);
   });
 
+  it('retains parser warnings and blocks incomplete partial results', async () => {
+    const content = '# 混合扫描 PDF\n\n'.concat('识别文本。'.repeat(12));
+    const chunks = await new MarkdownChunker(500, 50).splitStructured(content);
+    const report = assessIngestionQuality(content, chunks, {
+      status: 'partial',
+      completeness: 0.5,
+      warnings: [
+        {
+          code: 'pdf.page_ocr_empty',
+          message: '页面未识别到正文',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    expect(report.accepted).toBe(false);
+    expect(report.parseStatus).toBe('partial');
+    expect(report.parseWarnings?.[0].pageNumber).toBe(2);
+    expect(report.warnings).toContain('文档解析部分完成');
+    expect(report.warnings).toContain('解析告警（第 2 页）：页面未识别到正文');
+  });
+
+  it('accepts usable partial content above the completeness threshold with warnings', async () => {
+    const content = '# 混合扫描 PDF\n\n'.concat(
+      'OCR正文保留章节结构。'.repeat(12),
+    );
+    const chunks = await new MarkdownChunker(500, 50).splitStructured(content);
+    const report = assessIngestionQuality(content, chunks, {
+      status: 'partial',
+      completeness: 0.9,
+      warnings: [
+        { code: 'pdf.page_ocr_empty', message: '第 8 页为空', pageNumber: 8 },
+      ],
+    });
+
+    expect(report.accepted).toBe(true);
+    expect(report.parseStatus).toBe('partial');
+    expect(report.parseCompleteness).toBe(0.9);
+    expect(report.warnings).toContain('文档解析部分完成');
+  });
+
+  it('never accepts a failed parser result', async () => {
+    const content = '# Parsed body\n\n'.concat('x'.repeat(60));
+    const chunks = await new MarkdownChunker(500, 50).splitStructured(content);
+    const report = assessIngestionQuality(content, chunks, {
+      status: 'failed',
+      completeness: 0,
+      warnings: [{ code: 'office.invalid_package', message: '缺少文档主部件' }],
+    });
+
+    expect(report.accepted).toBe(false);
+    expect(report.parseStatus).toBe('failed');
+  });
+
   it('does not treat a topic mention of deprecated as a deprecated document', () => {
     const metadata = detectGameDocumentMetadata(
       'api-version-runbook.md',

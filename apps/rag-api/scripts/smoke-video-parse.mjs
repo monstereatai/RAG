@@ -12,7 +12,7 @@
  *   5. 长音轨分段转写，保留每段源时间范围并报告局部失败；
  *   6. 超过 VIDEO_MAX_BYTES 大小护栏的视频报明确错误。
  *
- * 夹具与产物在运行时生成到 scripts/fixtures/：
+ * 夹具与产物在运行时生成到系统临时目录：
  *   - sample-video.mp4：ffmpeg 生成的 3 秒测试视频；
  *   - output/：stub 委托真实收到的 WAV 音轨与关键帧 JPG（落盘供人工检查）。
  *
@@ -21,11 +21,12 @@
  * 通过标准：全部断言通过，exit 0。
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const distParserPath = resolve(
@@ -63,7 +64,10 @@ const { detectDocumentKind } = parserModule;
 const mediaParserModule = await import(distMediaParserPath);
 const { parseVideoDocument } = mediaParserModule;
 
-const fixturesDir = join(scriptDir, 'fixtures');
+const fixturesDir = mkdtempSync(join(tmpdir(), 'rag-video-parse-smoke-'));
+process.on('exit', () => {
+  rmSync(fixturesDir, { recursive: true, force: true });
+});
 const outputDir = join(fixturesDir, 'output');
 
 const failures = [];
