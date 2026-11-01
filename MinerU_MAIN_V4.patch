@@ -1,0 +1,711 @@
+diff --git a/apps/rag-api/src/modules/document/document.controller.ts b/apps/rag-api/src/modules/document/document.controller.ts
+--- a/apps/rag-api/src/modules/document/document.controller.ts
++++ b/apps/rag-api/src/modules/document/document.controller.ts
+@@ -43,3 +43,4 @@
+ import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
+ import { ObsidianIngestService } from './obsidian-ingest.service';
++import { MineruCloudService } from './mineru-cloud.service';
+ import {
+@@ -89,3 +90,4 @@
+     private readonly obsidianIngest: ObsidianIngestService,
+     private readonly objectStorageProvider: ObjectStorageProvider,
++    private readonly mineruCloud: MineruCloudService,
+   ) {
+@@ -450,4 +452,4 @@
+-    return parseDocument(
++    const parseNative = () => parseDocument(
+       file.buffer,
+       kind,
+       this.visionProvider,
+@@ -459,4 +461,36 @@
+         audioAsr: this.speechProvider,
+       },
+     );
++    if (this.mineruCloud.accepts(kind)) {
++      // Validate the original file before sending confidential content to an external service.
++      await validateDocumentFormat(file.buffer, kind, file.originalname);
++      try {
++        return await this.mineruCloud.parse({
++          buffer: file.buffer,
++          filename: file.originalname,
++          kind,
++          images: this.buildImageExtractionOptions(userId),
++        });
++      } catch (error) {
++        const message = error instanceof Error ? error.message : String(error);
++        this.logger.warn(`MinerU cloud parsing failed for ${kind}: ${message}`);
++        if (!this.mineruCloud.fallbackEnabled()) {
++          throw new BadRequestException(`MinerU cloud parsing failed: ${message}`);
++        }
++        const local = await parseNative();
++        if (local.status === 'failed') {
++          throw new BadRequestException('MinerU cloud and local document parsing both failed');
++        }
++        return {
++          ...local,
++          status: 'partial',
++          completeness: Math.min(local.completeness, 0.9),
++          warnings: [...local.warnings, {
++            code: 'mineru_cloud_fallback_local',
++            message: 'MinerU 云端解析不可用，已使用本地解析；请复核内容完整性。',
++          }],
++        };
++      }
++    }
++    return parseNative();
+   }
+diff --git a/apps/rag-api/src/modules/document/document.module.ts b/apps/rag-api/src/modules/document/document.module.ts
+--- a/apps/rag-api/src/modules/document/document.module.ts
++++ b/apps/rag-api/src/modules/document/document.module.ts
+@@ -10,3 +10,4 @@
+ import { DocumentIndexCoordinator } from './document-index-coordinator.service';
+ import { ObsidianIngestService } from './obsidian-ingest.service';
++import { MineruCloudService } from './mineru-cloud.service';
+ import { EmbeddingModule } from '../../providers/embedding/embedding.module';
+@@ -62,4 +63,5 @@
+     DocumentIndexCoordinator,
+     ObsidianIngestService,
++    MineruCloudService,
+   ],
+   exports: [
+diff --git a/apps/rag-api/src/modules/document/mineru-cloud.service.ts b/apps/rag-api/src/modules/document/mineru-cloud.service.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/rag-api/src/modules/document/mineru-cloud.service.ts
+@@ -0,0 +1,154 @@
++import { Injectable, Logger } from '@nestjs/common';
++import { randomUUID } from 'node:crypto';
++import JSZip from 'jszip';
++import type { DocumentImageExtractionOptions, ParsedDocument, SupportedDocumentKind } from './document-parser.types';
++import { convertMineruResult } from './mineru-cloud.result';
++
++// Distinct from self-hosted MinerU's /v1/tasks API.
++const API_BASE = 'https://mineru.net/api/v4';
++const MINERU_KINDS = new Set<SupportedDocumentKind>(['pdf','doc','docx','ppt','pptx','xlsx','xls']);
++const MAX_UPLOAD = 200 * 1024 * 1024;
++const MAX_ZIP_BYTES = 100 * 1024 * 1024;
++const MAX_UNZIPPED_BYTES = 240 * 1024 * 1024;
++const REQUEST_TIMEOUT_MS = 30000;
++const MAX_WAIT_MS = 300000;
++const POLL_INTERVAL_MS = 2500;
++
++interface ApiReply<T> { code: number; msg?: string; data?: T }
++interface UploadReply { batch_id: string; file_urls: string[] }
++interface TaskStatus { file_name?: string; data_id?: string; state?: string; full_zip_url?: string; err_msg?: string }
++interface StatusReply { extract_result: TaskStatus[] }
++
++type Fetcher = typeof fetch;
++
++function numberEnv(key: string, fallback: number, max: number): number {
++  const value = Number(process.env[key]);
++  return Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value),max) : fallback;
++}
++function allowedExternalUrl(raw: string, category: 'upload'|'result'): string {
++  const url = new URL(raw);
++  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) throw new Error('MinerU returned unsafe external URL');
++  const host = url.hostname.toLowerCase();
++  const uploadHosts = ['mineru.oss-cn-shanghai.aliyuncs.com'];
++  const resultHosts = ['cdn-mineru.openxlab.org.cn'];
++  if (!(category === 'upload' ? uploadHosts : resultHosts).includes(host)) throw new Error('MinerU returned unexpected external host');
++  return url.toString();
++}
++
++async function boundedBytes(response: Response, maxBytes: number): Promise<Buffer> {
++  const length = Number(response.headers.get('content-length'));
++  if (Number.isFinite(length) && length > maxBytes) throw new Error('MinerU response exceeds byte limit');
++  if (!response.body) throw new Error('MinerU response body is missing');
++  const chunks: Uint8Array[] = [];
++  let total = 0;
++  for await (const part of response.body) {
++    const chunk = part instanceof Uint8Array ? part : new Uint8Array(part);
++    total += chunk.length;
++    if (total > maxBytes) {
++      await response.body.cancel().catch(() => undefined);
++      throw new Error('MinerU response exceeds byte limit');
++    }
++    chunks.push(chunk);
++  }
++  return Buffer.concat(chunks,total);
++}
++
++@Injectable()
++export class MineruCloudService {
++  private readonly logger = new Logger(MineruCloudService.name);
++  // Argument injection allows a real HTTP integration test without using user credentials.
++  private http: Fetcher = fetch;
++
++  isEnabled(): boolean { return process.env.MINERU_ENABLED === 'true' && process.env.MINERU_PROVIDER === 'cloud_v4'; }
++  accepts(kind: SupportedDocumentKind): boolean { return this.isEnabled() && MINERU_KINDS.has(kind); }
++  fallbackEnabled(): boolean { return process.env.MINERU_FALLBACK_LOCAL === 'true'; }
++
++  async parse(input: {
++    buffer: Buffer;
++    kind: SupportedDocumentKind;
++    filename: string;
++    images?: DocumentImageExtractionOptions;
++  }): Promise<ParsedDocument> {
++    if (!MINERU_KINDS.has(input.kind)) throw new Error(`MinerU does not support ${input.kind}`);
++    if (input.buffer.length === 0 || input.buffer.length > MAX_UPLOAD) throw new Error('MinerU file is empty or exceeds 200MB');
++    const token = process.env.MINERU_API_KEY?.trim();
++    if (!token) throw new Error('MINERU_API_KEY is missing; cloud parsing is not configured');
++    const started = Date.now();
++    const timeout = numberEnv('MINERU_MAX_WAIT_MS', 180000, MAX_WAIT_MS);
++    const filename = input.filename.replace(/[\\/\r\n\0]/g, '_').slice(0,180);
++    const dataId = randomUUID();
++    // A ZIP result is already the official final artifact; do not expose CDN image URLs downstream.
++    const signed = await this.jsonRequest<UploadReply>(`${API_BASE}/file-urls/batch`, token, {
++      method:'POST',
++      body: JSON.stringify({
++        files: [{name:filename,data_id:dataId}],
++        model_version:process.env.MINERU_MODEL_VERSION === 'pipeline' ? 'pipeline':'vlm',
++        enable_table:true,
++        enable_formula:true,
++        language:'ch',
++      }),
++    });
++    if (!signed.batch_id || signed.file_urls?.length !== 1) throw new Error('MinerU did not return a valid single-file batch');
++    const uploadUrl = allowedExternalUrl(signed.file_urls[0], 'upload');
++    // Signed upload URL: never attach the Bearer token or a synthetic Content-Type.
++    await this.request(uploadUrl, {method:'PUT',body:new Uint8Array(input.buffer)}, Math.min(timeout,120000));
++    let zipUrl: string | undefined;
++    while (Date.now() - started < timeout) {
++      const result = await this.jsonRequest<StatusReply>(`${API_BASE}/extract-results/batch/${encodeURIComponent(signed.batch_id)}`,token,{method:'GET'});
++      const matches = Array.isArray(result.extract_result) ? result.extract_result : [];
++      const task = matches.find(x => x.data_id === dataId) ?? (matches.length === 1 ? matches[0] : undefined);
++      if (task?.state === 'failed') throw new Error(`MinerU task failed${task.err_msg ? ': '+task.err_msg.slice(0,120):''}`);
++      if (task?.state === 'done') {
++        if (!task.full_zip_url) throw new Error('MinerU task completed without result URL');
++        zipUrl = allowedExternalUrl(task.full_zip_url,'result');
++        break;
++      }
++      if (task?.state && !['waiting-file','pending','running','converting'].includes(task.state)) throw new Error('MinerU returned unrecognized task state');
++      await new Promise<void>(resolve => setTimeout(resolve,POLL_INTERVAL_MS));
++    }
++    if (!zipUrl) throw new Error('MinerU cloud parse exceeded the configured wait time');
++    const zipResponse = await this.request(zipUrl,{method:'GET'},Math.min(timeout,120000));
++    const zipBytes = await boundedBytes(zipResponse, MAX_ZIP_BYTES);
++    const zip = await JSZip.loadAsync(zipBytes, {checkCRC32:true});
++    let total = 0;
++    for (const entry of Object.values(zip.files)) {
++      const size = (entry as unknown as {_data?: {uncompressedSize?: number}})._data?.uncompressedSize ?? 0;
++      total += size;
++      if (total > MAX_UNZIPPED_BYTES) throw new Error('MinerU archive uncompressed size exceeds limit');
++      if (entry.name.includes('..') || entry.name.startsWith('/') || entry.name.includes('\\')) throw new Error('MinerU archive has invalid member path');
++    }
++    const contentFiles = Object.values(zip.files).filter(f=>!f.dir);
++    const mdFile = contentFiles.find(f=>/(^|\/)full\.md$/i.test(f.name)) ?? contentFiles.find(f=>/\.md$/i.test(f.name));
++    if (!mdFile) throw new Error('MinerU archive contains no Markdown document');
++    const markdown = await mdFile.async('string');
++    if (markdown.length > 40 * 1024 * 1024) throw new Error('MinerU Markdown exceeds character limit');
++    const candidates = contentFiles.filter(f=>f.name.endsWith('.json') && !/model|middle|layout/i.test(f.name));
++    let json: unknown;
++    for (const entry of candidates) {
++      if ((entry as unknown as {_data?:{uncompressedSize?:number}})._data?.uncompressedSize &&
++        (entry as unknown as {_data?:{uncompressedSize?:number}})._data!.uncompressedSize! > 30 * 1024 * 1024) continue;
++      try {
++        const data = JSON.parse(await entry.async('string')) as Record<string,unknown>;
++        if (Array.isArray(data?.pdf_info)) {json=data;break;}
++      } catch { /* MinerU JSON schema varies by version; Markdown remains the fallback. */ }
++    }
++    const parsed = await convertMineruResult({...input,filename,markdown,json,zip,originalBuffer:input.buffer});
++    this.logger.log(`MinerU cloud parsed ${input.kind}: blocks=${parsed.blocks.length}, status=${parsed.status}`);
++    if (parsed.status === 'failed') throw new Error('MinerU output did not contain indexable content');
++    return parsed;
++  }
++
++  private async request(url: string, options: RequestInit, timeout: number): Promise<Response> {
++    const response = await this.http(url,{...options,redirect:'error',signal:AbortSignal.timeout(timeout)});
++    if (!response.ok) throw new Error(`MinerU HTTP request failed with status ${response.status}`);
++    return response;
++  }
++  private async jsonRequest<T>(url: string, token: string, options: RequestInit): Promise<T> {
++    const response = await this.request(url,{...options,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}},REQUEST_TIMEOUT_MS);
++    const bytes = await boundedBytes(response, 4 * 1024 * 1024);
++    let body: ApiReply<T>;
++    try {body = JSON.parse(bytes.toString('utf8')) as ApiReply<T>;} catch {throw new Error('MinerU returned malformed JSON');}
++    if (body.code !== 0 || !body.data) throw new Error(`MinerU API error code ${String(body.code)}`);
++    return body.data;
++  }
++}
+diff --git a/apps/rag-api/src/modules/document/mineru-cloud.result.ts b/apps/rag-api/src/modules/document/mineru-cloud.result.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/rag-api/src/modules/document/mineru-cloud.result.ts
+@@ -0,0 +1,299 @@
++import { createHash } from 'node:crypto';
++import JSZip from 'jszip';
++import * as XLSX from 'xlsx';
++import { createParsedDocument } from './document-parser.util';
++import type {
++  DocumentImageExtractionOptions,
++  ParsedBlock,
++  ParsedDocument,
++  ParsedDocumentWarning,
++  SupportedDocumentKind,
++} from './document-parser.types';
++
++interface MineruPage { page_idx?: number; para_blocks?: unknown[] }
++interface MineruContent { pdf_info?: MineruPage[] }
++interface MineruTable { sheet: string; html: string }
++interface ParsedCell { label: string; text: string; images: string[] }
++interface ExcelRowLocator {
++  find(sheet: string, headers: string[], cells: string[]): number | null;
++}
++
++const MAX_IMAGES = 120;
++const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
++const HTML_TABLE = /<table\b[^>]*>[\s\S]*?<\/table>/gi;
++const HTML_ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
++const HTML_CELL = /<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi;
++const HTML_IMAGE = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*\/?\s*>/gi;
++
++/** MinerU 的 Office JSON 中，pdf_info 的一个 page 通常代表一个 Sheet，而非原 Excel 页码。 */
++function tablesFromJson(json: unknown): MineruTable[] {
++  if (!json || typeof json !== 'object') return [];
++  const pages = (json as MineruContent).pdf_info;
++  if (!Array.isArray(pages)) return [];
++  const tables: MineruTable[] = [];
++  for (const page of pages) {
++    const blocks = Array.isArray(page.para_blocks) ? page.para_blocks : [];
++    let sheet = `Sheet${(page.page_idx ?? tables.length) + 1}`;
++    for (const block of blocks) {
++      if (!block || typeof block !== 'object') continue;
++      const item = block as { type?: string; blocks?: unknown[]; lines?: unknown[] };
++      const collectSpans = (lines: unknown[] | undefined): Array<Record<string, unknown>> => {
++        if (!Array.isArray(lines)) return [];
++        return lines.flatMap((line) => {
++          const spans = (line as { spans?: unknown[] })?.spans;
++          return Array.isArray(spans) ? spans.filter((v): v is Record<string, unknown> => !!v && typeof v === 'object') : [];
++        });
++      };
++      if (item.type === 'title') {
++        const title = collectSpans(item.lines).map(s => typeof s.content === 'string' ? s.content : '').join(' ').trim();
++        if (title) sheet = title;
++      }
++      if (item.type === 'table') {
++        const inner = Array.isArray(item.blocks) ? item.blocks : [];
++        for (const section of inner) {
++          const spans = collectSpans((section as { lines?: unknown[] })?.lines);
++          for (const span of spans) {
++            if (typeof span.html === 'string' && /<table\b/i.test(span.html)) {
++              const htmlTables = span.html.match(HTML_TABLE) ?? [];
++              for (const html of htmlTables) tables.push({ sheet, html });
++            }
++          }
++        }
++      }
++    }
++  }
++  return tables;
++}
++
++function tablesFromMarkdown(markdown: string): MineruTable[] {
++  const out: MineruTable[] = [];
++  let sheet = 'Sheet1';
++  for (const part of markdown.split(/(?=<table\b|^#{1,3}\s)/gim)) {
++    const h = /^#{1,3}\s+([^\n]+)/.exec(part);
++    if (h) sheet = h[1].trim();
++    const matches = part.match(HTML_TABLE) ?? [];
++    for (const html of matches) out.push({ sheet, html });
++  }
++  // Simple fallback when HTML was not split neatly by Markdown headings.
++  if (out.length === 0) {
++    const matches = markdown.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi);
++    for (const match of matches) {
++      const prefix = markdown.slice(0, match.index);
++      sheet = [...prefix.matchAll(/^#{1,3}\s+([^\n]+)/gm)].at(-1)?.[1]?.trim() || 'Sheet1';
++      out.push({ sheet, html: match[0] });
++    }
++  }
++  return out;
++}
++
++function decodeHtml(text: string): string {
++  const entities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
++  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, value: string) => {
++    const lower = value.toLowerCase();
++    if (lower.startsWith('#')) {
++      const code = lower.startsWith('#x') ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
++      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : all;
++    }
++    return entities[lower] ?? all;
++  });
++}
++function cleanHtml(html: string): string {
++  return decodeHtml(html.replace(/<br\s*\/?\s*>/gi, '\n')
++    .replace(/<\/(?:p|div|li)>/gi, '\n')
++    .replace(/<[^>]+>/g, '')
++    .replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim());
++}
++function parseRows(html: string): ParsedCell[][] {
++  const rows: ParsedCell[][] = [];
++  for (const row of html.matchAll(HTML_ROW)) {
++    const cells: ParsedCell[] = [];
++    for (const cell of row[1].matchAll(HTML_CELL)) {
++      const images = [...cell[2].matchAll(HTML_IMAGE)].map(m => decodeHtml(m[1]));
++      const text = cleanHtml(cell[2].replace(HTML_IMAGE, ''));
++      cells.push({ label: cell[1].toLowerCase(), text, images });
++    }
++    if (cells.length) rows.push(cells);
++  }
++  return rows;
++}
++function normalize(v: string): string { return v.toLowerCase().replace(/[\s\u00a0|:：]+/g, '').trim(); }
++
++/** 精确行号来自原始 Excel；无法无歧义对应时不杜撰行号。 */
++function createExcelLocator(originalBuffer: Buffer | undefined, warnings: ParsedDocumentWarning[]): ExcelRowLocator | null {
++  if (!originalBuffer) return null;
++  try {
++    const workbook = XLSX.read(originalBuffer, { type: 'buffer', WTF: true });
++    const used = new Map<string, Set<number>>();
++    return {
++      find(sheetName, headers, cells) {
++        const sheet = workbook.Sheets[sheetName];
++        if (!sheet || !sheet['!ref']) return null;
++        const range = XLSX.utils.decode_range(sheet['!ref']);
++        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as unknown[][];
++        const records = rows.map(row => row.map(v => normalize(String(v ?? ''))));
++        const normalizedHeaders = headers.map(normalize);
++        let headerIndex = -1;
++        for (let i = 0; i < Math.min(40, rows.length); i++) {
++          const row = records[i];
++          const exact = normalizedHeaders.filter(h => h && row.includes(h)).length;
++          if (exact >= Math.min(2, normalizedHeaders.filter(Boolean).length)) { headerIndex = i; break; }
++        }
++        if (headerIndex < 0) return null;
++        const taken = used.get(sheetName) ?? new Set<number>();
++        used.set(sheetName, taken);
++        const nonempty = cells.map((v,i) => ({ value: normalize(v), idx: i })).filter(x => x.value);
++        // Use values, not ordinal position; escaped/merged cells can shift column positions.
++        const candidates: number[] = [];
++        for (let rowIndex = headerIndex + 1; rowIndex < records.length; rowIndex++) {
++          if (taken.has(rowIndex)) continue;
++          const values = records[rowIndex];
++          const matched = nonempty.filter(item => values.includes(item.value)).length;
++          if (matched >= Math.min(2, nonempty.length) && matched > 0) candidates.push(rowIndex);
++        }
++        if (candidates.length === 0) return null;
++        const selected = candidates[0];
++        taken.add(selected);
++        return range.s.r + selected + 1;
++      },
++    };
++  } catch {
++    warnings.push({ code: 'mineru_excel_locator_failed', message: '原始 Excel 单元格定位失败，已保留工作表和记录序号。' });
++    return null;
++  }
++}
++
++function safeName(src: string): string | null {
++  try {
++    const path = src.startsWith('http') ? new URL(src).pathname : src.split('?')[0];
++    const decoded = decodeURIComponent(path).replace(/\\/g, '/');
++    const name = decoded.split('/').pop() ?? '';
++    if (!/^[\w.\-]{1,180}\.(?:png|jpe?g|webp|gif|bmp)$/i.test(name)) return null;
++    return name;
++  } catch { return null; }
++}
++function mimeFor(data: Buffer): { type: string; ext: string } | null {
++  if (data.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))) return { type: 'image/png', ext: 'png' };
++  if (data.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))) return { type: 'image/jpeg', ext: 'jpg' };
++  if (data.subarray(0,4).toString() === 'RIFF' && data.subarray(8,12).toString() === 'WEBP') return { type:'image/webp',ext:'webp' };
++  if (data.subarray(0,3).toString() === 'GIF') return { type:'image/gif',ext:'gif' };
++  return null;
++}
++function sanitize(value: string): string { return value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g,'').slice(0,80) || 'anonymous'; }
++
++async function materializeImage(
++  src: string, zip: JSZip, images: DocumentImageExtractionOptions | undefined,
++  docHash: string, warnings: ParsedDocumentWarning[], cache: Map<string,string>,
++): Promise<string> {
++  const filename = safeName(src);
++  if (!filename) { warnings.push({ code: 'mineru_image_path_invalid', message: '忽略不安全的图片引用。' }); return '[图片引用无效]'; }
++  if (cache.has(filename)) return cache.get(filename)!;
++  if (cache.size >= MAX_IMAGES) { warnings.push({code:'mineru_image_limit',message:`图片超过 ${MAX_IMAGES} 张，剩余图片未入库。`}); return `[图片: ${filename}，未入库]`; }
++  const matches = Object.values(zip.files).filter(f => !f.dir && f.name.split('/').pop() === filename);
++  if (matches.length !== 1) {
++    warnings.push({code:'mineru_image_missing',message:`解析包中未找到唯一的附件 ${filename}。`});
++    return `[图片: ${filename}，资源缺失]`;
++  }
++  const entry = matches[0];
++  const uncompressed = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0;
++  if (uncompressed > MAX_IMAGE_BYTES) {
++    warnings.push({code:'mineru_image_too_large',message:`图片 ${filename} 超过单张大小限制。`});
++    return `[图片: ${filename}，过大未入库]`;
++  }
++  const bytes = await entry.async('nodebuffer');
++  if (bytes.length > MAX_IMAGE_BYTES) throw new Error('MinerU image exceeds byte limit');
++  const mime = mimeFor(bytes);
++  if (!mime) { warnings.push({code:'mineru_image_format_invalid',message:`图片 ${filename} 不是支持的实际图片格式。`}); return `[图片: ${filename}，格式不可用]`; }
++  if (!images?.storage) { warnings.push({code:'mineru_image_storage_missing',message:`附件 ${filename} 无可用对象存储。`}); return `[图片: ${filename}，未持久化]`; }
++  const key = `documents/${sanitize(images.ownerUserId ?? 'anonymous')}/mineru/${docHash}/images/${createHash('sha256').update(bytes).digest('hex').slice(0,24)}.${mime.ext}`;
++  const stored = await images.storage.putObject({key,body:bytes,contentType:mime.type});
++  const url = images.urlResolver ? images.urlResolver(stored) : stored.url;
++  // This is a controlled storage URL, not MinerU's expiring CDN URL.
++  const marker = `![附件截图](${url})`;
++  let description = '';
++  if (images.vision) {
++    try {
++      const reply = await images.vision.describeImage(bytes, mime.type, '简要描述截图中可用于检索的实际界面元素、文字和标注；不推断图片没有的信息。');
++      description = reply.description?.trim() || '';
++    } catch { warnings.push({code:'mineru_image_vision_failed',message:`附件 ${filename} 的图片理解失败，已保留原图。`}); }
++  }
++  const full = description ? `${marker}\n图片内容：${description}` : marker;
++  cache.set(filename, full);
++  return full;
++}
++
++export interface MineruParseSource {
++  kind: SupportedDocumentKind;
++  filename: string;
++  markdown: string;
++  json?: unknown;
++  zip: JSZip;
++  originalBuffer?: Buffer;
++  images?: DocumentImageExtractionOptions;
++}
++
++/** Turns MinerU's tables into atomic row records; ordinary documents stay Markdown based. */
++export async function convertMineruResult(input: MineruParseSource): Promise<ParsedDocument> {
++  const warnings: ParsedDocumentWarning[] = [];
++  const hash = createHash('sha256').update(input.originalBuffer ?? Buffer.from(input.markdown)).digest('hex').slice(0,20);
++  const cache = new Map<string,string>();
++  if (input.kind !== 'xlsx' && input.kind !== 'xls') {
++    // Markdown sometimes contains image refs; rewrite to our existing ACL-checked OSS assets.
++    const srcs = [...input.markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)|<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)];
++    let markdown = input.markdown;
++    for (const found of srcs) {
++      const source = found[1] || found[2];
++      const marker = await materializeImage(source, input.zip, input.images, hash, warnings, cache);
++      markdown = markdown.replace(found[0], marker);
++    }
++    const result = createParsedDocument(input.kind, input.filename, markdown, warnings);
++    return result;
++  }
++  const tables = tablesFromJson(input.json);
++  const parsedTables = tables.length ? tables : tablesFromMarkdown(input.markdown);
++  if (!parsedTables.length) {
++    warnings.push({code:'mineru_excel_no_tables',message:'MinerU 未识别 Excel 表格，需要使用本地 SheetJS 回退或人工检查。'});
++    return {kind:input.kind,title:input.filename,blocks:[],markdown:'',status:'failed',completeness:0,warnings};
++  }
++  const locator = createExcelLocator(input.originalBuffer, warnings);
++  const blocks: ParsedBlock[] = [];
++  const content: string[] = [`# ${input.filename.replace(/[\r\n#]+/g,' ').trim()}`];
++  let recordCount = 0;
++  for (const [tableIndex, table] of parsedTables.entries()) {
++    const rows = parseRows(table.html);
++    if (rows.length < 2) { warnings.push({code:'mineru_table_no_records',message:`工作表 ${table.sheet} 的表格没有有效数据行。`,sheetName:table.sheet}); continue; }
++    const headers = rows[0].map((cell,i) => cell.text || `列${i+1}`);
++    if (headers.every(h => /^列\d+$/.test(h))) { warnings.push({code:'mineru_table_header_missing',message:`工作表 ${table.sheet} 缺少表头，保留原始表格。`,sheetName:table.sheet}); }
++    const section = `工作表：${table.sheet}`;
++    content.push(`## ${section}`);
++    blocks.push({type:'heading',text:section,level:2,sheetName:table.sheet,headingPath:[input.filename,section]});
++    for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
++      const row = rows[rowIndex];
++      if (!row.some(cell => cell.text || cell.images.length)) continue;
++      recordCount++;
++      const values = headers.map((_,idx) => row[idx]?.text ?? '');
++      const sourceRow = locator?.find(table.sheet, headers, values) ?? null;
++      if (sourceRow === null && locator) warnings.push({code:'mineru_row_unmatched',message:`工作表 ${table.sheet} 的第 ${rowIndex} 条记录无法精确定位 Excel 行号。`,sheetName:table.sheet});
++      const recordId = `${hash}:${tableIndex}:${recordCount}`;
++      const heading = sourceRow === null ? `记录 ${rowIndex}` : `第 ${sourceRow} 行`;
++      const recordLines: string[] = [`### ${heading}`];
++      for (let idx = 0; idx < Math.max(headers.length,row.length); idx++) {
++        const label = headers[idx] || `列${idx+1}`;
++        const cell = row[idx] ?? {text:'',images:[]};
++        if (cell.text) recordLines.push(`- ${label}：${cell.text.replace(/\n/g,'；')}`);
++        for (const source of cell.images) {
++          const marker = await materializeImage(source,input.zip,input.images,hash,warnings,cache);
++          recordLines.push(`- ${label}：${marker}`);
++        }
++      }
++      const text = recordLines.join('\n');
++      content.push(text);
++      blocks.push({
++        type:'paragraph',text,sheetName:table.sheet,
++        headingPath:[input.filename,section,heading],
++        metadata:{recordId,recordIndex:rowIndex,tableIndex,...(sourceRow !== null ? {sourceRow}: {})},
++      });
++    }
++  }
++  if (recordCount === 0) return {kind:input.kind,title:input.filename,blocks:[],markdown:'',status:'failed',completeness:0,warnings:[...warnings,{code:'mineru_excel_empty',message:'未识别到可索引的数据记录。'}]};
++  return {kind:input.kind,title:input.filename,blocks,markdown:content.join('\n\n'),status:warnings.length?'partial':'complete',completeness:warnings.length?0.85:1,warnings};
++}
+diff --git a/apps/rag-api/src/modules/document/mineru-cloud.service.spec.ts b/apps/rag-api/src/modules/document/mineru-cloud.service.spec.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/rag-api/src/modules/document/mineru-cloud.service.spec.ts
+@@ -0,0 +1,99 @@
++import JSZip from 'jszip';
++import * as XLSX from 'xlsx';
++import { MineruCloudService } from './mineru-cloud.service';
++import { convertMineruResult } from './mineru-cloud.result';
++
++const ORIGINAL_ENV = {...process.env};
++const imageBytes = Buffer.from('89504e470d0a1a0a01000000', 'hex');
++const htmlTable = `<table><tr><th>模块</th><th>问题描述</th><th>附件</th><th>任务人</th></tr><tr><td>首页</td><td>替换这个按钮</td><td><img src="https://cdn-mineru.openxlab.org.cn/result/pic.png"/></td><td>黄中底</td></tr><tr><td>游戏版本页</td><td>修改文字</td><td>请保留附件说明</td><td>陈小到</td></tr></table>`;
++const exampleJson = {
++  pdf_info: [{
++    page_idx: 0,
++    para_blocks: [
++      { type: 'title', lines: [{ spans: [{ type: 'text', content: 'bug修复' }] }] },
++      { type: 'table', blocks: [{ lines: [{ spans: [{ type: 'table', html: htmlTable }] }] }] },
++    ],
++  }],
++};
++function xlsxFixture(): Buffer {
++  const workbook=XLSX.utils.book_new();
++  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
++    ['模块','问题描述','附件','任务人'],
++    ['首页','替换这个按钮','','黄中底'],
++    ['游戏版本页','修改文字','请保留附件说明','陈小到']
++  ]),'bug修复');
++  return XLSX.write(workbook,{type:'buffer',bookType:'xlsx'}) as Buffer;
++}
++async function zipFixture(): Promise<JSZip> {
++  const zip = new JSZip();
++  zip.file('full.md','# bug修复\n\n<table></table>');
++  zip.file('mineru.json',JSON.stringify(exampleJson));
++  zip.file('images/pic.png',imageBytes);
++  return zip;
++}
++afterEach(()=>{process.env={...ORIGINAL_ENV};});
++
++describe('MinerU Cloud V4 record conversion',()=>{
++  it('keeps independent Excel records, exact sheet/row, assignee, screenshot and notes',async()=>{
++    const saved: Array<{key:string; contentType?:string}> = [];
++    const zip=await zipFixture();
++    const parsed=await convertMineruResult({
++      kind:'xlsx', filename:'需求文档.xlsx', markdown:await zip.file('full.md')!.async('string'),
++      json:exampleJson,zip,originalBuffer:xlsxFixture(),
++      images:{ownerUserId:'test-user',storage:{async putObject(input){saved.push({key:input.key,contentType:input.contentType});return {key:input.key,url:'http://private-oss/'+input.key};}},urlResolver:stored=>'/api/v1/documents/assets/image?key='+encodeURIComponent(stored.key)},
++    });
++    expect(parsed.status).toBe('complete');
++    expect(parsed.blocks.filter(b=>b.metadata?.recordId)).toHaveLength(2);
++    expect(parsed.markdown).toContain('### 第 2 行');
++    expect(parsed.markdown).toContain('### 第 3 行');
++    expect(parsed.markdown).toContain('请保留附件说明');
++    expect(parsed.markdown).toContain('黄中底');
++    expect(parsed.markdown).toContain('/api/v1/documents/assets/image?key=');
++    expect(parsed.markdown).not.toContain('cdn-mineru.openxlab.org.cn');
++    expect(saved).toHaveLength(1);
++    expect(saved[0].key).toMatch(/^documents\/test-user\/mineru\//);
++    expect(saved[0].contentType).toBe('image/png');
++  });
++  it('does not invent a row number when the source workbook is absent',async()=>{
++    const zip=await zipFixture();
++    const parsed=await convertMineruResult({kind:'xlsx',filename:'x.xlsx',markdown:'',json:exampleJson,zip});
++    expect(parsed.markdown).toContain('### 记录 1');
++    expect(parsed.markdown).not.toContain('### 第 2 行');
++    expect(parsed.warnings.some(w=>w.code==='mineru_image_storage_missing')).toBe(true);
++  });
++  it('retains plain PDF Markdown when no HTML tables are present',async()=>{
++    const zip=new JSZip();
++    const parsed=await convertMineruResult({kind:'pdf',filename:'guide.pdf',markdown:'# Guide\n\n## 第 1 页\n\nImportant policy text',zip});
++    expect(parsed.status).toBe('complete');
++    expect(parsed.markdown).toContain('Important policy text');
++  });
++});
++
++describe('MinerU Cloud V4 transport',()=>{
++  it('uploads, polls and reads result ZIP without sending bearer token to signed upload host', async()=>{
++    process.env.MINERU_ENABLED='true';process.env.MINERU_PROVIDER='cloud_v4';process.env.MINERU_API_KEY='TEST_ONLY_TOKEN';
++    const zip=await zipFixture();
++    const bytes=await zip.generateAsync({type:'nodebuffer'});
++    const seen: Array<{url:string;method:string;auth?:string}> = [];
++    const client=new MineruCloudService();
++    (client as unknown as {http: typeof fetch}).http = async (input,init) => {
++      const url=String(input);
++      seen.push({url,method:init?.method ?? 'GET',auth:new Headers(init?.headers).get('Authorization') ?? undefined});
++      if(url.endsWith('/file-urls/batch')) return new Response(JSON.stringify({code:0,data:{batch_id:'batch1',file_urls:['https://mineru.oss-cn-shanghai.aliyuncs.com/file']}}),{status:200});
++      if(url.endsWith('/file')) return new Response(null,{status:200});
++      if(url.includes('extract-results/batch/')) return new Response(JSON.stringify({code:0,data:{extract_result:[{state:'done',full_zip_url:'https://cdn-mineru.openxlab.org.cn/out.zip'}]}}),{status:200});
++      if(url.endsWith('/out.zip')) return new Response(new Uint8Array(bytes),{status:200});
++      throw new Error('unexpected URL');
++    };
++    const result=await client.parse({kind:'xlsx',filename:'需求文档.xlsx',buffer:xlsxFixture()});
++    expect(result.markdown).toContain('替换这个按钮');
++    expect(seen.map(x=>x.method)).toEqual(['POST','PUT','GET','GET']);
++    expect(seen[1].auth).toBeUndefined();
++    expect(seen[0].auth).toBe('Bearer TEST_ONLY_TOKEN');
++  });
++  it('is opt-in and disabled by default',()=>{
++    const client=new MineruCloudService();
++    delete process.env.MINERU_ENABLED;
++    expect(client.accepts('xlsx')).toBe(false);
++  });
++});
+diff --git a/docs/MINERU_CLOUD_V4_INTEGRATION.md b/docs/MINERU_CLOUD_V4_INTEGRATION.md
+new file mode 100644
+--- /dev/null
++++ b/docs/MINERU_CLOUD_V4_INTEGRATION.md
+@@ -0,0 +1,69 @@
++# MinerU Cloud V4 接入现有 NestJS 文档解析
++
++## 范围
++
++- 只在 `MINERU_ENABLED=true` 与 `MINERU_PROVIDER=cloud_v4` 时，对 PDF、DOC/DOCX、PPT/PPTX、XLS/XLSX 启用 MinerU 云解析；其他类型保留原解析链路。
++- 不创建新分支、不重写原 OSS、鉴权、BullMQ、索引、文档版本治理。
++- 统一 MinerU ZIP 解析（Markdown 和可选 Office JSON），对 Excel HTML 表格按行拆分为一个业务记录一个 Markdown `###` 章节，保留原字段，不按固定模板假设十种表格拥有相同列名。
++- SheetJS 只用于比对原 Excel，找到可信的实际 Sheet 和行号；无法定位时保留记录序号而**不伪造精确行号**。
++- MinerU ZIP 中的图片转存到原项目受控 OSS，保留在对应表格单元格，调用 Vision 后补充可检索描述（如 `VISION_PROVIDER` 已启用）。不把临时 CDN 图片 URL 直接入库。
++- MinerU 失败时默认为上传失败；只有显式开启 `MINERU_FALLBACK_LOCAL=true` 才使用原本地解析，并记录 `partial` warning。
++
++## 接入步骤
++
++把 patch 放项目根目录：
++
++```bash
++git apply --check MinerU_Cloud_V4_RAG.patch
++git apply MinerU_Cloud_V4_RAG.patch
++pnpm --filter backend exec jest --runInBand mineru-cloud.service.spec.ts
++pnpm --filter backend exec tsc --noEmit
++```
++
++后端 `.env`（不要把真实密钥提交 GitHub）：
++
++```dotenv
++MINERU_ENABLED=true
++MINERU_PROVIDER=cloud_v4
++MINERU_API_KEY=your_new_private_api_key
++MINERU_MODEL_VERSION=vlm
++MINERU_MAX_WAIT_MS=180000
++MINERU_FALLBACK_LOCAL=false
++```
++
++通过现有 `POST /api/v1/documents/upload/async` 上传真实测试文件。MinerU 需要外部网络、可用额度和有效 API Key。建议先使用脱敏数据验证企业隐私和授权。
++
++## API 契约
++
++MinerU 托管平台 `https://mineru.net/api/v4`：
++
++1. `POST /file-urls/batch`，传 `{files:[{name,data_id}], model_version:'vlm'}` 获取 `batch_id` 和预签名 URL；
++2. 对返回的 OSS URL 执行 `PUT` 上传原始字节（不要携带 Bearer，也不加 Content-Type）；
++3. `GET /extract-results/batch/{batch_id}` 轮询，直到 `done` 或 `failed`；
++4. 下载 `full_zip_url`，优先读取 `full.md` 和 `pdf_info` JSON，Excel 表格逐条处理。
++
++官方文档：https://mineru.net/apiManage/docs
++
++## 安全、性能、质量
++
++- API Key 只从后端进程环境变量读取；代码与测试中没有真实密钥。
++- 签名上传 URL 和 ZIP 下载 URL 均采用严格的 HTTPS 域名白名单，不允许重定向；避免由返回地址进行 SSRF。
++- 设置 200MB 上传限制、100MB ZIP 下载限制、240MB 解压总限制、图片大小和数量限制，以及云任务总超时。使用方应同步调整文档上传最大限制。
++- XLSX 中多个 Sheet、不同表头均逐表处理；未匹配到物理行号时标注 `记录 N`，不编造第 N 行。
++- **重要限制**：MinerU 的不规则多层表头、行列合并、复杂交叉表以及漏行、错误图片关系仍可能出现。业务上线前必须用约十种模板的完整真实样本逐一回归。
++- 旧项目的 `MarkdownChunker` 根据 `### 记录` 章节优先切分。同一记录很长时可继续拆多个 Chunk，各段必须保留来源章节路径。
++- 这里没有新增数据库 `sourceRow` 字段；引用会在当前 Markdown / headingPath 中保留，精确数据库字段过滤需要另行迁移。
++
++## 验收用例
++
++- [ ] Excel `需求文档.xlsx` 全部 Sheet 均入库，Bug 行与附件不串行
++- [ ] 两张截图保存在自有 OSS，不引用 MinerU 临时 CDN
++- [ ] 检索 Bug 首页按钮时命中独立记录，能展示附件与来源
++- [ ] 未识别模板保留原字段，不丢失列数据
++- [ ] PDF/Word/PPT 仍可解析
++- [ ] MinerU 403/超时/ZIP 缺失时显示任务失败，未生成假知识
++- [ ] `MINERU_FALLBACK_LOCAL=true` 才允许本地回退
++
++## 边界
++
++此补丁已按当前 GitHub `main` 分支源码重新核对；如果你本地已经应用过此前 `/v1/tasks` 版补丁，先检查两个 MinerU Provider 是否重复注册，再选择云端 V4 实现。

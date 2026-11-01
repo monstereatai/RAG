@@ -9,6 +9,7 @@ import { DocumentTaskService } from './document-task.service';
 import { DocumentImageIngestionService } from './document-image-ingestion.service';
 import { DocumentIndexCoordinator } from './document-index-coordinator.service';
 import { ObsidianIngestService } from './obsidian-ingest.service';
+import { MineruCloudService } from './mineru-cloud.service';
 import { EmbeddingModule } from '../../providers/embedding/embedding.module';
 import { VectorStoreModule } from '../../providers/vector-store/vector-store.module';
 import { RagModule } from '../../rag/rag.module';
@@ -61,6 +62,7 @@ import { VisionModule } from '../../providers/vision/vision.module';
     DocumentImageIngestionService,
     DocumentIndexCoordinator,
     ObsidianIngestService,
+    MineruCloudService,
   ],
   exports: [
     DocumentService,

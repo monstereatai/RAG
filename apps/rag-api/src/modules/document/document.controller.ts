@@ -42,6 +42,7 @@ import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.pro
 import { VisionProvider } from '../../providers/vision/vision.provider';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { ObsidianIngestService } from './obsidian-ingest.service';
+import { MineruCloudService } from './mineru-cloud.service';
 import {
   DocumentLifecycleStatus,
   DocumentBusinessMetadata,
@@ -88,6 +89,7 @@ export class DocumentController {
     private readonly documentQueue: DocumentQueueService,
     private readonly obsidianIngest: ObsidianIngestService,
     private readonly objectStorageProvider: ObjectStorageProvider,
+    private readonly mineruCloud: MineruCloudService,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
       const buffer = await this.objectStorageProvider.getObject(job.objectKey);
@@ -447,7 +449,7 @@ export class DocumentController {
     // PDF 扫描页由统一解析器用 vision provider 兜底 OCR；
     // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
     // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
-    return parseDocument(
+    const parseNative = () => parseDocument(
       file.buffer,
       kind,
       this.visionProvider,
@@ -459,6 +461,38 @@ export class DocumentController {
         audioAsr: this.speechProvider,
       },
     );
+    if (this.mineruCloud.accepts(kind)) {
+      // Validate the original file before sending confidential content to an external service.
+      await validateDocumentFormat(file.buffer, kind, file.originalname);
+      try {
+        return await this.mineruCloud.parse({
+          buffer: file.buffer,
+          filename: file.originalname,
+          kind,
+          images: this.buildImageExtractionOptions(userId),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`MinerU cloud parsing failed for ${kind}: ${message}`);
+        if (!this.mineruCloud.fallbackEnabled()) {
+          throw new BadRequestException(`MinerU cloud parsing failed: ${message}`);
+        }
+        const local = await parseNative();
+        if (local.status === 'failed') {
+          throw new BadRequestException('MinerU cloud and local document parsing both failed');
+        }
+        return {
+          ...local,
+          status: 'partial',
+          completeness: Math.min(local.completeness, 0.9),
+          warnings: [...local.warnings, {
+            code: 'mineru_cloud_fallback_local',
+            message: 'MinerU 云端解析不可用，已使用本地解析；请复核内容完整性。',
+          }],
+        };
+      }
+    }
+    return parseNative();
   }
 
   /**
