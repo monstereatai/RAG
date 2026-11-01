@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
-import { MarkdownChunker } from './chunking.util';
+import type { HybridChunk } from './hybrid-document-chunker';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
@@ -726,7 +726,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       contentHash: string;
       indexGeneration: string;
     }>,
-    chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,
+    chunks: HybridChunk[],
     governance: DocumentGovernanceMetadata,
     hypotheticalQuestions: string[][],
     tenantId: string,

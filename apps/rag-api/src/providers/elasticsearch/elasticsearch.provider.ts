@@ -288,6 +288,8 @@ export class ElasticsearchProvider
       tableRef?: string | null;
       sourceStart?: number | null;
       sourceEnd?: number | null;
+      parentContent?: string | null;
+      sourceMetadata?: string | null;
       docVersion?: string | null;
       contentHash?: string | null;
       indexGeneration?: string | null;
