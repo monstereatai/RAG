@@ -1,0 +1,123 @@
+--- a/apps/rag-api/scripts/lib/platform-validation-utils.mjs
++++ b/apps/rag-api/scripts/lib/platform-validation-utils.mjs
+@@ -32,6 +32,17 @@
+   const xs = [...values].sort((a, b) => a - b);
+   return xs[Math.ceil(xs.length * p) - 1];
+ }
++/** Resolve Docker's actual host binding. A dynamic -p mapping can change after stop/start. */
++export function dockerRedisUrl(binding) {
++  const endpoints = String(binding).split(/\r?\n/).map((line) => line.trim());
++  const local = endpoints.find((line) => /^127\.0\.0\.1:[0-9]+$/.test(line));
++  const port = local ? Number(local.slice('127.0.0.1:'.length)) : NaN;
++  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
++    throw new Error(`Disposable Redis must bind to 127.0.0.1 on an ephemeral port; got: ${binding}`);
++  }
++  return `redis://127.0.0.1:${port}`;
++}
++
+ export async function disposableRedis(callback) {
+   requireIsolated();
+   // Never accept external Redis addresses for fault injection. The container is
+@@ -46,13 +57,10 @@
+       '--appendfsync', 'always', '--save', '60', '1',
+     ]);
+     created = true;
+-    const binding = await cmd('docker', ['port', name, '6379/tcp']);
+-    const port = Number(binding.trim().match(/:(\d+)\s*$/)?.[1]);
+-    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+-      throw new Error('Could not verify 127.0.0.1 Docker Redis port: ' + binding);
+-    }
+-    const url = `redis://127.0.0.1:${port}`;
+-    return await callback({ name, url, docker: (action) => cmd('docker', [action, name]) });
++    const redisUrl = async () =>
++      dockerRedisUrl(await cmd('docker', ['port', name, '6379/tcp']));
++    const url = await redisUrl();
++    return await callback({ name, url, redisUrl, docker: (action) => cmd('docker', [action, name]) });
+   } finally {
+     if (created) await cmd('docker', ['rm', '-f', name]).catch(() => {});
+   }
+@@ -68,5 +76,5 @@
+     try { await client.ping(); return client; }
+     catch { client.disconnect(); await sleep(200); }
+   }
+-  throw new Error('Disposable Redis not reachable before deadline');
++  throw new Error(`Disposable Redis not reachable before deadline: ${url} (waited ${timeoutMs}ms)`);
+ }
+--- a/apps/rag-api/scripts/verify-real-redis-recovery.mjs
++++ b/apps/rag-api/scripts/verify-real-redis-recovery.mjs
+@@ -2,7 +2,7 @@
+ import 'dotenv/config';
+ import assert from 'node:assert/strict';
+ import { createRequire } from 'node:module';
+-import { disposableRedis, awaitRedis, sleep, id, opt, report } from './lib/platform-validation-utils.mjs';
++import { disposableRedis, awaitRedis, sleep, id, opt, report, cmd } from './lib/platform-validation-utils.mjs';
+ 
+ const require = createRequire(import.meta.url);
+ const { RedisProvider } = require('../dist/src/providers/redis/redis.provider.js');
+@@ -26,7 +26,7 @@
+ 
+ let output;
+ try {
+-  output = await disposableRedis(async ({ url, name, docker }) => {
++  output = await disposableRedis(async ({ url, name, redisUrl, docker }) => {
+     const threadId = `verify-${id()}`;
+     const initialId = `checkpoint-${id()}`;
+     const config = { configurable: { thread_id: threadId } };
+@@ -52,9 +52,26 @@
+     assert.equal(rejectedWhileUnavailable, true, 'Required checkpoint writes must fail during outage');
+ 
+     await docker('start');
+-    const restored = await awaitRedis(url);
++    // Docker Desktop may assign a NEW published port on container start.
++    // A successful `docker start` does not mean that host port is ready yet.
++    const recoveredUrl = await redisUrl();
++    let restored;
++    try {
++      restored = await awaitRedis(recoveredUrl, 35_000);
++    } catch (error) {
++      const [status, publishedPort, recentLogs] = await Promise.all([
++        cmd('docker', ['inspect', '--format', '{{.State.Status}} (exit={{.State.ExitCode}})', name]).catch((e) => String(e)),
++        cmd('docker', ['port', name, '6379/tcp']).catch((e) => String(e)),
++        cmd('docker', ['logs', '--tail', '20', name]).catch((e) => String(e)),
++      ]);
++      throw new Error(
++        `Redis did not recover after docker start: ${error instanceof Error ? error.message : String(error)}; ` +
++        `container=${name}, status=${status}, publishedPort=${publishedPort}, ` +
++        `initialUrl=${url}, recoveredUrl=${recoveredUrl}, logs=${recentLogs.slice(-2400)}`,
++      );
++    }
+     restored.disconnect();
+-    await withSaver(url, async (saver) => {
++    await withSaver(recoveredUrl, async (saver) => {
+       const persisted = await saver.getTuple(config);
+       assert.equal(persisted?.checkpoint.id, initialId, 'Checkpoint lost after Docker restart');
+       const writes = await saver.getTuple(pendingConfig);
+@@ -66,6 +83,7 @@
+     });
+     return { passed: true, evidenceLevel: 'real_local_docker', containerName: name,
+       isolated: true, redisStopped: true, unavailableWriteRejected: true,
++      dockerPortChanged: url !== recoveredUrl,
+       checkpointSurvivedRestart: true, pendingWritesSurvivedRestart: true,
+       postRestartWriteWorked: true, cleanupWorked: true,
+       limitations: ['Does not test PostgreSQL/BullMQ correlation or external tool side effects',
+--- a/apps/rag-api/scripts/lib/platform-validation-utils.test.mjs
++++ b/apps/rag-api/scripts/lib/platform-validation-utils.test.mjs
+@@ -1,6 +1,6 @@
+ import test from 'node:test';
+ import assert from 'node:assert/strict';
+-import { percentile, requireIsolated, opt } from './platform-validation-utils.mjs';
++import { percentile, requireIsolated, opt, dockerRedisUrl } from './platform-validation-utils.mjs';
+ 
+ test('unacknowledged fault injection rejects before Docker invocation', () => {
+   const old = process.env.PLATFORM_VALIDATION_ISOLATED;
+@@ -16,3 +16,10 @@
+ test('opt missing key returns literal fallback', () => {
+   assert.equal(opt('--never-a-real-flag-for-test','safe'), 'safe');
+ });
++
++test('Docker Redis binding is re-resolved and must stay loopback-only', () => {
++  assert.equal(dockerRedisUrl('127.0.0.1:63778'), 'redis://127.0.0.1:63778');
++  assert.equal(dockerRedisUrl('127.0.0.1:63812'), 'redis://127.0.0.1:63812');
++  assert.throws(() => dockerRedisUrl('0.0.0.0:6379'), /127\.0\.0\.1/);
++  assert.throws(() => dockerRedisUrl('127.0.0.1:123'), /ephemeral port/);
++});

@@ -32,6 +32,17 @@ export function percentile(values, p) {
   const xs = [...values].sort((a, b) => a - b);
   return xs[Math.ceil(xs.length * p) - 1];
 }
+/** Resolve Docker's actual host binding. A dynamic -p mapping can change after stop/start. */
+export function dockerRedisUrl(binding) {
+  const endpoints = String(binding).split(/\r?\n/).map((line) => line.trim());
+  const local = endpoints.find((line) => /^127\.0\.0\.1:[0-9]+$/.test(line));
+  const port = local ? Number(local.slice('127.0.0.1:'.length)) : NaN;
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error(`Disposable Redis must bind to 127.0.0.1 on an ephemeral port; got: ${binding}`);
+  }
+  return `redis://127.0.0.1:${port}`;
+}
+
 export async function disposableRedis(callback) {
   requireIsolated();
   // Never accept external Redis addresses for fault injection. The container is
@@ -46,13 +57,10 @@ export async function disposableRedis(callback) {
       '--appendfsync', 'always', '--save', '60', '1',
     ]);
     created = true;
-    const binding = await cmd('docker', ['port', name, '6379/tcp']);
-    const port = Number(binding.trim().match(/:(\d+)\s*$/)?.[1]);
-    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-      throw new Error('Could not verify 127.0.0.1 Docker Redis port: ' + binding);
-    }
-    const url = `redis://127.0.0.1:${port}`;
-    return await callback({ name, url, docker: (action) => cmd('docker', [action, name]) });
+    const redisUrl = async () =>
+      dockerRedisUrl(await cmd('docker', ['port', name, '6379/tcp']));
+    const url = await redisUrl();
+    return await callback({ name, url, redisUrl, docker: (action) => cmd('docker', [action, name]) });
   } finally {
     if (created) await cmd('docker', ['rm', '-f', name]).catch(() => {});
   }
@@ -68,5 +76,5 @@ export async function awaitRedis(url, timeoutMs = 15_000) {
     try { await client.ping(); return client; }
     catch { client.disconnect(); await sleep(200); }
   }
-  throw new Error('Disposable Redis not reachable before deadline');
+  throw new Error(`Disposable Redis not reachable before deadline: ${url} (waited ${timeoutMs}ms)`);
 }

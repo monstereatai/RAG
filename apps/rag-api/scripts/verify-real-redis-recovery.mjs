@@ -2,7 +2,7 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { disposableRedis, awaitRedis, sleep, id, opt, report } from './lib/platform-validation-utils.mjs';
+import { disposableRedis, awaitRedis, sleep, id, opt, report, cmd } from './lib/platform-validation-utils.mjs';
 
 const require = createRequire(import.meta.url);
 const { RedisProvider } = require('../dist/src/providers/redis/redis.provider.js');
@@ -26,7 +26,7 @@ async function withSaver(url, fn, { offline = false } = {}) {
 
 let output;
 try {
-  output = await disposableRedis(async ({ url, name, docker }) => {
+  output = await disposableRedis(async ({ url, name, redisUrl, docker }) => {
     const threadId = `verify-${id()}`;
     const initialId = `checkpoint-${id()}`;
     const config = { configurable: { thread_id: threadId } };
@@ -52,9 +52,26 @@ try {
     assert.equal(rejectedWhileUnavailable, true, 'Required checkpoint writes must fail during outage');
 
     await docker('start');
-    const restored = await awaitRedis(url);
+    // Docker Desktop may assign a NEW published port on container start.
+    // A successful `docker start` does not mean that host port is ready yet.
+    const recoveredUrl = await redisUrl();
+    let restored;
+    try {
+      restored = await awaitRedis(recoveredUrl, 35_000);
+    } catch (error) {
+      const [status, publishedPort, recentLogs] = await Promise.all([
+        cmd('docker', ['inspect', '--format', '{{.State.Status}} (exit={{.State.ExitCode}})', name]).catch((e) => String(e)),
+        cmd('docker', ['port', name, '6379/tcp']).catch((e) => String(e)),
+        cmd('docker', ['logs', '--tail', '20', name]).catch((e) => String(e)),
+      ]);
+      throw new Error(
+        `Redis did not recover after docker start: ${error instanceof Error ? error.message : String(error)}; ` +
+        `container=${name}, status=${status}, publishedPort=${publishedPort}, ` +
+        `initialUrl=${url}, recoveredUrl=${recoveredUrl}, logs=${recentLogs.slice(-2400)}`,
+      );
+    }
     restored.disconnect();
-    await withSaver(url, async (saver) => {
+    await withSaver(recoveredUrl, async (saver) => {
       const persisted = await saver.getTuple(config);
       assert.equal(persisted?.checkpoint.id, initialId, 'Checkpoint lost after Docker restart');
       const writes = await saver.getTuple(pendingConfig);
@@ -66,6 +83,7 @@ try {
     });
     return { passed: true, evidenceLevel: 'real_local_docker', containerName: name,
       isolated: true, redisStopped: true, unavailableWriteRejected: true,
+      dockerPortChanged: url !== recoveredUrl,
       checkpointSurvivedRestart: true, pendingWritesSurvivedRestart: true,
       postRestartWriteWorked: true, cleanupWorked: true,
       limitations: ['Does not test PostgreSQL/BullMQ correlation or external tool side effects',

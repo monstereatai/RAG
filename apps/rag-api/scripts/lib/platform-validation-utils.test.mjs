@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { percentile, requireIsolated, opt } from './platform-validation-utils.mjs';
+import { percentile, requireIsolated, opt, dockerRedisUrl } from './platform-validation-utils.mjs';
 
 test('unacknowledged fault injection rejects before Docker invocation', () => {
   const old = process.env.PLATFORM_VALIDATION_ISOLATED;
@@ -15,4 +15,11 @@ test('percentiles use sorted empirical samples and do not invent samples', () =>
 });
 test('opt missing key returns literal fallback', () => {
   assert.equal(opt('--never-a-real-flag-for-test','safe'), 'safe');
+});
+
+test('Docker Redis binding is re-resolved and must stay loopback-only', () => {
+  assert.equal(dockerRedisUrl('127.0.0.1:63778'), 'redis://127.0.0.1:63778');
+  assert.equal(dockerRedisUrl('127.0.0.1:63812'), 'redis://127.0.0.1:63812');
+  assert.throws(() => dockerRedisUrl('0.0.0.0:6379'), /127\.0\.0\.1/);
+  assert.throws(() => dockerRedisUrl('127.0.0.1:123'), /ephemeral port/);
 });
