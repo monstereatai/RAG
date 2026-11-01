@@ -64,6 +64,8 @@ export type IncrementalChunkDraft = {
   tableRef: string | null;
   sourceStart: number | null;
   sourceEnd: number | null;
+  parentContent?: string | null;
+  sourceMetadata?: string | null;
   ruleKey: string | null;
   changeType: string;
   supersedesChunkId: string | null;

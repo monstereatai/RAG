@@ -60,6 +60,8 @@ export class RetrievalPostprocessor {
     | 'tableRef'
     | 'sourceStart'
     | 'sourceEnd'
+    | 'parentContent'
+    | 'sourceMetadata'
     | 'docVersion'
     | 'effectiveAt'
     | 'expiredAt'
@@ -85,6 +87,8 @@ export class RetrievalPostprocessor {
       tableRef: chunk.tableRef,
       sourceStart: chunk.sourceStart,
       sourceEnd: chunk.sourceEnd,
+      parentContent: chunk.parentContent,
+      sourceMetadata: chunk.sourceMetadata,
       docVersion: chunk.docVersion,
       effectiveAt: chunk.effectiveAt,
       expiredAt: chunk.expiredAt,

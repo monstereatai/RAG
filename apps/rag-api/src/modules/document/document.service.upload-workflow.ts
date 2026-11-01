@@ -9,7 +9,7 @@ import { GraphService } from '../graph/graph.service';
 import { DocumentMetadataExtractor } from './document-metadata.extractor';
 import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import { DocumentChunkWorkflow } from './document.service.chunk-workflow';
-import { MarkdownChunker } from './chunking.util';
+import { splitHybridDocument } from './hybrid-document-chunker';
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
 import {
   DocumentLifecycleStatus,
@@ -168,10 +168,14 @@ export class DocumentUploadWorkflow {
         options.businessMetadata,
       );
       const strategy = await this.context.resolveChunkStrategy(business);
-      const structuredChunks = await new MarkdownChunker(
-        strategy.chunkSize,
-        strategy.chunkOverlap,
-      ).splitStructured(content);
+      const structuredChunks = await splitHybridDocument({
+        docId,
+        filename,
+        content,
+        parsedDocument: options.parsedDocument,
+        chunkSize: strategy.chunkSize,
+        chunkOverlap: strategy.chunkOverlap,
+      });
       const hypotheticalQuestions = structuredChunks.map((chunk) =>
         this.context.chunkWorkflow.buildHypotheticalQuestions(
           chunk.content,
@@ -257,7 +261,10 @@ export class DocumentUploadWorkflow {
         chunkIndex: idx,
         userId,
         tenantId: options.tenantId ?? 'legacy',
-        contentHash: createHash('sha256').update(chunk).digest('hex'),
+        contentHash: createHash('sha256')
+          .update(chunk)
+          .update(JSON.stringify(structuredChunks[idx]?.sourceMetadata ?? {}))
+          .digest('hex'),
         indexGeneration,
       }));
       const chunkDocs = chunks.map((chunk, idx) => ({
@@ -267,7 +274,10 @@ export class DocumentUploadWorkflow {
         chunkIndex: idx,
         userId,
         tenantId: options.tenantId ?? 'legacy',
-        contentHash: createHash('sha256').update(chunk).digest('hex'),
+        contentHash: createHash('sha256')
+          .update(chunk)
+          .update(JSON.stringify(structuredChunks[idx]?.sourceMetadata ?? {}))
+          .digest('hex'),
         indexGeneration,
         parentChunkId: structuredChunks[idx]?.parentChunkId ?? null,
         headingPath: structuredChunks[idx]?.headingPath ?? [],
@@ -276,6 +286,10 @@ export class DocumentUploadWorkflow {
         tableRef: structuredChunks[idx]?.tableRef ?? null,
         sourceStart: structuredChunks[idx]?.sourceStart ?? null,
         sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,
+        parentContent: structuredChunks[idx]?.parentContent ?? null,
+        sourceMetadata: structuredChunks[idx]?.sourceMetadata
+          ? JSON.stringify(structuredChunks[idx].sourceMetadata)
+          : null,
         ruleKey: this.context.chunkWorkflow.resolveRuleKey(
           structuredChunks[idx],
           idx,

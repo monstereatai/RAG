@@ -1,0 +1,142 @@
+{
+  "apps/rag-api/src/modules/document/document.service.upload-workflow.ts": [
+    [
+      "import { MarkdownChunker } from './chunking.util';",
+      "import { splitHybridDocument } from './hybrid-document-chunker';"
+    ],
+    [
+      "      const structuredChunks = await new MarkdownChunker(\n        strategy.chunkSize,\n        strategy.chunkOverlap,\n      ).splitStructured(content);",
+      "      const structuredChunks = await splitHybridDocument({\n        docId,\n        filename,\n        content,\n        parsedDocument: options.parsedDocument,\n        chunkSize: strategy.chunkSize,\n        chunkOverlap: strategy.chunkOverlap,\n      });"
+    ],
+    [
+      "        sourceStart: structuredChunks[idx]?.sourceStart ?? null,\n        sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,",
+      "        sourceStart: structuredChunks[idx]?.sourceStart ?? null,\n        sourceEnd: structuredChunks[idx]?.sourceEnd ?? null,\n        parentContent: structuredChunks[idx]?.parentContent ?? null,\n        sourceMetadata: structuredChunks[idx]?.sourceMetadata\n          ? JSON.stringify(structuredChunks[idx].sourceMetadata)\n          : null,"
+    ],
+    [
+      "        contentHash: createHash('sha256').update(chunk).digest('hex'),",
+      "        contentHash: createHash('sha256')\n          .update(chunk)\n          .update(JSON.stringify(structuredChunks[idx]?.sourceMetadata ?? {}))\n          .digest('hex'),"
+    ]
+  ],
+  "apps/rag-api/src/modules/document/document.service.chunk-workflow.ts": [
+    [
+      "import { MarkdownChunker } from './chunking.util';",
+      "import type { HybridChunk } from './hybrid-document-chunker';"
+    ],
+    [
+      "    chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,",
+      "    chunks: HybridChunk[],"
+    ],
+    [
+      "        sourceStart: draft.sourceStart,\n        sourceEnd: draft.sourceEnd,",
+      "        sourceStart: draft.sourceStart,\n        sourceEnd: draft.sourceEnd,\n        parentContent: draft.parentContent ?? null,\n        sourceMetadata: draft.sourceMetadata ?? null,"
+    ],
+    [
+      "        sourceStart: chunk?.sourceStart ?? null,\n        sourceEnd: chunk?.sourceEnd ?? null,",
+      "        sourceStart: chunk?.sourceStart ?? null,\n        sourceEnd: chunk?.sourceEnd ?? null,\n        parentContent: chunk?.parentContent ?? null,\n        sourceMetadata: chunk?.sourceMetadata\n          ? JSON.stringify(chunk.sourceMetadata)\n          : null,"
+    ]
+  ],
+  "apps/rag-api/src/modules/document/document.service.types.ts": [
+    [
+      "  sourceStart: number | null;\n  sourceEnd: number | null;",
+      "  sourceStart: number | null;\n  sourceEnd: number | null;\n  parentContent?: string | null;\n  sourceMetadata?: string | null;"
+    ]
+  ],
+  "apps/rag-api/src/providers/db/entities/document-chunk.entity.ts": [
+    [
+      "  @Column({ type: 'int', nullable: true, default: null })\n  sourceEnd!: number | null;",
+      "  @Column({ type: 'int', nullable: true, default: null })\n  sourceEnd!: number | null;\n\n  /** Materialized parent context for child-hit -> parent expansion; never embedded by itself. */\n  @Column({ type: 'text', nullable: true, default: null })\n  parentContent!: string | null;\n\n  /** JSON containing verified page/sheet/row/time and local ACL-checked asset references. */\n  @Column({ type: 'text', nullable: true, default: null })\n  sourceMetadata!: string | null;"
+    ]
+  ],
+  "apps/rag-api/src/rag/contracts/rag-capabilities.ts": [
+    [
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;",
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;\n  parentContent?: string | null;\n  sourceMetadata?: string | null;"
+    ]
+  ],
+  "apps/rag-api/src/rag/indexing/bm25-store.ts": [
+    [
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;",
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;\n  parentContent?: string | null;\n  sourceMetadata?: string | null;"
+    ]
+  ],
+  "apps/rag-api/src/rag/evidence/retrieval.types.ts": [
+    [
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;",
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;\n  parentContent?: string | null;\n  sourceMetadata?: string | null;"
+    ]
+  ],
+  "apps/rag-api/src/rag/indexing/rag-index.service.ts": [
+    [
+      "    sourceStart: chunk.sourceStart,\n    sourceEnd: chunk.sourceEnd,",
+      "    sourceStart: chunk.sourceStart,\n    sourceEnd: chunk.sourceEnd,\n    parentContent: chunk.parentContent,\n    sourceMetadata: chunk.sourceMetadata,"
+    ],
+    [
+      "        sourceStart: entry.sourceStart,\n        sourceEnd: entry.sourceEnd,",
+      "        sourceStart: entry.sourceStart,\n        sourceEnd: entry.sourceEnd,\n        parentContent: entry.parentContent,\n        sourceMetadata: entry.sourceMetadata,"
+    ],
+    [
+      "        sourceStart: c.sourceStart,\n        sourceEnd: c.sourceEnd,",
+      "        sourceStart: c.sourceStart,\n        sourceEnd: c.sourceEnd,\n        parentContent: c.parentContent,\n        sourceMetadata: c.sourceMetadata,"
+    ]
+  ],
+  "apps/rag-api/src/rag/retrieval/retrieval-postprocessor.ts": [
+    [
+      "    | 'sourceStart'\n    | 'sourceEnd'",
+      "    | 'sourceStart'\n    | 'sourceEnd'\n    | 'parentContent'\n    | 'sourceMetadata'"
+    ],
+    [
+      "      sourceStart: chunk.sourceStart,\n      sourceEnd: chunk.sourceEnd,",
+      "      sourceStart: chunk.sourceStart,\n      sourceEnd: chunk.sourceEnd,\n      parentContent: chunk.parentContent,\n      sourceMetadata: chunk.sourceMetadata,"
+    ]
+  ],
+  "apps/rag-api/src/rag/retrieval/rag-chunk-policy.service.ts": [
+    [
+      "    | 'sourceStart'\n    | 'sourceEnd'",
+      "    | 'sourceStart'\n    | 'sourceEnd'\n    | 'parentContent'\n    | 'sourceMetadata'"
+    ]
+  ],
+  "apps/rag-api/src/rag/retrieval/context-builder.ts": [
+    [
+      "    const selected: RetrievedChunk[] = [];\n    let usedCharacters = 0;",
+      "    const selected: RetrievedChunk[] = [];\n    const expandedParents = new Set<string>();\n    let usedCharacters = 0;"
+    ],
+    [
+      "      const estimated = chunk.content.length + 32;\n      if (\n        selected.length > 0 &&\n        usedCharacters + estimated > contextCharacterBudget\n      ) {\n        budgetRemoved += 1;\n        continue;\n      }\n      selected.push(chunk);\n      usedCharacters += estimated;",
+      "      // Ranking remains child-only. Expand the first hit in a parent group after\n      // ranking, under the same document ACL/scope and the context token budget.\n      // Lookup stays precise; synthesis/procedures can use neighboring clauses.\n      let expanded = chunk.content;\n      const parentId = chunk.parentChunkId;\n      if (\n        parentId &&\n        !expandedParents.has(parentId) &&\n        profile.intent !== 'lookup' &&\n        chunk.parentContent &&\n        chunk.parentContent !== chunk.content\n      ) {\n        const parent = chunk.parentContent.slice(0, 6_000);\n        const candidate = `命中原文：\\n${chunk.content}\\n\\n所属父段落（补充上下文）：\\n${parent}`;\n        if (usedCharacters + candidate.length + 32 <= contextCharacterBudget) {\n          expanded = candidate;\n        }\n      }\n      const estimated = expanded.length + 32;\n      if (\n        selected.length > 0 &&\n        usedCharacters + estimated > contextCharacterBudget\n      ) {\n        budgetRemoved += 1;\n        continue;\n      }\n      if (parentId && expanded !== chunk.content) expandedParents.add(parentId);\n      selected.push(expanded === chunk.content ? chunk : { ...chunk, content: expanded });\n      usedCharacters += estimated;"
+    ],
+    [
+      "      selected.push(expanded === chunk.content ? chunk : { ...chunk, content: expanded });",
+      "      const sourceLabel = sourceCitationLabel(chunk.sourceMetadata);\n      selected.push({\n        ...chunk,\n        ...(expanded !== chunk.content ? { content: expanded } : {}),\n        ...(sourceLabel && !chunk.citationLabel ? { citationLabel: sourceLabel } : {}),\n      });"
+    ],
+    [
+      "          `[片段 ${index + 1}｜${chunk.contextRole ?? 'hit'}]\\n${chunk.content}`,",
+      "          `[片段 ${index + 1}｜${chunk.contextRole ?? 'hit'}${chunk.citationLabel ? `｜${chunk.citationLabel}` : ''}]\\n${chunk.content}`,"
+    ],
+    [
+      "export class ContextBuilder {",
+      "function sourceCitationLabel(raw?: string | null): string | null {\n  if (!raw) return null;\n  try {\n    const value = JSON.parse(raw) as Record<string, unknown>;\n    const filename = typeof value.filename === 'string' ? value.filename.slice(0, 100) : '';\n    const sheetName = typeof value.sheetName === 'string' ? value.sheetName.slice(0, 80) : '';\n    const row = Number.isSafeInteger(value.rowStart) && Number(value.rowStart) > 0\n      ? `第 ${value.rowStart} 行` : '';\n    const page = Number.isSafeInteger(value.pageNumber) && Number(value.pageNumber) > 0\n      ? `第 ${value.pageNumber} 页` : '';\n    const slide = Number.isSafeInteger(value.slideNumber) && Number(value.slideNumber) > 0\n      ? `第 ${value.slideNumber} 张` : '';\n    const time = typeof value.startSeconds === 'number' && Number.isFinite(value.startSeconds)\n      ? `${value.startSeconds.toFixed(1)}s` : '';\n    return [filename, sheetName, row, page, slide, time].filter(Boolean).join(' / ') || null;\n  } catch { return null; }\n}\n\nexport class ContextBuilder {"
+    ]
+  ],
+  "apps/rag-api/src/providers/elasticsearch/elasticsearch.provider.ts": [
+    [
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;",
+      "  sourceStart?: number | null;\n  sourceEnd?: number | null;\n  parentContent?: string | null;\n  sourceMetadata?: string | null;"
+    ],
+    [
+      "          sourceStart: { type: 'integer' },\n          sourceEnd: { type: 'integer' },",
+      "          sourceStart: { type: 'integer' },\n          sourceEnd: { type: 'integer' },\n          parentContent: { type: 'text', index: false },\n          sourceMetadata: { type: 'text', index: false },"
+    ],
+    [
+      "              sourceStart: c.sourceStart,\n              sourceEnd: c.sourceEnd,",
+      "              sourceStart: c.sourceStart,\n              sourceEnd: c.sourceEnd,\n              parentContent: c.parentContent,\n              sourceMetadata: c.sourceMetadata,"
+    ],
+    [
+      "          sourceStart: src?.sourceStart,\n          sourceEnd: src?.sourceEnd,",
+      "          sourceStart: src?.sourceStart,\n          sourceEnd: src?.sourceEnd,\n          parentContent: src?.parentContent,\n          sourceMetadata: src?.sourceMetadata,"
+    ],
+    [
+      "          if (!properties?.tenantId) patch.tenantId = { type: 'keyword' };",
+      "          if (!properties?.tenantId) patch.tenantId = { type: 'keyword' };\n          if (!properties?.parentContent)\n            patch.parentContent = { type: 'text', index: false };\n          if (!properties?.sourceMetadata)\n            patch.sourceMetadata = { type: 'text', index: false };"
+    ]
+  ]
+}

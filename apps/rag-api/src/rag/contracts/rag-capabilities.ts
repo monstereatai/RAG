@@ -22,6 +22,8 @@ export interface RagIndexChunkInput {
   tableRef?: string | null;
   sourceStart?: number | null;
   sourceEnd?: number | null;
+  parentContent?: string | null;
+  sourceMetadata?: string | null;
   docVersion?: string | null;
   effectiveAt?: Date | null;
   expiredAt?: Date | null;

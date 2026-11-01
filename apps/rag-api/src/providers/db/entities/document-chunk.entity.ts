@@ -75,6 +75,14 @@ export class DocumentChunkEntity {
   @Column({ type: 'int', nullable: true, default: null })
   sourceEnd!: number | null;
 
+  /** Materialized parent context for child-hit -> parent expansion; never embedded by itself. */
+  @Column({ type: 'text', nullable: true, default: null })
+  parentContent!: string | null;
+
+  /** JSON containing verified page/sheet/row/time and local ACL-checked asset references. */
+  @Column({ type: 'text', nullable: true, default: null })
+  sourceMetadata!: string | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   docVersion!: string | null;
 

@@ -7,7 +7,7 @@ import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.en
 import { GraphService } from '../graph/graph.service';
 import { DocumentIndexCoordinator } from './document-index-coordinator.service';
 import { DocumentTaskService } from './document-task.service';
-import { MarkdownChunker } from './chunking.util';
+import type { HybridChunk } from './hybrid-document-chunker';
 import {
   DocumentLifecycleStatus,
   type DocumentBusinessMetadata,
@@ -249,6 +249,8 @@ export class DocumentChunkWorkflow {
         tableRef: draft.tableRef,
         sourceStart: draft.sourceStart,
         sourceEnd: draft.sourceEnd,
+        parentContent: draft.parentContent ?? null,
+        sourceMetadata: draft.sourceMetadata ?? null,
         docVersion: input.governance.docVersion,
         effectiveAt: draft.effectiveAt,
         expiredAt: draft.expiredAt,
@@ -431,7 +433,7 @@ export class DocumentChunkWorkflow {
       contentHash: string;
       indexGeneration: string;
     }>,
-    chunks: Awaited<ReturnType<MarkdownChunker['splitStructured']>>,
+    chunks: HybridChunk[],
     governance: DocumentGovernanceMetadata,
     hypotheticalQuestions: string[][],
     tenantId: string,
@@ -462,6 +464,10 @@ export class DocumentChunkWorkflow {
         tableRef: chunk?.tableRef ?? null,
         sourceStart: chunk?.sourceStart ?? null,
         sourceEnd: chunk?.sourceEnd ?? null,
+        parentContent: chunk?.parentContent ?? null,
+        sourceMetadata: chunk?.sourceMetadata
+          ? JSON.stringify(chunk.sourceMetadata)
+          : null,
         docVersion: governance.docVersion,
         effectiveAt: this.resolveChunkValidity(
           record.content,

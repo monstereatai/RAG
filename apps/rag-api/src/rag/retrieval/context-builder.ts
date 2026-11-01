@@ -67,6 +67,24 @@ export function retrievalProfileForTaskType(
   return taskType === 'synthesis' ? PROFILES.generation : PROFILES[taskType];
 }
 
+function sourceCitationLabel(raw?: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const filename = typeof value.filename === 'string' ? value.filename.slice(0, 100) : '';
+    const sheetName = typeof value.sheetName === 'string' ? value.sheetName.slice(0, 80) : '';
+    const row = Number.isSafeInteger(value.rowStart) && Number(value.rowStart) > 0
+      ? `第 ${value.rowStart} 行` : '';
+    const page = Number.isSafeInteger(value.pageNumber) && Number(value.pageNumber) > 0
+      ? `第 ${value.pageNumber} 页` : '';
+    const slide = Number.isSafeInteger(value.slideNumber) && Number(value.slideNumber) > 0
+      ? `第 ${value.slideNumber} 张` : '';
+    const time = typeof value.startSeconds === 'number' && Number.isFinite(value.startSeconds)
+      ? `${value.startSeconds.toFixed(1)}s` : '';
+    return [filename, sheetName, row, page, slide, time].filter(Boolean).join(' / ') || null;
+  } catch { return null; }
+}
+
 export class ContextBuilder {
   /** 去重并限制单文档占比后，再按相关性、多样性和字符预算挑选生成上下文。 */
   build(
@@ -134,6 +152,7 @@ export class ContextBuilder {
         )
       : profile.contextCharacterBudget;
     const selected: RetrievedChunk[] = [];
+    const expandedParents = new Set<string>();
     let usedCharacters = 0;
     let budgetRemoved = 0;
     for (const chunk of ordered) {
@@ -141,7 +160,25 @@ export class ContextBuilder {
         budgetRemoved += 1;
         continue;
       }
-      const estimated = chunk.content.length + 32;
+      // Ranking remains child-only. Expand the first hit in a parent group after
+      // ranking, under the same document ACL/scope and the context token budget.
+      // Lookup stays precise; synthesis/procedures can use neighboring clauses.
+      let expanded = chunk.content;
+      const parentId = chunk.parentChunkId;
+      if (
+        parentId &&
+        !expandedParents.has(parentId) &&
+        profile.intent !== 'lookup' &&
+        chunk.parentContent &&
+        chunk.parentContent !== chunk.content
+      ) {
+        const parent = chunk.parentContent.slice(0, 6_000);
+        const candidate = `命中原文：\n${chunk.content}\n\n所属父段落（补充上下文）：\n${parent}`;
+        if (usedCharacters + candidate.length + 32 <= contextCharacterBudget) {
+          expanded = candidate;
+        }
+      }
+      const estimated = expanded.length + 32;
       if (
         selected.length > 0 &&
         usedCharacters + estimated > contextCharacterBudget
@@ -149,7 +186,13 @@ export class ContextBuilder {
         budgetRemoved += 1;
         continue;
       }
-      selected.push(chunk);
+      if (parentId && expanded !== chunk.content) expandedParents.add(parentId);
+      const sourceLabel = sourceCitationLabel(chunk.sourceMetadata);
+      selected.push({
+        ...chunk,
+        ...(expanded !== chunk.content ? { content: expanded } : {}),
+        ...(sourceLabel && !chunk.citationLabel ? { citationLabel: sourceLabel } : {}),
+      });
       usedCharacters += estimated;
     }
 
@@ -159,7 +202,7 @@ export class ContextBuilder {
     const context = arranged
       .map(
         (chunk, index) =>
-          `[片段 ${index + 1}｜${chunk.contextRole ?? 'hit'}]\n${chunk.content}`,
+          `[片段 ${index + 1}｜${chunk.contextRole ?? 'hit'}${chunk.citationLabel ? `｜${chunk.citationLabel}` : ''}]\n${chunk.content}`,
       )
       .join('\n\n---\n\n');
 

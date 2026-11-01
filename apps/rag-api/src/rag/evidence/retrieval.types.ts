@@ -16,6 +16,8 @@ export interface RetrievedChunk {
   tableRef?: string | null;
   sourceStart?: number | null;
   sourceEnd?: number | null;
+  parentContent?: string | null;
+  sourceMetadata?: string | null;
   docVersion?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;

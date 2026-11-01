@@ -66,6 +66,8 @@ export class RagChunkPolicyService {
     | 'tableRef'
     | 'sourceStart'
     | 'sourceEnd'
+    | 'parentContent'
+    | 'sourceMetadata'
     | 'docVersion'
     | 'effectiveAt'
     | 'expiredAt'

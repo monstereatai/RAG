@@ -21,6 +21,8 @@ type IndexedChunk = {
   tableRef?: string | null;
   sourceStart?: number | null;
   sourceEnd?: number | null;
+  parentContent?: string | null;
+  sourceMetadata?: string | null;
   docVersion?: string | null;
   effectiveAt?: string | null;
   expiredAt?: string | null;
@@ -170,6 +172,10 @@ export class ElasticsearchProvider
           if (!properties?.indexGeneration)
             patch.indexGeneration = { type: 'keyword' };
           if (!properties?.tenantId) patch.tenantId = { type: 'keyword' };
+          if (!properties?.parentContent)
+            patch.parentContent = { type: 'text', index: false };
+          if (!properties?.sourceMetadata)
+            patch.sourceMetadata = { type: 'text', index: false };
           if (Object.keys(patch).length > 0) {
             try {
               await this.client.indices.putMapping({
@@ -239,6 +245,8 @@ export class ElasticsearchProvider
           tableRef: { type: 'keyword' },
           sourceStart: { type: 'integer' },
           sourceEnd: { type: 'integer' },
+          parentContent: { type: 'text', index: false },
+          sourceMetadata: { type: 'text', index: false },
           docVersion: { type: 'keyword' },
           contentHash: { type: 'keyword' },
           indexGeneration: { type: 'keyword' },
@@ -342,6 +350,8 @@ export class ElasticsearchProvider
               tableRef: c.tableRef,
               sourceStart: c.sourceStart,
               sourceEnd: c.sourceEnd,
+              parentContent: c.parentContent,
+              sourceMetadata: c.sourceMetadata,
               docVersion: c.docVersion,
               contentHash: c.contentHash,
               indexGeneration: c.indexGeneration,
@@ -798,6 +808,8 @@ export class ElasticsearchProvider
           tableRef: src?.tableRef,
           sourceStart: src?.sourceStart,
           sourceEnd: src?.sourceEnd,
+          parentContent: src?.parentContent,
+          sourceMetadata: src?.sourceMetadata,
           docVersion: src?.docVersion,
           effectiveAt: src?.effectiveAt,
           expiredAt: src?.expiredAt,
