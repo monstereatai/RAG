@@ -107,6 +107,8 @@ function run(command, args, extraEnv = {}) {
       ...extraEnv,
       PROJECT_EVAL_REQUIRE_LIVE:
         process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true' ? 'true' : 'false',
+      PROJECT_EVAL_ALLOW_SKIP:
+        process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true' ? 'false' : 'true',
       EVAL_RAG_E2E_REQUIRE_LIVE:
         process.env.AGENT_PLATFORM_REQUIRE_LIVE === 'true' ? 'true' : 'false',
     },

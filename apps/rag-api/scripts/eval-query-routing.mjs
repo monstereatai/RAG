@@ -29,6 +29,9 @@ if (!fs.existsSync(plannerModulePath) || !fs.existsSync(policyModulePath)) {
   for (const item of cases) {
     const planner = new QueryPlannerService({
       invoke: async () => JSON.stringify(item.modelOutput),
+      getActiveProviderName: () => 'qwen',
+      getFallbackProviderName: () => null,
+      getRoutePolicy: () => ({ maxTokens: 2048 }),
     });
     const plan = await planner.plan(item.query, item.context ?? []);
     const executionPlan = policy.build(item.query, plan, item.scope);

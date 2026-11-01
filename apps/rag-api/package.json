@@ -110,7 +110,13 @@
     "smoke:checkpoint:atomic-guard": "node scripts/smoke-redis-atomic-guard.mjs",
     "test:hardening": "node --test scripts/lib/agent-rag-hardening.test.mjs",
     "eval:golden:reviewed": "node scripts/eval-reviewed-golden.mjs",
-    "eval:golden:release": "node scripts/eval-reviewed-golden.mjs --release"
+    "eval:golden:release": "node scripts/eval-reviewed-golden.mjs --release",
+    "verify:redis:recovery": "node scripts/verify-real-redis-recovery.mjs",
+    "verify:workers:chaos": "node scripts/verify-multi-worker-failover.mjs",
+    "verify:workers:real-api": "node scripts/benchmark-real-workflow-cluster.mjs",
+    "verify:golden:capture": "node scripts/capture-reviewed-golden-real.mjs",
+    "verify:golden:business": "node scripts/verify-reviewed-golden-business.mjs",
+    "verify:platform:test": "node --test scripts/lib/platform-validation-utils.test.mjs"
   },
   "dependencies": {
     "@alibaba-group/opensandbox": "1.1.1",

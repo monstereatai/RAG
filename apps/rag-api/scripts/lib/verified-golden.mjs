@@ -132,7 +132,8 @@ export function scoreGoldenDataset(dataset, observations, { k = 5, production = 
     const versionOkay = Object.entries(test.expectedVersions ?? {}).every(([id,version])=> actualVersions[id] === version);
     const didRefuse = run.refused === true;
     const denialOkay = test.expectRefusal === true ? didRefuse && cited.length === 0 : !didRefuse;
-    const citationsOkay = human.citationsSupported && cited.every(id => retrieved.includes(id));
+    const citationsOkay = human.citationsSupported && cited.every(id => retrieved.includes(id)) &&
+      (test.kind !== 'rag' || test.expectRefusal === true || cited.length > 0);
     const evidenceOkay = test.expectRefusal === true || test.kind === 'agent' || m.recall > 0;
     const events = array(run.events);
     const trajectoryOkay = test.kind !== 'agent' || (
