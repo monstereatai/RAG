@@ -19,6 +19,7 @@ try {
   const gate = strict ? applyReleaseGate(report, {
     minHoldoutPassRate: Number(process.env.REVIEWED_GOLDEN_MIN_PASS_RATE ?? '0.9'),
     minHoldoutRecall: Number(process.env.REVIEWED_GOLDEN_MIN_RECALL ?? '0.8'),
+    minAgentPassRate: Number(process.env.REVIEWED_GOLDEN_MIN_AGENT_PASS_RATE ?? '0.95'),
     maxP95Ms: Number(process.env.REVIEWED_GOLDEN_MAX_P95_MS ?? '30000'),
   }): {approved:false, errors:['not a release run']};
   const output = {kind:'reviewed-golden', releaseRequested:strict, ...report, gate};

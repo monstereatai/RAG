@@ -15,6 +15,7 @@ import {
   WORKFLOW_CANCEL_MARKER_TTL_SECONDS,
 } from './production-workflow.shared';
 import { ProductionWorkflowExecutionBase } from './production-workflow.execution';
+import { WORKFLOW_DISPATCH_REQUESTED_EVENT, parseWorkflowDispatch } from './workflow-dispatch-contract';
 
 export abstract class ProductionWorkflowControlBase extends ProductionWorkflowExecutionBase {
   protected abstract rejectForRevision(
@@ -25,6 +26,18 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
   ): Promise<ReturnType<ProductionWorkflowControlBase['view']>>;
 
   onModuleInit(): void {
+    // DomainEventOutbox is the durable intent; its handler can safely be retried.
+    this.domainEvents?.registerInternalHandler?.(
+      WORKFLOW_DISPATCH_REQUESTED_EVENT,
+      async (event) => {
+        const job = parseWorkflowDispatch(event.payload, event.aggregateId, event.tenantId);
+        if (!this.workflowQueue?.isEnabled()) {
+          throw new Error('Workflow queue is unavailable; retain dispatch intent for retry');
+        }
+        const accepted = await this.workflowQueue.enqueue(job);
+        if (!accepted) throw new Error('Workflow queue did not accept persisted dispatch');
+      },
+    );
     this.tasks?.registerRetryHandler((task) => this.dispatchRetryTask(task));
     this.workflowQueue?.registerProcessor(async (job, attempt) => {
       if (job.operation === 'retry_task') {
@@ -91,7 +104,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     const state = await this.getState(task.threadId);
     if (!state?.projectId) throw new Error('workflow not found');
     if (this.workflowQueue?.isEnabled()) {
-      const queued = await this.workflowQueue.enqueue({
+      const queued = await this.enqueueWorkflowJob({
         id: this.workflowJobId(
           'retry_task',
           task.threadId,

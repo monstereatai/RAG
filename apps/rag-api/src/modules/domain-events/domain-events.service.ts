@@ -128,7 +128,16 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         )
         .digest('hex')}`;
     const existing = await outbox.findOne({ where: { idempotencyKey } });
-    if (existing) return;
+    if (existing) {
+      if (input.eventType === 'workflow.dispatch.requested' &&
+          (existing.eventType !== input.eventType ||
+            existing.aggregateId !== input.aggregateId ||
+            existing.tenantId !== tenantId ||
+            existing.payload !== JSON.stringify(safePayload))) {
+        throw new ConflictException('workflow dispatch ID reused with different identity or payload');
+      }
+      return;
+    }
     try {
       const event = outbox.create({
         id: randomUUID(),
@@ -141,6 +150,9 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         status: 'pending',
         availableAt: new Date(),
       });
+      if (input.eventType === 'workflow.dispatch.requested') {
+        event.maxAttempts = 16;
+      }
       if (
         input.eventType === CONVERSATION_TURN_COMPLETED_EVENT ||
         input.eventType === CONVERSATION_MEMORY_PERSIST_EVENT ||
@@ -152,7 +164,17 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       // 多实例并发 emit 时由数据库唯一约束完成最终幂等；并发撞车应视为已存在，
       // 其他数据库错误仍然向上抛出，不能静默丢掉事件。
-      if (this.isUniqueViolation(error)) return;
+      if (this.isUniqueViolation(error)) {
+        if (input.eventType === 'workflow.dispatch.requested') {
+          const sameId = await outbox.findOne({ where: { idempotencyKey } });
+          if (!sameId || sameId.aggregateId !== input.aggregateId ||
+              sameId.tenantId !== tenantId ||
+              sameId.payload !== JSON.stringify(safePayload)) {
+            throw new ConflictException('workflow dispatch ID collision');
+          }
+        }
+        return;
+      }
       throw error;
     }
   }
@@ -331,6 +353,11 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async deliver(row: DomainEventOutboxEntity): Promise<void> {
+    // Persisted workflow dispatch is internal-only; never forward request DTOs to external webhooks.
+    if (row.eventType === 'workflow.dispatch.requested') {
+      await this.deliverConversationTurnCompleted(row);
+      return;
+    }
     // Internal events never enter the configurable Webhook／企微 subscription path.
     if (row.eventType === CONVERSATION_CACHE_INVALIDATE_EVENT) {
       await this.deliverConversationCacheInvalidation(row);

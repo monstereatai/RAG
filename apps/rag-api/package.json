@@ -107,6 +107,7 @@
     "migration:show": "npx typeorm-ts-node-commonjs migration:show -d src/providers/db/typeorm.config.ts",
     "audit:agent:recovery": "node scripts/audit-agent-recovery.mjs --strict",
     "smoke:checkpoint:atomic": "node scripts/smoke-redis-atomic-checkpoint.mjs",
+    "smoke:checkpoint:atomic-guard": "node scripts/smoke-redis-atomic-guard.mjs",
     "test:hardening": "node --test scripts/lib/agent-rag-hardening.test.mjs",
     "eval:golden:reviewed": "node scripts/eval-reviewed-golden.mjs",
     "eval:golden:release": "node scripts/eval-reviewed-golden.mjs --release"

@@ -153,7 +153,17 @@ export function scoreGoldenDataset(dataset, observations, { k = 5, production = 
   for (const split of ['development','holdout']) {
     const scoped = results.filter(x => x.split === split);
     const sorted = scoped.map(x=>x.durationMs).sort((a,b)=>a-b);
+    const ragCases = scoped.filter(x => x.kind === 'rag');
+    const agentCases = scoped.filter(x => x.kind === 'agent');
     groups[split] = {cases:scoped.length, passRate:average(scoped.map(x=>Number(x.passed))),
+      byKind: {
+        rag: { cases: ragCases.length, passRate: average(ragCases.map(x=>Number(x.passed))),
+          recallAtK: average(ragCases.map(x=>x.recallAtK)),
+          citationSupportedRate: average(ragCases.map(x=>Number(x.citationSupported))),
+          aclViolations: ragCases.filter(x=>x.aclViolated).length },
+        agent: { cases: agentCases.length, passRate: average(agentCases.map(x=>Number(x.passed))),
+          trajectoryPassRate: average(agentCases.map(x=>Number(x.trajectoryCorrect))) },
+      },
       recallAtK:average(scoped.map(x=>x.recallAtK)), mrr:average(scoped.map(x=>x.mrr)),
       ndcg:average(scoped.map(x=>x.ndcg)), contextPrecisionAtK:average(scoped.map(x=>x.contextPrecisionAtK)),
       chunkRecallAtK:average(scoped.map(x=>x.chunkRecallAtK)), aclViolations:scoped.filter(x=>x.aclViolated).length,
@@ -163,8 +173,9 @@ export function scoreGoldenDataset(dataset, observations, { k = 5, production = 
     observationHash:sha256(JSON.stringify(observations)), k, results, summary:groups};
 }
 
-export function applyReleaseGate(report, { minHoldoutPassRate = 0.9, minHoldoutRecall = 0.8, maxP95Ms = 30_000 } = {}) {
+export function applyReleaseGate(report, { minHoldoutPassRate = 0.9, minHoldoutRecall = 0.8, minAgentPassRate = 0.95, maxP95Ms = 30_000 } = {}) {
   const errors = [];
+  if (!Number.isFinite(minAgentPassRate) || minAgentPassRate < 0 || minAgentPassRate > 1) errors.push('invalid Agent threshold');
   if (!Number.isFinite(minHoldoutPassRate) || minHoldoutPassRate < 0 || minHoldoutPassRate > 1 ||
       !Number.isFinite(minHoldoutRecall) || minHoldoutRecall < 0 || minHoldoutRecall > 1 ||
       !Number.isFinite(maxP95Ms) || maxP95Ms <= 0) errors.push('invalid release thresholds');
@@ -172,6 +183,10 @@ export function applyReleaseGate(report, { minHoldoutPassRate = 0.9, minHoldoutR
   const holdout = report?.summary?.holdout;
   if (!Number.isFinite(holdout?.passRate) || holdout.passRate < minHoldoutPassRate) errors.push('holdout passRate below gate');
   if (!Number.isFinite(holdout?.recallAtK) || holdout.recallAtK < minHoldoutRecall) errors.push('holdout recall unavailable/below gate');
+  if (!holdout?.byKind?.rag?.cases) errors.push('RAG holdout cases required');
+  if (!holdout?.byKind?.agent?.cases) errors.push('Agent holdout cases required');
+  if (!Number.isFinite(holdout?.byKind?.agent?.passRate) ||
+      holdout.byKind.agent.passRate < minAgentPassRate) errors.push('agent holdout passRate below gate');
   if (holdout?.aclViolations !== 0) errors.push('ACL leakage is release-blocking');
   if (!Number.isFinite(holdout?.p95Ms) || holdout.p95Ms > maxP95Ms) errors.push('holdout p95 unavailable/above gate');
   return {approved: errors.length === 0, errors};

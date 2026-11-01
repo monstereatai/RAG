@@ -231,7 +231,7 @@ export default [
       {
         path: '/system/logs',
         name: 'logs',
-        component: './system/logs',
+        component: './system/audit-logs',
       },
       {
         path: '/system/notifications',

@@ -24,6 +24,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir apps/rag-api run build
+      - run: pnpm --dir apps/rag-api exec jest --runInBand workflow-dispatch-contract.spec.ts redis-checkpointer.atomic.spec.ts
+      - run: pnpm --dir apps/rag-api run test:hardening
+      - run: pnpm --dir apps/rag-api exec node --test scripts/lib/verified-golden.platform.test.mjs
       - run: pnpm --dir apps/admin-api run build
       - run: pnpm --dir apps/rag-api run enterprise:readiness
       - run: pnpm --dir apps/rag-api run eval:rag:quality

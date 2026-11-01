@@ -5,7 +5,7 @@ import {assessRun} from './recovery-audit-policy.mjs';
 const reviewed = {approved:true,reviewerId:'human-1',reviewedAt:'2026-10-31T12:00:00Z',sourceRevision:'version1'};
 const dataset = {datasetId:'business-reviewed',version:'1',synthetic:false,cases:[
   {id:'a',kind:'rag',split:'holdout',scenario:'direct',question:'what?',sourceUri:'private://a',sourceHash:'a'.repeat(64),expectedDocIds:['doc-a'],forbiddenDocIds:['doc-secret'],expectedClaims:['answer'],expectRefusal:false,review:reviewed},
-  {id:'b',kind:'agent',split:'development',scenario:'checkpoint_resume',question:'resume?',sourceUri:'private://b',sourceHash:'b'.repeat(64),expectedDocIds:[],forbiddenDocIds:[],expectedEvents:['start','done'],forbiddenEvents:['tool.unknown'],expectRefusal:false,review:reviewed}
+  {id:'b',kind:'agent',split:'holdout',scenario:'checkpoint_resume',question:'resume?',sourceUri:'private://b',sourceHash:'b'.repeat(64),expectedDocIds:[],forbiddenDocIds:[],expectedEvents:['start','done'],forbiddenEvents:['tool.unknown'],expectRefusal:false,review:reviewed}
 ]};
 const observed = {runs:[
  {caseId:'a',runId:'run-a',status:'completed',durationMs:3000,retrievedDocIds:['doc-a'],citedDocIds:['doc-a'],refused:false,humanReview:{...reviewed,correct:true,citationsSupported:true}},
@@ -16,6 +16,8 @@ test('reviewed source can be scored; ranked evidence and agent trajectory',()=>{
  const result=scoreGoldenDataset(dataset,observed,{k:5});
  assert.equal(result.ok,true);assert.equal(result.summary.holdout.recallAtK,1);
  assert.equal(result.summary.holdout.passRate,1);
+ assert.equal(result.summary.holdout.byKind.rag.cases,1);
+ assert.equal(result.summary.holdout.byKind.agent.cases,1);
  assert.equal(applyReleaseGate(result).approved,true);
 });
 test('release gate refuses synthetic despite plausible metrics',()=>{

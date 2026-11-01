@@ -417,6 +417,32 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     job: ProductionWorkflowJob,
   ): Promise<boolean> {
     try {
+      // Acknowledge only after a PostgreSQL Outbox intent is durable.
+      // DomainEvents will retry BullMQ delivery on a transient Redis outage.
+      if (
+        this.domainEvents &&
+        (this.workflowQueue?.isEnabled() || this.workflowQueue?.isRequired?.())
+      ) {
+        await this.domainEvents.emit({
+          eventType: 'workflow.dispatch.requested',
+          aggregateType: 'production_workflow',
+          aggregateId: job.threadId,
+          tenantId: job.tenantId,
+          idempotencyKey: `workflow-dispatch:${job.id}`,
+          payload: { job },
+        });
+        // Fast path: enqueue immediately when Redis is available. The durable
+        // Outbox is still the recovery source if this call or the process fails.
+        // Stable BullMQ jobId deduplicates while the job is retained.
+        try {
+          await this.workflowQueue?.enqueue(job);
+        } catch (queueError) {
+          this.logger.warn(
+            `workflow ${job.threadId} fast dispatch failed; durable Outbox will retry: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
+          );
+        }
+        return true;
+      }
       const queued = await this.workflowQueue?.enqueue(job);
       if (!queued && this.workflowQueue?.isRequired?.()) {
         throw new Error(

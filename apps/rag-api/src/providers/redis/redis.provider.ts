@@ -360,13 +360,26 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
         if ttl > 0 then redis.call('SET', key, val, 'EX', ttl)
         else redis.call('SET', key, val); redis.call('PERSIST', key) end
       end
+      -- Redis Lua is atomic against other clients, but is NOT a rollback transaction.
+      -- Reject corrupt key types/index pointers before any write takes place.
+      local indexType = redis.call('TYPE', KEYS[4]).ok
+      local pointerType = redis.call('TYPE', KEYS[3]).ok
+      if indexType ~= 'none' and indexType ~= 'zset' then
+        return redis.error_reply('checkpoint index key has unexpected type')
+      end
+      if pointerType ~= 'none' and pointerType ~= 'string' then
+        return redis.error_reply('checkpoint latest pointer has unexpected type')
+      end
+      local latest = redis.call('GET', KEYS[3])
+      local oldScore = latest and redis.call('ZSCORE', KEYS[4], latest)
+      if latest and not oldScore then
+        return redis.error_reply('checkpoint latest pointer is not indexed')
+      end
       put(KEYS[1], ARGV[1])
       put(KEYS[2], ARGV[2])
       redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), ARGV[5])
       if ttl > 0 then redis.call('EXPIRE', KEYS[4], ttl)
       else redis.call('PERSIST', KEYS[4]) end
-      local latest = redis.call('GET', KEYS[3])
-      local oldScore = latest and redis.call('ZSCORE', KEYS[4], latest)
       if not oldScore or tonumber(ARGV[3]) >= tonumber(oldScore) then
         put(KEYS[3], ARGV[5])
       end

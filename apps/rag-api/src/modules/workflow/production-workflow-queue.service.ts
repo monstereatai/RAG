@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import { workerSettings } from './workflow-dispatch-contract';
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker } from 'bullmq';
 import {
@@ -98,6 +99,8 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
         removeOnFail: { age: failedRetentionSeconds },
       },
     });
+    const workerPolicy = workerSettings(process.env);
+    if (workerPolicy.enabled) {
     this.worker = new Worker(
       PRODUCTION_WORKFLOW_QUEUE,
       async (job) => {
@@ -120,7 +123,7 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
           throw error;
         }
       },
-      { connection, concurrency: 1 },
+      { connection, concurrency: workerPolicy.concurrency },
     );
     this.worker.on('failed', (job, error) => {
       this.logger.error(
@@ -136,6 +139,7 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
         }),
       );
     });
+    }
   }
 
   registerProcessor(
