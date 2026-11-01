@@ -44,6 +44,7 @@ apps/rag-api/scripts/fixtures/
 # Misc
 agent_platform_9_patch/
 agent_platform_validation/
+agent_platform_final_evidence/
 .cache/
 tmp/
 .tmp/

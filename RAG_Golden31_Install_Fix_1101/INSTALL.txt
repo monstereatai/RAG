@@ -1,0 +1,12 @@
+RAG Golden31 dev candidates - install instructions
+
+1) Put this ZIP at: /Users/monster/Documents/GitHub/code/RAG/
+2) Run:
+   cd ~/Documents/GitHub/code/RAG
+   unzip -o RAG_Golden31_Install_Fix_1101.zip -d .
+   test -f apps/rag-api/scripts/verify-source-grounded-dev-candidates.mjs && echo script-ok
+   test -f apps/rag-api/.tmp/private-golden/source_grounded_31_dev_candidates.json && echo data-ok
+   cd apps/rag-api
+   node scripts/verify-source-grounded-dev-candidates.mjs
+
+The 31 entries are UNREVIEWED development candidates, not a passed Golden release.

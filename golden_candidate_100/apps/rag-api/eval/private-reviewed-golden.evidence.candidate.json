@@ -1,0 +1,1711 @@
+{
+  "$comment": "来源快照放在 apps/rag-api/.tmp/private-golden/sources/。每条必须人工补齐；代码不自动标记审批。",
+  "provenance": {
+    "kind": "unreviewed_scenario_template",
+    "confirmedRealAndSanitized": false,
+    "attestedBy": "",
+    "attestedAt": ""
+  },
+  "cases": {
+    "golden-001": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-002": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-003": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-004": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-005": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-006": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-007": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-008": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-009": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-010": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-011": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-012": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-013": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-014": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-015": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-016": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-017": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-018": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-019": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-020": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-021": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-022": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-023": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-024": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-025": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-026": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-027": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-028": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-029": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-030": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-031": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-032": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-033": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-034": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-035": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-036": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-037": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-038": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-039": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-040": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-041": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-042": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-043": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-044": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-045": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-046": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-047": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-048": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-049": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-050": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-051": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-052": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-053": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-054": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-055": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-056": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-057": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-058": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-059": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-060": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-061": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-062": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-063": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-064": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-065": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-066": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-067": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-068": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-069": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-070": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-071": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-072": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-073": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-074": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-075": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-076": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-077": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-078": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-079": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-080": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-081": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-082": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-083": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-084": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-085": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-086": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-087": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-088": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-089": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-090": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-091": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-092": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-093": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-094": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-095": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-096": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-097": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-098": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-099": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    },
+    "golden-100": {
+      "sourceFiles": [],
+      "sourceUri": "",
+      "sourceRevision": "",
+      "expectedDocIds": [],
+      "expectedChunkIds": [],
+      "forbiddenDocIds": [],
+      "expectedClaims": [],
+      "expectedVersions": {},
+      "expectedEvents": [],
+      "forbiddenEvents": [],
+      "sourceReviewer": {
+        "reviewerId": "",
+        "reviewedAt": "",
+        "approved": false
+      }
+    }
+  }
+}

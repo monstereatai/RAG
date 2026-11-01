@@ -116,7 +116,12 @@
     "verify:workers:real-api": "node scripts/benchmark-real-workflow-cluster.mjs",
     "verify:golden:capture": "node scripts/capture-reviewed-golden-real.mjs",
     "verify:golden:business": "node scripts/verify-reviewed-golden-business.mjs",
-    "verify:platform:test": "node --test scripts/lib/platform-validation-utils.test.mjs"
+    "verify:platform:test": "node --test scripts/lib/platform-validation-utils.test.mjs",
+    "verify:cross-store:recovery": "node scripts/verify-cross-store-recovery.mjs",
+    "verify:golden:prepare-review": "node scripts/prepare-human-golden-review.mjs",
+    "verify:golden:finalize-review": "node scripts/finalize-human-golden-review.mjs",
+    "verify:human-review:test": "node --test scripts/lib/golden-human-review.test.mjs",
+    "verify:platform:all-evidence": "node scripts/verify-platform-9-evidence.mjs"
   },
   "dependencies": {
     "@alibaba-group/opensandbox": "1.1.1",
