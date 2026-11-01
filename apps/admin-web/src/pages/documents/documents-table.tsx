@@ -35,6 +35,7 @@ export function createDocumentColumns(
     xlsx: <FileExcelOutlined className="file-icon excel" />,
     pptx: <FilePptOutlined className="file-icon ppt" />,
   };
+  const fallbackFileIcon = <FileDoneOutlined className="file-icon" />;
   const statusMap: Record<string, { color: string; text: string }> = {
     pending: { color: 'default', text: '待处理' },
     processing: { color: 'warning', text: '解析中' },
@@ -54,12 +55,15 @@ export function createDocumentColumns(
       render: () => <Checkbox />,
     },
     {
-      title: '文档名称',
+      title: '文件名',
       dataIndex: 'filename',
+      width: 280,
       render: (_, record) => (
         <Space size={12}>
-          {iconMap[record.fileType] ?? iconMap.pdf}
-          <span>{record.metadata?.title || record.filename}</span>
+          {iconMap[record.fileType.toLowerCase()] ?? fallbackFileIcon}
+          <Tooltip title={record.filename}>
+            <span>{record.filename}</span>
+          </Tooltip>
         </Space>
       ),
     },
