@@ -29,6 +29,8 @@ jobs:
       - run: pnpm --dir apps/rag-api exec node --test scripts/lib/verified-golden.platform.test.mjs
       - run: pnpm --dir apps/admin-api run build
       - run: pnpm --dir apps/rag-api run enterprise:readiness
-      - run: pnpm --dir apps/rag-api run eval:rag:quality
+      - run: pnpm --dir apps/rag-api run eval:rag
+      - run: pnpm --dir apps/rag-api run eval:golden:check
+      - run: pnpm --dir apps/rag-api exec node scripts/build-business-regression-dataset.mjs --check
       - run: pnpm --dir apps/rag-api run eval:agent-platform
       - run: pnpm --dir apps/rag-api run eval:golden-business

@@ -11,7 +11,7 @@ build/
 .env.local
 .env.*.local
 .history/**/.env*
-.histroy
+.history/
 agent-course
 
 # IDE
