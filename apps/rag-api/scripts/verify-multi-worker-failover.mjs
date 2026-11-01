@@ -19,9 +19,9 @@ function workerProcess(url, queue, prefix, role, count) {
   const child = spawn(process.execPath, ['scripts/platform-validation-worker.mjs', url, queue, prefix, role, String(count)], {
     cwd: process.cwd(), stdio: ['ignore','pipe','pipe'],
   });
-  children.push(child);
   const messages=[];
   let stderr='';
+  child.on('error', (error) => { stderr=(stderr+`spawn error: ${error.message}`).slice(-2000); });
   child.stderr.on('data', (chunk)=> { stderr=(stderr+chunk.toString()).slice(-2000); });
   child.stdout.setEncoding('utf8');
   let buffer='';
@@ -30,7 +30,10 @@ function workerProcess(url, queue, prefix, role, count) {
     const parts=buffer.split('\n');buffer=parts.pop()??'';
     for(const part of parts) try { messages.push(JSON.parse(part)); } catch {}
   });
-  return {child,messages,get stderr(){return stderr}};
+  // Cleanup operates on the same wrapper returned to the caller, not a raw ChildProcess.
+  const processRecord = {child,messages,get stderr(){return stderr}};
+  children.push(processRecord);
+  return processRecord;
 }
 async function waitFor(process, predicate, label, timeoutMs=12_000) {
   const until=Date.now()+timeoutMs;
