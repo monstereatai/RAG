@@ -125,6 +125,7 @@
 
 ## 最近验证
 
+- 2026-11-01：文档治理列表新增历史中文乱码文件名显示恢复和上传时间格式化（本地时区，`YYYY-MM-DD HH:mm:ss`）；新上传文件名由 Admin/RAG 两层按 UTF-8 解析。Admin Web production build、目标 Biome、格式化工具 Vitest 3/3 通过。全量 `pnpm run lint` 的 Biome 阶段通过，TypeScript 阶段被未改动的 `workflow-detail-artifact-sections.tsx:517` 缺少 `Alert` 导入阻断。
 - 2026-09-13：顶部消息入口优化
   - `AdminShell` 复用现有 `/api/admin/notifications` 与标记已读接口，移除硬编码未读数。
   - 新增消息浮层、最近 6 条消息、未读状态、类型标签、刷新和「全部已读」操作。

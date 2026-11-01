@@ -1,0 +1,11 @@
+{
+  "runs": [
+    {"caseId":"example-rag-01", "runId":"replace-with-real-run-id", "status":"completed", "durationMs":1000,
+     "retrievedDocIds":["source-doc-001"], "citedDocIds":["source-doc-001"], "refused":false,
+     "humanReview":{"approved":true,"reviewerId":"example-reviewer","reviewedAt":"2026-11-01T00:00:00Z","correct":true,"citationsSupported":true}},
+    {"caseId":"example-agent-01", "runId":"replace-with-real-run-id-2", "status":"completed", "durationMs":3000,
+     "retrievedDocIds":[], "citedDocIds":[], "refused":false,
+     "events":[{"eventType":"role.started"},{"eventType":"role.completed"}],
+     "humanReview":{"approved":true,"reviewerId":"example-reviewer","reviewedAt":"2026-11-01T00:00:00Z","correct":true,"citationsSupported":true}}
+  ]
+}

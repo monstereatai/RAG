@@ -1,0 +1,622 @@
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Param,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
+  Logger,
+  UseGuards,
+  Body,
+  Query,
+  Res,
+  ForbiddenException,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { DocumentService } from './document.service';
+import { DocumentPermissionService } from './document-permission.service';
+import { DocumentQueueService } from './document-queue.service';
+import {
+  createParsedDocument,
+  detectDocumentKind,
+  extractImageDocumentText,
+  extractUrlContent,
+  parseDocument,
+  validateDocumentFormat,
+} from './document-parser.util';
+import type {
+  ParsedDocument,
+  SupportedDocumentKind,
+  DocumentImageExtractionOptions,
+  DocumentVideoExtractionOptions,
+} from './document-parser.util';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { JwtPayload } from '../../common/interfaces/api-response.interface';
+import { TencentSpeechProvider } from '../../providers/speech/tencent-speech.provider';
+import { VisionProvider } from '../../providers/vision/vision.provider';
+import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
+import { ObsidianIngestService } from './obsidian-ingest.service';
+import { MineruCloudService } from './mineru-cloud.service';
+import {
+  DocumentLifecycleStatus,
+  DocumentBusinessMetadata,
+  GameDocumentType,
+} from './document-profile.util';
+import { ApiScopes } from '../../common/decorators/api-scopes.decorator';
+
+type DocumentUploadBody = Partial<
+  Record<
+    | 'projectId'
+    | 'activityId'
+    | 'region'
+    | 'locale'
+    | 'channel'
+    | 'roleScope'
+    | 'documentType'
+    | 'lifecycleStatus'
+    | 'supersedesDocId'
+    | 'docVersion'
+    | 'effectiveAt'
+    | 'expiredAt',
+    string | string[]
+  >
+>;
+
+const DOCUMENT_UPLOAD_MAX_BYTES = Number(
+  process.env.DOCUMENT_UPLOAD_MAX_BYTES ?? 200 * 1024 * 1024,
+);
+const DOCUMENT_UPLOAD_LIMITS = {
+  limits: { fileSize: DOCUMENT_UPLOAD_MAX_BYTES },
+};
+
+@Controller('documents')
+@UseGuards(JwtAuthGuard)
+@ApiScopes('rag:documents')
+export class DocumentController {
+  private readonly logger = new Logger(DocumentController.name);
+
+  constructor(
+    private readonly documentService: DocumentService,
+    private readonly documentPermission: DocumentPermissionService,
+    private readonly speechProvider: TencentSpeechProvider,
+    private readonly visionProvider: VisionProvider,
+    private readonly documentQueue: DocumentQueueService,
+    private readonly obsidianIngest: ObsidianIngestService,
+    private readonly objectStorageProvider: ObjectStorageProvider,
+    private readonly mineruCloud: MineruCloudService,
+  ) {
+    this.documentQueue.registerProcessor(async (job) => {
+      const buffer = await this.objectStorageProvider.getObject(job.objectKey);
+      return this.processAsyncUpload(
+        {
+          originalname: job.filename,
+          mimetype: job.contentType ?? 'application/octet-stream',
+          buffer,
+        } as Express.Multer.File,
+        job.userId,
+        job.taskId,
+        job.businessMetadata,
+        job.tenantId,
+        job.trustedAdminPrincipal,
+      );
+    });
+    this.documentQueue.registerFailureHandler(async (job, error) => {
+      await this.documentService.markTaskFailed(job.taskId, error.message);
+    });
+  }
+
+  // 同步入口先解析文件；ObsidianIngestService 做去重和来源挂接。
+  // 最终由 DocumentService 统一写入知识索引。
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: DocumentUploadBody,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    // cd 获取文件类型，调用 extractDocumentText 提取文本内容；ObsidianIngestService 做去重和来源挂接。
+    const kind = detectDocumentKind(file.originalname);
+
+    const parsedDocument = await this.extractUploadContent(
+      file,
+      kind,
+      user.userId,
+    );
+    const content = parsedDocument.markdown.trim();
+    if (!content || parsedDocument.status === 'failed') {
+      const details = parsedDocument.warnings
+        .map((warning) => `${warning.code}: ${warning.message}`)
+        .join('; ');
+      throw new BadRequestException(
+        `document parsing failed${details ? `: ${details}` : ': document text is empty'}`,
+      );
+    }
+
+    this.logger.log(
+      `Received ${file.originalname}, user=${user.username}, ${content.length} chars`,
+    );
+    const result = await this.obsidianIngest.ingestText({
+      title: file.originalname,
+      content,
+      userId: user.userId,
+      tenantId: user.tenantId,
+      filename: file.originalname,
+      sourceType: 'document',
+      contentType: file.mimetype,
+      originalBuffer: file.buffer,
+      businessMetadata: this.parseBusinessMetadata(body),
+      parsedDocument,
+    });
+    return { ...result.rag, obsidian: result.obsidian };
+  }
+
+  // 异步入口：原文件先落对象存储，队列只传 objectKey；无持久队列时开发环境才走进程内任务。
+  @Post('upload/async')
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_LIMITS))
+  async uploadAsync(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: DocumentUploadBody,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    const task = await this.documentService.createQueuedTask(
+      file.originalname,
+      user.userId,
+      user.tenantId,
+    );
+
+    if (this.documentQueue.enabled) {
+      const objectKey = `documents/${this.sanitizeObjectKeyPart(user.userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
+      const job = {
+        taskId: task.id,
+        userId: user.userId,
+        tenantId: user.tenantId,
+        filename: file.originalname,
+        objectKey,
+        contentType: file.mimetype,
+        businessMetadata: this.parseBusinessMetadata(body),
+      };
+      try {
+        await this.documentQueue.stageUpload(job);
+        await this.objectStorageProvider.putObject({
+          key: objectKey,
+          body: file.buffer,
+          contentType: file.mimetype,
+        });
+        await this.documentQueue.promoteUpload(task.id);
+      } catch (error) {
+        await this.documentQueue
+          .removeStagedUpload(task.id)
+          .catch((cleanupError: unknown) =>
+            this.logger.warn(
+              `staged document job cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            ),
+          );
+        await this.objectStorageProvider
+          .deleteObject(objectKey)
+          .catch((cleanupError: unknown) =>
+            this.logger.warn(
+              `uploaded object cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            ),
+          );
+        const message =
+          error instanceof Error ? error.message : 'document queue unavailable';
+        await this.documentService.markTaskFailed(task.id, message);
+        throw error;
+      }
+    } else if (this.documentQueue.required) {
+      const message =
+        '生产文档处理要求使用 Redis 持久队列，当前队列未初始化，任务未执行。';
+      await this.documentService.markTaskFailed(task.id, message);
+      throw new BadRequestException(message);
+    } else {
+      setImmediate(() => {
+        void this.processAsyncUpload(
+          file,
+          user.userId,
+          task.id,
+          this.parseBusinessMetadata(body),
+          user.tenantId,
+        );
+      });
+    }
+
+    return {
+      taskId: task.id,
+      status: task.status,
+      stage: task.stage,
+      progress: task.progress,
+      queueEnabled: this.documentQueue.enabled,
+    };
+  }
+
+  @Post('url')
+  async uploadUrl(
+    @Body('url') url: string,
+    @Body() body: DocumentUploadBody,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    const extracted = await extractUrlContent(url);
+    const content = extracted.content.trim();
+    if (!content) {
+      throw new BadRequestException('url content is empty');
+    }
+
+    this.logger.log(
+      `Received url ${url}, user=${user.username}, ${content.length} chars`,
+    );
+    const result = await this.obsidianIngest.ingestUrl({
+      url,
+      extracted,
+      userId: user.userId,
+      tenantId: user.tenantId,
+      filename: this.getUrlSnapshotFilename(extracted.finalUrl),
+      businessMetadata: this.parseBusinessMetadata(body),
+    });
+    return { ...result.rag, obsidian: result.obsidian };
+  }
+
+  @Post('manual')
+  async uploadManual(
+    @Body('title') title: string,
+    @Body('content') content: string,
+    @Body() body: DocumentUploadBody,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    const normalizedTitle = title?.trim() || 'Manual Note';
+    const normalizedContent = content?.trim();
+    if (!normalizedContent) {
+      throw new BadRequestException('content is required');
+    }
+
+    const filename = `${normalizedTitle.replace(/[\\/:*?"<>|#\x5B\x5D\n\r\t]+/g, ' ').trim() || 'manual-note'}.md`;
+    const result = await this.obsidianIngest.ingestText({
+      title: normalizedTitle,
+      content: normalizedContent,
+      userId: user.userId,
+      tenantId: user.tenantId,
+      filename,
+      sourceType: 'manual',
+      contentType: 'text/markdown',
+      originalBuffer: Buffer.from(normalizedContent, 'utf8'),
+      businessMetadata: this.parseBusinessMetadata(body),
+    });
+    return { ...result.rag, obsidian: result.obsidian };
+  }
+
+  @Get('tasks/:taskId')
+  async getTask(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const task = await this.documentService.getTask(taskId, user.userId);
+    if (!task) {
+      throw new BadRequestException(`task ${taskId} not found`);
+    }
+    return task;
+  }
+
+  /**
+   * 删除文档（Milvus chunks + BM25 索引同步删除）
+   */
+  @Delete(':docId')
+  @HttpCode(HttpStatus.OK)
+  async delete(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
+    await this.documentService.delete(docId, user.userId);
+    return { message: `doc ${docId} deleted` };
+  }
+
+  private async processAsyncUpload(
+    file: Express.Multer.File,
+    userId: string,
+    taskId: string,
+    businessMetadata?: DocumentBusinessMetadata,
+    tenantId?: string,
+    trustedAdminPrincipal = false,
+  ): Promise<{ chunkCount: number }> {
+    const kind = detectDocumentKind(file.originalname);
+    const parsedDocument = await this.extractUploadContent(file, kind, userId);
+    const content = parsedDocument.markdown.trim();
+    if (!content || parsedDocument.status === 'failed') {
+      const details = parsedDocument.warnings
+        .map((warning) => `${warning.code}: ${warning.message}`)
+        .join('; ');
+      const message = `document parsing failed${details ? `: ${details}` : ': document text is empty'}`;
+      await this.documentService.markTaskFailed(taskId, message);
+      throw new BadRequestException(message);
+    }
+    const result = await this.obsidianIngest.ingestText({
+      title: file.originalname,
+      content,
+      userId,
+      tenantId,
+      trustedAdminPrincipal,
+      filename: file.originalname,
+      sourceType: 'document',
+      contentType: file.mimetype,
+      originalBuffer: file.buffer,
+      taskId,
+      businessMetadata,
+      parsedDocument,
+    });
+    return { chunkCount: result.rag.chunkCount };
+  }
+
+  /**
+   * 获取文档处理队列状态（管理后台用）
+   */
+  @Get('queue/status')
+  async getQueueStatus() {
+    const caps = this.visionProvider.getCapabilities();
+    return {
+      documentQueue: await this.documentQueue.getStatus(),
+      vision: caps,
+    };
+  }
+
+  @Get('assets/image')
+  async proxyDocumentImage(
+    @Query('key') key: string,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const safeKey = this.normalizeObjectKey(key);
+    const ownerPrefix = `documents/${this.sanitizeObjectKeyPart(user.userId)}/`;
+    if (!safeKey.startsWith(ownerPrefix)) {
+      throw new ForbiddenException('image asset is not accessible');
+    }
+    const buffer = await this.objectStorageProvider.getObject(safeKey);
+    res.setHeader('Content-Type', this.resolveImageContentType(safeKey));
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
+  }
+
+  @Get()
+  list(@CurrentUser() user: JwtPayload) {
+    return this.documentService.listDocs(user.userId, user.tenantId);
+  }
+
+  @Get(':docId')
+  async get(@Param('docId') docId: string, @CurrentUser() user: JwtPayload) {
+    const meta = await this.documentService.getDocMeta(
+      docId,
+      user.userId,
+      user.tenantId,
+    );
+    if (!meta) {
+      throw new BadRequestException(`doc ${docId} not found`);
+    }
+    return meta;
+  }
+
+  private async extractUploadContent(
+    file: Express.Multer.File,
+    kind: SupportedDocumentKind,
+    userId?: string,
+  ): Promise<ParsedDocument> {
+    // 图片：调用视觉 provider 做 OCR / 图像理解
+    if (kind === 'image') {
+      try {
+        await validateDocumentFormat(file.buffer, kind, file.originalname);
+        const content = await extractImageDocumentText(
+          file.buffer,
+          file.originalname,
+          file.mimetype,
+          this.visionProvider,
+        );
+        const stored = await this.objectStorageProvider.putObject({
+          key: `documents/${this.sanitizeObjectKeyPart(userId ?? 'anonymous')}/image-upload-${Date.now()}/original.${this.imageExtension(file.mimetype)}`,
+          body: file.buffer,
+          contentType: file.mimetype,
+        });
+        const markdown = [
+          content,
+          '## 原始图片',
+          '',
+          `![${file.originalname.replace(/[[\]\r\n]/g, ' ')}](${this.proxyObjectUrl(stored.key)})`,
+        ].join('\n');
+        return createParsedDocument(kind, file.originalname, markdown);
+      } catch (err) {
+        this.logger.warn(
+          `Vision processing failed for image ${file.originalname}: ${
+            (err as Error).message
+          }`,
+        );
+        throw new BadRequestException(
+          `图片解析失败：${(err as Error).message}`,
+        );
+      }
+    }
+
+    // 视频：ffmpeg 抽音轨（腾讯 ASR 转写）+ 关键帧（Vision 逐帧描述）后合成 Markdown。
+    // 大小护栏超限、ffmpeg/ffprobe 缺失、封装损坏、抽轨/抽帧失败都会抛出明确错误，不静默降级；
+    // ASR / Vision 未配置时由 ParsedDocument 返回部分状态与告警，质量门禁决定是否入库。
+    // PDF 扫描页由统一解析器用 vision provider 兜底 OCR；
+    // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
+    // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
+    const parseNative = () => parseDocument(
+      file.buffer,
+      kind,
+      this.visionProvider,
+      this.buildImageExtractionOptions(userId),
+      this.buildVideoExtractionOptions(file.originalname, userId),
+      {
+        preservePdfPages: kind === 'pdf',
+        filename: file.originalname,
+        audioAsr: this.speechProvider,
+      },
+    );
+    if (this.mineruCloud.accepts(kind)) {
+      // Validate the original file before sending confidential content to an external service.
+      await validateDocumentFormat(file.buffer, kind, file.originalname);
+      try {
+        return await this.mineruCloud.parse({
+          buffer: file.buffer,
+          filename: file.originalname,
+          kind,
+          images: this.buildImageExtractionOptions(userId),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`MinerU cloud parsing failed for ${kind}: ${message}`);
+        if (!this.mineruCloud.fallbackEnabled()) {
+          throw new BadRequestException(`MinerU cloud parsing failed: ${message}`);
+        }
+        const local = await parseNative();
+        if (local.status === 'failed') {
+          throw new BadRequestException('MinerU cloud and local document parsing both failed');
+        }
+        return {
+          ...local,
+          status: 'partial',
+          completeness: Math.min(local.completeness, 0.9),
+          warnings: [...local.warnings, {
+            code: 'mineru_cloud_fallback_local',
+            message: 'MinerU 云端解析不可用，已使用本地解析；请复核内容完整性。',
+          }],
+        };
+      }
+    }
+    return parseNative();
+  }
+
+  /**
+   * 组装内嵌图片提取参数（PDF / PPTX → 对象存储 → Markdown ![alt](url)）。
+   *
+   * - 开关 DOCUMENT_EXTRACT_IMAGES 关闭（解析器默认开启）时不提取；
+   * - VISION_PROVIDER 已配置时传 vision 委托，用视觉模型批量生成 alt 描述；
+   *   未配置时解析器直接用文件名作 alt，不发起任何 vision 调用；
+   * - 对象存储异常由解析器静默降级为纯文本，不影响主入库链路。
+   */
+  private buildImageExtractionOptions(
+    userId?: string,
+  ): DocumentImageExtractionOptions | undefined {
+    if (process.env.DOCUMENT_EXTRACT_IMAGES === 'false') {
+      return undefined;
+    }
+    return {
+      storage: this.objectStorageProvider,
+      vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+      ownerUserId: userId,
+      urlResolver: (stored) => this.proxyObjectUrl(stored.key),
+    };
+  }
+
+  /**
+   * 组装视频入库参数（video → ffmpeg 抽音轨/关键帧 → ASR / Vision → 合成 Markdown）。
+   *
+   * - TENCENT_SECRET_ID/KEY 已配置时传 speech 委托（腾讯云一句话识别，16kHz 单声道 WAV）；
+   *   未配置时解析器在「音频转写」段写降级文案，不发起任何 ASR 调用；
+   * - VISION_PROVIDER 已配置时传 vision 委托，逐帧生成画面描述（并发 ≤2）；
+   *   未配置时「画面要点」只保留帧图与时间戳；
+   * - 帧图经对象存储委托上传到 documents/{docId}/frames/。
+   */
+  private buildVideoExtractionOptions(
+    filename: string,
+    userId?: string,
+  ): DocumentVideoExtractionOptions {
+    return {
+      storage: this.objectStorageProvider,
+      asr: process.env.TENCENT_SECRET_ID ? this.speechProvider : undefined,
+      vision: process.env.VISION_PROVIDER ? this.visionProvider : undefined,
+      ownerUserId: userId,
+      urlResolver: (stored) => this.proxyObjectUrl(stored.key),
+      filename,
+    };
+  }
+
+  private proxyObjectUrl(key: string): string {
+    return `/api/v1/documents/assets/image?key=${encodeURIComponent(key)}`;
+  }
+
+  private normalizeObjectKey(key: string | undefined): string {
+    const safeKey = (key ?? '').replace(/^\/+/, '');
+    if (!safeKey || safeKey.split('/').includes('..')) {
+      throw new BadRequestException('invalid image asset key');
+    }
+    return safeKey;
+  }
+
+  private sanitizeObjectKeyPart(value: string): string {
+    return value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
+  }
+
+  private imageExtension(contentType: string): string {
+    if (contentType === 'image/png') return 'png';
+    if (contentType === 'image/gif') return 'gif';
+    if (contentType === 'image/webp') return 'webp';
+    if (contentType === 'image/bmp') return 'bmp';
+    return 'jpg';
+  }
+
+  private resolveImageContentType(key: string): string {
+    const lower = key.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.bmp')) return 'image/bmp';
+    return 'image/jpeg';
+  }
+
+  private parseBusinessMetadata(
+    body: DocumentUploadBody,
+  ): DocumentBusinessMetadata | undefined {
+    const text = (key: keyof DocumentUploadBody): string | undefined => {
+      const value = body?.[key];
+      const normalized = Array.isArray(value) ? value[0] : value;
+      return normalized?.trim() || undefined;
+    };
+    const roleValue = body?.roleScope;
+    const roleScope = (
+      Array.isArray(roleValue) ? roleValue : roleValue?.split(',')
+    )
+      ?.map((item) => item.trim())
+      .filter(Boolean);
+    const metadata: DocumentBusinessMetadata = {
+      projectId: text('projectId') ?? null,
+      activityId: text('activityId') ?? null,
+      region: text('region') ?? null,
+      locale: text('locale') ?? null,
+      channel: text('channel') ?? null,
+      roleScope,
+      documentType: text('documentType') as GameDocumentType | undefined,
+      lifecycleStatus: text('lifecycleStatus') as
+        | DocumentLifecycleStatus
+        | undefined,
+      supersedesDocId: text('supersedesDocId') ?? null,
+      docVersion: text('docVersion') ?? null,
+      effectiveAt: text('effectiveAt') ?? null,
+      expiredAt: text('expiredAt') ?? null,
+    };
+    return Object.values(metadata).some((value) =>
+      Array.isArray(value) ? value.length > 0 : value != null,
+    )
+      ? metadata
+      : undefined;
+  }
+
+  private getUrlSnapshotFilename(url: string): string {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname.replace(/\/$/, '') || '/index';
+      return `${parsed.hostname}${path}.url.md`.replace(/[^\w./-]+/g, '_');
+    } catch {
+      return 'url-snapshot.md';
+    }
+  }
+}

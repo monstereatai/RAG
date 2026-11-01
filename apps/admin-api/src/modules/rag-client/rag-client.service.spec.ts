@@ -326,6 +326,27 @@ describe('RagClientService', () => {
       });
     });
 
+    it('maps numeric admin IDs before forwarding document uploads', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 202,
+        text: async () => JSON.stringify({ data: { taskId: 'task-1' } }),
+      });
+      const file = {
+        buffer: Buffer.from('pdf-bytes'),
+        mimetype: 'application/pdf',
+        originalname: 'sample.pdf',
+      } as Express.Multer.File;
+
+      await service.uploadDocument(file, { ownerUserId: 1 });
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('http://localhost:3000/api/v1/rag/admin/documents/upload');
+      expect((init.body as FormData).get('ownerUserId')).toBe(
+        'admin:481d475cf7936970fbcf9ccba276189a8f488961d4caa7a07274ebc154',
+      );
+    });
+
     it('uses the internal admin contract for queue status and guarded repair actions', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

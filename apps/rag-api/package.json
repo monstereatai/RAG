@@ -41,7 +41,7 @@
     "eval:rag:multimodal:private": "MULTIMODAL_EVAL_DATASET=eval/private-multimodal.dataset.json MULTIMODAL_EVAL_REQUIRE_ASSETS=true node scripts/eval-multimodal-rag.mjs",
     "eval:rag:langsmith": "node scripts/eval-rag-langsmith.mjs",
     "eval:rag:quality": "node scripts/eval-rag-quality-gate.mjs",
-    "eval:rag:release": "EVAL_RAG_RELEASE_GATE=true EVAL_RAG_JUDGE_REQUIRED=true PROJECT_EVAL_REQUIRE_LIVE=true node scripts/eval-rag-quality-gate.mjs",
+    "eval:rag:release": "EVAL_RAG_RELEASE_GATE=true EVAL_RAG_JUDGE_REQUIRED=true PROJECT_EVAL_REQUIRE_LIVE=true node scripts/eval-rag-quality-gate.mjs && node scripts/eval-reviewed-golden.mjs --release",
     "eval:prompt-injection": "node scripts/eval-prompt-injection.mjs",
     "eval:agent-tasks": "node scripts/eval-agent-task-metrics.mjs",
     "eval:conversation-context": "node scripts/eval-conversation-context.mjs",
@@ -104,7 +104,12 @@
     "migration:run": "npx typeorm-ts-node-commonjs migration:run -d src/providers/db/typeorm.config.ts",
     "migration:run:prod": "typeorm -d dist/src/providers/db/typeorm.config.js migration:run",
     "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d src/providers/db/typeorm.config.ts",
-    "migration:show": "npx typeorm-ts-node-commonjs migration:show -d src/providers/db/typeorm.config.ts"
+    "migration:show": "npx typeorm-ts-node-commonjs migration:show -d src/providers/db/typeorm.config.ts",
+    "audit:agent:recovery": "node scripts/audit-agent-recovery.mjs --strict",
+    "smoke:checkpoint:atomic": "node scripts/smoke-redis-atomic-checkpoint.mjs",
+    "test:hardening": "node --test scripts/lib/agent-rag-hardening.test.mjs",
+    "eval:golden:reviewed": "node scripts/eval-reviewed-golden.mjs",
+    "eval:golden:release": "node scripts/eval-reviewed-golden.mjs --release"
   },
   "dependencies": {
     "@alibaba-group/opensandbox": "1.1.1",

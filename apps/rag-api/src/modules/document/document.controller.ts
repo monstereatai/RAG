@@ -126,6 +126,10 @@ export class DocumentController {
     await this.documentPermission.assertTenant(user.userId, user.tenantId);
     // cd 获取文件类型，调用 extractDocumentText 提取文本内容；ObsidianIngestService 做去重和来源挂接。
     const kind = detectDocumentKind(file.originalname);
+    console.log(`cdddddddddd Detected document kind: ${kind} for file: ${file.originalname}`);
+    console.log(file);
+
+    return
 
     const parsedDocument = await this.extractUploadContent(
       file,

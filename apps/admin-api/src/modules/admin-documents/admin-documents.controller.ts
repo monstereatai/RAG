@@ -8,6 +8,10 @@ import { RagClientService } from '../rag-client/rag-client.service';
 import { unwrapRagResponse } from '../rag-client/rag-response.adapter';
 
 const MAX_DOCUMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
+const DOCUMENT_UPLOAD_OPTIONS = {
+  defParamCharset: 'utf8',
+  limits: { fileSize: MAX_DOCUMENT_UPLOAD_BYTES },
+};
 const DOCUMENT_OPERATIONS_UPSTREAM_TIMEOUT_MS = 15_000;
 const FAILED_DOCUMENT_TASKS_UPSTREAM_TIMEOUT_MS = 90_000;
 
@@ -298,16 +302,14 @@ export class AdminDocumentsController {
   @AuditLog('documents', 'upload')
   @ApiOperation({ summary: '后台文档上传（代理至 rag-backend）' })
   @RequirePermission('admin:documents:write')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: MAX_DOCUMENT_UPLOAD_BYTES },
-    }),
-  )
-  upload(@UploadedFile() file: Express.Multer.File, @Body() body: Record<string, unknown>, @Req() req: { user?: { userId?: string; sub?: string } }) {
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_OPTIONS))
+  async upload(@UploadedFile() file: Express.Multer.File, @Body() body: Record<string, unknown>, @Req() req: { user?: { userId?: string | number; sub?: string | number } }) {
     if (!file) throw new BadRequestException('file is required');
     const ownerUserId = req.user?.userId ?? req.user?.sub;
     if (!ownerUserId) throw new UnauthorizedException('authenticated admin is required');
-    return this.ragClient.uploadDocument(file, { ...body, ownerUserId });
+    const result = await this.ragClient.uploadDocument(file, { ...body, ownerUserId });
+    this.requireAvailable(result);
+    return unwrapRagResponse(result.data);
   }
 
   @Post(':docId/archive')

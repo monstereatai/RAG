@@ -78,7 +78,8 @@ export abstract class RagClientSearchBase extends RagClientGraphBase {
     const form = new FormData();
     form.append('file', new Blob([file.buffer as unknown as BlobPart], { type: file.mimetype }), file.originalname);
     for (const [key, value] of Object.entries(fields)) {
-      const forwardedValue = key === 'ownerUserId' && typeof value === 'string'
+      const forwardedValue = key === 'ownerUserId' &&
+        (typeof value === 'string' || (typeof value === 'number' && Number.isSafeInteger(value)))
         ? this.mapAdminUserId(value)
         : value;
       if (forwardedValue !== undefined && forwardedValue !== null) form.append(key, String(forwardedValue));

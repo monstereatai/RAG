@@ -194,28 +194,16 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     const checkpointId = checkpoint.id;
 
     try {
-      // 保存 checkpoint
-      await this.write(
-        `checkpoint:${threadId}:${checkpointId}`,
-        JSON.stringify(checkpoint),
-        this.ttl,
-      );
-
-      // 保存 metadata
-      if (metadata) {
-        await this.write(
-          `checkpoint:metadata:${threadId}:${checkpointId}`,
-          JSON.stringify(metadata),
-          this.ttl,
-        );
-      }
-
-      // 更新 latest pointer
-      await this.write(`checkpoint:latest:${threadId}`, checkpointId, this.ttl);
-
-      // 添加到 thread sorted set（按时间戳排序）
-      const score = new Date(checkpoint.ts).getTime();
-      await this.zadd(`thread:${threadId}`, score, checkpointId);
+      // Single Redis Lua transaction: no visible half-written checkpoint.
+      // Also prevents an older concurrent put from regressing the latest pointer.
+      await this.redisProvider.commitCheckpointRequired({
+        threadId,
+        checkpointId,
+        checkpointJson: JSON.stringify(checkpoint),
+        metadataJson: JSON.stringify(metadata ?? {}),
+        timestampMs: new Date(checkpoint.ts).getTime(),
+        ttlSeconds: this.ttl,
+      });
 
       return {
         configurable: { thread_id: threadId, checkpoint_id: checkpointId },
@@ -247,15 +235,13 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     }
 
     try {
-      // 保存每个 write
-      for (const [idx, write] of writes.entries()) {
-        const pendingWrite = [taskId, ...write];
-        await this.write(
-          `writes:${threadId}:${checkpointId}:${taskId}:${idx}`,
-          JSON.stringify(pendingWrite),
-          this.ttl,
-        );
-      }
+      await this.redisProvider.commitCheckpointWritesRequired({
+        threadId,
+        checkpointId,
+        taskId,
+        entries: writes.map((write) => JSON.stringify([taskId, ...write])),
+        ttlSeconds: this.ttl,
+      });
     } catch (err) {
       this.logger.warn(`putWrites failed: ${(err as Error).message}`);
       if (this.required) throw err;
@@ -273,10 +259,12 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     }
 
     try {
-      // 获取所有 checkpoint IDs
+      // First discover every pending write for the thread, including legacy keys.
+      // This is a cleanup operation after the workflow has been stopped;
+      // concurrent writers must be stopped by the calling orchestration layer.
       const checkpointIds = await this.zrange(`thread:${threadId}`, 0, -1);
-
-      // 删除每个 checkpoint 的数据
+      const pendingWriteKeys = await this.keys(`writes:${threadId}:*`);
+      for (const key of pendingWriteKeys) await this.del(key);
       for (const checkpointId of checkpointIds) {
         await this.del(`checkpoint:${threadId}:${checkpointId}`);
         await this.del(`checkpoint:metadata:${threadId}:${checkpointId}`);
@@ -305,7 +293,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     try {
       // 使用 pattern 查找所有 writes
       const pattern = `writes:${threadId}:${checkpointId}:*`;
-      const keys = await this.keys(pattern);
+      const keys = (await this.keys(pattern)).sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
 
       const writes: Array<[string, string, unknown]> = [];
       for (const key of keys) {
@@ -372,7 +360,7 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
 
   private keys(pattern: string): Promise<string[]> {
     return this.required
-      ? this.redisProvider.keysRequired(pattern)
-      : this.redisProvider.keys(pattern);
+      ? this.redisProvider.scanRequired(pattern)
+      : this.redisProvider.scan(pattern);
   }
 }

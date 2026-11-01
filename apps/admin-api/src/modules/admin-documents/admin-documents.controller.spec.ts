@@ -13,6 +13,7 @@ describe('AdminDocumentsController document operations', () => {
     retryIndexRepair: jest.fn(),
     runIndexReconciler: jest.fn(),
     cancelQueuedDocumentTask: jest.fn(),
+    uploadDocument: jest.fn(),
   };
   const controller = new AdminDocumentsController(ragClient as never);
 
@@ -104,6 +105,34 @@ describe('AdminDocumentsController document operations', () => {
       module: 'documents',
       action: 'run-index-reconciler',
     });
+  });
+
+  it('returns the unwrapped upload task and rejects upstream errors', async () => {
+    const file = {
+      originalname: 'sample.pdf',
+      mimetype: 'application/pdf',
+      buffer: Buffer.from('pdf-bytes'),
+    } as Express.Multer.File;
+    ragClient.uploadDocument.mockResolvedValueOnce({
+      available: true,
+      status: 201,
+      data: { code: 201, data: { taskId: 'task-1', status: 'queued' } },
+    });
+
+    await expect(
+      controller.upload(file, {}, { user: { userId: 1 } }),
+    ).resolves.toEqual({ taskId: 'task-1', status: 'queued' });
+    expect(ragClient.uploadDocument).toHaveBeenCalledWith(file, { ownerUserId: 1 });
+
+    ragClient.uploadDocument.mockResolvedValueOnce({
+      available: false,
+      status: 403,
+      data: null,
+      error: 'mapped Admin principal is required',
+    });
+    await expect(
+      controller.upload(file, {}, { user: { userId: 1 } }),
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it('forwards the repair retry and manual reconciliation requests', async () => {

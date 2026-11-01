@@ -34,6 +34,15 @@ import { IndexReconcilerService } from './index-reconciler.service';
 import { RagAdminGraphService } from './rag-admin-graph.service';
 import { Public } from '../../common/decorators/public.decorator';
 
+const DOCUMENT_UPLOAD_OPTIONS = {
+  defParamCharset: 'utf8',
+  limits: {
+    fileSize: Number(
+      process.env.DOCUMENT_UPLOAD_MAX_BYTES ?? 200 * 1024 * 1024,
+    ),
+  },
+};
+
 @Public()
 @Controller('rag/admin')
 @UseGuards(ServiceTokenGuard)
@@ -177,15 +186,7 @@ export class RagAdminController {
   }
 
   @Post('documents/upload')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: {
-        fileSize: Number(
-          process.env.DOCUMENT_UPLOAD_MAX_BYTES ?? 200 * 1024 * 1024,
-        ),
-      },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_OPTIONS))
   async uploadDocument(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: Record<string, unknown>,

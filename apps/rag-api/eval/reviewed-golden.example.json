@@ -1,0 +1,27 @@
+{
+  "datasetId": "private-reviewed-2026-v1",
+  "version": "1.0.0",
+  "synthetic": true,
+  "description": "示例字段，不是真实的已审核 Golden Dataset。--release 必须拒绝。",
+  "cases": [
+    {
+      "id": "example-rag-01", "kind": "rag", "split": "development",
+      "scenario": "direct", "question": "游戏活动需要什么道具？",
+      "sourceUri": "private://replace-with-authorized-source",
+      "sourceHash": "REPLACE_WITH_SHA256",
+      "expectedDocIds": ["source-doc-001"], "forbiddenDocIds": [],
+      "expectedClaims": ["正确活动道具名称"], "expectRefusal": false,
+      "review": {"approved":true,"reviewerId":"example-reviewer","reviewedAt":"2026-11-01T00:00:00Z","sourceRevision":"example-v1"}
+    },
+    {
+      "id": "example-agent-01", "kind": "agent", "split": "holdout",
+      "scenario": "checkpoint_resume", "question": "恢复上一次审批后的工作流",
+      "sourceUri": "private://replace-with-authorized-source",
+      "sourceHash": "REPLACE_WITH_SHA256",
+      "expectedDocIds": [], "forbiddenDocIds": [],
+      "expectedEvents": ["role.started", "role.completed"],
+      "forbiddenEvents": ["tool.unknown"], "expectRefusal": false,
+      "review": {"approved":true,"reviewerId":"example-reviewer","reviewedAt":"2026-11-01T00:00:00Z","sourceRevision":"example-v1"}
+    }
+  ]
+}

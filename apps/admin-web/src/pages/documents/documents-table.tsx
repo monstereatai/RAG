@@ -15,6 +15,7 @@ import { Button, Checkbox, Space, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import React from 'react';
 import type { DocumentsController } from './documents-controller';
+import { formatDocumentDateTime, restoreLegacyFilenameEncoding } from './documents-format';
 import type { DocumentItem } from './service';
 
 export function createDocumentColumns(
@@ -58,14 +59,17 @@ export function createDocumentColumns(
       title: '文件名',
       dataIndex: 'filename',
       width: 280,
-      render: (_, record) => (
-        <Space size={12}>
-          {iconMap[record.fileType.toLowerCase()] ?? fallbackFileIcon}
-          <Tooltip title={record.filename}>
-            <span>{record.filename}</span>
-          </Tooltip>
-        </Space>
-      ),
+      render: (_, record) => {
+        const filename = restoreLegacyFilenameEncoding(record.filename);
+        return (
+          <Space size={12}>
+            {iconMap[record.fileType.toLowerCase()] ?? fallbackFileIcon}
+            <Tooltip title={filename}>
+              <span>{filename}</span>
+            </Tooltip>
+          </Space>
+        );
+      },
     },
     {
       title: '文件类型',
@@ -73,7 +77,12 @@ export function createDocumentColumns(
       width: 120,
       render: (value) => String(value).toUpperCase(),
     },
-    { title: '上传时间', dataIndex: 'createdAt', width: 190 },
+    {
+      title: '上传时间',
+      dataIndex: 'createdAt',
+      width: 190,
+      render: (value: string) => formatDocumentDateTime(value),
+    },
     { title: '上传人', dataIndex: 'uploadedBy', width: 130 },
     {
       title: '文档解析状态',

@@ -79,6 +79,8 @@
 
 ## 最近验证
 
+- 2026-11-01：修正后台文档上传文件名解码，Admin API 的 Multer `defParamCharset` 设为 UTF-8，与 RAG API 上传入口保持一致。Admin API build、文档控制器定向测试 6/6、改动文件 ESLint 通过；重启后 `/health` 返回 200。
+- 2026-11-01：修复 Admin 文档上传代理。登录守卫提供数字类型 `userId`，上传代理此前只转换字符串，导致 RAG 收到未映射的数字 ID 并拒绝请求；现将安全整数也映射为 Admin principal。上传代理同时校验上游错误并解包成功响应中的 `taskId`，避免 403 被包装为 HTTP 201 而显示“上传成功”。新增两处回归覆盖。验证：build、lint（保留 2 条 warning）、两个定向套件 41/41、E2E 19/19、migration check 通过；全量 `npm run verify` 在 2 个无关单测套件失败（QA SSE mock 缺少 `res.on`；语音票据测试期望 tenant 参数与当前实现不符）。Admin API 重启后 `/health` 返回 200，RAG API 未重启。
 - 2026-09-23：管理接口授权与认证边界加固：公开注册固定普通角色；用户、订单、支付管理接口按现有角色权限码限制并过滤用户密码字段；JWT 增加 access/refresh 类型区分，登录和刷新拒绝停用账号，生产环境无数据库时拒绝启用内存演示用户。验证：`npm run verify` 通过（build、lint、unit 11 suites / 100 tests、e2e 2 suites / 19 tests、migration check）；lint 保留 3 条既有 warning。
 - 2026-06-30：**组织权限联调基础接口完成**
   - 新增 `AdminOrganizationsController`，`GET /api/admin/organizations` 返回 4 个部门、4 个岗位和树形结构。

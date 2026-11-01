@@ -341,6 +341,76 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Atomic checkpoint publication. TTL=0 means durable until explicit deletion. */
+  async commitCheckpointRequired(input: {
+    threadId: string;
+    checkpointId: string;
+    checkpointJson: string;
+    metadataJson: string;
+    timestampMs: number;
+    ttlSeconds: number;
+  }): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    if (!Number.isFinite(input.timestampMs) || input.ttlSeconds < 0 || !Number.isInteger(input.ttlSeconds)) {
+      throw new Error('invalid checkpoint timestamp or TTL');
+    }
+    const script = `
+      local ttl = tonumber(ARGV[4])
+      local function put(key, val)
+        if ttl > 0 then redis.call('SET', key, val, 'EX', ttl)
+        else redis.call('SET', key, val); redis.call('PERSIST', key) end
+      end
+      put(KEYS[1], ARGV[1])
+      put(KEYS[2], ARGV[2])
+      redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), ARGV[5])
+      if ttl > 0 then redis.call('EXPIRE', KEYS[4], ttl)
+      else redis.call('PERSIST', KEYS[4]) end
+      local latest = redis.call('GET', KEYS[3])
+      local oldScore = latest and redis.call('ZSCORE', KEYS[4], latest)
+      if not oldScore or tonumber(ARGV[3]) >= tonumber(oldScore) then
+        put(KEYS[3], ARGV[5])
+      end
+      return 1
+    `;
+    try {
+      await this.client.eval(script, 4,
+        `checkpoint:${input.threadId}:${input.checkpointId}`,
+        `checkpoint:metadata:${input.threadId}:${input.checkpointId}`,
+        `checkpoint:latest:${input.threadId}`,
+        `thread:${input.threadId}`,
+        input.checkpointJson, input.metadataJson,
+        String(input.timestampMs), String(input.ttlSeconds), input.checkpointId,
+      );
+    } catch (err) { this.enabled = false; throw err; }
+  }
+
+  /** Pending writes for one LangGraph task are either all visible or absent. */
+  async commitCheckpointWritesRequired(input: {
+    threadId: string;
+    checkpointId: string;
+    taskId: string;
+    entries: string[];
+    ttlSeconds: number;
+  }): Promise<void> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    if (input.entries.length === 0) return;
+    if (input.ttlSeconds < 0 || !Number.isInteger(input.ttlSeconds)) throw new Error('invalid checkpoint TTL');
+    const keys = input.entries.map((_, idx) =>
+      `writes:${input.threadId}:${input.checkpointId}:${input.taskId}:${idx}`);
+    const script = `
+      local ttl = tonumber(ARGV[1])
+      for i = 1, #KEYS do
+        if ttl > 0 then redis.call('SET', KEYS[i], ARGV[i + 1], 'EX', ttl)
+        else redis.call('SET', KEYS[i], ARGV[i + 1]); redis.call('PERSIST', KEYS[i]) end
+      end
+      return #KEYS
+    `;
+    try {
+      await this.client.eval(script, keys.length, ...keys,
+        String(input.ttlSeconds), ...input.entries);
+    } catch (err) { this.enabled = false; throw err; }
+  }
+
   async zrangeRequired(
     key: string,
     start: number,
