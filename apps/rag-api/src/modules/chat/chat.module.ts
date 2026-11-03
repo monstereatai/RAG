@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
+import { ChatContextBuilder } from './chat-context-builder';
+import { ChatLifecycleService } from './chat-lifecycle.service';
 import { ConversationService } from './conversation.service';
 import { ConversationEmbeddingService } from './conversation-embedding.service';
 import { RagModule } from '../../rag/rag.module';
@@ -60,6 +62,8 @@ import { ChatQueryLogService } from './chat-query-log.service';
   controllers: [ChatController],
   providers: [
     ChatService,
+    ChatContextBuilder,
+    ChatLifecycleService,
     ChatRunObservabilityService,
     ChatQueryLogService,
     ConversationService,

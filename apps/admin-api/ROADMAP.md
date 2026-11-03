@@ -4,6 +4,10 @@
 
 ## 当前结论
 
+2026-11-04：QA AG-UI SSE 转发、背压、断连取消和代理兜底已从控制器拆到 `QaOpsAguiStreamProxyService`；未传 `mode` 时默认 `auto`。3 个相关 Jest suites / 54 tests、改动文件 ESLint 通过。完整 `npm run verify` 的 build/lint 通过，Jest 为 153/154；唯一失败是现存语音票据控制器测试的参数断言。管理 API 未认证请求返回 401，真实 SSE 代理和快速/深度问答仍待有效登录态验证。
+
+2026-11-04：QA AG-UI 代理未传 `mode` 时默认 `auto`，定向测试 13/13、改动文件 ESLint 和 build 通过；完整 `npm run verify` 在现存语音票据测试失败处停止。独立端口管理 API 登录返回 401，真实问答代理验收待有效登录态。
+
 当前 `admin-backend` 已完成独立 NestJS 项目迁入、项目命名修正、基础模块装配和部分管理后台运营入口，但还不是完整管理后台。
 
 当前优先级：

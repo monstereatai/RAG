@@ -15,6 +15,21 @@ export function resolveAutoRoute(
   return 'simple';
 }
 
+export function resolveAgenticRoute(input: {
+  mode: 'simple' | 'agentic' | 'auto';
+  queryPlan: QueryPlan;
+  allowConversationStateAnswer: boolean;
+  multiIntent: boolean;
+  fastPathSufficient: boolean;
+}): 'simple' | 'agentic' {
+  if (input.queryPlan.action === 'execute') return 'agentic';
+  if (input.mode === 'simple') return 'simple';
+  if (input.mode === 'agentic') return 'agentic';
+  if (input.allowConversationStateAnswer) return 'simple';
+  if (input.multiIntent) return 'agentic';
+  return resolveAutoRoute(input.queryPlan, input.fastPathSufficient);
+}
+
 export function requiresAgenticPlan(queryPlan: QueryPlan): boolean {
   return (
     queryPlan.subQueries.length > 0 ||

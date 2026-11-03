@@ -4,7 +4,6 @@ import { SseCallback } from './sse-event';
 import { type AgenticRagStateType } from './agentic-rag.state';
 import {
   createFallbackQueryPlan,
-  isObjectiveKnowledgePlan,
   shouldClarifyQueryPlan,
 } from '../planning/query-plan';
 import { detectDangerousQuery } from '../prompts/prompt-injection.guard';
@@ -18,7 +17,7 @@ import {
   buildExplicitSubQuestions,
   hasExplicitScopeFilter,
   requiresAgenticPlan,
-  resolveAutoRoute,
+  resolveAgenticRoute,
 } from './agentic-rag-planning';
 import { AgenticRagResume } from './agentic-rag.resume';
 import type { AgenticRagRunResult } from './agentic-rag.types';
@@ -371,8 +370,7 @@ export class AgenticRagExecution extends AgenticRagResume {
         };
       }
     }
-    // Auto 先检查快速路径能否用本地证据回答；选中后把证据交给 Simple 复用。
-    // 未命中时继续按 route 分流；只有 Agentic 请求才进入 LangGraph 状态图。
+    // Auto 先检查快速路径的证据；不足时升级到 Agentic 状态图。
     const fastPathGate =
       !multiIntent && mode === 'auto'
         ? await this.fastPathCapability.assessFastPath(
@@ -381,25 +379,15 @@ export class AgenticRagExecution extends AgenticRagResume {
             retrieveOptions,
           )
         : null;
-    const route =
-      queryPlan.action === 'execute'
-        ? 'agentic'
-        : mode === 'simple'
-          ? 'simple'
-          : mode === 'agentic'
-            ? 'agentic'
-            : retrieveOptions.allowConversationStateAnswer
-              ? 'simple'
-              : queryPlan.contextMode === 'mixed'
-                ? 'simple'
-                : isObjectiveKnowledgePlan(queryPlan)
-                  ? 'simple'
-                  : multiIntent
-                    ? 'agentic'
-                    : resolveAutoRoute(
-                        queryPlan,
-                        Boolean(fastPathGate?.sufficient),
-                      );
+    const route = resolveAgenticRoute({
+      mode,
+      queryPlan,
+      allowConversationStateAnswer: Boolean(
+        retrieveOptions.allowConversationStateAnswer,
+      ),
+      multiIntent,
+      fastPathSufficient: Boolean(fastPathGate?.sufficient),
+    });
     observedRoute = route;
     onEvent?.({
       type: 'routing',

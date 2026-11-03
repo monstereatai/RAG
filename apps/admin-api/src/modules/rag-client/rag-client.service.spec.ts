@@ -572,6 +572,34 @@ describe('RagClientService', () => {
       );
     });
 
+    it('defaults AG-UI admin stream mode to auto and forwards trace identifiers', async () => {
+      const controller = new AbortController();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: {},
+      });
+
+      await service.streamAgui(
+        { query: '默认路由', userId: 'admin-user' },
+        controller.signal,
+        '00-trace-span-01',
+        'request-1',
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/v1/agui/admin/stream?query=%E9%BB%98%E8%AE%A4%E8%B7%AF%E7%94%B1&mode=auto&model=qwen&userId=admin-user',
+        expect.objectContaining({
+          headers: {
+            Authorization: 'Bearer test-token',
+            traceparent: '00-trace-span-01',
+            'x-request-id': 'request-1',
+          },
+          signal: controller.signal,
+        }),
+      );
+    });
+
     it('should call graph schema', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

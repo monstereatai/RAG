@@ -11,7 +11,7 @@ export abstract class RagClientQaBase extends RagClientDocumentsBase {
   ) {
     const params = new URLSearchParams({
       query: query.query,
-      mode: query.mode ?? "agentic",
+      mode: query.mode ?? "auto",
       model: query.model ?? "qwen",
       userId: this.mapAdminUserId(query.userId) || "",
     });

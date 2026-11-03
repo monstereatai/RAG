@@ -442,6 +442,31 @@ flowchart TD
 - 深度路径：外层 LangGraph 负责多步检索、查询扩展、联网兜底、Rerank 与反思重试；内层 `AgentLoopService` 统一执行模型／工具动作、工具次数与总步数限制、超时、Redis 状态快照和运行事件。通过 `AGENTIC_MAX_RETRIES`、`AGENTIC_MAX_AUGMENTED_QUERIES`、`AGENTIC_MAX_RETRIEVAL_QUERIES`、`AGENTIC_MAX_RETRIEVED_CHUNKS`、`AGENTIC_MAX_WEB_SEARCH_RESULTS`、`AGENTIC_MAX_RERANK_TOP_N` 控制外层成本边界。
 - 路由依据是 QueryPlan、证据充分性、子问题数量、实时/执行意图和上下文模式，不由用户手动选择；问题长度只影响上下文、Token、时间和成本预算。
 
+问答代码分层（按现有能力逐步收敛，保持功能和接口兼容）：
+
+```mermaid
+flowchart TD
+  Transport["Admin Web / Admin API / AG-UI<br/>鉴权、协议和事件映射"] --> Chat["ChatService.chat()<br/>一轮问答应用编排"]
+  Chat --> Context["Chat Context Builder<br/>历史、Memory、Skill、附件、Token 预算"]
+  Chat --> Lifecycle["ChatLifecycleService<br/>Run/Goal 启动、失败和结果收口"]
+  Lifecycle --> Observe["ChatRunObservabilityService<br/>运行快照、上下文事件、Trace"]
+  Context --> Plan["QueryPlanner + RetrievalPolicy<br/>QueryPlan 与来源策略"]
+  Plan --> Route["Auto Route / Evidence Policy"]
+  Route --> Fast["Fast Path"]
+  Route --> Graph["Agentic LangGraph"]
+  Fast --> Lifecycle
+  Graph --> Lifecycle
+  LLM["LLM Provider"] -.调用.-> Fast
+  LLM -.调用.-> Graph
+  Tools["Tool Registry / Tool Execution"] -.调用.-> Graph
+```
+
+- `ChatService.chat()` 保持统一用例入口，负责按顺序串联上下文、Run、执行和结果收口；历史/记忆拼接由 `ChatContextBuilder` 负责，Run 启动及完成由 `ChatLifecycleService` 负责，运行快照、上下文审计事件和 Trace 由 `ChatRunObservabilityService` 负责。流式 token 透传及最终答案替换由 `createChatEventRelay` 统一处理。
+- 上下文按 QueryPlan 分两阶段准备：先读取权限范围内的历史用于一次性规划；QueryPlan 和 RetrievalPolicy 生成后，再准备记忆、Skill、附件证据及模型上下文预算。附件仍只能在计划生成后按检索查询加载。
+- LLM Provider 与工具注册/执行作为执行层依赖；上下文层提供有类型的准备结果，执行器不反向依赖 Admin API 或 AG-UI 事件类型。
+- `ChatLifecycleService` 通过显式依赖注入处理最终答案、引用、会话、Query Log、Run/Goal 状态、用量和审批恢复；`ChatService` 只保留兼容 `resume()` 接口并委托给生命周期服务。暂停恢复保持原有检查点上下文。
+- 替换 Agentic 多级继承时保留 LangGraph 节点 ID、checkpoint 结构和恢复语义；任何状态协议变化必须有旧 checkpoint 兼容验证。
+
 ### 5.3 GraphRAG 链路
 
 GraphRAG 默认可配置开启。当前 Neo4j 已在 dev / staging / prod compose 中支持：

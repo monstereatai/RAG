@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { QaOpsController } from './qa-ops.controller';
+import { QaOpsAguiStreamProxyService } from './qa-ops-agui-stream-proxy.service';
 import { RagClientService } from '../rag-client/rag-client.service';
 import type { Response } from 'express';
 
@@ -24,6 +25,7 @@ describe('QaOpsController — SSE Streaming', () => {
       controllers: [QaOpsController],
       providers: [
         { provide: RagClientService, useValue: ragClient },
+        QaOpsAguiStreamProxyService,
       ],
     }).compile();
 
@@ -32,6 +34,8 @@ describe('QaOpsController — SSE Streaming', () => {
     mockRes = {
       setHeader: jest.fn().mockReturnThis(),
       flushHeaders: jest.fn(),
+      on: jest.fn().mockReturnThis(),
+      off: jest.fn().mockReturnThis(),
       write: jest.fn().mockReturnThis(),
       end: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),
@@ -68,11 +72,17 @@ describe('QaOpsController — SSE Streaming', () => {
       const mockReadable = createMockReadable(['data: {"type":"RUN_FINISHED","runId":"1"}\n\n']);
       ragClient.streamAgui.mockResolvedValue({ ok: true, body: mockReadable } as any);
 
-      await controller.streamAgui('你好', 'simple', 'qwen', undefined, mockReq as any, mockRes);
+      await controller.streamAgui('你好', undefined, 'qwen', undefined, mockReq as any, mockRes);
 
       expect(mockRes.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream; charset=utf-8');
       expect(mockRes.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-transform');
       expect(mockRes.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive');
+      expect(ragClient.streamAgui).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'auto' }),
+        expect.any(AbortSignal),
+        undefined,
+        undefined,
+      );
     });
   });
 
@@ -120,6 +130,44 @@ describe('QaOpsController — SSE Streaming', () => {
       expect(ragClient.streamAgui).toHaveBeenCalledWith(
         expect.objectContaining({ rolePresetId: 'product-manager' }),
         expect.any(AbortSignal),
+        undefined,
+        undefined,
+      );
+    });
+
+    it('maps trace context and request ID before proxying the AG-UI stream', async () => {
+      const mockReadable = createMockReadable([
+        'data: {"type":"RUN_FINISHED","runId":"abc"}\n\n',
+      ]);
+      ragClient.streamAgui.mockResolvedValue({
+        ok: true,
+        body: mockReadable,
+      } as any);
+      mockReq.traceContext = {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+      };
+      mockReq.requestId = 'request-1';
+
+      await controller.streamAgui(
+        '问题',
+        undefined,
+        undefined,
+        undefined,
+        mockReq as any,
+        mockRes,
+      );
+
+      expect(ragClient.streamAgui).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: '问题',
+          mode: 'auto',
+          model: 'qwen',
+          userId: 'test-user',
+        }),
+        expect.any(AbortSignal),
+        '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01',
+        'request-1',
       );
     });
   });
@@ -254,9 +302,10 @@ describe('QaOpsController — SSE Streaming', () => {
       let abortSignal: AbortSignal | undefined;
       let onCloseHandler: (() => void) | undefined;
 
-      mockReq.on = (event: string, handler: any) => {
+      mockRes.on.mockImplementation((event: string, handler: any) => {
         if (event === 'close') onCloseHandler = handler;
-      };
+        return mockRes;
+      });
 
       ragClient.streamAgui.mockImplementation(
         async (_input: any, signal: AbortSignal) => {

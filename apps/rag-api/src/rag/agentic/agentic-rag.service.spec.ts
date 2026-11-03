@@ -8,6 +8,7 @@ import {
 } from './agentic-rag.service.test-utils';
 import type { AgenticRagServiceInternals } from './agentic-rag.service.test-utils';
 import type { LlmInvokeOptions } from '../../providers/llm/llm-provider.interface';
+import { resolveAgenticRoute } from './agentic-rag-planning';
 
 describe('AgenticRagService budget boundaries', () => {
   it('routes Auto from the structured plan and evidence sufficiency', () => {
@@ -30,6 +31,172 @@ describe('AgenticRagService budget boundaries', () => {
     expect(resolveAutoRoute(lookupPlan, true)).toBe('simple');
     expect(resolveAutoRoute(lookupPlan, false)).toBe('agentic');
   });
+
+  it.each([
+    {
+      name: 'execute plans force Agentic even in simple mode',
+      mode: 'simple' as const,
+      plan: { action: 'execute' as const },
+      allowConversationStateAnswer: false,
+      multiIntent: false,
+      fastPathSufficient: false,
+      expected: 'agentic' as const,
+    },
+    {
+      name: 'explicit simple mode selects the fast route',
+      mode: 'simple' as const,
+      plan: {},
+      allowConversationStateAnswer: false,
+      multiIntent: false,
+      fastPathSufficient: false,
+      expected: 'simple' as const,
+    },
+    {
+      name: 'explicit Agentic mode takes precedence over conversation state',
+      mode: 'agentic' as const,
+      plan: {},
+      allowConversationStateAnswer: true,
+      multiIntent: false,
+      fastPathSufficient: true,
+      expected: 'agentic' as const,
+    },
+    {
+      name: 'conversation state may answer without fast-path evidence',
+      mode: 'auto' as const,
+      plan: {},
+      allowConversationStateAnswer: true,
+      multiIntent: false,
+      fastPathSufficient: false,
+      expected: 'simple' as const,
+    },
+    {
+      name: 'multi-intent plans force Agentic',
+      mode: 'auto' as const,
+      plan: {},
+      allowConversationStateAnswer: false,
+      multiIntent: true,
+      fastPathSufficient: true,
+      expected: 'agentic' as const,
+    },
+    {
+      name: 'complex plans force Agentic despite sufficient fast-path evidence',
+      mode: 'auto' as const,
+      plan: { taskType: 'comparison' as const },
+      allowConversationStateAnswer: false,
+      multiIntent: false,
+      fastPathSufficient: true,
+      expected: 'agentic' as const,
+    },
+    {
+      name: 'Auto uses the fast route when evidence is sufficient',
+      mode: 'auto' as const,
+      plan: {},
+      allowConversationStateAnswer: false,
+      multiIntent: false,
+      fastPathSufficient: true,
+      expected: 'simple' as const,
+    },
+    {
+      name: 'Auto upgrades when fast-path evidence is insufficient',
+      mode: 'auto' as const,
+      plan: {},
+      allowConversationStateAnswer: false,
+      multiIntent: false,
+      fastPathSufficient: false,
+      expected: 'agentic' as const,
+    },
+  ])(
+    '$name',
+    ({
+      mode,
+      plan,
+      allowConversationStateAnswer,
+      multiIntent,
+      fastPathSufficient,
+      expected,
+    }) => {
+      const queryPlan = {
+        ...createFallbackQueryPlan('查资料'),
+        ...plan,
+      };
+
+      expect(
+        resolveAgenticRoute({
+          mode,
+          queryPlan,
+          allowConversationStateAnswer,
+          multiIntent,
+          fastPathSufficient,
+        }),
+      ).toBe(expected);
+    },
+  );
+
+  it.each([
+    { contextMode: 'mixed' as const, domain: 'internal' as const },
+    { contextMode: 'independent' as const, domain: 'public' as const },
+  ])(
+    'upgrades Auto when $contextMode $domain evidence is insufficient',
+    async ({ contextMode, domain }) => {
+      const { service, ragService } = createService();
+      const assessFastPath = serviceMock(ragService, 'assessFastPath');
+      assessFastPath.mockResolvedValue({
+        sufficient: false,
+        reason: '证据不足',
+        chunks: [],
+        obsidianHits: [],
+        prefetchedFastPath: {
+          retrieval: { chunks: [], diagnostics: {}, profile: {} },
+          obsidianHits: [],
+        } as never,
+      });
+      const invoke = jest.fn().mockResolvedValue({
+        answer: '深度检索后的回答。',
+        retrievedChunks: [],
+        retrievalSufficient: true,
+        retrievalReason: '深度检索已补证',
+        confidence: 1,
+        retryCount: 0,
+        subQuestions: [],
+        artifacts: [],
+        executionState: { remainingSteps: 1, remainingToolCalls: 1 },
+      });
+      (
+        service as unknown as {
+          app: { invoke: jest.Mock; getState: jest.Mock };
+        }
+      ).app = {
+        invoke,
+        getState: jest.fn().mockResolvedValue({ tasks: [] }),
+      };
+      const query = '核对资料中的结论';
+      const queryPlan = {
+        ...createFallbackQueryPlan(query),
+        contextMode,
+        domain,
+      };
+
+      await expect(
+        service.run(
+          query,
+          'auto',
+          undefined,
+          [],
+          'thread-1',
+          'user-1',
+          [],
+          false,
+          {
+            queryPlan,
+          },
+        ),
+      ).resolves.toMatchObject({ route: 'agentic' });
+
+      expect(assessFastPath).toHaveBeenCalledTimes(1);
+      expect(serviceMock(ragService, 'answer')).not.toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('delegates ranking, sufficiency, and evidence-first answers to Evidence Policy', () => {
     const { service, evidencePolicy } = createService();

@@ -89,6 +89,16 @@ RAG/
 - **数据库表**：snake_case（`documents`、`conversation_chunks`）
 - **API 路径**：`/api/v1/<resource>`，版本化从 M3 开始
 
+## 问答链路分层约定
+
+- **接入层**：Controller 负责鉴权、参数校验、身份/租户上下文和协议适配；AG-UI 负责把应用事件转换为稳定的 SSE 契约。接入层不组装模型上下文、不做路由决策。
+- **应用编排层**：`ChatService.chat()` 是一轮问答的统一用例入口，只串联准备上下文、选择执行、运行生命周期和结果收口；保持公开签名稳定，不承载大段检索、记忆拼接、审计事件实现。
+- **上下文层**：上下文准备明确分两阶段：先取得有权限的历史供唯一一次 QueryPlan 使用；QueryPlan 与 RetrievalPolicy 生成后，再准备记忆、Skill、附件证据和 Token 预算。共享结果使用明确类型传递，不能重复规划或改变附件加载时序。
+- **策略与执行层**：QueryPlanner、RetrievalPolicy、EvidencePolicy 负责计划与策略；快速回答与 Agentic LangGraph 负责执行；LLM Provider、检索 Provider、工具注册与执行各自保留在现有能力模块中，不重复造一套通用框架。
+- **结果层**：`ChatLifecycleService` 负责答案引用门禁、会话持久化、Query Log、Run/Goal 状态、用量和审批恢复；`ChatRunObservabilityService` 负责运行事件/Trace；取消、失败与中断恢复沿用既有状态语义。
+- **重构约束**：逐步替换继承或搬移职责；不得改变 `/api/admin/qa-ops/agui/stream`、`auto` 默认路由、SSE 事件契约、租户/权限边界、Agent Run 恢复上下文或 LangGraph checkpoint 节点 ID。新增服务应有完整职责和明确输入输出，避免只转发调用的空壳抽象。
+- **新增文件位置**：沿用现有 feature 目录，同层文件使用职责明确的 kebab-case 命名；只有确实需要目录隔离时才新建目录，并在本规则中说明目录职责。
+
 ## 验证命令（改完必须跑）
 
 ```bash

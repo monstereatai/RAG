@@ -10,6 +10,8 @@ import type { RetrievalProfile } from '../../rag/retrieval/context-builder';
 import type { SseEvent } from '../../rag/agentic/sse-event';
 import type { ChatMode, RetrievalScopeDto } from './chat.dto';
 import { getPromptVersion } from '../../rag/prompts/prompt-registry';
+import type { AgentRuntimeService } from '../agent-runtime/agent-runtime.service';
+import type { ChatContextAudit } from './chat-runtime.types';
 
 type RunRoute = 'simple' | 'agentic';
 
@@ -236,6 +238,73 @@ export class ChatRunObservabilityService {
           ? 'tool-registry/v1'
           : null,
     };
+  }
+
+  async recordPreparedContext(
+    runId: string,
+    input: {
+      runtimePlan?: Awaited<
+        ReturnType<AgentRuntimeService['createPlanWithSkills']>
+      >['plan'];
+      audit: ChatContextAudit;
+      requestSnapshot: RequestSnapshotInput;
+    },
+  ): Promise<void> {
+    await this.agentRuns?.recordRuntimeEvent(runId, {
+      eventType: 'agent.plan.created',
+      target: input.runtimePlan?.planId,
+      payload: input.runtimePlan,
+    });
+    await this.agentRuns?.recordRuntimeEvent(runId, {
+      eventType: 'context.policy.selected',
+      target: 'short-term-memory',
+      payload: {
+        messageSafetyCap: input.audit.messageSafetyCap,
+        planningHistoryTokenBudget: input.audit.planningHistoryTokenBudget,
+        requestHistoryTokenBudget: input.audit.requestHistoryTokenBudget,
+        systemContextTokenBudget: input.audit.systemContextTokenBudget,
+        systemContextEstimatedTokens: input.audit.systemContextEstimatedTokens,
+        systemContextOverflowTokens: input.audit.systemContextOverflowTokens,
+        systemContextDroppedSources: input.audit.systemContextDroppedSources,
+        skillContextsInjected: input.audit.skillContextsInjected,
+        skillContextsDropped: input.audit.skillContextsDropped,
+        loadedTurns: input.audit.loadedTurns,
+        summaryLoaded: input.audit.summaryLoaded,
+      },
+    });
+    if (input.runtimePlan?.selectedSkills.length) {
+      await this.agentRuns?.recordRuntimeEvent(runId, {
+        eventType: 'skill.selected',
+        target: 'skill-system',
+        payload: {
+          skills: input.runtimePlan.selectedSkills,
+          versions: input.runtimePlan.selectedSkillVersions,
+          injected: input.audit.skillContextsInjected,
+          dropped: input.audit.skillContextsDropped,
+        },
+      });
+    }
+    await this.agentRuns?.recordRuntimeEvent(runId, {
+      eventType: 'request.snapshot',
+      target: 'model_request',
+      payload: this.requestSnapshot(input.requestSnapshot),
+    });
+  }
+
+  async recordMemoryContextLoaded(
+    runId: string,
+    audit: ChatContextAudit,
+  ): Promise<void> {
+    await this.agentRuns?.recordRuntimeEvent(runId, {
+      eventType: 'memory.context.loaded',
+      target: 'short_term_memory',
+      payload: {
+        recentTurns: audit.recentTurns,
+        truncatedHistory: audit.truncatedHistory,
+        summaryLoaded: audit.summaryLoaded,
+        systemContextDroppedSources: audit.systemContextDroppedSources,
+      },
+    });
   }
 
   toTraceEvent(event: SseEvent): RagTraceEvent {

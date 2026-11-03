@@ -1,4 +1,7 @@
 import { ChatService } from './chat.service';
+import { ChatContextBuilder } from './chat-context-builder';
+import { ChatLifecycleService } from './chat-lifecycle.service';
+import { ChatRunObservabilityService } from './chat-run-observability.service';
 
 const basePlan = {
   action: 'retrieve',
@@ -127,27 +130,45 @@ function createService(overrides: Deps = {}) {
     },
   };
   Object.assign(deps, overrides);
-  return new ChatService(
-    deps.rag as never,
-    deps.agentic as never,
+  const contextBuilder = new ChatContextBuilder(
     deps.conversation as never,
     deps.embedding as never,
     deps.memory as never,
     deps.shortTerm as never,
-    deps.langfuse as never,
-    deps.queryLog as never,
     deps.planner as never,
     deps.policy as never,
-    undefined,
+    deps.runtime as never,
+    deps.metrics as never,
+    deps.config as never,
+  );
+  const runObservability = new ChatRunObservabilityService(
+    deps.langfuse as never,
+    deps.agentRuns as never,
+  );
+  const chatLifecycle = new ChatLifecycleService(
+    deps.rag as never,
+    deps.agentic as never,
+    deps.conversation as never,
+    deps.memory as never,
+    deps.shortTerm as never,
+    deps.queryLog as never,
+    deps.policy as never,
+    runObservability,
     deps.agentRuns as never,
     deps.agentGoals as never,
     deps.config as never,
-    undefined,
+  );
+  return new ChatService(
+    deps.agentic as never,
+    deps.conversation as never,
+    contextBuilder,
+    chatLifecycle,
+    runObservability,
+    deps.config as never,
     undefined,
     deps.metrics as never,
     undefined,
-    undefined,
-    undefined,
+    deps.llmProvider as never,
   );
 }
 
@@ -265,8 +286,10 @@ describe('ChatService', () => {
       },
     });
     const planner = (
-      service as unknown as { queryPlanner: { plan: jest.Mock } }
-    ).queryPlanner;
+      service as unknown as {
+        chatContextBuilder: { queryPlanner: { plan: jest.Mock } };
+      }
+    ).chatContextBuilder.queryPlanner;
 
     const events: Array<{ type: string }> = [];
     const result = await service.chat(
@@ -306,6 +329,68 @@ describe('ChatService', () => {
     expect(events.findIndex((event) => event.type === 'token')).toBeLessThan(
       events.findIndex((event) => event.type === 'citation'),
     );
+  });
+
+  it('在模型执行前创建 Run 并记录规划与上下文快照', async () => {
+    const steps: string[] = [];
+    let receivedOptions: unknown;
+    const agentRuns = {
+      start: jest.fn().mockImplementation(() => {
+        steps.push('run.start');
+        return Promise.resolve({ id: 'run-1', maxSteps: 18, maxToolCalls: 24 });
+      }),
+      recordRuntimeEvent: jest
+        .fn()
+        .mockImplementation((_id: string, event: { eventType: string }) => {
+          steps.push(event.eventType);
+          return Promise.resolve();
+        }),
+      finish: jest.fn().mockResolvedValue(undefined),
+    };
+    const agentGoals = {
+      activate: jest.fn().mockImplementation(() => {
+        steps.push('goal.activate');
+        return Promise.resolve();
+      }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const agenticRun = jest.fn((...args: unknown[]) => {
+      steps.push('model.run');
+      receivedOptions = args[8];
+      return Promise.resolve({
+        answer: '回答',
+        references: [],
+        route: 'simple',
+        confidence: 1,
+        retryCount: 0,
+        retrievalSufficient: true,
+      });
+    });
+    const service = createService({
+      agentRuns,
+      agentGoals,
+      agentic: { run: agenticRun },
+    });
+
+    await service.chat({ query: '项目规则是什么？' }, 'user-1');
+
+    expect(steps).toEqual(
+      expect.arrayContaining([
+        'run.start',
+        'query.plan.created',
+        'goal.activate',
+        'context.policy.selected',
+        'request.snapshot',
+        'model.run',
+      ]),
+    );
+    expect(steps.indexOf('run.start')).toBeLessThan(steps.indexOf('model.run'));
+    expect(steps.indexOf('request.snapshot')).toBeLessThan(
+      steps.indexOf('model.run'),
+    );
+    expect(receivedOptions).toMatchObject({
+      runtimeRunId: 'run-1',
+    });
   });
 
   it('长会话先按规划预算取历史，再按最终检索档位收紧执行上下文', async () => {
