@@ -6,7 +6,7 @@ import type { ParsedBlock, ParsedDocument } from './document-parser.types';
  * Structure-aware hybrid chunking:
  * 1. Preserve records / API contracts / test cases / table rows as atomic units.
  * 2. Split oversized units *inside* their boundary using the existing token-aware chunker.
- * 3. Materialize bounded parent context for retrieval-time expansion; parents are not embedded.
+ * 3. Attach a bounded parent context reference for retrieval-time expansion; parents are not embedded.
  * 4. Keep source and attachment references alongside each child.
  */
 export interface ChunkProvenance {
@@ -265,12 +265,19 @@ export async function splitHybridDocument(input: {
     return chunks.map((chunk, i) => {
       const section = Number(chunk.sectionId?.replace(/^section-/, '') ?? 0);
       const parent = (sections.get(Number.isFinite(section) ? section : 0) ?? [chunk.content]).join('\n');
-      const parentId = createHash('sha256').update(`${input.docId}:section:${section}`).digest('hex').slice(0,36);
+      const parentContent = boundedParent(parent, chunk.content);
+      const parentId =
+        parentContent === chunk.content
+          ? null
+          : createHash('sha256')
+              .update(`${input.docId}:section:${section}:${parentContent}`)
+              .digest('hex')
+              .slice(0, 36);
       return {
         ...chunk,
         chunkIndex: i,
         parentChunkId: parentId,
-        parentContent: boundedParent(parent, chunk.content),
+        parentContent,
         sourceMetadata: { filename: input.filename, kind: parsed?.kind ?? 'text', assetRefs: assetsOf(chunk.content) },
       };
     });
@@ -290,7 +297,10 @@ export async function splitHybridDocument(input: {
     const inputText = `${prefix}${unit.content}`;
     const parts = await splitter.splitStructured(inputText);
     if (!parts.length) continue;
-    const id = createHash('sha256').update(`${input.docId}:${unit.group}`).digest('hex').slice(0,36);
+    const groupId = createHash('sha256')
+      .update(`${input.docId}:${unit.group}`)
+      .digest('hex')
+      .slice(0, 36);
     const rawParent = (groupContents.get(unit.group) ?? [unit.content]).join('\n\n');
     const parent = `${prefix}${rawParent}`;
     for (const part of parts) {
@@ -298,17 +308,25 @@ export async function splitHybridDocument(input: {
         ...unit.source,
         assetRefs: [...new Set([...(unit.source.assetRefs ?? []), ...assetsOf(unit.content)])].slice(0, MAX_ATTACHMENT_REFS),
       };
+      const parentContent = boundedParent(parent, part.content);
+      const parentId =
+        parentContent === part.content
+          ? null
+          : createHash('sha256')
+              .update(`${input.docId}:${unit.group}:${parentContent}`)
+              .digest('hex')
+              .slice(0, 36);
       output.push({
         ...part,
         content: part.content,
         chunkIndex: output.length,
-        parentChunkId: id,
-        sectionId: id,
+        parentChunkId: parentId,
+        sectionId: groupId,
         headingPath: unit.path,
         tableRef: unit.atomic && unit.source.sheetName ? unit.source.sheetName : part.tableRef,
         sourceStart: unit.start,
         sourceEnd: unit.end,
-        parentContent: boundedParent(parent, part.content),
+        parentContent,
         sourceMetadata: source,
       });
     }

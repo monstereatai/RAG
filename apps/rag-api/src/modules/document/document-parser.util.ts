@@ -47,6 +47,21 @@ export { extractUrlContent, extractUrlText } from './document-parser.url';
 
 export function detectDocumentKind(filename: string): SupportedDocumentKind {
   const lowerName = filename.toLowerCase();
+  const baseName = lowerName.split(/[\\/]/).pop() ?? lowerName;
+
+  if (
+    ['dockerfile', 'makefile', 'jenkinsfile', 'procfile'].includes(baseName) ||
+    baseName.startsWith('dockerfile.')
+  ) {
+    return 'code';
+  }
+  if (
+    /\.(?:ts|tsx|js|jsx|mjs|cjs|py|java|go|rs|c|h|cc|cpp|hh|hpp|cs|php|rb|swift|kt|kts|scala|sql|sh|bash|zsh|ps1|bat|vue|svelte|css|scss|less|xml|ya?ml|toml|ini|gradle|graphql|gql|proto|dart|lua|r|pl|pm|ex|exs|clj|cljs|cljc|tf|hcl|dockerfile)$/i.test(
+      lowerName,
+    )
+  ) {
+    return 'code';
+  }
 
   if (lowerName.endsWith('.md') || lowerName.endsWith('.markdown')) {
     return 'markdown';
@@ -141,6 +156,7 @@ export async function parseDocument(
   switch (kind) {
     case 'markdown':
     case 'text':
+    case 'code':
     case 'csv':
     case 'json':
     case 'html': {

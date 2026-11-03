@@ -395,10 +395,10 @@ export class DocumentRetrievalDescriptionService {
     const chunkWhere: FindOptionsWhere<DocumentChunkEntity>[] =
       tenantId === 'legacy'
         ? [
-            { docId, tenantId: 'legacy' },
-            { docId, tenantId: IsNull() },
+            { docId, tenantId: 'legacy', chunkType: 'leaf' },
+            { docId, tenantId: IsNull(), chunkType: 'leaf' },
           ]
-        : [{ docId, tenantId }];
+        : [{ docId, tenantId, chunkType: 'leaf' }];
     const [metadataRows, chunkRows, pgDescriptions] = await Promise.all([
       this.documentMetaRepo.find({ where: metadataWhere }),
       this.documentChunkRepo.find({ where: chunkWhere }),
@@ -526,11 +526,11 @@ export class DocumentRetrievalDescriptionService {
       const [tenantId, docId] = key.split('\0');
       if (tenantId === 'legacy') {
         chunkWhere.push(
-          { tenantId: 'legacy', docId },
-          { tenantId: IsNull(), docId },
+          { tenantId: 'legacy', docId, chunkType: 'leaf' },
+          { tenantId: IsNull(), docId, chunkType: 'leaf' },
         );
       } else {
-        chunkWhere.push({ tenantId, docId });
+        chunkWhere.push({ tenantId, docId, chunkType: 'leaf' });
       }
     }
     const chunks = chunkWhere.length

@@ -11,6 +11,7 @@ export class RagAdminIndexingWorkflow {
       take: Math.min(Math.max(limit, 1), 5000),
     });
     const chunks = await this.context.chunkRepo.find({
+      where: { chunkType: 'leaf' },
       order: { chunkIndex: 'ASC' },
     });
     const chunksByDoc = new Map<string, DocumentChunkEntity[]>();
@@ -191,7 +192,7 @@ export class RagAdminIndexingWorkflow {
       this.context.imageIndexService?.isEnabled() ?? false;
 
     const chunks = await this.context.chunkRepo.find({
-      where: { docId },
+      where: { docId, chunkType: 'leaf' },
       order: { chunkIndex: 'ASC' },
     });
 

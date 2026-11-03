@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { In } from 'typeorm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DocumentMetaEntity } from '../../providers/db/entities/document-meta.entity';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import { FactConflictEntity } from '../../providers/db/entities/fact-conflict.entity';
@@ -48,6 +48,50 @@ interface DocumentChunkWorkflowContext {
 export class DocumentChunkWorkflow {
   constructor(private readonly context: DocumentChunkWorkflowContext) {}
 
+  private createParentEntities(
+    entries: Array<{
+      leaf: DocumentChunkEntity;
+      parentContent?: string | null;
+    }>,
+    repository: Repository<DocumentChunkEntity>,
+  ): DocumentChunkEntity[] {
+    const parents = new Map<string, DocumentChunkEntity>();
+    for (const { leaf, parentContent } of entries) {
+      if (
+        !leaf.parentChunkId ||
+        !parentContent ||
+        parentContent === leaf.content
+      ) {
+        continue;
+      }
+      const existing = parents.get(leaf.parentChunkId);
+      if (existing) {
+        if (existing.content !== parentContent) {
+          throw new Error(
+            `parent chunk id maps to different content: ${leaf.parentChunkId}`,
+          );
+        }
+        existing.chunkIndex = Math.min(existing.chunkIndex, leaf.chunkIndex);
+        continue;
+      }
+      parents.set(
+        leaf.parentChunkId,
+        repository.create({
+          ...leaf,
+          id: leaf.parentChunkId,
+          parentChunkId: null,
+          chunkType: 'parent',
+          chunkIndex: leaf.chunkIndex,
+          content: parentContent,
+          contentHash: createHash('sha256').update(parentContent).digest('hex'),
+          parentContent: null,
+          hypotheticalQuestions: null,
+        }),
+      );
+    }
+    return [...parents.values()];
+  }
+
   public buildHypotheticalQuestions(
     content: string,
     headingPath?: string[],
@@ -87,7 +131,7 @@ export class DocumentChunkWorkflow {
       );
     }
     const oldChunks = await this.context.docChunkRepo.find({
-      where: { docId: input.docId, userId: input.userId },
+      where: { docId: input.docId, userId: input.userId, chunkType: 'leaf' },
       order: { chunkIndex: 'ASC' },
     });
     if (oldChunks.length === 0) {
@@ -147,10 +191,14 @@ export class DocumentChunkWorkflow {
     let unchanged = 0;
 
     const pickOldByHash = (
-      contentHash: string,
+      draft: IncrementalChunkDraft,
     ): DocumentChunkEntity | undefined => {
-      const list = oldByHash.get(contentHash) ?? [];
-      const candidate = list.find((chunk) => consumed.has(chunk.id) === false);
+      const list = oldByHash.get(draft.contentHash) ?? [];
+      const candidate = list.find(
+        (chunk) =>
+          consumed.has(chunk.id) === false &&
+          chunk.parentChunkId === draft.parentChunkId,
+      );
       if (candidate) consumed.add(candidate.id);
       return candidate;
     };
@@ -173,7 +221,7 @@ export class DocumentChunkWorkflow {
       for (const chunk of activeOld) expireIds.add(chunk.id);
     } else if (requestedChangeType === 'supplement') {
       for (const draft of input.chunkDocs) {
-        const sameContent = pickOldByHash(draft.contentHash);
+        const sameContent = pickOldByHash(draft);
         if (sameContent) {
           unchanged += 1;
           continue;
@@ -206,7 +254,7 @@ export class DocumentChunkWorkflow {
       }
     } else {
       for (const draft of input.chunkDocs) {
-        const sameContent = pickOldByHash(draft.contentHash);
+        const sameContent = pickOldByHash(draft);
         if (sameContent) {
           unchanged += 1;
           continue;
@@ -252,7 +300,7 @@ export class DocumentChunkWorkflow {
         tableRef: draft.tableRef,
         sourceStart: draft.sourceStart,
         sourceEnd: draft.sourceEnd,
-        parentContent: draft.parentContent ?? null,
+        parentContent: null,
         sourceMetadata: draft.sourceMetadata ?? null,
         docVersion: input.governance.docVersion,
         effectiveAt: draft.effectiveAt,
@@ -290,17 +338,26 @@ export class DocumentChunkWorkflow {
     }
 
     let totalChunkCount = oldChunks.length + newEntities.length;
+    const parentEntities = this.createParentEntities(
+      newEntities.map((leaf, index) => ({
+        leaf,
+        parentContent: newDrafts[index]?.parentContent,
+      })),
+      this.context.docChunkRepo,
+    );
     await this.context.docChunkRepo.manager.transaction(async (manager) => {
       if (expireIds.size > 0) {
         await manager
           .getRepository(DocumentChunkEntity)
           .update({ id: In([...expireIds]) }, { expiredAt: effectiveAt });
       }
-      if (newEntities.length > 0) {
-        await manager.getRepository(DocumentChunkEntity).save(newEntities);
+      if (parentEntities.length > 0 || newEntities.length > 0) {
+        await manager
+          .getRepository(DocumentChunkEntity)
+          .save([...parentEntities, ...newEntities]);
       }
       totalChunkCount = await manager.getRepository(DocumentChunkEntity).count({
-        where: { docId: input.docId, userId: input.userId },
+        where: { docId: input.docId, userId: input.userId, chunkType: 'leaf' },
       });
       await manager.getRepository(DocumentMetaEntity).update(
         { docId: input.docId },
@@ -482,7 +539,7 @@ export class DocumentChunkWorkflow {
         tableRef: chunk?.tableRef ?? null,
         sourceStart: chunk?.sourceStart ?? null,
         sourceEnd: chunk?.sourceEnd ?? null,
-        parentContent: chunk?.parentContent ?? null,
+        parentContent: null,
         sourceMetadata: chunk?.sourceMetadata
           ? JSON.stringify(chunk.sourceMetadata)
           : null,
@@ -518,7 +575,14 @@ export class DocumentChunkWorkflow {
             : null,
       });
     });
-    await chunkRepo.save(entities);
+    const parentEntities = this.createParentEntities(
+      entities.map((leaf, index) => ({
+        leaf,
+        parentContent: chunks[index]?.parentContent,
+      })),
+      chunkRepo,
+    );
+    await chunkRepo.save([...parentEntities, ...entities]);
   }
 
   public async deprecateSupersededDocument(

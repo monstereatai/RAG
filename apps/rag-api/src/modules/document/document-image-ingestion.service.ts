@@ -39,7 +39,7 @@ export class DocumentImageIngestionService {
     if (kind === 'image') return 1;
 
     const chunks = await this.chunkRepo.find({
-      where: { docId },
+      where: { docId, chunkType: 'leaf' },
       select: ['content'],
     });
     return this.getLocalImageReferences(

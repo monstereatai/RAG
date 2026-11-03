@@ -32,11 +32,20 @@ export class AuthoritativeChunkService {
         .filter((row) => this.isVisible(row, scope))
         .map((row) => [row.id, row]),
     );
+    const parentContents = await this.loadParentContents(
+      [...byId.values()],
+      scope,
+    );
 
     return candidates.flatMap((candidate) => {
       const row = byId.get(candidate.id);
       if (!row) return [];
-      return [{ ...candidate, ...this.toIndexedChunk(row) }];
+      return [
+        {
+          ...candidate,
+          ...this.toIndexedChunk(row, parentContents.get(row.id)),
+        },
+      ];
     });
   }
 
@@ -50,9 +59,46 @@ export class AuthoritativeChunkService {
       where: { docId: In(uniqueDocIds), chunkType: 'leaf' },
       order: { docId: 'ASC', chunkIndex: 'ASC' },
     });
-    return rows
-      .filter((row) => this.isVisible(row, scope))
-      .map((row) => this.toIndexedChunk(row));
+    const visibleRows = rows.filter((row) => this.isVisible(row, scope));
+    const parentContents = await this.loadParentContents(visibleRows, scope);
+    return visibleRows.map((row) =>
+      this.toIndexedChunk(row, parentContents.get(row.id)),
+    );
+  }
+
+  private async loadParentContents(
+    leaves: readonly DocumentChunkEntity[],
+    scope: AuthoritativeChunkScope,
+  ): Promise<Map<string, string | null>> {
+    const parentIds = [
+      ...new Set(
+        leaves.flatMap((leaf) =>
+          leaf.parentChunkId ? [leaf.parentChunkId] : [],
+        ),
+      ),
+    ];
+    if (parentIds.length === 0) return new Map();
+    const parents = await this.chunks.find({
+      where: { id: In(parentIds), chunkType: 'parent' },
+    });
+    const visibleParents = new Map(
+      parents
+        .filter((parent) => this.isVisible(parent, scope))
+        .map((parent) => [parent.id, parent]),
+    );
+    return new Map(
+      leaves.map((leaf) => {
+        const parent = leaf.parentChunkId
+          ? visibleParents.get(leaf.parentChunkId)
+          : undefined;
+        const sameScope =
+          parent !== undefined &&
+          parent.docId === leaf.docId &&
+          parent.tenantId === leaf.tenantId &&
+          parent.userId === leaf.userId;
+        return [leaf.id, sameScope ? parent.content : leaf.parentContent];
+      }),
+    );
   }
 
   private isVisible(
@@ -64,7 +110,10 @@ export class AuthoritativeChunkService {
     return !scope.userId || row.userId === scope.userId;
   }
 
-  toIndexedChunk(row: DocumentChunkEntity): IndexedChunk {
+  toIndexedChunk(
+    row: DocumentChunkEntity,
+    parentContent: string | null = row.parentContent,
+  ): IndexedChunk {
     return {
       id: row.id,
       content: row.content,
@@ -78,7 +127,7 @@ export class AuthoritativeChunkService {
       tableRef: row.tableRef,
       sourceStart: row.sourceStart,
       sourceEnd: row.sourceEnd,
-      parentContent: row.parentContent,
+      parentContent,
       sourceMetadata: row.sourceMetadata,
       docVersion: row.docVersion,
       effectiveAt: row.effectiveAt?.toISOString() ?? null,

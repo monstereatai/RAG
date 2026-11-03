@@ -111,7 +111,7 @@ export function DocumentsView({
         {!isArchivePage && (
           <>
             <Upload
-              accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi"
+              accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.java,.go,.rs,.c,.h,.cc,.cpp,.hh,.hpp,.cs,.php,.rb,.swift,.kt,.kts,.scala,.sql,.sh,.bash,.zsh,.ps1,.bat,.vue,.svelte,.css,.scss,.less,.xml,.yaml,.yml,.toml,.ini,.gradle,.graphql,.gql,.proto,.dart,.lua,.r,.pl,.pm,.ex,.exs,.clj,.cljs,.cljc,.tf,.hcl,.dockerfile,text/plain"
               beforeUpload={handleBeforeUpload}
               multiple
               showUploadList={false}
@@ -510,7 +510,7 @@ export function DocumentsView({
             </p>
             {!isArchivePage && (
               <Upload
-                accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi"
+                accept=".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.webm,.mov,.avi,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.java,.go,.rs,.c,.h,.cc,.cpp,.hh,.hpp,.cs,.php,.rb,.swift,.kt,.kts,.scala,.sql,.sh,.bash,.zsh,.ps1,.bat,.vue,.svelte,.css,.scss,.less,.xml,.yaml,.yml,.toml,.ini,.gradle,.graphql,.gql,.proto,.dart,.lua,.r,.pl,.pm,.ex,.exs,.clj,.cljs,.cljc,.tf,.hcl,.dockerfile,text/plain"
                 beforeUpload={handleBeforeUpload}
                 showUploadList={false}
               >

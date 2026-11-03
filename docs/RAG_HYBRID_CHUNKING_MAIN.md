@@ -6,22 +6,23 @@
 - 结构优先：使用 `ParsedDocument.blocks` 的标题/页码/Sheet/行号/幻灯片/时间轴/附件信息，而不只解析扁平 Markdown。
 - 业务边界：Excel/CSV 表格逐行；API Endpoint / 测试用例 / 规则条款聚合字段与相邻表格；PDF/Word/文档章节、音视频时间片按逻辑单元切片。
 - Token 兜底：过长逻辑单元只在它内部使用现有 `MarkdownChunker` 的 Token+语义边界组合切片；不跨业务记录合并。
-- Parent-Child：每个子块含稳定父级分组 ID 与有上限的父块上下文；**只有子块建立索引**，检索选出子块后根据任务意图按预算扩展父块。无需让父块重复进入向量/BM25 索引。
+- Parent-Child：父块在 PostgreSQL 中独立保存一次，子块只保存父块 ID；**只有子块建立检索索引**。检索命中子块后，按 ID 回 PostgreSQL 取父块，再根据任务意图和上下文预算扩展。
 - 引用安全：来源元数据作为 JSON 持久化，不把页码/行号/视频时间混同；不能证实时不编造。保留截图引用，由现有有权限校验的 OSS 路由访问。
 
 ## 数据路径
 
-`ParsedDocument` → `splitHybridDocument` → `HybridChunk` (content + parentContent + sourceMetadata) → PG + BM25 + ES + Milvus → 子块召回、Rerank → ContextBuilder 父块扩展 / 来源标签。
+`ParsedDocument` → `splitHybridDocument` → `HybridChunk`（content + parentChunkId + 临时 parentContent + sourceMetadata）→ PostgreSQL（parent/leaf）→ Elasticsearch（leaf only）→ 子块召回、Rerank → PostgreSQL 回填父块 → ContextBuilder 扩展 / 来源标签。
 
-`parentContent`/`sourceMetadata` 存于 `document_chunks` 并随检索元数据持久化，ES 字段禁止检索和单独 Embedding。父块作为上下文缓存而非独立索引实体。为了避免引入新的关联查询，父上下文按子块重复保存（上限 6000 字符）；如规模增长，可迁移到独立 parent 表而不更改上层查询协议。
+父子块共用现有 `document_chunks` 表：父块行的 `chunkType='parent'`，正文放在 `content`；叶子行的 `chunkType='leaf'`，用 `parentChunkId` 指向父块。`parentContent` 只在切片结果中临时传递，新的叶子行不再重复保存父文；父行不写入 Elasticsearch、BM25 或向量索引。Elasticsearch 只保留叶子正文和召回所需字段，引用正文与父级上下文以 PostgreSQL 为准。
 
-## 迁移与验证
+旧数据可能仍把父文保存在叶子行的 `parentContent` 中，读取路径会在找不到父行时兼容该字段。新入库和增量更新按独立父行写入；不自动回填历史数据，也不需要新增数据库 schema。历史文档需要转换时，应通过重新入库或经确认的专项回填完成。
 
-1. 在 `main` 分支仓库根目录执行 `python3 apply_rag_hybrid_main.py`（仅在匹配目标版本时改写文件；已安装时可重跑检查）。
-2. 执行 `pnpm --filter backend exec jest --runInBand hybrid-document-chunker.spec.ts`。
-3. 执行 `pnpm --filter backend build`；`tsc --noEmit` 包含旧测试文件，旧测试类型错误要独立修复。
-4. 使用现有 `migration:run` 流程应用 `AddHybridChunkProvenance`，且在生产环境先备份数据库。
-5. 使用真实 Excel、含图 PDF/Word/PPT、游戏玩法 PRD、API/测试/规则、音视频样本做回归。旧数据不会自动补齐 sourceMetadata/parentContent；重建索引/重新入库后才能看到新增字段。
+## 验证
+
+1. 执行 `npm run build` 和改动文件 ESLint。
+2. 验证普通入库与增量更新都写出 parent/leaf 行，且 `document_chunks` 中每个父 ID 对应一致的父正文。
+3. 验证 Elasticsearch 的 BM25/dense_vector 检索和开发环境 BM25 快照只含叶子块；检索命中后从 PostgreSQL 回填父块。文档正文不写入 Milvus。
+4. 使用真实 Excel、含图 PDF/Word/PPT、游戏玩法 PRD、API/测试/规则和音视频样本回归切片边界、引用来源与增量更新。
 
 ## 验收
 

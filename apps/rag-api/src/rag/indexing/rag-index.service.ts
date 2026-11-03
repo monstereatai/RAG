@@ -25,7 +25,6 @@ function pickChunkMetadata(
     tableRef: chunk.tableRef,
     sourceStart: chunk.sourceStart,
     sourceEnd: chunk.sourceEnd,
-    parentContent: chunk.parentContent,
     sourceMetadata: chunk.sourceMetadata,
     docVersion: chunk.docVersion,
     effectiveAt: chunk.effectiveAt,
@@ -137,7 +136,6 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         tableRef: entry.tableRef,
         sourceStart: entry.sourceStart,
         sourceEnd: entry.sourceEnd,
-        parentContent: entry.parentContent,
         sourceMetadata: entry.sourceMetadata,
         docVersion: entry.docVersion,
         effectiveAt: entry.effectiveAt,
@@ -159,7 +157,9 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         supersedesChunkId: entry.supersedesChunkId,
         hypotheticalQuestions: entry.hypotheticalQuestions,
       });
-      this.persistedEntries.push(entry);
+      const normalizedEntry = { ...entry };
+      delete normalizedEntry.parentContent;
+      this.persistedEntries.push(normalizedEntry);
     }
   }
 
@@ -188,7 +188,6 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         tableRef: c.tableRef,
         sourceStart: c.sourceStart,
         sourceEnd: c.sourceEnd,
-        parentContent: c.parentContent,
         sourceMetadata: c.sourceMetadata,
         docVersion: c.docVersion,
         effectiveAt: c.effectiveAt?.toISOString() ?? null,
@@ -224,7 +223,6 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
         tableRef: c.tableRef,
         sourceStart: c.sourceStart,
         sourceEnd: c.sourceEnd,
-        parentContent: c.parentContent,
         sourceMetadata: c.sourceMetadata,
         docVersion: c.docVersion,
         effectiveAt: c.effectiveAt?.toISOString() ?? null,

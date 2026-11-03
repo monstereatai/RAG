@@ -1,6 +1,7 @@
 export type SupportedDocumentKind =
   | 'markdown'
   | 'text'
+  | 'code'
   | 'pdf'
   | 'docx'
   | 'doc'

@@ -75,7 +75,7 @@ export class DocumentChunkEntity {
   @Column({ type: 'int', nullable: true, default: null })
   sourceEnd!: number | null;
 
-  /** Materialized parent context for child-hit -> parent expansion; never embedded by itself. */
+  /** Legacy inline parent context; new chunks store parent text in a parent row. */
   @Column({ type: 'text', nullable: true, default: null })
   parentContent!: string | null;
 

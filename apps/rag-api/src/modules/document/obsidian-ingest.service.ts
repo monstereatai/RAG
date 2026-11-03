@@ -46,7 +46,7 @@ export class ObsidianIngestService {
   ) {
     this.documentQueue.registerObsidianNoteProcessor(async (job) => {
       const chunks = await this.documentChunkRepo.find({
-        where: { docId: job.docId, userId: job.userId },
+        where: { docId: job.docId, userId: job.userId, chunkType: 'leaf' },
         order: { chunkIndex: 'ASC' },
       });
       if (chunks.length === 0) {
@@ -302,7 +302,11 @@ export class ObsidianIngestService {
     let safeContent = '';
     try {
       const chunks = await this.documentChunkRepo.find({
-        where: { docId: input.docId, userId: input.userId },
+        where: {
+          docId: input.docId,
+          userId: input.userId,
+          chunkType: 'leaf',
+        },
         order: { chunkIndex: 'ASC' },
       });
       safeContent = this.rebuildContentFromChunks(chunks);

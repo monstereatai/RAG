@@ -53,7 +53,10 @@ export class RagAdminAuditWorkflow {
     });
     const chunks = docs.length
       ? await this.context.chunkRepo.find({
-          where: { docId: In(docs.map((doc) => doc.docId)) },
+          where: {
+            docId: In(docs.map((doc) => doc.docId)),
+            chunkType: 'leaf',
+          },
           select: [
             'docId',
             'contentHash',

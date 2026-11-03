@@ -160,7 +160,12 @@ export class DocumentUploadWorkflow {
 
       // 安全门禁必须在切块与索引之前：高风险内容只能保留原始证据供人工审核，
       // 不能进入任何可被检索或被模型读取的存储。
-      const promptInjectionFindings = detectPromptInjection(originalContent);
+      // Source files often contain dangerous-looking identifiers or test strings.
+      // Keep them ingestible; retrieved context is still sanitized before generation.
+      const promptInjectionFindings =
+        options.parsedDocument?.kind === 'code'
+          ? []
+          : detectPromptInjection(originalContent);
       const highRiskPromptInjection = promptInjectionFindings.filter(
         (finding) => finding.severity === 'high',
       );

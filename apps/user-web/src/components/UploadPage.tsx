@@ -84,7 +84,7 @@ function UploadPage() {
           <input
             id="doc-file-input"
             type="file"
-            accept=".md,.markdown,.txt,.pdf,.docx"
+            accept=".md,.markdown,.txt,.pdf,.docx,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.java,.go,.rs,.c,.h,.cc,.cpp,.hh,.hpp,.cs,.php,.rb,.swift,.kt,.kts,.scala,.sql,.sh,.bash,.zsh,.ps1,.bat,.vue,.svelte,.css,.scss,.less,.xml,.yaml,.yml,.toml,.ini,.gradle,.graphql,.gql,.proto,.dart,.lua,.r,.pl,.pm,.ex,.exs,.clj,.cljs,.cljc,.tf,.hcl,.dockerfile,text/plain"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             disabled={uploading}
           />
