@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { MarkdownChunker, type StructuredChunk } from './chunking.util';
 import type { ParsedBlock, ParsedDocument } from './document-parser.types';
+import { splitCodeDocument } from './code-chunker.util';
 
 /**
  * Structure-aware hybrid chunking:
@@ -21,6 +22,14 @@ export interface ChunkProvenance {
   endSeconds?: number;
   recordId?: string;
   assetRefs?: string[];
+  filePath?: string;
+  language?: string;
+  symbol?: string;
+  symbolKind?: string;
+  parentSymbol?: string;
+  startLine?: number;
+  endLine?: number;
+  imports?: string[];
 }
 
 interface LogicalUnit {
@@ -244,6 +253,12 @@ export async function splitHybridDocument(input: {
   chunkSize: number;
   chunkOverlap: number;
 }): Promise<HybridChunk[]> {
+  if (input.parsedDocument?.kind === 'code' || input.parsedDocument?.kind === 'code_archive') {
+    return splitCodeDocument({
+      docId: input.docId, filename: input.filename, parsedDocument: input.parsedDocument,
+      chunkSize: input.chunkSize, chunkOverlap: input.chunkOverlap,
+    });
+  }
   const splitter = new MarkdownChunker(input.chunkSize, input.chunkOverlap, true);
   const parsed = input.parsedDocument;
   // Plain markdown already has an effective outline-aware splitter. Use it as-is unless an

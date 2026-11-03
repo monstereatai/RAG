@@ -21,6 +21,9 @@ import {
   parseVideoDocument,
 } from './document-parser.media';
 import { validateDocumentFormat } from './document-parser.validation';
+import { isCodeUpload } from './code-language.util';
+import { parseCodeSource } from './code-parser.util';
+import { parseCodeArchive } from './code-archive.util';
 export { validateDocumentFormat } from './document-parser.validation';
 export type {
   ParsedBlock,
@@ -109,8 +112,11 @@ export function detectDocumentKind(filename: string): SupportedDocumentKind {
     return 'video';
   }
 
+  if (lowerName.endsWith('.zip')) return 'code_archive';
+  if (isCodeUpload(filename)) return 'code';
+
   throw new BadRequestException(
-    'only document, url, image, audio and video knowledge files are supported',
+    'only document, URL, image, audio, video and source code files are supported',
   );
 }
 
@@ -154,9 +160,12 @@ export async function parseDocument(
   await validateDocumentFormat(buffer, kind, filename);
 
   switch (kind) {
+    case 'code':
+      return parseCodeSource(buffer, filename);
+    case 'code_archive':
+      return parseCodeArchive(buffer, filename);
     case 'markdown':
     case 'text':
-    case 'code':
     case 'csv':
     case 'json':
     case 'html': {

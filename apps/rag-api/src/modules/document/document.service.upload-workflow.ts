@@ -163,7 +163,8 @@ export class DocumentUploadWorkflow {
       // Source files often contain dangerous-looking identifiers or test strings.
       // Keep them ingestible; retrieved context is still sanitized before generation.
       const promptInjectionFindings =
-        options.parsedDocument?.kind === 'code'
+        options.parsedDocument?.kind === 'code' ||
+        options.parsedDocument?.kind === 'code_archive'
           ? []
           : detectPromptInjection(originalContent);
       const highRiskPromptInjection = promptInjectionFindings.filter(
@@ -193,11 +194,14 @@ export class DocumentUploadWorkflow {
         );
       }
 
+      const codeInput = options.parsedDocument?.kind === 'code' ||
+        options.parsedDocument?.kind === 'code_archive';
       const detectedBusiness = detectGameDocumentMetadata(filename, content);
       const business = this.context.chunkWorkflow.mergeBusinessMetadata(
         detectedBusiness,
         options.businessMetadata,
       );
+      if (codeInput) business.documentType = 'code';
       const strategy = await this.context.resolveChunkStrategy(business);
       const structuredChunks = await splitHybridDocument({
         docId,
@@ -371,7 +375,7 @@ export class DocumentUploadWorkflow {
       }
 
       // 标题、摘要等 LLM 元数据是增强信息；失败记为缺失，不阻断正文索引。
-      const metadataPromise = options.preserveExistingMetadata
+      const metadataPromise = options.preserveExistingMetadata || codeInput
         ? Promise.resolve(null)
         : this.context.metadataExtractor.extract(content).catch((err) => {
             this.context.logger.warn(
@@ -538,7 +542,7 @@ export class DocumentUploadWorkflow {
         }
       }
       const graphIndexStatus: GraphIndexStatus =
-        this.context.graphService.isEnabled() ? 'pending' : 'skipped';
+        this.context.graphService.isEnabled() && !codeInput ? 'pending' : 'skipped';
       if (graphIndexStatus === 'pending') {
         this.context.scheduleOptionalGraphIndex({
           docId,

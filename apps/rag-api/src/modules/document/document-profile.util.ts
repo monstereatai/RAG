@@ -11,6 +11,7 @@ export type GameDocumentType =
   | 'test'
   | 'config'
   | 'postmortem'
+  | 'code'
   | 'general';
 
 export type DocumentLifecycleStatus =
@@ -102,6 +103,7 @@ const STRATEGIES: Record<GameDocumentType, ChunkStrategy> = {
   test: { chunkSize: 550, chunkOverlap: 83, semanticBoundaries: true },
   config: { chunkSize: 700, chunkOverlap: 105, semanticBoundaries: true },
   postmortem: { chunkSize: 700, chunkOverlap: 105, semanticBoundaries: true },
+  code: { chunkSize: 800, chunkOverlap: 80, semanticBoundaries: true },
   general: { chunkSize: 500, chunkOverlap: 75, semanticBoundaries: true },
 };
 

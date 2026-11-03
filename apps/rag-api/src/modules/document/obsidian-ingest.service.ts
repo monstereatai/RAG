@@ -178,8 +178,10 @@ export class ObsidianIngestService {
     incrementalUpdate?: boolean;
     parsedDocument?: ParsedDocument;
   }): Promise<ObsidianIngestResult> {
-    // 文本已由入口完成解析；这里处理内容去重，并把 RAG 文档索引与 Obsidian 来源记录关联起来。
-    const duplicate = await this.findDuplicate(params.content, params.userId);
+    // Distinct code files may share identical contents; preserve each file's provenance.
+    const isCode = params.parsedDocument?.kind === 'code' ||
+      params.parsedDocument?.kind === 'code_archive';
+    const duplicate = isCode ? null : await this.findDuplicate(params.content, params.userId);
     if (
       duplicate?.ragDocId &&
       !this.hasBusinessMetadata(params.businessMetadata)
@@ -257,6 +259,17 @@ export class ObsidianIngestService {
           : {}),
       },
     );
+    // Code has a structured source index; avoid duplicating entire repositories into Obsidian.
+    if (isCode) {
+      return {
+        rag,
+        obsidian: {
+          status: 'skipped', title: params.title, tags: [],
+          contentHash: createHash('sha256').update(params.content).digest('hex'),
+          ragDocId: rag.docId,
+        },
+      };
+    }
     const obsidian = await this.enqueueNote({
       docId: rag.docId,
       userId: params.userId,
