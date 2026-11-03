@@ -424,7 +424,9 @@ export class RetrievalPostprocessor {
 
     for (const hit of hits) {
       add(hit);
-      const sameDocument = entries.filter((entry) => entry.docId === hit.docId);
+      const sameDocument = entries.filter((entry) =>
+        entry.docId === hit.docId && this.sameSourceFile(entry, hit),
+      );
       for (const entry of sameDocument) {
         const distance = Math.abs(entry.chunkIndex - hit.chunkIndex);
         if (distance > 0 && distance <= profile.neighborWindow) {
@@ -448,6 +450,22 @@ export class RetrievalPostprocessor {
       }
     }
     return expanded;
+  }
+
+  /** A ZIP repository shares one docId; code expansion must stay in one file. */
+  private sameSourceFile(entry: IndexedChunk, hit: RetrievedChunk): boolean {
+    if (entry.documentType !== 'code' && hit.documentType !== 'code') return true;
+    const filePath = (raw?: string | null): string | null => {
+      if (!raw) return null;
+      try {
+        const data: unknown = JSON.parse(raw);
+        if (!data || typeof data !== 'object' || !('filePath' in data)) return null;
+        const path = (data as { filePath: unknown }).filePath;
+        return typeof path === 'string' && path.length > 0 ? path : null;
+      } catch { return null; }
+    };
+    const entryPath = filePath(entry.sourceMetadata);
+    return Boolean(entryPath && entryPath === filePath(hit.sourceMetadata));
   }
 
   private toExpandedChunk(

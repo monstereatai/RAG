@@ -116,6 +116,8 @@ export interface RetrievalDiagnostics {
     filteredByScope: number;
     filteredByBudget: number;
   };
+  /** Search channel failures; independent of legitimate empty results. */
+  degradedChannels?: Array<'keyword' | 'vector'>;
   /** 本轮是否因高置信追问执行了补全问题检索。 */
   contextualQueryUsed?: boolean;
   /** Hybrid 计划检索无结果后是否执行了 BM25 兜底。 */

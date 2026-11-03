@@ -37,7 +37,8 @@ export interface SourceRecallRequest {
     allowedDocIds: Set<string> | null,
     userId?: string,
     scope?: RetrievalScope,
-  ) => VectorHits;
+  ) => VectorHits | Promise<VectorHits>;
+  verifyLegacyVectorHits?: (hits: VectorHits) => Promise<VectorHits>;
 }
 
 /** Provider recall only: authoritative ACLs and source-index snapshots come from the caller. */
@@ -80,8 +81,16 @@ export class RetrievalSources {
       localBm25Hits,
       chunkMeta,
       resolveDescriptionHits,
+      verifyLegacyVectorHits,
     } = input;
+    const queryVectorAttempt = vectorSearch
+      ? this.embeddingProvider.embedQuery(normalizedQuery).then(
+          (vector) => ({ vector, error: null as unknown }),
+          (error: unknown) => ({ vector: null as number[] | null, error }),
+        )
+      : null;
     let bm25Hits = localBm25Hits;
+    let keywordFailed = false;
     const bm25StartedAt = process.hrtime.bigint();
     try {
       if (this.elasticsearchProvider.isEnabled()) {
@@ -100,17 +109,17 @@ export class RetrievalSources {
         Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
       );
     } catch (error) {
+      keywordFailed = true;
       this.metricsService.observeRetrievalStage(
         'bm25',
         'error',
         Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
       );
-      if (localBm25Hits.length === 0) throw error;
       this.logger.warn(
         `Elasticsearch keyword search failed; using local BM25 migration fallback: ${(error as Error).message}`,
       );
     }
-    const bm25Source = this.elasticsearchProvider.isEnabled()
+    const bm25Source = this.elasticsearchProvider.isEnabled() && !keywordFailed
       ? 'elasticsearch'
       : 'bm25';
     this.metricsService.observeRetrievalHits(
@@ -133,13 +142,16 @@ export class RetrievalSources {
     let descriptionSourceChunkCount = 0;
     let descriptionUsed = false;
     let vectorSource: RagVectorSource = 'none';
+    let vectorFailed = false;
     if (vectorSearch) {
       let milvusUsed = false;
       let queryVector: number[] | null = null;
-      let vectorFailed = false;
       const vectorStartedAt = process.hrtime.bigint();
       try {
-        queryVector = await this.embeddingProvider.embedQuery(normalizedQuery);
+        const embedded = await queryVectorAttempt;
+        if (!embedded) throw new Error('embedding not scheduled');
+        if (embedded.error) throw embedded.error;
+        queryVector = embedded.vector;
         if (esKnnReady) {
           cosineHits = await this.esKnnVectorHits(
             queryVector,
@@ -156,13 +168,15 @@ export class RetrievalSources {
             userId,
             allowedDocIds ?? undefined,
           );
-          cosineHits = this.postprocessor.filterActiveVectorHits(
-            chunkMeta,
-            cosineHits,
-            userId,
-            allowedDocIds ?? undefined,
-            scope,
-          );
+          cosineHits = verifyLegacyVectorHits
+            ? await verifyLegacyVectorHits(cosineHits)
+            : this.postprocessor.filterActiveVectorHits(
+                chunkMeta,
+                cosineHits,
+                userId,
+                allowedDocIds ?? undefined,
+                scope,
+              );
           milvusUsed = true;
         }
       } catch (err) {
@@ -188,7 +202,7 @@ export class RetrievalSources {
             });
           descriptionCandidateCount = descriptionHits.length;
           descriptionUsed = descriptionHits.length > 0;
-          const sourceHits = resolveDescriptionHits(
+          const sourceHits = await resolveDescriptionHits(
             descriptionHits,
             normalizedQuery,
             allowedDocIds,
@@ -210,9 +224,9 @@ export class RetrievalSources {
       }
       vectorSource = milvusUsed
         ? 'milvus'
-        : queryVector && esKnnReady
+        : queryVector && esKnnReady && !vectorFailed
           ? 'elasticsearch'
-          : descriptionUsed
+          : descriptionSourceChunkCount > 0
             ? 'milvus'
             : 'none';
       this.metricsService.observeRetrievalStage(
@@ -234,6 +248,9 @@ export class RetrievalSources {
       );
     }
 
+    if (keywordFailed && (!vectorSearch || vectorFailed) && cosineHits.length === 0 && bm25Hits.length === 0) {
+      throw new Error('All available retrieval channels failed; refusing to report a false empty result');
+    }
     return {
       bm25Hits,
       cosineHits,
@@ -241,6 +258,8 @@ export class RetrievalSources {
       descriptionCandidateCount,
       descriptionSourceChunkCount,
       descriptionUsed,
+      keywordFailed,
+      vectorFailed,
     };
   }
 
@@ -258,6 +277,7 @@ export class RetrievalSources {
       {
         includeDeprecated: scope?.includeDeprecated,
         ...(scope?.effectiveTime ? { effectiveTime: scope.effectiveTime } : {}),
+        scope,
         allowedDocIds,
       },
     );

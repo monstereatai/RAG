@@ -50,6 +50,32 @@ const BUSINESS_PROPERTIES = {
   supersedesDocId: { type: 'keyword' },
 } satisfies Record<string, estypes.MappingProperty>;
 
+const CODE_INDEX_PROPERTIES = {
+  codeFilePath: { type: 'keyword', ignore_above: 2048 },
+  codeSymbol: { type: 'keyword', ignore_above: 512 },
+  codeFullSymbol: { type: 'keyword', ignore_above: 768 },
+  codeLanguage: { type: 'keyword', ignore_above: 64 },
+} satisfies Record<string, estypes.MappingProperty>;
+
+function codeIndexFields(sourceMetadata?: string | null): Record<string, string> {
+  if (!sourceMetadata) return {};
+  try {
+    const raw: unknown = JSON.parse(sourceMetadata);
+    if (!raw || typeof raw !== 'object' || !('kind' in raw) ||
+        (raw as { kind: unknown }).kind !== 'code') return {};
+    const item = raw as Record<string, unknown>;
+    const field = (key: string) => typeof item[key] === 'string' ? item[key] as string : '';
+    const symbol = field('symbol');
+    const parent = field('parentSymbol');
+    return {
+      codeFilePath: field('filePath'),
+      codeSymbol: symbol,
+      codeFullSymbol: parent && symbol ? `${parent}.${symbol}` : symbol,
+      codeLanguage: field('language'),
+    };
+  } catch { return {}; }
+}
+
 const ES_CHUNK_BULK_BATCH_SIZE = 100;
 const ES_CHUNK_BULK_TIMEOUT_MS = 30_000;
 
@@ -117,6 +143,59 @@ export class ElasticsearchProvider
     return this.enabled;
   }
 
+  /** Same ACL, lifecycle and business filters for lexical and kNN TopK. */
+  private chunkFilters(
+    userId?: string,
+    scope: ElasticsearchSearchScope = {},
+    allowedDocIds?: ReadonlySet<string>,
+  ): estypes.QueryDslQueryContainer[] {
+    const filters: estypes.QueryDslQueryContainer[] = [];
+    if (allowedDocIds) filters.push({ terms: { docId: [...allowedDocIds] } });
+    else if (userId) filters.push({ term: { userId } });
+    for (const [field, value] of Object.entries({
+      projectId: scope.projectId,
+      activityId: scope.activityId,
+      region: scope.region,
+      locale: scope.locale,
+      channel: scope.channel,
+      documentType: scope.documentType,
+    })) {
+      if (value) filters.push({ term: { [field]: value } });
+    }
+    if (scope.role) {
+      // A document without roleScope is visible to all authorized roles.
+      filters.push({ bool: {
+        should: [
+          { term: { roleScope: scope.role } },
+          { bool: { must_not: [{ exists: { field: 'roleScope' } }] } },
+        ],
+        minimum_should_match: 1,
+      } });
+    }
+    if (scope.fileType) {
+      filters.push({ wildcard: { 'filename.keyword': `*.${scope.fileType}` } });
+    }
+    if (scope.updatedRange) {
+      const gte = {
+        day: 'now-1d/d', week: 'now-7d/d', month: 'now-30d/d',
+      }[scope.updatedRange];
+      if (gte) filters.push({ range: { updatedAt: { gte } } });
+    }
+    if (scope.effectiveTime) filters.push(...effectiveTimeFilters(scope.effectiveTime));
+    const excludeDeprecated = scope.effectiveTime
+      ? scope.includeDeprecated === false
+      : !scope.includeDeprecated;
+    if (excludeDeprecated) filters.push({ bool: {
+      must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
+    } });
+    filters.push({ bool: { must_not: [
+      { term: { lifecycleStatus: 'draft' } },
+      { term: { lifecycleStatus: 'archived' } },
+    ] } });
+    // Additional chunk-level fields are supported only where indexed in rag_chunks.
+    return filters;
+  }
+
   /**
    * rag_chunks 的 dense_vector 向量字段定义（单 ES 混合检索的 kNN 向量通道）
    */
@@ -156,6 +235,9 @@ export class ElasticsearchProvider
           // 幂等补字段：为存量索引补齐业务元数据与 dense_vector embedding 字段
           // ES 支持给现有索引新增字段；失败仅告警，不阻塞启动，也绝不删除存量索引
           const patch: Record<string, estypes.MappingProperty> = {};
+          for (const [key, value] of Object.entries(CODE_INDEX_PROPERTIES)) {
+            if (!properties?.[key]) patch[key] = value;
+          }
           if (!properties?.projectId) {
             Object.assign(patch, BUSINESS_PROPERTIES);
           }
@@ -258,6 +340,7 @@ export class ElasticsearchProvider
           expiredAt: { type: 'date' },
           sourceAuthority: { type: 'keyword' },
           ...BUSINESS_PROPERTIES,
+          ...CODE_INDEX_PROPERTIES,
           // dense_vector：kNN 向量通道，维度需与嵌入模型一致（写入时可缺省）
           embedding: this.embeddingMappingProperty(),
           createdAt: { type: 'date' },
@@ -352,6 +435,7 @@ export class ElasticsearchProvider
               sourceStart: c.sourceStart,
               sourceEnd: c.sourceEnd,
               sourceMetadata: c.sourceMetadata,
+              ...codeIndexFields(c.sourceMetadata),
               docVersion: c.docVersion,
               contentHash: c.contentHash,
               indexGeneration: c.indexGeneration,
@@ -715,69 +799,23 @@ export class ElasticsearchProvider
 
     try {
       if (allowedDocIds != null && allowedDocIds.size === 0) return [];
-      const filter: estypes.QueryDslQueryContainer[] = [];
-      if (allowedDocIds != null) {
-        filter.push({ terms: { docId: [...allowedDocIds] } });
-      } else if (userId) {
-        filter.push({ term: { userId } });
-      }
-      for (const [field, value] of Object.entries({
-        projectId: scope.projectId,
-        activityId: scope.activityId,
-        region: scope.region,
-        locale: scope.locale,
-        channel: scope.channel,
-        documentType: scope.documentType,
-      })) {
-        if (value) filter.push({ term: { [field]: value } });
-      }
-      if (scope.role) filter.push({ term: { roleScope: scope.role } });
-      if (scope.fileType) {
-        filter.push({
-          wildcard: { 'filename.keyword': `*.${scope.fileType}` },
-        });
-      }
-      if (scope.updatedRange) {
-        const gte = {
-          day: 'now-1d/d',
-          week: 'now-7d/d',
-          month: 'now-30d/d',
-        }[scope.updatedRange];
-        if (gte) filter.push({ range: { updatedAt: { gte } } });
-      }
-      if (scope.effectiveTime) {
-        filter.push(...effectiveTimeFilters(scope.effectiveTime));
-      }
-      const excludeDeprecated = scope.effectiveTime
-        ? scope.includeDeprecated === false
-        : !scope.includeDeprecated;
-      if (excludeDeprecated) {
-        filter.push({
-          bool: {
-            must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
-          },
-        });
-      }
-      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
-      filter.push({
-        bool: {
-          must_not: [
-            { term: { lifecycleStatus: 'draft' } },
-            { term: { lifecycleStatus: 'archived' } },
-          ],
-        },
-      });
+      const filter = this.chunkFilters(userId, scope, allowedDocIds);
+      const codeIdentifiers = [...new Set(
+        (query.match(/[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*/g) ?? [])
+          .filter((term) => term.length >= 3),
+      )].slice(0, 8);
       const queryObj: estypes.QueryDslQueryContainer = {
         bool: {
-          must: [
-            {
-              multi_match: {
-                query,
-                fields: ['content^1', 'hypotheticalQuestions^2'],
-                type: 'best_fields',
-              },
-            },
-          ],
+          must: [{ multi_match: {
+            query,
+            fields: ['content^1', 'hypotheticalQuestions^2'],
+            type: 'best_fields',
+          } }],
+          ...(codeIdentifiers.length > 0 ? { should: codeIdentifiers.flatMap((term) => [
+            { term: { codeSymbol: { value: term, boost: 5 } } },
+            { term: { codeFullSymbol: { value: term, boost: 8 } } },
+            { term: { codeFilePath: { value: term, boost: 6 } } },
+          ]) } : {}),
           ...(filter.length > 0 ? { filter } : {}),
         },
       };
@@ -831,7 +869,7 @@ export class ElasticsearchProvider
       });
     } catch (err) {
       this.logger.warn(`ES search failed: ${(err as Error).message}`);
-      return [];
+      throw err;
     }
   }
 
@@ -851,6 +889,7 @@ export class ElasticsearchProvider
       includeDeprecated?: boolean;
       allowedDocIds?: ReadonlySet<string>;
       effectiveTime?: EffectiveTimeRange;
+      scope?: ElasticsearchSearchScope;
     },
   ): Promise<
     Array<{
@@ -867,35 +906,11 @@ export class ElasticsearchProvider
     try {
       if (opts?.allowedDocIds != null && opts.allowedDocIds.size === 0)
         return [];
-      const filter: estypes.QueryDslQueryContainer[] = [];
-      if (opts?.allowedDocIds != null) {
-        filter.push({ terms: { docId: [...opts.allowedDocIds] } });
-      } else if (userId) {
-        filter.push({ term: { userId } });
-      }
-      if (opts?.effectiveTime) {
-        filter.push(...effectiveTimeFilters(opts.effectiveTime));
-      }
-      const excludeDeprecated = opts?.effectiveTime
-        ? opts.includeDeprecated === false
-        : !opts?.includeDeprecated;
-      if (excludeDeprecated) {
-        filter.push({
-          bool: {
-            must_not: [{ term: { lifecycleStatus: 'deprecated' } }],
-          },
-        });
-      }
-      // 审批/归档门禁：draft 未经审批、archived 已归档，任何检索口径都不可见
-      filter.push({
-        bool: {
-          must_not: [
-            { term: { lifecycleStatus: 'draft' } },
-            { term: { lifecycleStatus: 'archived' } },
-          ],
-        },
-      });
-
+      const filter = this.chunkFilters(userId, {
+        ...(opts?.scope ?? {}),
+        includeDeprecated: opts?.includeDeprecated ?? opts?.scope?.includeDeprecated,
+        effectiveTime: opts?.effectiveTime ?? opts?.scope?.effectiveTime,
+      }, opts?.allowedDocIds);
       const k = Math.max(1, Math.floor(topK) || 1);
       const numCandidates = Math.min(k * 4, 200);
 
@@ -921,7 +936,7 @@ export class ElasticsearchProvider
       }));
     } catch (err) {
       this.logger.warn(`ES knnSearch failed: ${(err as Error).message}`);
-      return [];
+      throw err;
     }
   }
 }

@@ -104,7 +104,7 @@ export class DashScopeRerankService {
         documents,
         top_n: Math.min(topN, documents.length),
         instruct:
-          'Given a web search query, retrieve relevant passages that answer the query.',
+          'Rank enterprise knowledge-base evidence by relevance to the user question. Prefer exact identifiers and source symbols for code questions, and respect dates, exceptions and applicability for policy questions.', 
       };
     }
 

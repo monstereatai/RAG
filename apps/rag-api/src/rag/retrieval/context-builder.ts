@@ -71,6 +71,14 @@ function sourceCitationLabel(raw?: string | null): string | null {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof value.filePath === 'string' && value.filePath.trim()) {
+      const path = value.filePath.slice(0, 180);
+      const symbol = typeof value.symbol === 'string' ? value.symbol.slice(0, 120) : '';
+      const first = Number.isSafeInteger(value.startLine) ? Number(value.startLine) : null;
+      const last = Number.isSafeInteger(value.endLine) ? Number(value.endLine) : null;
+      const lines = first && last && last >= first ? `L${first}-L${last}` : '';
+      return [path, symbol, lines].filter(Boolean).join(' / ');
+    }
     const filename = typeof value.filename === 'string' ? value.filename.slice(0, 100) : '';
     const sheetName = typeof value.sheetName === 'string' ? value.sheetName.slice(0, 80) : '';
     const row = Number.isSafeInteger(value.rowStart) && Number(value.rowStart) > 0
@@ -110,12 +118,23 @@ export class ContextBuilder {
     const diversified: RetrievedChunk[] = [];
     let documentLimitRemoved = 0;
     for (const chunk of unique) {
-      const count = perDocument.get(chunk.docId) ?? 0;
+      // Repository ZIP uploads share docId; diversify code per file, not per archive.
+      let groupId = chunk.docId;
+      if (chunk.documentType === 'code' && chunk.sourceMetadata) {
+        try {
+          const meta: unknown = JSON.parse(chunk.sourceMetadata);
+          if (meta && typeof meta === 'object' && 'filePath' in meta &&
+              typeof (meta as { filePath: unknown }).filePath === 'string') {
+            groupId += `::${(meta as { filePath: string }).filePath}`;
+          }
+        } catch { /* malformed metadata never causes a crash */ }
+      }
+      const count = perDocument.get(groupId) ?? 0;
       if (count >= profile.maxChunksPerDocument) {
         documentLimitRemoved += 1;
         continue;
       }
-      perDocument.set(chunk.docId, count + 1);
+      perDocument.set(groupId, count + 1);
       diversified.push(chunk);
     }
 

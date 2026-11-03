@@ -149,6 +149,7 @@ export class RagRetrievalService {
             profile,
             supplementalEvidence: undefined,
             skipRerank: true,
+            candidateOnly: true,
             rankingQuery: originalQuery,
             executionPlan: {
               ...executionPlan,
@@ -231,8 +232,37 @@ export class RagRetrievalService {
       rerankOutcome = { chunks: [], applied: false };
     }
 
+    const globalAllowedDocIds = userId
+      ? await this.documentPermissionService.getAllowedDocIds(
+          userId,
+          options.roles ?? [],
+          options.departmentIds ?? [],
+          options.tenantId,
+          options.trustedAdminPrincipal,
+        )
+      : null;
+    const authorizedContext = this.authoritativeChunks
+      ? await this.authoritativeChunks.loadContextChunks(
+          rerankOutcome.chunks.map((chunk) => chunk.docId),
+          {
+            userId,
+            tenantId: options.tenantId,
+            allowedDocIds: globalAllowedDocIds ?? undefined,
+          },
+        )
+      : undefined;
+    const finalCandidates = authorizedContext
+      ? this.chunkPolicy.expandContextChunksFrom(
+          authorizedContext,
+          rerankOutcome.chunks,
+          profile,
+          userId,
+          executionPlan.scope ?? options.scope,
+          globalAllowedDocIds ?? undefined,
+        )
+      : rerankOutcome.chunks;
     const built = this.contextBuilder.build(
-      rerankOutcome.chunks,
+      finalCandidates,
       profile,
       originalQuery,
     );
@@ -246,6 +276,9 @@ export class RagRetrievalService {
       budgetRemoved: built.stats.budgetRemoved,
       contextCharacters: built.stats.contextCharacters,
       contextualQueryUsed: queries.length > 1,
+      degradedChannels: [...new Set(queryRuns.flatMap((run) =>
+        run.status === 'fulfilled' ? (run.value.diagnostics.degradedChannels ?? []) : [],
+      ))],
       ...(bm25FallbackChunks.length > 0
         ? { retrievalFallback: 'bm25' as const }
         : {}),
@@ -363,13 +396,10 @@ export class RagRetrievalService {
           options.trustedAdminPrincipal,
         )
       : null;
+    // Cheap ACL pre-check before provider probes; authoritative scope checks
+    // are performed after their small candidate sets return.
     const isDocumentVisible = (docId: string) =>
-      this.chunkPolicy.isEvidenceDocumentVisible(
-        docId,
-        userId,
-        allowedDocIds ?? undefined,
-        options.scope,
-      );
+      Boolean(userId && allowedDocIds?.has(docId));
     // 图谱和图片只是计划允许时才查询的补充证据；召回后仍要经过同一套文档可见性检查。
     const graphProbePromise = graphRequested
       ? this.supplementalEvidenceRetriever.probeGraph(
@@ -408,6 +438,8 @@ export class RagRetrievalService {
       vectorSource,
       descriptionCandidateCount,
       descriptionSourceChunkCount,
+      keywordFailed,
+      vectorFailed,
     } = await this.retrievalSources.recall({
       normalizedQuery,
       candidateDepth,
@@ -418,14 +450,42 @@ export class RagRetrievalService {
       allowedDocIds,
       localBm25Hits,
       chunkMeta: this.chunkMeta,
-      resolveDescriptionHits: (hits, query, ids, owner, scope) =>
-        this.chunkPolicy.mapDescriptionHitsToSourceChunks(
-          hits,
-          query,
-          ids,
-          owner,
-          scope,
-        ),
+      resolveDescriptionHits: async (hits, query, ids, owner, scope) => {
+        const entries = this.authoritativeChunks
+          ? await this.authoritativeChunks.loadDescriptionSourceEntries(
+              hits.flatMap((hit) => hit.sourceChunkIds),
+              {
+                userId: owner,
+                tenantId: options.tenantId,
+                allowedDocIds: ids ?? undefined,
+              },
+            )
+          : undefined;
+        return this.chunkPolicy.mapDescriptionHitsToSourceChunks(
+          hits, query, ids, owner, scope, entries,
+        );
+      },
+      verifyLegacyVectorHits: this.authoritativeChunks
+        ? async (hits) => {
+            const raw = hits.map((hit) => ({
+              ...hit, bm25Score: 0, cosineScore: hit.score, totalScore: hit.score,
+            }));
+            const trusted = await this.authoritativeChunks!.hydrateCandidates(raw, {
+              userId,
+              tenantId: options.tenantId,
+              allowedDocIds: allowedDocIds ?? undefined,
+            });
+            return trusted
+              .filter((chunk) =>
+                this.chunkPolicy.isLifecycleVisible(chunk, options.scope) &&
+                this.chunkPolicy.matchesScope(chunk, options.scope),
+              )
+              .map((chunk) => ({
+                id: chunk.id, docId: chunk.docId, chunkIndex: chunk.chunkIndex,
+                content: chunk.content, score: chunk.cosineScore,
+              }));
+          }
+        : undefined,
     });
 
     // RRF 消除不同检索通道的原始分数尺度差异；它不改变后面的版本、权限和范围门禁。
@@ -488,7 +548,7 @@ export class RagRetrievalService {
     }
     // cd：补充相关内容
     const ranked = rerankOutcome.chunks
-      .slice(0, profile.candidateDepth)
+      .slice(0, options.candidateOnly ? candidateDepth : profile.candidateDepth)
       .map((chunk) => ({
         ...chunk,
         retrievalSource:
@@ -509,7 +569,25 @@ export class RagRetrievalService {
     );
     const shouldMergeGraph = graphRequested;
     const shouldMergeImages = imageProbe.hits.length > 0;
-    const authoritativeContext = this.authoritativeChunks
+    const supplementaryDocIds = [...new Set(
+      [...graphChunks, ...imageChunks].map((chunk) => chunk.docId),
+    )];
+    const visibleEvidenceDocIds = this.authoritativeChunks
+      ? await this.authoritativeChunks.loadVisibleEvidenceDocIds(
+          supplementaryDocIds,
+          {
+            userId,
+            tenantId: options.tenantId,
+            allowedDocIds: allowedDocIds ?? undefined,
+          },
+          options.scope,
+        )
+      : new Set(supplementaryDocIds.filter((docId) =>
+          this.chunkPolicy.isEvidenceDocumentVisible(
+            docId, userId, allowedDocIds ?? undefined, options.scope,
+          ),
+        ));
+    const authoritativeContext = !options.candidateOnly && this.authoritativeChunks
       ? await this.authoritativeChunks.loadContextChunks(
           ranked.map((chunk) => chunk.docId),
           {
@@ -519,7 +597,9 @@ export class RagRetrievalService {
           },
         )
       : undefined;
-    const expanded = authoritativeContext
+    const expanded = options.candidateOnly
+      ? ranked
+      : authoritativeContext
       ? this.chunkPolicy.expandContextChunksFrom(
           authoritativeContext,
           ranked,
@@ -536,34 +616,43 @@ export class RagRetrievalService {
           allowedDocIds ?? undefined,
         );
     const visibleGraphChunks = graphChunks.filter((chunk) =>
-      this.chunkPolicy.isEvidenceDocumentVisible(
-        chunk.docId,
-        userId,
-        allowedDocIds ?? undefined,
-        options.scope,
-      ),
+      visibleEvidenceDocIds.has(chunk.docId),
     );
     const visibleImageChunks = imageChunks.filter((chunk) =>
-      this.chunkPolicy.isEvidenceDocumentVisible(
-        chunk.docId,
-        userId,
-        allowedDocIds ?? undefined,
-        options.scope,
-      ),
+      visibleEvidenceDocIds.has(chunk.docId),
     );
-    const built = this.contextBuilder.build(
-      [
-        ...(shouldMergeGraph ? visibleGraphChunks : []),
-        ...(shouldMergeImages ? visibleImageChunks : []),
-        ...expanded,
-        ...(options.supplementalEvidence ?? []),
-      ],
-      profile,
-      normalizedQuery,
-    );
+    const stagedChunks = options.candidateOnly
+      ? [
+          ...expanded,
+          ...(shouldMergeGraph ? visibleGraphChunks : []),
+          ...(shouldMergeImages ? visibleImageChunks : []),
+        ]
+      : [
+          ...(shouldMergeGraph ? visibleGraphChunks : []),
+          ...(shouldMergeImages ? visibleImageChunks : []),
+          ...expanded,
+          ...(options.supplementalEvidence ?? []),
+        ];
+    const built = options.candidateOnly
+      ? {
+          chunks: stagedChunks,
+          context: '',
+          stats: {
+            inputChunks: stagedChunks.length,
+            duplicateChunksRemoved: 0,
+            documentLimitRemoved: 0,
+            budgetRemoved: 0,
+            contextCharacters: 0,
+          },
+        }
+      : this.contextBuilder.build(stagedChunks, profile, normalizedQuery);
     const diagnostics: RetrievalDiagnostics = {
       intent: profile.intent,
       candidateDepth: profile.candidateDepth,
+      degradedChannels: [
+        ...(keywordFailed ? ['keyword' as const] : []),
+        ...(vectorFailed ? ['vector' as const] : []),
+      ],
       expandedChunks: expanded.filter(
         (chunk) => chunk.retrievalSource === 'expansion',
       ).length,

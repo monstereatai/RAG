@@ -373,13 +373,15 @@ export class RagAnswerService {
     const evidenceObsidianChunks = formalRetrievalGate.sufficient
       ? []
       : obsidianChunks;
-    const evidenceBuild = this.contextBuilder.build(
-      [...chunks, ...evidenceObsidianChunks],
-      retrieval.profile,
-      normalizedQuery,
-    );
+    const combinedEvidence = evidenceObsidianChunks.length > 0
+      ? this.contextBuilder.build(
+          [...chunks, ...evidenceObsidianChunks],
+          retrieval.profile,
+          normalizedQuery,
+        ).chunks
+      : chunks;
     const evidenceChunks = this.evidenceService.expandRuleCompanions(
-      evidenceBuild.chunks,
+      combinedEvidence,
       retrieveOptions.scope,
     );
     const hasAttachmentEvidence = evidenceChunks.some(

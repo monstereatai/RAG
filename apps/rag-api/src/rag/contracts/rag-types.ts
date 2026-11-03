@@ -88,6 +88,8 @@ export interface RetrieveOptions {
   rankingQuery?: string;
   /** 多路检索先各自取候选，合并后只重排一次。 */
   skipRerank?: boolean;
+  /** Internal only: preserve candidates for global query fusion before context cropping. */
+  candidateOnly?: boolean;
   /** 无权威片段时，允许使用本轮同实体的最近用户陈述回答状态确认。 */
   allowConversationStateAnswer?: boolean;
   /** 当前问题只允许使用本地知识库，不调用联网兜底。 */

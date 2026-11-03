@@ -4,6 +4,10 @@ import { In, Repository } from 'typeorm';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
 import type { RetrievedChunk } from '../evidence/retrieval.types';
 import type { IndexedChunk } from './retrieval-postprocessor';
+import type { Bm25PersistedEntry } from '../indexing/bm25-store';
+import type { RetrievalScope } from '../evidence/retrieval.types';
+import { isEffectiveDuring } from './effective-time';
+import { canonicalizeRole } from '../../modules/chat/role-presets';
 
 export interface AuthoritativeChunkScope {
   tenantId?: string;
@@ -66,6 +70,64 @@ export class AuthoritativeChunkService {
     );
   }
 
+  /** Description hits are linked to source chunk IDs, never to process-local BM25 state. */
+  async loadDescriptionSourceEntries(
+    chunkIds: readonly string[],
+    scope: AuthoritativeChunkScope,
+  ): Promise<Bm25PersistedEntry[]> {
+    const ids = [...new Set(chunkIds.filter(Boolean))].slice(0, 1500);
+    if (ids.length === 0 || (!scope.userId && !scope.allowedDocIds)) return [];
+    const rows = await this.chunks.find({
+      where: { id: In(ids), chunkType: 'leaf' },
+    });
+    return rows.filter((row) => this.isVisible(row, scope)).map((row) => ({
+      ...this.toIndexedChunk(row),
+      tokens: [],
+      userId: row.userId ?? undefined,
+      indexGeneration: row.indexGeneration,
+      hypotheticalQuestions: this.parseStringArray(row.hypotheticalQuestions),
+    }));
+  }
+
+  /** Bound, batch-checked evidence visibility for graph and image supplements. */
+  async loadVisibleEvidenceDocIds(
+    docIds: readonly string[],
+    auth: AuthoritativeChunkScope,
+    scope?: RetrievalScope,
+  ): Promise<Set<string>> {
+    const ids = [...new Set(docIds.filter(Boolean))].slice(0, 100);
+    if (ids.length === 0 || (!auth.userId && !auth.allowedDocIds)) return new Set();
+    const rows = await this.chunks.find({
+      where: { docId: In(ids), chunkType: 'leaf' },
+      select: {
+        docId: true, tenantId: true, userId: true,
+        effectiveAt: true, expiredAt: true, lifecycleStatus: true,
+        projectId: true, activityId: true, region: true,
+        locale: true, channel: true, documentType: true, roleScope: true,
+      },
+    });
+    const visible = new Set<string>();
+    for (const row of rows) {
+      if (!this.isVisible(row, auth)) continue;
+      const lifecycle = {
+        lifecycleStatus: row.lifecycleStatus,
+        effectiveAt: row.effectiveAt?.toISOString() ?? null,
+        expiredAt: row.expiredAt?.toISOString() ?? null,
+      };
+      if (!isEffectiveDuring(lifecycle, scope?.effectiveTime)) continue;
+      if (!(scope?.includeDeprecated ?? Boolean(scope?.effectiveTime)) && row.lifecycleStatus === 'deprecated') continue;
+      const fields = ['projectId', 'activityId', 'region', 'locale', 'channel', 'documentType'] as const;
+      if (fields.some((field) => scope?.[field] &&
+        String(row[field] ?? '').trim().toLowerCase() !== scope[field]?.trim().toLowerCase())) continue;
+      if (scope?.role) {
+        const roles = this.parseStringArray(row.roleScope).map(canonicalizeRole);
+        if (roles.length > 0 && !roles.includes(canonicalizeRole(scope.role))) continue;
+      }
+      visible.add(row.docId);
+    }
+    return visible;
+  }
+
   private async loadParentContents(
     leaves: readonly DocumentChunkEntity[],
     scope: AuthoritativeChunkScope,
@@ -107,7 +169,7 @@ export class AuthoritativeChunkService {
   ): boolean {
     if (scope.tenantId && row.tenantId !== scope.tenantId) return false;
     if (scope.allowedDocIds) return scope.allowedDocIds.has(row.docId);
-    return !scope.userId || row.userId === scope.userId;
+    return Boolean(scope.userId && row.userId === scope.userId);
   }
 
   toIndexedChunk(

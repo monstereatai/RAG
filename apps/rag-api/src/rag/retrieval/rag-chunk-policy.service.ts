@@ -100,9 +100,10 @@ export class RagChunkPolicyService {
     allowedDocIds: Set<string> | null,
     userId?: string,
     scope?: RetrievalScope,
+    authoritativeEntries?: readonly Bm25PersistedEntry[],
   ): Awaited<ReturnType<VectorStoreProvider['similaritySearch']>> {
     const entriesById = new Map(
-      this.persistedEntries.map((entry) => [entry.id, entry]),
+      (authoritativeEntries ?? this.persistedEntries).map((entry) => [entry.id, entry]),
     );
     const byChunkId = new Map<
       string,
