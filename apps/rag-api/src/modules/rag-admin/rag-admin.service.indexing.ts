@@ -226,68 +226,12 @@ export class RagAdminIndexingWorkflow {
     const content = chunks.map((chunk) => chunk.content).join('\n\n');
 
     try {
-      const storedVectors =
-        await this.context.vectorStoreProvider.getVectorsByIds(
-          chunks.map((chunk) => chunk.id),
-        );
-      const storedVectorsById = new Map(
-        storedVectors.map((record) => [record.id, record]),
+      const vectors = await this.context.embeddingProvider.embedDocuments(
+        chunks.map((chunk) => chunk.content),
       );
-      const vectorDimension =
-        this.context.vectorStoreProvider.getIndexInfo().dimension;
-      const vectorsById = new Map<string, number[]>();
-      const chunksNeedingEmbedding = chunks.filter((chunk) => {
-        const stored = storedVectorsById.get(chunk.id);
-        if (
-          !stored ||
-          stored.content !== chunk.content ||
-          stored.vector.length !== vectorDimension
-        ) {
-          return true;
-        }
-        vectorsById.set(chunk.id, stored.vector);
-        return false;
-      });
-      if (chunksNeedingEmbedding.length > 0) {
-        const generatedVectors =
-          await this.context.embeddingProvider.embedDocuments(
-            chunksNeedingEmbedding.map((chunk) => chunk.content),
-          );
-        if (generatedVectors.length !== chunksNeedingEmbedding.length) {
-          throw new Error(
-            'embedding count does not match chunks needing repair',
-          );
-        }
-        chunksNeedingEmbedding.forEach((chunk, index) => {
-          vectorsById.set(chunk.id, generatedVectors[index]);
-        });
-      }
-      const vectors = chunks.map((chunk) => vectorsById.get(chunk.id)!);
-      const currentVectorCount =
-        await this.context.vectorStoreProvider.countByDocId(docId);
-      const vectorIndexNeedsRebuild =
-        currentVectorCount !== chunks.length ||
-        chunksNeedingEmbedding.length > 0;
-
-      // 复用与 PostgreSQL 原文一致的现有向量；只有向量缺失或正文变化时才重算。
-      if (vectorIndexNeedsRebuild) {
-        await this.context.vectorStoreProvider.deleteByDocId(docId);
-        await this.context.vectorStoreProvider.insert(
-          chunks.map((chunk, index) => ({
-            id: chunk.id,
-            vector: vectors[index],
-            content: chunk.content,
-            docId,
-            chunkIndex: chunk.chunkIndex,
-            userId,
-          })),
-        );
-      }
-      const indexedVectorCount =
-        await this.context.vectorStoreProvider.countByDocId(docId);
-      if (indexedVectorCount !== chunks.length) {
+      if (vectors.length !== chunks.length) {
         throw new Error(
-          `Milvus reindex count mismatch: expected ${chunks.length}, received ${indexedVectorCount}`,
+          `embedding count mismatch: expected ${chunks.length}, received ${vectors.length}`,
         );
       }
 

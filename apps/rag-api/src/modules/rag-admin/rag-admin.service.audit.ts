@@ -164,18 +164,10 @@ export class RagAdminAuditWorkflow {
                 doc.lifecycleStatus ? [doc.lifecycleStatus] : [],
                 es.documentLifecycleStatuses ?? [],
               ));
-          const vectorRuntime =
-            this.context.vectorStoreProvider.getRuntimeStatus();
-          const milvus = await this.readIndexCheck(
-            vectorRuntime.available,
-            () =>
-              this.context.vectorStoreProvider.countByDocId(
-                doc.docId,
-                doc.userId ?? undefined,
-              ),
-            expected,
-            'milvus',
-          );
+          const milvus: IndexAuditCheck = {
+            status: 'skipped',
+            reason: 'main_document_chunks_migrated_to_elasticsearch',
+          };
           const graph = await this.readGraphIndexCheck(
             doc.graphIndexStatus,
             doc.docId,
@@ -409,19 +401,11 @@ export class RagAdminAuditWorkflow {
           if (expected <= 0) reasons.push('missing_chunks');
           if (indexChecks.postgres.status === 'mismatch')
             reasons.push('metadata_chunk_count_mismatch');
-          if (indexChecks.bm25.status === 'mismatch')
-            reasons.push(
-              indexChecks.bm25.reason ?? 'bm25_chunk_count_mismatch',
-            );
           if (indexChecks.elasticsearch.status === 'mismatch')
             reasons.push(
               indexChecks.elasticsearch.reason ??
                 'elasticsearch_index_count_mismatch',
             );
-          if (indexChecks.milvus.status === 'mismatch')
-            reasons.push('milvus_chunk_count_mismatch');
-          if (indexChecks.milvus.status === 'unavailable')
-            reasons.push('milvus_unavailable');
           if (indexChecks.image.status === 'mismatch')
             reasons.push('image_index_count_mismatch');
           if (indexChecks.image.status === 'unavailable')

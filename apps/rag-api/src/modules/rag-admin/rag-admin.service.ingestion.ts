@@ -15,6 +15,7 @@ import type {
 export class RagAdminIngestionWorkflow {
   constructor(private readonly context: RagAdminServiceContext) {}
 
+  // cd：上传文档
   async uploadDocument(
     file: Express.Multer.File,
     userId: string,
@@ -80,10 +81,14 @@ export class RagAdminIngestionWorkflow {
       userId,
       tenantId,
     );
+    this.context.logger.log(
+      `Created document processing task ${task.id}: mimeType=${file.mimetype}, sizeBytes=${file.size}`,
+    );
     const businessMetadata = { ...fields } as Record<string, unknown>;
     delete businessMetadata.ownerUserId;
     delete businessMetadata.tenantId;
-    if (!this.context.objectStorageProvider) {
+    const objectStorage = this.context.objectStorageProvider;
+    if (!objectStorage) {
       await this.context.documentService.markTaskFailed(
         task.id,
         'object storage is required for asynchronous document processing',
@@ -104,8 +109,9 @@ export class RagAdminIngestionWorkflow {
       businessMetadata,
     };
     try {
+      // cd 往redis队列添加任务
       await this.context.documentQueue.stageUpload(job);
-      await this.context.objectStorageProvider.putObject({
+      await objectStorage.putObject({
         key: objectKey,
         body: file.buffer,
         contentType: file.mimetype,
@@ -119,7 +125,7 @@ export class RagAdminIngestionWorkflow {
             `staged document job cleanup failed for ${task.id}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
           ),
         );
-      await this.context.objectStorageProvider
+      await objectStorage
         .deleteObject(objectKey)
         .catch((cleanupError: unknown) =>
           this.context.logger.warn(
@@ -168,7 +174,7 @@ export class RagAdminIngestionWorkflow {
       );
       return createParsedDocument(kind, file.originalname, content);
     }
-
+    // 判断模型是否支持ocr等
     const capabilities = this.context.visionProvider?.getCapabilities();
     const imageOptions =
       (kind === 'pdf' || kind === 'pptx') && this.context.objectStorageProvider

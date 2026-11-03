@@ -69,6 +69,11 @@ describe('parsed document ingestion contract', () => {
       permissionService: {
         assertTenant: jest.fn().mockResolvedValue(undefined),
       },
+      privacyService: {
+        redactTextFields: jest.fn((value: unknown) =>
+          Promise.resolve({ value, entityTypes: [] as string[] }),
+        ),
+      },
       logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
       documentTaskService: {
         upsertTask: jest.fn().mockResolvedValue(undefined),

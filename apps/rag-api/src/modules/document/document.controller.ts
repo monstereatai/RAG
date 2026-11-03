@@ -43,6 +43,8 @@ import { VisionProvider } from '../../providers/vision/vision.provider';
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { ObsidianIngestService } from './obsidian-ingest.service';
 import { MineruCloudService } from './mineru-cloud.service';
+import { DocumentPrivacyService } from './document-privacy.service';
+import JSZip from 'jszip';
 import {
   DocumentLifecycleStatus,
   DocumentBusinessMetadata,
@@ -90,6 +92,7 @@ export class DocumentController {
     private readonly obsidianIngest: ObsidianIngestService,
     private readonly objectStorageProvider: ObjectStorageProvider,
     private readonly mineruCloud: MineruCloudService,
+    private readonly documentPrivacyService: DocumentPrivacyService,
   ) {
     this.documentQueue.registerProcessor(async (job) => {
       const buffer = await this.objectStorageProvider.getObject(job.objectKey);
@@ -125,14 +128,11 @@ export class DocumentController {
     }
     await this.documentPermission.assertTenant(user.userId, user.tenantId);
     // cd 获取文件类型，调用 extractDocumentText 提取文本内容；ObsidianIngestService 做去重和来源挂接。
-    const kind = detectDocumentKind(file.originalname);
-    console.log(`cdddddddddd Detected document kind: ${kind} for file: ${file.originalname}`);
-    console.log(file);
-
-    return
+    const safeFile = await this.redactUploadedFilename(file);
+    const kind = detectDocumentKind(safeFile.originalname);
 
     const parsedDocument = await this.extractUploadContent(
-      file,
+      safeFile,
       kind,
       user.userId,
     );
@@ -147,14 +147,14 @@ export class DocumentController {
     }
 
     this.logger.log(
-      `Received ${file.originalname}, user=${user.username}, ${content.length} chars`,
+      `Received document upload, user=${user.username}, ${content.length} chars`,
     );
     const result = await this.obsidianIngest.ingestText({
-      title: file.originalname,
+      title: safeFile.originalname,
       content,
       userId: user.userId,
       tenantId: user.tenantId,
-      filename: file.originalname,
+      filename: safeFile.originalname,
       sourceType: 'document',
       contentType: file.mimetype,
       originalBuffer: file.buffer,
@@ -176,19 +176,20 @@ export class DocumentController {
       throw new BadRequestException('file is required');
     }
     await this.documentPermission.assertTenant(user.userId, user.tenantId);
+    const safeFile = await this.redactUploadedFilename(file);
     const task = await this.documentService.createQueuedTask(
-      file.originalname,
+      safeFile.originalname,
       user.userId,
       user.tenantId,
     );
 
     if (this.documentQueue.enabled) {
-      const objectKey = `documents/${this.sanitizeObjectKeyPart(user.userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(file.originalname)}`;
+      const objectKey = `documents/${this.sanitizeObjectKeyPart(user.userId)}/queue/${task.id}/${this.sanitizeObjectKeyPart(safeFile.originalname)}`;
       const job = {
         taskId: task.id,
         userId: user.userId,
         tenantId: user.tenantId,
-        filename: file.originalname,
+        filename: safeFile.originalname,
         objectKey,
         contentType: file.mimetype,
         businessMetadata: this.parseBusinessMetadata(body),
@@ -229,7 +230,7 @@ export class DocumentController {
     } else {
       setImmediate(() => {
         void this.processAsyncUpload(
-          file,
+          safeFile,
           user.userId,
           task.id,
           this.parseBusinessMetadata(body),
@@ -333,7 +334,11 @@ export class DocumentController {
     tenantId?: string,
     trustedAdminPrincipal = false,
   ): Promise<{ chunkCount: number }> {
+    file = await this.redactUploadedFilename(file);
     const kind = detectDocumentKind(file.originalname);
+    this.logger.log(
+      `Async upload parser entered: taskId=${taskId}, kind=${kind}, bytes=${file.buffer.byteLength}`,
+    );
     const parsedDocument = await this.extractUploadContent(file, kind, userId);
     const content = parsedDocument.markdown.trim();
     if (!content || parsedDocument.status === 'failed') {
@@ -453,21 +458,77 @@ export class DocumentController {
     // PDF 扫描页由统一解析器用 vision provider 兜底 OCR；
     // 未配置 vision provider 时对扫描件抛出明确错误，不会静默入库空文档。
     // PDF / PPTX 内嵌图片提取参数见 buildImageExtractionOptions。
-    const parseNative = () => parseDocument(
-      file.buffer,
-      kind,
-      this.visionProvider,
-      this.buildImageExtractionOptions(userId),
-      this.buildVideoExtractionOptions(file.originalname, userId),
-      {
-        preservePdfPages: kind === 'pdf',
-        filename: file.originalname,
-        audioAsr: this.speechProvider,
-      },
-    );
+    const parseNative = () =>
+      parseDocument(
+        file.buffer,
+        kind,
+        this.visionProvider,
+        this.buildImageExtractionOptions(userId),
+        this.buildVideoExtractionOptions(file.originalname, userId),
+        {
+          preservePdfPages: kind === 'pdf',
+          filename: file.originalname,
+          audioAsr: this.speechProvider,
+        },
+      );
     if (this.mineruCloud.accepts(kind)) {
-      // Validate the original file before sending confidential content to an external service.
       await validateDocumentFormat(file.buffer, kind, file.originalname);
+      const local = await this.parseNativeForPrivacyPreflight(
+        file,
+        kind,
+        userId,
+      );
+      const redacted = await this.documentPrivacyService.redactTextFields({
+        parsedDocument: local,
+        filename: file.originalname,
+      });
+      const localDocument = redacted.value.parsedDocument;
+      if (
+        localDocument.status === 'failed' ||
+        !localDocument.markdown.trim() ||
+        !localDocument.blocks.some(
+          (block) => block.text.trim() || block.asset?.url,
+        )
+      ) {
+        throw new BadRequestException(
+          'Local privacy preflight could not produce usable document text; MinerU cloud upload was blocked.',
+        );
+      }
+
+      const hasUnscannedMedia = await this.hasUnscannedMedia(
+        file,
+        kind,
+        localDocument,
+      );
+      if (redacted.entityTypes.length > 0) {
+        this.logger.warn(
+          `MinerU cloud skipped: local privacy preflight detected ${redacted.entityTypes.join(',')}`,
+        );
+      }
+      const preflightComplete =
+        localDocument.status === 'complete' &&
+        localDocument.completeness >= 1 &&
+        localDocument.warnings.length === 0 &&
+        !hasUnscannedMedia;
+      if (!preflightComplete) {
+        this.logger.warn(
+          `MinerU cloud skipped: local privacy preflight incomplete for kind=${kind}`,
+        );
+        return this.markPrivacyPreflightIncomplete(localDocument);
+      }
+      if (redacted.entityTypes.length > 0) {
+        return {
+          ...localDocument,
+          warnings: [
+            ...localDocument.warnings,
+            {
+              code: 'mineru_cloud_skipped_for_privacy',
+              message:
+                '检测到结构化隐私信息，已使用脱敏后的本地解析结果并跳过 MinerU 云端。',
+            },
+          ],
+        };
+      }
       try {
         return await this.mineruCloud.parse({
           buffer: file.buffer,
@@ -479,24 +540,107 @@ export class DocumentController {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.warn(`MinerU cloud parsing failed for ${kind}: ${message}`);
         if (!this.mineruCloud.fallbackEnabled()) {
-          throw new BadRequestException(`MinerU cloud parsing failed: ${message}`);
-        }
-        const local = await parseNative();
-        if (local.status === 'failed') {
-          throw new BadRequestException('MinerU cloud and local document parsing both failed');
+          throw new BadRequestException(
+            `MinerU cloud parsing failed: ${message}`,
+          );
         }
         return {
-          ...local,
+          ...localDocument,
           status: 'partial',
-          completeness: Math.min(local.completeness, 0.9),
-          warnings: [...local.warnings, {
-            code: 'mineru_cloud_fallback_local',
-            message: 'MinerU 云端解析不可用，已使用本地解析；请复核内容完整性。',
-          }],
+          completeness: Math.min(localDocument.completeness, 0.9),
+          warnings: [
+            ...localDocument.warnings,
+            {
+              code: 'mineru_cloud_fallback_local',
+              message:
+                'MinerU 云端解析不可用，已使用本地解析；请复核内容完整性。',
+            },
+          ],
         };
       }
     }
     return parseNative();
+  }
+
+  private async redactUploadedFilename(
+    file: Express.Multer.File,
+  ): Promise<Express.Multer.File> {
+    const result = await this.documentPrivacyService.redactText(
+      file.originalname,
+    );
+    if (result.entityTypes.length > 0) {
+      this.logger.log(
+        `Document filename privacy redaction applied: entities=${result.entityTypes.join(',')}`,
+      );
+    }
+    return { ...file, originalname: result.text };
+  }
+
+  private async parseNativeForPrivacyPreflight(
+    file: Express.Multer.File,
+    kind: SupportedDocumentKind,
+    userId?: string,
+  ): Promise<ParsedDocument> {
+    const images = this.buildImageExtractionOptions(userId);
+    return parseDocument(
+      file.buffer,
+      kind,
+      undefined,
+      images ? { ...images, vision: undefined } : undefined,
+      undefined,
+      {
+        preservePdfPages: kind === 'pdf',
+        filename: file.originalname,
+      },
+    );
+  }
+
+  private async hasUnscannedMedia(
+    file: Express.Multer.File,
+    kind: SupportedDocumentKind,
+    parsed: ParsedDocument,
+  ): Promise<boolean> {
+    if (parsed.blocks.some((block) => block.type === 'image')) return true;
+    if (kind === 'xls') return true;
+    if (
+      process.env.DOCUMENT_EXTRACT_IMAGES === 'false' &&
+      ['pdf', 'pptx'].includes(kind)
+    ) {
+      return true;
+    }
+    const mediaPrefix: Partial<Record<SupportedDocumentKind, RegExp>> = {
+      docx: /^word\/media\//i,
+      pptx: /^ppt\/media\//i,
+      xlsx: /^xl\/media\//i,
+    };
+    const mediaPath = mediaPrefix[kind];
+    if (!mediaPath) return false;
+    try {
+      const archive = await JSZip.loadAsync(file.buffer);
+      return Object.values(archive.files).some(
+        (entry) => !entry.dir && mediaPath.test(entry.name),
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  private markPrivacyPreflightIncomplete(
+    local: ParsedDocument,
+  ): ParsedDocument {
+    return {
+      ...local,
+      status: 'partial',
+      completeness: Math.min(local.completeness, 0.9),
+      warnings: [
+        ...local.warnings,
+        {
+          code: 'mineru_cloud_privacy_preflight_incomplete',
+          message:
+            '本地隐私预检未覆盖完整文档，已跳过 MinerU 云端解析并保留本地解析结果。',
+        },
+      ],
+    };
   }
 
   /**

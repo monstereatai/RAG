@@ -17,16 +17,10 @@ type ReconcileResult = {
 
 const REPAIRABLE_AUDIT_REASONS = new Set([
   'missing_chunks',
-  'bm25_chunk_count_mismatch',
   'elasticsearch_index_count_mismatch',
-  'milvus_chunk_count_mismatch',
   'image_index_count_mismatch',
-  'bm25_content_hash_mismatch',
   'elasticsearch_content_hash_mismatch',
-  'bm25_generation_mismatch',
   'elasticsearch_generation_mismatch',
-  'bm25_snapshot_not_persisted',
-  'bm25_lifecycle_mismatch',
   'elasticsearch_lifecycle_mismatch',
   'graph_index_missing',
   'graph_index_failed',

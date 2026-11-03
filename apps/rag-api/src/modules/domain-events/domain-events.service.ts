@@ -129,12 +129,16 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         .digest('hex')}`;
     const existing = await outbox.findOne({ where: { idempotencyKey } });
     if (existing) {
-      if (input.eventType === 'workflow.dispatch.requested' &&
-          (existing.eventType !== input.eventType ||
-            existing.aggregateId !== input.aggregateId ||
-            existing.tenantId !== tenantId ||
-            existing.payload !== JSON.stringify(safePayload))) {
-        throw new ConflictException('workflow dispatch ID reused with different identity or payload');
+      if (
+        input.eventType === 'workflow.dispatch.requested' &&
+        (existing.eventType !== input.eventType ||
+          existing.aggregateId !== input.aggregateId ||
+          existing.tenantId !== tenantId ||
+          existing.payload !== JSON.stringify(safePayload))
+      ) {
+        throw new ConflictException(
+          'workflow dispatch ID reused with different identity or payload',
+        );
       }
       return;
     }
@@ -167,9 +171,12 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       if (this.isUniqueViolation(error)) {
         if (input.eventType === 'workflow.dispatch.requested') {
           const sameId = await outbox.findOne({ where: { idempotencyKey } });
-          if (!sameId || sameId.aggregateId !== input.aggregateId ||
-              sameId.tenantId !== tenantId ||
-              sameId.payload !== JSON.stringify(safePayload)) {
+          if (
+            !sameId ||
+            sameId.aggregateId !== input.aggregateId ||
+            sameId.tenantId !== tenantId ||
+            sameId.payload !== JSON.stringify(safePayload)
+          ) {
             throw new ConflictException('workflow dispatch ID collision');
           }
         }
@@ -375,6 +382,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       await this.deliverConversationDeleted(row);
       return;
     }
+    if (this.internalHandlers.has(row.eventType)) {
+      await this.deliverInternal(row);
+      return;
+    }
 
     const subscribers = (
       await this.subscriptions.find({ where: { enabled: true } })
@@ -502,6 +513,34 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       row.status = 'pending';
       row.availableAt = new Date(
         Date.now() + 1000 * 2 ** Math.min(row.attempts, 8),
+      );
+    }
+    await this.outbox.save(row);
+  }
+
+  private async deliverInternal(row: DomainEventOutboxEntity): Promise<void> {
+    try {
+      const handler = this.internalHandlers.get(row.eventType);
+      if (!handler) {
+        throw new Error(
+          `Internal domain event handler is unavailable: ${row.eventType}`,
+        );
+      }
+      await handler(row);
+      row.status = 'delivered';
+      row.deliveredAt = new Date();
+      row.lastError = null;
+    } catch (error) {
+      row.attempts += 1;
+      row.lastError = this.message(error).slice(0, 1000);
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'failed';
+      } else {
+        row.status = 'pending';
+        row.availableAt = new Date(Date.now() + 1000 * 2 ** row.attempts);
+      }
+      this.logger.warn(
+        `Internal event delivery failed: eventType=${row.eventType}, aggregateId=${row.aggregateId}, attempt=${row.attempts}`,
       );
     }
     await this.outbox.save(row);

@@ -12,6 +12,7 @@ import type { DocumentBusinessMetadata } from './document-profile.util';
 import type { ParsedDocument } from './document-parser.types';
 import { DocumentQueueService } from './document-queue.service';
 import { DocumentChunkEntity } from '../../providers/db/entities/document-chunk.entity';
+import { DocumentPrivacyService } from './document-privacy.service';
 
 export type ObsidianWriteStatus =
   | ObsidianWriteResult['status']
@@ -39,6 +40,7 @@ export class ObsidianIngestService {
     private readonly documentService: DocumentService,
     private readonly obsidianKnowledge: ObsidianKnowledgeService,
     private readonly documentQueue: DocumentQueueService,
+    private readonly documentPrivacyService: DocumentPrivacyService,
     @InjectRepository(DocumentChunkEntity)
     private readonly documentChunkRepo: Repository<DocumentChunkEntity>,
   ) {
@@ -292,25 +294,55 @@ export class ObsidianIngestService {
     contentType?: string;
     filename?: string;
   }): Promise<ObsidianIngestWriteResult> {
+    const safeMetadata = await this.documentPrivacyService.redactTextFields({
+      title: input.title,
+      sourceUrl: input.sourceUrl,
+      filename: input.filename,
+    });
+    let safeContent = '';
+    try {
+      const chunks = await this.documentChunkRepo.find({
+        where: { docId: input.docId, userId: input.userId },
+        order: { chunkIndex: 'ASC' },
+      });
+      safeContent = this.rebuildContentFromChunks(chunks);
+    } catch (error) {
+      this.logger.warn(
+        `Unable to read sanitized source chunks for Obsidian note doc=${input.docId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!safeContent) {
+      safeContent = (
+        await this.documentPrivacyService.redactText(input.content)
+      ).text;
+    }
+    const title = safeMetadata.value.title ?? input.title;
+    const sourceUrl = safeMetadata.value.sourceUrl;
+    const filename = safeMetadata.value.filename;
+    if (safeMetadata.entityTypes.length > 0) {
+      this.logger.log(
+        `Obsidian source metadata redaction applied: docId=${input.docId}, entities=${safeMetadata.entityTypes.join(',')}`,
+      );
+    }
     const queued = await this.documentQueue.enqueueObsidianNote({
       docId: input.docId,
       userId: input.userId,
-      title: input.title,
+      title,
       contentHash: createHash('sha256')
-        .update(input.content.trim())
+        .update(safeContent.trim())
         .digest('hex'),
-      sourceUrl: input.sourceUrl,
+      sourceUrl,
       sourceType: input.sourceType,
       contentType: input.contentType,
-      filename: input.filename,
+      filename,
     });
     return {
       status: queued.status,
       ...(queued.taskId ? { taskId: queued.taskId } : {}),
       ...(queued.reason ? { error: queued.reason } : {}),
-      title: input.title,
+      title,
       tags: [],
-      contentHash: createHash('sha256').update(input.content).digest('hex'),
+      contentHash: createHash('sha256').update(safeContent).digest('hex'),
       ragDocId: input.docId,
     };
   }

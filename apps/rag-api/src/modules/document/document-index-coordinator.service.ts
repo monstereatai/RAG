@@ -22,7 +22,7 @@ type IndexedChunk = RagIndexChunkInput;
 type IndexedDocument = Parameters<ElasticsearchProvider['indexDocument']>[0];
 type ChunkMetadataPatch = RagChunkMetadataPatch;
 
-/** Coordinates the required document search indexes and Milvus delete recovery. */
+/** Coordinates the required document search indexes and legacy Milvus delete recovery. */
 @Injectable()
 export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DocumentIndexCoordinator.name);
@@ -90,37 +90,19 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
     vectors: number[][];
     document: IndexedDocument;
   }): Promise<void> {
-    // Milvus 与 BM25/Elasticsearch 是独立索引组，因此并发写入。
-    // 等两组都返回后再上报失败，让入库流程清理已成功的部分索引。
+    this.ragService.removeDocChunks(params.document.docId, params.userId);
+    this.ragService.indexChunks(params.chunks, params.userId);
+    await this.elasticsearchProvider.deleteByDocId(
+      params.document.docId,
+      params.userId,
+    );
     const indexResults = await Promise.allSettled([
-      (async () => {
-        await this.vectorStoreProvider.insert(
-          params.records.map((record, index) => ({
-            ...record,
-            vector: params.vectors[index],
-          })),
-        );
-      })(),
-      (async () => {
-        this.ragService.indexChunks(params.chunks, params.userId);
-        const elasticsearchResults = await Promise.allSettled([
-          (async () => {
-            await this.elasticsearchProvider.indexChunks(
-              params.chunks,
-              params.userId,
-              params.vectors,
-            );
-          })(),
-          (async () => {
-            await this.elasticsearchProvider.indexDocument(params.document);
-          })(),
-        ]);
-        const failedElasticsearchWrite = elasticsearchResults.find(
-          (result): result is PromiseRejectedResult =>
-            result.status === 'rejected',
-        );
-        if (failedElasticsearchWrite) throw failedElasticsearchWrite.reason;
-      })(),
+      this.elasticsearchProvider.indexDocument(params.document),
+      this.elasticsearchProvider.indexChunks(
+        params.chunks,
+        params.userId,
+        params.vectors,
+      ),
     ]);
     const failedIndex = indexResults.find(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -136,8 +118,7 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
     vectors: Array<number[] | null>;
     document: IndexedDocument;
   }): Promise<void> {
-    if (params.records.length > 0) {
-      await this.vectorStoreProvider.insert(params.records);
+    if (params.chunks.length > 0) {
       await Promise.all([
         Promise.resolve(
           this.ragService.indexChunks(params.chunks, params.userId),
@@ -150,6 +131,23 @@ export class DocumentIndexCoordinator implements OnModuleInit, OnModuleDestroy {
       ]);
     }
     await this.elasticsearchProvider.indexDocument(params.document);
+  }
+
+  async rebuildDocumentSearchIndexes(params: {
+    chunks: IndexedChunk[];
+    userId: string;
+    document: IndexedDocument;
+  }): Promise<void> {
+    const vectors = await this.embedChunks(
+      params.chunks.map((chunk) => chunk.content),
+    );
+    await this.writeDocumentIndexes({
+      records: [],
+      chunks: params.chunks,
+      userId: params.userId,
+      vectors,
+      document: params.document,
+    });
   }
 
   updateChunkMetadataByIds(

@@ -59,8 +59,15 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
   private readonly snapshotPersistenceErrors = new Map<string, string>();
   private bm25Store?: Bm25Store;
   private initialized = false;
+  private readonly localBm25Enabled: boolean;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    const nodeEnv =
+      configService.get<string>('nodeEnv') ??
+      process.env.NODE_ENV ??
+      'development';
+    this.localBm25Enabled = nodeEnv !== 'production';
+  }
 
   private getBm25Instance(userId?: string): BM25 {
     const key = userId || 'default';
@@ -83,6 +90,12 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
   onModuleInit(): void {
     if (this.initialized) return;
     this.initialized = true;
+    if (!this.localBm25Enabled) {
+      this.logger.log(
+        'Local BM25 is disabled in production; Elasticsearch is the primary keyword index',
+      );
+      return;
+    }
     const uploadDir =
       this.configService.get<string>('workspace.uploadDir') ??
       path.resolve(process.cwd(), '../../workspace/uploads');
@@ -154,6 +167,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
    * 文档上传后调用：把 chunks 加入 BM25 索引并持久化
    */
   indexChunks(chunks: RagIndexChunkInput[], userId?: string): void {
+    if (!this.localBm25Enabled) return;
     const docs: BM25Doc[] = chunks.map((c) => ({
       id: c.id,
       content: c.content,
@@ -249,6 +263,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
    * 删除指定 docId 的所有 chunks（BM25 内存 + 持久化）
    */
   removeDocChunks(docId: string, userId?: string): void {
+    if (!this.localBm25Enabled) return;
     // 过滤内存数据
     this.persistedEntries = this.persistedEntries.filter(
       (e) => e.docId !== docId,
@@ -296,6 +311,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
    * BM25 内核不支持单文档删除，因此仍要做用户级重建；但索引存储只删除指定 chunk。
    */
   removeChunkIds(ids: string[], userId?: string): void {
+    if (!this.localBm25Enabled) return;
     const idSet = new Set(ids.filter(Boolean));
     if (idSet.size === 0) return;
     const affectedDocIds = new Set(
@@ -338,6 +354,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
 
   /** 更新 chunk 元数据，不重新分词、不重写正文和向量。 */
   updateChunkMetadataByIds(ids: string[], patch: RagChunkMetadataPatch): void {
+    if (!this.localBm25Enabled) return;
     const idSet = new Set(ids.filter(Boolean));
     if (idSet.size === 0) return;
     const affectedDocIds = new Set(
@@ -363,6 +380,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
     lifecycleStatus: string,
     userId?: string,
   ): void {
+    if (!this.localBm25Enabled) return;
     let changed = false;
     this.persistedEntries = this.persistedEntries.map((entry) => {
       if (entry.docId !== docId || entry.userId !== userId) return entry;
@@ -470,6 +488,7 @@ export class RagIndexService implements OnModuleInit, RagIndexCapability {
     limit = 10,
     allowedDocIds?: ReadonlySet<string>,
   ): RankedRetrievalHit[] {
+    if (!this.localBm25Enabled) return [];
     const bm25 =
       allowedDocIds != null || userId == null
         ? this.globalBm25

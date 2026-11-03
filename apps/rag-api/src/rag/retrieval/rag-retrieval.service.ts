@@ -28,6 +28,7 @@ import { normalizeQuery } from './query-normalizer';
 import { RetrievalPostprocessor } from './retrieval-postprocessor';
 import { RetrievalSources } from './retrieval-sources';
 import { SupplementalEvidenceRetriever } from './supplemental-evidence-retriever';
+import { AuthoritativeChunkService } from './authoritative-chunk.service';
 
 @Injectable()
 export class RagRetrievalService {
@@ -62,6 +63,8 @@ export class RagRetrievalService {
     @Optional()
     private readonly retrievalDescriptionService?: DocumentRetrievalDescriptionService,
     @Optional() chunkPolicy?: RagChunkPolicyService,
+    @Optional()
+    private readonly authoritativeChunks?: AuthoritativeChunkService,
   ) {
     this.retrievalPostprocessor = new RetrievalPostprocessor(
       configService,
@@ -426,13 +429,26 @@ export class RagRetrievalService {
     });
 
     // RRF 消除不同检索通道的原始分数尺度差异；它不改变后面的版本、权限和范围门禁。
-    const fused = this.chunkPolicy
-      .fuseByRrf(bm25Hits, cosineHits)
-      .filter(
-        (chunk) =>
-          (!allowedDocIds || allowedDocIds.has(chunk.docId)) &&
-          this.chunkPolicy.isLifecycleVisible(chunk, options.scope),
-      );
+    const fusedIndexCandidates = this.chunkPolicy.fuseByRrf(
+      bm25Hits,
+      cosineHits,
+    );
+    const fused = (
+      this.authoritativeChunks
+        ? await this.authoritativeChunks.hydrateCandidates(
+            fusedIndexCandidates,
+            {
+              tenantId: options.tenantId,
+              userId,
+              allowedDocIds: allowedDocIds ?? undefined,
+            },
+          )
+        : fusedIndexCandidates
+    ).filter(
+      (chunk) =>
+        (!allowedDocIds || allowedDocIds.has(chunk.docId)) &&
+        this.chunkPolicy.isLifecycleVisible(chunk, options.scope),
+    );
     const fusedCandidateCount = fused.length;
     const scoped = this.chunkPolicy
       .applySourceAuthority(fused)
@@ -493,13 +509,32 @@ export class RagRetrievalService {
     );
     const shouldMergeGraph = graphRequested;
     const shouldMergeImages = imageProbe.hits.length > 0;
-    const expanded = this.chunkPolicy.expandContextChunks(
-      ranked,
-      profile,
-      userId,
-      options.scope,
-      allowedDocIds ?? undefined,
-    );
+    const authoritativeContext = this.authoritativeChunks
+      ? await this.authoritativeChunks.loadContextChunks(
+          ranked.map((chunk) => chunk.docId),
+          {
+            tenantId: options.tenantId,
+            userId,
+            allowedDocIds: allowedDocIds ?? undefined,
+          },
+        )
+      : undefined;
+    const expanded = authoritativeContext
+      ? this.chunkPolicy.expandContextChunksFrom(
+          authoritativeContext,
+          ranked,
+          profile,
+          userId,
+          options.scope,
+          allowedDocIds ?? undefined,
+        )
+      : this.chunkPolicy.expandContextChunks(
+          ranked,
+          profile,
+          userId,
+          options.scope,
+          allowedDocIds ?? undefined,
+        );
     const visibleGraphChunks = graphChunks.filter((chunk) =>
       this.chunkPolicy.isEvidenceDocumentVisible(
         chunk.docId,
@@ -721,20 +756,27 @@ export class RagRetrievalService {
       (hit) => !allowedDocIds || allowedDocIds.has(hit.docId),
     );
     const bm25MaxScore = Math.max(...permittedBm25Hits.map((h) => h.score), 1);
-    return permittedBm25Hits
-      .map((hit, index) => {
-        const normalizedBm25 = hit.score / bm25MaxScore;
-        return {
-          id: hit.id,
-          content: hit.content,
-          docId: hit.docId,
-          chunkIndex: hit.chunkIndex,
-          ...this.chunkPolicy.pickChunkMetadata(hit),
-          bm25Score: normalizedBm25,
-          cosineScore: 0,
-          totalScore: this.chunkPolicy.rankScore(index) * this.bm25Weight,
-        } satisfies RetrievedChunk;
-      })
+    const candidates = permittedBm25Hits.map((hit, index) => {
+      const normalizedBm25 = hit.score / bm25MaxScore;
+      return {
+        id: hit.id,
+        content: hit.content,
+        docId: hit.docId,
+        chunkIndex: hit.chunkIndex,
+        ...this.chunkPolicy.pickChunkMetadata(hit),
+        bm25Score: normalizedBm25,
+        cosineScore: 0,
+        totalScore: this.chunkPolicy.rankScore(index) * this.bm25Weight,
+      } satisfies RetrievedChunk;
+    });
+    const authoritativeCandidates = this.authoritativeChunks
+      ? await this.authoritativeChunks.hydrateCandidates(candidates, {
+          tenantId,
+          userId,
+          allowedDocIds: allowedDocIds ?? undefined,
+        })
+      : candidates;
+    return authoritativeCandidates
       .map((chunk) => this.chunkPolicy.applySourceAuthorityToChunk(chunk))
       .sort((a, b) => b.totalScore - a.totalScore)
       .filter((chunk) => this.chunkPolicy.isLifecycleVisible(chunk, scope))

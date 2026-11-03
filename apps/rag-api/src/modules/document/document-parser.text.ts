@@ -1,4 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
+import TurndownService from 'turndown';
+import { gfm } from 'turndown-plugin-gfm';
+
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+});
+turndownService.use(gfm);
 
 export function jsonToMarkdown(input: string): string {
   let value: unknown;
@@ -68,17 +77,10 @@ export function htmlToText(input: string): string {
     cleaned.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ??
     cleaned;
 
-  const body = decodeHtmlEntities(
-    main
-      .replace(/<\/(p|div|section|article|li|tr|h[1-6])>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<li[^>]*>/gi, '- ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n\s+/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim(),
-  );
+  const body = turndownService
+    .turndown(main)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
   const cleanTitle = metadata.title;
   return [cleanTitle ? `# ${cleanTitle}` : '', body]

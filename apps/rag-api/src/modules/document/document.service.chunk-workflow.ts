@@ -21,13 +21,16 @@ import type {
   UploadOptions,
   UploadResult,
 } from './document.service.types';
-import type { Repository } from 'typeorm';
+import type { EntityManager, Repository } from 'typeorm';
+import { DomainEventsService } from '../domain-events/domain-events.service';
+import { DOCUMENT_SEARCH_INDEX_UPSERT_EVENT } from './document-search-index.events';
 
 interface DocumentChunkWorkflowContext {
   docChunkRepo: Repository<DocumentChunkEntity>;
   docMetaRepo: Repository<DocumentMetaEntity>;
   documentIndexCoordinator: DocumentIndexCoordinator;
   documentTaskService: DocumentTaskService;
+  domainEvents: DomainEventsService;
   factConflictRepo: Repository<FactConflictEntity>;
   graphService: GraphService;
   logger: Logger;
@@ -318,6 +321,17 @@ export class DocumentChunkWorkflow {
           graphIndexError: null,
         },
       );
+      await this.context.domainEvents.emitInTransaction(manager, {
+        tenantId: input.tenantId,
+        eventType: DOCUMENT_SEARCH_INDEX_UPSERT_EVENT,
+        aggregateType: 'document',
+        aggregateId: input.docId,
+        payload: {
+          userId: input.userId,
+          indexGeneration: input.indexGeneration,
+        },
+        idempotencyKey: `${DOCUMENT_SEARCH_INDEX_UPSERT_EVENT}:${input.docId}:${input.indexGeneration}`,
+      });
     });
 
     if (expireIds.size > 0) {
@@ -438,10 +452,14 @@ export class DocumentChunkWorkflow {
     hypotheticalQuestions: string[][],
     tenantId: string,
     indexGeneration: string,
+    manager?: EntityManager,
   ): Promise<void> {
+    const chunkRepo = manager
+      ? manager.getRepository(DocumentChunkEntity)
+      : this.context.docChunkRepo;
     const entities = records.map((record, index) => {
       const chunk = chunks[index];
-      return this.context.docChunkRepo.create({
+      return chunkRepo.create({
         id: record.id,
         tenantId,
         docId,
@@ -500,7 +518,7 @@ export class DocumentChunkWorkflow {
             : null,
       });
     });
-    await this.context.docChunkRepo.save(entities);
+    await chunkRepo.save(entities);
   }
 
   public async deprecateSupersededDocument(

@@ -854,7 +854,15 @@ export class ElasticsearchProvider
       allowedDocIds?: ReadonlySet<string>;
       effectiveTime?: EffectiveTimeRange;
     },
-  ): Promise<Array<{ id: string; score: number }>> {
+  ): Promise<
+    Array<{
+      id: string;
+      score: number;
+      content: string;
+      docId: string;
+      chunkIndex: number;
+    }>
+  > {
     if (!this.enabled) return [];
     if (Array.isArray(vector) === false || vector.length === 0) return [];
 
@@ -903,12 +911,15 @@ export class ElasticsearchProvider
           filter,
         },
         size: k,
-        _source: false,
+        _source: ['content', 'docId', 'chunkIndex'],
       });
 
       return result.hits.hits.map((hit) => ({
         id: hit._id ?? '',
         score: hit._score ?? 0,
+        content: hit._source?.content ?? '',
+        docId: hit._source?.docId ?? '',
+        chunkIndex: hit._source?.chunkIndex ?? 0,
       }));
     } catch (err) {
       this.logger.warn(`ES knnSearch failed: ${(err as Error).message}`);

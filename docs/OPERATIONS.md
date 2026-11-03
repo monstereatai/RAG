@@ -22,6 +22,24 @@ docker compose -p docker \
 pnpm --dir apps/rag-api run start:dev
 ```
 
+### 本地文档隐私识别
+
+文档入库使用本机自托管 [Presidio Analyzer](https://microsoft.github.io/presidio/analyzer/) 检测中国大陆手机号、18 位居民身份证号、银行卡号、邮箱和明显凭据。项目以请求级自定义规则适配中文结构化信息。默认地址为 `http://127.0.0.1:5002`；分析器不可用或文本超过本地扫描上限时，入库会失败关闭。`pnpm run dev:backend` 只启动 RAG API，不会自动启动 Analyzer。
+
+需要手动启动 Analyzer 时，在仓库根目录运行：
+
+```bash
+docker compose -f infra/docker/docker-compose.dev.yml --profile privacy up -d presidio-analyzer
+```
+
+完成后可单独停止：
+
+```bash
+docker compose -f infra/docker/docker-compose.dev.yml --profile privacy stop presidio-analyzer
+```
+
+Analyzer 端口只绑定宿主机 loopback。入库原文件字节按现有规则保留；自动检测不覆盖姓名、地址以及未经本地 OCR 提取的图像文字。MinerU 云解析仅在本地预解析完整且未检测到隐私时使用；其他 OCR/ASR/Vision Provider 的出站处理不由此门禁控制。
+
 生产目标是 Docker Compose。上线检查脚本只检查配置和仓库边界，不会代替目标环境验收或执行生产发布：
 
 ```bash

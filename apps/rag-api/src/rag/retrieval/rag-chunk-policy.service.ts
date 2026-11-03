@@ -14,6 +14,7 @@ import type {
 import type { RetrievalProfile } from './context-builder';
 import { normalizeQuery } from './query-normalizer';
 import { RetrievalPostprocessor } from './retrieval-postprocessor';
+import type { IndexedChunk } from './retrieval-postprocessor';
 
 type RetrievalDescriptionHit = Awaited<
   ReturnType<DocumentRetrievalDescriptionService['searchByVector']>
@@ -263,8 +264,26 @@ export class RagChunkPolicyService {
     scope?: RetrievalScope,
     allowedDocIds?: ReadonlySet<string>,
   ): RetrievedChunk[] {
-    return this.retrievalPostprocessor.expandContextChunks(
+    return this.expandContextChunksFrom(
       this.persistedEntries,
+      hits,
+      profile,
+      userId,
+      scope,
+      allowedDocIds,
+    );
+  }
+
+  expandContextChunksFrom(
+    sourceEntries: readonly IndexedChunk[],
+    hits: RetrievedChunk[],
+    profile: RetrievalProfile,
+    userId?: string,
+    scope?: RetrievalScope,
+    allowedDocIds?: ReadonlySet<string>,
+  ): RetrievedChunk[] {
+    return this.retrievalPostprocessor.expandContextChunks(
+      sourceEntries,
       hits,
       profile,
       userId,

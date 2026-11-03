@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { RagService } from './rag.service';
 import { RagIndexService } from './indexing/rag-index.service';
 import { RagRetrievalService } from './retrieval/rag-retrieval.service';
@@ -23,6 +24,8 @@ import { ImageIndexModule } from '../modules/image-index/image-index.module';
 import { DocumentRetrievalDescriptionModule } from '../modules/document/document-retrieval-description.module';
 import { EvidenceModule } from './evidence/evidence.module';
 import { GenerationModule } from './generation/generation.module';
+import { DocumentChunkEntity } from '../providers/db/entities/document-chunk.entity';
+import { AuthoritativeChunkService } from './retrieval/authoritative-chunk.service';
 import {
   AGENTIC_FAST_PATH_CAPABILITY,
   AGENTIC_RETRIEVAL_CAPABILITY,
@@ -39,6 +42,7 @@ import {
 @Module({
   imports: [
     ConfigModule,
+    TypeOrmModule.forFeature([DocumentChunkEntity]),
     LlmModule,
     EmbeddingModule,
     VectorStoreModule,
@@ -57,6 +61,7 @@ import {
     RagIndexService,
     RagRetrievalService,
     RagChunkPolicyService,
+    AuthoritativeChunkService,
     RagEvidenceService,
     RagObsidianService,
     RagAnswerService,
@@ -88,6 +93,7 @@ import {
     RAG_RETRIEVAL_CAPABILITY,
     RAG_INDEX_CAPABILITY,
     RAG_ADMIN_CAPABILITY,
+    AuthoritativeChunkService,
   ],
 })
 export class RagModule {}

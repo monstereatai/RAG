@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "dev": "sh -c 'pnpm --filter backend start:dev & pnpm --filter admin-backend start & pnpm --filter ant-design-pro start:no-mock & pnpm --filter rag-frontend dev & wait'",
-    "dev:backend": "pnpm --filter backend start:dev",
+    "dev:backend": "sh scripts/dev-rag-api.sh",
     "dev:admin-backend": "pnpm --filter admin-backend start",
     "dev:admin": "pnpm --filter ant-design-pro start:no-mock",
     "dev:frontend": "pnpm --filter rag-frontend dev",

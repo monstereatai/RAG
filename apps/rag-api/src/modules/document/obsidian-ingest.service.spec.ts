@@ -14,6 +14,10 @@ describe('ObsidianIngestService', () => {
     enqueueObsidianNote: jest.Mock;
   };
   let documentChunkRepo: { find: jest.Mock };
+  let documentPrivacyService: {
+    redactTextFields: jest.Mock;
+    redactText: jest.Mock;
+  };
   let service: ObsidianIngestService;
   let processor: ObsidianNoteIngestProcessor | undefined;
 
@@ -39,10 +43,19 @@ describe('ObsidianIngestService', () => {
       }),
     };
     documentChunkRepo = { find: jest.fn().mockResolvedValue([]) };
+    documentPrivacyService = {
+      redactTextFields: jest.fn((value: unknown) =>
+        Promise.resolve({ value, entityTypes: [] as string[] }),
+      ),
+      redactText: jest.fn((text: string) =>
+        Promise.resolve({ text, entityTypes: [] as string[] }),
+      ),
+    };
     service = new ObsidianIngestService(
       documentService as never,
       obsidianKnowledge as never,
       documentQueue as never,
+      documentPrivacyService as never,
       documentChunkRepo as never,
     );
   });
@@ -85,6 +98,43 @@ describe('ObsidianIngestService', () => {
       rag,
       obsidian: { status: 'queued', taskId: 'obsidian-doc-1' },
     });
+  });
+
+  it('uses sanitized indexed chunks and metadata for the Obsidian queue', async () => {
+    const safeContent = '电话：[手机号]';
+    documentChunkRepo.find.mockResolvedValue([
+      {
+        content: safeContent,
+        chunkIndex: 0,
+        sectionId: null,
+        sourceStart: null,
+        sourceEnd: null,
+      },
+    ]);
+    documentPrivacyService.redactTextFields.mockResolvedValue({
+      value: {
+        title: 'Contact [手机号]',
+        filename: 'contact-[手机号].md',
+        sourceUrl: undefined,
+      },
+      entityTypes: ['CN_MOBILE_PHONE'],
+    });
+
+    await service.ingestText({
+      title: 'Contact 13800138000',
+      content: '电话：13800138000',
+      userId: 'user-1',
+      filename: 'contact-13800138000.md',
+      sourceType: 'manual',
+    });
+
+    expect(documentQueue.enqueueObsidianNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Contact [手机号]',
+        filename: 'contact-[手机号].md',
+        contentHash: createHash('sha256').update(safeContent).digest('hex'),
+      }),
+    );
   });
 
   it('returns the successful RAG upload when the optional queue is unavailable', async () => {

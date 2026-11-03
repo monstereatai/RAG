@@ -13,6 +13,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
     PinoLoggerModule.forRootAsync({
       useFactory: () => ({
         pinoHttp: {
+          level: process.env.LOG_LEVEL?.trim() || 'info',
           transport:
             process.env.NODE_ENV !== 'production'
               ? { target: 'pino-pretty', options: { colorize: true } }

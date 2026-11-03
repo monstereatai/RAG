@@ -24,10 +24,12 @@ import { DocumentResourceEntity } from '../../providers/db/entities/document-res
 import { DocumentPermissionEntity } from '../../providers/db/entities/document-permission.entity';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { DocumentPermissionModule } from './document-permission.module';
+import { DocumentPrivacyService } from './document-privacy.service';
 import { ImageIndexModule } from '../image-index/image-index.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { SpeechModule } from '../../providers/speech/speech.module';
 import { VisionModule } from '../../providers/vision/vision.module';
+import { DocumentSearchIndexOutboxHandler } from './document-search-index-outbox.handler';
 
 @Module({
   imports: [
@@ -56,11 +58,13 @@ import { VisionModule } from '../../providers/vision/vision.module';
   controllers: [DocumentController],
   providers: [
     DocumentService,
+    DocumentPrivacyService,
     DocumentMetadataExtractor,
     DocumentQueueService,
     DocumentTaskService,
     DocumentImageIngestionService,
     DocumentIndexCoordinator,
+    DocumentSearchIndexOutboxHandler,
     ObsidianIngestService,
     MineruCloudService,
   ],

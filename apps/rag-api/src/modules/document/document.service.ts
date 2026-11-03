@@ -18,6 +18,7 @@ import { DocumentResourceEntity } from '../../providers/db/entities/document-res
 import { ObjectStorageProvider } from '../../providers/object-storage/object-storage.provider';
 import { DocumentPermissionService } from './document-permission.service';
 import { PermissionSubject } from './document-permission.service';
+import { DocumentPrivacyService } from './document-privacy.service';
 import { KnowledgeBaseProfileEntity } from '../../providers/db/entities/knowledge-base-profile.entity';
 import { GraphService } from '../graph/graph.service';
 import {
@@ -63,9 +64,8 @@ import type { DomainEventInput } from '../domain-events/domain-events.service';
 /**
  * 文档入库编排服务。
  *
- * 固定顺序为：安全扫描／质量门禁 → 结构化父子切块 → 生成向量 → 多存储并发写入。
- * PostgreSQL 始终先以 draft（草稿）状态落库；只有索引成功且通过后续治理流程，
- * 才会被提升为可检索版本。任一必要写入失败会触发外部索引补偿清理。
+ * 固定顺序为：安全扫描／质量门禁 → 结构化父子切块 → PostgreSQL 事务落库与 outbox → ES 索引。
+ * PostgreSQL 保存权威正文与引用元数据；ES 是可重建的关键词／向量检索索引。
  */
 @Injectable()
 export class DocumentService implements OnModuleInit, OnModuleDestroy {
@@ -89,6 +89,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     private readonly metadataExtractor: DocumentMetadataExtractor,
     private readonly objectStorageProvider: ObjectStorageProvider,
     private readonly permissionService: DocumentPermissionService,
+    private readonly documentPrivacyService: DocumentPrivacyService,
     private readonly graphService: GraphService,
     private readonly documentQueueService: DocumentQueueService,
     private readonly documentTaskService: DocumentTaskService,
@@ -107,6 +108,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       docMetaRepo: this.docMetaRepo,
       documentIndexCoordinator: this.documentIndexCoordinator,
       documentTaskService: this.documentTaskService,
+      domainEvents: this.domainEvents,
       factConflictRepo: this.factConflictRepo,
       graphService: this.graphService,
       logger: this.logger,
@@ -117,6 +119,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
     });
     this.uploadWorkflow = new DocumentUploadWorkflow({
       permissionService: this.permissionService,
+      privacyService: this.documentPrivacyService,
       logger: this.logger,
       documentTaskService: this.documentTaskService,
       docMetaRepo: this.docMetaRepo,
@@ -126,6 +129,7 @@ export class DocumentService implements OnModuleInit, OnModuleDestroy {
       documentImageIngestionService: this.documentImageIngestionService,
       dingTalk: this.dingTalk,
       chunkWorkflow: this.chunkWorkflow,
+      domainEvents: this.domainEvents,
       saveOriginalResource: (...args) => this.saveOriginalResource(...args),
       resolveChunkStrategy: (...args) => this.resolveChunkStrategy(...args),
       cleanupFailedExternalIndexes: (...args) =>

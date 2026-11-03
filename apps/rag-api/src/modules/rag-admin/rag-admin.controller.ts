@@ -184,7 +184,7 @@ export class RagAdminController {
   async listDocuments(@Query() query: RagDocumentQueryDto) {
     return this.ragAdminService.listDocuments(query);
   }
-
+  // cd：文件上传
   @Post('documents/upload')
   @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_OPTIONS))
   async uploadDocument(
@@ -195,6 +195,7 @@ export class RagAdminController {
     const principal = this.requireAdminPrincipal(
       typeof body?.ownerUserId === 'string' ? body.ownerUserId : undefined,
     );
+
     return this.ragAdminService.uploadDocumentAsync(
       file,
       principal.userId,

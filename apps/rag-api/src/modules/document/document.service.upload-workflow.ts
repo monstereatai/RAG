@@ -11,6 +11,7 @@ import { DingTalkProvider } from '../../providers/notify/dingtalk.provider';
 import { DocumentChunkWorkflow } from './document.service.chunk-workflow';
 import { splitHybridDocument } from './hybrid-document-chunker';
 import { detectPromptInjection } from '../../rag/prompts/prompt-injection.guard';
+import { DocumentPrivacyService } from './document-privacy.service';
 import {
   DocumentLifecycleStatus,
   assessIngestionQuality,
@@ -23,12 +24,17 @@ import type {
   UploadOptions,
   UploadResult,
 } from './document.service.types';
-import type { DomainEventInput } from '../domain-events/domain-events.service';
+import {
+  DomainEventsService,
+  type DomainEventInput,
+} from '../domain-events/domain-events.service';
+import { DOCUMENT_SEARCH_INDEX_UPSERT_EVENT } from './document-search-index.events';
 
 type GraphIndexStatus = 'pending' | 'indexed' | 'failed' | 'skipped';
 
 interface DocumentUploadWorkflowContext {
   permissionService: DocumentPermissionService;
+  privacyService: DocumentPrivacyService;
   logger: Logger;
   documentTaskService: DocumentTaskService;
   docMetaRepo: Repository<DocumentMetaEntity>;
@@ -38,6 +44,7 @@ interface DocumentUploadWorkflowContext {
   documentImageIngestionService: DocumentImageIngestionService;
   dingTalk?: DingTalkProvider;
   chunkWorkflow: DocumentChunkWorkflow;
+  domainEvents: DomainEventsService;
   saveOriginalResource: (params: {
     docId: string;
     taskId: string;
@@ -85,8 +92,27 @@ export class DocumentUploadWorkflow {
       options.tenantId,
       options.trustedAdminPrincipal,
     );
+    const originalContent = content;
+    const privacyResult = await this.context.privacyService.redactTextFields({
+      filename,
+      content,
+      parsedDocument: options.parsedDocument,
+      businessMetadata: options.businessMetadata,
+    });
+    filename = privacyResult.value.filename;
+    content = privacyResult.value.content;
+    options = {
+      ...options,
+      parsedDocument: privacyResult.value.parsedDocument,
+      businessMetadata: privacyResult.value.businessMetadata,
+    };
     const docId = options.docId ?? randomUUID();
     const taskId = options.taskId ?? randomUUID();
+    if (privacyResult.entityTypes.length > 0) {
+      this.context.logger.log(
+        `Document privacy redaction applied: docId=${docId}, entities=${privacyResult.entityTypes.join(',')}`,
+      );
+    }
     this.context.logger.log(
       `Uploading ${filename}, docId=${docId}, userId=${userId}`,
     );
@@ -134,7 +160,7 @@ export class DocumentUploadWorkflow {
 
       // 安全门禁必须在切块与索引之前：高风险内容只能保留原始证据供人工审核，
       // 不能进入任何可被检索或被模型读取的存储。
-      const promptInjectionFindings = detectPromptInjection(content);
+      const promptInjectionFindings = detectPromptInjection(originalContent);
       const highRiskPromptInjection = promptInjectionFindings.filter(
         (finding) => finding.severity === 'high',
       );
@@ -147,7 +173,7 @@ export class DocumentUploadWorkflow {
             userId,
             tenantId: options.tenantId,
             filename,
-            buffer: Buffer.from(content, 'utf8'),
+            buffer: Buffer.from(originalContent, 'utf8'),
             contentType: options.contentType ?? 'text/plain',
           });
         }
@@ -384,8 +410,7 @@ export class DocumentUploadWorkflow {
           : 'skipped',
       });
 
-      // 嵌入提前到并行入库之前：同一条向量既要写 Milvus，也要随 chunk 写入 ES（dense_vector kNN 通道）。
-      // 失败语义与原先一致：嵌入失败 => 清理外部索引并整体入库失败（原先对应 allSettled 首分支拒绝路径）。
+      // 同步 fast-path 提前生成 ES dense_vector；权威数据提交后，outbox 仍可独立重算并修复索引。
       await this.context.documentTaskService.updateTask(taskId, {
         stage: 'embedding',
         progress: 30,
@@ -403,10 +428,43 @@ export class DocumentUploadWorkflow {
         progress: 50,
       });
 
-      // 四个必要落点彼此独立，因此并发降低等待时间；allSettled 用于收集所有结果，
-      // 以便后续对已成功的外部索引做一致的补偿清理。
-      const indexResults = await Promise.allSettled([
-        this.context.documentIndexCoordinator.writeDocumentIndexes({
+      // PostgreSQL 是正文与引用元数据的唯一权威源；索引事件与业务数据同事务提交。
+      await this.context.docMetaRepo.manager.transaction(async (manager) => {
+        await manager.getRepository(DocumentMetaEntity).save(docMeta);
+        await this.context.chunkWorkflow.saveChunkMetadata(
+          docId,
+          userId,
+          records,
+          structuredChunks,
+          indexingGovernance,
+          hypotheticalQuestions,
+          options.tenantId ?? 'legacy',
+          indexGeneration,
+          manager,
+        );
+        await this.context.domainEvents.emitInTransaction(manager, {
+          tenantId: options.tenantId ?? 'legacy',
+          eventType: DOCUMENT_SEARCH_INDEX_UPSERT_EVENT,
+          aggregateType: 'document',
+          aggregateId: docId,
+          payload: { userId, indexGeneration },
+          idempotencyKey: `${DOCUMENT_SEARCH_INDEX_UPSERT_EVENT}:${docId}:${indexGeneration}`,
+        });
+      });
+      if (!options.preservePermissions) {
+        await this.context.permissionService.grantOwner(docId, userId);
+      }
+      await this.context.chunkWorkflow.detectAndSaveFactConflicts(
+        docId,
+        userId,
+        records,
+        indexingGovernance,
+      );
+
+      // 同步 fast-path 缩短新文档首次可检索时间；失败时由事务 outbox 重试，
+      // 不再回滚已经提交的 PostgreSQL 权威数据。
+      try {
+        await this.context.documentIndexCoordinator.writeDocumentIndexes({
           records,
           chunks: chunkDocs,
           userId,
@@ -433,39 +491,13 @@ export class DocumentUploadWorkflow {
             effectiveAt: indexingGovernance.effectiveAt,
             expiredAt: indexingGovernance.expiredAt,
           },
-        }),
-        (async () => {
-          await this.context.docMetaRepo.save(docMeta);
-          if (!options.preservePermissions) {
-            await this.context.permissionService.grantOwner(docId, userId);
-          }
-          await this.context.chunkWorkflow.saveChunkMetadata(
-            docId,
-            userId,
-            records,
-            structuredChunks,
-            indexingGovernance,
-            hypotheticalQuestions,
-            options.tenantId ?? 'legacy',
-            indexGeneration,
-          );
-          await this.context.chunkWorkflow.detectAndSaveFactConflicts(
-            docId,
-            userId,
-            records,
-            indexingGovernance,
-          );
-        })(),
-        options.onQualityAccepted?.(docId) ?? Promise.resolve(),
-      ]);
-      const failedIndex = indexResults.find(
-        (result): result is PromiseRejectedResult =>
-          result.status === 'rejected',
-      );
-      if (failedIndex) {
-        await this.context.cleanupFailedExternalIndexes(docId, userId);
-        throw failedIndex.reason;
+        });
+      } catch (error) {
+        this.context.logger.warn(
+          `Synchronous search indexing failed; outbox will retry: docId=${docId}, error=${(error as Error).message}`,
+        );
       }
+      await (options.onQualityAccepted?.(docId) ?? Promise.resolve());
 
       // 图片检索是可选索引：文档中的本地图片资产与原始图片统一替换为完整集合。
       let imageIndexResult: UploadResult['imageIndex'];

@@ -92,11 +92,7 @@ export class RetrievalSources {
           scope,
           allowedDocIds ?? undefined,
         );
-        bm25Hits = this.postprocessor.mergeRankedHits(
-          esHits,
-          localBm25Hits,
-          candidateDepth,
-        );
+        bm25Hits = esHits;
       }
       this.metricsService.observeRetrievalStage(
         'bm25',
@@ -109,7 +105,10 @@ export class RetrievalSources {
         'error',
         Number(process.hrtime.bigint() - bm25StartedAt) / 1e9,
       );
-      throw error;
+      if (localBm25Hits.length === 0) throw error;
+      this.logger.warn(
+        `Elasticsearch keyword search failed; using local BM25 migration fallback: ${(error as Error).message}`,
+      );
     }
     const bm25Source = this.elasticsearchProvider.isEnabled()
       ? 'elasticsearch'
@@ -125,10 +124,8 @@ export class RetrievalSources {
       bm25Hits.length,
     );
 
-    // 2. 向量检索：Milvus 为主通道；RAG_ES_KNN_MODE 控制 ES kNN 降级（fallback）/并行（always）通道
-    const esKnnMode = this.resolveEsKnnMode();
-    const esKnnReady =
-      esKnnMode !== 'off' && this.elasticsearchProvider.isEnabled();
+    // 主文档向量召回统一走 Elasticsearch；Milvus 仅兼容 ES 不可用时的旧索引。
+    const esKnnReady = this.elasticsearchProvider.isEnabled();
     let cosineHits: Awaited<
       ReturnType<VectorStoreProvider['similaritySearch']>
     > = [];
@@ -143,17 +140,16 @@ export class RetrievalSources {
       const vectorStartedAt = process.hrtime.bigint();
       try {
         queryVector = await this.embeddingProvider.embedQuery(normalizedQuery);
-        const skipMilvus =
-          esKnnMode === 'fallback' &&
-          esKnnReady &&
-          !this.isMilvusRuntimeAvailable();
-        if (skipMilvus) {
-          // fallback 模式下 Milvus 运行时不可用：直接走 ES kNN，不浪费一次必然失败的调用
-          this.logger.warn(
-            'Milvus runtime unavailable, switching vector channel to ES kNN (RAG_ES_KNN_MODE=fallback)',
+        if (esKnnReady) {
+          cosineHits = await this.esKnnVectorHits(
+            queryVector,
+            candidateDepth,
+            userId,
+            scope,
+            allowedDocIds ?? undefined,
           );
         } else {
-          // cd：向量查询
+          // 迁移期兼容：ES 不可用时才读取既有 Milvus 主 chunk 集合。
           cosineHits = await this.vectorStoreProvider.similaritySearch(
             queryVector,
             candidateDepth,
@@ -181,35 +177,6 @@ export class RetrievalSources {
           'retrieval.bm25_fallback',
           `**向量检索失败，已降级 BM25**\n\n错误：${(err as Error).message.slice(0, 300)}`,
         );
-      }
-      // fallback：Milvus 失败/不可用时补 ES kNN；always：Milvus 正常也并行拉 ES kNN
-      if (
-        queryVector &&
-        esKnnReady &&
-        (!milvusUsed || esKnnMode === 'always')
-      ) {
-        try {
-          const knnHits = await this.esKnnVectorHits(
-            chunkMeta,
-            queryVector,
-            candidateDepth,
-            userId,
-            scope,
-            allowedDocIds ?? undefined,
-          );
-          if (knnHits.length > 0) {
-            // always 模式：两路向量候选按 chunk id 去重合并进 cosine 池再进 fuseByRrf
-            const seenIds = new Set(cosineHits.map((hit) => hit.id));
-            cosineHits = [
-              ...cosineHits,
-              ...knnHits.filter((hit) => !seenIds.has(hit.id)),
-            ];
-          }
-        } catch (err) {
-          this.logger.warn(
-            `ES kNN vector search failed: ${(err as Error).message}`,
-          );
-        }
       }
       // 2. 查找引用片段
       if (queryVector && this.retrievalDescriptionService) {
@@ -241,11 +208,12 @@ export class RetrievalSources {
           );
         }
       }
-      vectorSource =
-        milvusUsed || descriptionUsed
-          ? 'milvus'
-          : queryVector && esKnnReady
-            ? 'elasticsearch'
+      vectorSource = milvusUsed
+        ? 'milvus'
+        : queryVector && esKnnReady
+          ? 'elasticsearch'
+          : descriptionUsed
+            ? 'milvus'
             : 'none';
       this.metricsService.observeRetrievalStage(
         'vector_search',
@@ -254,7 +222,7 @@ export class RetrievalSources {
       );
     }
     this.metricsService.observeRetrievalHits(
-      'milvus',
+      vectorSource === 'none' ? 'elasticsearch' : vectorSource,
       vectorSearch ? 'hybrid' : 'keyword',
       cosineHits.length,
     );
@@ -276,25 +244,7 @@ export class RetrievalSources {
     };
   }
 
-  private resolveEsKnnMode(): 'off' | 'fallback' | 'always' {
-    const raw = (
-      this.configService.get<string>('RAG_ES_KNN_MODE') ?? 'fallback'
-    )
-      .trim()
-      .toLowerCase();
-    return raw === 'off' || raw === 'always' ? raw : 'fallback';
-  }
-
-  private isMilvusRuntimeAvailable(): boolean {
-    try {
-      return this.vectorStoreProvider.getRuntimeStatus().available;
-    } catch {
-      return true;
-    }
-  }
-
   private async esKnnVectorHits(
-    chunkMeta: ReadonlyMap<string, Omit<IndexedChunk, 'id'>>,
     queryVector: number[],
     candidateDepth: number,
     userId?: string,
@@ -311,23 +261,12 @@ export class RetrievalSources {
         allowedDocIds,
       },
     );
-    return knnHits.flatMap((hit) => {
-      const meta = chunkMeta.get(hit.id);
-      if (meta == null) return [];
-      if (allowedDocIds != null) {
-        if (allowedDocIds.has(meta.docId) === false) return [];
-      } else if (userId != null && meta.userId !== userId) {
-        return [];
-      }
-      return [
-        {
-          id: hit.id,
-          content: meta.content,
-          docId: meta.docId,
-          chunkIndex: meta.chunkIndex,
-          score: hit.score,
-        },
-      ];
-    });
+    return knnHits.map((hit) => ({
+      id: hit.id,
+      content: hit.content,
+      docId: hit.docId,
+      chunkIndex: hit.chunkIndex,
+      score: hit.score,
+    }));
   }
 }
