@@ -85,8 +85,8 @@ export class RetrievalSources {
     } = input;
     const queryVectorAttempt = vectorSearch
       ? this.embeddingProvider.embedQuery(normalizedQuery).then(
-          (vector) => ({ vector, error: null as unknown }),
-          (error: unknown) => ({ vector: null as number[] | null, error }),
+          (vector) => ({ ok: true as const, vector }),
+          (error: unknown) => ({ ok: false as const, error }),
         )
       : null;
     let bm25Hits = localBm25Hits;
@@ -150,11 +150,12 @@ export class RetrievalSources {
       try {
         const embedded = await queryVectorAttempt;
         if (!embedded) throw new Error('embedding not scheduled');
-        if (embedded.error) throw embedded.error;
-        queryVector = embedded.vector;
+        if (!embedded.ok) throw embedded.error;
+        const vector = embedded.vector;
+        queryVector = vector;
         if (esKnnReady) {
           cosineHits = await this.esKnnVectorHits(
-            queryVector,
+            vector,
             candidateDepth,
             userId,
             scope,
@@ -163,7 +164,7 @@ export class RetrievalSources {
         } else {
           // 迁移期兼容：ES 不可用时才读取既有 Milvus 主 chunk 集合。
           cosineHits = await this.vectorStoreProvider.similaritySearch(
-            queryVector,
+            vector,
             candidateDepth,
             userId,
             allowedDocIds ?? undefined,
