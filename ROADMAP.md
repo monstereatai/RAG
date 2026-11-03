@@ -9,6 +9,7 @@
 - 外部依赖或目标环境尚未验证时，标为待办或阻塞，不作生产就绪结论。
 
 ## 当前状态
+- **管理端开发环境 Module Federation 加载错误（2026-11-03）**：在管理端 `config.ts` 关闭 MFSU，避免 stale remote container 引用缺失模块；不改依赖。管理端开发服务器重新编译后页面返回 200、跳转登录页，`umi.js` 不再引用 MFSU remote，浏览器控制台无错误；配置文件 Biome lint 通过。全量 TypeScript 检查仍被无关页面缺少 `Alert` 导入阻断。
 - **代码文件入库（2026-11-03）**：用户端与管理端上传入口支持常见源码和配置文本；后端按 UTF-8 文本解析并沿用现有切块、脱敏和检索链路，不执行或编译文件。代码文件跳过入库阶段的提示注入整篇隔离，生成前仍保留检索上下文清理。RAG API 与用户端 build、改动文件定向 lint、管理端 Biome lint 和 `git diff --check` 通过；管理端 TypeScript 检查被既有 `workflow-detail-artifact-sections.tsx` 中未导入 `Alert` 阻断；未运行测试。
 - **父子块正文去重（2026-11-03）**：普通入库与增量更新把父正文作为 `chunkType='parent'` 独立行保存，叶子行只保留 `parentChunkId`；父 ID 随父正文变化，增量匹配同时校验父 ID，避免旧版本叶子被错误指向新父文。ES 与开发 BM25 不再写入父正文；检索候选回 PostgreSQL 回填父文，并保留旧行 `parentContent` 读取兼容。入库、检索重建、审计、检索描述、图片计数与 Obsidian 原文重建均限定叶子行。复用既有字段，无 schema 变更或历史回填。RAG API build 通过；全量 ESLint 失败并报告大量错误，改动文件 lint 的剩余问题集中在 hybrid chunker 原有格式；本次未运行 Jest 或真实问答检索验证，需后续补做。
 - **文档正文检索存储收敛（2026-11-03）**：PostgreSQL `document_chunks` 作为脱敏正文与引用元数据权威源；Elasticsearch 同时承载 BM25 与 dense_vector 主召回，候选命中后回 PostgreSQL 回填正文、版本、定位和引用字段。正文 chunk 不再写入 Milvus，生产环境关闭本地 BM25；Milvus 仅保留非正文专用集合及迁移期 ES 不可用兼容读取。文档与增量 chunk 在 PostgreSQL 事务内写入既有 `domain_event_outbox`，内部处理器可从 PostgreSQL 全量重建 ES；同步 ES 写仅作为低延迟 fast-path。未新增数据库 schema，目标文件 ESLint、RAG API build 与目标 `git diff --check` 通过；未运行单测，历史数据回填、真实 ES 故障恢复和生产压测仍待目标环境验证。

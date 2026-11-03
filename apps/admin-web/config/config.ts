@@ -87,6 +87,7 @@ export default defineConfig({
    * @description 一个不错的热更新组件，更新时可以保留 state
    */
   fastRefresh: true,
+  mfsu: false,
   /**
    * @name 路由预加载
    * @description 预加载路由资源，提升页面切换速度
