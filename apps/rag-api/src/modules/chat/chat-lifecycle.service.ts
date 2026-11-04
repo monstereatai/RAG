@@ -677,33 +677,6 @@ export class ChatLifecycleService {
     });
   }
 
-  protected createConversation(
-    query: string,
-    mode: ChatMode,
-    userId: string,
-    tenantId?: string,
-  ): Promise<string> {
-    return tenantId?.trim()
-      ? this.conversationService.create(query, mode, userId, tenantId.trim())
-      : this.conversationService.create(query, mode, userId);
-  }
-
-  protected getConversationHistory(
-    threadId: string,
-    maxTurns: number,
-    userId: string,
-    tenantId?: string,
-  ) {
-    return tenantId?.trim()
-      ? this.conversationService.getRecentHistory(
-          threadId,
-          maxTurns,
-          userId,
-          tenantId.trim(),
-        )
-      : this.conversationService.getRecentHistory(threadId, maxTurns, userId);
-  }
-
   protected getConversation(
     threadId: string,
     userId: string,

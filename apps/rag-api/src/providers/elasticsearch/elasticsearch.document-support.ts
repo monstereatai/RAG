@@ -5,7 +5,7 @@ import type {
   IndexedDocument,
 } from './elasticsearch.provider.types';
 
-const ES_DOCUMENT_WRITE_TIMEOUT_MS = 30_000;
+const ES_DOCUMENT_WRITE_TIMEOUT_MS = 120_000;
 
 export abstract class ElasticsearchDocumentSupport {
   protected abstract readonly logger: Logger;

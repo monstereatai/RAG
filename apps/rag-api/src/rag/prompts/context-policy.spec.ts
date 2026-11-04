@@ -47,6 +47,14 @@ describe('context policy', () => {
       shouldClarifyQueryPlan(
         plan({ clarificationQuestion: '请补充项目或业务场景' }),
       ),
+    ).toBe(false);
+    expect(
+      shouldClarifyQueryPlan(
+        plan({
+          action: 'direct',
+          clarificationQuestion: '请补充项目或业务场景',
+        }),
+      ),
     ).toBe(true);
   });
 

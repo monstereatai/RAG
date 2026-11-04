@@ -76,8 +76,8 @@ function codeIndexFields(sourceMetadata?: string | null): Record<string, string>
   } catch { return {}; }
 }
 
-const ES_CHUNK_BULK_BATCH_SIZE = 100;
-const ES_CHUNK_BULK_TIMEOUT_MS = 30_000;
+const ES_CHUNK_BULK_BATCH_SIZE = 20;
+const ES_CHUNK_BULK_TIMEOUT_MS = 60_000;
 
 /**
  * Elasticsearch Provider
@@ -719,30 +719,36 @@ export class ElasticsearchProvider
     const filter: estypes.QueryDslQueryContainer[] = [{ term: { docId } }];
     if (userId) filter.push({ term: { userId } });
     try {
-      const chunks = await this.client.updateByQuery({
-        index: this.indexName,
-        query: { bool: { filter } },
-        script: {
-          source: 'ctx._source.lifecycleStatus = params.status',
-          params: { status: lifecycleStatus },
+      const chunks = await this.client.updateByQuery(
+        {
+          index: this.indexName,
+          query: { bool: { filter } },
+          script: {
+            source: 'ctx._source.lifecycleStatus = params.status',
+            params: { status: lifecycleStatus },
+          },
+          refresh: true,
         },
-        refresh: true,
-      });
+        { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+      );
       const chunkFailureCount = chunks.failures?.length ?? 0;
       if (chunks.timed_out || chunkFailureCount > 0) {
         throw new Error(
           `ES chunk lifecycle update incomplete: timedOut=${chunks.timed_out}, failures=${chunkFailureCount}`,
         );
       }
-      const documents = await this.client.updateByQuery({
-        index: this.documentIndexName,
-        query: { bool: { filter } },
-        script: {
-          source: 'ctx._source.lifecycleStatus = params.status',
-          params: { status: lifecycleStatus },
+      const documents = await this.client.updateByQuery(
+        {
+          index: this.documentIndexName,
+          query: { bool: { filter } },
+          script: {
+            source: 'ctx._source.lifecycleStatus = params.status',
+            params: { status: lifecycleStatus },
+          },
+          refresh: true,
         },
-        refresh: true,
-      });
+        { requestTimeout: ES_CHUNK_BULK_TIMEOUT_MS },
+      );
       const documentFailureCount = documents.failures?.length ?? 0;
       if (documents.timed_out || documentFailureCount > 0) {
         throw new Error(

@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, Raw, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
@@ -63,18 +63,26 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
         : 30 * 60_000,
     );
     const staleAfterMinutes = Math.ceil(staleAfterMs / 60_000);
-    const cutoff = new Date(Date.now() - staleAfterMs);
+    // PostgreSQL timestamp 列按 UTC 写入；用 UTC 字面时间比较，避免 pg 将 Date
+    // 序列化为本机 +08:00 后按无时区 timestamp 比较，误停刚启动的 Run。
+    const staleCutoffUtc = new Date(Date.now() - staleAfterMs)
+      .toISOString()
+      .slice(0, 23)
+      .replace('T', ' ');
+    const staleUpdatedAt = Raw((column) => `${column} < :staleCutoffUtc`, {
+      staleCutoffUtc,
+    });
     try {
       await this.retryPendingStaleCancellationSignals();
       const staleRuns = await this.runRepo.find({
-        where: { status: 'running', updatedAt: LessThan(cutoff) },
+        where: { status: 'running', updatedAt: staleUpdatedAt },
         order: { updatedAt: 'ASC' },
         take: 100,
       });
       for (const run of staleRuns) {
         const errorMessage = `运行超过 ${staleAfterMinutes} 分钟没有进展，已停止自动执行。为避免重复执行结果未知的工具操作，请检查运行事件后再手动重试。`;
         const update = await this.runRepo.update(
-          { id: run.id, status: 'running', updatedAt: LessThan(cutoff) },
+          { id: run.id, status: 'running', updatedAt: staleUpdatedAt },
           {
             status: 'failed',
             errorMessage,

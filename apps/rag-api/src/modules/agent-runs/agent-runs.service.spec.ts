@@ -87,7 +87,7 @@ describe('AgentRunsService runtime controls', () => {
       ...run,
       updatedAt: new Date(Date.now() - 31 * 60_000),
     };
-    repo.find.mockResolvedValueOnce([staleRun]);
+    repo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([staleRun]);
 
     await (
       service as unknown as { recoverStaleRuns: () => Promise<void> }
@@ -110,13 +110,40 @@ describe('AgentRunsService runtime controls', () => {
     );
   });
 
+  it('compares stale timestamps using UTC values for PostgreSQL', async () => {
+    const { service, repo } = createService();
+    const now = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-11-04T06:00:00.000Z'));
+    try {
+      await (
+        service as unknown as { recoverStaleRuns: () => Promise<void> }
+      ).recoverStaleRuns();
+      const findCalls = repo.find.mock.calls as unknown as Array<
+        [
+          {
+            where: {
+              updatedAt: { objectLiteralParameters: Record<string, unknown> };
+            };
+          },
+        ]
+      >;
+      const staleScan = findCalls[1]?.[0];
+      expect(staleScan.where.updatedAt.objectLiteralParameters).toEqual({
+        staleCutoffUtc: '2026-11-04 05:30:00.000',
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('does not signal cancellation when another transition wins stale-run CAS', async () => {
     const { service, repo, events, redis, run } = createService();
     const staleRun = {
       ...run,
       updatedAt: new Date(Date.now() - 31 * 60_000),
     };
-    repo.find.mockResolvedValueOnce([staleRun]);
+    repo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([staleRun]);
     repo.update.mockResolvedValueOnce({ affected: 0 });
 
     await (
@@ -133,7 +160,10 @@ describe('AgentRunsService runtime controls', () => {
       ...run,
       updatedAt: new Date(Date.now() - 31 * 60_000),
     };
-    repo.find.mockResolvedValueOnce([staleRun]);
+    repo.find
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([staleRun])
+      .mockResolvedValueOnce([run]);
     redis.setRequiredOrThrow.mockRejectedValueOnce(
       new Error('Redis temporarily unavailable'),
     );

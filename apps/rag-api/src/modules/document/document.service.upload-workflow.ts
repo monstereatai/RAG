@@ -457,7 +457,6 @@ export class DocumentUploadWorkflow {
           aggregateType: 'document',
           aggregateId: docId,
           payload: { userId, indexGeneration },
-          idempotencyKey: `${DOCUMENT_SEARCH_INDEX_UPSERT_EVENT}:${docId}:${indexGeneration}`,
         });
       });
       if (!options.preservePermissions) {

@@ -387,7 +387,6 @@ export class DocumentChunkWorkflow {
           userId: input.userId,
           indexGeneration: input.indexGeneration,
         },
-        idempotencyKey: `${DOCUMENT_SEARCH_INDEX_UPSERT_EVENT}:${input.docId}:${input.indexGeneration}`,
       });
     });
 

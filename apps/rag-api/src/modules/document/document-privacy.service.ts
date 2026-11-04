@@ -29,9 +29,9 @@ interface Redaction {
 }
 
 const MAX_ANALYSIS_CHARS = 20_000_000;
-const SEGMENT_CHARS = 16_000;
+const SEGMENT_CHARS = 4_000;
 const SEGMENT_OVERLAP = 64;
-const BATCH_SIZE = 24;
+const BATCH_SIZE = 2;
 const ENTITY_LABELS: Record<DocumentPiiEntity, string> = {
   CN_MOBILE_PHONE: '[手机号]',
   CN_RESIDENT_ID: '[身份证号]',

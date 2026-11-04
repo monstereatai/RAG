@@ -124,11 +124,11 @@ export class ChatService {
         : Promise.resolve(undefined),
       req.threadId
         ? Promise.resolve(req.threadId)
-        : this.createConversation(
+        : this.conversationService.create(
             req.query,
             mode,
             userId,
-            executionOptions?.tenantId,
+            executionOptions?.tenantId?.trim() || undefined,
           ),
     ]);
     const preparedContext = await this.chatContextBuilder.build({
@@ -263,16 +263,5 @@ export class ChatService {
       tenantId,
       onEvent,
     );
-  }
-
-  private createConversation(
-    query: string,
-    mode: ChatMode,
-    userId: string,
-    tenantId?: string,
-  ): Promise<string> {
-    return tenantId?.trim()
-      ? this.conversationService.create(query, mode, userId, tenantId.trim())
-      : this.conversationService.create(query, mode, userId);
   }
 }

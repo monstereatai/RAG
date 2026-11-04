@@ -73,6 +73,38 @@ describe('DocumentPrivacyService', () => {
     expect(result.entityTypes).toEqual([]);
   });
 
+  it('scans long text in bounded batches without skipping segment boundaries', async () => {
+    const service = new DocumentPrivacyService();
+    const batches: string[][] = [];
+    (service as unknown as { http: typeof fetch }).http = jest.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(bodyText(init)) as { text: string[] };
+        batches.push(body.text);
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(body.text.map((text) => findingsFor(text))),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      },
+    ) as typeof fetch;
+
+    const source = `${'a'.repeat(4_000)}${examples.phone}${'b'.repeat(5_000)}`;
+    const result = await service.redactText(source);
+
+    expect(result.text).toBe(
+      `${'a'.repeat(4_000)}[手机号]${'b'.repeat(5_000)}`,
+    );
+    expect(batches.length).toBeGreaterThan(1);
+    expect(batches.every((batch) => batch.length <= 2)).toBe(true);
+    expect(batches.flat().every((segment) => segment.length <= 4_000)).toBe(
+      true,
+    );
+  });
+
   it('accepts a country-prefixed mobile number and lowercase ID check digit', async () => {
     const service = new DocumentPrivacyService();
     installAnalyzer(service);

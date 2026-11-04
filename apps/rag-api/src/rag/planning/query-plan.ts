@@ -186,7 +186,10 @@ export function isObjectiveKnowledgePlan(plan?: QueryPlan): boolean {
 }
 
 export function shouldClarifyQueryPlan(plan?: QueryPlan): boolean {
-  return Boolean(plan?.clarificationQuestion?.trim());
+  // 已规划为检索的问题先查证据；模型附带的澄清建议不能截断 auto→Agentic。
+  return Boolean(
+    plan?.action !== 'retrieve' && plan?.clarificationQuestion?.trim(),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
