@@ -60,8 +60,8 @@ export class StartProductionWorkflowDto {
   riskApprovalThreshold?: 'medium' | 'high';
 
   @IsOptional()
-  @IsIn(['sequential', 'hierarchical', 'conditional'])
-  processType?: 'sequential' | 'hierarchical' | 'conditional';
+  @IsIn(['sequential', 'hierarchical'])
+  processType?: 'sequential' | 'hierarchical';
 
   /** 声明式插件组合；未传时使用产研运基础能力包。 */
   @IsOptional()

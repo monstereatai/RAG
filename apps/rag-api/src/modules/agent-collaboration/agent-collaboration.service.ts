@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { AgentSopEntity } from '../../providers/db/entities/agent-sop.entity';
 import { AgentCollaborationMessageEntity } from '../../providers/db/entities/agent-collaboration-message.entity';
@@ -136,9 +136,15 @@ export class AgentCollaborationService {
     subject: string;
     payload?: unknown;
     artifactIds?: string[];
+    idempotencyKey?: string;
   }) {
+    const messageId = input.idempotencyKey
+      ? createHash('sha256')
+          .update(`${input.threadId}:${input.idempotencyKey}`)
+          .digest('hex')
+      : randomUUID();
     const entity = this.messages.create({
-      id: randomUUID(),
+      id: messageId,
       threadId: input.threadId,
       runId: input.runId ?? null,
       fromRole: input.fromRole,
@@ -149,13 +155,18 @@ export class AgentCollaborationService {
       artifactIds: this.json(input.artifactIds ?? []),
       status: 'published',
     });
-    const saved = await this.messages.save(entity);
+    const saved = input.idempotencyKey
+      ? await this.saveMessageOnce(entity)
+      : await this.messages.save(entity);
     await this.events.emit({
       threadId: input.threadId,
       runId: input.runId,
       eventType: 'message.published',
       actor: input.fromRole,
       target: input.toRole,
+      idempotencyKey: input.idempotencyKey
+        ? `message.published:${messageId}`
+        : undefined,
       payload: {
         messageType: input.messageType ?? 'handoff',
         subject: input.subject,
@@ -163,6 +174,17 @@ export class AgentCollaborationService {
       },
     });
     return this.viewMessage(saved);
+  }
+
+  private async saveMessageOnce(entity: AgentCollaborationMessageEntity) {
+    await this.messages
+      .createQueryBuilder()
+      .insert()
+      .into(AgentCollaborationMessageEntity)
+      .values(entity)
+      .orIgnore()
+      .execute();
+    return this.messages.findOneByOrFail({ id: entity.id });
   }
 
   async listMessages(threadId?: string) {

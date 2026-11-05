@@ -1,3 +1,4 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import { createHash } from 'node:crypto';
 import {
   PRODUCTION_ROLES,
@@ -15,10 +16,14 @@ import {
   getRegisteredToolTimeoutMs,
 } from '../../tools/tool-execution.service';
 import { RISK_RANK } from './production-workflow.shared';
-import { ProductionWorkflowStateBase } from './production-workflow.state-service';
 
-export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkflowStateBase {
-  protected degradedRoleResult(
+export class ProductionWorkflowRoleSupport {
+  readonly context: ProductionWorkflowContext;
+
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
+  degradedRoleResult(
     role: ProductionRole,
     state: ProductionWorkflowStateType,
     toolResult: Awaited<ReturnType<ProductionWorkflowTools['gather']>>,
@@ -79,7 +84,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     };
   }
 
-  protected validateClaims(
+  validateClaims(
     claims: ProductionClaim[],
     evidence: ProductionStageResult['evidence'],
   ): ProductionClaim[] {
@@ -97,7 +102,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     });
   }
 
-  protected evidenceCoverage(claims: ProductionClaim[]): number {
+  evidenceCoverage(claims: ProductionClaim[]): number {
     if (claims.length === 0) return 1;
     const supported = claims.filter(
       (claim) => claim.status === 'supported',
@@ -105,17 +110,17 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     return Number((supported / claims.length).toFixed(4));
   }
 
-  protected sleep(durationMs: number): Promise<void> {
+  sleep(durationMs: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, durationMs));
   }
 
-  protected async publishRoleArtifact(
+  async publishRoleArtifact(
     state: ProductionWorkflowStateType,
     result: ProductionStageResult,
   ) {
-    this.assertLeaseOwned(state.threadId);
+    this.context.state.assertLeaseOwned(state.threadId);
     const startedAt = Date.now();
-    const authorization = this.toolPolicy?.decide('artifact_generate', {
+    const authorization = this.context.toolPolicy?.decide('artifact_generate', {
       mode: 'production',
       role: result.role,
       pluginKeys: state.pluginKeys,
@@ -130,10 +135,15 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
         fallback: '交付内容保留在工作流状态中，等待管理员修正工具授权。',
         error: authorization.reason,
       });
-      await this.emitRuntimeEvent(state, 'policy.denied', result.role, {
-        tool: 'artifact_generate',
-        reason: authorization.reason,
-      });
+      await this.context.events.emitRuntimeEvent(
+        state,
+        'policy.denied',
+        result.role,
+        {
+          tool: 'artifact_generate',
+          reason: authorization.reason,
+        },
+      );
       return undefined;
     }
     const sourceText = this.renderDeliverables(
@@ -142,8 +152,8 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
       result.lowCodeSchemas,
     );
     try {
-      const execution = this.toolExecution
-        ? await this.toolExecution.execute({
+      const execution = this.context.toolExecution
+        ? await this.context.toolExecution.execute({
             toolName: 'artifact_generate',
             threadId: state.threadId,
             runId: state.runId || undefined,
@@ -162,7 +172,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
             sideEffect: true,
             idempotencyKey: `workflow-artifact:${state.threadId}:${result.role}:${this.contentHash(sourceText)}`,
             execute: () =>
-              this.artifacts.create({
+              this.context.artifacts.create({
                 ownerUserId: state.userId,
                 threadId: state.threadId,
                 title: `${state.projectId}-${result.role}-交付物`,
@@ -176,7 +186,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
               'artifact_generate',
               getRegisteredToolTimeoutMs('artifact_generate'),
               () =>
-                this.artifacts.create({
+                this.context.artifacts.create({
                   ownerUserId: state.userId,
                   threadId: state.threadId,
                   title: `${state.projectId}-${result.role}-交付物`,
@@ -217,7 +227,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     }
   }
 
-  protected renderDeliverables(
+  renderDeliverables(
     deliverables: ProductionDeliverable[],
     claims: ProductionClaim[],
     lowCodeSchemas: ProductionLowCodeSchema[] = [],
@@ -250,7 +260,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     ].join('\n\n');
   }
 
-  protected normalizeLowCodeSchemas(
+  normalizeLowCodeSchemas(
     role: ProductionRole,
     state: ProductionWorkflowStateType,
     input: unknown,
@@ -264,7 +274,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
       : this.defaultLowCodeSchemas(role, state);
   }
 
-  protected normalizeLowCodeSchemaItem(
+  normalizeLowCodeSchemaItem(
     role: ProductionRole,
     item: unknown,
   ): ProductionLowCodeSchema | null {
@@ -306,7 +316,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     };
   }
 
-  protected recordArray(value: unknown): Array<Record<string, unknown>> {
+  recordArray(value: unknown): Array<Record<string, unknown>> {
     return Array.isArray(value)
       ? value
           .filter(
@@ -316,7 +326,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
       : [];
   }
 
-  protected defaultLowCodeSchemas(
+  defaultLowCodeSchemas(
     role: ProductionRole,
     state: ProductionWorkflowStateType,
   ): ProductionLowCodeSchema[] {
@@ -421,11 +431,11 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     ];
   }
 
-  protected contentHash(content: string): string {
+  contentHash(content: string): string {
     return createHash('sha256').update(content).digest('hex').slice(0, 32);
   }
 
-  protected validateGeneratedProject<
+  validateGeneratedProject<
     T extends {
       files: Array<{ path: string; content: string }>;
       runCommand: string;
@@ -463,7 +473,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     return project;
   }
 
-  protected deliveryVerification(project: {
+  deliveryVerification(project: {
     projectName: string;
     framework: string;
     files: Array<{ path: string; content: string }>;
@@ -500,7 +510,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     };
   }
 
-  protected requiresRoleApproval(
+  requiresRoleApproval(
     role: ProductionRole,
     result: ProductionStageResult,
     state: ProductionWorkflowStateType,
@@ -513,7 +523,7 @@ export abstract class ProductionWorkflowRoleSupportBase extends ProductionWorkfl
     );
   }
 
-  protected unionRoles(
+  unionRoles(
     current: ProductionRole[],
     additions: ProductionRole[],
   ): ProductionRole[] {

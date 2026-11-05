@@ -181,6 +181,12 @@ export const AgenticRagState = Annotation.Root({
     default: () => '',
   }),
 
+  /** 反思失败后的修复节点：证据缺失时重检索，否则重新生成。 */
+  retryTarget: Annotation<'generate' | 'retrieval'>({
+    reducer: (_prev, next) => next,
+    default: () => 'generate',
+  }),
+
   /** 是否通过 reflection */
   passed: Annotation<boolean>({
     reducer: (_prev, next) => next,

@@ -1,22 +1,25 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import {
   ProductionRole,
   ProductionWorkflowStateType,
 } from './production-workflow.state';
 import { dependenciesForProductionRole } from './production-workflow.plan';
-import { ProductionWorkflowRuntimeBase } from './production-workflow.runtime';
 
-export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRuntimeBase {
-  protected config(threadId: string) {
+export class ProductionWorkflowEvents {
+  readonly context: ProductionWorkflowContext;
+
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
+  config(threadId: string) {
     return { configurable: { thread_id: `production:${threadId}` } };
   }
 
-  protected workflowIndexKey(userId: string, threadId: string) {
+  workflowIndexKey(userId: string, threadId: string) {
     return `production:workflow:${userId}:${threadId}`;
   }
 
-  protected async saveWorkflowIndex(
-    view: ReturnType<ProductionWorkflowEventBase['view']>,
-  ) {
+  async saveWorkflowIndex(view: ReturnType<ProductionWorkflowEvents['view']>) {
     const index = {
       ...view,
       brief: undefined,
@@ -47,35 +50,36 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         ]),
       ),
     };
-    this.workflowIndexMemory.set(`${view.userId}:${view.threadId}`, index);
-    await this.redisProvider.set(
+    this.context.workflowIndexMemory.set(
+      `${view.userId}:${view.threadId}`,
+      index,
+    );
+    await this.context.redisProvider.set(
       this.workflowIndexKey(view.userId, view.threadId),
       JSON.stringify(index),
     );
-    await this.redisProvider.zadd(
+    await this.context.redisProvider.zadd(
       `production:workflows:${view.userId}`,
       Date.now(),
       view.threadId,
     );
   }
 
-  protected async saveWorkflowIndexBestEffort(
-    view: ReturnType<ProductionWorkflowEventBase['view']>,
+  async saveWorkflowIndexBestEffort(
+    view: ReturnType<ProductionWorkflowEvents['view']>,
   ): Promise<void> {
     try {
       await this.saveWorkflowIndex(view);
     } catch (error) {
-      this.logger.warn(
+      this.context.logger.warn(
         `production workflow ${view.threadId} index persistence failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
-  protected async traceLangfuse(
-    state: ProductionWorkflowStateType,
-  ): Promise<void> {
-    if (!this.langfuseProvider) return;
-    await this.langfuseProvider.traceProductionWorkflow({
+  async traceLangfuse(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.context.langfuseProvider) return;
+    await this.context.langfuseProvider.traceProductionWorkflow({
       userId: state.userId,
       threadId: state.threadId,
       projectId: state.projectId,
@@ -106,9 +110,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     });
   }
 
-  protected async emitWorkflowState(
-    state: ProductionWorkflowStateType,
-  ): Promise<void> {
+  async emitWorkflowState(state: ProductionWorkflowStateType): Promise<void> {
     const runId = state.runId;
     if (state.status === 'revision_required') {
       await this.emitDomainEvent('workflow.revision_required', state, {
@@ -134,7 +136,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         reason: 'Artifact 已驳回，等待人工确认后启动修订。',
       });
       if (runId) {
-        await this.agentRuns?.finish(runId, {
+        await this.context.agentRuns?.finish(runId, {
           route: 'production_workflow',
           status: 'waiting_approval',
           requiresApproval: true,
@@ -163,7 +165,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         reason: '等待人工审批。',
       });
       if (runId) {
-        await this.agentRuns?.finish(runId, {
+        await this.context.agentRuns?.finish(runId, {
           route: 'production_workflow',
           status: 'waiting_approval',
           requiresApproval: true,
@@ -196,7 +198,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         },
       );
       if (runId) {
-        await this.agentRuns?.finish(runId, {
+        await this.context.agentRuns?.finish(runId, {
           route: 'production_workflow',
           status: 'completed',
           resultSummary: `${state.projectId}：已完成 ${state.completedRoles.length}/${state.selectedRoles.length} 个岗位交付。`,
@@ -215,7 +217,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         { reason: state.error ?? '用户取消工作流' },
       );
       if (runId) {
-        await this.agentRuns?.finish(runId, {
+        await this.context.agentRuns?.finish(runId, {
           route: 'production_workflow',
           status: 'cancelled',
           cancelledAt: new Date(),
@@ -251,7 +253,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         },
       );
       if (runId) {
-        await this.agentRuns?.finish(runId, {
+        await this.context.agentRuns?.finish(runId, {
           route: 'production_workflow',
           status: 'failed',
           errorMessage: state.error,
@@ -261,15 +263,16 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     }
   }
 
-  protected async emitRuntimeEvent(
+  async emitRuntimeEvent(
     state: ProductionWorkflowStateType,
     eventType: string,
     actor: string,
     payload: unknown,
+    idempotencyKey?: string,
   ): Promise<void> {
-    if (!this.runtimeEvents) return;
+    if (!this.context.runtimeEvents) return;
     try {
-      await this.runtimeEvents.emit({
+      await this.context.runtimeEvents.emit({
         tenantId: state.tenantId,
         threadId: state.threadId,
         runId: state.runId || undefined,
@@ -277,21 +280,22 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         actor,
         target: state.projectId,
         payload,
+        idempotencyKey,
       });
     } catch (error) {
-      this.logger.warn(
+      this.context.logger.warn(
         `Runtime event skipped: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
-  protected async emitDomainEvent(
+  async emitDomainEvent(
     eventType: string,
     state: ProductionWorkflowStateType,
     payload: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.domainEvents?.emit({
+      await this.context.domainEvents?.emit({
         tenantId: state.tenantId,
         eventType,
         aggregateType: 'production_workflow',
@@ -303,17 +307,13 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
         },
       });
     } catch (error) {
-      this.logger.warn(
+      this.context.logger.warn(
         `Domain event skipped: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
-  protected view(
-    threadId: string,
-    state: ProductionWorkflowStateType,
-    userId: string,
-  ) {
+  view(threadId: string, state: ProductionWorkflowStateType, userId: string) {
     return {
       threadId,
       runId: state.runId,
@@ -349,12 +349,12 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     };
   }
 
-  protected revisionAwareBrief(state: ProductionWorkflowStateType): string {
+  revisionAwareBrief(state: ProductionWorkflowStateType): string {
     if (!state.supplementalMaterials) return state.brief;
     return `${state.brief}\n\n本次修订的人工补充资料（待核验）：\n${state.supplementalMaterials}`;
   }
 
-  protected withRevisionPackage(
+  withRevisionPackage(
     history: ProductionWorkflowStateType['revisionHistory'],
     supplementalMaterials: string,
     rerunRoles: ProductionRole[],
@@ -371,7 +371,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     );
   }
 
-  protected async emitRevisionRuntimeEventOnce(
+  async emitRevisionRuntimeEventOnce(
     state: ProductionWorkflowStateType,
     eventType: string,
     actor: string,
@@ -379,8 +379,8 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     revisionField: 'revision' | 'nextRevision',
     revision: number,
   ): Promise<void> {
-    if (!this.runtimeEvents) return;
-    const events = await this.runtimeEvents.list(
+    if (!this.context.runtimeEvents) return;
+    const events = await this.context.runtimeEvents.list(
       state.threadId,
       state.runId || undefined,
       state.tenantId?.trim() || 'legacy',
@@ -398,7 +398,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
       return eventPayload?.[revisionField] === revision;
     });
     if (alreadyEmitted) return;
-    await this.runtimeEvents.emit({
+    await this.context.runtimeEvents.emit({
       tenantId: state.tenantId,
       threadId: state.threadId,
       runId: state.runId || undefined,
@@ -409,7 +409,7 @@ export abstract class ProductionWorkflowEventBase extends ProductionWorkflowRunt
     });
   }
 
-  protected downstreamRoles(
+  downstreamRoles(
     roots: ProductionRole[],
     selectedRoles: ProductionRole[],
   ): ProductionRole[] {

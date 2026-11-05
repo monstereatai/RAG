@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DataSource, LessThan, Repository } from 'typeorm';
 import { AgentRuntimeEventEntity } from '../../providers/db/entities/agent-runtime-event.entity';
 
@@ -23,6 +23,7 @@ export class AgentRuntimeEventsService {
     actor: string;
     target?: string;
     payload?: unknown;
+    idempotencyKey?: string;
   }) {
     const previous = this.threadQueues.get(input.threadId) ?? Promise.resolve();
     const write = previous
@@ -50,24 +51,43 @@ export class AgentRuntimeEventsService {
     actor: string;
     target?: string;
     payload?: unknown;
+    idempotencyKey?: string;
   }) {
     const tenantId = input.tenantId ?? 'legacy';
+    const id = input.idempotencyKey
+      ? createHash('sha256')
+          .update(`${tenantId}:${input.threadId}:${input.idempotencyKey}`)
+          .digest('hex')
+      : randomUUID();
+    if (input.idempotencyKey) {
+      const existing = await this.events.findOneBy({ id });
+      if (existing) return existing;
+    }
     const sequence = await this.nextSequence(tenantId, input.threadId);
+    const event = this.events.create({
+      id,
+      tenantId,
+      threadId: input.threadId,
+      runId: input.runId ?? null,
+      taskId: input.taskId ?? null,
+      eventType: input.eventType,
+      actor: input.actor,
+      target: input.target ?? null,
+      sequence,
+      payload: JSON.stringify(input.payload ?? {}),
+    });
+    if (input.idempotencyKey) {
+      await this.events
+        .createQueryBuilder()
+        .insert()
+        .into(AgentRuntimeEventEntity)
+        .values(event)
+        .orIgnore()
+        .execute();
+      return this.events.findOneByOrFail({ id });
+    }
     // cd:运行日志保存
-    return this.events.save(
-      this.events.create({
-        id: randomUUID(),
-        tenantId,
-        threadId: input.threadId,
-        runId: input.runId ?? null,
-        taskId: input.taskId ?? null,
-        eventType: input.eventType,
-        actor: input.actor,
-        target: input.target ?? null,
-        sequence,
-        payload: JSON.stringify(input.payload ?? {}),
-      }),
-    );
+    return this.events.save(event);
   }
 
   private async nextSequence(

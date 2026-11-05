@@ -542,6 +542,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         passed: false,
         retryCount,
         reflectionFeedback: reason.slice(0, 500),
+        retryTarget: 'generate',
       };
     }
 
@@ -579,6 +580,10 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
           '答案置信度 0~1：是否完整回答了问题、是否有引用支撑、是否编造',
         ),
       reason: z.string().describe('评估理由（中文）'),
+      retryTarget: z
+        .enum(['generate', 'retrieval'])
+        .default('generate')
+        .describe('现有证据足够时重新生成，证据缺失时重新检索'),
     });
 
     try {
@@ -640,6 +645,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         reflectionFeedback: passed
           ? ''
           : `答案需要补充或修正：${result.reason}`.slice(0, 500),
+        retryTarget: result.retryTarget,
       };
     } catch (err) {
       await this.rethrowIfAbortedOrCancelled(err, config);
@@ -662,6 +668,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         retryCount,
         reflectionFeedback:
           '反思评估失败，请重新核对原问题的每个要求并逐项作答。',
+        retryTarget: 'generate',
       };
     }
   }

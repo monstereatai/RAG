@@ -40,6 +40,51 @@ import {
   isSupplementalEvidenceRestricted,
 } from '../retrieval/scope-policy';
 
+type RagAnswerHistory = Array<{ role: 'human' | 'ai'; content: string }>;
+type RagAnswerMemory = Array<{ role: string; content: string }>;
+type AnswerGate = { sufficient: boolean; reason: string };
+
+interface RagAnswerContext {
+  query: string;
+  normalizedQuery: string;
+  retrievalQuery: string;
+  history: RagAnswerHistory;
+  userId?: string;
+  memoryMessages: RagAnswerMemory;
+  onToken?: (token: string) => void;
+  retrieveOptions: RetrieveOptions;
+  initialRetrieveOptions: RetrieveOptions;
+  hasPlannedAnswerRequirements: boolean;
+  prefetchedFastPath?: PrefetchedFastPath;
+}
+
+type InitialRetrievalOutcome =
+  | { kind: 'direct_answer'; answer: RagAnswerResult }
+  | {
+      kind: 'retrieved';
+      badCaseMatches: BadCaseMatch[];
+      retrieval: DetailedRetrievalResult;
+      obsidianHits: ObsidianSearchHit[];
+    };
+
+interface CoreAnswerEvidence {
+  retrieval: DetailedRetrievalResult;
+  badCaseMatches: BadCaseMatch[];
+  obsidianHits: ObsidianSearchHit[];
+  reviewedBaseCaseChunks: RetrievedChunk[];
+  baseCaseGate: AnswerGate;
+  formalRetrievalGate: AnswerGate;
+  chunks: RetrievedChunk[];
+  retrievalGate: AnswerGate;
+}
+
+interface PreparedAnswerEvidence extends CoreAnswerEvidence {
+  obsidianGate: AnswerGate;
+  generationMemory: RagAnswerMemory;
+  obsidianChunks: RetrievedChunk[];
+  evidenceChunks: RetrievedChunk[];
+}
+
 @Injectable()
 export class RagAnswerService {
   private readonly logger = new Logger(RagAnswerService.name);
@@ -112,67 +157,187 @@ export class RagAnswerService {
     onToken?: (token: string) => void,
     retrieveOptions: RetrieveOptions = {},
   ): Promise<RagAnswerResult> {
-    // cd：格式化输入，空格去掉
     const normalizedQuery = this.retrievalService.normalizeQuery(query);
-    const hasPlannedAnswerRequirements = Boolean(
-      retrieveOptions.queryPlan?.subQueries.length,
+    const arithmeticAnswer = this.answerArithmetic(
+      normalizedQuery,
+      history,
+      onToken,
     );
-    // cd：判断是否为结构化算式
-    const arithmeticAnswer = this.fallbackService.buildArithmeticAnswer(
+    if (arithmeticAnswer) return arithmeticAnswer;
+
+    const context = this.createAnswerContext(
+      query,
+      normalizedQuery,
+      history,
+      userId,
+      memoryMessages,
+      onToken,
+      retrieveOptions,
+    );
+    const initial = await this.retrieveInitialEvidence(context);
+    if (initial.kind === 'direct_answer') return initial.answer;
+
+    const exactCorrectionAnswer = await this.tryAnswerFromExactCorrection(
+      context,
+      initial,
+    );
+    if (exactCorrectionAnswer) return exactCorrectionAnswer;
+
+    const coreEvidence = await this.prepareCoreAnswerEvidence(context, initial);
+    const correctionAnswer = await this.tryAnswerFromBaseCaseCorrection(
+      context,
+      initial,
+      coreEvidence,
+    );
+    if (correctionAnswer) return correctionAnswer;
+
+    const evidence = this.prepareAnswerEvidence(context, coreEvidence);
+    const conversationAnswer = await this.tryAnswerFromConversationContext(
+      context,
+      evidence,
+    );
+    if (conversationAnswer) return conversationAnswer;
+
+    if (evidence.chunks.length === 0) {
+      return this.answerWithoutChunks(context, evidence);
+    }
+
+    const deterministicAnswer = context.hasPlannedAnswerRequirements
+      ? null
+      : this.evidenceService.buildDeterministicAnswer(
+          context.normalizedQuery,
+          evidence.evidenceChunks,
+        );
+    if (deterministicAnswer) {
+      return {
+        answer: deterministicAnswer,
+        references: this.evidenceService.toReferences(evidence.evidenceChunks),
+        retrievalSufficient: true,
+        retrievalReason: '命中明确结构化事实，已使用片段抽取式回答',
+        obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+        obsidianHits: evidence.obsidianHits,
+        retrievalDiagnostics: evidence.retrieval.diagnostics,
+      };
+    }
+
+    if (
+      !evidence.retrievalGate.sufficient &&
+      !evidence.obsidianGate.sufficient
+    ) {
+      return this.answerWithInsufficientEvidence(context, evidence);
+    }
+
+    return this.groundedAnswerService.generate({
+      query: context.query,
+      normalizedQuery: context.normalizedQuery,
+      evidenceChunks: evidence.evidenceChunks,
+      ragChunks: evidence.chunks,
+      ragChunkCount: evidence.chunks.length,
+      obsidianChunkCount: evidence.obsidianChunks.length,
+      obsidianHits: evidence.obsidianHits,
+      retrievalDiagnostics: evidence.retrieval.diagnostics,
+      history: context.history,
+      generationMemory: evidence.generationMemory,
+      answerRequirements: context.retrieveOptions.queryPlan?.subQueries ?? [],
+      hasPlannedAnswerRequirements: context.hasPlannedAnswerRequirements,
+      onToken: context.onToken,
+      signal: context.retrieveOptions.signal,
+      preferFastModel: context.retrieveOptions.preferFastModel,
+      obsidianGateSufficient: evidence.obsidianGate.sufficient,
+    });
+  }
+
+  private answerArithmetic(
+    normalizedQuery: string,
+    history: RagAnswerHistory,
+    onToken?: (token: string) => void,
+  ): RagAnswerResult | null {
+    const answer = this.fallbackService.buildArithmeticAnswer(
       normalizedQuery,
       history,
     );
-    if (arithmeticAnswer) {
-      onToken?.(arithmeticAnswer);
-      return {
-        answer: arithmeticAnswer,
-        references: [],
-        retrievalSufficient: true,
-        retrievalReason: '结构化算式求值，已忽略历史设定与无关检索片段',
-        obsidianPaths: [],
-        obsidianHits: [],
-        retrievalDiagnostics: {
-          intent: 'lookup',
-          candidateDepth: 0,
-          expandedChunks: 0,
-          duplicateChunksRemoved: 0,
-          documentLimitRemoved: 0,
-          budgetRemoved: 0,
-          contextCharacters: 0,
-        },
-      };
-    }
-    // 格式化输入，清理空格
-    const retrievalQuery = normalizedQuery;
+    if (!answer) return null;
+
+    onToken?.(answer);
+    return {
+      answer,
+      references: [],
+      retrievalSufficient: true,
+      retrievalReason: '结构化算式求值，已忽略历史设定与无关检索片段',
+      obsidianPaths: [],
+      obsidianHits: [],
+      retrievalDiagnostics: {
+        intent: 'lookup',
+        candidateDepth: 0,
+        expandedChunks: 0,
+        duplicateChunksRemoved: 0,
+        documentLimitRemoved: 0,
+        budgetRemoved: 0,
+        contextCharacters: 0,
+      },
+    };
+  }
+
+  private createAnswerContext(
+    query: string,
+    normalizedQuery: string,
+    history: RagAnswerHistory,
+    userId: string | undefined,
+    memoryMessages: RagAnswerMemory,
+    onToken: ((token: string) => void) | undefined,
+    retrieveOptions: RetrieveOptions,
+  ): RagAnswerContext {
     const profile =
       retrieveOptions.profile ??
       retrievalProfileForTaskType(
         retrieveOptions.queryPlan?.taskType ?? 'lookup',
       );
-    const canUseVector = retrieveOptions.vectorSearch !== false;
-    // 直答未命中后统一执行完整 Hybrid RAG；旧的 adaptiveVectorSearch
-    // 参数仅保留调用兼容，不再让 lookup 查询跳过向量召回。
-    const startsWithVector = canUseVector;
+    // 保持完整 Hybrid 检索；旧 adaptiveVectorSearch 参数仅用于调用兼容。
     const initialRetrieveOptions: RetrieveOptions = {
       ...retrieveOptions,
       profile,
-      vectorSearch: startsWithVector,
+      vectorSearch: retrieveOptions.vectorSearch !== false,
     };
-    const prefetchedFastPath = retrieveOptions.prefetchedFastPath;
+
+    return {
+      query,
+      normalizedQuery,
+      retrievalQuery: normalizedQuery,
+      history,
+      userId,
+      memoryMessages,
+      onToken,
+      retrieveOptions,
+      initialRetrieveOptions,
+      hasPlannedAnswerRequirements: Boolean(
+        retrieveOptions.queryPlan?.subQueries.length,
+      ),
+      prefetchedFastPath: retrieveOptions.prefetchedFastPath,
+    };
+  }
+
+  private async retrieveInitialEvidence(
+    context: RagAnswerContext,
+  ): Promise<InitialRetrievalOutcome> {
+    const {
+      retrievalQuery,
+      initialRetrieveOptions,
+      retrieveOptions,
+      prefetchedFastPath,
+      userId,
+    } = context;
+    const supplementalEvidenceRestricted =
+      isSupplementalEvidenceRestricted(retrieveOptions);
+    const baseCaseRestricted = hasExplicitDocumentScope(retrieveOptions.scope);
 
     const retrieveFormalKnowledge = () =>
       prefetchedFastPath
-        ? // auto查过，那结果
-          Promise.resolve(prefetchedFastPath.retrieval)
-        : // 没查当前问题查询
-          this.retrievalService.retrieveWithContextualQuery(
+        ? Promise.resolve(prefetchedFastPath.retrieval)
+        : this.retrievalService.retrieveWithContextualQuery(
             retrievalQuery,
             initialRetrieveOptions,
             userId,
           );
-    const supplementalEvidenceRestricted =
-      isSupplementalEvidenceRestricted(retrieveOptions);
-    const baseCaseRestricted = hasExplicitDocumentScope(retrieveOptions.scope);
     const retrieveBaseCaseKnowledge = () =>
       baseCaseRestricted
         ? Promise.resolve([] as BadCaseMatch[])
@@ -203,23 +368,18 @@ export class RagAnswerService {
                 return [] as ObsidianSearchHit[];
               });
 
-    let badCaseMatches: BadCaseMatch[];
-    let initialRetrieval: DetailedRetrievalResult;
-    let obsidianHits: ObsidianSearchHit[];
     if (
       retrieveOptions.governedDirectAnswer &&
       !retrieveOptions.supplementalEvidence?.length &&
       !retrieveOptions.needsSynthesis &&
       !prefetchedFastPath
     ) {
-      // 受治理直答保留精确纠错覆盖检查：它只查 PostgreSQL 精确问题，
-      // 与本地 BM25 直答并行，不触发 Milvus 语义检索。
-      const direct = await this.directService.answerDirect(
-        query,
-        history,
-        userId,
-        memoryMessages,
-        onToken,
+      const directAnswer = await this.directService.answerDirect(
+        context.query,
+        context.history,
+        context.userId,
+        context.memoryMessages,
+        context.onToken,
         retrieveOptions.scope,
         retrieveOptions.signal,
         retrieveOptions.tenantId,
@@ -228,57 +388,41 @@ export class RagAnswerService {
         retrieveOptions.departmentIds ?? [],
         retrieveOptions.trustedAdminPrincipal,
       );
-      if (direct) {
-        return direct;
-      }
-      // 未走成直答后，纠正语义候选与正式 Hybrid RAG 同时构建。
-      [badCaseMatches, initialRetrieval, obsidianHits] = await Promise.all([
-        retrieveBaseCaseKnowledge(),
-        retrieveFormalKnowledge(),
-        retrieveObsidianKnowledge(),
-      ]);
-    } else {
-      // 常规问答没有额外 Bad Case 往返：纠正层与正式知识层并行召回。
-      [badCaseMatches, initialRetrieval, obsidianHits] = await Promise.all([
-        retrieveBaseCaseKnowledge(),
-        retrieveFormalKnowledge(),
-        retrieveObsidianKnowledge(),
-      ]);
-    }
-    const exactBadCase = badCaseMatches.find((match) => match.mode === 'exact');
-    if (exactBadCase) {
-      const correctedAnswer = this.evidenceService.extractCorrectedAnswer(
-        exactBadCase.text,
-      );
-      if (correctedAnswer) {
-        const answer = await this.evidenceService.generateCorrectionAnswer(
-          query,
-          correctedAnswer,
-          history,
-          memoryMessages,
-          onToken,
-          exactBadCase.query,
-          retrieveOptions.signal,
-        );
-        return {
-          answer,
-          references: [],
-          retrievalSufficient: true,
-          retrievalReason: `命中已审核 Bad Case 纠错证据（${exactBadCase.mode}，${exactBadCase.score.toFixed(3)}）`,
-        };
+      if (directAnswer) {
+        return { kind: 'direct_answer', answer: directAnswer };
       }
     }
-    const retrieval = initialRetrieval;
+
+    const [badCaseMatches, retrieval, obsidianHits] = await Promise.all([
+      retrieveBaseCaseKnowledge(),
+      retrieveFormalKnowledge(),
+      retrieveObsidianKnowledge(),
+    ]);
+    return {
+      kind: 'retrieved',
+      badCaseMatches,
+      retrieval,
+      obsidianHits,
+    };
+  }
+
+  private async prepareCoreAnswerEvidence(
+    context: RagAnswerContext,
+    initial: Extract<InitialRetrievalOutcome, { kind: 'retrieved' }>,
+  ): Promise<CoreAnswerEvidence> {
+    const { retrieval, badCaseMatches } = initial;
+    let obsidianHits = initial.obsidianHits;
     const sourceResolution =
       await this.obsidianService.resolveObsidianSourceEvidence(
-        retrievalQuery,
+        context.retrievalQuery,
         obsidianHits,
-        userId,
-        retrieveOptions,
+        context.userId,
+        context.retrieveOptions,
       );
     obsidianHits = obsidianHits.filter(
       (hit) => !sourceResolution.sourceNotePaths.has(hit.path),
     );
+
     const formalChunkMap = new Map<string, RetrievedChunk>();
     for (const chunk of [...retrieval.chunks, ...sourceResolution.chunks]) {
       const existing = formalChunkMap.get(chunk.id);
@@ -293,9 +437,7 @@ export class RagAnswerService {
       badCaseMatches,
       reviewedBaseCaseChunks,
     );
-    const prefetchedBundle = prefetchedFastPath?.evidenceBundle;
-    // Fast Path 与正式回答对同一原问题只能有一份充分性结论。此前这里再次
-    // 用改写后的文本判定，导致搜索命中后仍可能在问答链路被误报资料不足。
+    const prefetchedBundle = context.prefetchedFastPath?.evidenceBundle;
     const attachmentEvidenceCount = formalChunks.filter(
       (chunk) => chunk.retrievalSource === 'attachment',
     ).length;
@@ -307,14 +449,14 @@ export class RagAnswerService {
           }
         : sourceResolution.chunks.length === 0 &&
             prefetchedBundle &&
-            appliesToQuery(prefetchedBundle, query)
+            appliesToQuery(prefetchedBundle, context.query)
           ? prefetchedBundle.assessment
           : formalChunks.length === 0
             ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
             : this.answerQuality.assessRetrievalQuality(
-                retrievalQuery,
+                context.retrievalQuery,
                 formalChunks,
-                retrieveOptions.queryPlan?.taskType ?? 'lookup',
+                context.retrieveOptions.queryPlan?.taskType ?? 'lookup',
               );
     const chunks = formalRetrievalGate.sufficient
       ? [...formalChunks, ...reviewedBaseCaseChunks]
@@ -325,12 +467,62 @@ export class RagAnswerService {
         ? `Base Case: ${baseCaseGate.reason}; RAG: ${formalRetrievalGate.reason}`
         : formalRetrievalGate.reason,
     };
-    const correctionBaseCase = badCaseMatches.find(
+
+    return {
+      retrieval,
+      badCaseMatches,
+      obsidianHits,
+      reviewedBaseCaseChunks,
+      baseCaseGate,
+      formalRetrievalGate,
+      chunks,
+      retrievalGate,
+    };
+  }
+
+  private async tryAnswerFromExactCorrection(
+    context: RagAnswerContext,
+    initial: Extract<InitialRetrievalOutcome, { kind: 'retrieved' }>,
+  ): Promise<RagAnswerResult | null> {
+    const exactBadCase = initial.badCaseMatches.find(
+      (match) => match.mode === 'exact',
+    );
+    if (exactBadCase) {
+      const correctedAnswer = this.evidenceService.extractCorrectedAnswer(
+        exactBadCase.text,
+      );
+      if (correctedAnswer) {
+        const answer = await this.evidenceService.generateCorrectionAnswer(
+          context.query,
+          correctedAnswer,
+          context.history,
+          context.memoryMessages,
+          context.onToken,
+          exactBadCase.query,
+          context.retrieveOptions.signal,
+        );
+        return {
+          answer,
+          references: [],
+          retrievalSufficient: true,
+          retrievalReason: `命中已审核 Bad Case 纠错证据（${exactBadCase.mode}，${exactBadCase.score.toFixed(3)}）`,
+        };
+      }
+    }
+    return null;
+  }
+
+  private async tryAnswerFromBaseCaseCorrection(
+    context: RagAnswerContext,
+    initial: Extract<InitialRetrievalOutcome, { kind: 'retrieved' }>,
+    evidence: CoreAnswerEvidence,
+  ): Promise<RagAnswerResult | null> {
+    const correctionBaseCase = initial.badCaseMatches.find(
       (match) => match.mode === 'correction',
     );
     if (
-      baseCaseGate.sufficient &&
-      !formalRetrievalGate.sufficient &&
+      evidence.baseCaseGate.sufficient &&
+      !evidence.formalRetrievalGate.sufficient &&
       correctionBaseCase
     ) {
       const correctedAnswer = this.evidenceService.extractCorrectedAnswer(
@@ -338,69 +530,90 @@ export class RagAnswerService {
       );
       if (correctedAnswer) {
         const answer = await this.evidenceService.generateCorrectionAnswer(
-          query,
+          context.query,
           correctedAnswer,
-          history,
-          memoryMessages,
-          onToken,
+          context.history,
+          context.memoryMessages,
+          context.onToken,
           correctionBaseCase.query,
-          retrieveOptions.signal,
+          context.retrieveOptions.signal,
         );
         return {
           answer,
-          references: this.evidenceService.toReferences(reviewedBaseCaseChunks),
+          references: this.evidenceService.toReferences(
+            evidence.reviewedBaseCaseChunks,
+          ),
           retrievalSufficient: true,
           retrievalReason: `命中已审核 Base Case 纠正证据（${correctionBaseCase.mode}，${correctionBaseCase.score.toFixed(3)}）`,
-          retrievalDiagnostics: retrieval.diagnostics,
+          retrievalDiagnostics: evidence.retrieval.diagnostics,
         };
       }
     }
+    return null;
+  }
 
+  private prepareAnswerEvidence(
+    context: RagAnswerContext,
+    core: CoreAnswerEvidence,
+  ): PreparedAnswerEvidence {
     const obsidianGate = this.obsidianKnowledge.assessHits(
-      retrievalQuery,
-      obsidianHits,
+      context.retrievalQuery,
+      core.obsidianHits,
     );
-    const badCasePrompt = badCaseMatches.length
-      ? this.badCaseFlywheel.formatPrompt(badCaseMatches)
+    const badCasePrompt = core.badCaseMatches.length
+      ? this.badCaseFlywheel.formatPrompt(core.badCaseMatches)
       : '';
     const generationMemory = badCasePrompt
-      ? [...memoryMessages, { role: 'system', content: badCasePrompt }]
-      : memoryMessages;
-    const obsidianChunks = this.obsidianService.toObsidianChunks(obsidianHits);
-    // 正式 RAG 已有足够证据时，Obsidian 只能作为独立补充源，不能以更高的
-    // 文件分数抢占上下文预算；否则无关的 compiled/index 笔记会把正式片段
-    // 挤出最终证据，进而触发引用门禁。正式检索不足时仍保留 Obsidian 兜底。
-    const evidenceObsidianChunks = formalRetrievalGate.sufficient
+      ? [...context.memoryMessages, { role: 'system', content: badCasePrompt }]
+      : context.memoryMessages;
+    const obsidianChunks = this.obsidianService.toObsidianChunks(
+      core.obsidianHits,
+    );
+    const evidenceObsidianChunks = core.formalRetrievalGate.sufficient
       ? []
       : obsidianChunks;
-    const combinedEvidence = evidenceObsidianChunks.length > 0
-      ? this.contextBuilder.build(
-          [...chunks, ...evidenceObsidianChunks],
-          retrieval.profile,
-          normalizedQuery,
-        ).chunks
-      : chunks;
     const evidenceChunks = this.evidenceService.expandRuleCompanions(
-      combinedEvidence,
-      retrieveOptions.scope,
+      evidenceObsidianChunks.length > 0
+        ? this.contextBuilder.build(
+            [...core.chunks, ...evidenceObsidianChunks],
+            core.retrieval.profile,
+            context.normalizedQuery,
+          ).chunks
+        : core.chunks,
+      context.retrieveOptions.scope,
     );
-    const hasAttachmentEvidence = evidenceChunks.some(
+
+    return {
+      ...core,
+      obsidianGate,
+      generationMemory,
+      obsidianChunks,
+      evidenceChunks,
+    };
+  }
+
+  private async tryAnswerFromConversationContext(
+    context: RagAnswerContext,
+    evidence: PreparedAnswerEvidence,
+  ): Promise<RagAnswerResult | null> {
+    const hasAttachmentEvidence = evidence.evidenceChunks.some(
       (chunk) => chunk.retrievalSource === 'attachment',
     );
     const shouldPreferConversationState =
-      retrieveOptions.allowConversationStateAnswer &&
-      history.length > 0 &&
+      context.retrieveOptions.allowConversationStateAnswer &&
+      context.history.length > 0 &&
       !hasAttachmentEvidence &&
       !this.fallbackService.hasConversationEntityEvidence(
-        evidenceChunks,
-        retrieveOptions.entities ?? retrieveOptions.queryPlan?.entities,
+        evidence.evidenceChunks,
+        context.retrieveOptions.entities ??
+          context.retrieveOptions.queryPlan?.entities,
       );
     if (shouldPreferConversationState) {
       const answer = await this.fallbackService.generateConversationStateAnswer(
-        query,
-        history,
-        onToken,
-        retrieveOptions.signal,
+        context.query,
+        context.history,
+        context.onToken,
+        context.retrieveOptions.signal,
       );
       if (answer) {
         return {
@@ -409,22 +622,22 @@ export class RagAnswerService {
           retrievalSufficient: true,
           retrievalReason:
             '检索未命中同一实体权威证据，已按本轮最新对话状态回答',
-          obsidianPaths: obsidianHits.map((hit) => hit.path),
-          obsidianHits,
-          retrievalDiagnostics: retrieval.diagnostics,
+          obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+          obsidianHits: evidence.obsidianHits,
+          retrievalDiagnostics: evidence.retrieval.diagnostics,
         };
       }
     }
 
     if (
-      retrieveOptions.queryPlan?.contextMode === 'mixed' &&
-      history.some((item) => item.role === 'human')
+      context.retrieveOptions.queryPlan?.contextMode === 'mixed' &&
+      context.history.some((item) => item.role === 'human')
     ) {
       const answer = await this.fallbackService.generateMixedContextAnswer(
-        query,
-        history,
-        onToken,
-        retrieveOptions.signal,
+        context.query,
+        context.history,
+        context.onToken,
+        context.retrieveOptions.signal,
       );
       if (answer) {
         return {
@@ -432,172 +645,149 @@ export class RagAnswerService {
           references: [],
           retrievalSufficient: true,
           retrievalReason: '客观事实优先，已补充当前会话中的历史设定',
-          obsidianPaths: obsidianHits.map((hit) => hit.path),
-          obsidianHits,
-          retrievalDiagnostics: retrieval.diagnostics,
+          obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+          obsidianHits: evidence.obsidianHits,
+          retrievalDiagnostics: evidence.retrieval.diagnostics,
         };
       }
     }
+    return null;
+  }
 
-    if (chunks.length === 0) {
-      if (obsidianGate.sufficient) {
-        const answer = await this.fallbackService.generateObsidianAnswer(
-          query,
-          obsidianHits,
-          history,
-          generationMemory,
-          onToken,
-          retrieveOptions.signal,
-        );
+  private async answerWithoutChunks(
+    context: RagAnswerContext,
+    evidence: PreparedAnswerEvidence,
+  ): Promise<RagAnswerResult> {
+    if (evidence.obsidianGate.sufficient) {
+      const answer = await this.fallbackService.generateObsidianAnswer(
+        context.query,
+        evidence.obsidianHits,
+        context.history,
+        evidence.generationMemory,
+        context.onToken,
+        context.retrieveOptions.signal,
+      );
+      return {
+        answer,
+        references: this.evidenceService.toReferences(evidence.obsidianChunks),
+        retrievalSufficient: true,
+        retrievalReason: evidence.obsidianGate.reason,
+        obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+        obsidianHits: evidence.obsidianHits,
+        retrievalDiagnostics: evidence.retrieval.diagnostics,
+      };
+    }
+
+    if (
+      context.retrieveOptions.allowConversationStateAnswer &&
+      context.history.length > 0
+    ) {
+      const answer = await this.fallbackService.generateConversationStateAnswer(
+        context.query,
+        context.history,
+        context.onToken,
+        context.retrieveOptions.signal,
+      );
+      if (answer) {
         return {
           answer,
-          references: this.evidenceService.toReferences(obsidianChunks),
+          references: [],
           retrievalSufficient: true,
-          retrievalReason: obsidianGate.reason,
-          obsidianPaths: obsidianHits.map((hit) => hit.path),
-          obsidianHits,
-          retrievalDiagnostics: retrieval.diagnostics,
+          retrievalReason: '未命中权威资料，已按本轮最新对话状态回答',
+          obsidianPaths: [],
+          obsidianHits: evidence.obsidianHits,
+          retrievalDiagnostics: evidence.retrieval.diagnostics,
         };
       }
-      if (retrieveOptions.allowConversationStateAnswer && history.length > 0) {
-        const answer =
-          await this.fallbackService.generateConversationStateAnswer(
-            query,
-            history,
-            onToken,
-            retrieveOptions.signal,
-          );
-        if (answer) {
-          return {
-            answer,
-            references: [],
-            retrievalSufficient: true,
-            retrievalReason: '未命中权威资料，已按本轮最新对话状态回答',
-            obsidianPaths: [],
-            obsidianHits,
-            retrievalDiagnostics: retrieval.diagnostics,
-          };
-        }
-      }
-      const webFallback = await this.fallbackService.answerWithWebFallback(
-        query,
-        `没有检索到候选片段；${obsidianGate.reason}`,
-        history,
-        generationMemory,
-        onToken,
-        retrieveOptions,
+    }
+
+    const webFallback = await this.fallbackService.answerWithWebFallback(
+      context.query,
+      `没有检索到候选片段；${evidence.obsidianGate.reason}`,
+      context.history,
+      evidence.generationMemory,
+      context.onToken,
+      context.retrieveOptions,
+    );
+    const modelFallback = !webFallback
+      ? await this.fallbackService.answerWithModelFallback(
+          context.query,
+          context.history,
+          context.onToken,
+          context.retrieveOptions,
+        )
+      : null;
+    const answer =
+      webFallback?.answer ??
+      modelFallback?.answer ??
+      this.evidenceService.unsupportedReliableAnswer();
+    if (!webFallback && !modelFallback) context.onToken?.(answer);
+
+    return {
+      answer,
+      references: webFallback?.references ?? [],
+      retrievalSufficient: Boolean(webFallback || modelFallback),
+      retrievalReason: webFallback
+        ? `没有检索到本地证据；${evidence.obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
+        : modelFallback
+          ? '没有检索到本地证据；联网搜索不可用，已使用模型通用能力回答'
+          : `没有检索到候选片段；${evidence.obsidianGate.reason}；联网搜索和模型回答均不可用，已进入安全降级`,
+      obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+      obsidianHits: evidence.obsidianHits,
+      retrievalDiagnostics: evidence.retrieval.diagnostics,
+    };
+  }
+
+  private async answerWithInsufficientEvidence(
+    context: RagAnswerContext,
+    evidence: PreparedAnswerEvidence,
+  ): Promise<RagAnswerResult> {
+    if (
+      context.retrieveOptions.allowConversationStateAnswer &&
+      context.history.length > 0
+    ) {
+      const answer = await this.fallbackService.generateConversationStateAnswer(
+        context.query,
+        context.history,
+        context.onToken,
+        context.retrieveOptions.signal,
       );
-      const modelFallback = !webFallback
-        ? await this.fallbackService.answerWithModelFallback(
-            query,
-            history,
-            onToken,
-            retrieveOptions,
-          )
-        : null;
-      const answer =
-        webFallback?.answer ??
-        modelFallback?.answer ??
-        this.evidenceService.unsupportedReliableAnswer();
-      if (!webFallback && !modelFallback) onToken?.(answer);
-      return {
-        answer,
-        references: webFallback?.references ?? [],
-        retrievalSufficient: Boolean(webFallback || modelFallback),
-        retrievalReason: webFallback
-          ? `没有检索到本地证据；${obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
-          : modelFallback
-            ? `没有检索到本地证据；联网搜索不可用，已使用模型通用能力回答`
-            : `没有检索到候选片段；${obsidianGate.reason}；联网搜索和模型回答均不可用，已进入安全降级`,
-        obsidianPaths: obsidianHits.map((hit) => hit.path),
-        obsidianHits,
-        retrievalDiagnostics: retrieval.diagnostics,
-      };
-    }
-
-    // 结构化事实优先于“需要综合”的通用标记：needsSynthesis 只表示普通语义
-    // 问题需要模型总结，不能阻止 OKR、薪资、版本等已有确定性证据直接回答。
-    const earlyDeterministicAnswer = hasPlannedAnswerRequirements
-      ? null
-      : this.evidenceService.buildDeterministicAnswer(
-          normalizedQuery,
-          evidenceChunks,
-        );
-    if (earlyDeterministicAnswer) {
-      return {
-        answer: earlyDeterministicAnswer,
-        references: this.evidenceService.toReferences(evidenceChunks),
-        retrievalSufficient: true,
-        retrievalReason: '命中明确结构化事实，已使用片段抽取式回答',
-        obsidianPaths: obsidianHits.map((hit) => hit.path),
-        obsidianHits,
-        retrievalDiagnostics: retrieval.diagnostics,
-      };
-    }
-
-    if (!retrievalGate.sufficient && !obsidianGate.sufficient) {
-      if (retrieveOptions.allowConversationStateAnswer && history.length > 0) {
-        const answer =
-          await this.fallbackService.generateConversationStateAnswer(
-            query,
-            history,
-            onToken,
-            retrieveOptions.signal,
-          );
-        if (answer) {
-          return {
-            answer,
-            references: [],
-            retrievalSufficient: true,
-            retrievalReason: '权威资料不足，已按本轮最新对话状态回答',
-            obsidianPaths: obsidianHits.map((hit) => hit.path),
-            obsidianHits,
-            retrievalDiagnostics: retrieval.diagnostics,
-          };
-        }
+      if (answer) {
+        return {
+          answer,
+          references: [],
+          retrievalSufficient: true,
+          retrievalReason: '权威资料不足，已按本轮最新对话状态回答',
+          obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+          obsidianHits: evidence.obsidianHits,
+          retrievalDiagnostics: evidence.retrieval.diagnostics,
+        };
       }
-      const webFallback = await this.fallbackService.answerWithWebFallback(
-        query,
-        `${retrievalGate.reason}；${obsidianGate.reason}`,
-        history,
-        generationMemory,
-        onToken,
-        retrieveOptions,
-      );
-      const answer =
-        webFallback?.answer ?? this.evidenceService.unsupportedReliableAnswer();
-      if (!webFallback) onToken?.(answer);
-      return {
-        answer,
-        references: webFallback?.references ?? [],
-        retrievalSufficient: Boolean(webFallback),
-        retrievalReason: webFallback
-          ? `${retrievalGate.reason}；${obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
-          : `${retrievalGate.reason}；${obsidianGate.reason}；联网搜索不可用，已进入安全降级`,
-        obsidianPaths: obsidianHits.map((hit) => hit.path),
-        obsidianHits,
-        retrievalDiagnostics: retrieval.diagnostics,
-      };
     }
 
-    return this.groundedAnswerService.generate({
-      query,
-      normalizedQuery,
-      evidenceChunks,
-      ragChunks: chunks,
-      ragChunkCount: chunks.length,
-      obsidianChunkCount: obsidianChunks.length,
-      obsidianHits,
-      retrievalDiagnostics: retrieval.diagnostics,
-      history,
-      generationMemory,
-      answerRequirements: retrieveOptions.queryPlan?.subQueries ?? [],
-      hasPlannedAnswerRequirements,
-      onToken,
-      signal: retrieveOptions.signal,
-      preferFastModel: retrieveOptions.preferFastModel,
-      obsidianGateSufficient: obsidianGate.sufficient,
-    });
+    const webFallback = await this.fallbackService.answerWithWebFallback(
+      context.query,
+      `${evidence.retrievalGate.reason}；${evidence.obsidianGate.reason}`,
+      context.history,
+      evidence.generationMemory,
+      context.onToken,
+      context.retrieveOptions,
+    );
+    const answer =
+      webFallback?.answer ?? this.evidenceService.unsupportedReliableAnswer();
+    if (!webFallback) context.onToken?.(answer);
+
+    return {
+      answer,
+      references: webFallback?.references ?? [],
+      retrievalSufficient: Boolean(webFallback),
+      retrievalReason: webFallback
+        ? `${evidence.retrievalGate.reason}；${evidence.obsidianGate.reason}；已通过 Bocha 联网搜索补充 ${webFallback.references.length} 条来源`
+        : `${evidence.retrievalGate.reason}；${evidence.obsidianGate.reason}；联网搜索不可用，已进入安全降级`,
+      obsidianPaths: evidence.obsidianHits.map((hit) => hit.path),
+      obsidianHits: evidence.obsidianHits,
+      retrievalDiagnostics: evidence.retrieval.diagnostics,
+    };
   }
 
   assessFastPath(

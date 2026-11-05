@@ -412,7 +412,7 @@ export class AgenticRagExecution extends AgenticRagResume {
         },
       });
     }
-
+  // cd： simple链路
     if (route === 'simple') {
       const result = await this.simpleAnswerCapability.answer(
         query,

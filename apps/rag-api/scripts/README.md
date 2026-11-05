@@ -101,6 +101,7 @@ npm run graph:import-business -- --dry-run
 - `smoke:milvus:conversation-history`：只读检查 `conversation_chunks_v2` 中重复问题组，比较 `queryIterator` 前后的计数并读取最新选中行。只输出数量，不输出会话 ID 或内容；抽样范围内必须存在重复问题组，可通过 `MILVUS_HISTORY_SMOKE_SAMPLE_LIMIT` 扩大范围。
 - `smoke:bad-case-milvus`、`smoke:es-knn`、`smoke:rag-pipeline`、`smoke:hybrid`：检查 Bad Case 向量、Elasticsearch KNN、RAG 主链路和混合检索。`smoke:hybrid` 会上传固定中文测试文档、检查检索结果，然后删除这些文档。
 - `smoke:redis-checkpointer`：用另一个 Node 进程验证 Checkpoint 能否读到已保存状态。
+- `verify:workflow:cross-worker`：在新建的本机隔离 Redis 容器中启动真实产研工作流服务和 BullMQ Worker；Worker A 在岗位生成 Checkpoint 后退出，Worker B 接管同一 job 并从 Checkpoint 完成工作流。模型、检索和 Artifact Provider 使用本地 mock，需设置 `PLATFORM_VALIDATION_ISOLATED=I_ACKNOWLEDGE_DISPOSABLE_TEST_ENV`；演练结束会清理本次创建的容器、Worker 和队列。
 - `smoke:bullmq-index-repair`：先构建后端，再使用独立进程和本机隔离 Redis DB 15，检查索引修复队列的临时失败重试、已完成任务去重，以及 Worker 被 `SIGKILL` 后任务恢复。只清理本次生成的随机队列、任务和计数键；不会重启 Redis，也不会触碰应用使用的 Redis DB。
 
 ### 语音、图片、视频和外部服务

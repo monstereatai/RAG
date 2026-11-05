@@ -190,10 +190,11 @@ export class AgenticRagService extends AgenticRagExecution {
       'reflection',
       (state) => {
         const action = this.reflectionRouter(state);
-        return action === 'retry' ? 'retrieval' : END;
+        return action === 'end' ? END : action;
       },
       {
         retrieval: 'retrieval',
+        generate: 'generate',
         [END]: END,
       },
     );

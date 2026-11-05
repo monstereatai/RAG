@@ -16,13 +16,21 @@ import { AgentGoalService } from '../agent-runs/agent-goal.service';
 import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
-import { ProductionWorkflowRevisionBase } from './production-workflow.revision';
+import type { ProductionWorkflowContext } from './production-workflow.context';
+import { composeProductionWorkflow } from './production-workflow.composition';
 
+/**
+ * 产研工作流的 Nest 入口。
+ * composeProductionWorkflow 按职责组装组件，service 保留稳定的对外方法。
+ * startAsync/resumeAsync/reviseAsync 在 control 中入队；Worker 调用同步入口。
+ * state-service.runUntilSettled 推进图：prepare 选批次，execution 按岗位
+ * generateRole（检索与生成）→ persistRole（产物、交接、任务），审批/修订再入队。
+ * 旧 Checkpoint 继续走 executeBatch，查询与导出由 query 提供。
+ */
 @Injectable()
-export class ProductionWorkflowService
-  extends ProductionWorkflowRevisionBase
-  implements OnModuleInit
-{
+export class ProductionWorkflowService implements OnModuleInit {
+  private readonly context: ProductionWorkflowContext;
+
   constructor(
     llmProvider: LlmProvider,
     redisProvider: RedisProvider,
@@ -43,7 +51,7 @@ export class ProductionWorkflowService
     workflowQueue?: ProductionWorkflowQueueService,
     @Optional() configService?: ConfigService,
   ) {
-    super({
+    this.context = composeProductionWorkflow({
       llmProvider,
       redisProvider,
       roleTools,
@@ -62,5 +70,89 @@ export class ProductionWorkflowService
       workflowQueue,
       configService,
     });
+  }
+
+  onModuleInit(): void {
+    this.context.control.onModuleInit();
+  }
+
+  start(...args: Parameters<ProductionWorkflowContext['control']['start']>) {
+    return this.context.control.start(...args);
+  }
+
+  startAsync(
+    ...args: Parameters<ProductionWorkflowContext['control']['startAsync']>
+  ) {
+    return this.context.control.startAsync(...args);
+  }
+
+  resume(...args: Parameters<ProductionWorkflowContext['control']['resume']>) {
+    return this.context.control.resume(...args);
+  }
+
+  resumeAsync(
+    ...args: Parameters<ProductionWorkflowContext['control']['resumeAsync']>
+  ) {
+    return this.context.control.resumeAsync(...args);
+  }
+
+  revise(...args: Parameters<ProductionWorkflowContext['control']['revise']>) {
+    return this.context.control.revise(...args);
+  }
+
+  reviseAsync(
+    ...args: Parameters<ProductionWorkflowContext['control']['reviseAsync']>
+  ) {
+    return this.context.control.reviseAsync(...args);
+  }
+
+  cancel(...args: Parameters<ProductionWorkflowContext['control']['cancel']>) {
+    return this.context.control.cancel(...args);
+  }
+
+  status(...args: Parameters<ProductionWorkflowContext['query']['status']>) {
+    return this.context.query.status(...args);
+  }
+
+  list(...args: Parameters<ProductionWorkflowContext['query']['list']>) {
+    return this.context.query.list(...args);
+  }
+
+  codingContext(
+    ...args: Parameters<ProductionWorkflowContext['query']['codingContext']>
+  ) {
+    return this.context.query.codingContext(...args);
+  }
+
+  assertOwnedThread(
+    ...args: Parameters<ProductionWorkflowContext['query']['assertOwnedThread']>
+  ) {
+    return this.context.query.assertOwnedThread(...args);
+  }
+
+  handoffManifest(
+    ...args: Parameters<ProductionWorkflowContext['query']['handoffManifest']>
+  ) {
+    return this.context.query.handoffManifest(...args);
+  }
+
+  playwayPreview(
+    ...args: Parameters<ProductionWorkflowContext['query']['playwayPreview']>
+  ) {
+    return this.context.query.playwayPreview(...args);
+  }
+
+  generateProject(
+    ...args: Parameters<ProductionWorkflowContext['query']['generateProject']>
+  ) {
+    return this.context.query.generateProject(...args);
+  }
+
+  generateProjectZip(
+    ...args: Parameters<
+      ProductionWorkflowContext['query']['generateProjectZip']
+    >
+  ) {
+    return this.context.query.generateProjectZip(...args);
   }
 }

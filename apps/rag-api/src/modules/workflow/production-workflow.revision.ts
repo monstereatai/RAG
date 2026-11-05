@@ -1,13 +1,18 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import { randomUUID } from 'node:crypto';
 import {
   ProductionRole,
   ProductionWorkflowStateType,
 } from './production-workflow.state';
 import { ResumeProductionWorkflowDto } from './production-workflow.dto';
-import { ProductionWorkflowQueryBase } from './production-workflow.query';
 
-export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase {
-  protected async rejectForRevision(
+export class ProductionWorkflowRevision {
+  readonly context: ProductionWorkflowContext;
+
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
+  async rejectForRevision(
     threadId: string,
     current: ProductionWorkflowStateType,
     dto: ResumeProductionWorkflowDto,
@@ -16,8 +21,8 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
     const lockKey = `production:workflow:rejection:${threadId}`;
     const lockToken = randomUUID();
     let acquiredRedisLock = false;
-    if (this.redisProvider.isEnabled()) {
-      acquiredRedisLock = await this.redisProvider.setIfAbsent(
+    if (this.context.redisProvider.isEnabled()) {
+      acquiredRedisLock = await this.context.redisProvider.setIfAbsent(
         lockKey,
         lockToken,
         300,
@@ -27,15 +32,16 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       }
     } else {
       if (
-        this.configService?.get<boolean>('core.requireDependencies') === true ||
-        this.configService?.get<string>('nodeEnv') === 'production'
+        this.context.configService?.get<boolean>('core.requireDependencies') ===
+          true ||
+        this.context.configService?.get<string>('nodeEnv') === 'production'
       ) {
         throw new Error('Redis rejection lock is required in production.');
       }
-      if (this.rejectionOperations.has(threadId)) {
+      if (this.context.rejectionOperations.has(threadId)) {
         throw new Error('workflow rejection is already being persisted');
       }
-      this.rejectionOperations.add(threadId);
+      this.context.rejectionOperations.add(threadId);
     }
 
     try {
@@ -55,12 +61,12 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
         userId,
       );
     } finally {
-      this.rejectionOperations.delete(threadId);
+      this.context.rejectionOperations.delete(threadId);
       if (acquiredRedisLock) {
         try {
-          await this.redisProvider.releaseLock(lockKey, lockToken);
+          await this.context.redisProvider.releaseLock(lockKey, lockToken);
         } catch (error) {
-          this.logger.warn(
+          this.context.logger.warn(
             `workflow rejection lock release failed: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
@@ -68,7 +74,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
     }
   }
 
-  protected matchesRejectedRevisionRequest(
+  matchesRejectedRevisionRequest(
     state: ProductionWorkflowStateType,
     dto: ResumeProductionWorkflowDto,
   ): boolean {
@@ -80,8 +86,8 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       state.revisionNumber !== latest.revision + 1 ||
       state.feedback !== (dto.feedback?.trim() ?? '') ||
       latest.feedback !== state.feedback ||
-      !this.sameRoles(state.rerunRoles, latest.rejectedRoles) ||
-      !this.sameRoles(state.staleRoles, latest.staleRoles)
+      !this.context.control.sameRoles(state.rerunRoles, latest.rejectedRoles) ||
+      !this.context.control.sameRoles(state.staleRoles, latest.staleRoles)
     ) {
       return false;
     }
@@ -95,16 +101,13 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
     );
   }
 
-  protected sameRoleSet(
-    left: ProductionRole[],
-    right: ProductionRole[],
-  ): boolean {
+  sameRoleSet(left: ProductionRole[], right: ProductionRole[]): boolean {
     return (
       left.length === right.length && left.every((role) => right.includes(role))
     );
   }
 
-  protected async completeRejectedRevision(
+  async completeRejectedRevision(
     threadId: string,
     current: ProductionWorkflowStateType,
     dto: ResumeProductionWorkflowDto,
@@ -133,7 +136,10 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
         ? dto.rerunRoles.filter((role) => current.currentBatch.includes(role))
         : current.pendingApprovalRoles;
       rejectedRoles = requested.length ? requested : current.currentBatch;
-      staleRoles = this.downstreamRoles(rejectedRoles, current.selectedRoles);
+      staleRoles = this.context.events.downstreamRoles(
+        rejectedRoles,
+        current.selectedRoles,
+      );
       rejectedResults = Object.fromEntries(
         Object.entries(current.results).map(([role, result]) => [
           role,
@@ -169,7 +175,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       // Persist the exact decision before side effects. If a task or artifact
       // write fails, the same rejection can resume without accepting a changed
       // role selection or feedback against partially written review state.
-      await this.app.updateState(this.config(threadId), {
+      await this.context.app.updateState(this.context.events.config(threadId), {
         status: 'pending_approval',
         approval: 'rejected',
         feedback,
@@ -182,14 +188,14 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
 
     await Promise.all([
       ...rejectedRoles.map((role) =>
-        this.tasks?.updateForRole(threadId, role, {
+        this.context.tasks?.updateForRole(threadId, role, {
           status: 'revision_required',
           summary: feedback,
           approvalRequired: true,
         }),
       ),
       ...staleRoles.map((role) =>
-        this.tasks?.updateForRole(threadId, role, {
+        this.context.tasks?.updateForRole(threadId, role, {
           status: 'stale',
           summary: `上游产物被驳回：${feedback}`,
           approvalRequired: false,
@@ -207,7 +213,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
             ? 'stale'
             : null;
         return reviewStatus
-          ? this.artifacts.markReviewState(artifactId, {
+          ? this.context.artifacts.markReviewState(artifactId, {
               reviewStatus,
               revision: result.revision ?? current.revisionNumber ?? 1,
               feedback,
@@ -217,7 +223,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
     );
     // Keep the rejection marker until Task and Artifact review state has been
     // persisted, so a repeated request can complete a partial write.
-    await this.app.updateState(this.config(threadId), {
+    await this.context.app.updateState(this.context.events.config(threadId), {
       status: 'revision_required',
       approval: null,
       feedback,
@@ -229,11 +235,11 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       results: rejectedResults,
       error: '',
     });
-    const state = await this.getOwnedState(threadId, userId);
+    const state = await this.context.state.getOwnedState(threadId, userId);
     return this.finalizeRejectedRevision(threadId, state, userId);
   }
 
-  protected async finalizeRejectedRevision(
+  async finalizeRejectedRevision(
     threadId: string,
     state: ProductionWorkflowStateType,
     userId: string,
@@ -246,7 +252,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
 
     // The outbox derives an idempotency key from this payload, so retrying after
     // a later event/index failure cannot create a duplicate domain event.
-    await this.domainEvents?.emit({
+    await this.context.domainEvents?.emit({
       tenantId: state.tenantId,
       eventType: 'workflow.revision_required',
       aggregateType: 'production_workflow',
@@ -259,7 +265,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       },
     });
 
-    await this.emitRevisionRuntimeEventOnce(
+    await this.context.events.emitRevisionRuntimeEventOnce(
       state,
       'revision.required',
       'human_reviewer',
@@ -273,7 +279,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       'nextRevision',
       nextRevision,
     );
-    await this.emitRevisionRuntimeEventOnce(
+    await this.context.events.emitRevisionRuntimeEventOnce(
       state,
       'workflow.revision_required',
       'production_workflow',
@@ -286,7 +292,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       'revision',
       nextRevision,
     );
-    await this.emitRevisionRuntimeEventOnce(
+    await this.context.events.emitRevisionRuntimeEventOnce(
       state,
       'goal.paused',
       'production_workflow',
@@ -302,14 +308,14 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       nextRevision,
     );
 
-    if (state.runId && this.agentRuns) {
-      const run = await this.agentRuns.get(
+    if (state.runId && this.context.agentRuns) {
+      const run = await this.context.agentRuns.get(
         state.runId,
         state.tenantId ?? undefined,
       );
       const resultSummary = `${state.projectId}：Artifact 已驳回，等待 v${nextRevision} 修订。`;
-      const runUpdatedEventExists = this.runtimeEvents
-        ? await this.runtimeEvents.hasMatchingEvent({
+      const runUpdatedEventExists = this.context.runtimeEvents
+        ? await this.context.runtimeEvents.hasMatchingEvent({
             tenantId: state.tenantId,
             threadId: state.threadId,
             runId: state.runId,
@@ -326,7 +332,7 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
         ['running', 'waiting_approval'].includes(run.status) &&
         (run.resultSummary !== resultSummary || !runUpdatedEventExists)
       ) {
-        await this.agentRuns.finish(state.runId, {
+        await this.context.agentRuns.finish(state.runId, {
           route: 'production_workflow',
           status: 'waiting_approval',
           requiresApproval: true,
@@ -335,8 +341,8 @@ export class ProductionWorkflowRevisionBase extends ProductionWorkflowQueryBase 
       }
     }
 
-    const result = this.view(threadId, state, userId);
-    await this.saveWorkflowIndex(result);
+    const result = this.context.events.view(threadId, state, userId);
+    await this.context.events.saveWorkflowIndex(result);
     return result;
   }
 }

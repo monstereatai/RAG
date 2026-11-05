@@ -15,7 +15,9 @@ export const agenticPromptDefinitions = {
 - 答案是否有检索片段支撑（非编造）？
 - 答案是否标注了引用来源？
 
-只输出结构化字段：confidence（0~1 数字）和 reason（中文理由）。`,
+如果答案有缺漏、表达错误或引用格式问题，但检索片段足够回答，retryTarget 选 generate。
+只有检索片段确实缺少回答所需事实时，retryTarget 才选 retrieval。
+只输出结构化字段：confidence（0~1 数字）、reason（中文理由）和 retryTarget（generate 或 retrieval）。`,
     human: `用户问题：{query}
 
 检索片段：

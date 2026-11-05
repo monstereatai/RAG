@@ -114,6 +114,9 @@ describe('AgenticRagService budget boundaries', () => {
     });
 
     expect(ragService.retrieve.mock.calls).toHaveLength(1);
+    expect(ragService.retrieve.mock.calls[0]?.[1]).toMatchObject({
+      skipRerank: true,
+    });
     expect(
       ragService.retrieve.mock.calls[0]?.[1]?.executionPlan?.queries?.map(
         (item: { text: string }) => item.text,
@@ -369,6 +372,55 @@ describe('AgenticRagService budget boundaries', () => {
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual(['c1']);
   });
 
+  it('retrieves fresh evidence on retry and preserves web search history', async () => {
+    const { service, ragService } = createService();
+    ragService.retrieve.mockResolvedValue([chunk('fresh', 0.8)]);
+    const result = await service.retrievalNode(
+      {
+        query: '需要补充的事实',
+        augmentedQueries: [],
+        retryCount: 1,
+        webSearchAttempted: true,
+        webSearchCount: 2,
+        retrievedChunks: [chunk('web:https://example.com', 0.15)],
+      } as unknown as AgenticRagStateType,
+      { configurable: { fastPathChunks: [chunk('stale', 0.9)] } },
+    );
+
+    expect(serviceMock(ragService, 'retrieve')).toHaveBeenCalledTimes(1);
+    expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
+      'fresh',
+      'web:https://example.com',
+    ]);
+    expect(result).toMatchObject({
+      webSearchAttempted: true,
+      webSearchCount: 2,
+    });
+    expect(
+      result.artifacts?.find((item) => item.type === 'evidence_bundle')
+        ?.payload,
+    ).toMatchObject({ webSearchCount: 2 });
+  });
+
+  it('routes answer repair to generation and missing evidence to retrieval', () => {
+    const { service } = createService({ 'agentic.maxRetries': 3 });
+    const state = { passed: false, retryCount: 1 } as AgenticRagStateType;
+
+    expect(
+      service.reflectionRouter({ ...state, retryTarget: 'generate' }),
+    ).toBe('generate');
+    expect(
+      service.reflectionRouter({ ...state, retryTarget: 'retrieval' }),
+    ).toBe('retrieval');
+    expect(
+      service.reflectionRouter({
+        ...state,
+        retryCount: 4,
+        retryTarget: 'retrieval',
+      }),
+    ).toBe('end');
+  });
+
   it('reuses Fast Path Bad Case candidates during query planning', async () => {
     const { service, badCaseFlywheel } = createService();
     const prefetchedFastPath = {
@@ -478,6 +530,7 @@ describe('AgenticRagService budget boundaries', () => {
       retryCount: 1,
     });
     expect(result.reflectionFeedback).toContain('答案契约校验未通过');
+    expect(result.retryTarget).toBe('generate');
     expect(getModelMock).not.toHaveBeenCalled();
   });
 });

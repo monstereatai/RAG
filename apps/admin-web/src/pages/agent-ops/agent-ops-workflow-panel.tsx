@@ -433,9 +433,8 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
           >
             <Select
               options={[
-                { value: 'sequential', label: 'Sequential：按依赖顺序' },
-                { value: 'hierarchical', label: 'Hierarchical：Manager 委派' },
-                { value: 'conditional', label: 'Conditional：按质量分支' },
+                { value: 'sequential', label: 'Sequential：逐岗位执行' },
+                { value: 'hierarchical', label: 'Hierarchical：按依赖层执行' },
               ]}
             />
           </Form.Item>

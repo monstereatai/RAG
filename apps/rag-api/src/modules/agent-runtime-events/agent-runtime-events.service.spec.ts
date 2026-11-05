@@ -1,6 +1,48 @@
 import { AgentRuntimeEventsService } from './agent-runtime-events.service';
 
 describe('AgentRuntimeEventsService', () => {
+  it('writes a keyed event only once when a workflow side effect is replayed', async () => {
+    let stored: Record<string, unknown> | null = null;
+    const execute = jest.fn(() => Promise.resolve());
+    const insert = {
+      insert: () => insert,
+      into: () => insert,
+      values: (value: Record<string, unknown>) => {
+        stored = value;
+        return insert;
+      },
+      orIgnore: () => insert,
+      execute,
+    };
+    const events = {
+      create: jest.fn((value: Record<string, unknown>) => value),
+      findOneBy: jest.fn(() => Promise.resolve(stored)),
+      findOneByOrFail: jest.fn(() => Promise.resolve(stored)),
+      createQueryBuilder: jest.fn().mockReturnValue(insert),
+    };
+    const dataSource = {
+      options: { type: 'postgres' },
+      query: jest.fn().mockResolvedValue([{ nextSequence: 1 }]),
+    };
+    const service = new AgentRuntimeEventsService(
+      events as never,
+      dataSource as never,
+    );
+    const input = {
+      threadId: 'thread-a',
+      eventType: 'message.published',
+      actor: 'product',
+      idempotencyKey: 'handoff-product-backend',
+    };
+
+    const first = await service.emit(input);
+    const second = await service.emit(input);
+
+    expect(first).toEqual(second);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+  });
+
   it('cleans a failed thread queue without creating a second unhandled rejection', async () => {
     const service = new AgentRuntimeEventsService(
       { save: jest.fn() } as never,

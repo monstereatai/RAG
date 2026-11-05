@@ -19,63 +19,70 @@ import { PluginRuntimeService } from '../plugin-runtime/plugin-runtime.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
 import { ProductionWorkflowDependencies } from './production-workflow.shared';
+import type { ProductionWorkflowEvents } from './production-workflow.events';
+import type { ProductionWorkflowStateService } from './production-workflow.state-service';
+import type { ProductionWorkflowRoleSupport } from './production-workflow.role-support';
+import type { ProductionWorkflowExecution } from './production-workflow.execution';
+import type { ProductionWorkflowControl } from './production-workflow.control';
+import type { ProductionWorkflowQuery } from './production-workflow.query';
+import type { ProductionWorkflowRevision } from './production-workflow.revision';
 
-export abstract class ProductionWorkflowRuntimeBase {
-  protected abstract readonly app: {
-    getState(config: {
-      configurable: { thread_id: string };
-    }): Promise<{ values?: ProductionWorkflowStateType } | undefined>;
-    invoke(
-      input: Partial<ProductionWorkflowStateType>,
-      config: { configurable: { thread_id: string } },
-    ): Promise<ProductionWorkflowStateType>;
-    updateState(
-      config: { configurable: { thread_id: string } },
-      values: Partial<ProductionWorkflowStateType>,
-    ): Promise<unknown>;
-  };
-  protected readonly llmProvider: LlmProvider;
-  protected readonly redisProvider: RedisProvider;
-  protected readonly roleTools: ProductionWorkflowTools;
-  protected readonly artifacts: ArtifactsService;
-  protected readonly langfuseProvider?: LangfuseProvider;
-  protected readonly collaboration?: AgentCollaborationService;
-  protected readonly tasks?: AgentTasksService;
-  protected readonly runtimeEvents?: AgentRuntimeEventsService;
-  protected readonly toolPolicy?: ToolExecutionPolicyService;
-  protected readonly toolExecution?: ToolExecutionService;
-  protected readonly agentRuns?: AgentRunsService;
-  protected readonly agentGoals?: AgentGoalService;
-  protected readonly plugins?: PluginRuntimeService;
-  protected readonly domainEvents?: DomainEventsService;
-  protected readonly dingTalk?: DingTalkProvider;
-  protected readonly workflowQueue?: ProductionWorkflowQueueService;
-  protected readonly configService?: ConfigService;
+export interface ProductionWorkflowGraph {
+  getState(config: {
+    configurable: { thread_id: string };
+  }): Promise<{ values?: ProductionWorkflowStateType } | undefined>;
+  invoke(
+    input: Partial<ProductionWorkflowStateType>,
+    config: { configurable: { thread_id: string } },
+  ): Promise<ProductionWorkflowStateType>;
+  updateState(
+    config: { configurable: { thread_id: string } },
+    values: Partial<ProductionWorkflowStateType>,
+  ): Promise<unknown>;
+}
 
-  protected readonly logger = new Logger('ProductionWorkflowService');
+export class ProductionWorkflowRuntime {
+  events!: ProductionWorkflowEvents;
+  state!: ProductionWorkflowStateService;
+  roleSupport!: ProductionWorkflowRoleSupport;
+  execution!: ProductionWorkflowExecution;
+  control!: ProductionWorkflowControl;
+  query!: ProductionWorkflowQuery;
+  revision!: ProductionWorkflowRevision;
+  app!: ProductionWorkflowGraph;
+  readonly llmProvider: LlmProvider;
+  readonly redisProvider: RedisProvider;
+  readonly roleTools: ProductionWorkflowTools;
+  readonly artifacts: ArtifactsService;
+  readonly langfuseProvider?: LangfuseProvider;
+  readonly collaboration?: AgentCollaborationService;
+  readonly tasks?: AgentTasksService;
+  readonly runtimeEvents?: AgentRuntimeEventsService;
+  readonly toolPolicy?: ToolExecutionPolicyService;
+  readonly toolExecution?: ToolExecutionService;
+  readonly agentRuns?: AgentRunsService;
+  readonly agentGoals?: AgentGoalService;
+  readonly plugins?: PluginRuntimeService;
+  readonly domainEvents?: DomainEventsService;
+  readonly dingTalk?: DingTalkProvider;
+  readonly workflowQueue?: ProductionWorkflowQueueService;
+  readonly configService?: ConfigService;
 
-  protected readonly checkpointer: RedisCheckpointer;
+  readonly logger = new Logger('ProductionWorkflowService');
 
-  protected readonly activeRuns = new Map<string, Promise<void>>();
+  readonly checkpointer: RedisCheckpointer;
 
-  protected readonly cancellationControllers = new Map<
-    string,
-    AbortController
-  >();
+  readonly activeRuns = new Map<string, Promise<void>>();
 
-  protected readonly lostLeases = new Set<string>();
+  readonly cancellationControllers = new Map<string, AbortController>();
 
-  protected readonly rejectionOperations = new Set<string>();
+  readonly lostLeases = new Set<string>();
 
-  protected readonly pendingStates = new Map<
-    string,
-    ProductionWorkflowStateType
-  >();
+  readonly rejectionOperations = new Set<string>();
 
-  protected readonly workflowIndexMemory = new Map<
-    string,
-    Record<string, unknown>
-  >();
+  readonly pendingStates = new Map<string, ProductionWorkflowStateType>();
+
+  readonly workflowIndexMemory = new Map<string, Record<string, unknown>>();
 
   constructor(dependencies: ProductionWorkflowDependencies) {
     this.llmProvider = dependencies.llmProvider;

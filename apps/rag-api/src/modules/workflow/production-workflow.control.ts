@@ -1,3 +1,4 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import { randomUUID } from 'node:crypto';
 import {
   ProductionRole,
@@ -14,38 +15,47 @@ import {
   WorkflowApprovalCheckpointIdentity,
   WORKFLOW_CANCEL_MARKER_TTL_SECONDS,
 } from './production-workflow.shared';
-import { ProductionWorkflowExecutionBase } from './production-workflow.execution';
-import { WORKFLOW_DISPATCH_REQUESTED_EVENT, parseWorkflowDispatch } from './workflow-dispatch-contract';
+import {
+  WORKFLOW_DISPATCH_REQUESTED_EVENT,
+  parseWorkflowDispatch,
+} from './workflow-dispatch-contract';
 
-export abstract class ProductionWorkflowControlBase extends ProductionWorkflowExecutionBase {
-  protected abstract rejectForRevision(
-    threadId: string,
-    current: ProductionWorkflowStateType,
-    dto: ResumeProductionWorkflowDto,
-    userId: string,
-  ): Promise<ReturnType<ProductionWorkflowControlBase['view']>>;
+export class ProductionWorkflowControl {
+  readonly context: ProductionWorkflowContext;
 
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
   onModuleInit(): void {
     // DomainEventOutbox is the durable intent; its handler can safely be retried.
-    this.domainEvents?.registerInternalHandler?.(
+    this.context.domainEvents?.registerInternalHandler?.(
       WORKFLOW_DISPATCH_REQUESTED_EVENT,
       async (event) => {
-        const job = parseWorkflowDispatch(event.payload, event.aggregateId, event.tenantId);
-        if (!this.workflowQueue?.isEnabled()) {
-          throw new Error('Workflow queue is unavailable; retain dispatch intent for retry');
+        const job = parseWorkflowDispatch(
+          event.payload,
+          event.aggregateId,
+          event.tenantId,
+        );
+        if (!this.context.workflowQueue?.isEnabled()) {
+          throw new Error(
+            'Workflow queue is unavailable; retain dispatch intent for retry',
+          );
         }
-        const accepted = await this.workflowQueue.enqueue(job);
-        if (!accepted) throw new Error('Workflow queue did not accept persisted dispatch');
+        const accepted = await this.context.workflowQueue.enqueue(job);
+        if (!accepted)
+          throw new Error('Workflow queue did not accept persisted dispatch');
       },
     );
-    this.tasks?.registerRetryHandler((task) => this.dispatchRetryTask(task));
-    this.workflowQueue?.registerProcessor(async (job, attempt) => {
+    this.context.tasks?.registerRetryHandler((task) =>
+      this.dispatchRetryTask(task),
+    );
+    this.context.workflowQueue?.registerProcessor(async (job, attempt) => {
       if (job.operation === 'retry_task') {
         try {
           await this.retryTask(job);
         } catch (error) {
           if (attempt.finalAttempt) {
-            await this.tasks?.markRetryFailed(job.taskId, error);
+            await this.context.tasks?.markRetryFailed(job.taskId, error);
           }
           throw error;
         }
@@ -84,9 +94,13 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         }
       } catch (error) {
         if (attempt.finalAttempt) {
-          await this.markScheduledFailure(job.threadId, job.userId, error);
+          await this.context.state.markScheduledFailure(
+            job.threadId,
+            job.userId,
+            error,
+          );
         } else {
-          this.logger.warn(
+          this.context.logger.warn(
             `production workflow ${job.threadId} attempt ${attempt.attempt} failed; queue will retry`,
           );
         }
@@ -95,17 +109,17 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     });
   }
 
-  protected async dispatchRetryTask(task: {
+  async dispatchRetryTask(task: {
     id: string;
     threadId: string;
     role: string;
     retryCount: number;
   }): Promise<void> {
-    const state = await this.getState(task.threadId);
+    const state = await this.context.state.getState(task.threadId);
     if (!state?.projectId) throw new Error('workflow not found');
-    if (this.workflowQueue?.isEnabled()) {
-      const queued = await this.enqueueWorkflowJob({
-        id: this.workflowJobId(
+    if (this.context.workflowQueue?.isEnabled()) {
+      const queued = await this.context.state.enqueueWorkflowJob({
+        id: this.context.state.workflowJobId(
           'retry_task',
           task.threadId,
           `${task.id}-${task.retryCount}`,
@@ -119,7 +133,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       });
       if (queued) return;
     }
-    if (this.workflowQueue?.isRequired?.()) {
+    if (this.context.workflowQueue?.isRequired?.()) {
       throw new Error(
         '生产工作流要求使用 Redis 持久队列，队列不可用时拒绝进程内重试。',
       );
@@ -127,41 +141,45 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     await this.retryTask(task);
   }
 
-  protected async retryTask(task: {
-    threadId: string;
-    role: string;
-  }): Promise<void> {
-    const state = await this.getState(task.threadId);
+  async retryTask(task: { threadId: string; role: string }): Promise<void> {
+    const state = await this.context.state.getState(task.threadId);
     if (!state?.projectId) throw new Error('workflow not found');
     const role = task.role as ProductionRole;
     if (!state.selectedRoles.includes(role)) {
       throw new Error(`task role ${task.role} is not part of the workflow`);
     }
     if (state.status === 'cancelled') {
-      await this.tasks?.updateForRole(task.threadId, role, {
+      await this.context.tasks?.updateForRole(task.threadId, role, {
         status: 'cancelled',
         errorMessage: state.error || '用户取消工作流',
       });
       return;
     }
-    await this.app.updateState(this.config(task.threadId), {
-      status: 'running',
-      currentBatch: [role],
-      rerunRoles: [role],
-      pendingApprovalRoles: [],
-      approval: null,
-      feedback: '',
-      error: '',
-    });
-    const settled = await this.runUntilSettled(
-      task.threadId,
-      await this.getOwnedState(task.threadId, state.userId),
+    await this.context.app.updateState(
+      this.context.events.config(task.threadId),
+      {
+        status: 'running',
+        currentBatch: [role],
+        rerunRoles: [role],
+        pendingApprovalRoles: [],
+        approval: null,
+        feedback: '',
+        error: '',
+      },
     );
-    await this.traceLangfuse(settled);
-    const result = this.view(task.threadId, settled, state.userId);
-    await this.emitWorkflowState(settled);
-    await this.saveWorkflowIndex(result);
-    await this.tasks?.updateForRole(task.threadId, role, {
+    const settled = await this.context.state.runUntilSettled(
+      task.threadId,
+      await this.context.state.getOwnedState(task.threadId, state.userId),
+    );
+    await this.context.events.traceLangfuse(settled);
+    const result = this.context.events.view(
+      task.threadId,
+      settled,
+      state.userId,
+    );
+    await this.context.events.emitWorkflowState(settled);
+    await this.context.events.saveWorkflowIndex(result);
+    await this.context.tasks?.updateForRole(task.threadId, role, {
       status:
         settled.status === 'completed'
           ? 'completed'
@@ -184,30 +202,37 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     // BullMQ 重试或 Worker 接管时不能从零覆盖已有 Checkpoint；正在运行的
     // 工作流从最后持久化状态继续，其他终态直接返回当前视图。
     if (dto.threadId) {
-      const checkpoint = await this.getState(threadId);
+      const checkpoint = await this.context.state.getState(threadId);
       if (checkpoint?.projectId) {
         // 已存在的 Checkpoint 必须先通过 owner／tenant 校验，不能把“无权访问”
         // 当成“首次执行”并覆盖另一个用户或租户的工作流。
-        const existing = await this.getOwnedState(threadId, userId, tenantId);
+        const existing = await this.context.state.getOwnedState(
+          threadId,
+          userId,
+          tenantId,
+        );
         if (existing.status === 'running') {
-          const settled = await this.runUntilSettled(threadId, existing);
-          await this.traceLangfuse(settled);
-          const result = this.view(threadId, settled, userId);
-          await this.emitWorkflowState(settled);
-          await this.saveWorkflowIndex(result);
+          const settled = await this.context.state.runUntilSettled(
+            threadId,
+            existing,
+          );
+          await this.context.events.traceLangfuse(settled);
+          const result = this.context.events.view(threadId, settled, userId);
+          await this.context.events.emitWorkflowState(settled);
+          await this.context.events.saveWorkflowIndex(result);
           return result;
         }
-        return this.view(threadId, existing, userId);
+        return this.context.events.view(threadId, existing, userId);
       }
     }
-    const initialState = await this.createInitialState(
+    const initialState = await this.context.state.createInitialState(
       dto,
       userId,
       threadId,
       tenantId,
     );
-    await this.ensureRun(initialState);
-    await this.emitRuntimeEvent(
+    await this.context.state.ensureRun(initialState);
+    await this.context.events.emitRuntimeEvent(
       initialState,
       'workflow.started',
       'production_workflow',
@@ -219,7 +244,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         pluginTools: initialState.pluginTools,
       },
     );
-    await this.emitRuntimeEvent(
+    await this.context.events.emitRuntimeEvent(
       initialState,
       'goal.active',
       'production_workflow',
@@ -230,16 +255,16 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         maxRounds: initialState.maxSteps,
       },
     );
-    await this.initializeTasks(initialState);
-    const settled = await this.runUntilSettled(
+    await this.context.state.initializeTasks(initialState);
+    const settled = await this.context.state.runUntilSettled(
       threadId,
       initialState,
       initialState,
     );
-    await this.traceLangfuse(settled);
-    const result = this.view(threadId, settled, userId);
-    await this.emitWorkflowState(settled);
-    await this.saveWorkflowIndex(result);
+    await this.context.events.traceLangfuse(settled);
+    const result = this.context.events.view(threadId, settled, userId);
+    await this.context.events.emitWorkflowState(settled);
+    await this.context.events.saveWorkflowIndex(result);
     return result;
   }
 
@@ -250,49 +275,53 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
   ) {
     const threadId = dto.threadId ?? randomUUID();
     if (dto.threadId) {
-      const pending = this.pendingStates.get(threadId);
+      const pending = this.context.pendingStates.get(threadId);
       if (pending) {
         if (
           pending.userId !== userId ||
-          !this.tenantMatches(pending.tenantId, tenantId)
+          !this.context.state.tenantMatches(pending.tenantId, tenantId)
         ) {
           throw new Error('workflow not found');
         }
-        return this.view(threadId, pending, userId);
+        return this.context.events.view(threadId, pending, userId);
       }
-      const checkpoint = await this.getState(threadId);
+      const checkpoint = await this.context.state.getState(threadId);
       if (checkpoint?.projectId) {
-        const existing = await this.getOwnedState(threadId, userId, tenantId);
-        return this.view(threadId, existing, userId);
+        const existing = await this.context.state.getOwnedState(
+          threadId,
+          userId,
+          tenantId,
+        );
+        return this.context.events.view(threadId, existing, userId);
       }
     }
-    const initialState = await this.createInitialState(
+    const initialState = await this.context.state.createInitialState(
       dto,
       userId,
       threadId,
       tenantId,
     );
-    await this.ensureRun(initialState);
+    await this.context.state.ensureRun(initialState);
     // 任务计划是工作流的业务记录，必须先落库再入队，避免 API 与 Worker 并发创建两份计划。
-    await this.initializeTasks(initialState);
-    this.pendingStates.set(threadId, initialState);
-    await this.saveWorkflowIndexBestEffort(
-      this.view(threadId, initialState, userId),
+    await this.context.state.initializeTasks(initialState);
+    this.context.pendingStates.set(threadId, initialState);
+    await this.context.events.saveWorkflowIndexBestEffort(
+      this.context.events.view(threadId, initialState, userId),
     );
-    const queued = await this.enqueueWorkflowJob({
-      id: this.workflowJobId('start', threadId),
+    const queued = await this.context.state.enqueueWorkflowJob({
+      id: this.context.state.workflowJobId('start', threadId),
       operation: 'start',
       threadId,
       userId,
       tenantId,
       dto: { ...dto, threadId },
     });
-    if (!queued && !this.workflowQueue?.isRequired?.()) {
-      this.schedule(threadId, userId, () =>
+    if (!queued && !this.context.workflowQueue?.isRequired?.()) {
+      this.context.state.schedule(threadId, userId, () =>
         this.start({ ...dto, threadId }, userId, tenantId),
       );
     }
-    return this.view(threadId, initialState, userId);
+    return this.context.events.view(threadId, initialState, userId);
   }
 
   async resume(
@@ -304,13 +333,22 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     approvalCheckpointIdentity?: WorkflowApprovalCheckpointIdentity,
     queueAttempt = 1,
   ) {
-    const current = await this.getOwnedState(threadId, userId, tenantId);
-    await this.ensureRun(current);
+    const current = await this.context.state.getOwnedState(
+      threadId,
+      userId,
+      tenantId,
+    );
+    await this.context.state.ensureRun(current);
     if (current.approval === 'rejected' && dto.approval !== 'rejected') {
       throw new Error('a rejected approval is awaiting persistence');
     }
     if (dto.approval === 'rejected' && current.status === 'revision_required') {
-      return this.rejectForRevision(threadId, current, dto, userId);
+      return this.context.revision.rejectForRevision(
+        threadId,
+        current,
+        dto,
+        userId,
+      );
     }
     if (allowCheckpointRecovery && dto.approval === 'approved') {
       if (!approvalCheckpointIdentity && queueAttempt > 1) {
@@ -326,7 +364,10 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       ) {
         // Approval was consumed, but its batch has not advanced yet. Resume
         // the existing running checkpoint without invoking the approval again.
-        const settled = await this.runUntilSettled(threadId, current);
+        const settled = await this.context.state.runUntilSettled(
+          threadId,
+          current,
+        );
         return this.finalizeApprovedCheckpoint(
           threadId,
           settled,
@@ -346,7 +387,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         const settled =
           current.status === 'running' &&
           current.revisionNumber === approvalCheckpointIdentity.revisionNumber
-            ? await this.runUntilSettled(threadId, current)
+            ? await this.context.state.runUntilSettled(threadId, current)
             : current;
         return this.finalizeApprovedCheckpoint(
           threadId,
@@ -375,7 +416,12 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       ) {
         throw new Error('驳回请求与当前待审批批次不匹配。');
       }
-      return this.rejectForRevision(threadId, current, dto, userId);
+      return this.context.revision.rejectForRevision(
+        threadId,
+        current,
+        dto,
+        userId,
+      );
     }
     if (
       approvalCheckpointIdentity &&
@@ -390,15 +436,15 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     ) {
       throw new Error('审批重试任务缺少原始检查点身份，拒绝应用审批。');
     }
-    const state = await this.app.invoke(
+    const state = await this.context.app.invoke(
       {
         approval: dto.approval,
         feedback: dto.feedback?.trim() ?? '',
         rerunRoles: dto.rerunRoles ?? [],
       },
-      this.config(threadId),
+      this.context.events.config(threadId),
     );
-    const settled = await this.runUntilSettled(threadId, state);
+    const settled = await this.context.state.runUntilSettled(threadId, state);
     return this.finalizeApprovedCheckpoint(
       threadId,
       settled,
@@ -415,14 +461,23 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     userId: string,
     tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId, tenantId);
-    await this.ensureRun(current);
+    const current = await this.context.state.getOwnedState(
+      threadId,
+      userId,
+      tenantId,
+    );
+    await this.context.state.ensureRun(current);
     if (current.status !== 'pending_approval') {
       if (
         dto.approval === 'rejected' &&
         current.status === 'revision_required'
       ) {
-        return this.rejectForRevision(threadId, current, dto, userId);
+        return this.context.revision.rejectForRevision(
+          threadId,
+          current,
+          dto,
+          userId,
+        );
       }
       throw new Error(`workflow is not pending approval: ${current.status}`);
     }
@@ -436,12 +491,12 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       feedback: dto.feedback?.trim() ?? '',
       rerunRoles: dto.rerunRoles ?? [],
     };
-    this.pendingStates.set(threadId, pending);
-    await this.saveWorkflowIndexBestEffort(
-      this.view(threadId, pending, userId),
+    this.context.pendingStates.set(threadId, pending);
+    await this.context.events.saveWorkflowIndexBestEffort(
+      this.context.events.view(threadId, pending, userId),
     );
     const queuedJob: ResumeWorkflowJobWithCheckpoint = {
-      id: this.workflowJobId(
+      id: this.context.state.workflowJobId(
         'resume',
         threadId,
         `${current.stepCount}-${current.batchIndex}`,
@@ -454,16 +509,16 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       approvalCheckpointIdentity:
         this.captureApprovalCheckpointIdentity(current),
     };
-    const queued = await this.enqueueWorkflowJob(queuedJob);
-    if (!queued && !this.workflowQueue?.isRequired?.()) {
-      this.schedule(threadId, userId, () =>
+    const queued = await this.context.state.enqueueWorkflowJob(queuedJob);
+    if (!queued && !this.context.workflowQueue?.isRequired?.()) {
+      this.context.state.schedule(threadId, userId, () =>
         this.resume(threadId, dto, userId, tenantId),
       );
     }
-    return this.view(threadId, pending, userId);
+    return this.context.events.view(threadId, pending, userId);
   }
 
-  protected captureApprovalCheckpointIdentity(
+  captureApprovalCheckpointIdentity(
     state: ProductionWorkflowStateType,
   ): WorkflowApprovalCheckpointIdentity {
     return {
@@ -476,7 +531,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     };
   }
 
-  protected matchesApprovalCheckpoint(
+  matchesApprovalCheckpoint(
     state: ProductionWorkflowStateType,
     identity: WorkflowApprovalCheckpointIdentity,
   ): boolean {
@@ -490,7 +545,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     );
   }
 
-  protected approvalCheckpointHasAdvanced(
+  approvalCheckpointHasAdvanced(
     state: ProductionWorkflowStateType,
     identity: WorkflowApprovalCheckpointIdentity,
   ): boolean {
@@ -510,7 +565,7 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     );
   }
 
-  protected approvalCheckpointIsRunningInPlace(
+  approvalCheckpointIsRunningInPlace(
     state: ProductionWorkflowStateType,
     identity: WorkflowApprovalCheckpointIdentity,
   ): boolean {
@@ -528,17 +583,14 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     );
   }
 
-  protected sameRoles(
-    left: ProductionRole[],
-    right: ProductionRole[],
-  ): boolean {
+  sameRoles(left: ProductionRole[], right: ProductionRole[]): boolean {
     return (
       left.length === right.length &&
       left.every((role, index) => role === right[index])
     );
   }
 
-  protected async finalizeApprovedCheckpoint(
+  async finalizeApprovedCheckpoint(
     threadId: string,
     state: ProductionWorkflowStateType,
     dto: ResumeProductionWorkflowDto,
@@ -546,16 +598,21 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     identity?: WorkflowApprovalCheckpointIdentity,
     resumedFromCheckpoint = false,
   ) {
-    await this.traceLangfuse(state);
-    const result = this.view(threadId, state, userId);
-    await this.emitRuntimeEvent(state, 'approval.approved', 'human_reviewer', {
-      feedback: dto.feedback?.trim() ?? '',
-      rerunRoles: dto.rerunRoles ?? [],
-      ...(identity ? { approvedBatchIndex: identity.batchIndex } : {}),
-      ...(resumedFromCheckpoint ? { resumedFromCheckpoint: true } : {}),
-    });
-    await this.emitWorkflowState(state);
-    await this.saveWorkflowIndex(result);
+    await this.context.events.traceLangfuse(state);
+    const result = this.context.events.view(threadId, state, userId);
+    await this.context.events.emitRuntimeEvent(
+      state,
+      'approval.approved',
+      'human_reviewer',
+      {
+        feedback: dto.feedback?.trim() ?? '',
+        rerunRoles: dto.rerunRoles ?? [],
+        ...(identity ? { approvedBatchIndex: identity.batchIndex } : {}),
+        ...(resumedFromCheckpoint ? { resumedFromCheckpoint: true } : {}),
+      },
+    );
+    await this.context.events.emitWorkflowState(state);
+    await this.context.events.saveWorkflowIndex(result);
     return result;
   }
 
@@ -570,7 +627,11 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     tenantId?: string,
     allowCheckpointRecovery = false,
   ) {
-    const current = await this.getOwnedState(threadId, userId, tenantId);
+    const current = await this.context.state.getOwnedState(
+      threadId,
+      userId,
+      tenantId,
+    );
     const recoveringRunningRevision =
       allowCheckpointRecovery &&
       current.status === 'running' &&
@@ -595,12 +656,12 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         dto.supplementalMaterials?.trim() ??
         current.supplementalMaterials ??
         '';
-      const revisionHistory = this.withRevisionPackage(
+      const revisionHistory = this.context.events.withRevisionPackage(
         current.revisionHistory ?? [],
         supplementalMaterials,
         requested,
       );
-      await this.app.updateState(this.config(threadId), {
+      await this.context.app.updateState(this.context.events.config(threadId), {
         status: 'running',
         rerunRoles: requested,
         pendingApprovalRoles: [],
@@ -609,19 +670,28 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
         revisionHistory,
         error: '',
       });
-      state = await this.getOwnedState(threadId, userId, tenantId);
-      await this.emitRuntimeEvent(state, 'revision.started', 'human_reviewer', {
-        revision: state.revisionNumber ?? 1,
-        rerunRoles: requested,
-        feedback: state.feedback,
-        supplementalMaterialsLength: supplementalMaterials.length,
-      });
+      state = await this.context.state.getOwnedState(
+        threadId,
+        userId,
+        tenantId,
+      );
+      await this.context.events.emitRuntimeEvent(
+        state,
+        'revision.started',
+        'human_reviewer',
+        {
+          revision: state.revisionNumber ?? 1,
+          rerunRoles: requested,
+          feedback: state.feedback,
+          supplementalMaterialsLength: supplementalMaterials.length,
+        },
+      );
     }
-    const settled = await this.runUntilSettled(threadId, state);
-    await this.traceLangfuse(settled);
-    const result = this.view(threadId, settled, userId);
-    await this.emitWorkflowState(settled);
-    await this.saveWorkflowIndex(result);
+    const settled = await this.context.state.runUntilSettled(threadId, state);
+    await this.context.events.traceLangfuse(settled);
+    const result = this.context.events.view(threadId, settled, userId);
+    await this.context.events.emitWorkflowState(settled);
+    await this.context.events.saveWorkflowIndex(result);
     return result;
   }
 
@@ -631,7 +701,11 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
     userId: string,
     tenantId?: string,
   ) {
-    const current = await this.getOwnedState(threadId, userId, tenantId);
+    const current = await this.context.state.getOwnedState(
+      threadId,
+      userId,
+      tenantId,
+    );
     if (current.status !== 'revision_required') {
       throw new Error(`workflow does not require revision: ${current.status}`);
     }
@@ -652,12 +726,12 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       pendingApprovalRoles: [],
       supplementalMaterials,
     };
-    this.pendingStates.set(threadId, pending);
-    await this.saveWorkflowIndexBestEffort(
-      this.view(threadId, pending, userId),
+    this.context.pendingStates.set(threadId, pending);
+    await this.context.events.saveWorkflowIndexBestEffort(
+      this.context.events.view(threadId, pending, userId),
     );
-    const queued = await this.enqueueWorkflowJob({
-      id: this.workflowJobId(
+    const queued = await this.context.state.enqueueWorkflowJob({
+      id: this.context.state.workflowJobId(
         'revise',
         threadId,
         `${current.revisionNumber}-${requested.join(',')}`,
@@ -668,12 +742,12 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
       tenantId,
       dto,
     });
-    if (!queued && !this.workflowQueue?.isRequired?.()) {
-      this.schedule(threadId, userId, () =>
+    if (!queued && !this.context.workflowQueue?.isRequired?.()) {
+      this.context.state.schedule(threadId, userId, () =>
         this.revise(threadId, dto, userId, tenantId),
       );
     }
-    return this.view(threadId, pending, userId);
+    return this.context.events.view(threadId, pending, userId);
   }
 
   async cancel(
@@ -684,57 +758,62 @@ export abstract class ProductionWorkflowControlBase extends ProductionWorkflowEx
   ) {
     let state: ProductionWorkflowStateType;
     try {
-      state = await this.getOwnedState(threadId, userId, tenantId);
+      state = await this.context.state.getOwnedState(
+        threadId,
+        userId,
+        tenantId,
+      );
     } catch (error) {
-      const pending = this.pendingStates.get(threadId);
+      const pending = this.context.pendingStates.get(threadId);
       if (
         !pending ||
         pending.userId !== userId ||
-        !this.tenantMatches(pending.tenantId, tenantId)
+        !this.context.state.tenantMatches(pending.tenantId, tenantId)
       ) {
         throw error;
       }
       state = pending;
     }
     if (['completed', 'failed', 'cancelled'].includes(state.status)) {
-      return this.view(threadId, state, userId);
+      return this.context.events.view(threadId, state, userId);
     }
 
     const cancelReason = reason.trim().slice(0, 500) || '用户取消工作流';
-    const markerKey = this.workflowCancelKey(threadId);
-    if (this.redisProvider.isEnabled()) {
-      await this.redisProvider.setRequiredOrThrow(
+    const markerKey = this.context.state.workflowCancelKey(threadId);
+    if (this.context.redisProvider.isEnabled()) {
+      await this.context.redisProvider.setRequiredOrThrow(
         markerKey,
         `cancelled:${cancelReason}`,
         WORKFLOW_CANCEL_MARKER_TTL_SECONDS,
       );
     } else if (
-      this.configService?.get<boolean>('core.requireDependencies') === true ||
-      this.configService?.get<string>('nodeEnv') === 'production'
+      this.context.configService?.get<boolean>('core.requireDependencies') ===
+        true ||
+      this.context.configService?.get<string>('nodeEnv') === 'production'
     ) {
       throw new Error('取消标记无法持久化，工作流状态未更改。');
     } else if (
       state.status === 'running' &&
-      !this.cancellationControllers.has(threadId)
+      !this.context.cancellationControllers.has(threadId)
     ) {
       throw new Error(
         '工作流正在其他执行器中运行，Redis 不可用时无法安全取消。',
       );
     }
 
-    this.cancellationControllers
+    this.context.cancellationControllers
       .get(threadId)
       ?.abort(new ProductionWorkflowCancelledError(cancelReason));
 
     if (state.status !== 'running') {
-      state = await this.persistWorkflowCancelled(
+      state = await this.context.state.persistWorkflowCancelled(
         threadId,
         state,
         cancelReason,
       );
     }
     return {
-      ...this.view(threadId, state, userId),
+      ...this.context.events.view(threadId, state, userId),
       cancellationRequested: state.status !== 'cancelled',
     };
   }

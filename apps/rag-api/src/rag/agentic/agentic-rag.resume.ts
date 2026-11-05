@@ -409,17 +409,20 @@ export class AgenticRagResume extends AgenticRagEvidence {
   /**
    * 条件路由：reflection 后决定重试还是结束
    */
-  reflectionRouter(state: AgenticRagStateType): 'retry' | 'end' {
+  reflectionRouter(
+    state: AgenticRagStateType,
+  ): 'generate' | 'retrieval' | 'end' {
     if (state.passed) {
       this.metricsService.observeAgentLoopDecision('passed');
       return 'end';
     }
-    if (state.retryCount >= this.maxRetries) {
+    // Reflection 在判定失败时已经把本次评估计入 retryCount；允许配置的重试次数真正执行。
+    if (state.retryCount > this.maxRetries) {
       this.logger.warn(`Max retries (${this.maxRetries}) reached, ending`);
       this.metricsService.observeAgentLoopDecision('max_retries');
       return 'end';
     }
     this.metricsService.observeAgentLoopDecision('retry');
-    return 'retry';
+    return state.retryTarget === 'retrieval' ? 'retrieval' : 'generate';
   }
 }

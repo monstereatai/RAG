@@ -230,7 +230,7 @@ flowchart TB
   Queue --> Worker["Workflow Worker<br/>持有并续租执行租约"]
   Worker --> Checkpoint["读取 / 写入 Redis LangGraph checkpoint"]
   Checkpoint --> DAG["Workflow DAG<br/>批次、岗位、依赖与当前步骤"]
-  DAG --> Role["岗位 Agent / Agent Loop"]
+  DAG --> Role["岗位执行<br/>知识检索 + 结构化模型生成"]
   Role --> Policy["工具策略、Schema、权限、幂等与审批"]
   Policy --> Tools["RAG / MCP / 业务工具"]
   Tools --> State["结果、证据、claims、错误与事件回填"]
@@ -250,6 +250,12 @@ flowchart TB
 ```
 
 PostgreSQL 保存业务任务和运行审计，Redis checkpoint 保存图执行恢复位置，BullMQ 负责跨进程派发与重试。带外部副作用且结果未知的工具不能盲目重放；自动扫描与接管仍是待闭环项，需人工确认或按局部任务重跑。
+
+新建工作流使用 `prepare → generateRole → persistRole`：每个岗位生成结果后先写 Checkpoint，再执行产物、交接和任务写入；同批次下一个岗位从新 Checkpoint 继续。旧工作流的 Checkpoint 继续走原有 `executeBatch` 节点，直到该任务结束。
+
+代码入口是 `production-workflow.service.ts`；`production-workflow.composition.ts` 将状态、岗位执行、审批控制、查询和修订组件赋给共享运行上下文中的命名字段。调用位置直接写出组件归属，例如 `context.state.runUntilSettled()`；方法不再动态挂载到上下文。启动、审批和修订在 `production-workflow.control.ts`，状态创建和循环恢复在 `production-workflow.state-service.ts`，图节点与岗位执行在 `production-workflow.execution.ts`，输入预算在 `production-workflow.role-input.ts`，状态查询与导出在 `production-workflow.query.ts`。这些组件不再用继承串联。
+
+`processType=sequential` 按依赖顺序逐岗位形成批次；`hierarchical` 按依赖层形成批次并建立 Manager Task。新任务不再接受 `conditional`，因为接口没有提供可执行的岗位条件；已有 Checkpoint 保留原状态继续运行。
 
 ### 2.1.4 上下文如何组织
 

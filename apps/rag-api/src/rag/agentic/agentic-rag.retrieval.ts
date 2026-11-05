@@ -23,8 +23,16 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
     const userId = config?.configurable?.userId as string | undefined;
     const retrieveOptions = (config?.configurable?.retrieveOptions ??
       {}) as RetrieveOptions;
-    const fastPathChunks = (config?.configurable?.fastPathChunks ??
-      []) as RetrievedChunk[];
+    const fastPathChunks = (
+      (state.retryCount ?? 0) === 0
+        ? (config?.configurable?.fastPathChunks ?? [])
+        : []
+    ) as RetrievedChunk[];
+    const priorWebChunks = state.webSearchAttempted
+      ? (state.retrievedChunks ?? []).filter((chunk) =>
+          chunk.id.startsWith('web:'),
+        )
+      : [];
     const prefetchedFastPath = config?.configurable?.prefetchedFastPath as
       | PrefetchedFastPath
       | undefined;
@@ -53,6 +61,7 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
               ...retrieveOptions,
               executionPlan,
               rankingQuery: state.query,
+              skipRerank: true,
             },
             userId,
           )
@@ -67,7 +76,12 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
         ...subQuestion,
         status:
           chunks.length > 0 ? ('retrieved' as const) : ('needs_more' as const),
-        evidenceIds: chunks.map((chunk) => chunk.id),
+        evidenceIds: [
+          ...new Set([
+            ...chunks.map((chunk) => chunk.id),
+            ...subQuestion.evidenceIds.filter((id) => id.startsWith('web:')),
+          ]),
+        ],
         retrievalAttempts: subQuestion.retrievalAttempts + 1,
         results: chunks,
       })),
@@ -163,6 +177,7 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
     // 只能作为可观测补充，不能挤占正式片段；正式 RAG 不足时才纳入长期笔记兜底。
     const baselineCandidates = [
       ...fastPathChunks,
+      ...priorWebChunks,
       ...reviewedBaseCaseChunks,
       ...sourceResolution.chunks,
       ...(formalEvidenceSufficient ? [] : obsidianChunks),
@@ -260,7 +275,7 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
             status,
           }),
         ),
-        webSearchCount: 0,
+        webSearchCount: state.webSearchCount,
       },
     );
     onEvent?.({ type: 'artifact', data: evidenceArtifact });
@@ -271,8 +286,8 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
       retrievedChunks: chunks,
       subQuestions: [...updatedSubQuestions, ...remainingSubQuestions],
       artifacts: [...previousArtifacts, evidenceArtifact],
-      webSearchAttempted: false,
-      webSearchCount: 0,
+      webSearchAttempted: state.webSearchAttempted,
+      webSearchCount: state.webSearchCount,
       answer: '',
       passed: false,
     };
@@ -286,6 +301,24 @@ export class AgenticRagRetrieval extends AgenticRagPlanning {
     config?: RunnableConfig,
   ): Promise<Partial<AgenticRagStateType> & { reranked: boolean }> {
     const onEvent = config?.configurable?.onEvent as SseCallback | undefined;
+    const prefetchedChunks = (
+      (state.retryCount ?? 0) === 0
+        ? (config?.configurable?.fastPathChunks ?? [])
+        : []
+    ) as RetrievedChunk[];
+    // Auto 预取结果已经由检索层重排；本节点只负责未预取的 Agentic 候选。
+    if (prefetchedChunks.length > 0) {
+      onEvent?.({
+        type: 'rerank',
+        data: {
+          enabled:
+            this.rerankEnabled && this.dashScopeRerankService.isEnabled(),
+          reranked: false,
+          count: state.retrievedChunks.length,
+        },
+      });
+      return { reranked: false };
+    }
     if (state.retrievedChunks.length < 2) {
       onEvent?.({
         type: 'rerank',

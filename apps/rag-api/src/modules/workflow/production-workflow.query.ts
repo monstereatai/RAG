@@ -1,3 +1,4 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import {
@@ -11,21 +12,29 @@ import {
   getRegisteredToolTimeoutMs,
 } from '../../tools/tool-execution.service';
 import { projectSchema } from './production-workflow.shared';
-import { ProductionWorkflowControlBase } from './production-workflow.control';
 import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
 import { productionProjectGenerationPromptDefinitions } from './production-project-generation.prompts';
 
-export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowControlBase {
+export class ProductionWorkflowQuery {
+  readonly context: ProductionWorkflowContext;
+
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
   async status(threadId: string, userId: string, tenantId?: string) {
     let state: ProductionWorkflowStateType;
     try {
-      state = await this.getOwnedState(threadId, userId, tenantId);
+      state = await this.context.state.getOwnedState(
+        threadId,
+        userId,
+        tenantId,
+      );
     } catch (error) {
-      const pending = this.pendingStates.get(threadId);
+      const pending = this.context.pendingStates.get(threadId);
       if (
         !pending ||
         pending.userId !== userId ||
-        !this.tenantMatches(pending.tenantId, tenantId)
+        !this.context.state.tenantMatches(pending.tenantId, tenantId)
       )
         throw error;
       state = pending;
@@ -34,21 +43,21 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     // 否则会与 Worker 产生同一 Checkpoint 的并发推进。
     if (
       state.status === 'running' &&
-      !this.activeRuns.has(threadId) &&
-      !this.workflowQueue?.isEnabled() &&
-      !this.workflowQueue?.isRequired?.()
+      !this.context.activeRuns.has(threadId) &&
+      !this.context.workflowQueue?.isEnabled() &&
+      !this.context.workflowQueue?.isRequired?.()
     ) {
-      this.schedule(threadId, userId, () =>
-        this.runUntilSettled(threadId, state),
+      this.context.state.schedule(threadId, userId, () =>
+        this.context.state.runUntilSettled(threadId, state),
       );
     }
-    const result = this.view(threadId, state, userId);
-    void this.saveWorkflowIndexBestEffort(result);
+    const result = this.context.events.view(threadId, state, userId);
+    void this.context.events.saveWorkflowIndexBestEffort(result);
     return result;
   }
 
   async list(userId: string, tenantId?: string) {
-    const ids = await this.redisProvider.zrange(
+    const ids = await this.context.redisProvider.zrange(
       `production:workflows:${userId}`,
       0,
       -1,
@@ -56,16 +65,21 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     );
     const items = await Promise.all(
       ids.map((threadId) =>
-        this.redisProvider.get(this.workflowIndexKey(userId, threadId)),
+        this.context.redisProvider.get(
+          this.context.events.workflowIndexKey(userId, threadId),
+        ),
       ),
     );
     const redisItems = items
       .filter((item): item is string => Boolean(item))
       .map((item) => JSON.parse(item) as Record<string, unknown>)
-      .filter((item) => this.tenantMatches(item.tenantId, tenantId));
-    const memoryItems = [...this.workflowIndexMemory.values()].filter(
+      .filter((item) =>
+        this.context.state.tenantMatches(item.tenantId, tenantId),
+      );
+    const memoryItems = [...this.context.workflowIndexMemory.values()].filter(
       (item) =>
-        item.userId === userId && this.tenantMatches(item.tenantId, tenantId),
+        item.userId === userId &&
+        this.context.state.tenantMatches(item.tenantId, tenantId),
     );
     const merged = new Map<string, Record<string, unknown>>();
     [...redisItems, ...memoryItems].forEach((item) => {
@@ -76,13 +90,19 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
       String(b.updatedAt).localeCompare(String(a.updatedAt)),
     );
     await Promise.all(
-      workflows.map((item) => this.ensureIndexedRun(item, userId)),
+      workflows.map((item) =>
+        this.context.state.ensureIndexedRun(item, userId),
+      ),
     );
     return workflows;
   }
 
   async codingContext(threadId: string, userId: string, tenantId?: string) {
-    const state = await this.getOwnedState(threadId, userId, tenantId);
+    const state = await this.context.state.getOwnedState(
+      threadId,
+      userId,
+      tenantId,
+    );
     if (state.status !== 'completed') {
       throw new Error(`workflow is not completed: ${state.status}`);
     }
@@ -129,7 +149,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
 
   /** 管理端任务重跑前的租户边界校验；不新增任务表 owner 列，直接复用工作流状态 owner。 */
   async assertOwnedThread(threadId: string, userId: string): Promise<void> {
-    await this.getOwnedState(threadId, userId);
+    await this.context.state.getOwnedState(threadId, userId);
   }
 
   /** 页面目录导出、项目 ZIP 和 MCP 共同消费的唯一交接契约。 */
@@ -201,7 +221,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
 
   async generateProject(threadId: string, userId: string, tenantId?: string) {
     const context = await this.codingContext(threadId, userId, tenantId);
-    const run = await this.agentRuns?.findLatestByThread(threadId);
+    const run = await this.context.agentRuns?.findLatestByThread(threadId);
     const handoff = context.stages
       .map(
         (stage) =>
@@ -222,23 +242,26 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
       let lastError: unknown;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          const output = await this.llmProvider.runWithSignal(signal, () =>
-            this.llmProvider
-              .getModel()
-              .withStructuredOutput(projectSchema, { method: 'jsonMode' })
-              .invoke(messages, {
-                metadata: {
-                  ...getPromptMetadata('workflow.project_generation'),
-                  ...(attempt > 1
-                    ? {
-                        repairPromptName: 'workflow.project_generation.repair',
-                        repairPromptVersion: getPromptMetadata(
-                          'workflow.project_generation.repair',
-                        ).promptVersion,
-                      }
-                    : {}),
-                },
-              }),
+          const output = await this.context.llmProvider.runWithSignal(
+            signal,
+            () =>
+              this.context.llmProvider
+                .getModel()
+                .withStructuredOutput(projectSchema, { method: 'jsonMode' })
+                .invoke(messages, {
+                  metadata: {
+                    ...getPromptMetadata('workflow.project_generation'),
+                    ...(attempt > 1
+                      ? {
+                          repairPromptName:
+                            'workflow.project_generation.repair',
+                          repairPromptVersion: getPromptMetadata(
+                            'workflow.project_generation.repair',
+                          ).promptVersion,
+                        }
+                      : {}),
+                  },
+                }),
           );
           const normalized = {
             ...output,
@@ -246,7 +269,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
               ? output.notes
               : [String(output.notes ?? '')].filter(Boolean),
           };
-          return this.validateGeneratedProject({
+          return this.context.roleSupport.validateGeneratedProject({
             ...normalized,
             activityName: context.projectId,
             sourceThreadId: context.threadId,
@@ -264,8 +287,8 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
         `项目代码结构化生成失败：${lastError instanceof Error ? lastError.message : String(lastError)}`,
       );
     };
-    const execution = this.toolExecution
-      ? await this.toolExecution.execute({
+    const execution = this.context.toolExecution
+      ? await this.context.toolExecution.execute({
           toolName: 'artifact_generate',
           threadId,
           runId: run?.id,
@@ -336,7 +359,11 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     );
     zip.file(
       'DELIVERY_VERIFICATION.json',
-      JSON.stringify(this.deliveryVerification(generated), null, 2),
+      JSON.stringify(
+        this.context.roleSupport.deliveryVerification(generated),
+        null,
+        2,
+      ),
     );
     context.stages.forEach((stage) => {
       if ((stage.lowCodeSchemas ?? []).length > 0) {
@@ -356,8 +383,8 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   }
 
-  protected buildHandoffMarkdown(
-    context: Awaited<ReturnType<ProductionWorkflowQueryBase['codingContext']>>,
+  buildHandoffMarkdown(
+    context: Awaited<ReturnType<ProductionWorkflowQuery['codingContext']>>,
   ): string {
     const stages = context.stages.map((stage) =>
       [
@@ -375,7 +402,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     ].join('\n\n');
   }
 
-  protected buildEvidenceMarkdown(
+  buildEvidenceMarkdown(
     evidence: Array<ProductionEvidence & { role: string }>,
   ): string {
     const lines = evidence.map(
@@ -390,7 +417,7 @@ export abstract class ProductionWorkflowQueryBase extends ProductionWorkflowCont
     ].join('\n\n');
   }
 
-  protected handoffHash(value: string): string {
+  handoffHash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
   }
 }

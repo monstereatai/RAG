@@ -5,10 +5,10 @@ import {
 } from './production-workflow.plan';
 
 describe('production workflow execution plan', () => {
-  it('builds parallel batches from production dependencies', () => {
+  it('builds hierarchical batches from production dependencies', () => {
     const roles = normalizeProductionRoles();
 
-    expect(buildProductionExecutionBatches(roles)).toEqual([
+    expect(buildProductionExecutionBatches(roles, 'hierarchical')).toEqual([
       ['product'],
       ['design', 'backend'],
       ['frontend'],
@@ -17,11 +17,30 @@ describe('production workflow execution plan', () => {
     ]);
   });
 
+  it('runs sequential mode in dependency order one role at a time', () => {
+    expect(
+      buildProductionExecutionBatches(normalizeProductionRoles(), 'sequential'),
+    ).toEqual([
+      ['product'],
+      ['design'],
+      ['backend'],
+      ['frontend'],
+      ['qa'],
+      ['operations'],
+    ]);
+  });
+
+  it('rejects conditional mode until executable role conditions exist', () => {
+    expect(() =>
+      buildProductionExecutionBatches(['product'], 'conditional'),
+    ).toThrow('conditional workflow requires role conditions');
+  });
+
   it('removes dependencies for roles that are not selected', () => {
     const roles = normalizeProductionRoles(['qa', 'design', 'backend']);
 
     expect(roles).toEqual(['design', 'backend', 'qa']);
-    expect(buildProductionExecutionBatches(roles)).toEqual([
+    expect(buildProductionExecutionBatches(roles, 'hierarchical')).toEqual([
       ['design', 'backend'],
       ['qa'],
     ]);

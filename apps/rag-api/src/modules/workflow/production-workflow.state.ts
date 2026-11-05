@@ -159,6 +159,11 @@ export const ProductionWorkflowState = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => 'sequential',
   }),
+  /** 旧检查点继续走 executeBatch；新任务按岗位分别检查点。 */
+  workflowVersion: Annotation<number>({
+    reducer: (_previous, next) => next,
+    default: () => 1,
+  }),
   currentRole: Annotation<ProductionRole>({
     reducer: (_previous, next) => next,
     default: () => 'product',
@@ -178,6 +183,18 @@ export const ProductionWorkflowState = Annotation.Root({
   currentBatch: Annotation<ProductionRole[]>({
     reducer: (_previous, next) => next,
     default: () => [],
+  }),
+  batchRoleCursor: Annotation<number>({
+    reducer: (_previous, next) => next,
+    default: () => 0,
+  }),
+  rolePhase: Annotation<'idle' | 'generated'>({
+    reducer: (_previous, next) => next,
+    default: () => 'idle',
+  }),
+  currentRoleModelError: Annotation<string>({
+    reducer: (_previous, next) => next,
+    default: () => '',
   }),
   completedRoles: Annotation<ProductionRole[]>({
     reducer: (_previous, next) => next,

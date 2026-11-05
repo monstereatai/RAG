@@ -1,5 +1,6 @@
 import {
   PRODUCTION_ROLES,
+  type ProductionProcessType,
   type ProductionRole,
 } from './production-workflow.state';
 
@@ -32,7 +33,13 @@ export function normalizeProductionRoles(
 
 export function buildProductionExecutionBatches(
   roles: ProductionRole[],
+  processType: ProductionProcessType = 'sequential',
 ): ProductionRole[][] {
+  if (processType === 'conditional') {
+    throw new Error(
+      'conditional workflow requires role conditions and is not supported for new runs',
+    );
+  }
   const remaining = new Set(roles);
   const completed = new Set<ProductionRole>();
   const batches: ProductionRole[][] = [];
@@ -48,7 +55,11 @@ export function buildProductionExecutionBatches(
     if (batch.length === 0) {
       throw new Error('production workflow dependency cycle detected');
     }
-    batches.push(batch);
+    if (processType === 'sequential') {
+      batches.push(...batch.map((role) => [role]));
+    } else {
+      batches.push(batch);
+    }
     for (const role of batch) {
       remaining.delete(role);
       completed.add(role);

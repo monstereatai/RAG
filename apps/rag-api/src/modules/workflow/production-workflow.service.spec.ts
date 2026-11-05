@@ -2,7 +2,10 @@ import { ProductionWorkflowService } from './production-workflow.service';
 import type { ProductionWorkflowStateType } from './production-workflow.state';
 
 describe('ProductionWorkflowService', () => {
-  const createService = (workflowQueue?: { enqueue: jest.Mock }) => {
+  const createService = (
+    workflowQueue?: { enqueue: jest.Mock },
+    collaboration?: { publishMessage: jest.Mock },
+  ) => {
     const invoke = jest.fn().mockResolvedValue({
       summary: '审查完成',
       deliverables: [
@@ -84,7 +87,7 @@ describe('ProductionWorkflowService', () => {
         markReviewState: jest.fn().mockResolvedValue({}),
       } as never,
       undefined,
-      undefined,
+      collaboration as never,
       undefined,
       undefined,
       undefined,
@@ -115,7 +118,8 @@ describe('ProductionWorkflowService', () => {
     expect(invoke).toHaveBeenCalledTimes(6);
     expect(state.executionBatches).toEqual([
       ['product'],
-      ['design', 'backend'],
+      ['design'],
+      ['backend'],
       ['frontend'],
       ['qa'],
       ['operations'],
@@ -128,6 +132,124 @@ describe('ProductionWorkflowService', () => {
       'qa',
       'operations',
     ]);
+  });
+
+  it('does not retry the model when a downstream handoff write fails', async () => {
+    const collaboration = {
+      publishMessage: jest
+        .fn()
+        .mockRejectedValue(new Error('handoff unavailable')),
+    };
+    const { service, invoke } = createService(undefined, collaboration);
+
+    await expect(
+      service.start(
+        {
+          projectId: 'handoff-failure',
+          brief: '验证交接消息写入失败时，不再重新生成同一个岗位的模型结果。',
+          roles: ['product', 'backend'],
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow('handoff unavailable');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes a failed role write from its generated checkpoint', async () => {
+    const collaboration = {
+      publishMessage: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('handoff unavailable'))
+        .mockResolvedValue(undefined),
+    };
+    const { service, invoke } = createService(undefined, collaboration);
+    const dto = {
+      threadId: 'role-write-recovery',
+      projectId: 'role-write-recovery',
+      brief: '验证岗位交接写入失败后，从已生成的结果继续，不再重复调用模型。',
+      roles: ['product', 'backend'] as Array<'product' | 'backend'>,
+    };
+
+    await expect(service.start(dto, 'user-1')).rejects.toThrow(
+      'handoff unavailable',
+    );
+    const resumed = await service.start(dto, 'user-1');
+
+    expect(resumed.status).toBe('completed');
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(collaboration.publishMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the legacy executeBatch path for an existing workflow checkpoint', async () => {
+    const { service, invoke } = createService();
+    const legacy = (
+      service as unknown as {
+        context: {
+          state: {
+            createInitialState: (
+              dto: {
+                projectId: string;
+                brief: string;
+                roles: Array<'product'>;
+              },
+              userId: string,
+              threadId: string,
+            ) => Promise<ProductionWorkflowStateType>;
+            runUntilSettled: (
+              threadId: string,
+              state: ProductionWorkflowStateType,
+              input: ProductionWorkflowStateType,
+            ) => Promise<ProductionWorkflowStateType>;
+          };
+        };
+      }
+    ).context.state;
+    const state = await legacy.createInitialState(
+      {
+        projectId: 'legacy-workflow',
+        brief: '验证旧版工作流检查点仍然可以走 executeBatch 节点完成。',
+        roles: ['product'],
+      },
+      'user-1',
+      'legacy-thread',
+    );
+    state.workflowVersion = 1;
+
+    const settled = await legacy.runUntilSettled('legacy-thread', state, state);
+
+    expect(settled.status).toBe('completed');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not regenerate completed roles in a partially persisted batch', async () => {
+    let failed = false;
+    const collaboration = {
+      publishMessage: jest.fn((input: { fromRole: string }) => {
+        if (input.fromRole === 'backend' && !failed) {
+          failed = true;
+          return Promise.reject(new Error('backend handoff unavailable'));
+        }
+        return Promise.resolve();
+      }),
+    };
+    const { service, invoke } = createService(undefined, collaboration);
+    const dto = {
+      threadId: 'partial-batch-recovery',
+      projectId: 'partial-batch-recovery',
+      brief:
+        '验证同批次已有岗位完成时，后续岗位写入失败不会让前序岗位重新生成。',
+      roles: ['product', 'design', 'backend', 'frontend'] as Array<
+        'product' | 'design' | 'backend' | 'frontend'
+      >,
+    };
+
+    await expect(service.start(dto, 'user-1')).rejects.toThrow(
+      'backend handoff unavailable',
+    );
+    const resumed = await service.start(dto, 'user-1');
+
+    expect(resumed.status).toBe('completed');
+    expect(invoke).toHaveBeenCalledTimes(4);
   });
 
   it('exports one verified handoff manifest for ZIP, page and MCP consumers', async () => {
@@ -277,28 +399,32 @@ describe('ProductionWorkflowService', () => {
   it('keeps workflow runtime and domain events in the workflow tenant', async () => {
     const runtimeEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     const domainEvents = { emit: jest.fn().mockResolvedValue(undefined) };
-    const service = Object.create(
-      ProductionWorkflowService.prototype,
-    ) as ProductionWorkflowService;
+    const { service } = createService();
     type EventState = Pick<
       ProductionWorkflowStateType,
       'tenantId' | 'threadId' | 'runId' | 'projectId'
     >;
-    const internals = service as unknown as {
-      runtimeEvents: { emit: jest.Mock };
-      domainEvents: { emit: jest.Mock };
-      emitRuntimeEvent(
-        state: EventState,
-        eventType: string,
-        actor: string,
-        payload: unknown,
-      ): Promise<void>;
-      emitDomainEvent(
-        eventType: string,
-        state: EventState,
-        payload: Record<string, unknown>,
-      ): Promise<void>;
-    };
+    const internals = (
+      service as unknown as {
+        context: {
+          runtimeEvents: { emit: jest.Mock };
+          domainEvents: { emit: jest.Mock };
+          events: {
+            emitRuntimeEvent(
+              state: EventState,
+              eventType: string,
+              actor: string,
+              payload: unknown,
+            ): Promise<void>;
+            emitDomainEvent(
+              eventType: string,
+              state: EventState,
+              payload: Record<string, unknown>,
+            ): Promise<void>;
+          };
+        };
+      }
+    ).context;
     internals.runtimeEvents = runtimeEvents;
     internals.domainEvents = domainEvents;
     const state = {
@@ -308,10 +434,10 @@ describe('ProductionWorkflowService', () => {
       projectId: 'project-a',
     };
 
-    await internals.emitRuntimeEvent(state, 'run.started', 'workflow', {
+    await internals.events.emitRuntimeEvent(state, 'run.started', 'workflow', {
       source: 'test',
     });
-    await internals.emitDomainEvent('workflow.started', state, {
+    await internals.events.emitDomainEvent('workflow.started', state, {
       source: 'test',
     });
 
@@ -344,7 +470,14 @@ describe('ProductionWorkflowService', () => {
 
   it('rejects generated project code without runnable entry requirements', async () => {
     const { service, invoke } = createService();
-    jest.spyOn(service, 'codingContext').mockResolvedValue({
+    const context = (
+      service as unknown as {
+        context: {
+          query: { codingContext: ProductionWorkflowService['codingContext'] };
+        };
+      }
+    ).context;
+    jest.spyOn(context.query, 'codingContext').mockResolvedValue({
       threadId: 'thread-1',
       projectId: 'demo',
       brief: '生成活动页',
@@ -417,6 +550,7 @@ describe('ProductionWorkflowService', () => {
         projectId: 'anniversary',
         brief: '游戏官网周年庆活动，需要完成产品到运营的全链路上线审查。',
         approvalMode: 'required',
+        processType: 'hierarchical',
       },
       'user-1',
     );
@@ -456,6 +590,7 @@ describe('ProductionWorkflowService', () => {
         projectId: 'anniversary',
         brief: '游戏官网周年庆活动，需要审查多地区规则和异常状态。',
         approvalMode: 'required',
+        processType: 'hierarchical',
       },
       'user-1',
     );
@@ -612,11 +747,13 @@ describe('ProductionWorkflowService', () => {
     delete legacyResult.lowCodeSchemas;
     const app = (
       service as unknown as {
-        app: {
-          updateState: (config: unknown, values: unknown) => Promise<unknown>;
+        context: {
+          app: {
+            updateState: (config: unknown, values: unknown) => Promise<unknown>;
+          };
         };
       }
-    ).app;
+    ).context.app;
     await app.updateState(
       { configurable: { thread_id: `production:${state.threadId}` } },
       { results: { product: legacyResult } },

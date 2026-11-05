@@ -1,3 +1,4 @@
+import type { ProductionWorkflowContext } from './production-workflow.context';
 import { createHash, randomUUID } from 'node:crypto';
 import { ProductionWorkflowStateType } from './production-workflow.state';
 import { StartProductionWorkflowDto } from './production-workflow.dto';
@@ -7,7 +8,6 @@ import {
 } from './production-workflow.plan';
 import type { ProductionWorkflowJob } from './production-workflow-queue.service';
 import { ProductionWorkflowCancelledError } from './production-workflow.shared';
-import { ProductionWorkflowEventBase } from './production-workflow.events';
 
 function workflowText(value: unknown, fallback: string): string {
   if (typeof value === 'string') return value;
@@ -23,16 +23,26 @@ function workflowText(value: unknown, fallback: string): string {
   return fallback;
 }
 
-export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEventBase {
-  protected async createInitialState(
+export class ProductionWorkflowStateService {
+  readonly context: ProductionWorkflowContext;
+
+  constructor(context: ProductionWorkflowContext) {
+    this.context = context;
+  }
+  async createInitialState(
     dto: StartProductionWorkflowDto,
     userId: string,
     threadId: string,
     tenantId?: string,
   ): Promise<ProductionWorkflowStateType> {
     const selectedRoles = normalizeProductionRoles(dto.roles);
-    const composition = this.plugins
-      ? await this.plugins.resolve(
+    const processType = dto.processType ?? 'sequential';
+    const executionBatches = buildProductionExecutionBatches(
+      selectedRoles,
+      processType,
+    );
+    const composition = this.context.plugins
+      ? await this.context.plugins.resolve(
           dto.pluginKeys,
           'production',
           ['workflow.production-base'],
@@ -54,12 +64,16 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       pluginKeys: composition.pluginKeys,
       pluginTools: composition.toolNames,
       brief: dto.brief.trim(),
-      processType: dto.processType ?? 'sequential',
+      processType,
+      workflowVersion: 2,
       currentRole: selectedRoles[0],
       selectedRoles,
-      executionBatches: buildProductionExecutionBatches(selectedRoles),
+      executionBatches,
       batchIndex: 0,
       currentBatch: [],
+      batchRoleCursor: 0,
+      rolePhase: 'idle',
+      currentRoleModelError: '',
       completedRoles: [],
       stageIndex: 0,
       stepCount: 0,
@@ -83,26 +97,24 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     };
   }
 
-  protected async initializeTasks(
-    state: ProductionWorkflowStateType,
-  ): Promise<void> {
-    if (!this.tasks) return;
-    const existing = await this.tasks.list(state.threadId);
+  async initializeTasks(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.context.tasks) return;
+    const existing = await this.context.tasks.list(state.threadId);
     if (existing.length > 0) return;
-    await this.tasks.createPlan({
+    await this.context.tasks.createPlan({
       threadId: state.threadId,
       roles: state.selectedRoles,
       processType: state.processType,
     });
   }
 
-  protected async ensureRun(state: ProductionWorkflowStateType): Promise<void> {
-    if (!this.agentRuns || state.runId) return;
+  async ensureRun(state: ProductionWorkflowStateType): Promise<void> {
+    if (!this.context.agentRuns || state.runId) return;
     const threadId = state.threadId;
-    const existing = await this.agentRuns.findLatestByThread(threadId);
+    const existing = await this.context.agentRuns.findLatestByThread(threadId);
     const run =
       existing ??
-      (await this.agentRuns.start({
+      (await this.context.agentRuns.start({
         threadId,
         userId: state.userId,
         mode: 'agentic',
@@ -110,7 +122,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       }));
     state.runId = run.id;
     if (run.route !== 'production_workflow') {
-      await this.agentRuns.finish(run.id, {
+      await this.context.agentRuns.finish(run.id, {
         route: 'production_workflow',
         status: run.status,
         resultSummary:
@@ -118,7 +130,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       });
     }
     if (!existing) {
-      await this.agentGoals?.activate({
+      await this.context.agentGoals?.activate({
         threadId,
         runId: run.id,
         tenantId: run.tenantId?.trim() || 'legacy',
@@ -129,13 +141,16 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     }
   }
 
-  protected async ensureIndexedRun(
+  async ensureIndexedRun(
     item: Record<string, unknown>,
     userId: string,
   ): Promise<void> {
-    if (!this.agentRuns) return;
+    if (!this.context.agentRuns) return;
     const threadId = workflowText(item.threadId, '');
-    if (!threadId || (await this.agentRuns.findLatestByThread(threadId)))
+    if (
+      !threadId ||
+      (await this.context.agentRuns.findLatestByThread(threadId))
+    )
       return;
     const selectedRoles = Array.isArray(item.selectedRoles)
       ? item.selectedRoles
@@ -146,18 +161,18 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     const status = workflowText(item.status, 'running');
     const projectId = workflowText(item.projectId, '未命名活动');
     const maxSteps = Number(item.maxSteps ?? 18);
-    const run = await this.agentRuns.start({
+    const run = await this.context.agentRuns.start({
       threadId,
       userId,
       mode: 'agentic',
       maxSteps,
     });
-    await this.agentRuns.finish(run.id, {
+    await this.context.agentRuns.finish(run.id, {
       route: 'production_workflow',
       status: run.status,
       resultSummary: `${projectId}：历史工作流补建运行记录，已完成 ${completedRoles.length}/${selectedRoles.length} 个岗位。`,
     });
-    await this.agentGoals?.activate({
+    await this.context.agentGoals?.activate({
       threadId,
       runId: run.id,
       tenantId: run.tenantId?.trim() || 'legacy',
@@ -172,7 +187,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       status === 'pending_approval' ||
       status === 'revision_required'
     ) {
-      await this.agentRuns.finish(run.id, {
+      await this.context.agentRuns.finish(run.id, {
         route: 'production_workflow',
         status:
           status === 'pending_approval' || status === 'revision_required'
@@ -197,26 +212,28 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     }
   }
 
-  protected schedule(
+  schedule(
     threadId: string,
     userId: string,
     task: () => Promise<unknown>,
   ): void {
-    if (this.activeRuns.has(threadId)) return;
+    if (this.context.activeRuns.has(threadId)) return;
     const leaseToken = randomUUID();
     const leaseKey = `production:workflow:lease:${threadId}`;
     const leaseSeconds = 5 * 60;
     let leaseRenewal: NodeJS.Timeout | undefined;
-    this.lostLeases.delete(threadId);
+    this.context.lostLeases.delete(threadId);
     const run = Promise.resolve()
       .then(async () => {
-        if (!this.redisProvider.isEnabled()) {
+        if (!this.context.redisProvider.isEnabled()) {
           if (
-            this.configService?.get<boolean>('redis.requireDistributedLock') ===
-              true ||
-            this.configService?.get<boolean>('core.requireDependencies') ===
-              true ||
-            this.configService?.get<string>('nodeEnv') === 'production'
+            this.context.configService?.get<boolean>(
+              'redis.requireDistributedLock',
+            ) === true ||
+            this.context.configService?.get<boolean>(
+              'core.requireDependencies',
+            ) === true ||
+            this.context.configService?.get<string>('nodeEnv') === 'production'
           ) {
             throw new Error(
               'Redis 分布式锁不可用，生产模式拒绝执行工作流副作用。',
@@ -224,26 +241,26 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
           }
           return true;
         }
-        const acquired = await this.redisProvider.setIfAbsent(
+        const acquired = await this.context.redisProvider.setIfAbsent(
           leaseKey,
           leaseToken,
           leaseSeconds,
         );
         if (acquired) {
           leaseRenewal = setInterval(() => {
-            void this.redisProvider
+            void this.context.redisProvider
               .renewLock(leaseKey, leaseToken, leaseSeconds)
               .then((renewed) => {
                 if (!renewed) {
-                  this.lostLeases.add(threadId);
-                  this.logger.error(
+                  this.context.lostLeases.add(threadId);
+                  this.context.logger.error(
                     `production workflow ${threadId} lease renewal failed; another instance may take over`,
                   );
                 }
               })
               .catch((error: unknown) => {
-                this.lostLeases.add(threadId);
-                this.logger.error(
+                this.context.lostLeases.add(threadId);
+                this.context.logger.error(
                   `production workflow ${threadId} lease renewal errored: ${error instanceof Error ? error.message : String(error)}`,
                 );
               });
@@ -253,7 +270,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       })
       .then((acquired) => {
         if (!acquired) {
-          this.logger.warn(
+          this.context.logger.warn(
             `production workflow ${threadId} is being advanced by another instance`,
           );
           return undefined;
@@ -264,18 +281,18 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       .catch((error) => this.markScheduledFailure(threadId, userId, error))
       .finally(() => {
         if (leaseRenewal) clearInterval(leaseRenewal);
-        this.activeRuns.delete(threadId);
-        this.lostLeases.delete(threadId);
-        void this.redisProvider.releaseLock(leaseKey, leaseToken);
-        if (this.pendingStates.get(threadId)?.status !== 'failed') {
-          this.pendingStates.delete(threadId);
+        this.context.activeRuns.delete(threadId);
+        this.context.lostLeases.delete(threadId);
+        void this.context.redisProvider.releaseLock(leaseKey, leaseToken);
+        if (this.context.pendingStates.get(threadId)?.status !== 'failed') {
+          this.context.pendingStates.delete(threadId);
         }
       });
-    this.activeRuns.set(threadId, run);
+    this.context.activeRuns.set(threadId, run);
   }
 
   /** BullMQ 自定义 jobId 不能包含冒号；哈希同时保证稳定去重且不泄露 threadId。 */
-  protected workflowJobId(
+  workflowJobId(
     operation: ProductionWorkflowJob['operation'],
     threadId: string,
     suffix = '',
@@ -287,7 +304,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     return `production-workflow-${operation}-${digest}`;
   }
 
-  protected async markScheduledFailure(
+  async markScheduledFailure(
     threadId: string,
     userId: string,
     error: unknown,
@@ -295,8 +312,10 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     const message = (
       error instanceof Error ? error.message : String(error)
     ).slice(0, 2_000);
-    this.logger.error(`production workflow ${threadId} failed: ${message}`);
-    let state = this.pendingStates.get(threadId);
+    this.context.logger.error(
+      `production workflow ${threadId} failed: ${message}`,
+    );
+    let state = this.context.pendingStates.get(threadId);
     try {
       state = (await this.getState(threadId)) ?? state;
     } catch {
@@ -308,9 +327,11 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
 
     if (state.status === 'completed' || state.status === 'cancelled') {
       try {
-        await this.saveWorkflowIndex(this.view(threadId, state, userId));
+        await this.context.events.saveWorkflowIndex(
+          this.context.events.view(threadId, state, userId),
+        );
       } catch (indexError) {
-        this.logger.warn(
+        this.context.logger.warn(
           `production workflow ${threadId} terminal index refresh failed: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
         );
       }
@@ -319,7 +340,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
 
     const failedState = { ...state, status: 'failed' as const, error: message };
     try {
-      await this.app.updateState(this.config(threadId), {
+      await this.context.app.updateState(this.context.events.config(threadId), {
         status: 'failed',
         error: message,
       });
@@ -327,59 +348,60 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     } catch {
       state = failedState;
     }
-    this.pendingStates.set(threadId, state);
+    this.context.pendingStates.set(threadId, state);
 
     try {
-      const tasks = await this.tasks?.list(threadId);
+      const tasks = await this.context.tasks?.list(threadId);
       const latestByRole = new Map(
         (tasks ?? []).map((task) => [task.role, task]),
       );
       for (const task of latestByRole.values()) {
         if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
           try {
-            await this.tasks?.updateForRole(threadId, task.role, {
+            await this.context.tasks?.updateForRole(threadId, task.role, {
               status: 'failed',
               errorMessage: message,
             });
           } catch (taskError) {
-            this.logger.warn(
+            this.context.logger.warn(
               `production workflow ${threadId} task ${task.role} failure persistence failed: ${taskError instanceof Error ? taskError.message : String(taskError)}`,
             );
           }
         }
       }
     } catch (taskError) {
-      this.logger.warn(
+      this.context.logger.warn(
         `production workflow ${threadId} task failure persistence failed: ${taskError instanceof Error ? taskError.message : String(taskError)}`,
       );
     }
 
     try {
-      await this.emitWorkflowState(state);
+      await this.context.events.emitWorkflowState(state);
     } catch (eventError) {
-      this.logger.warn(
+      this.context.logger.warn(
         `production workflow ${threadId} failure event persistence failed: ${eventError instanceof Error ? eventError.message : String(eventError)}`,
       );
       let runId: string | undefined = state.runId || undefined;
       if (!runId) {
         try {
-          runId = (await this.agentRuns?.findLatestByThread(threadId))?.id;
+          runId = (await this.context.agentRuns?.findLatestByThread(threadId))
+            ?.id;
         } catch (runLookupError) {
-          this.logger.warn(
+          this.context.logger.warn(
             `production workflow ${threadId} run lookup failed: ${runLookupError instanceof Error ? runLookupError.message : String(runLookupError)}`,
           );
         }
       }
       if (runId) {
         try {
-          await this.agentRuns?.finish(runId, {
+          await this.context.agentRuns?.finish(runId, {
             route: 'production_workflow',
             status: 'failed',
             errorMessage: message,
             resultSummary: `${state.projectId}：工作流失败。`,
           });
         } catch (runError) {
-          this.logger.warn(
+          this.context.logger.warn(
             `production workflow ${threadId} run failure persistence failed: ${runError instanceof Error ? runError.message : String(runError)}`,
           );
         }
@@ -388,9 +410,9 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
 
     if (!state.runId) {
       try {
-        const run = await this.agentRuns?.findLatestByThread(threadId);
+        const run = await this.context.agentRuns?.findLatestByThread(threadId);
         if (run) {
-          await this.agentRuns?.finish(run.id, {
+          await this.context.agentRuns?.finish(run.id, {
             route: 'production_workflow',
             status: 'failed',
             errorMessage: message,
@@ -398,32 +420,33 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
           });
         }
       } catch (runError) {
-        this.logger.warn(
+        this.context.logger.warn(
           `production workflow ${threadId} run failure persistence failed: ${runError instanceof Error ? runError.message : String(runError)}`,
         );
       }
     }
 
     try {
-      await this.saveWorkflowIndex(this.view(threadId, state, userId));
+      await this.context.events.saveWorkflowIndex(
+        this.context.events.view(threadId, state, userId),
+      );
     } catch (indexError) {
-      this.logger.warn(
+      this.context.logger.warn(
         `production workflow ${threadId} failed index refresh: ${indexError instanceof Error ? indexError.message : String(indexError)}`,
       );
     }
   }
 
-  protected async enqueueWorkflowJob(
-    job: ProductionWorkflowJob,
-  ): Promise<boolean> {
+  async enqueueWorkflowJob(job: ProductionWorkflowJob): Promise<boolean> {
     try {
       // Acknowledge only after a PostgreSQL Outbox intent is durable.
       // DomainEvents will retry BullMQ delivery on a transient Redis outage.
       if (
-        this.domainEvents &&
-        (this.workflowQueue?.isEnabled() || this.workflowQueue?.isRequired?.())
+        this.context.domainEvents &&
+        (this.context.workflowQueue?.isEnabled() ||
+          this.context.workflowQueue?.isRequired?.())
       ) {
-        await this.domainEvents.emit({
+        await this.context.domainEvents.emit({
           eventType: 'workflow.dispatch.requested',
           aggregateType: 'production_workflow',
           aggregateId: job.threadId,
@@ -435,16 +458,16 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
         // Outbox is still the recovery source if this call or the process fails.
         // Stable BullMQ jobId deduplicates while the job is retained.
         try {
-          await this.workflowQueue?.enqueue(job);
+          await this.context.workflowQueue?.enqueue(job);
         } catch (queueError) {
-          this.logger.warn(
+          this.context.logger.warn(
             `workflow ${job.threadId} fast dispatch failed; durable Outbox will retry: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
           );
         }
         return true;
       }
-      const queued = await this.workflowQueue?.enqueue(job);
-      if (!queued && this.workflowQueue?.isRequired?.()) {
+      const queued = await this.context.workflowQueue?.enqueue(job);
+      if (!queued && this.context.workflowQueue?.isRequired?.()) {
         throw new Error(
           '生产工作流要求使用 Redis 持久队列，队列不可用时拒绝进程内执行。',
         );
@@ -456,30 +479,26 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     }
   }
 
-  protected assertLeaseOwned(threadId: string): void {
-    const signal = this.cancellationControllers.get(threadId)?.signal;
+  assertLeaseOwned(threadId: string): void {
+    const signal = this.context.cancellationControllers.get(threadId)?.signal;
     if (signal?.aborted) throw this.cancellationError(signal.reason);
-    if (this.lostLeases.has(threadId)) {
+    if (this.context.lostLeases.has(threadId)) {
       throw new Error('production workflow lease was lost');
     }
   }
 
-  protected cancellationError(reason: unknown): Error {
+  cancellationError(reason: unknown): Error {
     if (reason instanceof ProductionWorkflowCancelledError) return reason;
     return reason instanceof Error
       ? reason
       : new Error('工作流取消状态检查失败，已停止继续执行。');
   }
 
-  protected workflowCancelKey(threadId: string): string {
+  workflowCancelKey(threadId: string): string {
     return `production:workflow:cancel:${threadId}`;
   }
 
-  protected async getOwnedState(
-    threadId: string,
-    userId: string,
-    tenantId?: string,
-  ) {
+  async getOwnedState(threadId: string, userId: string, tenantId?: string) {
     const state = await this.getState(threadId);
     if (!state?.projectId) throw new Error('workflow not found');
     if (state.userId !== userId) throw new Error('workflow not found');
@@ -490,10 +509,7 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
   }
 
   /** 有租户请求不能读取未绑定租户的历史状态，避免把旧的无租户数据当成当前租户数据。 */
-  protected tenantMatches(
-    resourceTenantId?: unknown,
-    requestedTenantId?: string,
-  ) {
+  tenantMatches(resourceTenantId?: unknown, requestedTenantId?: string) {
     const requested = requestedTenantId?.trim();
     if (!requested) return true;
     const resource =
@@ -501,25 +517,28 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
     return Boolean(resource) && resource === requested;
   }
 
-  protected async getState(threadId: string) {
-    const snapshot = await this.app.getState(this.config(threadId));
+  async getState(threadId: string) {
+    const snapshot = await this.context.app.getState(
+      this.context.events.config(threadId),
+    );
     return snapshot?.values;
   }
 
-  protected async runUntilSettled(
+  async runUntilSettled(
     threadId: string,
     initialState: ProductionWorkflowStateType,
     initialInput?: ProductionWorkflowStateType,
   ): Promise<ProductionWorkflowStateType> {
     let state = initialState;
     const controller = new AbortController();
-    this.cancellationControllers.set(threadId, controller);
+    this.context.cancellationControllers.set(threadId, controller);
     let checkingCancellation = false;
     const checkCancellation = async () => {
-      if (checkingCancellation || !this.redisProvider.isEnabled()) return;
+      if (checkingCancellation || !this.context.redisProvider.isEnabled())
+        return;
       checkingCancellation = true;
       try {
-        const marker = await this.redisProvider.getRequired(
+        const marker = await this.context.redisProvider.getRequired(
           this.workflowCancelKey(threadId),
         );
         if (marker?.startsWith('cancelled:') && !controller.signal.aborted) {
@@ -543,9 +562,9 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       }
       while (state.status === 'running') {
         this.assertLeaseOwned(threadId);
-        state = await this.app.invoke(
+        state = await this.context.app.invoke(
           initialInput ?? {},
-          this.config(threadId),
+          this.context.events.config(threadId),
         );
         initialInput = undefined;
       }
@@ -560,13 +579,13 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       throw error;
     } finally {
       clearInterval(watcher);
-      if (this.cancellationControllers.get(threadId) === controller) {
-        this.cancellationControllers.delete(threadId);
+      if (this.context.cancellationControllers.get(threadId) === controller) {
+        this.context.cancellationControllers.delete(threadId);
       }
     }
   }
 
-  protected async persistWorkflowCancelled(
+  async persistWorkflowCancelled(
     threadId: string,
     current: ProductionWorkflowStateType,
     reason: string,
@@ -580,49 +599,52 @@ export abstract class ProductionWorkflowStateBase extends ProductionWorkflowEven
       error: reason,
     };
     try {
-      await this.app.updateState(this.config(threadId), {
+      await this.context.app.updateState(this.context.events.config(threadId), {
         status: 'cancelled',
         error: reason,
       });
       current = (await this.getState(threadId)) ?? cancelledState;
     } catch {
       // 初始任务可能在首个 checkpoint 前被取消；终态初始状态不会执行工作流副作用。
-      await this.app.invoke(cancelledState, this.config(threadId));
+      await this.context.app.invoke(
+        cancelledState,
+        this.context.events.config(threadId),
+      );
       current = (await this.getState(threadId)) ?? cancelledState;
     }
-    this.pendingStates.set(threadId, current);
+    this.context.pendingStates.set(threadId, current);
     try {
-      for (const task of (await this.tasks?.list(threadId)) ?? []) {
+      for (const task of (await this.context.tasks?.list(threadId)) ?? []) {
         if (!['completed', 'failed', 'cancelled'].includes(task.status)) {
           try {
-            await this.tasks?.updateForRole(threadId, task.role, {
+            await this.context.tasks?.updateForRole(threadId, task.role, {
               status: 'cancelled',
               errorMessage: reason,
             });
           } catch (error) {
-            this.logger.warn(
+            this.context.logger.warn(
               `production workflow ${threadId} task ${task.role} cancellation persistence failed: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
         }
       }
     } catch (error) {
-      this.logger.warn(
+      this.context.logger.warn(
         `production workflow ${threadId} task cancellation lookup failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     if (current.runId) {
       try {
-        await this.agentRuns?.cancel(current.runId, reason);
+        await this.context.agentRuns?.cancel(current.runId, reason);
       } catch (error) {
-        this.logger.warn(
+        this.context.logger.warn(
           `production workflow ${threadId} run cancellation persistence failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
-    await this.emitWorkflowState(current);
-    await this.saveWorkflowIndexBestEffort(
-      this.view(threadId, current, current.userId),
+    await this.context.events.emitWorkflowState(current);
+    await this.context.events.saveWorkflowIndexBestEffort(
+      this.context.events.view(threadId, current, current.userId),
     );
     return current;
   }
