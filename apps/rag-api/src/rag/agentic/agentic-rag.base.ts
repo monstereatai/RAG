@@ -2,6 +2,7 @@ import { BadRequestException, Logger } from '@nestjs/common';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import type { RetrieveOptions } from '../contracts/rag-types';
 import type { RetrievedChunk } from '../evidence/retrieval.types';
+import type { EvidenceAssessment } from '../evidence/evidence-bundle';
 import { EvidencePolicyService } from '../evidence/evidence-policy.service';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
 import {
@@ -515,8 +516,17 @@ export class AgenticRagBase {
     query: string,
     chunks: RetrievedChunk[],
     taskType?: QueryTaskType,
-  ): { sufficient: boolean; reason: string } {
-    return this.evidencePolicy.assessRetrievedChunks(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    if (requiredAspects.length === 0) {
+      return this.evidencePolicy.assessRetrievedChunks(query, chunks, taskType);
+    }
+    return this.evidencePolicy.assessRetrievedChunks(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   protected buildEvidenceFirstAnswer(

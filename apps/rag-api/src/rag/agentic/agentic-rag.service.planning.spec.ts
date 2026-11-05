@@ -138,9 +138,17 @@ describe('AgenticRagService budget boundaries', () => {
     );
 
     expect(retrieve).toHaveBeenCalledTimes(1);
+    const expectedExecutionPlan = {
+      ...executionPlan,
+      queries: [
+        ...executionPlan.queries,
+        { text: '计划子问题 A', kind: 'sub_query', weight: 1 },
+        { text: '计划子问题 B', kind: 'sub_query', weight: 1 },
+      ],
+    };
     expect(retrieve).toHaveBeenCalledWith(
       '原始问题',
-      expect.objectContaining({ executionPlan }),
+      expect.objectContaining({ executionPlan: expectedExecutionPlan }),
       'user-1',
     );
     expect(result.subQuestions?.map((item) => item.evidenceIds)).toEqual([

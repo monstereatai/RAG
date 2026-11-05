@@ -2,6 +2,7 @@ import type { ConfigService } from '@nestjs/config';
 import { retrievalProfileForTaskType } from '../retrieval/context-builder';
 import type { RetrievedChunk } from './retrieval.types';
 import type { QueryTaskType } from '../planning/query-plan';
+import type { EvidenceAssessment } from './evidence-bundle';
 
 /** 检查召回证据是否够用，以及回答中的结论和引用是否能被证据支撑。 */
 export class AnswerQualityService {
@@ -15,8 +16,79 @@ export class AnswerQualityService {
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    const requirements = Array.from(
+      new Set(
+        (requiredAspects.length ? requiredAspects : [query]).map((item) =>
+          item.trim(),
+        ),
+      ),
+    ).filter(Boolean);
+    const coverage = requirements.map((requirement, index) => {
+      const gate = this.assessSingleQueryQuality(requirement, chunks, taskType);
+      return {
+        id: `aspect-${index + 1}`,
+        query: requirement,
+        covered: gate.sufficient,
+        evidenceIds: chunks
+          .filter((chunk) => this.hasLexicalEvidence(requirement, chunk))
+          .map((chunk) => chunk.id),
+        reason: gate.reason,
+      };
+    });
+    const missingAspects = coverage
+      .filter((item) => !item.covered)
+      .map((item) => item.query);
+    const conflicts = this.findUnresolvedRuleConflicts(chunks);
+    const sufficient =
+      chunks.length > 0 &&
+      missingAspects.length === 0 &&
+      conflicts.length === 0;
+    const status = sufficient
+      ? 'sufficient'
+      : coverage.some((item) => item.covered) || conflicts.length > 0
+        ? 'partial'
+        : 'insufficient';
+
+    return {
+      sufficient,
+      status,
+      reasonCode: sufficient
+        ? 'complete_coverage'
+        : chunks.length === 0
+          ? 'no_evidence'
+          : conflicts.length > 0
+            ? 'version_conflict'
+            : status === 'partial'
+              ? 'missing_aspects'
+              : 'requirements_not_supported',
+      reason: sufficient
+        ? '所有明确要求均有可引用证据覆盖'
+        : chunks.length === 0
+          ? '没有检索到候选片段'
+          : conflicts.length > 0
+            ? `规则版本存在未解决的生效期冲突：${conflicts.join('；')}`
+            : `缺少直接证据：${coverage
+                .filter((item) => !item.covered)
+                .map((item) => `${item.query}（${item.reason ?? '未覆盖'}）`)
+                .join('；')}`,
+      evaluatedQuery: query,
+      missingAspects: [
+        ...missingAspects,
+        ...conflicts.map((conflict) => `版本冲突：${conflict}`),
+      ],
+      coverage,
+      conflicts,
+    };
+  }
+
+  private assessSingleQueryQuality(
+    query: string,
+    chunks: RetrievedChunk[],
+    taskType: QueryTaskType,
   ): { sufficient: boolean; reason: string } {
-    const topScore = chunks[0]?.totalScore ?? 0;
+    const topScore = Math.max(...chunks.map((chunk) => chunk.totalScore), 0);
     const profile = retrievalProfileForTaskType(taskType);
     const configuredMinTopScore =
       this.configService.get<number>('ragQuality.minTopScore') ?? 0.05;
@@ -39,21 +111,26 @@ export class AnswerQualityService {
       };
     }
 
-    // Rerank 是针对“问题－片段”对的语义相关度判断。它存在且通过门槛时，
-    // 不再要求用户的表达方式（例如“请总结”“资料库中”）逐字出现在资料原文，
-    // 否则会把实际命中的内容错误降级为“资料不足”。未配置或未返回重排分时，
-    // 仍使用下方的词面门禁作为保守兜底。
+    const numericAnchors = this.extractNumericAnchors(query);
+    const normalizedEvidence = chunks
+      .map((chunk) => this.normalizeQuery(chunk.content).replace(/\s+/g, ''))
+      .join('\n');
+    const missingNumericAnchors = numericAnchors.filter(
+      (anchor) => !normalizedEvidence.includes(anchor),
+    );
+    if (missingNumericAnchors.length > 0) {
+      return {
+        sufficient: false,
+        reason: `缺少问题指定的数值或时间证据：${missingNumericAnchors.join('、')}`,
+      };
+    }
+
+    // Rerank 只用来描述候选相关度，不能替代对查询要求的证据覆盖检查。
     const strongestRerankScore = Math.max(
       ...chunks.map((chunk) => chunk.rerankScore ?? Number.NEGATIVE_INFINITY),
     );
     const minRerankScore =
       this.configService.get<number>('ragQuality.minRerankScore') ?? 0.65;
-    if (strongestRerankScore >= minRerankScore) {
-      return {
-        sufficient: true,
-        reason: `重排语义相关度 ${strongestRerankScore.toFixed(3)} 通过阈值 ${minRerankScore}`,
-      };
-    }
 
     const queryTokens = this.extractQualityTokens(query);
     const minOverlap =
@@ -136,7 +213,42 @@ export class AnswerQualityService {
       }
     }
 
-    return { sufficient: true, reason: '检索分数与关键词重合通过阈值' };
+    return {
+      sufficient: true,
+      reason:
+        strongestRerankScore >= minRerankScore
+          ? `重排语义相关度 ${strongestRerankScore.toFixed(3)} 通过阈值；查询要求有文本证据支撑`
+          : '检索分数与关键词重合通过阈值',
+    };
+  }
+
+  private hasLexicalEvidence(query: string, chunk: RetrievedChunk): boolean {
+    const tokens = this.extractQualityTokens(query);
+    const phrases = this.extractChinesePhraseTokens(query);
+    const normalizedContent = this.normalizeQuery(chunk.content).replace(
+      /\s+/g,
+      '',
+    );
+    if (
+      this.extractNumericAnchors(query).some(
+        (anchor) => !normalizedContent.includes(anchor),
+      )
+    ) {
+      return false;
+    }
+    const anchorPhrases = this.extractChineseAnchorPhrases(query);
+    if (anchorPhrases.size > 0) {
+      return (
+        this.countChinesePhraseOverlap(anchorPhrases, chunk.content) > 0 ||
+        this.countWordOverlap(query, [chunk]) > 0
+      );
+    }
+    return (
+      this.countTokenOverlap(tokens, chunk.content) > 0 ||
+      this.countCjkBigramOverlap(query, chunk.content) > 0 ||
+      this.countWordOverlap(query, [chunk]) > 0 ||
+      this.countChinesePhraseOverlap(phrases, chunk.content) > 0
+    );
   }
 
   assessCitationSupport(
@@ -357,7 +469,12 @@ export class AnswerQualityService {
         .map((token) => token.trim())
         .filter((token) => token.length > 0)
         .filter((token) => !stopwords.has(token))
-        .filter((token) => token.length > 1 || /[\p{Script=Han}]/u.test(token)),
+        .filter(
+          (token) =>
+            token.length > 1 ||
+            /[\p{Script=Han}]/u.test(token) ||
+            /\d/u.test(token),
+        ),
     );
   }
 
@@ -492,5 +609,85 @@ export class AnswerQualityService {
       }
     }
     return overlap;
+  }
+
+  private extractNumericAnchors(query: string): string[] {
+    return Array.from(
+      new Set(
+        this.normalizeQuery(query)
+          .replace(/\s+/g, '')
+          .match(/\d+(?:年|月|日|号|点|时|版本|期)?/gu) ?? [],
+      ),
+    );
+  }
+
+  private findUnresolvedRuleConflicts(chunks: RetrievedChunk[]): string[] {
+    const byRule = new Map<string, RetrievedChunk[]>();
+    for (const chunk of chunks) {
+      if (!chunk.ruleKey || !chunk.docVersion) continue;
+      const versions = byRule.get(chunk.ruleKey) ?? [];
+      versions.push(chunk);
+      byRule.set(chunk.ruleKey, versions);
+    }
+
+    const conflicts = new Set<string>();
+    for (const [ruleKey, versions] of byRule) {
+      const distinctVersions = new Map(
+        versions.map((chunk) => [`${chunk.docId}:${chunk.docVersion}`, chunk]),
+      );
+      const candidates = [...distinctVersions.values()];
+      for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+        for (
+          let rightIndex = leftIndex + 1;
+          rightIndex < candidates.length;
+          rightIndex += 1
+        ) {
+          const left = candidates[leftIndex];
+          const right = candidates[rightIndex];
+          if (
+            left.supersedesDocId === right.docId ||
+            right.supersedesDocId === left.docId
+          ) {
+            continue;
+          }
+          if (this.validityPeriodsOverlap(left, right)) {
+            conflicts.add(ruleKey);
+          }
+        }
+      }
+    }
+    return [...conflicts];
+  }
+
+  private validityPeriodsOverlap(
+    left: RetrievedChunk,
+    right: RetrievedChunk,
+  ): boolean {
+    const leftFrom = this.parseEffectiveDate(
+      left.effectiveAt,
+      Number.NEGATIVE_INFINITY,
+    );
+    const rightFrom = this.parseEffectiveDate(
+      right.effectiveAt,
+      Number.NEGATIVE_INFINITY,
+    );
+    const leftTo = this.parseEffectiveDate(
+      left.expiredAt,
+      Number.POSITIVE_INFINITY,
+    );
+    const rightTo = this.parseEffectiveDate(
+      right.expiredAt,
+      Number.POSITIVE_INFINITY,
+    );
+    return leftFrom < rightTo && rightFrom < leftTo;
+  }
+
+  private parseEffectiveDate(
+    value: string | null | undefined,
+    fallback: number,
+  ): number {
+    if (!value) return fallback;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? fallback : parsed;
   }
 }

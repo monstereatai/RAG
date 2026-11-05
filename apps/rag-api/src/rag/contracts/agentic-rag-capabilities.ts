@@ -3,6 +3,7 @@ import type {
   RetrievalScope,
   RetrievedChunk,
 } from '../evidence/retrieval.types';
+import type { EvidenceAssessment } from '../evidence/evidence-bundle';
 import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.types';
 import type { RagAnswerResult, RetrieveOptions } from './rag-types';
 
@@ -34,6 +35,7 @@ export interface AgenticRetrievalCapability {
 export interface AgenticFastPathResult {
   sufficient: boolean;
   reason: string;
+  assessment?: EvidenceAssessment;
   chunks: RetrievedChunk[];
   obsidianHits: ObsidianSearchHit[];
   prefetchedFastPath: NonNullable<RetrieveOptions['prefetchedFastPath']>;

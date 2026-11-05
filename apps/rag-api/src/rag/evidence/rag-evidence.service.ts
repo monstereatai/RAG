@@ -11,6 +11,7 @@ import type {
   RetrievalScope,
   RetrievedChunk,
 } from '../evidence/retrieval.types';
+import type { EvidenceAssessment } from './evidence-bundle';
 import { EvidencePolicyService } from './evidence-policy.service';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
 import { RagIndexService } from '../indexing/rag-index.service';
@@ -79,8 +80,14 @@ export class RagEvidenceService {
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    return this.evidencePolicy.assessRetrievedChunks(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.evidencePolicy.assessRetrievedChunks(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   async retrieveReviewedEvidence(
@@ -145,8 +152,14 @@ export class RagEvidenceService {
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    return this.evidencePolicy.assessRetrievalQuality(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.evidencePolicy.assessRetrievalQuality(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   assessCitationSupport(

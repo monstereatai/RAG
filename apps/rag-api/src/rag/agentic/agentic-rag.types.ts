@@ -9,6 +9,9 @@ export interface AgenticRagRunResult {
   retryCount: number;
   retrievalSufficient?: boolean;
   retrievalReason?: string;
+  evidenceStatus?: 'sufficient' | 'partial' | 'insufficient' | 'source_error';
+  reasonCode?: string;
+  missingAspects?: string[];
   obsidianPaths?: string[];
   interrupted?: boolean;
   evidenceCoverage?: Array<{

@@ -133,6 +133,27 @@ export const AgenticRagState = Annotation.Root({
     default: () => [],
   }),
 
+  /** 同一 Run 已尝试过的请求级检索指纹，包含空结果与失败查询。 */
+  retrievalFingerprints: Annotation<string[]>({
+    reducer: (prev, next) =>
+      Array.from(new Set([...(prev ?? []), ...(next ?? [])])),
+    default: () => [],
+  }),
+
+  /** 最近一次检索的来源状态；旧 checkpoint 缺字段时按未执行处理。 */
+  retrievalStatus: Annotation<
+    'not_executed' | 'hit' | 'no_result' | 'source_error'
+  >({
+    reducer: (_prev, next) => next,
+    default: () => 'not_executed',
+  }),
+
+  /** 稳定的检索终止/失败原因码，避免把来源故障伪装成语义不足。 */
+  retrievalReasonCode: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
+
   /** 检索结果是否足够支撑生成 */
   retrievalSufficient: Annotation<boolean>({
     reducer: (_prev, next) => next,

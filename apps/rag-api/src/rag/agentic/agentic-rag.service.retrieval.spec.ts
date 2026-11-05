@@ -1,6 +1,7 @@
 import type { AgenticRagStateType } from './agentic-rag.state';
 import type { ObsidianSearchHit } from '../../modules/obsidian/obsidian-knowledge.service';
 import type { PrefetchedFastPath } from '../contracts/rag-types';
+import { retrievalFingerprintsForPlan } from '../evidence/retrieval-fingerprint';
 import {
   chunk,
   createService,
@@ -121,7 +122,7 @@ describe('AgenticRagService budget boundaries', () => {
       ragService.retrieve.mock.calls[0]?.[1]?.executionPlan?.queries?.map(
         (item: { text: string }) => item.text,
       ) ?? [],
-    ).toEqual(['请分析差旅制度']);
+    ).toEqual(['请分析差旅制度', '扩展 A']);
     expect(ragService.retrieveBm25Only.mock.calls).toHaveLength(0);
     expect(result.retrievedChunks?.map((item) => item.id)).toEqual([
       'c1',
@@ -297,6 +298,28 @@ describe('AgenticRagService budget boundaries', () => {
       'toReviewedEvidenceChunks',
     );
     const toObsidianChunks = serviceMock(ragService, 'toObsidianChunks');
+    const retrieveOptions = {
+      executionPlan: {
+        planVersion: 2 as const,
+        sourcePolicy: 'local_only' as const,
+        queries: [
+          { text: '原始问题', kind: 'original' as const, weight: 1 },
+          { text: '扩展问题', kind: 'sub_query' as const, weight: 1 },
+        ],
+        profile: {
+          intent: 'lookup' as const,
+          candidateDepth: 8,
+          finalTopK: 4,
+          neighborWindow: 0,
+          sameSectionLimit: 0,
+          contextCharacterBudget: 3500,
+          maxChunksPerDocument: 2,
+        },
+        useGraph: false,
+        scopeRestricted: false,
+        reasonCode: 'internal_evidence_required' as const,
+      },
+    };
     ragService.retrieve.mockResolvedValue([chunk('c2', 0.8)]);
     const prefetchedFastPath = {
       retrieval: { chunks: [], diagnostics: {}, profile: {} },
@@ -319,6 +342,13 @@ describe('AgenticRagService budget boundaries', () => {
           mode: 'correction',
         },
       ],
+      retrievalAttempted: true,
+      retrievalFingerprints: retrievalFingerprintsForPlan(
+        '原始问题',
+        'user-1',
+        retrieveOptions,
+        retrieveOptions.executionPlan,
+      ),
     } as unknown as PrefetchedFastPath;
     ragService.toObsidianChunks.mockReturnValue([
       chunk('obsidian:notes/fast-path.md', 0.8),
@@ -354,6 +384,7 @@ describe('AgenticRagService budget boundaries', () => {
       {
         configurable: {
           userId: 'user-1',
+          retrieveOptions,
           fastPathChunks: [chunk('c1', 0.9)],
           prefetchedFastPath,
           subQuestionLimit: 2,
@@ -532,5 +563,416 @@ describe('AgenticRagService budget boundaries', () => {
     expect(result.reflectionFeedback).toContain('答案契约校验未通过');
     expect(result.retryTarget).toBe('generate');
     expect(getModelMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Agentic retrieval fingerprint and source policy', () => {
+  it('keeps evidence partial after a citation-valid answer', async () => {
+    const { service, agentLoop } = createService();
+    agentLoop.run.mockResolvedValue({
+      status: 'completed',
+      output: {
+        answer: '9 月资料有依据 [片段1]；10 月资料不足。',
+        citationGate: { sufficient: true, reason: '引用有效' },
+      },
+    });
+    const state = {
+      query: '比较 9 月和 10 月活动规则',
+      retrievedChunks: [chunk('september', 0.8)],
+      retrievalSufficient: false,
+      retrievalReason: '缺少 10 月活动规则',
+      subQuestions: [
+        {
+          id: 'september',
+          question: '9 月活动规则',
+          sufficient: true,
+          evidenceIds: ['september'],
+        },
+        {
+          id: 'october',
+          question: '10 月活动规则',
+          sufficient: false,
+          evidenceIds: [],
+        },
+      ],
+      badCaseMatches: [],
+      artifacts: [],
+    } as AgenticRagStateType;
+
+    const result = await service.generateNode(state, {
+      configurable: {
+        retrieveOptions: {
+          queryPlan: { subQueries: ['9 月活动规则', '10 月活动规则'] },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      retrievalSufficient: false,
+      retrievalReason: '缺少 10 月活动规则',
+    });
+  });
+
+  it('does not cite unrelated candidates when no sub-question is covered', async () => {
+    const { service, agentLoop } = createService();
+    const state = {
+      query: '比较 9 月和 10 月活动规则',
+      retrievedChunks: [chunk('unrelated', 0.9)],
+      retrievalSufficient: false,
+      retrievalReason: '两个月份都缺少规则证据',
+      subQuestions: [
+        {
+          id: 'september',
+          question: '9 月活动规则',
+          sufficient: false,
+          evidenceIds: [],
+        },
+        {
+          id: 'october',
+          question: '10 月活动规则',
+          sufficient: false,
+          evidenceIds: [],
+        },
+      ],
+      badCaseMatches: [],
+      artifacts: [],
+    } as AgenticRagStateType;
+
+    const result = await service.generateNode(state, {
+      configurable: {
+        retrieveOptions: {
+          queryPlan: { subQueries: ['9 月活动规则', '10 月活动规则'] },
+        },
+      },
+    });
+
+    expect(agentLoop.run).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      retrievedChunks: [],
+      retrievalSufficient: false,
+    });
+  });
+
+  const singleQueryPlan = {
+    planVersion: 2 as const,
+    sourcePolicy: 'local_only' as const,
+    queries: [{ text: '同一问题', kind: 'original' as const, weight: 1 }],
+    profile: {
+      intent: 'lookup' as const,
+      candidateDepth: 8,
+      finalTopK: 4,
+      neighborWindow: 0,
+      sameSectionLimit: 0,
+      contextCharacterBudget: 3500,
+      maxChunksPerDocument: 2,
+    },
+    useGraph: false,
+    scopeRestricted: false,
+    reasonCode: 'internal_evidence_required' as const,
+  };
+
+  it('does not repeat an empty retrieval on retry without a new query or strategy', async () => {
+    const { service, ragService } = createService();
+    const retrieve = serviceMock(ragService, 'retrieve');
+    retrieve.mockResolvedValue([]);
+    const state = {
+      query: '同一问题',
+      augmentedQueries: [],
+      subQuestions: [
+        {
+          id: 'subq-1',
+          question: '同一问题',
+          dependsOn: [],
+          status: 'planned',
+          evidenceIds: [],
+          retrievalAttempts: 0,
+          sufficient: false,
+          reason: '',
+        },
+      ],
+      retrievedChunks: [],
+      retrievalFingerprints: [],
+      retrievalStatus: 'not_executed',
+      retryCount: 0,
+      webSearchAttempted: false,
+      webSearchCount: 0,
+      artifacts: [],
+    } as unknown as AgenticRagStateType;
+    const retrieveOptions = { executionPlan: singleQueryPlan };
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const config = {
+      configurable: {
+        userId: 'user-1',
+        retrieveOptions,
+        onEvent: (event: { type: string; data: Record<string, unknown> }) =>
+          events.push(event),
+      },
+    };
+
+    const first = await service.retrievalNode(state, config);
+    const second = await service.retrievalNode(
+      { ...state, ...first, retryCount: 1 },
+      config,
+    );
+    const third = await service.retrievalNode(
+      { ...state, ...first, ...second, retryCount: 2 },
+      config,
+    );
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(second.retrievalReasonCode).toBe('duplicate_retrieval_skipped');
+    expect(third.retrievalReasonCode).toBe('duplicate_retrieval_skipped');
+    expect(events.at(-2)).toMatchObject({
+      type: 'retrieval',
+      data: {
+        duplicateRetrievalSkipped: true,
+        stoppedReason: 'same_retrieval_fingerprint_without_new_evidence',
+      },
+    });
+  });
+
+  it('runs a new targeted query and keeps prefetched evidence', async () => {
+    const { service, ragService } = createService();
+    const retrieve = serviceMock(ragService, 'retrieve');
+    const previous = chunk('prefetched', 0.8);
+    const added = chunk('targeted-october', 0.9);
+    retrieve.mockResolvedValue([added]);
+    const retrieveOptions = { executionPlan: singleQueryPlan };
+    const prefetchedFastPath = {
+      retrieval: { chunks: [previous], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+      retrievalAttempted: true,
+      retrievalFingerprints: retrievalFingerprintsForPlan(
+        '同一问题',
+        'user-1',
+        retrieveOptions,
+        singleQueryPlan,
+      ),
+    } as unknown as PrefetchedFastPath;
+    const state = {
+      query: '同一问题',
+      augmentedQueries: [],
+      subQuestions: [
+        {
+          id: 'subq-1',
+          question: '同一问题',
+          dependsOn: [],
+          status: 'needs_more',
+          evidenceIds: ['prefetched'],
+          retrievalAttempts: 1,
+          sufficient: false,
+          reason: '缺少某一维度',
+        },
+        {
+          id: 'subq-2',
+          question: '10 月规则',
+          dependsOn: ['subq-1'],
+          status: 'needs_more',
+          evidenceIds: [],
+          retrievalAttempts: 0,
+          sufficient: false,
+          reason: '',
+        },
+      ],
+      retrievedChunks: [previous],
+      retrievalFingerprints: prefetchedFastPath.retrievalFingerprints,
+      retrievalStatus: 'hit',
+      retryCount: 1,
+      webSearchAttempted: false,
+      webSearchCount: 0,
+      artifacts: [],
+    } as unknown as AgenticRagStateType;
+
+    const result = await service.retrievalNode(state, {
+      configurable: {
+        userId: 'user-1',
+        retrieveOptions,
+        prefetchedFastPath,
+        fastPathChunks: [previous],
+      },
+    });
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(retrieve).toHaveBeenCalledWith(
+      '同一问题',
+      expect.objectContaining({
+        executionPlan: {
+          ...singleQueryPlan,
+          queries: [{ text: '10 月规则', kind: 'sub_query', weight: 1 }],
+        },
+        rankingQuery: '同一问题',
+        skipRerank: true,
+      }),
+      'user-1',
+    );
+    expect(result.retrievedChunks?.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['prefetched', 'targeted-october']),
+    );
+  });
+
+  it('does not reuse prefetched chunks across a user identity change', async () => {
+    const { service, ragService } = createService();
+    const retrieve = serviceMock(ragService, 'retrieve');
+    const fresh = chunk('current-user-evidence', 0.9);
+    const stale = chunk('other-user-evidence', 0.95);
+    retrieve.mockResolvedValue([fresh]);
+    const retrieveOptions = { executionPlan: singleQueryPlan };
+    const prefetchedFastPath = {
+      retrieval: { chunks: [stale], diagnostics: {}, profile: {} },
+      obsidianHits: [],
+      badCaseMatches: [],
+      retrievalAttempted: true,
+      retrievalFingerprints: retrievalFingerprintsForPlan(
+        '同一问题',
+        'user-a',
+        retrieveOptions,
+        singleQueryPlan,
+      ),
+    } as unknown as PrefetchedFastPath;
+    const state = {
+      query: '同一问题',
+      augmentedQueries: [],
+      subQuestions: [],
+      retrievedChunks: [],
+      retryCount: 0,
+      webSearchAttempted: false,
+      webSearchCount: 0,
+      artifacts: [],
+    } as AgenticRagStateType;
+
+    const result = await service.retrievalNode(state, {
+      configurable: {
+        userId: 'user-b',
+        retrieveOptions,
+        prefetchedFastPath,
+        fastPathChunks: [stale],
+      },
+    });
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(result.retrievedChunks?.map((item) => item.id)).toContain(
+      'current-user-evidence',
+    );
+    expect(result.retrievedChunks?.map((item) => item.id)).not.toContain(
+      'other-user-evidence',
+    );
+  });
+
+  it('reports retrieval source failures separately from an empty result', async () => {
+    const { service, ragService } = createService();
+    serviceMock(ragService, 'retrieve').mockRejectedValue(
+      new Error('backend internal detail'),
+    );
+    const state = {
+      query: '本地资料查询',
+      augmentedQueries: [],
+      subQuestions: [],
+      retrievedChunks: [],
+      retryCount: 0,
+      webSearchAttempted: false,
+      webSearchCount: 0,
+      artifacts: [],
+    } as unknown as AgenticRagStateType;
+    const retrieveOptions = { executionPlan: singleQueryPlan };
+    const result = await service.retrievalNode(state, {
+      configurable: { userId: 'user-1', retrieveOptions },
+    });
+    const sufficiency = await service.sufficiencyNode(
+      { ...state, ...result },
+      { configurable: { userId: 'user-1', retrieveOptions } },
+    );
+
+    expect(result).toMatchObject({
+      retrievalStatus: 'source_error',
+      retrievalReasonCode: 'source_failure',
+    });
+    expect(sufficiency.retrievalReason).toContain('证据源调用失败');
+    expect(sufficiency.retrievalReason).not.toContain(
+      'backend internal detail',
+    );
+  });
+
+  it('blocks web fallback for local-only and scope-restricted requests', async () => {
+    const { service, bochaSearchService } = createService();
+    Reflect.set(
+      bochaSearchService,
+      'isEnabled',
+      jest.fn().mockReturnValue(true),
+    );
+    const searchMock = Reflect.get(bochaSearchService, 'search') as jest.Mock;
+
+    await service.webSearchFallbackNode(
+      {
+        query: '内部资料问题',
+        retrievalSufficient: false,
+        webSearchAttempted: false,
+      } as AgenticRagStateType,
+      {
+        configurable: {
+          retrieveOptions: {
+            sourcePolicy: 'local_only',
+            executionPlan: { scopeRestricted: false },
+          },
+        },
+      },
+    );
+    await service.webSearchFallbackNode(
+      {
+        query: '受限项目规则',
+        retrievalSufficient: false,
+        webSearchAttempted: false,
+      } as AgenticRagStateType,
+      {
+        configurable: {
+          retrieveOptions: {
+            sourcePolicy: 'web_allowed',
+            executionPlan: { scopeRestricted: true },
+          },
+        },
+      },
+    );
+
+    expect(searchMock.mock.calls).toHaveLength(0);
+  });
+
+  it('allows one bounded web search when web use is explicitly authorized', async () => {
+    const { service, bochaSearchService, toolPolicy } = createService();
+    Reflect.set(
+      bochaSearchService,
+      'isEnabled',
+      jest.fn().mockReturnValue(true),
+    );
+    Reflect.set(
+      toolPolicy,
+      'decide',
+      jest.fn().mockReturnValue({
+        allowed: true,
+        entry: { timeoutMs: 1_000 },
+      }),
+    );
+    const searchMock = Reflect.get(bochaSearchService, 'search') as jest.Mock;
+    const result = await service.webSearchFallbackNode(
+      {
+        query: '公开发布说明',
+        augmentedQueries: [],
+        retrievalSufficient: false,
+        webSearchAttempted: false,
+        webSearchCount: 0,
+      } as AgenticRagStateType,
+      {
+        configurable: {
+          retrieveOptions: {
+            sourcePolicy: 'web_allowed',
+            executionPlan: {
+              sourcePolicy: 'web_allowed',
+              scopeRestricted: false,
+            },
+          },
+        },
+      },
+    );
+
+    expect(searchMock.mock.calls).toHaveLength(1);
+    expect(result.webSearchAttempted).toBe(true);
   });
 });

@@ -88,7 +88,13 @@ export class AgenticAnswerGenerationService {
     const effectiveRetrievalSufficient =
       state.retrievalSufficient ||
       Boolean(deterministicEvidenceAnswer) ||
-      (hasPlannedAnswerRequirements && state.retrievedChunks.length > 0);
+      (hasPlannedAnswerRequirements &&
+        (state.subQuestions ?? []).some(
+          (item) => item.sufficient && item.evidenceIds.length > 0,
+        ));
+    const evidenceComplete =
+      state.retrievalSufficient &&
+      (state.subQuestions ?? []).every((item) => item.sufficient);
     const strongBadCase = badCaseMatches.find(
       (match) => match.mode === 'exact',
     );
@@ -128,7 +134,8 @@ export class AgenticAnswerGenerationService {
         state.retrievedChunks.length === 0
           ? '没有检索到任何可用片段'
           : state.retrievalReason || '检索不足';
-      const ans = this.groundedAnswerGeneration.unsupportedReliableAnswer();
+      const ans =
+        '当前资料不足以支撑可靠结论。请补充具体版本、项目、时间范围或业务场景。';
       onEvent?.({ type: 'token', data: ans });
       onEvent?.({ type: 'citation', data: [] });
       const artifacts = buildAnswerArtifacts(
@@ -350,7 +357,7 @@ export class AgenticAnswerGenerationService {
         const artifacts = buildAnswerArtifacts(
           state,
           repairedFallbackAnswer,
-          true,
+          evidenceComplete,
           getSubQuestionCoverage(state),
           '证据语义总结通过引用校验',
         );
@@ -360,8 +367,10 @@ export class AgenticAnswerGenerationService {
         });
         return {
           answer: repairedFallbackAnswer,
-          retrievalSufficient: true,
-          retrievalReason: '首选模型答案不可用，已切换备用模型完成证据总结',
+          retrievalSufficient: evidenceComplete,
+          retrievalReason: evidenceComplete
+            ? '首选模型答案不可用，已切换备用模型完成证据总结'
+            : state.retrievalReason,
           artifacts,
         };
       }
@@ -396,7 +405,7 @@ export class AgenticAnswerGenerationService {
     const artifacts = buildAnswerArtifacts(
       state,
       answer,
-      true,
+      evidenceComplete,
       getSubQuestionCoverage(state),
       '答案通过引用和子问题覆盖校验',
     );
@@ -404,10 +413,12 @@ export class AgenticAnswerGenerationService {
     return {
       answer,
       retrievedChunks: citedChunks,
-      retrievalSufficient: true,
-      retrievalReason: deterministicAnswer
-        ? '结构化证据答案使用当前片段字段并保留局部引用'
-        : undefined,
+      retrievalSufficient: evidenceComplete,
+      retrievalReason: evidenceComplete
+        ? deterministicAnswer
+          ? '结构化证据答案使用当前片段字段并保留局部引用'
+          : undefined
+        : state.retrievalReason,
       artifacts,
     };
   }

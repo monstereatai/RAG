@@ -18,6 +18,7 @@ import {
   ragFallbackPromptDefinitions,
   renderRagFallbackPrompt,
 } from './rag-fallback.prompts';
+import { isWebFallbackRestricted } from '../retrieval/scope-policy';
 
 @Injectable()
 export class RagAnswerFallbackService {
@@ -42,7 +43,16 @@ export class RagAnswerFallbackService {
     answer: string;
     references: RagAnswerResult['references'];
   } | null> {
-    if (retrieveOptions.knowledgeOnly) return null;
+    const sourcePolicy =
+      retrieveOptions.executionPlan?.sourcePolicy ??
+      retrieveOptions.sourcePolicy;
+    if (
+      retrieveOptions.knowledgeOnly ||
+      sourcePolicy !== 'web_allowed' ||
+      isWebFallbackRestricted(retrieveOptions)
+    ) {
+      return null;
+    }
     const policy = this.toolPolicy.decide('bocha_web_search', {
       mode: 'simple',
       pluginKeys: retrieveOptions.pluginKeys,
@@ -89,9 +99,7 @@ export class RagAnswerFallbackService {
       };
     } catch (error) {
       rethrowIfAborted(error, retrieveOptions.signal);
-      this.logger.warn(
-        `Simple web fallback failed: ${(error as Error).message}`,
-      );
+      this.logger.warn('Simple web fallback failed');
       return null;
     }
   }
@@ -450,6 +458,7 @@ export class RagAnswerFallbackService {
   ): Promise<{ answer: string } | null> {
     if (
       options.knowledgeOnly ||
+      isWebFallbackRestricted(options) ||
       options.sourcePolicy === 'local_only' ||
       options.executionPlan?.sourcePolicy === 'local_only'
     ) {

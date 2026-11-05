@@ -70,6 +70,9 @@ export interface PrefetchedFastPath {
   badCaseMatches?: BadCaseMatch[];
   /** 同一原始问题的权威证据结论，禁止下游按改写问题重复否决。 */
   evidenceBundle?: EvidenceBundle;
+  /** 预取执行过的查询指纹；空结果和失败也必须记录。 */
+  retrievalFingerprints?: string[];
+  retrievalAttempted?: boolean;
 }
 
 /** Historical retrieval options retained by the RAG facade. */

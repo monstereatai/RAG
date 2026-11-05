@@ -35,3 +35,12 @@ export function isSupplementalEvidenceRestricted(
     options.scope?.effectiveTime,
   );
 }
+
+export function isWebFallbackRestricted(options: RetrieveOptions): boolean {
+  return Boolean(
+    options.executionPlan?.scopeRestricted ||
+    options.requestContext?.executionPlan.scopeRestricted ||
+    hasExplicitDocumentScope(options.scope) ||
+    hasExplicitDocumentScope(options.requestContext?.scope),
+  );
+}

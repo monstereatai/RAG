@@ -16,7 +16,9 @@ import type {
   RetrieveOptions,
 } from '../contracts/rag-types';
 import { createEvidenceBundle } from '../evidence/evidence-bundle';
+import type { EvidenceAssessment } from '../evidence/evidence-bundle';
 import { buildEvidenceSourceStatuses } from '../evidence/evidence-source-status';
+import { retrievalFingerprintsForPlan } from '../evidence/retrieval-fingerprint';
 import { RagEvidenceService } from '../evidence/rag-evidence.service';
 import { RagObsidianService } from '../evidence/rag-obsidian.service';
 import { retrievalProfileForTaskType } from '../retrieval/context-builder';
@@ -49,11 +51,16 @@ export class RagFastPathService {
   ): Promise<{
     sufficient: boolean;
     reason: string;
+    assessment: EvidenceAssessment;
     chunks: RetrievedChunk[];
     obsidianHits: ObsidianSearchHit[];
     prefetchedFastPath: PrefetchedFastPath;
   }> {
     const normalizedQuery = this.retrievalService.normalizeQuery(query);
+    const sourcePolicy =
+      options.executionPlan?.sourcePolicy ??
+      options.sourcePolicy ??
+      'local_only';
     let badCaseFailure: string | undefined;
     let retrievalFailure: string | undefined;
     let obsidianFailure: string | undefined;
@@ -66,18 +73,14 @@ export class RagFastPathService {
             .retrieveMatches(normalizedQuery, 2, userId, options.tenantId)
             .catch((error) => {
               badCaseFailure = (error as Error).message;
-              this.logger.warn(
-                `Fast path Base Case retrieval failed: ${(error as Error).message}`,
-              );
+              this.logger.warn('Fast path Base Case retrieval failed');
               return [] as BadCaseMatch[];
             }),
       this.retrievalService
         .retrieveWithContextualQuery(normalizedQuery, options, userId)
         .catch((error) => {
           retrievalFailure = (error as Error).message;
-          this.logger.warn(
-            `Fast path RAG retrieval failed: ${(error as Error).message}`,
-          );
+          this.logger.warn('Fast path RAG retrieval failed');
           return {
             chunks: [] as RetrievedChunk[],
             diagnostics: {
@@ -105,9 +108,7 @@ export class RagFastPathService {
             })
             .catch((error) => {
               obsidianFailure = (error as Error).message;
-              this.logger.warn(
-                `Fast path Obsidian retrieval failed: ${(error as Error).message}`,
-              );
+              this.logger.warn('Fast path Obsidian retrieval failed');
               return [] as ObsidianSearchHit[];
             }),
     ]);
@@ -139,53 +140,60 @@ export class RagFastPathService {
       badCaseMatches,
       reviewedBaseCaseChunks,
     );
-    const attachmentEvidenceCount = retrievalWithSources.chunks.filter(
-      (chunk) => chunk.retrievalSource === 'attachment',
-    ).length;
-    const ragGate =
-      attachmentEvidenceCount > 0
-        ? {
-            sufficient: true,
-            reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
-          }
-        : retrievalWithSources.chunks.length === 0
-          ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-          : this.answerQuality.assessRetrievalQuality(
-              normalizedQuery,
-              retrievalWithSources.chunks,
-              options.queryPlan?.taskType ?? 'lookup',
-            );
-    const obsidianGate = this.obsidianKnowledge.assessHits(
+    const obsidianChunks =
+      this.obsidianService.toObsidianChunks(evidenceObsidianHits);
+    const candidateChunks = [...chunks, ...obsidianChunks];
+    const requiredAspects = options.queryPlan?.subQueries ?? [];
+    const evidenceAssessment = this.answerQuality.assessRetrievalQuality(
       normalizedQuery,
-      evidenceObsidianHits,
+      candidateChunks,
+      options.queryPlan?.taskType ?? 'lookup',
+      requiredAspects,
     );
-
+    const sourceStatuses = buildEvidenceSourceStatuses({
+      badCaseMatches,
+      retrieval: retrievalWithSources,
+      obsidianHits: evidenceObsidianHits,
+      sourcePolicy,
+      failures: { badCaseFailure, retrievalFailure, obsidianFailure },
+    });
+    const sourceFailure = sourceStatuses.some((source) =>
+      ['failure', 'timeout'].includes(source.status),
+    );
     const assessment = {
-      sufficient:
-        baseCaseGate.sufficient ||
-        ragGate.sufficient ||
-        obsidianGate.sufficient,
-      reason: `Base Case: ${baseCaseGate.reason}; RAG: ${ragGate.reason}; Obsidian: ${obsidianGate.reason}`,
+      ...evidenceAssessment,
+      reason: `${evidenceAssessment.reason}; Base Case: ${baseCaseGate.reason}; RAG 候选 ${retrievalWithSources.chunks.length} 个；Obsidian 候选 ${obsidianChunks.length} 个`,
+      ...(candidateChunks.length === 0 && sourceFailure
+        ? {
+            status: 'source_error' as const,
+            reasonCode: 'source_failure',
+            reason: '本地证据源调用失败，无法完成检索判断',
+          }
+        : {}),
       evaluatedQuery: query,
     };
+    const retrievalFingerprints = retrievalFingerprintsForPlan(
+      normalizedQuery,
+      userId,
+      options,
+      options.executionPlan,
+    );
     const evidenceBundle = createEvidenceBundle({
       query,
-      chunks,
+      chunks: candidateChunks,
       assessment,
-      sourcePolicy: options.sourcePolicy ?? 'web_allowed',
+      sourcePolicy,
       diagnostics: retrievalWithSources.diagnostics,
-      sourceStatuses: buildEvidenceSourceStatuses({
-        badCaseMatches,
-        retrieval: retrievalWithSources,
-        obsidianHits: evidenceObsidianHits,
-        sourcePolicy: options.sourcePolicy ?? 'web_allowed',
-        failures: { badCaseFailure, retrievalFailure, obsidianFailure },
-      }),
+      sourceStatuses,
+      subquestionCoverage: evidenceAssessment.coverage,
+      retrievalFingerprints,
+      retrievalAttempted: true,
     });
 
     return {
       sufficient: evidenceBundle.assessment.sufficient,
       reason: evidenceBundle.assessment.reason,
+      assessment: evidenceBundle.assessment,
       chunks: evidenceBundle.chunks,
       obsidianHits: evidenceObsidianHits,
       prefetchedFastPath: {
@@ -193,6 +201,8 @@ export class RagFastPathService {
         obsidianHits: evidenceObsidianHits,
         badCaseMatches,
         evidenceBundle,
+        retrievalFingerprints,
+        retrievalAttempted: true,
       },
     };
   }

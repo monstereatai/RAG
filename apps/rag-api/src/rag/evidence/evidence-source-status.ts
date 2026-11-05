@@ -28,31 +28,44 @@ export function buildEvidenceSourceStatuses(
       source: 'bad_case',
       status: input.failures?.badCaseFailure
         ? statusForFailure(input.failures.badCaseFailure)
-        : input.badCaseMatches.length
-          ? 'hit'
-          : 'no_result',
+        : input.retrieval.diagnostics.degradedChannels?.includes('keyword')
+          ? 'failure'
+          : input.badCaseMatches.length
+            ? 'hit'
+            : 'no_result',
       hitCount: input.badCaseMatches.length,
-      reason: input.failures?.badCaseFailure,
+      reason: input.failures?.badCaseFailure
+        ? failureReasonCode(input.failures.badCaseFailure)
+        : undefined,
     },
     {
       source: 'bm25',
       status: input.failures?.retrievalFailure
         ? statusForFailure(input.failures.retrievalFailure)
-        : input.retrieval.diagnostics.stages?.keywordCandidates
-          ? 'hit'
-          : 'no_result',
+        : input.retrieval.diagnostics.degradedChannels?.includes('keyword')
+          ? 'failure'
+          : input.retrieval.diagnostics.stages?.keywordCandidates
+            ? 'hit'
+            : 'no_result',
       hitCount: input.retrieval.diagnostics.stages?.keywordCandidates ?? 0,
-      reason: input.failures?.retrievalFailure,
+      reason: input.failures?.retrievalFailure
+        ? failureReasonCode(input.failures.retrievalFailure)
+        : undefined,
     },
     {
       source: 'vector',
-      status: input.retrieval.vectorSource === 'none' ? 'no_result' : 'hit',
+      status: input.retrieval.diagnostics.degradedChannels?.includes('vector')
+        ? 'failure'
+        : input.retrieval.vectorSource === 'none'
+          ? 'no_result'
+          : 'hit',
       hitCount: input.retrieval.diagnostics.stages?.vectorCandidates ?? 0,
     },
     {
       source: 'elasticsearch',
-      status:
-        input.retrieval.vectorSource === 'elasticsearch'
+      status: input.retrieval.diagnostics.degradedChannels?.includes('vector')
+        ? 'failure'
+        : input.retrieval.vectorSource === 'elasticsearch'
           ? 'hit'
           : 'not_executed',
       hitCount:
@@ -68,7 +81,9 @@ export function buildEvidenceSourceStatuses(
           ? 'hit'
           : 'no_result',
       hitCount: input.obsidianHits.length,
-      reason: input.failures?.obsidianFailure,
+      reason: input.failures?.obsidianFailure
+        ? failureReasonCode(input.failures.obsidianFailure)
+        : undefined,
     },
     {
       source: 'graph',
@@ -101,4 +116,12 @@ export function buildEvidenceSourceStatuses(
 
 function statusForFailure(message: string): 'timeout' | 'failure' {
   return /timeout|timed out|超时/i.test(message) ? 'timeout' : 'failure';
+}
+
+function failureReasonCode(
+  message: string,
+): 'source_timeout' | 'source_failure' {
+  return statusForFailure(message) === 'timeout'
+    ? 'source_timeout'
+    : 'source_failure';
 }

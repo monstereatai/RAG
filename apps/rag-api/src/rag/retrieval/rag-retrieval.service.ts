@@ -662,12 +662,14 @@ export class RagRetrievalService {
       contextCharacters: built.stats.contextCharacters,
       graphProbe: {
         ...graphProbe,
-        merged: shouldMergeGraph && graphChunks.length > 0,
+        factCount: visibleGraphChunks.length,
+        merged: shouldMergeGraph && visibleGraphChunks.length > 0,
         elapsedMs: Date.now() - graphProbeStartedAt,
       },
       imageProbe: {
         ...imageProbe,
-        merged: shouldMergeImages && imageChunks.length > 0,
+        hitCount: visibleImageChunks.length,
+        merged: shouldMergeImages && visibleImageChunks.length > 0,
       },
       stages: {
         keywordCandidates: bm25Hits.length,

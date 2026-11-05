@@ -75,6 +75,7 @@ export function createService(overrides: Record<string, unknown> = {}) {
   } as unknown as jest.Mocked<RagService>;
   const bochaSearchService = {
     isEnabled: jest.fn().mockReturnValue(false),
+    search: jest.fn().mockResolvedValue([]),
   } as unknown as BochaSearchService;
   const dashScopeRerankService = {
     isEnabled: jest.fn().mockReturnValue(false),
@@ -120,6 +121,9 @@ export function createService(overrides: Record<string, unknown> = {}) {
       }),
     ),
     buildEvidenceFirstAnswer: jest.fn().mockReturnValue(null),
+    selectCitedChunks: jest.fn(
+      (_answer: string, chunks: RetrievedChunk[]) => chunks,
+    ),
   } as unknown as EvidencePolicyService;
 
   const service = new AgenticRagService(
@@ -147,6 +151,9 @@ export function createService(overrides: Record<string, unknown> = {}) {
     getModelMock,
     badCaseFlywheel,
     evidencePolicy,
+    bochaSearchService,
+    toolPolicy,
+    agentLoop,
   };
 }
 

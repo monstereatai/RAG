@@ -46,15 +46,12 @@ describe('EvidencePolicyService', () => {
     ]);
   });
 
-  it('keeps the session attachment sufficiency exception in the shared policy', () => {
+  it('does not treat a session attachment hit as sufficient by itself', () => {
     expect(
       policy.assessRetrievedChunks('无关问题', [
         { ...chunk('attachment', 0), retrievalSource: 'attachment' },
       ]),
-    ).toEqual({
-      sufficient: true,
-      reason: '当前会话附件命中 1 个片段',
-    });
+    ).toMatchObject({ sufficient: false, status: 'insufficient' });
   });
 
   it('selects only chunks explicitly cited by the answer', () => {

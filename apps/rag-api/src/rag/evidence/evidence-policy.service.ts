@@ -4,6 +4,7 @@ import type { QueryTaskType } from '../planning/query-plan';
 import { AnswerQualityService } from './answer-quality.service';
 import { DeterministicAnswerBuilder } from './deterministic-answer-builder';
 import type { RetrievedChunk } from './retrieval.types';
+import type { EvidenceAssessment } from './evidence-bundle';
 
 /** Shared ranking, evidence sufficiency, and evidence-first answer policy. */
 @Injectable()
@@ -43,25 +44,28 @@ export class EvidencePolicyService {
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    const attachmentEvidenceCount = chunks.filter(
-      (chunk) => chunk.retrievalSource === 'attachment',
-    ).length;
-    if (attachmentEvidenceCount > 0) {
-      return {
-        sufficient: true,
-        reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
-      };
-    }
-    return this.answerQuality.assessRetrievalQuality(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.answerQuality.assessRetrievalQuality(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   assessRetrievalQuality(
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    return this.answerQuality.assessRetrievalQuality(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.answerQuality.assessRetrievalQuality(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   assessCitationSupport(

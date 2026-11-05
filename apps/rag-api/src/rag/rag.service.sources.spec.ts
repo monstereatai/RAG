@@ -30,16 +30,14 @@ describe('RagService retrieval sources and ranking', () => {
       'user-1',
     );
 
-    await expect(
-      service.answer('quantum physics', [], 'user-1'),
-    ).resolves.toMatchObject({
+    const result = await service.answer('quantum physics', [], 'user-1');
+    expect(result).toMatchObject({
       answer:
         '当前没有找到足以支撑确定结论的可靠资料。你可以补充具体版本、项目、时间范围或业务场景，也可以切换到深度检索继续查找。',
       references: [],
       retrievalSufficient: false,
-      retrievalReason:
-        '检索片段与问题关键词重合数 0 低于阈值 1；Obsidian 未命中；联网搜索不可用，已进入安全降级',
     });
+    expect(result.retrievalReason).toContain('没有检索到候选片段');
     expect(llmInvoke).not.toHaveBeenCalled();
   });
 
@@ -585,7 +583,7 @@ describe('RagService retrieval sources and ranking', () => {
     ).resolves.toHaveLength(1);
   });
 
-  it('accepts strongly reranked evidence when instruction wording is absent from the source', () => {
+  it('does not treat a strong rerank score as proof of evidence coverage', () => {
     const { service } = createService();
 
     const result = service.assessRetrievedChunks(
@@ -604,8 +602,8 @@ describe('RagService retrieval sources and ranking', () => {
       ],
     );
 
-    expect(result.sufficient).toBe(true);
-    expect(result.reason).toContain('重排语义相关度');
+    expect(result.sufficient).toBe(false);
+    expect(result.status).toBe('insufficient');
   });
 
   it('uses QueryPlan graph retrieval and filters graph facts by ACL, scope, and lifecycle', async () => {

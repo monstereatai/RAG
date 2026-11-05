@@ -8,6 +8,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import type { ObsidianSearchHit } from '../modules/obsidian/obsidian-knowledge.service';
 import type { BadCaseMatch } from './prompts/bad-case-flywheel.service';
 import type { QueryTaskType } from './planning/query-plan';
+import type { EvidenceAssessment } from './evidence/evidence-bundle';
 import type {
   DetailedRetrievalResult,
   RetrievalScope,
@@ -199,8 +200,14 @@ export class RagService
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    return this.evidenceService.assessRetrievedChunks(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.evidenceService.assessRetrievedChunks(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   answer(
@@ -228,6 +235,7 @@ export class RagService
   ): Promise<{
     sufficient: boolean;
     reason: string;
+    assessment?: EvidenceAssessment;
     chunks: RetrievedChunk[];
     obsidianHits: ObsidianSearchHit[];
     prefetchedFastPath: PrefetchedFastPath;
@@ -278,8 +286,14 @@ export class RagService
     query: string,
     chunks: RetrievedChunk[],
     taskType: QueryTaskType = 'lookup',
-  ): { sufficient: boolean; reason: string } {
-    return this.evidenceService.assessRetrievalQuality(query, chunks, taskType);
+    requiredAspects: string[] = [],
+  ): EvidenceAssessment {
+    return this.evidenceService.assessRetrievalQuality(
+      query,
+      chunks,
+      taskType,
+      requiredAspects,
+    );
   }
 
   assessCitationSupport(

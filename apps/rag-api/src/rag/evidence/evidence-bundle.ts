@@ -15,6 +15,20 @@ export type EvidenceSourceStatus =
   | 'failure'
   | 'forbidden';
 
+export type EvidenceAssessmentStatus =
+  | 'sufficient'
+  | 'partial'
+  | 'insufficient'
+  | 'source_error';
+
+export interface EvidenceCoverage {
+  id: string;
+  query: string;
+  covered: boolean;
+  evidenceIds: string[];
+  reason?: string;
+}
+
 export interface EvidenceSourceSnapshot {
   source:
     | 'bad_case'
@@ -36,6 +50,11 @@ export interface EvidenceAssessment {
   reason: string;
   /** 充分性必须针对该查询判断，防止子问题覆盖原问题的结论。 */
   evaluatedQuery: string;
+  status?: EvidenceAssessmentStatus;
+  reasonCode?: string;
+  missingAspects?: string[];
+  coverage?: EvidenceCoverage[];
+  conflicts?: string[];
 }
 
 /**
@@ -52,12 +71,10 @@ export interface EvidenceBundle {
   diagnostics?: RetrievalDiagnostics;
   sourceStatuses?: EvidenceSourceSnapshot[];
   /** 子问题覆盖率：每个子问题是否有可引用证据，供 Agent Loop 复用。 */
-  subquestionCoverage?: Array<{
-    id: string;
-    query: string;
-    covered: boolean;
-    evidenceIds: string[];
-  }>;
+  subquestionCoverage?: EvidenceCoverage[];
+  /** 空结果与失败结果同样记录为已执行，避免恢复或升级时重复查询。 */
+  retrievalFingerprints?: string[];
+  retrievalAttempted?: boolean;
 }
 
 export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
@@ -71,6 +88,7 @@ export function createEvidenceBundle(input: EvidenceBundle): EvidenceBundle {
       evaluatedQuery: input.assessment.evaluatedQuery.trim(),
     },
     sourceStatuses: input.sourceStatuses?.map((item) => ({ ...item })) ?? [],
+    retrievalFingerprints: [...new Set(input.retrievalFingerprints ?? [])],
     subquestionCoverage:
       input.subquestionCoverage?.map((item) => ({
         ...item,

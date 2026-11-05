@@ -12,6 +12,7 @@ import {
 import { BochaSearchService } from '../../tools/bocha-search.service';
 import { ToolExecutionPolicyService } from '../../tools/tool-execution-policy.service';
 import { appliesToQuery } from '../evidence/evidence-bundle';
+import { createRetrievalFingerprint } from '../evidence/retrieval-fingerprint';
 import type { AnswerQualityService } from '../evidence/answer-quality.service';
 import { GroundedAnswerGenerationService } from '../generation/grounded-answer-generation.service';
 import {
@@ -174,6 +175,7 @@ export class RagAnswerService {
       onToken,
       retrieveOptions,
     );
+    // cd：并发拿到 hybrid 和 case base 和 obsidian 证据
     const initial = await this.retrieveInitialEvidence(context);
     if (initial.kind === 'direct_answer') return initial.answer;
 
@@ -319,13 +321,11 @@ export class RagAnswerService {
   private async retrieveInitialEvidence(
     context: RagAnswerContext,
   ): Promise<InitialRetrievalOutcome> {
-    const {
-      retrievalQuery,
-      initialRetrieveOptions,
-      retrieveOptions,
-      prefetchedFastPath,
-      userId,
-    } = context;
+    const { retrievalQuery, initialRetrieveOptions, retrieveOptions, userId } =
+      context;
+    const prefetchedFastPath = this.canReusePrefetchedFastPath(context)
+      ? context.prefetchedFastPath
+      : undefined;
     const supplementalEvidenceRestricted =
       isSupplementalEvidenceRestricted(retrieveOptions);
     const baseCaseRestricted = hasExplicitDocumentScope(retrieveOptions.scope);
@@ -433,40 +433,33 @@ export class RagAnswerService {
     const formalChunks = Array.from(formalChunkMap.values());
     const reviewedBaseCaseChunks =
       this.evidenceService.toReviewedEvidenceChunks(badCaseMatches);
-    const baseCaseGate = this.evidenceService.assessReviewedBaseCaseEvidence(
-      badCaseMatches,
+    const obsidianChunks = this.obsidianService.toObsidianChunks(obsidianHits);
+    const requiredAspects = context.retrieveOptions.queryPlan?.subQueries ?? [];
+    const taskType = context.retrieveOptions.queryPlan?.taskType ?? 'lookup';
+    const baseCaseGate = this.answerQuality.assessRetrievalQuality(
+      context.retrievalQuery,
       reviewedBaseCaseChunks,
+      taskType,
+      requiredAspects,
     );
     const prefetchedBundle = context.prefetchedFastPath?.evidenceBundle;
-    const attachmentEvidenceCount = formalChunks.filter(
-      (chunk) => chunk.retrievalSource === 'attachment',
-    ).length;
-    const formalRetrievalGate =
-      attachmentEvidenceCount > 0
-        ? {
-            sufficient: true,
-            reason: `当前会话附件命中 ${attachmentEvidenceCount} 个片段`,
-          }
-        : sourceResolution.chunks.length === 0 &&
-            prefetchedBundle &&
-            appliesToQuery(prefetchedBundle, context.query)
-          ? prefetchedBundle.assessment
-          : formalChunks.length === 0
-            ? { sufficient: false, reason: 'RAG 没有检索到候选片段' }
-            : this.answerQuality.assessRetrievalQuality(
-                context.retrievalQuery,
-                formalChunks,
-                context.retrieveOptions.queryPlan?.taskType ?? 'lookup',
-              );
-    const chunks = formalRetrievalGate.sufficient
-      ? [...formalChunks, ...reviewedBaseCaseChunks]
-      : [...reviewedBaseCaseChunks, ...formalChunks];
-    const retrievalGate = {
-      sufficient: baseCaseGate.sufficient || formalRetrievalGate.sufficient,
-      reason: baseCaseGate.sufficient
-        ? `Base Case: ${baseCaseGate.reason}; RAG: ${formalRetrievalGate.reason}`
-        : formalRetrievalGate.reason,
-    };
+    const canReusePrefetched = this.canReusePrefetchedFastPath(context);
+    const formalRetrievalGate = this.answerQuality.assessRetrievalQuality(
+      context.retrievalQuery,
+      formalChunks,
+      taskType,
+      requiredAspects,
+    );
+    const retrievalGate =
+      canReusePrefetched && prefetchedBundle
+        ? prefetchedBundle.assessment
+        : this.answerQuality.assessRetrievalQuality(
+            context.retrievalQuery,
+            [...formalChunks, ...reviewedBaseCaseChunks, ...obsidianChunks],
+            taskType,
+            requiredAspects,
+          );
+    const chunks = [...formalChunks, ...reviewedBaseCaseChunks];
 
     return {
       retrieval,
@@ -480,6 +473,28 @@ export class RagAnswerService {
     };
   }
 
+  private canReusePrefetchedFastPath(context: RagAnswerContext): boolean {
+    const prefetchedFastPath = context.prefetchedFastPath;
+    const prefetchedBundle = prefetchedFastPath?.evidenceBundle;
+    if (
+      !prefetchedFastPath?.retrievalAttempted ||
+      !prefetchedBundle ||
+      !appliesToQuery(prefetchedBundle, context.query)
+    ) {
+      return false;
+    }
+    const expectedFingerprint = createRetrievalFingerprint(
+      context.retrievalQuery,
+      context.userId,
+      context.retrieveOptions,
+      context.retrieveOptions.executionPlan,
+    );
+    return (
+      prefetchedFastPath.retrievalFingerprints?.includes(expectedFingerprint) ??
+      false
+    );
+  }
+
   private async tryAnswerFromExactCorrection(
     context: RagAnswerContext,
     initial: Extract<InitialRetrievalOutcome, { kind: 'retrieved' }>,
@@ -488,6 +503,16 @@ export class RagAnswerService {
       (match) => match.mode === 'exact',
     );
     if (exactBadCase) {
+      const reviewedChunks = this.evidenceService.toReviewedEvidenceChunks(
+        initial.badCaseMatches,
+      );
+      const assessment = this.answerQuality.assessRetrievalQuality(
+        context.query,
+        reviewedChunks,
+        context.retrieveOptions.queryPlan?.taskType ?? 'lookup',
+        context.retrieveOptions.queryPlan?.subQueries ?? [],
+      );
+      if (!assessment.sufficient) return null;
       const correctedAnswer = this.evidenceService.extractCorrectedAnswer(
         exactBadCase.text,
       );
@@ -556,10 +581,6 @@ export class RagAnswerService {
     context: RagAnswerContext,
     core: CoreAnswerEvidence,
   ): PreparedAnswerEvidence {
-    const obsidianGate = this.obsidianKnowledge.assessHits(
-      context.retrievalQuery,
-      core.obsidianHits,
-    );
     const badCasePrompt = core.badCaseMatches.length
       ? this.badCaseFlywheel.formatPrompt(core.badCaseMatches)
       : '';
@@ -568,6 +589,12 @@ export class RagAnswerService {
       : context.memoryMessages;
     const obsidianChunks = this.obsidianService.toObsidianChunks(
       core.obsidianHits,
+    );
+    const obsidianGate = this.answerQuality.assessRetrievalQuality(
+      context.retrievalQuery,
+      obsidianChunks,
+      context.retrieveOptions.queryPlan?.taskType ?? 'lookup',
+      context.retrieveOptions.queryPlan?.subQueries ?? [],
     );
     const evidenceObsidianChunks = core.formalRetrievalGate.sufficient
       ? []

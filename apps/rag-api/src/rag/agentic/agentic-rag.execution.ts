@@ -394,6 +394,18 @@ export class AgenticRagExecution extends AgenticRagResume {
       data: {
         mode,
         route,
+        routeDecision: route,
+        reasonCode:
+          fastPathGate?.assessment?.reasonCode ??
+          (multiIntent
+            ? 'multi_intent_query'
+            : requiresAgenticPlan(queryPlan)
+              ? 'complex_query'
+              : fastPathGate?.sufficient
+                ? 'evidence_complete'
+                : 'evidence_missing'),
+        evidenceStatus: fastPathGate?.assessment?.status,
+        missingAspects: fastPathGate?.assessment?.missingAspects,
         ...routeMetadata,
         ...(multiIntent
           ? { reason: 'multi_intent_query', subQueries: queryPlan.subQueries }
@@ -406,13 +418,17 @@ export class AgenticRagExecution extends AgenticRagResume {
         data: {
           sufficient: fastPathGate.sufficient,
           reason: fastPathGate.reason,
+          evidenceStatus: fastPathGate.assessment?.status,
+          reasonCode: fastPathGate.assessment?.reasonCode,
+          missingAspects: fastPathGate.assessment?.missingAspects,
+          coverage: fastPathGate.assessment?.coverage,
           taskComplexity: requiresAgenticPlan(queryPlan),
           obsidianPaths: fastPathGate.obsidianHits.map((hit) => hit.path),
           ragReferences: fastPathGate.chunks.map((chunk) => chunk.id),
         },
       });
     }
-  // cd： simple链路
+    // cd： simple链路
     if (route === 'simple') {
       const result = await this.simpleAnswerCapability.answer(
         query,
@@ -439,8 +455,24 @@ export class AgenticRagExecution extends AgenticRagResume {
         retryCount: 0,
         retrievalSufficient: result.retrievalSufficient,
         retrievalReason: result.retrievalReason,
+        evidenceStatus:
+          fastPathGate?.assessment?.status ??
+          (result.retrievalSufficient ? 'sufficient' : 'insufficient'),
+        reasonCode:
+          fastPathGate?.assessment?.reasonCode ??
+          (result.retrievalSufficient
+            ? 'evidence_complete'
+            : 'evidence_missing'),
+        missingAspects: fastPathGate?.assessment?.missingAspects ?? [],
         obsidianPaths: result.obsidianPaths,
-        evidenceCoverage: [],
+        evidenceCoverage: (fastPathGate?.assessment?.coverage ?? []).map(
+          ({ id, query, covered, evidenceIds }) => ({
+            id,
+            query,
+            covered,
+            evidenceIds,
+          }),
+        ),
       };
     }
 
@@ -467,6 +499,7 @@ export class AgenticRagExecution extends AgenticRagResume {
     }
 
     // 只有 route 为 agentic 才运行状态图：按计划取证并检查充分性，再按需补证、重排和生成答案。
+    // cd：invoke执行图获取状态
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const finalState = (await this.app.invoke(
       {
@@ -543,12 +576,14 @@ export class AgenticRagExecution extends AgenticRagResume {
     if (typeof getGraphState !== 'function') {
       throw new Error('Agentic graph state lookup is unavailable.');
     }
+    // cd：从 checkpoint 里读出这个 run 当前的图状态快照
     const graphSnapshot: unknown = await Reflect.apply(
       getGraphState,
       this.app,
       [{ configurable: { thread_id: threadId } }],
     );
     const interrupted = hasInterruptingTasks(graphSnapshot);
+    // cd：obsidianPaths：笔记去重
     const obsidianPaths = Array.from(
       new Set([
         ...obsidianContext.hits.map((hit) => hit.path),
@@ -567,6 +602,18 @@ export class AgenticRagExecution extends AgenticRagResume {
         retryCount: 0,
         retrievalSufficient: finalState.retrievalSufficient,
         retrievalReason: finalState.retrievalReason,
+        evidenceStatus:
+          finalState.retrievalStatus === 'source_error'
+            ? 'source_error'
+            : finalState.retrievalSufficient
+              ? 'sufficient'
+              : finalState.subQuestions.some((item) => item.sufficient)
+                ? 'partial'
+                : 'insufficient',
+        reasonCode: finalState.retrievalReasonCode,
+        missingAspects: finalState.subQuestions
+          .filter((item) => !item.sufficient)
+          .map((item) => item.question),
         obsidianPaths,
         interrupted: true,
         executionState: {
@@ -578,6 +625,14 @@ export class AgenticRagExecution extends AgenticRagResume {
       };
     }
 
+    const evidenceStatus: AgenticRagRunResult['evidenceStatus'] =
+      finalState.retrievalStatus === 'source_error'
+        ? 'source_error'
+        : finalState.retrievalSufficient
+          ? 'sufficient'
+          : finalState.subQuestions.some((item) => item.sufficient)
+            ? 'partial'
+            : 'insufficient';
     const result = {
       answer: finalState.answer,
       references: finalState.retrievedChunks,
@@ -586,6 +641,11 @@ export class AgenticRagExecution extends AgenticRagResume {
       retryCount: finalState.retryCount,
       retrievalSufficient: finalState.retrievalSufficient,
       retrievalReason: finalState.retrievalReason,
+      evidenceStatus,
+      reasonCode: finalState.retrievalReasonCode,
+      missingAspects: finalState.subQuestions
+        .filter((item) => !item.sufficient)
+        .map((item) => item.question),
       obsidianPaths,
       evidenceCoverage: finalState.subQuestions.map((item) => ({
         id: item.id,

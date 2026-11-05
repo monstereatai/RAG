@@ -16,8 +16,10 @@ import {
   appliesToQuery,
   type EvidenceBundle,
 } from '../evidence/evidence-bundle';
+import { createRetrievalFingerprint } from '../evidence/retrieval-fingerprint';
 import { buildSubQuestions } from './agentic-rag-planning';
 import { AgenticRagRetrieval } from './agentic-rag.retrieval';
+import { isWebFallbackRestricted } from '../retrieval/scope-policy';
 const MAX_WEB_RESULT_CONTEXT_CHARACTERS = 2_000;
 
 export class AgenticRagEvidence extends AgenticRagRetrieval {
@@ -41,11 +43,24 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
     const fastPathBundle = config?.configurable?.fastPathBundle as
       | EvidenceBundle
       | undefined;
+    const userId = config?.configurable?.userId as string | undefined;
+    const fastPathFingerprint = createRetrievalFingerprint(
+      state.query,
+      userId,
+      retrieveOptions,
+      retrieveOptions.executionPlan,
+    );
+    const canReuseFastPathBundle = Boolean(
+      fastPathBundle &&
+      appliesToQuery(fastPathBundle, state.query) &&
+      fastPathBundle.retrievalAttempted &&
+      fastPathBundle.retrievalFingerprints?.includes(fastPathFingerprint),
+    );
     // 对单一原问题，Fast Path 已经完成了权限过滤、混合检索和语义充分性判断。
     // Agentic 的“拆题”只是执行细节，不能使用不同问法把该结论推翻。
     if (
+      canReuseFastPathBundle &&
       fastPathBundle &&
-      appliesToQuery(fastPathBundle, state.query) &&
       fastPathBundle.assessment.sufficient &&
       subQuestions.length <= 1
     ) {
@@ -55,10 +70,14 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         sufficient: true,
         status: 'sufficient' as const,
         reason,
-        evidenceIds:
-          subQuestion.evidenceIds.length > 0
-            ? subQuestion.evidenceIds
-            : fastPathBundle.chunks.map((chunk) => chunk.id),
+        evidenceIds: Array.from(
+          new Set([
+            ...subQuestion.evidenceIds,
+            ...(fastPathBundle.assessment.coverage ?? []).flatMap(
+              (item) => item.evidenceIds,
+            ),
+          ]),
+        ),
       }));
       onEvent?.({
         type: 'sufficiency',
@@ -81,9 +100,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
       state.query,
       state.retrievedChunks,
     );
-    // 这些答案由当前 state 的结构化片段和固定字段匹配生成，引用编号也在同一
-    // 批片段内；不再让一次不稳定的“语义充分性”判定把确定性证据重新打回不足。
-    const deterministicEvidenceGate = Boolean(deterministicEvidenceAnswer);
+    // 每个子问题单独验证确定性答案，防止一个局部匹配将整个复合问题标为充分。
     const evaluatedSubQuestions = subQuestions.map((subQuestion) => {
       const evidence = subQuestion.evidenceIds
         .map((id) => chunksById.get(id))
@@ -93,27 +110,36 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         evidence,
         retrieveOptions.queryPlan?.taskType,
       );
+      const deterministicAnswer = this.buildEvidenceFirstAnswer(
+        subQuestion.question,
+        evidence,
+      );
+      const sufficient = gate.sufficient || Boolean(deterministicAnswer);
       return {
         ...subQuestion,
-        sufficient: gate.sufficient || deterministicEvidenceGate,
-        status:
-          gate.sufficient || deterministicEvidenceGate
-            ? ('sufficient' as const)
-            : ('needs_more' as const),
-        reason: deterministicEvidenceGate
+        sufficient,
+        status: sufficient ? ('sufficient' as const) : ('needs_more' as const),
+        reason: deterministicAnswer
           ? '结构化证据可直接回答，保留当前片段进入生成与引用门禁'
           : gate.reason,
       };
     });
     const unresolved = evaluatedSubQuestions.filter((item) => !item.sufficient);
+    const canUseSemanticCoverage =
+      state.retrievedChunks.length > 0 && subQuestions.length === 1;
 
-    if (state.retrievedChunks.length === 0 || unresolved.length > 0) {
+    if (
+      state.retrievedChunks.length === 0 ||
+      (unresolved.length > 0 && !canUseSemanticCoverage)
+    ) {
       const res = {
         retrievalSufficient: false,
         retrievalReason:
-          state.retrievedChunks.length === 0
-            ? '没有检索到任何可用片段'
-            : `仍有 ${unresolved.length} 个子问题缺少直接证据：${unresolved.map((item) => item.question).join('；')}`,
+          state.retrievalStatus === 'source_error'
+            ? '本地证据源调用失败，无法完成检索判断'
+            : state.retrievedChunks.length === 0
+              ? '没有检索到任何可用片段'
+              : `仍有 ${unresolved.length} 个子问题缺少直接证据：${unresolved.map((item) => item.question).join('；')}`,
         subQuestions: evaluatedSubQuestions,
       };
       onEvent?.({
@@ -121,6 +147,24 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         data: {
           sufficient: res.retrievalSufficient,
           reason: res.retrievalReason,
+          evidenceStatus:
+            state.retrievalStatus === 'source_error'
+              ? 'source_error'
+              : state.retrievedChunks.length === 0
+                ? 'insufficient'
+                : 'partial',
+          reasonCode:
+            state.retrievalReasonCode ||
+            (state.retrievalStatus === 'source_error'
+              ? 'source_failure'
+              : 'missing_aspects'),
+          missingAspects: unresolved.map((item) => item.question),
+          coverage: evaluatedSubQuestions.map((item) => ({
+            id: item.id,
+            query: item.question,
+            covered: item.sufficient,
+            evidenceIds: item.evidenceIds,
+          })),
         },
       });
       return res;
@@ -130,18 +174,24 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
       state.query,
       state.retrievedChunks,
       retrieveOptions.queryPlan?.taskType,
+      subQuestions.map((item) => item.question),
     );
-    if (!localGate.sufficient) {
+    if (!localGate.sufficient && !canUseSemanticCoverage) {
       onEvent?.({
         type: 'sufficiency',
         data: {
           sufficient: false,
           reason: localGate.reason,
+          evidenceStatus: localGate.status,
+          reasonCode: localGate.reasonCode,
+          missingAspects: localGate.missingAspects,
+          coverage: localGate.coverage,
         },
       });
       return {
         retrievalSufficient: false,
         retrievalReason: localGate.reason,
+        retrievalReasonCode: localGate.reasonCode ?? state.retrievalReasonCode,
         subQuestions: evaluatedSubQuestions,
       };
     }
@@ -206,33 +256,60 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         },
       );
 
-      this.logger.log(
-        `Retrieval sufficiency: sufficient=${result.sufficient}, reason=${result.reason}`,
-      );
+      this.logger.log(`Retrieval sufficiency: sufficient=${result.sufficient}`);
 
       const deterministicAnswer = deterministicEvidenceAnswer;
-      const sufficient = result.sufficient || Boolean(deterministicAnswer);
-      const resolvedReason =
-        sufficient && !result.sufficient && deterministicAnswer
+      const semanticCoverage = result.sufficient && canUseSemanticCoverage;
+      const sufficient =
+        (result.sufficient && (unresolved.length === 0 || semanticCoverage)) ||
+        Boolean(deterministicAnswer);
+      const resolvedReason = semanticCoverage
+        ? '单问题语义评估认为当前片段足以回答，仍须通过答案引用门禁'
+        : sufficient && !result.sufficient && deterministicAnswer
           ? '结构化证据可直接回答，保留当前片段进入生成与引用门禁'
           : result.reason;
+      const resolvedSubQuestions = evaluatedSubQuestions.map((item) => {
+        const itemSufficient = item.sufficient || semanticCoverage;
+        return {
+          ...item,
+          sufficient: itemSufficient,
+          status: itemSufficient
+            ? ('sufficient' as const)
+            : ('needs_more' as const),
+          reason: semanticCoverage ? resolvedReason : item.reason,
+          evidenceIds:
+            semanticCoverage && item.evidenceIds.length === 0
+              ? state.retrievedChunks.map((chunk) => chunk.id)
+              : item.evidenceIds,
+        };
+      });
 
       onEvent?.({
         type: 'sufficiency',
         data: {
           sufficient,
           reason: resolvedReason,
+          evidenceStatus: sufficient ? 'sufficient' : localGate.status,
+          reasonCode: semanticCoverage
+            ? 'semantic_sufficiency_passed'
+            : localGate.reasonCode,
+          missingAspects: sufficient ? [] : localGate.missingAspects,
+          coverage: resolvedSubQuestions.map((item) => ({
+            id: item.id,
+            query: item.question,
+            covered: item.sufficient,
+            evidenceIds: item.evidenceIds,
+          })),
         },
       });
 
       return {
         retrievalSufficient: sufficient,
         retrievalReason: resolvedReason,
-        subQuestions: evaluatedSubQuestions.map((item) => ({
-          ...item,
-          sufficient: sufficient && item.sufficient,
-          status: sufficient && item.sufficient ? 'sufficient' : 'needs_more',
-        })),
+        retrievalReasonCode: semanticCoverage
+          ? 'semantic_sufficiency_passed'
+          : (localGate.reasonCode ?? state.retrievalReasonCode),
+        subQuestions: resolvedSubQuestions,
       };
     } catch (err) {
       await this.rethrowIfAbortedOrCancelled(err, config);
@@ -242,22 +319,33 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
         state.query,
         state.retrievedChunks,
         retrieveOptions.queryPlan?.taskType,
+        subQuestions.map((item) => item.question),
       );
-      const sufficient = fallbackGate.sufficient;
+      const sufficient =
+        fallbackGate.sufficient &&
+        evaluatedSubQuestions.every((item) => item.sufficient);
       const reason = `充分性 LLM 评估失败，按检索质量门禁判断：${fallbackGate.reason}`;
-      this.logger.warn(`${reason}: ${(err as Error).message}`);
+      this.logger.warn(
+        'Sufficiency LLM evaluation failed; used deterministic evidence gate',
+      );
 
       onEvent?.({
         type: 'sufficiency',
         data: {
           sufficient,
           reason,
+          evidenceStatus: sufficient ? 'sufficient' : fallbackGate.status,
+          reasonCode: fallbackGate.reasonCode,
+          missingAspects: fallbackGate.missingAspects,
+          coverage: fallbackGate.coverage,
         },
       });
 
       return {
         retrievalSufficient: sufficient,
         retrievalReason: reason,
+        retrievalReasonCode:
+          fallbackGate.reasonCode ?? state.retrievalReasonCode,
         subQuestions: evaluatedSubQuestions,
       };
     }
@@ -275,7 +363,9 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
       {}) as RetrieveOptions;
     if (
       retrieveOptions.knowledgeOnly ||
-      retrieveOptions.sourcePolicy !== 'web_allowed'
+      (retrieveOptions.executionPlan?.sourcePolicy ??
+        retrieveOptions.sourcePolicy) !== 'web_allowed' ||
+      isWebFallbackRestricted(retrieveOptions)
     ) {
       const reason = `${state.retrievalReason || '本地检索不足'}；当前问题限定使用资料库，已跳过联网搜索`;
       onEvent?.({
@@ -449,8 +539,8 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
       };
     } catch (err) {
       await this.rethrowIfAbortedOrCancelled(err, config);
-      const reason = `Bocha web_search 调用失败：${(err as Error).message}`;
-      this.logger.warn(reason);
+      const reason = 'Bocha web_search 调用失败';
+      this.logger.warn('Bocha web_search failed');
       const fallbackReason = `${state.retrievalReason || '检索不足'}；${reason}`;
       onEvent?.({
         type: 'web_search',
@@ -625,7 +715,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
       const retryCount = state.retryCount + 1;
 
       this.logger.log(
-        `Reflection: confidence=${result.confidence.toFixed(2)}, passed=${passed}, retry=${retryCount}/${this.maxRetries}, reason=${result.reason}`,
+        `Reflection: confidence=${result.confidence.toFixed(2)}, passed=${passed}, retry=${retryCount}/${this.maxRetries}, retryTarget=${result.retryTarget}`,
       );
 
       onEvent?.({
@@ -650,7 +740,7 @@ export class AgenticRagEvidence extends AgenticRagRetrieval {
     } catch (err) {
       await this.rethrowIfAbortedOrCancelled(err, config);
       this.logger.warn(
-        `Reflection failed, treat confidence as unknown and retry safely: ${(err as Error).message}`,
+        'Reflection failed; confidence is unknown and bounded repair will follow',
       );
       const retryCount = state.retryCount + 1;
       onEvent?.({

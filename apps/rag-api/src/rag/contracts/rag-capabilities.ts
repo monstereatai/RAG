@@ -3,6 +3,7 @@ import type {
   RetrievedChunk,
 } from '../evidence/retrieval.types';
 import type { QueryTaskType } from '../planning/query-plan';
+import type { EvidenceAssessment } from '../evidence/evidence-bundle';
 import type { RagAnswerResult, RetrieveOptions } from './rag-types';
 
 export const RAG_QUERY_CAPABILITY = Symbol('RAG_QUERY_CAPABILITY');
@@ -88,7 +89,8 @@ export interface RagRetrievalCapability {
     query: string,
     chunks: RetrievedChunk[],
     taskType?: QueryTaskType,
-  ): { sufficient: boolean; reason: string };
+    requiredAspects?: string[],
+  ): EvidenceAssessment;
 }
 
 export interface RagIndexCapability {
