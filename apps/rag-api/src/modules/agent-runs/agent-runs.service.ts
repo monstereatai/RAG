@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Raw, Repository } from 'typeorm';
+import { EntityManager, In, Raw, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AgentRunEntity } from '../../providers/db/entities/agent-run.entity';
 import { AgentActionEntity } from '../../providers/db/entities/agent-action.entity';
@@ -171,15 +171,18 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
     maxSteps?: number;
     maxToolCalls?: number;
     maxDelegations?: number;
-  }) {
+    route?: string;
+  }, manager?: EntityManager) {
+    const repository = manager?.getRepository(AgentRunEntity) ?? this.runRepo;
     // cd：创建运行记录
-    const run = await this.runRepo.save(
-      this.runRepo.create({
+    const run = await repository.save(
+      repository.create({
         id: randomUUID(),
         threadId: input.threadId,
         userId: input.userId ?? null,
         tenantId: input.tenantId ?? 'legacy',
         mode: input.mode,
+        route: input.route ?? null,
         maxSteps: input.maxSteps ?? 18,
         maxToolCalls: input.maxToolCalls ?? 24,
         maxDelegations: input.maxDelegations ?? 6,
@@ -193,6 +196,11 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
       }),
     );
     // cd：发布运行开始事件
+    if (!manager) await this.ensureStartedEvent(run);
+    return run;
+  }
+
+  async ensureStartedEvent(run: AgentRunEntity): Promise<void> {
     await this.events.emit({
       threadId: run.threadId,
       tenantId: run.tenantId ?? 'legacy',
@@ -200,8 +208,16 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
       eventType: 'run.started',
       actor: run.mode,
       payload: { mode: run.mode, maxSteps: run.maxSteps },
+      idempotencyKey: `run-started:${run.id}`,
     });
-    return run;
+  }
+
+  async listActiveProductionWorkflows(): Promise<AgentRunEntity[]> {
+    return this.runRepo.find({
+      where: { route: 'production_workflow', status: In(['running', 'waiting_approval']) },
+      order: { createdAt: 'ASC' },
+      take: 500,
+    });
   }
 
   async finish(

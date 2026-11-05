@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { AgentTaskEntity } from '../../providers/db/entities/agent-task.entity';
 import { type ProductionRole } from '../workflow/production-workflow.state';
 import { dependenciesForProductionRole } from '../workflow/production-workflow.plan';
@@ -44,14 +44,15 @@ export class AgentTasksService {
     roles: ProductionRole[];
     processType?: 'sequential' | 'hierarchical' | 'conditional';
     runId?: string;
-  }) {
+  }, transactionManager?: EntityManager) {
+    const repository = transactionManager?.getRepository(AgentTaskEntity) ?? this.tasks;
     const ids = new Map<ProductionRole, string>();
     const parentTaskId =
       input.processType === 'hierarchical' ? randomUUID() : null;
     const rows = input.roles.map((role) => {
       const id = randomUUID();
       ids.set(role, id);
-      return this.tasks.create({
+      return repository.create({
         id,
         threadId: input.threadId,
         runId: input.runId ?? null,
@@ -77,7 +78,7 @@ export class AgentTasksService {
       row.dependsOnTaskIds = JSON.stringify(dependencies);
     }
     if (parentTaskId) {
-      const manager = this.tasks.create({
+      const manager = repository.create({
         id: parentTaskId,
         threadId: input.threadId,
         runId: input.runId ?? null,
@@ -92,27 +93,36 @@ export class AgentTasksService {
         approvalRequired: true,
         retryCount: 0,
       });
-      const saved = await this.tasks.save([manager, ...rows]);
-      await this.events.emit({
+      const saved = await repository.save([manager, ...rows]);
+      if (!transactionManager) await this.ensurePlanCreatedEvent({
         threadId: input.threadId,
-        eventType: 'task.created',
-        actor: 'workflow',
-        target: 'manager',
-        payload: { processType: input.processType, taskCount: saved.length },
+        processType: input.processType,
+        taskCount: saved.length,
       });
       return saved;
     }
-    const saved = await this.tasks.save(rows);
+    const saved = await repository.save(rows);
+    if (!transactionManager) await this.ensurePlanCreatedEvent({
+      threadId: input.threadId,
+      processType: input.processType,
+      taskCount: saved.length,
+    });
+    return saved;
+  }
+
+  async ensurePlanCreatedEvent(input: {
+    threadId: string;
+    processType?: string;
+    taskCount: number;
+  }): Promise<void> {
     await this.events.emit({
       threadId: input.threadId,
       eventType: 'task.created',
       actor: 'workflow',
-      payload: {
-        processType: input.processType ?? 'sequential',
-        taskCount: saved.length,
-      },
+      target: input.processType === 'hierarchical' ? 'manager' : undefined,
+      payload: { processType: input.processType ?? 'sequential', taskCount: input.taskCount },
+      idempotencyKey: `workflow-task-plan:${input.threadId}`,
     });
-    return saved;
   }
 
   async list(threadId?: string) {

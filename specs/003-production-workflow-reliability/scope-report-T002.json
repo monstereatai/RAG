@@ -1,0 +1,57 @@
+{
+  "base_commit": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T002.json",
+  "new_files": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+    "apps/admin-web/src/pages/agent-ops/service.ts",
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts"
+  ],
+  "modified_preexisting_files": [
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+  ],
+  "touched_files": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+    "apps/admin-web/src/pages/agent-ops/service.ts",
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+  ],
+  "allow_patterns": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+    "apps/admin-web/src/pages/agent-ops/service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+    "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts",
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+  ],
+  "internal_patterns": [
+    "specs/003-production-workflow-reliability/**",
+    "specs/003-production-workflow-reliability/scope-baseline-T002.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

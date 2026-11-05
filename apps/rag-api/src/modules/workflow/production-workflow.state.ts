@@ -168,6 +168,10 @@ export const ProductionWorkflowState = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => 'product',
   }),
+  parallelRole: Annotation<ProductionRole | null>({
+    reducer: (_previous, next) => next,
+    default: () => null,
+  }),
   selectedRoles: Annotation<ProductionRole[]>({
     reducer: (_previous, next) => next,
     default: () => [...PRODUCTION_ROLES],
@@ -229,6 +233,10 @@ export const ProductionWorkflowState = Annotation.Root({
     default: () => [],
   }),
   rerunRoles: Annotation<ProductionRole[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  qualityBlockedRoles: Annotation<ProductionRole[]>({
     reducer: (_previous, next) => next,
     default: () => [],
   }),

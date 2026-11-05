@@ -91,7 +91,22 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
     manager: EntityManager,
     input: DomainEventInput,
   ): Promise<void> {
-    await this.persist(manager.getRepository(DomainEventOutboxEntity), input);
+    await this.persist(manager.getRepository(DomainEventOutboxEntity), input, true);
+  }
+
+  transaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.outbox.manager.transaction(callback);
+  }
+
+  async findByIdempotencyKey(key: string): Promise<DomainEventOutboxEntity | null> {
+    return this.outbox.findOne({ where: { idempotencyKey: key } });
+  }
+
+  async findWorkflowDispatch(threadId: string): Promise<DomainEventOutboxEntity | null> {
+    return this.outbox.findOne({
+      where: { eventType: 'workflow.dispatch.requested', aggregateId: threadId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   registerInternalHandler(
@@ -109,6 +124,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
   private async persist(
     outbox: Repository<DomainEventOutboxEntity>,
     input: DomainEventInput,
+    transactional = false,
   ): Promise<void> {
     const safePayload = this.safePayload(input.payload ?? {});
     const tenantId = input.tenantId ?? 'legacy';
@@ -154,7 +170,10 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         status: 'pending',
         availableAt: new Date(),
       });
-      if (input.eventType === 'workflow.dispatch.requested') {
+      if (
+        input.eventType === 'workflow.dispatch.requested' ||
+        input.eventType === 'workflow.approval.notify'
+      ) {
         event.maxAttempts = 16;
       }
       if (
@@ -169,6 +188,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       // 多实例并发 emit 时由数据库唯一约束完成最终幂等；并发撞车应视为已存在，
       // 其他数据库错误仍然向上抛出，不能静默丢掉事件。
       if (this.isUniqueViolation(error)) {
+        if (transactional) throw error;
         if (input.eventType === 'workflow.dispatch.requested') {
           const sameId = await outbox.findOne({ where: { idempotencyKey } });
           if (
@@ -298,6 +318,7 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
         await this.dispatchInternalCacheInvalidations();
         return;
       }
+      await this.reconcileFailedWorkflowIntents();
       const rows = await this.outbox
         .createQueryBuilder('event')
         .where('event.status = :status', { status: 'pending' })
@@ -335,6 +356,22 @@ export class DomainEventsService implements OnModuleInit, OnModuleDestroy {
       if (lockAcquired)
         await this.redisProvider.releaseLock(this.dispatchLockKey, lockToken);
       this.dispatching = false;
+    }
+  }
+
+  private async reconcileFailedWorkflowIntents(): Promise<void> {
+    const rows = await this.outbox.find({
+      where: [
+        { eventType: 'workflow.dispatch.requested', status: 'failed' },
+        { eventType: 'workflow.approval.notify', status: 'failed' },
+      ],
+      order: { updatedAt: 'ASC' },
+      take: 20,
+    });
+    const retryBefore = Date.now() - 5 * 60_000;
+    for (const row of rows) {
+      if (row.updatedAt.getTime() > retryBefore) continue;
+      await this.retry(row.id);
     }
   }
 

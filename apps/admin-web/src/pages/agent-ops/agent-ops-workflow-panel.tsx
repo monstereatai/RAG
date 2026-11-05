@@ -33,6 +33,50 @@ import type {
   ProductionWorkflow,
 } from './service';
 
+const ROLE_ORDER = Object.keys(ROLE_LABELS) as ProductionRole[];
+const ROLE_DEPENDENCIES: Record<ProductionRole, ProductionRole[]> = {
+  product: [],
+  design: ['product'],
+  backend: ['product'],
+  frontend: ['design', 'backend'],
+  qa: ['product', 'design', 'frontend', 'backend'],
+  operations: ['product', 'design', 'frontend', 'backend', 'qa'],
+};
+
+export function previewProductionWorkflow(
+  roles: ProductionRole[],
+  processType: 'sequential' | 'hierarchical',
+  approvalMode: 'auto' | 'required' | 'risk_based',
+  approvalRoles: ProductionRole[],
+  riskApprovalThreshold: 'medium' | 'high',
+) {
+  const selected = ROLE_ORDER.filter((role) => roles.includes(role));
+  const pending = new Set(selected);
+  const completed = new Set<ProductionRole>();
+  const batches: ProductionRole[][] = [];
+  while (pending.size > 0) {
+    const ready = selected.filter(
+      (role) => pending.has(role) && ROLE_DEPENDENCIES[role]
+        .filter((dependency) => pending.has(dependency) || completed.has(dependency))
+        .every((dependency) => completed.has(dependency)),
+    );
+    for (const role of ready) {
+      pending.delete(role);
+      completed.add(role);
+    }
+    batches.push(...(processType === 'sequential' ? ready.map((role) => [role]) : [ready]));
+  }
+  const approval = approvalMode === 'required'
+    ? '每个岗位均需人工审批'
+    : approvalMode === 'risk_based'
+      ? `${riskApprovalThreshold === 'high' ? '高' : '中、高'}风险岗位需人工审批`
+      : '普通岗位自动流转';
+  return {
+    batches,
+    approval: `${approval}${approvalRoles.length ? `；指定岗位：${approvalRoles.filter((role) => selected.includes(role)).map((role) => ROLE_LABELS[role]).join('、')}` : ''}。生成失败或证据不足时暂停，需补充材料或修订。`,
+  };
+}
+
 export function renderWorkflowPanel(controller: AgentOpsController) {
   const {
     workflowForm,
@@ -369,7 +413,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             {
               title: '状态',
               dataIndex: 'status',
-              render: (value: ProductionWorkflow['status']) => (
+              render: (value: ProductionWorkflow['status'], record: ProductionWorkflow) => (
                 <Tag
                   color={
                     value === 'completed'
@@ -382,7 +426,9 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
                           : 'blue'
                   }
                 >
-                  {WORKFLOW_STATUS_LABELS[value] ?? value}
+                  {value === 'running' && record.dispatchStatus
+                    ? ({ accepted: '已受理', queued: '排队中', running: '运行中', failed: '派发失败' }[record.dispatchStatus])
+                    : WORKFLOW_STATUS_LABELS[value] ?? value}
                 </Tag>
               ),
             },
@@ -414,9 +460,6 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
           >
             <Input placeholder="anniversary-2026" />
           </Form.Item>
-          <Form.Item label="最大步骤" name="maxSteps" initialValue={18}>
-            <InputNumber min={6} max={30} />
-          </Form.Item>
           <Form.Item label="审批策略" name="approvalMode" initialValue="auto">
             <Select
               options={[
@@ -426,53 +469,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
               ]}
             />
           </Form.Item>
-          <Form.Item
-            label="协作策略"
-            name="processType"
-            initialValue="sequential"
-          >
-            <Select
-              options={[
-                { value: 'sequential', label: 'Sequential：逐岗位执行' },
-                { value: 'hierarchical', label: 'Hierarchical：按依赖层执行' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            label="插件能力包"
-            name="pluginKeys"
-            initialValue={['workflow.production-base']}
-          >
-            <Select
-              mode="multiple"
-              placeholder="选择并组合能力包"
-              options={governancePlugins
-                .filter(
-                  (plugin) =>
-                    plugin.status === 'enabled' &&
-                    (plugin.modes ?? []).includes('production'),
-                )
-                .map((plugin) => ({
-                  value: plugin.key,
-                  label: `${plugin.displayName ?? plugin.key}（${plugin.key}）`,
-                }))}
-            />
-          </Form.Item>
-          <Form.Item label="组合校验">
-            <Button onClick={() => void handlePreviewPluginComposition()}>
-              预览有效工具
-            </Button>
-          </Form.Item>
         </div>
-        {pluginPreview && (
-          <Alert
-            showIcon
-            type="info"
-            style={{ marginBottom: 16 }}
-            title={`已组合：${(pluginPreview.pluginKeys ?? []).join('、') || '无'}`}
-            description={`有效工具：${(pluginPreview.toolNames ?? []).join('、') || '无（将只保留模型生成，不调用工具）'}`}
-          />
-        )}
         <Form.Item
           label="参与岗位"
           name="roles"
@@ -488,35 +485,6 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             placeholder="选择独立执行或协作执行的岗位"
           />
         </Form.Item>
-        <div className="agent-ops-form-grid">
-          <Form.Item
-            label="指定审批岗位"
-            name="approvalRoles"
-            initialValue={[]}
-          >
-            <Select
-              allowClear
-              mode="multiple"
-              options={Object.entries(ROLE_LABELS).map(([value, label]) => ({
-                value,
-                label,
-              }))}
-              placeholder="无论风险级别都需要审批"
-            />
-          </Form.Item>
-          <Form.Item
-            label="风险审批阈值"
-            name="riskApprovalThreshold"
-            initialValue="high"
-          >
-            <Select
-              options={[
-                { value: 'high', label: '仅高风险' },
-                { value: 'medium', label: '中、高风险' },
-              ]}
-            />
-          </Form.Item>
-        </div>
         <Form.Item
           label="需求背景"
           name="brief"
@@ -526,6 +494,66 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
             rows={5}
             placeholder="活动目标、范围、规则、地区版本和上线约束"
           />
+        </Form.Item>
+        <Collapse
+          style={{ marginBottom: 16 }}
+          items={[{
+            key: 'advanced',
+            label: '高级配置',
+            children: <>
+              <div className="agent-ops-form-grid">
+                <Form.Item label="最大步骤" name="maxSteps" initialValue={18}>
+                  <InputNumber min={6} max={30} />
+                </Form.Item>
+                <Form.Item label="协作策略" name="processType" initialValue="sequential">
+                  <Select options={[
+                    { value: 'sequential', label: '逐岗位执行' },
+                    { value: 'hierarchical', label: '按依赖层并行执行' },
+                  ]} />
+                </Form.Item>
+                <Form.Item label="风险审批阈值" name="riskApprovalThreshold" initialValue="high">
+                  <Select options={[
+                    { value: 'high', label: '仅高风险' },
+                    { value: 'medium', label: '中、高风险' },
+                  ]} />
+                </Form.Item>
+                <Form.Item label="指定审批岗位" name="approvalRoles" initialValue={[]}>
+                  <Select allowClear mode="multiple" options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} placeholder="无论风险级别都需要审批" />
+                </Form.Item>
+                <Form.Item label="插件能力包" name="pluginKeys" initialValue={['workflow.production-base']}>
+                  <Select mode="multiple" placeholder="选择并组合能力包" options={governancePlugins
+                    .filter((plugin) => plugin.status === 'enabled' && (plugin.modes ?? []).includes('production'))
+                    .map((plugin) => ({ value: plugin.key, label: `${plugin.displayName ?? plugin.key}（${plugin.key}）` }))} />
+                </Form.Item>
+                <Form.Item label="组合校验">
+                  <Button onClick={() => void handlePreviewPluginComposition()}>预览有效工具</Button>
+                </Form.Item>
+              </div>
+              {pluginPreview && <Alert showIcon type="info" title={`已组合：${(pluginPreview.pluginKeys ?? []).join('、') || '无'}`} description={`有效工具：${(pluginPreview.toolNames ?? []).join('、') || '无（将只保留模型生成，不调用工具）'}`} />}
+            </>,
+          }]}
+        />
+        <Form.Item noStyle shouldUpdate>
+          {({ getFieldsValue }) => {
+            const values = getFieldsValue();
+            const preview = previewProductionWorkflow(
+              values.roles ?? ROLE_ORDER,
+              values.processType ?? 'sequential',
+              values.approvalMode ?? 'auto',
+              values.approvalRoles ?? [],
+              values.riskApprovalThreshold ?? 'high',
+            );
+            return <Alert
+              style={{ marginBottom: 16 }}
+              type="info"
+              showIcon
+              title="启动预览"
+              description={<>
+                <div>岗位依赖：{preview.batches.map((batch) => batch.map((role) => ROLE_LABELS[role]).join('＋')).join(' → ') || '请选择岗位'}</div>
+                <div>预计审批：{preview.approval}</div>
+              </>}
+            />;
+          }}
         </Form.Item>
         <Button
           loading={loading}
@@ -556,7 +584,9 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
                 {
                   key: 'status',
                   label: '状态',
-                  children: WORKFLOW_STATUS_LABELS[workflow.status],
+                  children: workflow.status === 'running' && workflow.dispatchStatus
+                    ? ({ accepted: '已受理', queued: '排队中', running: '运行中', failed: '派发失败' }[workflow.dispatchStatus])
+                    : WORKFLOW_STATUS_LABELS[workflow.status],
                 },
                 {
                   key: 'steps',
@@ -584,6 +614,7 @@ export function renderWorkflowPanel(controller: AgentOpsController) {
                 },
               ]}
             />
+            {workflow.error && <Alert type="error" showIcon title="失败原因" description={workflow.error} style={{ marginTop: 12 }} />}
             <Collapse
               items={workflow.selectedRoles
                 .filter((role) => workflow.results[role])

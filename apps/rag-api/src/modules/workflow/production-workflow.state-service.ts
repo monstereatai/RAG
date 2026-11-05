@@ -7,6 +7,7 @@ import {
   normalizeProductionRoles,
 } from './production-workflow.plan';
 import type { ProductionWorkflowJob } from './production-workflow-queue.service';
+import type { EntityManager } from 'typeorm';
 import { ProductionWorkflowCancelledError } from './production-workflow.shared';
 
 function workflowText(value: unknown, fallback: string): string {
@@ -65,13 +66,14 @@ export class ProductionWorkflowStateService {
       pluginTools: composition.toolNames,
       brief: dto.brief.trim(),
       processType,
-      workflowVersion: 2,
+      workflowVersion: processType === 'hierarchical' ? 3 : 2,
       currentRole: selectedRoles[0],
       selectedRoles,
       executionBatches,
       batchIndex: 0,
       currentBatch: [],
       batchRoleCursor: 0,
+      parallelRole: null,
       rolePhase: 'idle',
       currentRoleModelError: '',
       completedRoles: [],
@@ -84,6 +86,7 @@ export class ProductionWorkflowStateService {
       ),
       riskApprovalThreshold: dto.riskApprovalThreshold ?? 'high',
       pendingApprovalRoles: [],
+      qualityBlockedRoles: [],
       rerunRoles: [],
       staleRoles: [],
       revisionNumber: 1,
@@ -100,16 +103,23 @@ export class ProductionWorkflowStateService {
   async initializeTasks(state: ProductionWorkflowStateType): Promise<void> {
     if (!this.context.tasks) return;
     const existing = await this.context.tasks.list(state.threadId);
-    if (existing.length > 0) return;
-    await this.context.tasks.createPlan({
-      threadId: state.threadId,
-      roles: state.selectedRoles,
-      processType: state.processType,
-    });
+    const plan = existing.length > 0
+      ? existing
+      : await this.context.tasks.createPlan({
+          threadId: state.threadId,
+          roles: state.selectedRoles,
+          processType: state.processType,
+          runId: state.runId || undefined,
+        });
+    await this.context.tasks.ensurePlanCreatedEvent?.({
+        threadId: state.threadId,
+        processType: state.processType,
+        taskCount: plan.length,
+      });
   }
 
   async ensureRun(state: ProductionWorkflowStateType): Promise<void> {
-    if (!this.context.agentRuns || state.runId) return;
+    if (!this.context.agentRuns) return;
     const threadId = state.threadId;
     const existing = await this.context.agentRuns.findLatestByThread(threadId);
     const run =
@@ -129,7 +139,9 @@ export class ProductionWorkflowStateService {
           run.resultSummary ?? `${state.projectId}：产研运工作流已创建。`,
       });
     }
-    if (!existing) {
+    await this.context.agentRuns.ensureStartedEvent?.(run);
+    const goal = await this.context.agentGoals?.get?.(run.id, run.tenantId ?? undefined);
+    if (!goal) {
       await this.context.agentGoals?.activate({
         threadId,
         runId: run.id,
@@ -139,6 +151,41 @@ export class ProductionWorkflowStateService {
         maxRounds: state.maxSteps,
       });
     }
+  }
+
+  async createAcceptedRecords(
+    manager: EntityManager,
+    state: ProductionWorkflowStateType,
+    job: ProductionWorkflowJob,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<void> {
+    if (!this.context.agentRuns || !this.context.tasks || !this.context.domainEvents) {
+      throw new Error('Workflow transactional start dependencies unavailable');
+    }
+    const run = await this.context.agentRuns.start({
+      threadId: state.threadId,
+      userId: state.userId,
+      tenantId: state.tenantId,
+      mode: 'agentic',
+      route: 'production_workflow',
+      maxSteps: state.maxSteps,
+    }, manager);
+    state.runId = run.id;
+    await this.context.tasks.createPlan({
+      threadId: state.threadId,
+      roles: state.selectedRoles,
+      processType: state.processType,
+      runId: run.id,
+    }, manager);
+    await this.context.domainEvents.emitInTransaction(manager, {
+      eventType: 'workflow.dispatch.requested',
+      aggregateType: 'production_workflow',
+      aggregateId: state.threadId,
+      tenantId: state.tenantId,
+      idempotencyKey,
+      payload: { job, requestHash },
+    });
   }
 
   async ensureIndexedRun(
@@ -437,8 +484,18 @@ export class ProductionWorkflowStateService {
     }
   }
 
-  async enqueueWorkflowJob(job: ProductionWorkflowJob): Promise<boolean> {
+  async enqueueWorkflowJob(job: ProductionWorkflowJob, intentPersisted = false): Promise<boolean> {
     try {
+      if (intentPersisted) {
+        try {
+          await this.context.workflowQueue?.enqueue(job);
+        } catch (queueError) {
+          this.context.logger.warn(
+            `workflow ${job.threadId} fast dispatch failed; durable Outbox will retry: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
+          );
+        }
+        return true;
+      }
       // Acknowledge only after a PostgreSQL Outbox intent is durable.
       // DomainEvents will retry BullMQ delivery on a transient Redis outage.
       if (

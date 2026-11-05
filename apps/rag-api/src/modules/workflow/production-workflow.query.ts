@@ -53,7 +53,30 @@ export class ProductionWorkflowQuery {
     }
     const result = this.context.events.view(threadId, state, userId);
     void this.context.events.saveWorkflowIndexBestEffort(result);
-    return result;
+    if (state.status === 'failed') return { ...result, dispatchStatus: 'failed' as const };
+    if (state.status !== 'running' || state.stepCount > 0) {
+      return { ...result, dispatchStatus: 'running' as const };
+    }
+    const intent = await this.context.domainEvents?.findWorkflowDispatch(threadId);
+    if (intent?.status === 'failed') {
+      return {
+        ...result,
+        dispatchStatus: 'failed' as const,
+        error: intent.lastError ?? '工作流派发失败，等待自动重投。',
+      };
+    }
+    const jobState = await this.context.workflowQueue?.jobState?.(
+      this.context.state.workflowJobId('start', threadId),
+    );
+    return {
+      ...result,
+      dispatchStatus:
+        jobState === 'active'
+          ? 'running' as const
+          : jobState === 'waiting' || jobState === 'delayed'
+            ? 'queued' as const
+            : 'accepted' as const,
+    };
   }
 
   async list(userId: string, tenantId?: string) {

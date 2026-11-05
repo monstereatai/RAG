@@ -126,6 +126,19 @@ describe('DingTalkProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('propagates approval delivery failures so the outbox can retry', async () => {
+    const provider = new DingTalkProvider(makeConfig());
+    global.fetch = jest.fn().mockRejectedValue(new Error('network down'));
+
+    await expect(provider.notifyApproval({
+      threadId: 'thread-1',
+      projectId: 'p-1',
+      brief: 'brief',
+      completedRoles: [],
+      pendingApprovalRoles: ['product'],
+    })).rejects.toThrow('network down');
+  });
+
   it('forwards rag answers only for whitelisted thread ids', async () => {
     const provider = new DingTalkProvider(
       makeConfig({ 'dingtalk.forwardThreadIds': ' thread-a , thread-b ' }),

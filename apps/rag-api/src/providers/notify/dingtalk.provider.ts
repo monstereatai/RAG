@@ -22,7 +22,7 @@ export interface DingTalkRagAnswerPayload {
 /**
  * 钉钉群机器人通知（加签模式）。
  *
- * 所有通知均为 fire-and-forget：失败只记 warn 日志，不阻塞业务。
+ * 普通通知失败记 warn 日志；审批通知将失败交给 Outbox 重试。
  * 告警类通知（notifyAlert）按 key 节流，默认 5 分钟窗口，避免熔断
  * 反复打开时刷屏；审批通知不节流（修订后再次待审批是新事件）。
  */
@@ -115,7 +115,9 @@ export class DingTalkProvider {
       `- 已完成角色：${payload.completedRoles.join('、') || '-'}`,
       `- 需求摘要：${payload.brief.slice(0, 200)}`,
     ].join('\n\n');
-    await this.sendMarkdown('工作流待审批', text);
+    if (!(await this.sendMarkdown('工作流待审批', text))) {
+      throw new Error(this.lastError ?? 'dingtalk approval notification failed');
+    }
   }
 
   /** 告警通知：按 key 节流（默认 5 分钟窗口内同 key 只发一次）。 */

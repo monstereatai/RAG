@@ -1,0 +1,32 @@
+{
+  "base_commit": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T001.json",
+  "new_files": [
+    "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+  ],
+  "allow_patterns": [
+    "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+    "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+  ],
+  "internal_patterns": [
+    "specs/003-production-workflow-reliability/**",
+    "specs/003-production-workflow-reliability/scope-baseline-T001.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

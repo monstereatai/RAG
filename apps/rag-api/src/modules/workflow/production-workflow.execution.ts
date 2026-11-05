@@ -1,5 +1,5 @@
 import type { ProductionWorkflowContext } from './production-workflow.context';
-import { StateGraph, START, END } from '@langchain/langgraph';
+import { StateGraph, START, END, Send } from '@langchain/langgraph';
 import type { z } from 'zod';
 import {
   PRODUCTION_ROLES,
@@ -37,13 +37,21 @@ export class ProductionWorkflowExecution {
       .addNode('prepare', this.prepareNode.bind(this))
       .addNode('executeBatch', this.executeBatchNode.bind(this))
       .addNode('generateRole', this.generateRoleNode.bind(this))
-      .addNode('persistRole', this.persistRoleNode.bind(this));
+      .addNode('persistRole', this.persistRoleNode.bind(this))
+      .addNode('runParallelRole', this.runParallelRoleNode.bind(this))
+      .addNode('finishParallelBatch', this.finishParallelBatchNode.bind(this));
 
     graph.addEdge(START, 'prepare');
     graph.addConditionalEdges(
       'prepare',
       (state) => {
         if (state.status !== 'running') return END;
+        if (state.workflowVersion === 3) {
+          const roles = state.rerunRoles.length ? state.rerunRoles : state.currentBatch;
+          return roles.map((role) =>
+            new Send('runParallelRole', { ...state, parallelRole: role }),
+          );
+        }
         if (state.workflowVersion !== 2) return 'executeBatch';
         return state.rolePhase === 'generated' ? 'persistRole' : 'generateRole';
       },
@@ -51,10 +59,13 @@ export class ProductionWorkflowExecution {
         executeBatch: 'executeBatch',
         generateRole: 'generateRole',
         persistRole: 'persistRole',
+        runParallelRole: 'runParallelRole',
         [END]: END,
       },
     );
     graph.addEdge('executeBatch', END);
+    graph.addEdge('runParallelRole', 'finishParallelBatch');
+    graph.addEdge('finishParallelBatch', END);
     graph.addEdge('generateRole', 'persistRole');
     graph.addConditionalEdges(
       'persistRole',
@@ -178,6 +189,25 @@ export class ProductionWorkflowExecution {
     return this.finishBatch(state, results, rolesToRun);
   }
 
+  async runParallelRoleNode(
+    state: ProductionWorkflowStateType,
+  ): Promise<Partial<ProductionWorkflowStateType>> {
+    const role = state.parallelRole;
+    if (!role) throw new Error('parallel workflow role is missing');
+    const result = await this.runRole(role, state);
+    return { results: { [role]: result } };
+  }
+
+  async finishParallelBatchNode(
+    state: ProductionWorkflowStateType,
+  ): Promise<Partial<ProductionWorkflowStateType>> {
+    const roles = state.rerunRoles.length ? state.rerunRoles : state.currentBatch;
+    const results = Object.fromEntries(
+      roles.map((role) => [role, state.results[role]]),
+    ) as Partial<Record<ProductionRole, ProductionStageResult>>;
+    return this.finishBatch(state, results, roles);
+  }
+
   /** 新工作流将模型产出单独检查点；旧工作流继续使用 executeBatch。 */
   async generateRoleNode(
     state: ProductionWorkflowStateType,
@@ -262,8 +292,35 @@ export class ProductionWorkflowExecution {
     rolesToRun: ProductionRole[],
   ): Promise<Partial<ProductionWorkflowStateType>> {
     const mergedResults = { ...state.results, ...results };
+    const qualityFailures = state.currentBatch.flatMap((role) => {
+      const result = mergedResults[role];
+      const quality = result
+        ? this.context.roleSupport.roleQuality(result)
+        : { status: 'generation_failed', reason: '岗位结果缺失。' };
+      return quality.status === 'passed'
+        ? []
+        : [{ role, reason: quality.reason }];
+    });
+    if (qualityFailures.length > 0) {
+      const reason = qualityFailures
+        .map(({ role, reason }) => `${role}：${reason}`)
+        .join('；');
+      return {
+        status: 'revision_required',
+        currentRole: qualityFailures[0].role,
+        rerunRoles: qualityFailures.map(({ role }) => role),
+        qualityBlockedRoles: qualityFailures.map(({ role }) => role),
+        revisionNumber: (state.revisionNumber ?? 1) + 1,
+        pendingApprovalRoles: [],
+        results,
+        error: reason,
+        feedback: reason,
+      };
+    }
     const isRevisionRun =
-      (state.revisionNumber ?? 1) > 1 && state.rerunRoles.length > 0;
+      (state.revisionNumber ?? 1) > 1 &&
+      state.rerunRoles.length > 0 &&
+      (state.qualityBlockedRoles?.length ?? 0) === 0;
     const pendingApprovalRoles = state.currentBatch.filter((role) => {
       const result = mergedResults[role];
       if (isRevisionRun) return rolesToRun.includes(role) && Boolean(result);
@@ -277,9 +334,9 @@ export class ProductionWorkflowExecution {
         state.currentBatch,
       );
       const approvedResults = Object.fromEntries(
-        Object.entries(results).map(([role, result]) => [
+        state.currentBatch.map((role) => [
           role,
-          { ...result, reviewStatus: 'approved' as const },
+          { ...mergedResults[role]!, reviewStatus: 'approved' as const },
         ]),
       ) as Partial<Record<ProductionRole, ProductionStageResult>>;
       await Promise.all(
@@ -301,22 +358,16 @@ export class ProductionWorkflowExecution {
         status: 'running',
         results: approvedResults,
         rerunRoles: [],
+        qualityBlockedRoles: [],
       };
     }
-    // 钉钉审批通知（fire-and-forget，失败只记日志不影响工作流）
-    void this.context.dingTalk?.notifyApproval({
-      threadId: state.threadId,
-      projectId: state.projectId,
-      brief: state.brief,
-      completedRoles: state.completedRoles,
-      pendingApprovalRoles,
-    });
     return {
       currentRole: pendingApprovalRoles[0],
       status: 'pending_approval',
       pendingApprovalRoles,
       results,
       rerunRoles: [],
+      qualityBlockedRoles: [],
     };
   }
 
@@ -530,10 +581,23 @@ export class ProductionWorkflowExecution {
             error: lastError.message,
           },
         );
-        if (attempt < 2) {
+        const status = Number(
+          (error as { status?: number; statusCode?: number }).status ??
+            (error as { statusCode?: number }).statusCode,
+        );
+        const retryable =
+          !['AbortError', 'CanceledError', 'CancelledError'].includes(
+            lastError.name,
+          ) &&
+          ![400, 401, 403, 422].includes(status) &&
+          (!Number.isFinite(status) || status === 429 || status >= 500);
+        if (!retryable) throw lastError;
+        if (attempt < 2 && retryable) {
           await this.context.roleSupport.sleep(
             ROLE_LLM_RETRY_BACKOFF_MS * 2 ** (attempt - 1),
           );
+        } else {
+          break;
         }
       }
     }
@@ -588,7 +652,7 @@ export class ProductionWorkflowExecution {
     if (modelError) {
       await this.recordRoleHandoff(state, result);
       await this.context.tasks?.updateForRole(state.threadId, role, {
-        status: 'waiting_approval',
+        status: 'failed',
         summary: result.summary,
         outputArtifactId: result.generatedArtifact?.id,
         approvalRequired: true,
@@ -619,7 +683,7 @@ export class ProductionWorkflowExecution {
     );
     await this.recordRoleHandoff(state, result);
     await this.context.tasks?.updateForRole(state.threadId, role, {
-      status: result.readyForApproval ? 'completed' : 'waiting_approval',
+      status: result.readyForApproval ? 'completed' : 'failed',
       summary: result.summary,
       outputArtifactId: result.generatedArtifact?.id,
       approvalRequired: !result.readyForApproval,

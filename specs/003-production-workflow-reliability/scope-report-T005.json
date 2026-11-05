@@ -1,0 +1,28 @@
+{
+  "base_commit": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T005.json",
+  "new_files": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx"
+  ],
+  "allow_patterns": [
+    "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+    "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+    "apps/admin-web/src/pages/agent-ops/service.ts",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx"
+  ],
+  "internal_patterns": [
+    "specs/003-production-workflow-reliability/**",
+    "specs/003-production-workflow-reliability/scope-baseline-T005.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

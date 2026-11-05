@@ -15,6 +15,7 @@ describe('DomainEventsService', () => {
   ) {
     const outbox = {
       findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
       create: jest.fn((value: Record<string, unknown>) => value),
       save: jest.fn().mockResolvedValue(undefined),
       createQueryBuilder: jest.fn().mockReturnValue({
@@ -82,6 +83,24 @@ describe('DomainEventsService', () => {
         aggregateId: 'doc-1',
       }),
     );
+  });
+
+  it('lets a transaction roll back on a concurrent unique-key collision', async () => {
+    const { service } = createService();
+    const transactionalOutbox = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value: Record<string, unknown>) => value),
+      save: jest.fn().mockRejectedValue({ code: '23505' }),
+    };
+    const manager = { getRepository: jest.fn().mockReturnValue(transactionalOutbox) };
+
+    await expect(service.emitInTransaction(manager as never, {
+      eventType: 'workflow.dispatch.requested',
+      aggregateType: 'production_workflow',
+      aggregateId: 'thread-1',
+      idempotencyKey: 'start-request-1',
+    })).rejects.toMatchObject({ code: '23505' });
+    expect(transactionalOutbox.findOne).toHaveBeenCalledTimes(1);
   });
 
   it('keeps implicit idempotency distinct for later aggregate transitions', async () => {

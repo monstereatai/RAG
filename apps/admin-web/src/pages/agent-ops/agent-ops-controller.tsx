@@ -57,6 +57,7 @@ import {
 } from './service';
 
 export function useAgentOpsController() {
+  const pendingStartKey = 'agent-ops:production-workflow:pending-start';
   /**
    * Agent 运营工作台聚合多个独立运行面：工作流、评测、Bad Case、运行轨迹、Artifact 与协作。
    * 它只展示后端状态，不在浏览器端推断审批结果或伪造岗位执行状态。
@@ -395,10 +396,7 @@ export function useAgentOpsController() {
       .then((result) => {
         const nextWorkflow = unwrapData<ProductionWorkflow>(result);
         if (!nextWorkflow?.threadId) return;
-        if (
-          nextWorkflow.status === 'completed' ||
-          nextWorkflow.status === 'failed'
-        ) {
+        if (nextWorkflow.status === 'completed') {
           window.localStorage.removeItem(CURRENT_PRODUCTION_WORKFLOW_KEY);
           return;
         }
@@ -420,10 +418,12 @@ export function useAgentOpsController() {
         .then((result) => {
           const nextWorkflow = unwrapData<ProductionWorkflow>(result);
           void loadProductionWorkflows();
-          if (
-            nextWorkflow.status === 'completed' ||
-            nextWorkflow.status === 'failed'
-          ) {
+          if (nextWorkflow.status === 'failed') {
+            setWorkflow(nextWorkflow);
+            message.error(nextWorkflow.error || '工作流执行失败，请在运行中心查看原因');
+            return;
+          }
+          if (nextWorkflow.status === 'completed') {
             setWorkflow(null);
             workflowForm.resetFields();
             window.localStorage.removeItem(CURRENT_PRODUCTION_WORKFLOW_KEY);
@@ -711,10 +711,26 @@ export function useAgentOpsController() {
 
   const handleStartWorkflow = async () => {
     const values = await workflowForm.validateFields();
+    const serialized = JSON.stringify(values);
+    let pending: { requestId: string; serialized: string } | null = null;
+    try {
+      const stored = window.localStorage.getItem(pendingStartKey);
+      pending = stored ? JSON.parse(stored) : null;
+    } catch {
+      pending = null;
+    }
+    const requestId = pending?.serialized === serialized
+      ? pending.requestId
+      : window.crypto.randomUUID();
+    window.localStorage.setItem(
+      pendingStartKey,
+      JSON.stringify({ requestId, serialized }),
+    );
     setLoading(true);
     try {
-      const result = await startProductionWorkflow(values);
+      const result = await startProductionWorkflow({ ...values, requestId });
       const nextWorkflow = unwrapData<ProductionWorkflow>(result);
+      window.localStorage.removeItem(pendingStartKey);
       setWorkflow(nextWorkflow);
       void loadProductionWorkflows();
       window.localStorage.setItem(
@@ -729,6 +745,8 @@ export function useAgentOpsController() {
         nextWorkflow.pendingApprovalRoles,
       );
       message.success('工作流已进入后台执行');
+    } catch {
+      message.warning('启动结果尚未确认；可用相同表单重试，系统会沿用本次请求 ID');
     } finally {
       setLoading(false);
     }

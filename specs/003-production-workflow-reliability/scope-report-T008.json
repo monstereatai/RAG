@@ -1,0 +1,23 @@
+{
+  "base_commit": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T008.json",
+  "new_files": [],
+  "modified_preexisting_files": [
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts"
+  ],
+  "touched_files": [
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts"
+  ],
+  "allow_patterns": [
+    "ROADMAP.md",
+    "specs/003-production-workflow-reliability/verify.md",
+    "specs/003-production-workflow-reliability/tasks.md",
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts"
+  ],
+  "internal_patterns": [
+    "specs/003-production-workflow-reliability/**",
+    "specs/003-production-workflow-reliability/scope-baseline-T008.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

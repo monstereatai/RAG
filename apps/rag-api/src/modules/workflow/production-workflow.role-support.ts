@@ -23,6 +23,24 @@ export class ProductionWorkflowRoleSupport {
   constructor(context: ProductionWorkflowContext) {
     this.context = context;
   }
+  roleQuality(result: ProductionStageResult): {
+    status: 'passed' | 'generation_failed' | 'evidence_insufficient';
+    reason: string;
+  } {
+    if (result.deliverables.some((item) => item.type === 'degraded-review')) {
+      return {
+        status: 'generation_failed',
+        reason: result.issues[0] ?? `${result.role} 模型生成失败，请修复模型后重试。`,
+      };
+    }
+    if (!result.readyForApproval || result.evidenceCoverage < 1) {
+      return {
+        status: 'evidence_insufficient',
+        reason: result.issues[0] ?? `${result.role} 证据不足，请补充材料后重试。`,
+      };
+    }
+    return { status: 'passed', reason: '' };
+  }
   degradedRoleResult(
     role: ProductionRole,
     state: ProductionWorkflowStateType,

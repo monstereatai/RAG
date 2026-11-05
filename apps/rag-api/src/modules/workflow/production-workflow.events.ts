@@ -126,6 +126,7 @@ export class ProductionWorkflowEvents {
           roles: state.rerunRoles,
           staleRoles: state.staleRoles,
           feedback: state.feedback,
+          error: state.error,
         },
       );
       await this.emitRuntimeEvent(state, 'goal.paused', 'production_workflow', {
@@ -133,7 +134,7 @@ export class ProductionWorkflowEvents {
         status: 'paused',
         round: state.stepCount,
         maxRounds: state.maxSteps,
-        reason: 'Artifact 已驳回，等待人工确认后启动修订。',
+        reason: state.error || 'Artifact 已驳回，等待人工确认后启动修订。',
       });
       if (runId) {
         await this.context.agentRuns?.finish(runId, {
@@ -141,11 +142,13 @@ export class ProductionWorkflowEvents {
           status: 'waiting_approval',
           requiresApproval: true,
           resultSummary: `${state.projectId}：Artifact 已驳回，等待 v${state.revisionNumber} 修订。`,
+          errorMessage: state.error || undefined,
         });
       }
       return;
     }
     if (state.status === 'pending_approval') {
+      await this.context.control.ensureApprovalNotificationIntent(state);
       await this.emitDomainEvent('workflow.approval_required', state, {
         roles: state.pendingApprovalRoles,
       });

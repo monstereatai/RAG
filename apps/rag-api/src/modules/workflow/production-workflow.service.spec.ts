@@ -1,7 +1,25 @@
 import { ProductionWorkflowService } from './production-workflow.service';
 import type { ProductionWorkflowStateType } from './production-workflow.state';
+import { AgentRunsService } from '../agent-runs/agent-runs.service';
 
 describe('ProductionWorkflowService', () => {
+  it('enumerates only active production runs for notification reconciliation', async () => {
+    const repo = { find: jest.fn().mockResolvedValue([{ id: 'run-1' }]) };
+    const runs = new AgentRunsService(
+      repo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(runs.listActiveProductionWorkflows()).resolves.toEqual([{ id: 'run-1' }]);
+    const options = repo.find.mock.calls[0][0];
+    expect(options.where.route).toBe('production_workflow');
+    expect(options.where.status.value).toEqual(['running', 'waiting_approval']);
+    expect(options.take).toBe(500);
+  });
   const createService = (
     workflowQueue?: { enqueue: jest.Mock },
     collaboration?: { publishMessage: jest.Mock },
@@ -132,6 +150,95 @@ describe('ProductionWorkflowService', () => {
       'qa',
       'operations',
     ]);
+  });
+
+  it('blocks downstream roles when the model fails under auto approval', async () => {
+    const { service, invoke, createArtifact } = createService();
+    invoke.mockRejectedValue(new Error('model unavailable'));
+
+    const state = await service.start(
+      {
+        projectId: 'quality-failure',
+        brief: '验证模型连续失败后工作流停在当前岗位。',
+        roles: ['product', 'backend'],
+      },
+      'user-1',
+    );
+
+    expect(state.status).toBe('revision_required');
+    expect(state.requiresRevision).toBe(true);
+    expect(state.rerunRoles).toEqual(['product']);
+    expect(state.results.product?.reviewStatus).toBe('pending');
+    expect(state.error).toContain('model unavailable');
+    expect(state.results.backend).toBeUndefined();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(createArtifact).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a result with insufficient evidence before applying auto approval', async () => {
+    const { service, invoke } = createService();
+    invoke.mockResolvedValue({
+      summary: '证据不足',
+      deliverables: [{ type: 'review', title: '草稿', markdown: '待核实' }],
+      claims: [{ statement: '未经支持的结论', evidenceIds: [], status: 'pending_confirmation' }],
+      issues: ['请补充项目证据'],
+      downstreamRisks: [],
+      riskLevel: 'medium',
+      readyForApproval: false,
+    });
+
+    const state = await service.start(
+      {
+        projectId: 'evidence-gap',
+        brief: '验证证据不足时下游不启动。',
+        roles: ['product', 'backend'],
+      },
+      'user-1',
+    );
+
+    expect(state.status).toBe('revision_required');
+    expect(state.results.product?.reviewStatus).toBe('pending');
+    expect(state.results.backend).toBeUndefined();
+    expect(state.error).toContain('请补充项目证据');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a model permission error', async () => {
+    const { service, invoke } = createService();
+    invoke.mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 }));
+
+    await expect(
+      service.start(
+        { projectId: 'permission-error', brief: '验证权限错误不重试。', roles: ['product'] },
+        'user-1',
+      ),
+    ).rejects.toThrow('forbidden');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs one stable approval notification intent from a saved checkpoint', async () => {
+    const { service } = createService();
+    const dto = {
+      projectId: 'approval-intent',
+      brief: '验证审批检查点已保存而通知意图尚未保存时恢复。',
+      roles: ['product'] as Array<'product'>,
+      approvalMode: 'required' as const,
+    };
+    const pending = await service.start(dto, 'user-1');
+    expect(pending.status).toBe('pending_approval');
+    const emit = jest.fn().mockResolvedValue(undefined);
+    const context = (service as unknown as { context: { domainEvents: unknown; control: { reconcileApprovalNotifications: () => Promise<void> }; agentRuns: unknown } }).context;
+    context.domainEvents = { emit };
+    context.agentRuns = {
+      listActiveProductionWorkflows: jest.fn().mockResolvedValue([{ threadId: pending.threadId }]),
+    };
+
+    await service.start({ ...dto, threadId: pending.threadId }, 'user-1');
+    await context.control.reconcileApprovalNotifications();
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(emit.mock.calls[0][0].idempotencyKey).toBe(
+      emit.mock.calls[1][0].idempotencyKey,
+    );
   });
 
   it('does not retry the model when a downstream handoff write fails', async () => {
@@ -501,20 +608,21 @@ describe('ProductionWorkflowService', () => {
     );
   });
 
-  it('finishes with an evidence-preserving deliverable when the model fails', async () => {
+  it('holds an evidence-preserving deliverable for revision when the model fails', async () => {
     const { service, invoke, createArtifact } = createService();
     invoke.mockRejectedValue(new Error('model unavailable'));
 
     const state = await service.start(
       {
         projectId: 'degraded-review',
-        brief: '单独审查后端方案，并验证模型失败时不会阻塞整个工作流。',
+        brief: '单独审查后端方案，并验证模型失败时停在当前岗位。',
         roles: ['backend'],
       },
       'user-1',
     );
 
-    expect(state.status).toBe('completed');
+    expect(state.status).toBe('revision_required');
+    expect(state.results.backend?.reviewStatus).toBe('pending');
     expect(state.results.backend?.readyForApproval).toBe(false);
     expect(state.results.backend?.evidenceCoverage).toBe(0);
     expect(state.results.backend?.deliverables[0]?.type).toBe(
@@ -541,6 +649,109 @@ describe('ProductionWorkflowService', () => {
     expect(state.status).toBe('completed');
     expect(state.selectedRoles).toEqual(['product', 'backend', 'qa']);
     expect(Object.keys(state.results)).toEqual(['product', 'backend', 'qa']);
+  });
+
+  it('runs independent hierarchical roles concurrently and waits before frontend', async () => {
+    const { service, invoke } = createService();
+    const output = await invoke();
+    invoke.mockClear();
+    let active = 0;
+    let maxActive = 0;
+    invoke.mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      active -= 1;
+      return output;
+    });
+
+    const state = await service.start(
+      {
+        projectId: 'parallel-plan',
+        brief: '验证设计和后端同层执行，前端等待两者完成。',
+        roles: ['product', 'design', 'backend', 'frontend'],
+        processType: 'hierarchical',
+      },
+      'user-1',
+    );
+
+    expect(state.status).toBe('completed');
+    expect(state.executionBatches).toEqual([
+      ['product'],
+      ['design', 'backend'],
+      ['frontend'],
+    ]);
+    expect(maxActive).toBe(2);
+    expect(invoke).toHaveBeenCalledTimes(4);
+  });
+
+  it('reuses the successful sibling when one hierarchical role needs revision', async () => {
+    const { service, invoke } = createService();
+    const output = await invoke();
+    invoke.mockClear();
+    let calls = 0;
+    invoke.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 3 || calls === 4) throw new Error('backend model unavailable');
+      return output;
+    });
+    const dto = {
+      projectId: 'parallel-recovery',
+      brief: '验证同层一成一败后只重试失败岗位。',
+      roles: ['product', 'design', 'backend', 'frontend'] as Array<'product' | 'design' | 'backend' | 'frontend'>,
+      processType: 'hierarchical' as const,
+    };
+    const blocked = await service.start(dto, 'user-1');
+    expect(blocked.status).toBe('revision_required');
+    expect(blocked.rerunRoles).toHaveLength(1);
+    const sibling = blocked.rerunRoles[0] === 'design' ? 'backend' : 'design';
+    expect(blocked.results[sibling]?.reviewStatus).toBe('pending');
+    expect(blocked.results.frontend).toBeUndefined();
+
+    const revised = await service.revise(
+      blocked.threadId,
+      { rerunRoles: blocked.rerunRoles, supplementalMaterials: '模型已恢复。' },
+      'user-1',
+    );
+    expect(revised.status).toBe('completed');
+    expect(revised.results[sibling]?.reviewStatus).toBe('approved');
+    expect(invoke).toHaveBeenCalledTimes(6);
+  });
+
+  it('records comparable sequential and hierarchical mock cost', async () => {
+    const measure = async (processType: 'sequential' | 'hierarchical') => {
+      const { service, invoke } = createService();
+      const output = await invoke();
+      invoke.mockClear();
+      let estimatedInputTokens = 0;
+      invoke.mockImplementation(async (messages: unknown) => {
+        estimatedInputTokens += Math.ceil(JSON.stringify(messages).length / 4);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return output;
+      });
+      const started = Date.now();
+      const workflow = await service.start(
+        {
+          projectId: 'mock-cost',
+          brief: '比较同一组岗位的串行和层次执行开销。',
+          roles: ['product', 'design', 'backend', 'frontend'],
+          processType,
+        },
+        'user-1',
+      );
+      expect(workflow.status).toBe('completed');
+      return {
+        elapsedMs: Date.now() - started,
+        modelCalls: invoke.mock.calls.length,
+        estimatedInputTokens,
+      };
+    };
+
+    const sequential = await measure('sequential');
+    const hierarchical = await measure('hierarchical');
+    expect(sequential.modelCalls).toBe(4);
+    expect(hierarchical.modelCalls).toBe(4);
+    console.info(JSON.stringify({ benchmark: 'production-workflow-mock', sequential, hierarchical }));
   });
 
   it('advances an important task only after explicit approvals', async () => {
@@ -653,7 +864,7 @@ describe('ProductionWorkflowService', () => {
       issues: ['奖励概率待确认'],
       downstreamRisks: ['错误配置会影响奖励成本'],
       riskLevel: 'high',
-      readyForApproval: false,
+      readyForApproval: true,
     });
 
     const state = await service.start(

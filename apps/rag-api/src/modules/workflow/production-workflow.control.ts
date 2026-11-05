@@ -1,5 +1,7 @@
 import type { ProductionWorkflowContext } from './production-workflow.context';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { ConflictException } from '@nestjs/common';
+import { normalizeProductionRoles } from './production-workflow.plan';
 import {
   ProductionRole,
   ProductionWorkflowStateType,
@@ -26,7 +28,80 @@ export class ProductionWorkflowControl {
   constructor(context: ProductionWorkflowContext) {
     this.context = context;
   }
+
+  startRequestIdentity(
+    dto: StartProductionWorkflowDto,
+    userId: string,
+    tenantId?: string,
+  ): { key: string; requestHash: string } {
+    const requestId = dto.requestId ?? randomUUID();
+    const key = `workflow-start:${createHash('sha256')
+      .update(JSON.stringify([tenantId?.trim() || 'legacy', userId, requestId]))
+      .digest('hex')}`;
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({
+        threadId: dto.threadId ?? null,
+        projectId: dto.projectId.trim(),
+        brief: dto.brief.trim(),
+        roles: normalizeProductionRoles(dto.roles),
+        processType: dto.processType ?? 'sequential',
+        maxSteps: dto.maxSteps ?? 18,
+        approvalMode: dto.approvalMode ?? 'auto',
+        approvalRoles: normalizeProductionRoles(dto.approvalRoles).filter((role) => dto.approvalRoles?.includes(role)),
+        riskApprovalThreshold: dto.riskApprovalThreshold ?? 'high',
+        pluginKeys: [...(dto.pluginKeys ?? [])].sort(),
+      }))
+      .digest('hex');
+    return { key, requestHash };
+  }
+
+  async viewAcceptedRequest(
+    key: string,
+    requestHash: string,
+    userId: string,
+    tenantId?: string,
+  ) {
+    const event = await this.context.domainEvents?.findByIdempotencyKey(key);
+    if (!event) return null;
+    const payload = JSON.parse(event.payload) as {
+      job?: { dto?: StartProductionWorkflowDto; threadId?: string; userId?: string };
+      requestHash?: string;
+    };
+    if (!payload.job?.dto || payload.requestHash !== requestHash || payload.job.userId !== userId) {
+      throw new ConflictException('requestId 已被不同的启动参数使用');
+    }
+    const threadId = event.aggregateId;
+    const existing = await this.context.state.getState(threadId);
+    if (existing?.projectId) {
+      const owned = await this.context.state.getOwnedState(threadId, userId, tenantId);
+      return this.context.events.view(threadId, owned, userId);
+    }
+    const pending = this.context.pendingStates.get(threadId) ??
+      await this.context.state.createInitialState(
+        payload.job.dto, userId, threadId, tenantId,
+      );
+    return this.context.events.view(threadId, pending, userId);
+  }
   onModuleInit(): void {
+    this.context.domainEvents?.registerInternalHandler?.(
+      'workflow.approval.notify',
+      async (event) => {
+        const payload = JSON.parse(event.payload) as {
+          threadId: string;
+          projectId: string;
+          brief: string;
+          completedRoles: string[];
+          pendingApprovalRoles: string[];
+        };
+        await this.context.dingTalk?.notifyApproval(payload);
+      },
+    );
+    const approvalReconciler = setInterval(
+      () => void this.reconcileApprovalNotifications(),
+      30_000,
+    );
+    approvalReconciler.unref();
+    void this.reconcileApprovalNotifications();
     // DomainEventOutbox is the durable intent; its handler can safely be retried.
     this.context.domainEvents?.registerInternalHandler?.(
       WORKFLOW_DISPATCH_REQUESTED_EVENT,
@@ -107,6 +182,61 @@ export class ProductionWorkflowControl {
         throw error;
       }
     });
+  }
+
+  async ensureApprovalNotificationIntent(
+    state: ProductionWorkflowStateType,
+  ): Promise<void> {
+    if (state.status !== 'pending_approval' || !this.context.domainEvents) return;
+    const identity = createHash('sha256')
+      .update(JSON.stringify([
+        state.threadId,
+        state.revisionNumber ?? 1,
+        state.batchIndex,
+        state.stepCount,
+        state.pendingApprovalRoles,
+      ]))
+      .digest('hex');
+    await this.context.domainEvents.emit({
+      eventType: 'workflow.approval.notify',
+      aggregateType: 'production_workflow',
+      aggregateId: state.threadId,
+      tenantId: state.tenantId,
+      idempotencyKey: `workflow-approval:${identity}`,
+      payload: {
+        threadId: state.threadId,
+        projectId: state.projectId,
+        brief: state.brief,
+        completedRoles: state.completedRoles,
+        pendingApprovalRoles: state.pendingApprovalRoles,
+        revision: state.revisionNumber ?? 1,
+        batchIndex: state.batchIndex,
+        checkpoint: state.stepCount,
+      },
+    });
+  }
+
+  async reconcileApprovalNotifications(): Promise<void> {
+    if (!this.context.agentRuns || !this.context.domainEvents) return;
+    try {
+      const runs = await this.context.agentRuns.listActiveProductionWorkflows();
+      for (const run of runs) {
+        try {
+          const state = await this.context.state.getState(run.threadId);
+          if (state?.status === 'pending_approval') {
+            await this.ensureApprovalNotificationIntent(state);
+          }
+        } catch (error) {
+          this.context.logger.warn(
+            `workflow ${run.threadId} approval reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.context.logger.warn(
+        `workflow approval reconciliation skipped: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async dispatchRetryTask(task: {
@@ -222,6 +352,7 @@ export class ProductionWorkflowControl {
           await this.context.events.saveWorkflowIndex(result);
           return result;
         }
+        await this.ensureApprovalNotificationIntent(existing);
         return this.context.events.view(threadId, existing, userId);
       }
     }
@@ -273,6 +404,11 @@ export class ProductionWorkflowControl {
     userId: string,
     tenantId?: string,
   ) {
+    const { key, requestHash } = this.startRequestIdentity(dto, userId, tenantId);
+    if (dto.requestId && this.context.domainEvents) {
+      const accepted = await this.viewAcceptedRequest(key, requestHash, userId, tenantId);
+      if (accepted) return accepted;
+    }
     const threadId = dto.threadId ?? randomUUID();
     if (dto.threadId) {
       const pending = this.context.pendingStates.get(threadId);
@@ -301,22 +437,51 @@ export class ProductionWorkflowControl {
       threadId,
       tenantId,
     );
-    await this.context.state.ensureRun(initialState);
-    // 任务计划是工作流的业务记录，必须先落库再入队，避免 API 与 Worker 并发创建两份计划。
-    await this.context.state.initializeTasks(initialState);
-    this.context.pendingStates.set(threadId, initialState);
-    await this.context.events.saveWorkflowIndexBestEffort(
-      this.context.events.view(threadId, initialState, userId),
-    );
-    const queued = await this.context.state.enqueueWorkflowJob({
+    const job = {
       id: this.context.state.workflowJobId('start', threadId),
-      operation: 'start',
+      operation: 'start' as const,
       threadId,
       userId,
       tenantId,
       dto: { ...dto, threadId },
-    });
-    if (!queued && !this.context.workflowQueue?.isRequired?.()) {
+    };
+    const transactional = Boolean(
+      this.context.domainEvents &&
+      this.context.agentRuns &&
+      this.context.tasks,
+    );
+    if (transactional) {
+      try {
+        await this.context.domainEvents!.transaction((manager) =>
+          this.context.state.createAcceptedRecords(
+            manager, initialState, job, key, requestHash,
+          ),
+        );
+      } catch (error) {
+        const accepted = await this.viewAcceptedRequest(key, requestHash, userId, tenantId);
+        if (accepted) return accepted;
+        throw error;
+      }
+    } else {
+      await this.context.state.ensureRun(initialState);
+      await this.context.state.initializeTasks(initialState);
+    }
+    if (transactional) {
+      try {
+        await this.context.state.ensureRun(initialState);
+        await this.context.state.initializeTasks(initialState);
+      } catch (error) {
+        this.context.logger.warn(
+          `workflow ${threadId} accepted; post-commit event repair pending: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    this.context.pendingStates.set(threadId, initialState);
+    await this.context.events.saveWorkflowIndexBestEffort(
+      this.context.events.view(threadId, initialState, userId),
+    );
+    const queued = await this.context.state.enqueueWorkflowJob(job, transactional);
+    if ((!queued || this.context.workflowQueue?.isEnabled?.() === false) && !this.context.workflowQueue?.isRequired?.()) {
       this.context.state.schedule(threadId, userId, () =>
         this.start({ ...dto, threadId }, userId, tenantId),
       );

@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "base_commit": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+  "initial_snapshots": {
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "982b03172e9d38fde37c8f013376e07c0cde1b35051da02e5e43a9995ac8496f"
+    }
+  },
+  "internal_patterns": [
+    "specs/003-production-workflow-reliability/**",
+    "specs/003-production-workflow-reliability/scope-baseline-T001.json"
+  ]
+}

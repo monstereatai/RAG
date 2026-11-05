@@ -161,6 +161,7 @@ export interface ProductionWorkflow {
   error: string;
   requiresApproval: boolean;
   requiresRevision: boolean;
+  dispatchStatus?: 'accepted' | 'queued' | 'running' | 'failed';
 }
 
 export interface AgentEvalResult {
@@ -315,6 +316,7 @@ export interface AgenticRunOption {
 }
 
 export const startProductionWorkflow = (body: {
+  requestId: string;
   projectId: string;
   brief: string;
   maxSteps?: number;
@@ -322,6 +324,8 @@ export const startProductionWorkflow = (body: {
   roles?: ProductionRole[];
   approvalRoles?: ProductionRole[];
   riskApprovalThreshold?: 'medium' | 'high';
+  processType?: 'sequential' | 'hierarchical';
+  pluginKeys?: string[];
 }) =>
   authRequest<unknown>('/api/admin/agent-ops/workflows', {
     method: 'POST',

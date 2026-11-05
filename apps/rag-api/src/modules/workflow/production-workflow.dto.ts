@@ -20,6 +20,10 @@ import {
 export class StartProductionWorkflowDto {
   @IsOptional()
   @IsUUID()
+  requestId?: string;
+
+  @IsOptional()
+  @IsUUID()
   threadId?: string;
 
   @IsString()

@@ -1,0 +1,2093 @@
+{
+  "schema_version": 2,
+  "change_id": "003-production-workflow-reliability",
+  "mode": "roadmap",
+  "status": "verifying",
+  "current_task": null,
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/003-production-workflow-reliability/spec.md",
+    "plan": "specs/003-production-workflow-reliability/plan.md",
+    "tasks": "specs/003-production-workflow-reliability/tasks.md",
+    "verify": "specs/003-production-workflow-reliability/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "plan"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-11-05T16:17:09Z",
+      "approver": "主人",
+      "evidence": "用户原始任务书并明确要求：帮我完成这些优化。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-11-05T17:19:51Z",
+      "approver": "主人",
+      "evidence": "用户明确回复：没有执行完你给我执行完啊，不用我授权直接执行",
+      "review_report": "specs/003-production-workflow-reliability/plan-review.md"
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "默认 auto 下模型生成失败或证据不足阻止下游和批准；质量通过后按原审批策略。"
+    },
+    "AC-02": {
+      "description": "同 requestId 原子幂等创建 Run、岗位任务和 Outbox；冲突参数报错，失败整体回滚。"
+    },
+    "AC-03": {
+      "description": "审批 checkpoint 后生成可重试、稳定去重的通知 Outbox 意图。"
+    },
+    "AC-04": {
+      "description": "hierarchical 同层受控并行，失败后只重跑失败岗位，旧 checkpoint 兼容。"
+    },
+    "AC-05": {
+      "description": "启动表单突出常用字段，并预览依赖层和预计审批条件。"
+    },
+    "AC-06": {
+      "description": "显示已受理/排队中/运行中/失败，并兼容审批、修订、取消和旧检查点。"
+    },
+    "AC-07": {
+      "description": "记录可重复模拟场景的耗时、模型调用数和估算 Token。"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T001-unit-retry"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T001.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T001.json",
+        "sha256": "c02dc7cc0815a737958a55f6029865d8aaa31fa86d02c2f611c084c6f9f4313a"
+      }
+    },
+    "T002": {
+      "depends_on": [
+        "T001"
+      ],
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-06"
+      ],
+      "allowed_paths": [
+        "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+        "apps/admin-web/src/pages/agent-ops/service.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+        "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+        "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts",
+        "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+        "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts",
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T002-domain-recheck",
+        "T002-workflow-recheck"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T002.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T002.json",
+        "sha256": "c969112c961a31bc81909ba9116c2416988f4732a1576a5ad5f8a1784972848c"
+      }
+    },
+    "T003": {
+      "depends_on": [
+        "T002"
+      ],
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+        "apps/rag-api/src/providers/notify/dingtalk.provider.ts",
+        "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts",
+        "cd apps/rag-api && npm test -- --runInBand src/providers/notify/dingtalk.provider.spec.ts",
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T003-domain",
+        "T003-dingtalk",
+        "T003-workflow"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T003.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T003.json",
+        "sha256": "9af8a3cc808ffc7cd6f3d713d92d2a1877107cd5b5abe8e8ceead069f8c13606"
+      }
+    },
+    "T004": {
+      "depends_on": [
+        "T001",
+        "T003"
+      ],
+      "acceptance_criteria": [
+        "AC-04",
+        "AC-07"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.plan.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.plan.spec.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+        "apps/rag-api/scripts/verify-production-workflow-cross-worker.mjs"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.plan.spec.ts",
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+        "cd apps/rag-api && npm run verify:workflow:cross-worker"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T004-plan-initial",
+        "T004-workflow-final",
+        "T004-cross-worker"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T004.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T004.json",
+        "sha256": "a0ce67117d24bd15f5fae5f3eb083d52bc01e4fc08151ed49f15d5d863364e32"
+      }
+    },
+    "T005": {
+      "depends_on": [
+        "T002",
+        "T004"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-05",
+        "AC-06"
+      ],
+      "allowed_paths": [
+        "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+        "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+        "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+        "apps/admin-web/src/pages/agent-ops/service.ts",
+        "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx"
+      ],
+      "commands": [
+        "pnpm --dir apps/admin-web exec vitest run src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+        "pnpm --dir apps/admin-web run lint",
+        "pnpm --dir apps/admin-web exec antd lint ./src"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T005-ui",
+        "T005-lint",
+        "T005-antd"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T005.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T005.json",
+        "sha256": "c5c6a690e0b97a0ab18582ad65ef4e80ac02d5c7882f910ac6492661f8703427"
+      }
+    },
+    "T006": {
+      "depends_on": [
+        "T001",
+        "T002",
+        "T003",
+        "T004",
+        "T005"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-07"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+        "apps/rag-api/scripts/verify-production-workflow-cross-worker.mjs",
+        "ROADMAP.md",
+        "specs/003-production-workflow-reliability/verify.md",
+        "specs/003-production-workflow-reliability/tasks.md"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm run build",
+        "pnpm --dir apps/admin-web run lint",
+        "pnpm --dir apps/admin-web exec antd lint ./src",
+        "git diff --check"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T006-build",
+        "T006-admin-lint",
+        "T006-antd",
+        "T006-diff",
+        "T006-acceptance"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T006.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T006.json",
+        "sha256": "20fcea9606e47505af050dbf564e76c083889c0d49f93ec70d024875f9e7bc6d"
+      }
+    },
+    "T007": {
+      "depends_on": [
+        "T006"
+      ],
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/scripts/verify-production-workflow-postgres.mjs",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+        "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+        "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+        "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+        "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts",
+        "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+        "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm test -- --runInBand src/modules/agent-runs/agent-runs.service.spec.ts src/modules/agent-tasks/agent-tasks.service.spec.ts",
+        "cd apps/rag-api && node scripts/verify-production-workflow-postgres.mjs"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T007-run-task-unit",
+        "T007-postgres"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T007.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T007.json",
+        "sha256": "a4be959efe18d2b2f2e20bfda1db591f55c1818eede22e4bf9ab75dc18a8152d"
+      }
+    },
+    "T008": {
+      "depends_on": [
+        "T007"
+      ],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-07"
+      ],
+      "allowed_paths": [
+        "ROADMAP.md",
+        "specs/003-production-workflow-reliability/verify.md",
+        "specs/003-production-workflow-reliability/tasks.md",
+        "apps/rag-api/src/modules/workflow/production-workflow.control.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm run build",
+        "pnpm --dir apps/admin-web run lint",
+        "pnpm --dir apps/admin-web exec antd lint ./src",
+        "git diff --check",
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T008-build-final",
+        "T008-workflow-regression",
+        "T008-admin-lint",
+        "T008-antd",
+        "T008-diff"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-baseline-T008.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/003-production-workflow-reliability/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/003-production-workflow-reliability/scope-report-T008.json",
+        "sha256": "fd17afe43572eb02797c14e177ff448ce238f2a13b638d0d0af23b9c461a0d74"
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "T001-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:21:48Z",
+      "duration_ms": 8337,
+      "exit_code": 1,
+      "result": "fail",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T001-unit.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T001-unit.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "7ac4622fbcbfe1fd48fa96e2d34900600e6c92c890af0079b38cd287231cbb1f"
+      }
+    },
+    {
+      "id": "T001-unit-retry",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:22:27Z",
+      "duration_ms": 7067,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T001-unit-retry.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T001-unit-retry.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "0dd0648c766bdccb426e4588afa485d439aeec529e2457d5371d4424ee249008"
+      }
+    },
+    {
+      "id": "T002-domain-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:25:45Z",
+      "duration_ms": 9479,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T002-domain-unit.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T002-domain-unit.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "17894b395d193dc1ee5ad909fdd7215a80299f6448fe1dba9be8c3a63044b0ce"
+      }
+    },
+    {
+      "id": "T002-workflow-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02",
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:26:01Z",
+      "duration_ms": 20995,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T002-workflow-unit.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T002-workflow-unit.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "17894b395d193dc1ee5ad909fdd7215a80299f6448fe1dba9be8c3a63044b0ce"
+      }
+    },
+    {
+      "id": "T002-domain-recheck",
+      "type": "command",
+      "kind": "unit",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:29:12Z",
+      "duration_ms": 2368,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T002-domain-recheck.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T002-domain-recheck.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "4aebc1361ef6a83c94ed085706aea7300825c3600b0795fd1591eb6072b405dc"
+      }
+    },
+    {
+      "id": "T002-workflow-recheck",
+      "type": "command",
+      "kind": "unit",
+      "task": "T002",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:29:15Z",
+      "duration_ms": 6954,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T002-workflow-recheck.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T002-workflow-recheck.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts"
+        ],
+        "diff_sha256": "4aebc1361ef6a83c94ed085706aea7300825c3600b0795fd1591eb6072b405dc"
+      }
+    },
+    {
+      "id": "T003-domain",
+      "type": "command",
+      "kind": "unit",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:32:00Z",
+      "duration_ms": 1657,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T003-domain.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T003-domain.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ebcaad1929fa30ce7edaf8f5b2803d1045f9771414b3287d543df842985fe42"
+      }
+    },
+    {
+      "id": "T003-dingtalk",
+      "type": "command",
+      "kind": "unit",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/providers/notify/dingtalk.provider.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:32:02Z",
+      "duration_ms": 851,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T003-dingtalk.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T003-dingtalk.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ebcaad1929fa30ce7edaf8f5b2803d1045f9771414b3287d543df842985fe42"
+      }
+    },
+    {
+      "id": "T003-workflow",
+      "type": "command",
+      "kind": "unit",
+      "task": "T003",
+      "acceptance_criteria": [
+        "AC-03"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:32:03Z",
+      "duration_ms": 6669,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T003-workflow.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T003-workflow.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ebcaad1929fa30ce7edaf8f5b2803d1045f9771414b3287d543df842985fe42"
+      }
+    },
+    {
+      "id": "T004-plan-initial",
+      "type": "command",
+      "kind": "unit",
+      "task": "T004",
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.plan.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:34:10Z",
+      "duration_ms": 4171,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T004-plan-initial.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T004-plan-initial.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "7b0183f9cdeea6f3b7a336d7835c4f2f0b3b681707145688f16c15cc5a34b845"
+      }
+    },
+    {
+      "id": "T004-workflow-initial",
+      "type": "command",
+      "kind": "unit",
+      "task": "T004",
+      "acceptance_criteria": [
+        "AC-04",
+        "AC-07"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:34:38Z",
+      "duration_ms": 21425,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T004-workflow-initial.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T004-workflow-initial.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "70ca20627c53f7224a4fadbcbfa8861e109645f558ecc5a4ad6f023b5e5c8e70"
+      }
+    },
+    {
+      "id": "T004-workflow-final",
+      "type": "command",
+      "kind": "unit",
+      "task": "T004",
+      "acceptance_criteria": [
+        "AC-04",
+        "AC-07"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:38:44Z",
+      "duration_ms": 8564,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T004-workflow-final.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T004-workflow-final.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "a81f2d77eff0757647019a60ee62ae4c5dfae1593c92d6bcf2579ab49d1f4369"
+      }
+    },
+    {
+      "id": "T004-cross-worker",
+      "type": "command",
+      "kind": "integration",
+      "task": "T004",
+      "acceptance_criteria": [
+        "AC-04"
+      ],
+      "command": "cd apps/rag-api && npm run verify:workflow:cross-worker",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:38:57Z",
+      "duration_ms": 82240,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T004-cross-worker.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T004-cross-worker.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "a81f2d77eff0757647019a60ee62ae4c5dfae1593c92d6bcf2579ab49d1f4369"
+      }
+    },
+    {
+      "id": "T005-ui",
+      "type": "command",
+      "kind": "unit",
+      "task": "T005",
+      "acceptance_criteria": [
+        "AC-05"
+      ],
+      "command": "pnpm --dir apps/admin-web exec vitest run src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:43:58Z",
+      "duration_ms": 3228,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T005-ui.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T005-ui.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "e3952cc6d1f83976c9e25b0480e8a596cd735d804636da49cf324a21832843fa"
+      }
+    },
+    {
+      "id": "T005-lint",
+      "type": "command",
+      "kind": "static",
+      "task": "T005",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-06"
+      ],
+      "command": "pnpm --dir apps/admin-web run lint",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:44:05Z",
+      "duration_ms": 7650,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T005-lint.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T005-lint.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "e3952cc6d1f83976c9e25b0480e8a596cd735d804636da49cf324a21832843fa"
+      }
+    },
+    {
+      "id": "T005-antd",
+      "type": "command",
+      "kind": "static",
+      "task": "T005",
+      "acceptance_criteria": [
+        "AC-05"
+      ],
+      "command": "pnpm --dir apps/admin-web exec antd lint ./src",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:44:16Z",
+      "duration_ms": 543,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T005-antd.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T005-antd.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "e3952cc6d1f83976c9e25b0480e8a596cd735d804636da49cf324a21832843fa"
+      }
+    },
+    {
+      "id": "T006-rag-lint-baseline",
+      "type": "command",
+      "kind": "static",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm run lint",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:45:59Z",
+      "duration_ms": 43533,
+      "exit_code": 1,
+      "result": "fail",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T006-rag-lint-baseline.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T006-rag-lint-baseline.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ad14d1f35cf139aa409e38f64d985dddb4ba76497bd2d90793534935326aee7"
+      }
+    },
+    {
+      "id": "T006-build",
+      "type": "command",
+      "kind": "build",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:46:54Z",
+      "duration_ms": 16735,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T006-build.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T006-build.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ad14d1f35cf139aa409e38f64d985dddb4ba76497bd2d90793534935326aee7"
+      }
+    },
+    {
+      "id": "T006-admin-lint",
+      "type": "command",
+      "kind": "static",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-06"
+      ],
+      "command": "pnpm --dir apps/admin-web run lint",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:47:18Z",
+      "duration_ms": 10692,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T006-admin-lint.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T006-admin-lint.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ad14d1f35cf139aa409e38f64d985dddb4ba76497bd2d90793534935326aee7"
+      }
+    },
+    {
+      "id": "T006-antd",
+      "type": "command",
+      "kind": "static",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-06"
+      ],
+      "command": "pnpm --dir apps/admin-web exec antd lint ./src",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:47:29Z",
+      "duration_ms": 815,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T006-antd.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T006-antd.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ad14d1f35cf139aa409e38f64d985dddb4ba76497bd2d90793534935326aee7"
+      }
+    },
+    {
+      "id": "T006-diff",
+      "type": "command",
+      "kind": "static",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-06"
+      ],
+      "command": "git diff --check",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:47:30Z",
+      "duration_ms": 32,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T006-diff.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T006-diff.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "4ad14d1f35cf139aa409e38f64d985dddb4ba76497bd2d90793534935326aee7"
+      }
+    },
+    {
+      "id": "T006-acceptance",
+      "type": "observation",
+      "task": "T006",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-07"
+      ],
+      "observer": "Codex",
+      "evidence": "逐项核对 verify.md 与 T001–T005 通过的命令证据；AC-02 真实 PostgreSQL 行为仍由 T007 独立验证，当前仅通过单元层。",
+      "result": "pass",
+      "at": "2026-11-05T17:48:37Z"
+    },
+    {
+      "id": "T007-run-task-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T007",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/agent-runs/agent-runs.service.spec.ts src/modules/agent-tasks/agent-tasks.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:50:40Z",
+      "duration_ms": 2265,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T007-run-task-unit.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T007-run-task-unit.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "85d5e6344e1976e11ea9171b14eb9add9f514595cdeb59f47629585c2fc79b95"
+      }
+    },
+    {
+      "id": "T007-postgres",
+      "type": "command",
+      "kind": "integration",
+      "task": "T007",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && node scripts/verify-production-workflow-postgres.mjs",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:51:05Z",
+      "duration_ms": 2860,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T007-postgres.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T007-postgres.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "85d5e6344e1976e11ea9171b14eb9add9f514595cdeb59f47629585c2fc79b95"
+      }
+    },
+    {
+      "id": "T008-build",
+      "type": "command",
+      "kind": "build",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:52:42Z",
+      "duration_ms": 14130,
+      "exit_code": 1,
+      "result": "fail",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-build.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-build.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "09d57ea0ed4ec393c0dd072f9fb1c529a8d0e417f079a811a2a2dfa50abcabac"
+      }
+    },
+    {
+      "id": "T008-build-retry",
+      "type": "command",
+      "kind": "build",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:53:12Z",
+      "duration_ms": 19769,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-build-retry.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-build-retry.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "45985c61236b595baa25196958af4f0c73e03744d9ecb35c16749eb024854e31"
+      }
+    },
+    {
+      "id": "T008-admin-lint",
+      "type": "command",
+      "kind": "static",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-05"
+      ],
+      "command": "pnpm --dir apps/admin-web run lint",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:53:54Z",
+      "duration_ms": 8880,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-admin-lint.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-admin-lint.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "45985c61236b595baa25196958af4f0c73e03744d9ecb35c16749eb024854e31"
+      }
+    },
+    {
+      "id": "T008-antd",
+      "type": "command",
+      "kind": "static",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-05"
+      ],
+      "command": "pnpm --dir apps/admin-web exec antd lint ./src",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:54:03Z",
+      "duration_ms": 779,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-antd.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-antd.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "45985c61236b595baa25196958af4f0c73e03744d9ecb35c16749eb024854e31"
+      }
+    },
+    {
+      "id": "T008-diff",
+      "type": "command",
+      "kind": "static",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-07"
+      ],
+      "command": "git diff --check",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:54:04Z",
+      "duration_ms": 28,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-diff.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-diff.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "45985c61236b595baa25196958af4f0c73e03744d9ecb35c16749eb024854e31"
+      }
+    },
+    {
+      "id": "T008-workflow-regression",
+      "type": "command",
+      "kind": "unit",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-04",
+        "AC-06",
+        "AC-07"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:55:04Z",
+      "duration_ms": 7544,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-workflow-regression.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-workflow-regression.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "11836240e184a300c19b212ba5f4a0baa6e5a459689eb0680d094b3615becd43"
+      }
+    },
+    {
+      "id": "T008-build-final",
+      "type": "command",
+      "kind": "build",
+      "task": "T008",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-06"
+      ],
+      "command": "cd apps/rag-api && npm run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-05T17:55:16Z",
+      "duration_ms": 14361,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/003-production-workflow-reliability/evidence/T008-build-final.stdout.log",
+      "stderr_log": "specs/003-production-workflow-reliability/evidence/T008-build-final.stderr.log",
+      "git": {
+        "head": "b4fc459f318aae6a731c41fc90cf5c511f347626",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-controller.tsx",
+          "apps/admin-web/src/pages/agent-ops/agent-ops-workflow-panel.tsx",
+          "apps/admin-web/src/pages/agent-ops/service.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.spec.ts",
+          "apps/rag-api/src/modules/domain-events/domain-events.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.events.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.execution.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.query.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.role-support.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state-service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.state.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.spec.ts",
+          "apps/rag-api/src/providers/notify/dingtalk.provider.ts"
+        ],
+        "diff_sha256": "11836240e184a300c19b212ba5f4a0baa6e5a459689eb0680d094b3615becd43"
+      }
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-11-05T16:17:08Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-11-05T16:17:08Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "已把用户任务书转成稳定验收标准；等待 Plan 独立审查与审批。"
+    },
+    {
+      "at": "2026-11-05T16:17:08Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-11-05T16:17:08Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-11-05T16:17:08Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-03."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-04."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-05."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-06."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-07."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户原始任务书并明确要求：帮我完成这些优化。"
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "基于 main 最新提交完成具体实施方案；等待 Plan 独立审查和主人审批。"
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-11-05T16:17:09Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T002."
+    },
+    {
+      "at": "2026-11-05T16:17:10Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T003."
+    },
+    {
+      "at": "2026-11-05T16:17:10Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T004."
+    },
+    {
+      "at": "2026-11-05T16:17:10Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T005."
+    },
+    {
+      "at": "2026-11-05T16:17:10Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T006."
+    },
+    {
+      "at": "2026-11-05T16:35:21Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T007."
+    },
+    {
+      "at": "2026-11-05T16:41:23Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T008."
+    },
+    {
+      "at": "2026-11-05T17:19:51Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by 主人: 用户明确回复：没有执行完你给我执行完啊，不用我授权直接执行"
+    },
+    {
+      "at": "2026-11-05T17:19:56Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    },
+    {
+      "at": "2026-11-05T17:21:56Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-unit: fail (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:22:35Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-unit-retry: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:22:55Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T001 with T001-unit-retry."
+    },
+    {
+      "at": "2026-11-05T17:23:00Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T002."
+    },
+    {
+      "at": "2026-11-05T17:25:54Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-domain-unit: pass (cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:26:22Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-workflow-unit: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:29:15Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-domain-recheck: pass (cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:29:22Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T002-workflow-recheck: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:29:56Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T002 with T002-domain-recheck, T002-workflow-recheck."
+    },
+    {
+      "at": "2026-11-05T17:30:18Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T003."
+    },
+    {
+      "at": "2026-11-05T17:32:02Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T003-domain: pass (cd apps/rag-api && npm test -- --runInBand src/modules/domain-events/domain-events.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:32:03Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T003-dingtalk: pass (cd apps/rag-api && npm test -- --runInBand src/providers/notify/dingtalk.provider.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:32:10Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T003-workflow: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:32:23Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T003 with T003-domain, T003-dingtalk, T003-workflow."
+    },
+    {
+      "at": "2026-11-05T17:33:20Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T004."
+    },
+    {
+      "at": "2026-11-05T17:34:14Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T004-plan-initial: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.plan.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:34:59Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T004-workflow-initial: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:38:53Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T004-workflow-final: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:40:20Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T004-cross-worker: pass (cd apps/rag-api && npm run verify:workflow:cross-worker)"
+    },
+    {
+      "at": "2026-11-05T17:40:49Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T004 with T004-plan-initial, T004-workflow-final, T004-cross-worker."
+    },
+    {
+      "at": "2026-11-05T17:41:09Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T005."
+    },
+    {
+      "at": "2026-11-05T17:44:01Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T005-ui: pass (pnpm --dir apps/admin-web exec vitest run src/pages/agent-ops/agent-ops-workflow-panel.spec.tsx)"
+    },
+    {
+      "at": "2026-11-05T17:44:13Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T005-lint: pass (pnpm --dir apps/admin-web run lint)"
+    },
+    {
+      "at": "2026-11-05T17:44:16Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T005-antd: pass (pnpm --dir apps/admin-web exec antd lint ./src)"
+    },
+    {
+      "at": "2026-11-05T17:44:25Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T005 with T005-ui, T005-lint, T005-antd."
+    },
+    {
+      "at": "2026-11-05T17:44:51Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T006."
+    },
+    {
+      "at": "2026-11-05T17:46:43Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T006-rag-lint-baseline: fail (cd apps/rag-api && npm run lint)"
+    },
+    {
+      "at": "2026-11-05T17:47:11Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T006-build: pass (cd apps/rag-api && npm run build)"
+    },
+    {
+      "at": "2026-11-05T17:47:29Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T006-admin-lint: pass (pnpm --dir apps/admin-web run lint)"
+    },
+    {
+      "at": "2026-11-05T17:47:30Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T006-antd: pass (pnpm --dir apps/admin-web exec antd lint ./src)"
+    },
+    {
+      "at": "2026-11-05T17:47:30Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T006-diff: pass (git diff --check)"
+    },
+    {
+      "at": "2026-11-05T17:48:37Z",
+      "action": "record_observation",
+      "status": "executing",
+      "note": "T006-acceptance: pass by Codex"
+    },
+    {
+      "at": "2026-11-05T17:48:41Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T006 with T006-build, T006-admin-lint, T006-antd, T006-diff, T006-acceptance."
+    },
+    {
+      "at": "2026-11-05T17:48:56Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T007."
+    },
+    {
+      "at": "2026-11-05T17:50:43Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T007-run-task-unit: pass (cd apps/rag-api && npm test -- --runInBand src/modules/agent-runs/agent-runs.service.spec.ts src/modules/agent-tasks/agent-tasks.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:51:08Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T007-postgres: pass (cd apps/rag-api && node scripts/verify-production-workflow-postgres.mjs)"
+    },
+    {
+      "at": "2026-11-05T17:51:18Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T007 with T007-run-task-unit, T007-postgres."
+    },
+    {
+      "at": "2026-11-05T17:51:43Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T008."
+    },
+    {
+      "at": "2026-11-05T17:52:57Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-build: fail (cd apps/rag-api && npm run build)"
+    },
+    {
+      "at": "2026-11-05T17:53:32Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-build-retry: pass (cd apps/rag-api && npm run build)"
+    },
+    {
+      "at": "2026-11-05T17:54:03Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-admin-lint: pass (pnpm --dir apps/admin-web run lint)"
+    },
+    {
+      "at": "2026-11-05T17:54:04Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-antd: pass (pnpm --dir apps/admin-web exec antd lint ./src)"
+    },
+    {
+      "at": "2026-11-05T17:54:04Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-diff: pass (git diff --check)"
+    },
+    {
+      "at": "2026-11-05T17:55:12Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-workflow-regression: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/production-workflow.service.spec.ts)"
+    },
+    {
+      "at": "2026-11-05T17:55:31Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T008-build-final: pass (cd apps/rag-api && npm run build)"
+    },
+    {
+      "at": "2026-11-05T17:56:04Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T008 with T008-build-final, T008-workflow-regression, T008-admin-lint, T008-antd, T008-diff."
+    },
+    {
+      "at": "2026-11-05T17:56:14Z",
+      "action": "begin_verify",
+      "status": "verifying",
+      "note": "All registered tasks are complete."
+    }
+  ],
+  "created_at": "2026-11-05T16:17:08Z",
+  "updated_at": "2026-11-05T17:56:14Z"
+}

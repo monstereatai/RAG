@@ -172,6 +172,11 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
     return true;
   }
 
+  async jobState(jobId: string): Promise<string | null> {
+    const job = await this.queue?.getJob(jobId);
+    return job ? job.getState() : null;
+  }
+
   async getStatus(): Promise<{
     enabled: boolean;
     waiting: number;
