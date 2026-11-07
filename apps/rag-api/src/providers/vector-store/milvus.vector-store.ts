@@ -109,7 +109,11 @@ export class MilvusVectorStoreProvider
       2;
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
+    void this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
     // 对齐 agent-course/milvus-test 参考实现：不设 timeout，让 Milvus 自行管理
     this.client = new MilvusClient({
       address: `${this.host}:${this.port}`,

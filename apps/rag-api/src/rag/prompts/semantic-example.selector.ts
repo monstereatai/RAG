@@ -39,7 +39,11 @@ export class SemanticExampleSelector implements OnModuleInit {
       this.config.get<number>('vectorStore.milvus.dimension') ?? 1024;
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
+    void this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
     const host =
       this.config.get<string>('vectorStore.milvus.host') ?? 'localhost';
     const port = this.config.get<number>('vectorStore.milvus.port') ?? 19530;

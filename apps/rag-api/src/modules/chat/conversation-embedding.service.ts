@@ -82,15 +82,13 @@ export class ConversationEmbeddingService implements OnModuleInit {
     );
   }
 
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.ensureInitialized();
-    } catch (err) {
+  onModuleInit(): void {
+    void this.ensureInitialized().catch((err) => {
       this.logger.warn(
         `ConversationEmbeddingService init failed: ${(err as Error).message}. ` +
           'Conversation history search will be disabled until an indexing retry reconnects.',
       );
-    }
+    });
   }
 
   private async ensureInitialized(): Promise<void> {
