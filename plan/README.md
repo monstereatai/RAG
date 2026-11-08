@@ -13,3 +13,4 @@
 ## 当前计划
 
 - [未来产研工作流产物：Schema、Vue/React 与数字大屏](future-features.md)
+- [RAG Coding Task 与 Git 交付改造路线图（待确认）](002-coding-task-git-delivery.md)

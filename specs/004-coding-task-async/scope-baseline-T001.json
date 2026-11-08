@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "base_commit": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+  "initial_snapshots": {
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "7d0ba449330599b0c44d71ba6b541edb4d028ec2af0e270f926c67c5ae54cd4e"
+    },
+    "plan/002-coding-task-git-delivery.md": {
+      "kind": "file",
+      "sha256": "863b0c66ae873d06fc216c207c0d757b4117c547bc5487b21cf2125958eab504"
+    },
+    "plan/README.md": {
+      "kind": "file",
+      "sha256": "3b6529995fd7aa526161bd8f41803e8e02a019845108b84b001575b15584cad5"
+    }
+  },
+  "internal_patterns": [
+    "specs/004-coding-task-async/**",
+    "specs/004-coding-task-async/scope-baseline-T001.json"
+  ]
+}

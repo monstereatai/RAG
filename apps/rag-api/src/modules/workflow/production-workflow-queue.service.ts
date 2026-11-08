@@ -17,6 +17,16 @@ export const PRODUCTION_WORKFLOW_QUEUE = 'production-workflow';
 export type ProductionWorkflowJob =
   | {
       id: string;
+      operation: 'coding_task';
+      threadId: string;
+      userId: string;
+      tenantId?: string;
+      taskId: string;
+      taskAttempt: number;
+      resume: boolean;
+    }
+  | {
+      id: string;
       operation: 'start';
       threadId: string;
       userId: string;
@@ -68,6 +78,10 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
     job: ProductionWorkflowJob,
     attempt: ProductionWorkflowJobAttempt,
   ) => Promise<void>;
+  private codingTaskProcessor?: (
+    job: Extract<ProductionWorkflowJob, { operation: 'coding_task' }>,
+    attempt: ProductionWorkflowJobAttempt,
+  ) => Promise<void>;
 
   constructor(
     @Optional() config?: ConfigService,
@@ -104,15 +118,27 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
     this.worker = new Worker(
       PRODUCTION_WORKFLOW_QUEUE,
       async (job) => {
-        if (!this.processor) {
-          throw new Error('production workflow processor is not registered');
+        const processor =
+          job.data.operation === 'coding_task'
+            ? this.codingTaskProcessor
+            : this.processor;
+        if (!processor) {
+          throw new Error(
+            job.data.operation === 'coding_task'
+              ? 'coding task processor is not registered'
+              : 'production workflow processor is not registered',
+          );
         }
         const attempt = {
           attempt: job.attemptsMade + 1,
           finalAttempt: job.attemptsMade + 1 >= (job.opts.attempts ?? 1),
         };
         try {
-          const process = () => this.processor!(job.data, attempt);
+          const process = () =>
+            processor(
+              job.data as never,
+              attempt,
+            );
           if (this.llmProvider) {
             await this.llmProvider.runWithRequestBudget(process);
           } else {
@@ -149,6 +175,18 @@ export class ProductionWorkflowQueueService implements OnModuleDestroy {
     ) => Promise<void>,
   ): void {
     this.processor = processor;
+  }
+
+  registerCodingTaskProcessor(
+    processor: (
+      job: Extract<ProductionWorkflowJob, { operation: 'coding_task' }>,
+      attempt: ProductionWorkflowJobAttempt,
+    ) => Promise<void>,
+  ): void {
+    if (this.codingTaskProcessor) {
+      throw new Error('coding task processor is already registered');
+    }
+    this.codingTaskProcessor = processor;
   }
 
   isEnabled(): boolean {

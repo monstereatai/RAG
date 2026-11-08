@@ -20,7 +20,8 @@ export class AgentRunEntity {
   queryLogId!: string | null;
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   userId!: string | null;
-  @Column({ type: 'varchar', length: 32 }) mode!: 'simple' | 'auto' | 'agentic';
+  @Column({ type: 'varchar', length: 32 })
+  mode!: 'simple' | 'auto' | 'agentic' | 'coding';
   @Column({ type: 'varchar', length: 32, nullable: true, default: null })
   route!: string | null;
   @Column({ type: 'varchar', length: 32, default: 'running' }) status!:

@@ -11,6 +11,7 @@ import type {
   AgentLoopResult,
   AgentLoopToolAction,
 } from './agent-loop.types';
+import { AgentLoopResumeError as AgentLoopResumeErrorClass } from './agent-loop.types';
 
 /**
  * 受控 Agent Loop：只负责“决策 → 模型／工具动作 → 结果回填 → 再决策”。
@@ -46,28 +47,7 @@ export class AgentLoopService {
   async resume<TState, TOutput>(
     input: AgentLoopInput<TState, TOutput>,
   ): Promise<AgentLoopResult<TState, TOutput>> {
-    if (!this.redis.isEnabled())
-      throw new Error('Agent Loop 恢复需要 Redis 检查点');
-    const raw = await this.redis.get(
-      this.checkpointKey(input.threadId, input.actor, input.runId),
-    );
-    if (!raw) throw new Error('未找到可恢复的 Agent Loop 检查点');
-    let checkpoint: AgentLoopCheckpoint<TState>;
-    try {
-      checkpoint = JSON.parse(raw) as AgentLoopCheckpoint<TState>;
-    } catch {
-      throw new Error('Agent Loop 检查点损坏，拒绝恢复');
-    }
-    if (
-      checkpoint.version !== 1 ||
-      checkpoint.threadId !== input.threadId ||
-      checkpoint.actor !== input.actor ||
-      checkpoint.runId !== input.runId ||
-      checkpoint.step < 0 ||
-      checkpoint.toolCalls < 0
-    ) {
-      throw new Error('Agent Loop 检查点身份或运行标识不匹配，拒绝恢复');
-    }
+    const checkpoint = await this.readResumeCheckpoint(input);
     return this.execute(
       input,
       checkpoint.state,
@@ -75,6 +55,97 @@ export class AgentLoopService {
       checkpoint.toolCalls,
       Math.max(0, checkpoint.elapsedMs ?? 0),
     );
+  }
+
+  async assertCanResume<TState, TOutput>(
+    input: AgentLoopInput<TState, TOutput>,
+  ): Promise<void> {
+    await this.readResumeCheckpoint(input);
+  }
+
+  private async readResumeCheckpoint<TState, TOutput>(
+    input: AgentLoopInput<TState, TOutput>,
+  ): Promise<AgentLoopCheckpoint<TState>> {
+    if (!this.redis.isEnabled()) {
+      throw new AgentLoopResumeErrorClass(
+        'redis_unavailable',
+        'Agent Loop 恢复需要 Redis 检查点',
+      );
+    }
+    let raw: string | null;
+    try {
+      raw = await this.redis.get(
+        this.checkpointKey(input.threadId, input.actor, input.runId),
+      );
+    } catch {
+      throw new AgentLoopResumeErrorClass(
+        'redis_unavailable',
+        'Agent Loop 检查点存储不可用，拒绝恢复',
+      );
+    }
+    if (!raw) {
+      throw new AgentLoopResumeErrorClass(
+        'missing_checkpoint',
+        '未找到可恢复的 Agent Loop 检查点',
+      );
+    }
+    let checkpoint: AgentLoopCheckpoint<TState>;
+    try {
+      checkpoint = JSON.parse(raw) as AgentLoopCheckpoint<TState>;
+    } catch {
+      throw new AgentLoopResumeErrorClass(
+        'invalid_checkpoint',
+        'Agent Loop 检查点损坏，拒绝恢复',
+      );
+    }
+    const maxSteps = Math.max(1, input.maxSteps);
+    const maxToolCalls = Math.max(0, input.maxToolCalls);
+    const updatedAt = Date.parse(checkpoint.updatedAt);
+    const checkpointTtlMs =
+      Math.max(1, input.checkpointTtlSeconds ?? 86_400) * 1_000;
+    if (
+      checkpoint.version !== 1 ||
+      checkpoint.threadId !== input.threadId ||
+      checkpoint.actor !== input.actor ||
+      checkpoint.runId !== input.runId ||
+      checkpoint.taskId !== input.taskId ||
+      !Number.isInteger(checkpoint.step) ||
+      checkpoint.step < 0 ||
+      !Number.isInteger(checkpoint.toolCalls) ||
+      checkpoint.toolCalls < 0 ||
+      !Number.isFinite(checkpoint.elapsedMs ?? 0) ||
+      (checkpoint.elapsedMs ?? 0) < 0 ||
+      !Number.isFinite(updatedAt) ||
+      updatedAt > Date.now()
+    ) {
+      throw new AgentLoopResumeErrorClass(
+        'identity_mismatch',
+        'Agent Loop 检查点身份、计数或运行标识不匹配，拒绝恢复',
+      );
+    }
+    if (Date.now() - updatedAt > checkpointTtlMs) {
+      throw new AgentLoopResumeErrorClass(
+        'checkpoint_expired',
+        'Agent Loop 检查点已过期，拒绝恢复',
+      );
+    }
+    if (
+      checkpoint.step >= maxSteps ||
+      (checkpoint.elapsedMs ?? 0) >= input.timeoutMs ||
+      checkpoint.toolCalls > maxToolCalls
+    ) {
+      throw new AgentLoopResumeErrorClass(
+        'budget_exceeded',
+        'Agent Loop 检查点已耗尽执行预算，拒绝恢复',
+      );
+    }
+    if (await this.isCancellationRequested(input)) {
+      throw new AgentLoopResumeErrorClass(
+        'cancelled',
+        '已取消的 Agent Loop 不可恢复',
+      );
+    }
+    return checkpoint;
   }
 
   private async execute<TState, TOutput>(
@@ -373,6 +444,7 @@ export class AgentLoopService {
       threadId: input.threadId,
       actor: input.actor,
       runId: input.runId,
+      taskId: input.taskId,
       step,
       toolCalls,
       elapsedMs,
@@ -453,6 +525,7 @@ export class AgentLoopService {
         tenantId: input.tenantId?.trim() || 'legacy',
         threadId: input.threadId,
         runId: input.runId,
+        taskId: input.taskId,
         eventType,
         actor: input.actor,
         payload,

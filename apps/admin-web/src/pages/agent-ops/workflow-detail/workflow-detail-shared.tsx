@@ -60,10 +60,56 @@ export interface ProductionCodeEditDraft {
   previewHtml: string;
 }
 
-export interface ProductionWorkspaceAgentResult {
-  status: 'completed' | 'failed';
-  summary: string;
-  steps?: Array<{ command: string; exitCode: number; output: string }>;
+export type ProductionCodingTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'blocked'
+  | 'budget_exceeded'
+  | 'cancelled'
+  | 'verification_failed'
+  | 'waiting_review'
+  | 'waiting_reconciliation';
+
+export interface ProductionCodingTask {
+  taskId: string;
+  runId: string | null;
+  threadId: string;
+  status: ProductionCodingTaskStatus;
+  attempt: number;
+  lastCompletedStep: number;
+  summary: string | null;
+  error: string | null;
+  verification?: {
+    checkedAt: string;
+    diff: {
+      added: Array<{ path: string; sha256: string }>;
+      modified: Array<{
+        path: string;
+        seedSha256: string;
+        workspaceSha256: string;
+      }>;
+      deleted: Array<{ path: string; sha256: string }>;
+    };
+    checks: Record<
+      'lint' | 'test' | 'build',
+      {
+        status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
+        command: string | null;
+        exitCode: number | null;
+        output: string;
+        reason?: string;
+      }
+    >;
+  } | null;
+  events: Array<{
+    sequence: number;
+    eventType: string;
+    createdAt: string;
+    payload: unknown;
+  }>;
+  updatedAt: string;
 }
 
 export interface ProductionWorkspaceCommandResult {

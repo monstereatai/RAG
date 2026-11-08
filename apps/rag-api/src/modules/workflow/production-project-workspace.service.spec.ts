@@ -587,4 +587,78 @@ describe('ProductionProjectWorkspaceService', () => {
       redisValues.has(identityKey('tenant-1', 'owner-1', 'thread-1')),
     ).toBe(false);
   });
+
+  it('compares workspace file hashes and preserves each declared verification exit code', async () => {
+    redisValues.set(
+      identityKey('tenant-1', 'owner-1', 'thread-1'),
+      JSON.stringify(workspaceRecord()),
+    );
+    const seed = await new JSZip()
+      .file('package.json', JSON.stringify({ scripts: { lint: 'lint', test: 'test', build: 'build' } }))
+      .file('src/main.ts', 'seed source')
+      .generateAsync({ type: 'nodebuffer' });
+    artifacts.getStudioVersionFile.mockResolvedValue({ body: seed });
+    const contents = new Map<string, Buffer>([
+      ['/root/workspace/package.json', Buffer.from(JSON.stringify({ scripts: { lint: 'lint', test: 'test', build: 'build' } }))],
+      ['/root/workspace/src/main.ts', Buffer.from('modified source')],
+      ['/root/workspace/src/new.ts', Buffer.from('new source')],
+    ]);
+    sandbox.files.listDirectory.mockResolvedValue([
+      { path: '/root/workspace/package.json', type: 'file', size: 80 },
+      { path: '/root/workspace/src/main.ts', type: 'file', size: 15 },
+      { path: '/root/workspace/src/new.ts', type: 'file', size: 10 },
+    ]);
+    sandbox.files.readBytes.mockImplementation(async (path: string) => contents.get(path)!);
+    sandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, logs: { stdout: [{ text: 'lint ok' }] } })
+      .mockResolvedValueOnce({ exitCode: 2, logs: { stderr: [{ text: 'test failed' }] } })
+      .mockResolvedValueOnce({ exitCode: 0, logs: { stdout: [{ text: 'build ok' }] } });
+
+    const result = await service.verifyWorkspace(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'artifact-1',
+    );
+
+    expect(result.diff.added.map((file) => file.path)).toEqual(['src/new.ts']);
+    expect(result.diff.modified.map((file) => file.path)).toEqual(['src/main.ts']);
+    expect(result.diff.deleted).toEqual([]);
+    expect(result.checks).toMatchObject({
+      lint: { status: 'passed', command: 'npm run lint', exitCode: 0 },
+      test: { status: 'failed', command: 'npm run test', exitCode: 2 },
+      build: { status: 'passed', command: 'npm run build', exitCode: 0 },
+    });
+    expect(sandbox.commands.run).toHaveBeenCalledTimes(3);
+  });
+
+  it('marks missing package scripts as not applicable instead of passed', async () => {
+    redisValues.set(
+      identityKey('tenant-1', 'owner-1', 'thread-1'),
+      JSON.stringify(workspaceRecord()),
+    );
+    const seed = await new JSZip()
+      .file('src/main.ts', 'same source')
+      .generateAsync({ type: 'nodebuffer' });
+    artifacts.getStudioVersionFile.mockResolvedValue({ body: seed });
+    sandbox.files.listDirectory.mockResolvedValue([
+      { path: '/root/workspace/src/main.ts', type: 'file', size: 11 },
+    ]);
+    sandbox.files.readBytes.mockResolvedValue(Buffer.from('same source'));
+
+    const result = await service.verifyWorkspace(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'artifact-1',
+    );
+
+    expect(result.diff).toEqual({ added: [], modified: [], deleted: [] });
+    expect(Object.values(result.checks).map((check) => check.status)).toEqual([
+      'not_applicable',
+      'not_applicable',
+      'not_applicable',
+    ]);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
 });

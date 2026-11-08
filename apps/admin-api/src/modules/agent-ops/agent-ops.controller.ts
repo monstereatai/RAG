@@ -376,6 +376,68 @@ export class AgentOpsController {
     );
   }
 
+  @Post('workflows/:threadId/workspace/coding-tasks')
+  @RequirePermission('admin:qa-ops:write')
+  submitWorkflowWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Body() body: { artifactId: string; instruction: string; requestId: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.submitProductionWorkflowWorkspaceCodingTask(
+      threadId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId')
+  @RequirePermission('admin:qa-ops:read')
+  getWorkflowWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.getProductionWorkflowWorkspaceCodingTask(
+      threadId,
+      taskId,
+      this.userId(req),
+      this.tenantId(req),
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')
+  @RequirePermission('admin:qa-ops:write')
+  cancelWorkflowWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Body() body: { reason?: string },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.cancelProductionWorkflowWorkspaceCodingTask(
+      threadId,
+      taskId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/resume')
+  @RequirePermission('admin:qa-ops:write')
+  resumeWorkflowWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Req() req: Request,
+  ) {
+    return this.ragClient.resumeProductionWorkflowWorkspaceCodingTask(
+      threadId,
+      taskId,
+      this.userId(req),
+      this.tenantId(req),
+    );
+  }
+
   @Post('workflows/:threadId/workspace/command')
   @RequirePermission('admin:qa-ops:write')
   runWorkflowWorkspaceCommand(

@@ -19,6 +19,7 @@ import { ProductionWorkflowQueueService } from './production-workflow-queue.serv
 import { ProductionArtifactStudioService } from './production-artifact-studio.service';
 import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
 import { ProductionProjectWorkspaceAgentService } from './production-project-workspace-agent.service';
+import { CodingTaskService } from './coding-task.service';
 
 @Module({
   imports: [
@@ -44,12 +45,14 @@ import { ProductionProjectWorkspaceAgentService } from './production-project-wor
     ProductionArtifactStudioService,
     ProductionProjectWorkspaceService,
     ProductionProjectWorkspaceAgentService,
+    CodingTaskService,
   ],
   exports: [
     ProductionWorkflowService,
     ProductionArtifactStudioService,
     ProductionProjectWorkspaceService,
     ProductionProjectWorkspaceAgentService,
+    CodingTaskService,
   ],
 })
 export class WorkflowModule {}

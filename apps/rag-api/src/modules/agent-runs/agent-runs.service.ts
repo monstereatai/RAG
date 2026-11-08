@@ -289,6 +289,53 @@ export class AgentRunsService implements OnModuleInit, OnModuleDestroy {
     return saved;
   }
 
+  async prepareCodingResume(
+    id: string,
+    manager?: EntityManager,
+  ): Promise<AgentRunEntity> {
+    const repository = manager?.getRepository(AgentRunEntity) ?? this.runRepo;
+    const current = await repository.findOne({ where: { id } });
+    if (
+      !current ||
+      current.mode !== 'coding' ||
+      current.route !== 'workspace_agent' ||
+      current.status !== 'failed' ||
+      current.cancelSignalPending ||
+      current.cancelledAt
+    ) {
+      throw new BadRequestException('Coding Run is not safely resumable');
+    }
+    const result = await repository.update(
+      { id, mode: 'coding', route: 'workspace_agent', status: 'failed' },
+      {
+        status: 'running',
+        finishedAt: null,
+        errorMessage: null,
+        resultSummary: null,
+        retryCount: current.retryCount + 1,
+      },
+    );
+    if (result.affected !== 1) {
+      throw new BadRequestException('Coding Run changed before it could resume');
+    }
+    const resumed = await repository.findOne({ where: { id } });
+    if (!resumed) throw new NotFoundException(`agent run ${id} not found`);
+    if (!manager) await this.ensureCodingResumeEvent(resumed);
+    return resumed;
+  }
+
+  async ensureCodingResumeEvent(run: AgentRunEntity): Promise<void> {
+    await this.events.emit({
+      threadId: run.threadId,
+      tenantId: run.tenantId ?? 'legacy',
+      runId: run.id,
+      eventType: 'run.resumed',
+      actor: run.mode,
+      payload: { retryCount: run.retryCount },
+      idempotencyKey: `run-resumed:${run.id}:${run.retryCount}`,
+    });
+  }
+
   async cancel(id: string, reason = '用户取消运行') {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`agent run ${id} not found`);

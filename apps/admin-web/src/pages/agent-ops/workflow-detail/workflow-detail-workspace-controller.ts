@@ -8,15 +8,21 @@ import {
   type ProductionArtifactVersion,
   type ProductionWorkflow,
   type ProductionWorkspaceStatus,
-  runProductionWorkspaceAgent,
   runProductionWorkspaceCommand,
   startProductionWorkspace,
   startProductionWorkspaceDevServer,
   stopProductionWorkspaceDevServer,
   unwrapData,
 } from '../service';
+import {
+  cancelProductionWorkspaceCodingTask,
+  getProductionWorkspaceCodingTask,
+  resumeProductionWorkspaceCodingTask,
+  submitProductionWorkspaceCodingTask,
+} from '../workspace-service';
 import type {
-  ProductionWorkspaceAgentResult,
+  ProductionCodingTask,
+  ProductionCodingTaskStatus,
   ProductionWorkspaceCommandResult,
 } from './workflow-detail-shared';
 
@@ -44,8 +50,10 @@ export function useWorkflowWorkspaceController({
   const [workspaceArtifactId, setWorkspaceArtifactId] = React.useState('');
   const [workspaceBusy, setWorkspaceBusy] = React.useState(false);
   const [workspaceInstruction, setWorkspaceInstruction] = React.useState('');
-  const [workspaceAgentResult, setWorkspaceAgentResult] =
-    React.useState<ProductionWorkspaceAgentResult | null>(null);
+  const [workspaceCodingTask, setWorkspaceCodingTask] =
+    React.useState<ProductionCodingTask | null>(null);
+  const [workspaceCodingTaskPollingError, setWorkspaceCodingTaskPollingError] =
+    React.useState('');
   const [workspaceCommand, setWorkspaceCommand] = React.useState('');
   const [workspaceCommandResult, setWorkspaceCommandResult] =
     React.useState<ProductionWorkspaceCommandResult | null>(null);
@@ -60,12 +68,16 @@ export function useWorkflowWorkspaceController({
       setWorkspaceArtifactId('');
       setWorkspaceStatusLoading(false);
       setWorkspaceStatusLoadFailed(false);
+      setWorkspaceCodingTask(null);
+      setWorkspaceCodingTaskPollingError('');
       return;
     }
     let active = true;
     setWorkspaceStatusLoading(true);
     setWorkspaceStatusLoadFailed(false);
     setWorkspaceArtifactId('');
+    setWorkspaceCodingTask(null);
+    setWorkspaceCodingTaskPollingError('');
     getProductionWorkspaceStatus(workflow.threadId)
       .then((response) => {
         if (active) {
@@ -94,6 +106,62 @@ export function useWorkflowWorkspaceController({
       active = false;
     };
   }, [workflow?.threadId]);
+
+  React.useEffect(() => {
+    if (
+      !workflow?.threadId ||
+      !workspaceCodingTask ||
+      !['queued', 'running'].includes(workspaceCodingTask.status)
+    ) {
+      return;
+    }
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const response = await getProductionWorkspaceCodingTask(
+          workflow.threadId,
+          workspaceCodingTask.taskId,
+        );
+        const task = unwrapData<ProductionCodingTask>(response);
+        if (!task?.taskId) throw new Error('任务状态响应为空');
+        if (active) {
+          setWorkspaceCodingTask(task);
+          setWorkspaceCodingTaskPollingError('');
+        }
+        if (active && ['queued', 'running'].includes(task.status)) {
+          timer = setTimeout(poll, 2000);
+        } else if (active) {
+          void getProductionWorkspaceStatus(workflow.threadId)
+            .then((statusResponse) => {
+              const status =
+                unwrapData<WorkspaceStatusWithArtifact>(statusResponse);
+              if (!status) return;
+              setWorkspaceStatus(status);
+              setWorkspaceArtifactId(status.artifactId ?? '');
+              setWorkspaceStatusLoadFailed(false);
+            })
+            .catch(() => setWorkspaceStatusLoadFailed(true));
+        }
+      } catch (error) {
+        if (active) {
+          setWorkspaceCodingTaskPollingError(
+            error instanceof Error ? error.message : '查询任务状态失败',
+          );
+          timer = setTimeout(poll, 3000);
+        }
+      }
+    };
+    timer = setTimeout(poll, 1000);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [workflow?.threadId, workspaceCodingTask?.taskId, workspaceCodingTask?.status]);
+
+  const workspaceCodingTaskActive =
+    workspaceCodingTask?.status === 'queued' ||
+    workspaceCodingTask?.status === 'running';
 
   const startWorkspace = async () => {
     if (
@@ -149,57 +217,93 @@ export function useWorkflowWorkspaceController({
       return;
     }
     setWorkspaceBusy(true);
-    setWorkspaceAgentResult(null);
+    setWorkspaceCodingTask(null);
+    setWorkspaceCodingTaskPollingError('');
     setWorkspaceCommandResult(null);
     try {
-      if (!workspaceStatus.ready) {
-        const started = await startProductionWorkspace(workflow.threadId, {
-          artifactId: workspaceArtifactId,
-        });
-        const status = unwrapData<WorkspaceStatusWithArtifact>(started);
-        if (!status) {
-          setWorkspaceStatus(null);
-          setWorkspaceStatusLoadFailed(true);
-          throw new Error('工作区状态响应为空，无法确认启动结果');
-        }
-        setWorkspaceStatus(status);
-        setWorkspaceArtifactId(status.artifactId ?? workspaceArtifactId);
-        setWorkspaceStatusLoadFailed(false);
-        if (!status.ready) throw new Error('开发工作区尚未就绪');
-      }
-      const response = await runProductionWorkspaceAgent(workflow.threadId, {
+      const response = await submitProductionWorkspaceCodingTask(workflow.threadId, {
         artifactId: workspaceArtifactId,
         instruction: workspaceInstruction.trim(),
+        requestId: crypto.randomUUID(),
       });
-      const result = unwrapData<ProductionWorkspaceAgentResult>(response);
-      if (!result) throw new Error('Agent 未返回执行结果');
-      setWorkspaceAgentResult(result);
-      try {
-        const statusResponse = await getProductionWorkspaceStatus(
-          workflow.threadId,
-        );
-        const status = unwrapData<WorkspaceStatusWithArtifact>(statusResponse);
-        if (!status) {
-          setWorkspaceStatus(null);
-          setWorkspaceStatusLoadFailed(true);
-        } else {
-          setWorkspaceStatus(status);
-          setWorkspaceArtifactId(status.artifactId ?? workspaceArtifactId);
-          setWorkspaceStatusLoadFailed(false);
-        }
-      } catch {
-        setWorkspaceStatusLoadFailed(true);
-        message.warning('Agent 结果已返回，但工作区状态刷新失败');
-      }
-      if (result.status === 'completed') {
-        message.success('Agent 开发任务已完成');
-      } else {
-        message.warning(result.summary || 'Agent 开发任务未完成');
-      }
+      const accepted = unwrapData<{
+        taskId: string;
+        runId: string | null;
+        status: ProductionCodingTaskStatus;
+      }>(response);
+      if (!accepted?.taskId) throw new Error('任务受理响应未返回 taskId');
+      setWorkspaceCodingTask({
+        taskId: accepted.taskId,
+        runId: accepted.runId,
+        threadId: workflow.threadId,
+        status: accepted.status,
+        attempt: 0,
+        lastCompletedStep: 0,
+        summary: null,
+        error: null,
+        verification: null,
+        events: [],
+        updatedAt: new Date().toISOString(),
+      });
+      message.success('Agent 开发任务已提交');
     } catch (error) {
       message.error(
         error instanceof Error ? error.message : 'Agent 开发任务失败',
       );
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const cancelWorkspaceCodingTask = async () => {
+    if (!workflow || !workspaceCodingTask || !workspaceCodingTaskActive) return;
+    setWorkspaceBusy(true);
+    try {
+      await cancelProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      const response = await getProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      const task = unwrapData<ProductionCodingTask>(response);
+      if (!task?.taskId) throw new Error('任务状态响应为空');
+      setWorkspaceCodingTask(task);
+      message.success('已提交取消请求');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '取消任务失败');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const resumeWorkspaceCodingTask = async () => {
+    if (
+      !workflow ||
+      !workspaceCodingTask ||
+      !(['failed', 'blocked'] as ProductionCodingTaskStatus[]).includes(
+        workspaceCodingTask.status,
+      )
+    ) {
+      return;
+    }
+    setWorkspaceBusy(true);
+    try {
+      await resumeProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      const refreshed = await getProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      const updated = unwrapData<ProductionCodingTask>(refreshed);
+      if (!updated?.taskId) throw new Error('任务状态响应为空');
+      setWorkspaceCodingTask(updated);
+      message.success('已提交安全续跑请求');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '续跑任务失败');
     } finally {
       setWorkspaceBusy(false);
     }
@@ -300,7 +404,7 @@ export function useWorkflowWorkspaceController({
             confirmDiscard: true,
           });
           setWorkspacePreviewUrl('');
-          setWorkspaceAgentResult(null);
+          setWorkspaceCodingTask(null);
           setWorkspaceCommandResult(null);
           setWorkspaceArtifactId('');
           try {
@@ -390,8 +494,9 @@ export function useWorkflowWorkspaceController({
     workspaceBusy,
     workspaceInstruction,
     setWorkspaceInstruction,
-    workspaceAgentResult,
-    setWorkspaceAgentResult,
+    workspaceCodingTask,
+    workspaceCodingTaskActive,
+    workspaceCodingTaskPollingError,
     workspaceCommand,
     setWorkspaceCommand,
     workspaceCommandResult,
@@ -403,6 +508,8 @@ export function useWorkflowWorkspaceController({
     setWorkspacePreviewUrl,
     startWorkspace,
     runWorkspaceAgent,
+    cancelWorkspaceCodingTask,
+    resumeWorkspaceCodingTask,
     runWorkspaceCommand,
     startWorkspaceDevServer,
     stopWorkspaceDevServer,

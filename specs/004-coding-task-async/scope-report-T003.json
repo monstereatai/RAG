@@ -1,0 +1,41 @@
+{
+  "base_commit": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/004-coding-task-async/scope-baseline-T003.json",
+  "new_files": [
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts",
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts",
+    "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.spec.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts",
+    "apps/admin-web/src/pages/agent-ops/workspace-service.ts"
+  ],
+  "modified_preexisting_files": [],
+  "touched_files": [
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts",
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts",
+    "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.spec.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts",
+    "apps/admin-web/src/pages/agent-ops/workspace-service.ts"
+  ],
+  "allow_patterns": [
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts",
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts",
+    "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts",
+    "apps/admin-web/src/pages/agent-ops/workspace-service.ts",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.spec.tsx"
+  ],
+  "internal_patterns": [
+    "specs/004-coding-task-async/**",
+    "specs/004-coding-task-async/scope-baseline-T003.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

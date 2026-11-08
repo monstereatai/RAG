@@ -3,7 +3,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { LlmProvider } from '../../providers/llm/llm.provider';
 import { AgentLoopService } from '../agent-loop/agent-loop.service';
-import type { AgentLoopDecision } from '../agent-loop/agent-loop.types';
+import type {
+  AgentLoopDecision,
+  AgentLoopInput,
+  AgentLoopStatus,
+} from '../agent-loop/agent-loop.types';
 import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
 import { getPromptMetadata } from '../../rag/prompts/prompt-registry';
 import { buildProductionProjectWorkspaceAgentPrompt } from './production-project-workspace-agent.prompts';
@@ -36,7 +40,7 @@ type WorkspaceAgentState = {
 };
 type WorkspaceAgentOutput = {
   summary: string;
-  status: 'completed' | 'failed';
+  status: AgentLoopStatus;
   steps: Array<{ command: string; exitCode: number; output: string }>;
   toolCalls: number;
 };
@@ -67,21 +71,32 @@ export class ProductionProjectWorkspaceAgentService {
     tenantId: string | undefined,
     artifactId: string,
     instruction: string,
+    options?: { runId?: string; taskId?: string; resume?: boolean },
   ): Promise<WorkspaceAgentOutput> {
     const normalizedInstruction = instruction.trim();
     if (!normalizedInstruction || normalizedInstruction.length > 4_000) {
       throw new BadRequestException('instruction must be 1–4000 characters');
     }
 
-    await this.workspace.startWorkspace(threadId, userId, tenantId, artifactId);
+    if (options?.resume) {
+      await this.workspace.assertWorkspaceReady(
+        threadId,
+        userId,
+        tenantId,
+        artifactId,
+      );
+    } else {
+      await this.workspace.startWorkspace(threadId, userId, tenantId, artifactId);
+    }
 
-    const runId = randomUUID();
-    const result = await this.agentLoop.run<
+    const runId = options?.runId ?? randomUUID();
+    const loopInput: AgentLoopInput<
       WorkspaceAgentState,
       WorkspaceAgentOutput
-    >({
+    > = {
       threadId,
       runId,
+      taskId: options?.taskId,
       actor: 'production-workspace-agent',
       tenantId,
       initialState: { instruction: normalizedInstruction, events: [] },
@@ -186,12 +201,15 @@ export class ProductionProjectWorkspaceAgentService {
           WorkspaceAgentOutput
         >;
       },
-    });
+    };
+    const result = options?.resume
+      ? await this.agentLoop.resume<WorkspaceAgentState, WorkspaceAgentOutput>(loopInput)
+      : await this.agentLoop.run<WorkspaceAgentState, WorkspaceAgentOutput>(loopInput);
 
     if (result.output) return result.output;
     return {
       summary: result.terminationReason,
-      status: 'failed',
+      status: result.status,
       steps: result.state.events.map(({ command, exitCode, output }) => ({
         command,
         exitCode,
@@ -199,6 +217,49 @@ export class ProductionProjectWorkspaceAgentService {
       })),
       toolCalls: result.toolCalls,
     };
+  }
+
+  async runWithExecutionOptions(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+    instruction: string,
+    options: { runId: string; taskId: string; resume: boolean },
+  ): Promise<WorkspaceAgentOutput> {
+    return this.run(threadId, userId, tenantId, artifactId, instruction, options);
+  }
+
+  async assertCanResume(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+    instruction: string,
+    options: { runId: string; taskId: string },
+  ): Promise<void> {
+    const normalizedInstruction = instruction.trim();
+    if (!normalizedInstruction || normalizedInstruction.length > 4_000) {
+      throw new BadRequestException('instruction must be 1–4000 characters');
+    }
+    await this.workspace.assertWorkspaceReady(
+      threadId,
+      userId,
+      tenantId,
+      artifactId,
+    );
+    await this.agentLoop.assertCanResume({
+      threadId,
+      runId: options.runId,
+      taskId: options.taskId,
+      actor: 'production-workspace-agent',
+      tenantId,
+      initialState: { instruction: normalizedInstruction, events: [] },
+      maxSteps: MAX_AGENT_STEPS,
+      maxToolCalls: MAX_AGENT_TOOL_CALLS,
+      timeoutMs: AGENT_TIMEOUT_MS,
+      decide: () => ({ type: 'blocked', reason: 'resume preflight only' }),
+    });
   }
 
   private async executeAction(

@@ -192,6 +192,48 @@ describe('AgentRunsService runtime controls', () => {
     expect(repo.save).not.toHaveBeenCalled();
   });
 
+  it('resumes only a failed coding workspace run and keeps the run id', async () => {
+    const { service, repo, events, run } = createService();
+    Object.assign(run, {
+      mode: 'coding',
+      route: 'workspace_agent',
+      status: 'failed',
+      retryCount: 2,
+      cancelSignalPending: false,
+      cancelledAt: null,
+    });
+
+    const resumed = await service.prepareCodingResume('run-1');
+
+    expect(repo.update).toHaveBeenCalledWith(
+      { id: 'run-1', mode: 'coding', route: 'workspace_agent', status: 'failed' },
+      expect.objectContaining({ status: 'running', retryCount: 3 }),
+    );
+    expect(resumed).toMatchObject({ id: 'run-1', status: 'running', retryCount: 3 });
+    expect(events.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-1',
+        eventType: 'run.resumed',
+        idempotencyKey: 'run-resumed:run-1:3',
+      }),
+    );
+  });
+
+  it('does not resume a cancelled coding run', async () => {
+    const { service, repo, run } = createService();
+    Object.assign(run, {
+      mode: 'coding',
+      route: 'workspace_agent',
+      status: 'failed',
+      cancelSignalPending: true,
+    });
+
+    await expect(service.prepareCodingResume('run-1')).rejects.toThrow(
+      'Coding Run is not safely resumable',
+    );
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
   it('does not complete a run when cancellation won the state transition race', async () => {
     const { service, repo, run } = createService();
     run.status = 'running';

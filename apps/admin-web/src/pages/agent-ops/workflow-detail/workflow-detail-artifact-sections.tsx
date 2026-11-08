@@ -11,6 +11,34 @@ import type { ProductionArtifactTarget } from '../service';
 import type { WorkflowDetailLoadedController } from './workflow-detail-controller';
 import { ARTIFACT_OPTIONS, artifactLabel } from './workflow-detail-shared';
 
+const CODING_TASK_STATUS_LABELS = {
+  queued: '排队中',
+  running: '执行中',
+  completed: '完成',
+  failed: '失败',
+  blocked: '阻塞',
+  budget_exceeded: '预算耗尽',
+  cancelled: '已取消',
+  verification_failed: '验证失败',
+  waiting_review: '待人工验收',
+  waiting_reconciliation: '待对账',
+} as const;
+
+const CHECK_STATUS_LABELS = {
+  passed: '通过',
+  failed: '失败',
+  not_applicable: '不适用',
+  not_run: '未运行',
+} as const;
+
+const codingTaskTagColor = (status: string) => {
+  if (status === 'completed' || status === 'passed') return 'green';
+  if (status === 'running') return 'blue';
+  if (status === 'queued' || status === 'waiting_review') return 'gold';
+  if (status === 'not_applicable' || status === 'not_run') return 'default';
+  return 'orange';
+};
+
 export function renderWorkflowArtifacts(
   controller: WorkflowDetailLoadedController,
 ) {
@@ -44,8 +72,9 @@ export function renderWorkflowArtifacts(
     workspaceBusy,
     workspaceInstruction,
     setWorkspaceInstruction,
-    workspaceAgentResult,
-    setWorkspaceAgentResult,
+    workspaceCodingTask,
+    workspaceCodingTaskActive,
+    workspaceCodingTaskPollingError,
     workspaceCommand,
     setWorkspaceCommand,
     workspaceCommandResult,
@@ -73,6 +102,8 @@ export function renderWorkflowArtifacts(
     applyCodeArtifactEdit,
     startWorkspace,
     runWorkspaceAgent,
+    cancelWorkspaceCodingTask,
+    resumeWorkspaceCodingTask,
     runWorkspaceCommand,
     startWorkspaceDevServer,
     stopWorkspaceDevServer,
@@ -466,7 +497,8 @@ export function renderWorkflowArtifacts(
               workspaceStatusLoading ||
               workspaceStatusLoadFailed ||
               !workspaceStatus ||
-              Boolean(workspaceStatus?.artifactId)
+              Boolean(workspaceStatus?.artifactId) ||
+              workspaceCodingTaskActive
             }
             options={artifactVersions
               .filter((artifact) => artifact.kind === 'code')
@@ -476,7 +508,6 @@ export function renderWorkflowArtifacts(
               }))}
             onChange={(value) => {
               setWorkspaceArtifactId(value);
-              setWorkspaceAgentResult(null);
               setWorkspacePreviewUrl('');
             }}
           />
@@ -487,7 +518,9 @@ export function renderWorkflowArtifacts(
               !workspaceArtifactId ||
               workspaceStatusLoading ||
               workspaceStatusLoadFailed ||
-              !workspaceStatus
+              !workspaceStatus ||
+              workspaceCodingTaskActive ||
+              workspaceBusy
             }
             onClick={() => void startWorkspace()}
           >
@@ -503,7 +536,7 @@ export function renderWorkflowArtifacts(
           <Button
             danger
             loading={workspaceBusy}
-            disabled={!workflow || workspaceBusy}
+            disabled={!workflow || workspaceBusy || workspaceCodingTaskActive}
             onClick={destroyWorkspace}
           >
             销毁工作区
@@ -542,6 +575,7 @@ export function renderWorkflowArtifacts(
             value={workspaceInstruction}
             onChange={(event) => setWorkspaceInstruction(event.target.value)}
             placeholder="例如：安装项目依赖，修复构建报错，再运行测试并说明结果"
+            disabled={workspaceCodingTaskActive || workspaceBusy}
             style={{ marginTop: 10 }}
           />
           <Button
@@ -550,6 +584,8 @@ export function renderWorkflowArtifacts(
             disabled={
               !workspaceArtifactId ||
               !workspaceInstruction.trim() ||
+              workspaceCodingTaskActive ||
+              workspaceBusy ||
               workspaceStatusLoading ||
               workspaceStatusLoadFailed ||
               !workspaceStatus
@@ -557,44 +593,183 @@ export function renderWorkflowArtifacts(
             onClick={() => void runWorkspaceAgent()}
             style={{ marginTop: 8 }}
           >
-            执行开发任务
+            提交异步开发任务
           </Button>
-          {workspaceAgentResult && (
+          {workspaceCodingTaskActive && (
+            <Button
+              danger
+              loading={workspaceBusy}
+              disabled={workspaceBusy}
+              onClick={() => void cancelWorkspaceCodingTask()}
+              style={{ marginTop: 8, marginLeft: 8 }}
+            >
+              取消任务
+            </Button>
+          )}
+          {workspaceCodingTask && (
             <div style={{ marginTop: 12 }}>
               <Tag
-                color={
-                  workspaceAgentResult.status === 'completed'
-                    ? 'green'
-                    : 'orange'
-                }
+                color={codingTaskTagColor(workspaceCodingTask.status)}
               >
-                {workspaceAgentResult.status === 'completed'
-                  ? '任务完成'
-                  : '任务未完成'}
+                {CODING_TASK_STATUS_LABELS[workspaceCodingTask.status] ??
+                  workspaceCodingTask.status}
               </Tag>
-              <p style={{ whiteSpace: 'pre-wrap' }}>
-                {workspaceAgentResult.summary}
-              </p>
-              {workspaceAgentResult.steps?.map((step) => (
-                <details
-                  key={`${step.command}-${step.exitCode}`}
+              <div style={{ color: '#667085', marginTop: 4 }}>
+                Task {workspaceCodingTask.taskId}
+                {workspaceCodingTask.runId
+                  ? ` · Run ${workspaceCodingTask.runId}`
+                  : ''}
+                {` · 尝试 ${workspaceCodingTask.attempt} · 已完成步骤 ${workspaceCodingTask.lastCompletedStep}`}
+              </div>
+              {(workspaceCodingTask.summary || workspaceCodingTask.error) && (
+                <p style={{ whiteSpace: 'pre-wrap' }}>
+                  {workspaceCodingTask.summary || workspaceCodingTask.error}
+                </p>
+              )}
+              {workspaceCodingTaskPollingError && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title="任务状态暂时无法刷新"
+                  description={`${workspaceCodingTaskPollingError}，页面会继续重试。`}
                   style={{ marginTop: 8 }}
+                />
+              )}
+              {(['failed', 'blocked'] as string[]).includes(
+                workspaceCodingTask.status,
+              ) && (
+                <Button
+                  loading={workspaceBusy}
+                  disabled={workspaceBusy}
+                  onClick={() => void resumeWorkspaceCodingTask()}
                 >
-                  <summary>
-                    {step.command} · exit {step.exitCode}
-                  </summary>
-                  <pre
-                    style={{
-                      maxHeight: 260,
-                      overflow: 'auto',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {step.output}
-                  </pre>
+                  安全续跑
+                </Button>
+              )}
+              {workspaceCodingTask.events.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary>运行事件（{workspaceCodingTask.events.length}）</summary>
+                  {workspaceCodingTask.events.map((event) => (
+                    <div
+                      key={`${event.sequence}-${event.eventType}`}
+                      style={{ borderTop: '1px solid #eaecf0', padding: 8 }}
+                    >
+                      <strong>{event.eventType}</strong>
+                      <span style={{ marginLeft: 8, color: '#667085' }}>
+                        {new Date(event.createdAt).toLocaleString()}
+                      </span>
+                      <pre
+                        style={{
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          margin: '4px 0 0',
+                        }}
+                      >
+                        {JSON.stringify(event.payload, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
                 </details>
-              ))}
+              )}
+              {workspaceCodingTask.verification && (
+                <div style={{ marginTop: 12 }}>
+                  <strong>文件差异</strong>
+                  {(['added', 'modified', 'deleted'] as const).map((kind) => {
+                    const files = workspaceCodingTask.verification?.diff[kind] ?? [];
+                    return (
+                      <div key={kind} style={{ marginTop: 4 }}>
+                        <span>
+                          {kind === 'added'
+                            ? '新增'
+                            : kind === 'modified'
+                              ? '修改'
+                              : '删除'}
+                          （{files.length}）
+                        </span>
+                        {files.length > 0 && (
+                          <ul style={{ margin: '2px 0 4px' }}>
+                            {files.map((file) => (
+                              <li key={file.path}>
+                                <code>{file.path}</code>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <strong style={{ display: 'block', marginTop: 12 }}>
+                    验证结果 ·{' '}
+                    {new Date(
+                      workspaceCodingTask.verification.checkedAt,
+                    ).toLocaleString()}
+                  </strong>
+                  {Object.entries(workspaceCodingTask.verification.checks).map(
+                    ([name, check]) => (
+                      <div
+                        key={name}
+                        style={{ borderTop: '1px solid #eaecf0', padding: 8 }}
+                      >
+                        <Tag color={codingTaskTagColor(check.status)}>
+                          {name}: {CHECK_STATUS_LABELS[check.status]}
+                        </Tag>
+                        {check.command && <code>{check.command}</code>}
+                        {check.exitCode !== null && (
+                          <span style={{ marginLeft: 8 }}>
+                            exit {check.exitCode}
+                          </span>
+                        )}
+                        {check.reason && (
+                          <div style={{ color: '#667085', marginTop: 4 }}>
+                            {check.reason}
+                          </div>
+                        )}
+                        {check.output && (
+                          <details style={{ marginTop: 4 }}>
+                            <summary>查看输出</summary>
+                            <pre
+                              style={{
+                                maxHeight: 260,
+                                overflow: 'auto',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {check.output}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+              {workspaceCodingTask.status === 'completed' && (
+                <Alert
+                  type="success"
+                  showIcon
+                  title="任务已完成，差异与适用检查均通过"
+                  style={{ marginTop: 8 }}
+                />
+              )}
+              {workspaceCodingTask.status === 'waiting_review' && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title="任务需要人工验收"
+                  description="没有代码差异或没有适用的 lint/test/build 检查，不能自动判定为完成。"
+                  style={{ marginTop: 8 }}
+                />
+              )}
+              {workspaceCodingTask.status === 'waiting_reconciliation' && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title="任务需要人工对账"
+                  description="检测到结果不确定的工具副作用，系统不会盲目重放。"
+                  style={{ marginTop: 8 }}
+                />
+              )}
             </div>
           )}
         </section>
@@ -607,11 +782,18 @@ export function renderWorkflowArtifacts(
               onChange={(event) => setWorkspaceCommand(event.target.value)}
               onPressEnter={() => void runWorkspaceCommand()}
               placeholder="例如：npm test"
-              disabled={!workspaceStatus?.ready || workspaceBusy}
+              disabled={
+                !workspaceStatus?.ready || workspaceBusy || workspaceCodingTaskActive
+              }
             />
             <Button
               loading={workspaceBusy}
-              disabled={!workspaceStatus?.ready || !workspaceCommand.trim()}
+              disabled={
+                !workspaceStatus?.ready ||
+                !workspaceCommand.trim() ||
+                workspaceBusy ||
+                workspaceCodingTaskActive
+              }
               onClick={() => void runWorkspaceCommand()}
             >
               执行
@@ -643,19 +825,26 @@ export function renderWorkflowArtifacts(
               }
               placeholder="npm run dev -- --host 0.0.0.0"
               style={{ flex: '1 1 360px' }}
-              disabled={!workspaceStatus?.ready || workspaceBusy}
+              disabled={
+                !workspaceStatus?.ready || workspaceBusy || workspaceCodingTaskActive
+              }
             />
             <Input
               value={workspacePort}
               onChange={(event) => setWorkspacePort(event.target.value)}
               placeholder="端口"
               style={{ width: 110 }}
-              disabled={!workspaceStatus?.ready || workspaceBusy}
+              disabled={
+                !workspaceStatus?.ready || workspaceBusy || workspaceCodingTaskActive
+              }
             />
             <Button
               loading={workspaceBusy}
               disabled={
-                !workspaceStatus?.ready || !workspaceDevServerCommand.trim()
+                !workspaceStatus?.ready ||
+                !workspaceDevServerCommand.trim() ||
+                workspaceBusy ||
+                workspaceCodingTaskActive
               }
               onClick={() => void startWorkspaceDevServer()}
             >
@@ -663,14 +852,16 @@ export function renderWorkflowArtifacts(
             </Button>
             <Button
               loading={workspaceBusy}
-              disabled={!workspaceStatus?.devServer || workspaceBusy}
+              disabled={
+                !workspaceStatus?.devServer || workspaceBusy || workspaceCodingTaskActive
+              }
               onClick={() => void stopWorkspaceDevServer()}
             >
               停止服务器
             </Button>
             <Button
               loading={workspaceBusy}
-              disabled={!workspaceStatus?.ready}
+              disabled={!workspaceStatus?.ready || workspaceBusy || workspaceCodingTaskActive}
               onClick={() => void openWorkspacePreview()}
             >
               打开预览
@@ -678,7 +869,7 @@ export function renderWorkflowArtifacts(
             <Button
               icon={<DownloadOutlined />}
               loading={workspaceBusy}
-              disabled={!workspaceStatus?.ready}
+              disabled={!workspaceStatus?.ready || workspaceBusy || workspaceCodingTaskActive}
               onClick={() => void exportWorkspace()}
             >
               导出新 ZIP

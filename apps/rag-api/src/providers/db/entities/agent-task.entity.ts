@@ -10,6 +10,11 @@ import {
 @Entity('agent_tasks')
 @Index('IDX_agent_tasks_thread_status', ['threadId', 'status'])
 @Index('IDX_agent_tasks_parent', ['parentTaskId'])
+@Index(
+  'UQ_agent_tasks_tenant_owner_request',
+  ['tenantId', 'ownerUserId', 'requestId'],
+  { unique: true },
+)
 export class AgentTaskEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
   @Index('IDX_agent_tasks_tenant')
@@ -26,6 +31,21 @@ export class AgentTaskEntity {
   @Column({ type: 'varchar', length: 32, default: 'sequential' })
   processType!: string;
   @Column({ type: 'varchar', length: 32, default: 'pending' }) status!: string;
+  @Column({ type: 'varchar', length: 32, default: 'workflow_role' })
+  taskType!: 'workflow_role' | 'coding_task';
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  ownerUserId!: string | null;
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  requestId!: string | null;
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  requestHash!: string | null;
+  @Column({ type: 'text', nullable: true, default: null }) codingContext!:
+    | string
+    | null;
+  @Column({ type: 'text', nullable: true, default: null }) verification!:
+    | string
+    | null;
+  @Column({ type: 'int', default: 0 }) lastCompletedStep!: number;
   @Column({ type: 'text', default: '[]' }) dependsOnTaskIds!: string;
   @Column({ type: 'text', default: '[]' }) inputArtifactIds!: string;
   @Column({ type: 'varchar', length: 128, nullable: true, default: null })

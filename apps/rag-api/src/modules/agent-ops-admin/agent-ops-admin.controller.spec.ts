@@ -24,6 +24,12 @@ describe('AgentOpsAdminController task owner isolation', () => {
     destroyWorkspace: jest.fn(),
   };
   const projectWorkspaceAgent = { run: jest.fn() };
+  const codingTasks = {
+    submit: jest.fn(),
+    get: jest.fn(),
+    cancel: jest.fn(),
+    resume: jest.fn(),
+  };
   const controller = new AgentOpsAdminController(
     workflows as never,
     {} as never,
@@ -41,6 +47,7 @@ describe('AgentOpsAdminController task owner isolation', () => {
     {} as never,
     projectWorkspace as never,
     projectWorkspaceAgent as never,
+    codingTasks as never,
   );
 
   beforeEach(() => jest.resetAllMocks());
@@ -123,6 +130,57 @@ describe('AgentOpsAdminController task owner isolation', () => {
       'artifact-1',
       '运行测试',
     );
+  });
+
+  it('checks workflow ownership before accepting an async coding task', async () => {
+    codingTasks.submit.mockResolvedValue({
+      taskId: 'task-1',
+      runId: 'run-1',
+      status: 'queued',
+    });
+
+    await expect(
+      controller.submitProductionProjectWorkspaceCodingTask(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        {
+          artifactId: 'artifact-1',
+          instruction: '修复 lint',
+          requestId: '00000000-0000-4000-8000-000000000001',
+        },
+      ),
+    ).resolves.toEqual({ taskId: 'task-1', runId: 'run-1', status: 'queued' });
+
+    expect(workflows.assertOwnedThread).toHaveBeenCalledWith(
+      'thread-1',
+      'owner-1',
+    );
+    expect(codingTasks.submit).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      ownerUserId: 'owner-1',
+      tenantId: 'tenant-1',
+      body: expect.objectContaining({ artifactId: 'artifact-1' }),
+    });
+  });
+
+  it('passes task controls through the owner-scoped coding service', async () => {
+    codingTasks.get.mockResolvedValue({ taskId: 'task-1', status: 'running' });
+    codingTasks.cancel.mockResolvedValue({ taskId: 'task-1', status: 'cancelled' });
+
+    await controller.productionProjectWorkspaceCodingTaskStatus(
+      'thread-1', 'task-1', 'owner-1', 'tenant-1',
+    );
+    await controller.cancelProductionProjectWorkspaceCodingTask(
+      'thread-1', 'task-1', 'owner-1', 'tenant-1', { reason: '停止' },
+    );
+
+    expect(codingTasks.get).toHaveBeenCalledWith({
+      taskId: 'task-1', threadId: 'thread-1', ownerUserId: 'owner-1', tenantId: 'tenant-1',
+    });
+    expect(codingTasks.cancel).toHaveBeenCalledWith({
+      taskId: 'task-1', threadId: 'thread-1', ownerUserId: 'owner-1', tenantId: 'tenant-1', reason: '停止',
+    });
   });
 
   it('requires the explicit discard flag when destroying a project workspace', async () => {

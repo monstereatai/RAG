@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import JSZip from 'jszip';
 import { Sandbox, SandboxApiException } from '@alibaba-group/opensandbox';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { URL } from 'node:url';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { RedisProvider } from '../../providers/redis/redis.provider';
@@ -161,6 +161,273 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         throw error;
       }
     });
+  }
+
+  async validateCodingArtifact(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+  ): Promise<void> {
+    this.assertIdentity(threadId, userId);
+    if (!artifactId || artifactId.length > 64) {
+      throw new BadRequestException('artifactId is invalid.');
+    }
+    await this.workflow.codingContext(threadId, userId, tenantId);
+    const artifact = await this.artifacts.getStudioVersion(
+      artifactId,
+      userId,
+      threadId,
+    );
+    this.assertArtifactTenant(artifact, tenantId);
+    if (
+      artifact.status !== 'ready' ||
+      artifact.kind !== 'code' ||
+      !artifact.filename.toLowerCase().endsWith('.zip')
+    ) {
+      throw new BadRequestException(
+        'Workspace requires a ready generated code ZIP artifact.',
+      );
+    }
+  }
+
+  async assertWorkspaceReady(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+  ): Promise<void> {
+    await this.validateCodingArtifact(threadId, userId, tenantId, artifactId);
+    const { record, sandbox } = await this.getActiveWorkspace(
+      threadId,
+      userId,
+      tenantId,
+    );
+    try {
+      if (record.artifactId !== artifactId) {
+        throw new ConflictException(
+          'Workspace does not match the requested ZIP artifact.',
+        );
+      }
+    } finally {
+      await sandbox.close();
+    }
+  }
+
+  async verifyWorkspace(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+    signal?: AbortSignal,
+  ) {
+    const { diff, scripts, manifestError } = await this.inspectWorkspace(
+      threadId,
+      userId,
+      tenantId,
+      artifactId,
+    );
+    const checks: Record<
+      'lint' | 'test' | 'build',
+      {
+        status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
+        command: string | null;
+        exitCode: number | null;
+        output: string;
+        reason?: string;
+      }
+    > = {
+      lint: { status: 'not_applicable', command: null, exitCode: null, output: '', reason: 'package.json 未声明 lint 脚本。' },
+      test: { status: 'not_applicable', command: null, exitCode: null, output: '', reason: 'package.json 未声明 test 脚本。' },
+      build: { status: 'not_applicable', command: null, exitCode: null, output: '', reason: 'package.json 未声明 build 脚本。' },
+    };
+
+    if (manifestError) {
+      for (const name of ['lint', 'test', 'build'] as const) {
+        checks[name] = {
+          status: 'failed',
+          command: null,
+          exitCode: null,
+          output: '',
+          reason: manifestError,
+        };
+      }
+    } else {
+      for (const name of ['lint', 'test', 'build'] as const) {
+        if (!scripts[name]) continue;
+        const command = `npm run ${name}`;
+        if (signal?.aborted) {
+          checks[name] = {
+            status: 'not_run',
+            command,
+            exitCode: null,
+            output: '',
+            reason: '任务已取消，未运行此检查。',
+          };
+          continue;
+        }
+        try {
+          const result = await this.runCommand(
+            threadId,
+            userId,
+            tenantId,
+            command,
+            240,
+            signal,
+          );
+          checks[name] = {
+            status:
+              result.exitCode === 0 && !result.timedOut ? 'passed' : 'failed',
+            command,
+            exitCode: result.exitCode,
+            output: result.output,
+            ...(result.timedOut ? { reason: '命令超时。' } : {}),
+          };
+        } catch (error) {
+          checks[name] = {
+            status: signal?.aborted ? 'not_run' : 'failed',
+            command,
+            exitCode: null,
+            output: '',
+            reason:
+              error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+          };
+        }
+      }
+    }
+
+    return { checkedAt: new Date().toISOString(), diff, checks };
+  }
+
+  private async inspectWorkspace(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    artifactId: string,
+  ) {
+    this.assertIdentity(threadId, userId);
+    await this.validateCodingArtifact(threadId, userId, tenantId, artifactId);
+    const { record, sandbox } = await this.getActiveWorkspace(
+      threadId,
+      userId,
+      tenantId,
+    );
+    try {
+      if (record.artifactId !== artifactId) {
+        throw new ConflictException(
+          'Workspace does not match the requested ZIP artifact.',
+        );
+      }
+      const source = await this.artifacts.getStudioVersionFile(
+        artifactId,
+        userId,
+        threadId,
+      );
+      const seedFiles = await this.unpackSeedZip(source.body);
+      const seed = new Map<string, Buffer>();
+      for (const file of seedFiles) {
+        const path = this.workspaceRelativePath(file.path);
+        if (!path || this.isIgnoredWorkspacePath(path)) continue;
+        seed.set(path, Buffer.from(file.data));
+      }
+
+      const entries = await sandbox.files.listDirectory({
+        path: WORKSPACE_ROOT,
+        depth: 32,
+      });
+      if (entries.length > MAX_SEED_FILES * 2) {
+        throw new BadRequestException('Workspace contains too many files to verify.');
+      }
+      const current = new Map<string, Buffer>();
+      let totalBytes = 0;
+      for (const file of entries) {
+        const path = this.workspaceRelativePath(file.path);
+        if (
+          !path ||
+          file.type === 'directory' ||
+          file.type === 'symlink' ||
+          (file.type && file.type !== 'file') ||
+          this.isIgnoredWorkspacePath(path)
+        ) {
+          continue;
+        }
+        if (typeof file.size === 'number' && file.size > MAX_SINGLE_FILE_BYTES) {
+          throw new BadRequestException('Workspace file exceeds the verification size limit.');
+        }
+        const data = Buffer.from(await sandbox.files.readBytes(file.path));
+        totalBytes += data.length;
+        if (
+          data.length > MAX_SINGLE_FILE_BYTES ||
+          totalBytes > MAX_EXPORT_BYTES ||
+          current.size >= MAX_SEED_FILES ||
+          current.has(path)
+        ) {
+          throw new BadRequestException('Workspace exceeds the verification size limit.');
+        }
+        current.set(path, data);
+      }
+
+      let scripts: Partial<Record<'lint' | 'test' | 'build', string>> = {};
+      let manifestError: string | undefined;
+      const packageFile = current.get('package.json');
+      if (packageFile) {
+        try {
+          const packageJson = JSON.parse(packageFile.toString('utf8')) as {
+            scripts?: unknown;
+          };
+          if (
+            !packageJson.scripts ||
+            typeof packageJson.scripts !== 'object' ||
+            Array.isArray(packageJson.scripts)
+          ) {
+            scripts = {};
+          } else {
+            const declared = packageJson.scripts as Record<string, unknown>;
+            for (const name of ['lint', 'test', 'build'] as const) {
+              const value = declared[name];
+              if (typeof value === 'string' && value.trim()) {
+                scripts[name] = value;
+              } else if (value !== undefined) {
+                manifestError = `package.json 的 ${name} 脚本定义无效。`;
+              }
+            }
+          }
+        } catch {
+          manifestError = 'package.json 无法解析，确定性验收未运行。';
+        }
+      }
+
+      const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+      const added = [...current.keys()]
+        .filter((path) => !seed.has(path))
+        .sort()
+        .map((path) => ({ path, sha256: hash(current.get(path)!) }));
+      const deleted = [...seed.keys()]
+        .filter((path) => !current.has(path))
+        .sort()
+        .map((path) => ({ path, sha256: hash(seed.get(path)!) }));
+      const modified = [...current.keys()]
+        .filter((path) => seed.has(path) && hash(current.get(path)!) !== hash(seed.get(path)!))
+        .sort()
+        .map((path) => ({
+          path,
+          seedSha256: hash(seed.get(path)!),
+          workspaceSha256: hash(current.get(path)!),
+        }));
+      return {
+        diff: { added, modified, deleted },
+        scripts,
+        manifestError,
+      };
+    } finally {
+      await sandbox.close();
+    }
+  }
+
+  private isIgnoredWorkspacePath(path: string): boolean {
+    return path
+      .split('/')
+      .some((part) => part === 'node_modules' || part === '.git');
   }
 
   async runCommand(

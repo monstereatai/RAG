@@ -1,0 +1,29 @@
+{
+  "base_commit": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/004-coding-task-async/scope-baseline-T004.json",
+  "new_files": [],
+  "modified_preexisting_files": [
+    "specs/004-coding-task-async/tasks.md",
+    "specs/004-coding-task-async/verify.md"
+  ],
+  "touched_files": [
+    "specs/004-coding-task-async/tasks.md",
+    "specs/004-coding-task-async/verify.md"
+  ],
+  "allow_patterns": [
+    "ROADMAP.md",
+    "plan/002-coding-task-git-delivery.md",
+    "specs/004-coding-task-async/verify.md",
+    "specs/004-coding-task-async/tasks.md"
+  ],
+  "internal_patterns": [
+    "specs/004-coding-task-async/state.json",
+    "specs/004-coding-task-async/evidence/**",
+    "specs/004-coding-task-async/logs/**",
+    "specs/004-coding-task-async/scope-*.json",
+    "specs/004-coding-task-async/fixup/**",
+    "specs/004-coding-task-async/scope-baseline-T004.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}

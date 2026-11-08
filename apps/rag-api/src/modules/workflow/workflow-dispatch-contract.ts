@@ -19,7 +19,11 @@ export function parseWorkflowDispatch(
   const job = payload.job;
   if (
     typeof job.id !== 'string' ||
-    !/^production-workflow-(start|resume|revise|retry_task)-[a-f0-9]{32}$/.test(job.id) ||
+    !(typeof job.operation === 'string' && (
+      job.operation === 'coding_task'
+        ? /^production-workflow-coding_task-[a-f0-9]{32}-r\d+$/.test(job.id)
+        : /^production-workflow-(start|resume|revise|retry_task)-[a-f0-9]{32}$/.test(job.id)
+    )) ||
     typeof job.threadId !== 'string' ||
     job.threadId !== aggregateThreadId ||
     typeof job.userId !== 'string' ||
@@ -29,7 +33,7 @@ export function parseWorkflowDispatch(
     throw new Error('workflow dispatch identity or tenant mismatch');
   }
   if (
-    !['start', 'resume', 'revise', 'retry_task'].includes(String(job.operation)) ||
+    !['start', 'resume', 'revise', 'retry_task', 'coding_task'].includes(String(job.operation)) ||
     !job.id.startsWith(`production-workflow-${job.operation}-`)
   ) {
     throw new Error('unknown workflow dispatch operation');
@@ -38,6 +42,17 @@ export function parseWorkflowDispatch(
     if (typeof job.taskId !== 'string' || !job.taskId.trim() ||
         typeof job.role !== 'string' || !job.role.trim()) {
       throw new Error('retry_task dispatch missing task identity');
+    }
+  } else if (job.operation === 'coding_task') {
+    if (
+      typeof job.taskId !== 'string' ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(job.taskId) ||
+      !Number.isInteger(job.taskAttempt) ||
+      Number(job.taskAttempt) < 0 ||
+      typeof job.resume !== 'boolean' ||
+      job.id !== `production-workflow-coding_task-${job.taskId.replace(/-/g, '')}-r${job.taskAttempt}`
+    ) {
+      throw new Error('coding_task dispatch missing task identity');
     }
   } else if (!isObject(job.dto)) {
     throw new Error('workflow dispatch missing DTO');

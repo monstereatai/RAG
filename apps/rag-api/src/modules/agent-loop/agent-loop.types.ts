@@ -49,6 +49,7 @@ export type AgentLoopDecision<TState, TOutput> =
 export interface AgentLoopInput<TState, TOutput> {
   threadId: string;
   runId?: string;
+  taskId?: string;
   actor: string;
   initialState: TState;
   maxSteps: number;
@@ -77,12 +78,32 @@ export interface AgentLoopCheckpoint<TState> {
   threadId: string;
   actor: string;
   runId?: string;
+  taskId?: string;
   step: number;
   toolCalls: number;
   /** 从本次运行开始累计的执行时间，用于恢复时继续消耗同一总超时预算。 */
   elapsedMs?: number;
   state: TState;
   updatedAt: string;
+}
+
+export type AgentLoopResumeFailureCode =
+  | 'redis_unavailable'
+  | 'missing_checkpoint'
+  | 'invalid_checkpoint'
+  | 'identity_mismatch'
+  | 'checkpoint_expired'
+  | 'budget_exceeded'
+  | 'cancelled';
+
+export class AgentLoopResumeError extends Error {
+  constructor(
+    readonly code: AgentLoopResumeFailureCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AgentLoopResumeError';
+  }
 }
 
 export interface AgentLoopResult<TState, TOutput> {

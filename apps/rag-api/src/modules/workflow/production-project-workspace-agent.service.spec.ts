@@ -139,4 +139,86 @@ describe('ProductionProjectWorkspaceAgentService', () => {
     });
     expect(workspace.startDevServer).not.toHaveBeenCalled();
   });
+
+  it('resumes the requested task on the same run and preserves blocked loop status', async () => {
+    const llm = { getAgenticModel: jest.fn() };
+    const workspace = {
+      startWorkspace: jest.fn(),
+      assertWorkspaceReady: jest.fn().mockResolvedValue(undefined),
+    };
+    const agentLoop = {
+      resume: jest.fn().mockResolvedValue({
+        status: 'blocked',
+        state: { instruction: '恢复任务', events: [] },
+        steps: 2,
+        toolCalls: 1,
+        terminationReason: '需要人工确认',
+      }),
+      run: jest.fn(),
+    };
+    const service = new ProductionProjectWorkspaceAgentService(
+      llm as never,
+      agentLoop as never,
+      workspace as never,
+    );
+
+    await expect(
+      service.runWithExecutionOptions(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        '恢复任务',
+        {
+          runId: 'run-stable',
+          taskId: 'task-stable',
+          resume: true,
+        },
+      ),
+    ).resolves.toMatchObject({
+      summary: '需要人工确认',
+      status: 'blocked',
+      toolCalls: 1,
+    });
+
+    expect(workspace.assertWorkspaceReady).toHaveBeenCalledWith(
+      'thread-1', 'owner-1', 'tenant-1', 'artifact-1',
+    );
+    expect(workspace.startWorkspace).not.toHaveBeenCalled();
+    expect(agentLoop.resume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-stable',
+        taskId: 'task-stable',
+        actor: 'production-workspace-agent',
+      }),
+    );
+    expect(agentLoop.run).not.toHaveBeenCalled();
+  });
+
+  it('preflights checkpoint eligibility without invoking the model', async () => {
+    const llm = { getAgenticModel: jest.fn() };
+    const workspace = {
+      assertWorkspaceReady: jest.fn().mockResolvedValue(undefined),
+    };
+    const agentLoop = { assertCanResume: jest.fn().mockResolvedValue(undefined) };
+    const service = new ProductionProjectWorkspaceAgentService(
+      llm as never,
+      agentLoop as never,
+      workspace as never,
+    );
+
+    await service.assertCanResume(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'artifact-1',
+      '恢复任务',
+      { runId: 'run-stable', taskId: 'task-stable' },
+    );
+
+    expect(agentLoop.assertCanResume).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'run-stable', taskId: 'task-stable' }),
+    );
+    expect(llm.getAgenticModel).not.toHaveBeenCalled();
+  });
 });

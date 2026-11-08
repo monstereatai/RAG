@@ -1,0 +1,296 @@
+{
+  "schema_version": 2,
+  "change_id": "004-coding-task-dispatch-fix",
+  "mode": "standard",
+  "status": "executing",
+  "current_task": null,
+  "waiting_for": null,
+  "artifacts": {
+    "spec": "specs/004-coding-task-async/fixup/spec.md",
+    "plan": "specs/004-coding-task-async/fixup/plan.md",
+    "tasks": "specs/004-coding-task-async/fixup/tasks.md",
+    "verify": "specs/004-coding-task-async/fixup/verify.md"
+  },
+  "controls": {
+    "commit_strategy": "none",
+    "branch": null,
+    "independent_review": "off"
+  },
+  "approvals": {
+    "spec": {
+      "at": "2026-11-07T13:51:34Z",
+      "approver": "主人",
+      "evidence": "用户回复：批准，补最小修复并继续。",
+      "review_report": null
+    },
+    "plan": {
+      "at": "2026-11-07T13:51:34Z",
+      "approver": "主人",
+      "evidence": "用户回复：批准，补最小修复并继续。",
+      "review_report": null
+    },
+    "acceptance": null
+  },
+  "acceptance_criteria": {
+    "AC-01": {
+      "description": "coding_task 误入普通 Workflow processor 时不会读取 dto 或调用 revise。"
+    },
+    "AC-02": {
+      "description": "RAG API build 与 workflow dispatch contract 定向测试通过。"
+    }
+  },
+  "tasks": {
+    "T001": {
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02"
+      ],
+      "allowed_paths": [
+        "apps/rag-api/src/modules/workflow/production-workflow.control.ts"
+      ],
+      "commands": [
+        "cd apps/rag-api && npm run build",
+        "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/workflow-dispatch-contract.spec.ts"
+      ],
+      "status": "done",
+      "check_ids": [
+        "T001-rag-build",
+        "T001-dispatch-unit"
+      ],
+      "scope": {
+        "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/004-coding-task-async/fixup/scope-baseline-T001.json",
+        "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+        "internal_patterns": [
+          "specs/004-coding-task-async/**"
+        ]
+      },
+      "scope_report": {
+        "path": "/Users/monster/Documents/GitHub/code/RAG/specs/004-coding-task-async/fixup/scope-report-T001.json",
+        "sha256": "f499f387affc242dcaf08e53e32aa1285b1cbdc6f37523f2e51e66f36602e8f7"
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "T001-rag-build",
+      "type": "command",
+      "kind": "build",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm run build",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-07T13:51:52Z",
+      "duration_ms": 12413,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/004-coding-task-async/fixup/evidence/T001-rag-build.stdout.log",
+      "stderr_log": "specs/004-coding-task-async/fixup/evidence/T001-rag-build.stderr.log",
+      "git": {
+        "head": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts",
+          "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts",
+          "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts",
+          "apps/admin-web/src/pages/agent-ops/workspace-service.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts",
+          "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.spec.ts",
+          "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.spec.ts",
+          "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.ts",
+          "apps/rag-api/src/modules/workflow/workflow.module.ts",
+          "apps/rag-api/src/providers/db/entities/agent-run.entity.ts",
+          "apps/rag-api/src/providers/db/entities/agent-task.entity.ts",
+          "plan/README.md"
+        ],
+        "diff_sha256": "7615694e4c77d43677118e2f53157db784835ac40f1a54d1617f16355e05417d"
+      }
+    },
+    {
+      "id": "T001-dispatch-unit",
+      "type": "command",
+      "kind": "unit",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01",
+        "AC-02"
+      ],
+      "command": "cd apps/rag-api && npm test -- --runInBand src/modules/workflow/workflow-dispatch-contract.spec.ts",
+      "cwd": "/Users/monster/Documents/GitHub/code/RAG",
+      "started_at": "2026-11-07T13:52:08Z",
+      "duration_ms": 924,
+      "exit_code": 0,
+      "result": "pass",
+      "stdout_log": "specs/004-coding-task-async/fixup/evidence/T001-dispatch-unit.stdout.log",
+      "stderr_log": "specs/004-coding-task-async/fixup/evidence/T001-dispatch-unit.stderr.log",
+      "git": {
+        "head": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+        "changed_files": [
+          "ROADMAP.md",
+          "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts",
+          "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts",
+          "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx",
+          "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts",
+          "apps/admin-web/src/pages/agent-ops/workspace-service.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts",
+          "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts",
+          "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.spec.ts",
+          "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts",
+          "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts",
+          "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.dto.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts",
+          "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts",
+          "apps/rag-api/src/modules/workflow/production-workflow.control.ts",
+          "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.spec.ts",
+          "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.ts",
+          "apps/rag-api/src/modules/workflow/workflow.module.ts",
+          "apps/rag-api/src/providers/db/entities/agent-run.entity.ts",
+          "apps/rag-api/src/providers/db/entities/agent-task.entity.ts",
+          "plan/README.md"
+        ],
+        "diff_sha256": "7615694e4c77d43677118e2f53157db784835ac40f1a54d1617f16355e05417d"
+      }
+    },
+    {
+      "id": "AC-01-branch-guard",
+      "type": "observation",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-01"
+      ],
+      "observer": "Codex",
+      "evidence": "显式 revise 分支已通过 RAG API build；coding_task 误入普通 processor 将明确报错。",
+      "result": "pass",
+      "at": "2026-11-07T13:52:23Z"
+    },
+    {
+      "id": "AC-02-fixup-validation",
+      "type": "observation",
+      "task": "T001",
+      "acceptance_criteria": [
+        "AC-02"
+      ],
+      "observer": "Codex",
+      "evidence": "RAG API npm run build 与 workflow-dispatch-contract.spec.ts 均通过。",
+      "result": "pass",
+      "at": "2026-11-07T13:52:23Z"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "init",
+      "status": "initialized",
+      "note": "State created."
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "set_draft",
+      "status": "spec_draft",
+      "note": "主人批准增加最小 dispatch 类型修复。"
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-01."
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "add_criterion",
+      "status": "spec_draft",
+      "note": "Registered AC-02."
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "approve",
+      "status": "spec_approved",
+      "note": "spec approved by 主人: 用户回复：批准，补最小修复并继续。"
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "set_draft",
+      "status": "plan_draft",
+      "note": "建立单文件编译修复任务。"
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "add_task",
+      "status": "plan_draft",
+      "note": "Registered T001."
+    },
+    {
+      "at": "2026-11-07T13:51:34Z",
+      "action": "approve",
+      "status": "plan_approved",
+      "note": "plan approved by 主人: 用户回复：批准，补最小修复并继续。"
+    },
+    {
+      "at": "2026-11-07T13:51:44Z",
+      "action": "start_task",
+      "status": "executing",
+      "note": "Started T001."
+    },
+    {
+      "at": "2026-11-07T13:52:04Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-rag-build: pass (cd apps/rag-api && npm run build)"
+    },
+    {
+      "at": "2026-11-07T13:52:09Z",
+      "action": "run_check",
+      "status": "executing",
+      "note": "T001-dispatch-unit: pass (cd apps/rag-api && npm test -- --runInBand src/modules/workflow/workflow-dispatch-contract.spec.ts)"
+    },
+    {
+      "at": "2026-11-07T13:52:23Z",
+      "action": "record_observation",
+      "status": "executing",
+      "note": "AC-01-branch-guard: pass by Codex"
+    },
+    {
+      "at": "2026-11-07T13:52:23Z",
+      "action": "record_observation",
+      "status": "executing",
+      "note": "AC-02-fixup-validation: pass by Codex"
+    },
+    {
+      "at": "2026-11-07T13:52:23Z",
+      "action": "complete_task",
+      "status": "executing",
+      "note": "Completed T001 with T001-rag-build, T001-dispatch-unit."
+    }
+  ],
+  "created_at": "2026-11-07T13:51:34Z",
+  "updated_at": "2026-11-07T13:52:23Z"
+}

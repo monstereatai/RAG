@@ -40,6 +40,7 @@ import {
 import { ProductionArtifactStudioService } from '../workflow/production-artifact-studio.service';
 import { ProductionProjectWorkspaceService } from '../workflow/production-project-workspace.service';
 import { ProductionProjectWorkspaceAgentService } from '../workflow/production-project-workspace-agent.service';
+import { CodingTaskService } from '../workflow/coding-task.service';
 import {
   CreateProductionProjectWorkspacePreviewTicketDto,
   DestroyProductionProjectWorkspaceDto,
@@ -47,6 +48,7 @@ import {
   RunProductionProjectWorkspaceCommandDto,
   StartProductionProjectWorkspaceDevServerDto,
   StartProductionProjectWorkspaceDto,
+  SubmitWorkspaceCodingTaskDto,
 } from '../workflow/production-project-workspace.dto';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
 import { ConversationService } from '../chat/conversation.service';
@@ -116,6 +118,7 @@ export class AgentOpsAdminController {
     private readonly artifactStudio: ProductionArtifactStudioService,
     private readonly projectWorkspace: ProductionProjectWorkspaceService,
     private readonly projectWorkspaceAgent: ProductionProjectWorkspaceAgentService,
+    private readonly codingTasks: CodingTaskService,
     @Optional() private readonly chat?: ChatService,
   ) {}
 
@@ -463,6 +466,54 @@ export class AgentOpsAdminController {
       body.artifactId,
       body.instruction,
     );
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks')
+  async submitProductionProjectWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: SubmitWorkspaceCodingTaskDto,
+  ) {
+    await this.workflows.assertOwnedThread(threadId, ownerUserId);
+    return this.codingTasks.submit({ threadId, ownerUserId, tenantId, body });
+  }
+
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId')
+  productionProjectWorkspaceCodingTaskStatus(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    return this.codingTasks.get({ taskId, threadId, ownerUserId, tenantId });
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')
+  cancelProductionProjectWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: { reason?: string },
+  ) {
+    return this.codingTasks.cancel({
+      taskId,
+      threadId,
+      ownerUserId,
+      tenantId,
+      reason: body?.reason,
+    });
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/resume')
+  resumeProductionProjectWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    return this.codingTasks.resume({ taskId, threadId, ownerUserId, tenantId });
   }
 
   @Post('workflows/:threadId/workspace/command')

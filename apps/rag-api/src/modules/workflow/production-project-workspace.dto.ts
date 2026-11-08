@@ -3,6 +3,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -63,6 +64,21 @@ export class RunProductionProjectWorkspaceAgentDto {
   @MinLength(1)
   @MaxLength(4000)
   instruction!: string;
+}
+
+export class SubmitWorkspaceCodingTaskDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  artifactId!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  instruction!: string;
+
+  @IsUUID()
+  requestId!: string;
 }
 
 export interface WorkspaceCommandResult {

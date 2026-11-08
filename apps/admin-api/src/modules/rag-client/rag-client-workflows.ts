@@ -282,6 +282,61 @@ export abstract class RagClientWorkflowBase extends RagClientContentBase {
     );
   }
 
+  submitProductionWorkflowWorkspaceCodingTask(
+    threadId: string,
+    ownerUserId: string,
+    tenantId: string | undefined,
+    body: unknown,
+  ) {
+    return this.request<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), tenantId })}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      true,
+      30_000,
+    );
+  }
+
+  getProductionWorkflowWorkspaceCodingTask(
+    threadId: string,
+    taskId: string,
+    ownerUserId: string,
+    tenantId: string | undefined,
+  ) {
+    return this.getJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), tenantId })}`,
+      30_000,
+    );
+  }
+
+  cancelProductionWorkflowWorkspaceCodingTask(
+    threadId: string,
+    taskId: string,
+    ownerUserId: string,
+    tenantId: string | undefined,
+    body: unknown,
+  ) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}/cancel${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), tenantId })}`,
+      body,
+    );
+  }
+
+  resumeProductionWorkflowWorkspaceCodingTask(
+    threadId: string,
+    taskId: string,
+    ownerUserId: string,
+    tenantId: string | undefined,
+  ) {
+    return this.postJson<Record<string, unknown>>(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}/resume${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), tenantId })}`,
+      {},
+    );
+  }
+
   runProductionWorkflowWorkspaceCommand(
     threadId: string,
     ownerUserId: string,

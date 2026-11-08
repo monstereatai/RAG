@@ -158,7 +158,7 @@ export class ProductionWorkflowControl {
             approvalCheckpointIdentity,
             attempt.attempt,
           );
-        } else {
+        } else if (job.operation === 'revise') {
           await this.revise(
             job.threadId,
             job.dto,
@@ -166,6 +166,8 @@ export class ProductionWorkflowControl {
             job.tenantId,
             true,
           );
+        } else {
+          throw new Error('coding_task jobs must use the coding task processor');
         }
       } catch (error) {
         if (attempt.finalAttempt) {

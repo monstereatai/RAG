@@ -11,6 +11,10 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
     proxyProductionWorkflowWorkspacePreview: jest.fn(),
     exportProductionWorkflowWorkspace: jest.fn(),
     deleteProductionWorkflowWorkspace: jest.fn(),
+    submitProductionWorkflowWorkspaceCodingTask: jest.fn(),
+    getProductionWorkflowWorkspaceCodingTask: jest.fn(),
+    cancelProductionWorkflowWorkspaceCodingTask: jest.fn(),
+    resumeProductionWorkflowWorkspaceCodingTask: jest.fn(),
   };
   const controller = new AgentOpsController(ragClient as never);
   const ticket = 'ticket_' + 'a'.repeat(32);
@@ -218,5 +222,54 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
       '42',
       undefined,
     );
+  });
+
+  it('forwards async coding task controls with the authenticated owner and tenant', async () => {
+    const req = { user: { userId: '42', tenantId: 'tenant-1' } };
+    const body = {
+      artifactId: 'artifact-1',
+      instruction: '修复 lint',
+      requestId: '11111111-1111-4111-8111-111111111111',
+    };
+    ragClient.submitProductionWorkflowWorkspaceCodingTask.mockResolvedValue({
+      available: true,
+      status: 201,
+      data: { taskId: 'task-1', runId: 'run-1', status: 'queued' },
+    });
+    ragClient.getProductionWorkflowWorkspaceCodingTask.mockResolvedValue({
+      data: { taskId: 'task-1', status: 'running' },
+    });
+    ragClient.cancelProductionWorkflowWorkspaceCodingTask.mockResolvedValue({
+      data: { taskId: 'task-1', status: 'cancelled' },
+    });
+    ragClient.resumeProductionWorkflowWorkspaceCodingTask.mockResolvedValue({
+      data: { taskId: 'task-1', status: 'queued' },
+    });
+
+    await expect(
+      controller.submitWorkflowWorkspaceCodingTask('thread-1', body, req as never),
+    ).resolves.toMatchObject({ data: { taskId: 'task-1', status: 'queued' } });
+    await controller.getWorkflowWorkspaceCodingTask('thread-1', 'task-1', req as never);
+    await controller.cancelWorkflowWorkspaceCodingTask(
+      'thread-1', 'task-1', { reason: '停止' }, req as never,
+    );
+    await controller.resumeWorkflowWorkspaceCodingTask('thread-1', 'task-1', req as never);
+
+    expect(ragClient.submitProductionWorkflowWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1', '42', 'tenant-1', body,
+    );
+    expect(ragClient.getProductionWorkflowWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1', 'task-1', '42', 'tenant-1',
+    );
+    expect(ragClient.cancelProductionWorkflowWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1', 'task-1', '42', 'tenant-1', { reason: '停止' },
+    );
+    expect(ragClient.resumeProductionWorkflowWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1', 'task-1', '42', 'tenant-1',
+    );
+    expect(Reflect.getMetadata(REQUIRE_PERMISSION_KEY, controller.submitWorkflowWorkspaceCodingTask))
+      .toEqual(['admin:qa-ops:write']);
+    expect(Reflect.getMetadata(REQUIRE_PERMISSION_KEY, controller.getWorkflowWorkspaceCodingTask))
+      .toEqual(['admin:qa-ops:read']);
   });
 });

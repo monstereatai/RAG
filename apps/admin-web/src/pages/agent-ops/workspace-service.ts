@@ -25,6 +25,42 @@ export const runProductionWorkspaceAgent = (
     data: body,
   });
 
+export const submitProductionWorkspaceCodingTask = (
+  threadId: string,
+  body: { artifactId: string; instruction: string; requestId: string },
+) =>
+  authRequest<unknown>(`${productionWorkspacePath(threadId)}/coding-tasks`, {
+    method: 'POST',
+    data: body,
+  });
+
+export const getProductionWorkspaceCodingTask = (
+  threadId: string,
+  taskId: string,
+) =>
+  authRequest<unknown>(
+    `${productionWorkspacePath(threadId)}/coding-tasks/${encodeURIComponent(taskId)}`,
+  );
+
+export const cancelProductionWorkspaceCodingTask = (
+  threadId: string,
+  taskId: string,
+  body: { reason?: string } = {},
+) =>
+  authRequest<unknown>(
+    `${productionWorkspacePath(threadId)}/coding-tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: 'POST', data: body },
+  );
+
+export const resumeProductionWorkspaceCodingTask = (
+  threadId: string,
+  taskId: string,
+) =>
+  authRequest<unknown>(
+    `${productionWorkspacePath(threadId)}/coding-tasks/${encodeURIComponent(taskId)}/resume`,
+    { method: 'POST', data: {} },
+  );
+
 export const runProductionWorkspaceCommand = (
   threadId: string,
   body: { command: string },

@@ -1,0 +1,151 @@
+{
+  "schema_version": 2,
+  "base_commit": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+  "initial_snapshots": {
+    "ROADMAP.md": {
+      "kind": "file",
+      "sha256": "ca236306f42536bbae0127fda0d2d3edfdc0713d63825e8b11b07639334c9363"
+    },
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.spec.ts": {
+      "kind": "file",
+      "sha256": "ba2f9241c2df3813fba5fd502023b05490a05d0fadd63b5441718704c68867ff"
+    },
+    "apps/admin-api/src/modules/agent-ops/agent-ops.controller.ts": {
+      "kind": "file",
+      "sha256": "7cd449bc3a8c39b75b57dfd37d58deef835b98549f1b073d7a98ff7597a5d857"
+    },
+    "apps/admin-api/src/modules/rag-client/rag-client-workflows.ts": {
+      "kind": "file",
+      "sha256": "4c42f5309579ac2546480b2e78fbe213dab79c3a4a4611141183819c698e3957"
+    },
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-artifact-sections.tsx": {
+      "kind": "file",
+      "sha256": "26414fd8f2e645212c16c0d6233c97229284b2c6112ba42180c0d40a7877c0a4"
+    },
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-shared.tsx": {
+      "kind": "file",
+      "sha256": "8334b29722876321004c068ecd56b69fbb94fe63884ce5c7f2d856169c80c5fa"
+    },
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.spec.tsx": {
+      "kind": "file",
+      "sha256": "5598cacbac035ccd94bcca0bad9375646d23ef5a6480b2193c47ad53c172e97a"
+    },
+    "apps/admin-web/src/pages/agent-ops/workflow-detail/workflow-detail-workspace-controller.ts": {
+      "kind": "file",
+      "sha256": "97d20df3b97a79e2cfe7bdacfa09a0a6f2b9912f38051328bb7d520dd77041f2"
+    },
+    "apps/admin-web/src/pages/agent-ops/workspace-service.ts": {
+      "kind": "file",
+      "sha256": "e814bb6815c0a7e375317f99a8d2453d3340d0ff5f511a9eec498b63171e3d78"
+    },
+    "apps/rag-api/src/migrations/1794000000000-AddCodingTaskFields.ts": {
+      "kind": "file",
+      "sha256": "bfb685951b7ff95ff65a0f49a8061012ec7bc9a287554c2c51cb1b1c649950f0"
+    },
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts": {
+      "kind": "file",
+      "sha256": "2e6cb6dfee09517363387edf95bd25dc96e8072ecc2c3f7710733b073303ab4a"
+    },
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts": {
+      "kind": "file",
+      "sha256": "7b41b5b80528a2ba6c01cfeafdbed566c032610ad65c9be6fb199648c2b20c1d"
+    },
+    "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts": {
+      "kind": "file",
+      "sha256": "aa406a8a918dd69a88cc35559d9ed97bac3abb433f008343ab7320a9a2af2b4c"
+    },
+    "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.spec.ts": {
+      "kind": "file",
+      "sha256": "acfcf3b36d9106b01aabd8ab0715bdd6ff6df0865d33a059ec95fee0a61cdd4c"
+    },
+    "apps/rag-api/src/modules/agent-ops-admin/agent-ops-admin.controller.ts": {
+      "kind": "file",
+      "sha256": "8e21bb0ee4d1e5b39ae423d13a35919dc634e8cd6ad53b82014a93ee75fe0d9c"
+    },
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.spec.ts": {
+      "kind": "file",
+      "sha256": "fe9e5f9831aa1d7a1126c9d9681aa453ee3caff5cdf4ef5754ff2c9a801f7e9b"
+    },
+    "apps/rag-api/src/modules/agent-runs/agent-runs.service.ts": {
+      "kind": "file",
+      "sha256": "fb402268295786d0d3b8853707629a48bcc8164eb06d7b769a614be5d05cb2b3"
+    },
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.spec.ts": {
+      "kind": "file",
+      "sha256": "97fc40a57c98ff5029d1ba44526ecd1793a9b6fcfe2aa587382102318bc7a55b"
+    },
+    "apps/rag-api/src/modules/agent-tasks/agent-tasks.service.ts": {
+      "kind": "file",
+      "sha256": "3fafcb0fa8b4094613218c077d43dd351ce5fdcf892693fc2c174adfb46cf73a"
+    },
+    "apps/rag-api/src/modules/workflow/coding-task.service.spec.ts": {
+      "kind": "file",
+      "sha256": "02dacce09ebd845d657f643ae652a8a74ff64ba817558a8a0f84a521eab10421"
+    },
+    "apps/rag-api/src/modules/workflow/coding-task.service.ts": {
+      "kind": "file",
+      "sha256": "acd086c4a59be8343a37ae7289855921b93d26eae95a1e3aec67c1bc3485c9af"
+    },
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts": {
+      "kind": "file",
+      "sha256": "477d24da32424603dc2d67454692db160b219b280bd1e71b7ba11a7487b2dead"
+    },
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts": {
+      "kind": "file",
+      "sha256": "48a712e4d2a6c7fd5e89d56abb9dfc29865958ae66d92dd6207ab0f05bcbef7c"
+    },
+    "apps/rag-api/src/modules/workflow/production-project-workspace.dto.ts": {
+      "kind": "file",
+      "sha256": "9183b8278da1bc65455ee7715d07e663154a42700039ac3404549553f5ca0508"
+    },
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts": {
+      "kind": "file",
+      "sha256": "5ed14b01175870ef366aaf7136b8b5322480256bed9969f7451e877304f540bf"
+    },
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts": {
+      "kind": "file",
+      "sha256": "c61196173e4a8d3ad477a3914842fe268c313bfd2c62775102c1f35510806c41"
+    },
+    "apps/rag-api/src/modules/workflow/production-workflow-queue.service.ts": {
+      "kind": "file",
+      "sha256": "9b4b067cf151bb02df665872ecf0ae645a3f9002c3a85adf2f1bb16958f014c3"
+    },
+    "apps/rag-api/src/modules/workflow/production-workflow.control.ts": {
+      "kind": "file",
+      "sha256": "c1ca9bf9e2ef54e3e6621d08853a948d3195313c8c96d074d9503a7fcbfd7c19"
+    },
+    "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.spec.ts": {
+      "kind": "file",
+      "sha256": "74625f2e74871e1191cfe051d6b472609855a1c0c4ef32926527ea7f0c6e3dd8"
+    },
+    "apps/rag-api/src/modules/workflow/workflow-dispatch-contract.ts": {
+      "kind": "file",
+      "sha256": "e506d66f29268c7b3b2e2be3c7e9cb0055a12150288cac0dfb32694b8bdaf1df"
+    },
+    "apps/rag-api/src/modules/workflow/workflow.module.ts": {
+      "kind": "file",
+      "sha256": "61523222959395eda705381fd075938e1044bd02b2df78571c854d75897eeedf"
+    },
+    "apps/rag-api/src/providers/db/entities/agent-run.entity.ts": {
+      "kind": "file",
+      "sha256": "ddb8fd1aaa667a6f80975f6b99f2c78db4000e3efb3fdf17f5a881eeb21a8bb3"
+    },
+    "apps/rag-api/src/providers/db/entities/agent-task.entity.ts": {
+      "kind": "file",
+      "sha256": "8a7edd62e36b7c816c23ccdf9c1a381c39dd855e45d624269a0ebb9bc1652054"
+    },
+    "plan/002-coding-task-git-delivery.md": {
+      "kind": "file",
+      "sha256": "1752916fc33eab8414b274d8db60a838e1bc49f321ac1ec0da60fcc679078e66"
+    },
+    "plan/README.md": {
+      "kind": "file",
+      "sha256": "3b6529995fd7aa526161bd8f41803e8e02a019845108b84b001575b15584cad5"
+    }
+  },
+  "internal_patterns": [
+    "specs/004-coding-task-async/**",
+    "specs/004-coding-task-async/fixup/**",
+    "specs/004-coding-task-async/scope-baseline-T004.json"
+  ]
+}

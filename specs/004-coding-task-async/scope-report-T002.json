@@ -1,0 +1,45 @@
+{
+  "base_commit": "e497aa7db882a96dd2b4cc9d0f918c15e4970acf",
+  "baseline": "/Users/monster/Documents/GitHub/code/RAG/specs/004-coding-task-async/scope-baseline-T002.json",
+  "new_files": [
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts"
+  ],
+  "modified_preexisting_files": [
+    "apps/rag-api/src/modules/workflow/coding-task.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/coding-task.service.ts"
+  ],
+  "touched_files": [
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts",
+    "apps/rag-api/src/modules/workflow/coding-task.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/coding-task.service.ts"
+  ],
+  "allow_patterns": [
+    "apps/rag-api/src/modules/agent-loop/agent-loop.types.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.ts",
+    "apps/rag-api/src/modules/agent-loop/agent-loop.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/coding-task.service.ts",
+    "apps/rag-api/src/modules/workflow/coding-task.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace.service.spec.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.ts",
+    "apps/rag-api/src/modules/workflow/production-project-workspace-agent.service.spec.ts"
+  ],
+  "internal_patterns": [
+    "specs/004-coding-task-async/**",
+    "specs/004-coding-task-async/scope-baseline-T002.json"
+  ],
+  "outside_scope": [],
+  "passed": true
+}
