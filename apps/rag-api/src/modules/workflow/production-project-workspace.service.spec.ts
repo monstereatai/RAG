@@ -110,6 +110,7 @@ describe('ProductionProjectWorkspaceService', () => {
       expireRequired: jest.fn().mockResolvedValue(undefined),
     };
     artifacts = {
+      listStudioVersions: jest.fn().mockResolvedValue([]),
       getStudioVersion: jest.fn((id: string) =>
         Promise.resolve({
           id,
@@ -119,7 +120,11 @@ describe('ProductionProjectWorkspaceService', () => {
           status: 'ready',
           kind: 'code',
           filename: `${id}.zip`,
-          metadata: JSON.stringify({ studio: 'production', framework: 'vue' }),
+          metadata: JSON.stringify({
+            studio: 'production',
+            target: 'vue-page',
+            framework: 'vue',
+          }),
         }),
       ),
       getStudioVersionFile: jest.fn(async () => ({
@@ -204,6 +209,160 @@ describe('ProductionProjectWorkspaceService', () => {
       redisValues.has(identityKey('tenant-1', 'owner-1', 'thread-1')),
     ).toBe(true);
     expect(connectSandbox).not.toHaveBeenCalled();
+  });
+
+  it('rejects a backend artifact whose source does not contain a runnable NestJS manifest', async () => {
+    artifacts.getStudioVersion.mockResolvedValueOnce({
+      id: 'artifact-1',
+      tenantId: 'tenant-1',
+      ownerUserId: 'owner-1',
+      threadId: 'thread-1',
+      status: 'ready',
+      kind: 'code',
+      filename: 'nestjs-api-v1.zip',
+      metadata: JSON.stringify({ studio: 'production', target: 'nestjs-api' }),
+      sourceText: JSON.stringify({ framework: 'react', files: {} }),
+    });
+
+    await expect(
+      service.validateCodingArtifact(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        'backend',
+        'code',
+      ),
+    ).rejects.toThrow('ready generated code ZIP');
+  });
+
+  it('requires both QA and source-role approval for an explicit verification task', async () => {
+    const workflow = (
+      service as unknown as {
+        workflow: { codingContext: jest.Mock };
+      }
+    ).workflow;
+    const backendFiles = {
+      'package.json': JSON.stringify({
+        scripts: {
+          start: 'node dist/main.js',
+          'start:dev': 'tsx watch src/main.ts',
+          build: 'tsc -p tsconfig.json',
+          lint: 'tsc --noEmit -p tsconfig.json',
+          test: 'npm run build && node --test test/*.test.js',
+        },
+      }),
+      'src/main.ts': 'export {};',
+      'src/app.module.ts': 'export {};',
+      'src/app.controller.ts': 'export {};',
+      'src/app.service.ts': 'export {};',
+      'src/dto/create-task.dto.ts': 'export {};',
+      'test/app.service.test.js': 'test',
+    };
+    artifacts.getStudioVersion.mockResolvedValue({
+      id: 'artifact-1',
+      tenantId: 'tenant-1',
+      ownerUserId: 'owner-1',
+      threadId: 'thread-1',
+      status: 'ready',
+      kind: 'code',
+      filename: 'nestjs-api-v1.zip',
+      metadata: JSON.stringify({ studio: 'production', target: 'nestjs-api' }),
+      sourceText: JSON.stringify({ framework: 'nestjs', files: backendFiles }),
+    });
+    workflow.codingContext
+      .mockResolvedValueOnce({
+        threadId: 'thread-1',
+        runId: 'parent-run',
+        selectedRoles: ['backend', 'qa'],
+      })
+      .mockResolvedValueOnce({
+        threadId: 'thread-1',
+        selectedRoles: ['backend'],
+      });
+
+    await expect(
+      service.validateCodingArtifact(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        'qa',
+        'verify',
+        true,
+      ),
+    ).resolves.toMatchObject({
+      runId: 'parent-run',
+      artifactMetadata: expect.stringContaining('nestjs-api'),
+    });
+    await expect(
+      service.validateCodingArtifact(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        'qa',
+        'verify',
+        true,
+      ),
+    ).rejects.toThrow('ready generated code ZIP');
+  });
+
+  it('rejects a backend ZIP missing the actual package scripts before creating a sandbox', async () => {
+    const backendFiles = {
+      'package.json': JSON.stringify({ scripts: { build: 'tsc' } }),
+      'src/main.ts': 'export {};',
+      'src/app.module.ts': 'export {};',
+      'src/app.controller.ts': 'export {};',
+      'src/app.service.ts': 'export {};',
+      'src/dto/create-task.dto.ts': 'export {};',
+      'test/app.service.test.js': 'test',
+    };
+    const validSourceFiles = {
+      ...backendFiles,
+      'package.json': JSON.stringify({
+        scripts: {
+          start: 'node dist/main.js',
+          'start:dev': 'tsx watch src/main.ts',
+          build: 'tsc -p tsconfig.json',
+          lint: 'tsc --noEmit -p tsconfig.json',
+          test: 'npm run build && node --test test/*.test.js',
+        },
+      }),
+    };
+    const archive = await new JSZip()
+      .file('package.json', backendFiles['package.json'])
+      .file('src/main.ts', backendFiles['src/main.ts'])
+      .file('src/app.module.ts', backendFiles['src/app.module.ts'])
+      .file('src/app.controller.ts', backendFiles['src/app.controller.ts'])
+      .file('src/app.service.ts', backendFiles['src/app.service.ts'])
+      .file('src/dto/create-task.dto.ts', backendFiles['src/dto/create-task.dto.ts'])
+      .file('test/app.service.test.js', backendFiles['test/app.service.test.js'])
+      .generateAsync({ type: 'nodebuffer' });
+    artifacts.getStudioVersion.mockResolvedValueOnce({
+      id: 'artifact-1',
+      tenantId: 'tenant-1',
+      ownerUserId: 'owner-1',
+      threadId: 'thread-1',
+      status: 'ready',
+      kind: 'code',
+      filename: 'nestjs-api-v1.zip',
+      metadata: JSON.stringify({ studio: 'production', target: 'nestjs-api' }),
+      sourceText: JSON.stringify({ framework: 'nestjs', files: validSourceFiles }),
+    });
+    artifacts.getStudioVersionFile.mockResolvedValueOnce({ body: archive });
+
+    await expect(
+      service.startWorkspace(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        'backend',
+        'code',
+      ),
+    ).rejects.toThrow('ZIP 缺少可运行的 package scripts');
+    expect(createSandbox).not.toHaveBeenCalled();
   });
 
   it('applies CPU, memory, and disk limits when creating a workspace', async () => {
@@ -576,7 +735,12 @@ describe('ProductionProjectWorkspaceService', () => {
       '/root/workspace/src/main.ts',
     );
     expect(input.filename).toMatch(/^workspace-export-v\d+\.zip$/);
-    expect(input.metadata.target).toBe('workspace-export');
+    expect(input.metadata.target).toBe('vue-page');
+    expect(input.metadata.parentArtifactId).toBe('artifact-1');
+    expect(JSON.parse(String(input.sourceText))).toMatchObject({
+      framework: 'vue',
+      files: { 'src/main.ts': 'export {};' },
+    });
     expect(artifact.status).toBe('ready');
 
     await expect(
@@ -586,6 +750,32 @@ describe('ProductionProjectWorkspaceService', () => {
     expect(
       redisValues.has(identityKey('tenant-1', 'owner-1', 'thread-1')),
     ).toBe(false);
+  });
+
+  it('reuses the output Artifact for a retried Coding Task', async () => {
+    const existing = {
+      id: 'artifact-coding-task-1',
+      status: 'ready',
+      metadata: { codingTaskId: 'coding-task-1' },
+    };
+    artifacts.listStudioVersions.mockResolvedValueOnce([existing]);
+    artifacts.getStudioVersion.mockResolvedValueOnce({ tenantId: 'tenant-1' });
+
+    await expect(
+      service.exportWorkspace(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        {
+          taskId: 'coding-task-1',
+          role: 'backend',
+          parentRunId: 'workflow-run-1',
+          traceId: 'coding-run-1',
+        },
+      ),
+    ).resolves.toMatchObject({ id: 'artifact-coding-task-1' });
+    expect(artifacts.createStudioVersion).not.toHaveBeenCalled();
+    expect(createSandbox).not.toHaveBeenCalled();
   });
 
   it('compares workspace file hashes and preserves each declared verification exit code', async () => {

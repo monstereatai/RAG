@@ -374,6 +374,7 @@ export function useWorkflowDetailController() {
 
   const workspaceController = useWorkflowWorkspaceController({
     workflow,
+    artifactVersions,
     refreshArtifactVersions,
     downloadArtifact,
   });

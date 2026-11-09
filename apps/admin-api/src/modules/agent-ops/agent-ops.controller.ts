@@ -350,7 +350,7 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:write')
   startWorkflowWorkspace(
     @Param('threadId') threadId: string,
-    @Body() body: { artifactId: string },
+    @Body() body: { artifactId: string; role?: 'frontend' | 'backend' | 'qa' },
     @Req() req: Request,
   ) {
     return this.ragClient.startProductionWorkflowWorkspace(
@@ -380,7 +380,14 @@ export class AgentOpsController {
   @RequirePermission('admin:qa-ops:write')
   submitWorkflowWorkspaceCodingTask(
     @Param('threadId') threadId: string,
-    @Body() body: { artifactId: string; instruction: string; requestId: string },
+    @Body()
+    body: {
+      artifactId: string;
+      instruction: string;
+      requestId: string;
+      role?: 'frontend' | 'backend' | 'qa';
+      task?: 'code' | 'verify';
+    },
     @Req() req: Request,
   ) {
     return this.ragClient.submitProductionWorkflowWorkspaceCodingTask(
@@ -404,6 +411,26 @@ export class AgentOpsController {
       this.userId(req),
       this.tenantId(req),
     );
+  }
+
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId/report/download')
+  @RequirePermission('admin:qa-ops:read')
+  async downloadWorkflowWorkspaceCodingTaskReport(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const response =
+      await this.ragClient.downloadProductionWorkflowWorkspaceCodingTaskReport(
+        threadId,
+        taskId,
+        this.userId(req),
+        this.tenantId(req),
+      );
+    res.status(response.status ?? 500);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    return res.send(Buffer.from(await response.arrayBuffer()));
   }
 
   @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')

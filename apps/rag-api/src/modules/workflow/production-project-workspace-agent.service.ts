@@ -35,6 +35,7 @@ type WorkspaceAgentEvent = {
   output: string;
 };
 type WorkspaceAgentState = {
+  role: 'frontend' | 'backend';
   instruction: string;
   events: WorkspaceAgentEvent[];
 };
@@ -71,22 +72,40 @@ export class ProductionProjectWorkspaceAgentService {
     tenantId: string | undefined,
     artifactId: string,
     instruction: string,
-    options?: { runId?: string; taskId?: string; resume?: boolean },
+    options?: {
+      runId?: string;
+      taskId?: string;
+      resume?: boolean;
+      role?: 'frontend' | 'backend';
+      strictRole?: boolean;
+    },
   ): Promise<WorkspaceAgentOutput> {
     const normalizedInstruction = instruction.trim();
     if (!normalizedInstruction || normalizedInstruction.length > 4_000) {
       throw new BadRequestException('instruction must be 1–4000 characters');
     }
 
+    const role = options?.role ?? 'frontend';
     if (options?.resume) {
       await this.workspace.assertWorkspaceReady(
         threadId,
         userId,
         tenantId,
         artifactId,
+        role,
+        'code',
+        options?.strictRole ?? false,
       );
     } else {
-      await this.workspace.startWorkspace(threadId, userId, tenantId, artifactId);
+      await this.workspace.startWorkspace(
+        threadId,
+        userId,
+        tenantId,
+        artifactId,
+        role,
+        'code',
+        options?.strictRole ?? false,
+      );
     }
 
     const runId = options?.runId ?? randomUUID();
@@ -99,7 +118,7 @@ export class ProductionProjectWorkspaceAgentService {
       taskId: options?.taskId,
       actor: 'production-workspace-agent',
       tenantId,
-      initialState: { instruction: normalizedInstruction, events: [] },
+      initialState: { role, instruction: normalizedInstruction, events: [] },
       maxSteps: MAX_AGENT_STEPS,
       maxToolCalls: MAX_AGENT_TOOL_CALLS,
       timeoutMs: AGENT_TIMEOUT_MS,
@@ -108,11 +127,11 @@ export class ProductionProjectWorkspaceAgentService {
           {
             role: 'system',
             content:
-              buildProductionProjectWorkspaceAgentPrompt(MAX_AGENT_TOOL_CALLS),
+              buildProductionProjectWorkspaceAgentPrompt(MAX_AGENT_TOOL_CALLS, role),
           },
           {
             role: 'user',
-            content: `用户任务：\n${state.instruction}\n\n最近执行记录：\n${this.historyText(state.events)}\n\n请输出下一步动作。若还没有查看项目结构或 package scripts，应先查看。`,
+            content: `执行岗位：${state.role}\n用户任务：\n${state.instruction}\n\n最近执行记录：\n${this.historyText(state.events)}\n\n请输出下一步动作。若还没有查看项目结构或 package scripts，应先查看。`,
           },
         ];
         const decision = await this.llmProvider
@@ -168,13 +187,13 @@ export class ProductionProjectWorkspaceAgentService {
 
         const action = decision;
         const idempotencyKey = createHash('sha256')
-          .update(`${threadId}\0${userId}\0${runId}\0${state.events.length}`)
+          .update(`${threadId}\0${userId}\0${runId}\0${state.role}\0${state.events.length}`)
           .digest('hex');
         return {
           type: 'tool',
           name: 'workspace_agent_command',
           mode: 'production',
-          role: 'frontend',
+          role: state.role,
           ownerUserId: userId,
           approvalPolicy: 'auto',
           allowedToolNames: ['workspace_agent_command'],
@@ -225,7 +244,13 @@ export class ProductionProjectWorkspaceAgentService {
     tenantId: string | undefined,
     artifactId: string,
     instruction: string,
-    options: { runId: string; taskId: string; resume: boolean },
+    options: {
+      runId: string;
+      taskId: string;
+      resume: boolean;
+      role?: 'frontend' | 'backend';
+      strictRole?: boolean;
+    },
   ): Promise<WorkspaceAgentOutput> {
     return this.run(threadId, userId, tenantId, artifactId, instruction, options);
   }
@@ -236,7 +261,12 @@ export class ProductionProjectWorkspaceAgentService {
     tenantId: string | undefined,
     artifactId: string,
     instruction: string,
-    options: { runId: string; taskId: string },
+    options: {
+      runId: string;
+      taskId: string;
+      role?: 'frontend' | 'backend';
+      strictRole?: boolean;
+    },
   ): Promise<void> {
     const normalizedInstruction = instruction.trim();
     if (!normalizedInstruction || normalizedInstruction.length > 4_000) {
@@ -247,6 +277,9 @@ export class ProductionProjectWorkspaceAgentService {
       userId,
       tenantId,
       artifactId,
+      options.role ?? 'frontend',
+      'code',
+      options.strictRole ?? false,
     );
     await this.agentLoop.assertCanResume({
       threadId,
@@ -254,7 +287,11 @@ export class ProductionProjectWorkspaceAgentService {
       taskId: options.taskId,
       actor: 'production-workspace-agent',
       tenantId,
-      initialState: { instruction: normalizedInstruction, events: [] },
+      initialState: {
+        role: options.role ?? 'frontend',
+        instruction: normalizedInstruction,
+        events: [],
+      },
       maxSteps: MAX_AGENT_STEPS,
       maxToolCalls: MAX_AGENT_TOOL_CALLS,
       timeoutMs: AGENT_TIMEOUT_MS,

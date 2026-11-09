@@ -29,6 +29,7 @@ describe('AgentOpsAdminController task owner isolation', () => {
     get: jest.fn(),
     cancel: jest.fn(),
     resume: jest.fn(),
+    getReportFile: jest.fn(),
   };
   const controller = new AgentOpsAdminController(
     workflows as never,
@@ -132,6 +133,27 @@ describe('AgentOpsAdminController task owner isolation', () => {
     );
   });
 
+  it('passes an explicit role through workspace startup with strict workflow scope', async () => {
+    projectWorkspace.startWorkspace.mockResolvedValue({ ready: true });
+
+    await controller.startProductionProjectWorkspace(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      { artifactId: 'nestjs-1', role: 'backend' },
+    );
+
+    expect(projectWorkspace.startWorkspace).toHaveBeenCalledWith(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      'nestjs-1',
+      'backend',
+      'code',
+      true,
+    );
+  });
+
   it('checks workflow ownership before accepting an async coding task', async () => {
     codingTasks.submit.mockResolvedValue({
       taskId: 'task-1',
@@ -181,6 +203,38 @@ describe('AgentOpsAdminController task owner isolation', () => {
     expect(codingTasks.cancel).toHaveBeenCalledWith({
       taskId: 'task-1', threadId: 'thread-1', ownerUserId: 'owner-1', tenantId: 'tenant-1', reason: '停止',
     });
+  });
+
+  it('streams an owner-scoped QA report file', async () => {
+    const body = Buffer.from('{"status":"passed"}');
+    codingTasks.getReportFile.mockResolvedValue({
+      artifact: { filename: 'qa report.json', contentType: 'application/json' },
+      body,
+    });
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      type: jest.fn().mockReturnThis(),
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn().mockReturnThis(),
+    };
+
+    await controller.downloadWorkspaceCodingTaskReport(
+      'thread-1',
+      'task-1',
+      'owner-1',
+      'tenant-1',
+      response as never,
+    );
+
+    expect(codingTasks.getReportFile).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      threadId: 'thread-1',
+      ownerUserId: 'owner-1',
+      tenantId: 'tenant-1',
+    });
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.type).toHaveBeenCalledWith('application/json');
+    expect(response.send).toHaveBeenCalledWith(body);
   });
 
   it('requires the explicit discard flag when destroying a project workspace', async () => {

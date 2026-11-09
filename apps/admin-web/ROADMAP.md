@@ -125,6 +125,7 @@
 
 ## 最近验证
 
+- 2026-11-09：Agent 工作台支持显式选择 frontend/backend coding 或 qa verify，展示角色对应 Artifact、QA 报告/人工复核状态，并可下载 QA JSON 报告和 Coding 输出 ZIP。`pnpm run lint`（Biome + TypeScript）、`pnpm exec antd lint ./src`、`pnpm run build`、工作区 Hook 定向 Vitest 3/3 通过。未做登录态浏览器 E2E 或生产验收。
 - 2026-11-01：文档治理列表新增历史中文乱码文件名显示恢复和上传时间格式化（本地时区，`YYYY-MM-DD HH:mm:ss`）；新上传文件名由 Admin/RAG 两层按 UTF-8 解析。Admin Web production build、目标 Biome、格式化工具 Vitest 3/3 通过。全量 `pnpm run lint` 的 Biome 阶段通过，TypeScript 阶段被未改动的 `workflow-detail-artifact-sections.tsx:517` 缺少 `Alert` 导入阻断。
 - 2026-09-13：顶部消息入口优化
   - `AdminShell` 复用现有 `/api/admin/notifications` 与标记已读接口，移除硬编码未读数。

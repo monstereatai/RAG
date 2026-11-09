@@ -24,6 +24,27 @@ describe('ToolExecutionPolicyService', () => {
     ).toMatchObject({ allowed: false });
   });
 
+  it('allows QA to run only the fixed workspace verification tool', () => {
+    expect(
+      service.decide('workspace_verify', {
+        mode: 'production',
+        role: 'qa',
+      }),
+    ).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(
+      service.decide('workspace_agent_command', {
+        mode: 'production',
+        role: 'qa',
+      }),
+    ).toMatchObject({ allowed: false });
+    expect(
+      service.decide('workspace_verify', {
+        mode: 'production',
+        role: 'backend',
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
   it('allows network search in Simple mode only as an evidence-shortage fallback', () => {
     expect(
       service.decide('bocha_web_search', { mode: 'simple' }),

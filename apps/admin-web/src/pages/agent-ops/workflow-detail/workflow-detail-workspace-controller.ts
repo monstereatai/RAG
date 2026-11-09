@@ -16,6 +16,7 @@ import {
 } from '../service';
 import {
   cancelProductionWorkspaceCodingTask,
+  downloadProductionWorkspaceCodingTaskReport,
   getProductionWorkspaceCodingTask,
   resumeProductionWorkspaceCodingTask,
   submitProductionWorkspaceCodingTask,
@@ -32,12 +33,14 @@ type WorkspaceStatusWithArtifact = ProductionWorkspaceStatus & {
 
 interface WorkflowWorkspaceControllerOptions {
   workflow: ProductionWorkflow | null;
+  artifactVersions: ProductionArtifactVersion[];
   refreshArtifactVersions: () => Promise<void>;
   downloadArtifact: (artifact: ProductionArtifactVersion) => Promise<void>;
 }
 
 export function useWorkflowWorkspaceController({
   workflow,
+  artifactVersions,
   refreshArtifactVersions,
   downloadArtifact,
 }: WorkflowWorkspaceControllerOptions) {
@@ -48,6 +51,10 @@ export function useWorkflowWorkspaceController({
   const [workspaceStatusLoadFailed, setWorkspaceStatusLoadFailed] =
     React.useState(false);
   const [workspaceArtifactId, setWorkspaceArtifactId] = React.useState('');
+  const [workspaceRole, setWorkspaceRole] = React.useState<
+    'frontend' | 'backend' | 'qa'
+  >('frontend');
+  const workspaceTask = workspaceRole === 'qa' ? 'verify' : 'code';
   const [workspaceBusy, setWorkspaceBusy] = React.useState(false);
   const [workspaceInstruction, setWorkspaceInstruction] = React.useState('');
   const [workspaceCodingTask, setWorkspaceCodingTask] =
@@ -66,6 +73,7 @@ export function useWorkflowWorkspaceController({
     if (!workflow?.threadId) {
       setWorkspaceStatus(null);
       setWorkspaceArtifactId('');
+      setWorkspaceRole('frontend');
       setWorkspaceStatusLoading(false);
       setWorkspaceStatusLoadFailed(false);
       setWorkspaceCodingTask(null);
@@ -76,6 +84,7 @@ export function useWorkflowWorkspaceController({
     setWorkspaceStatusLoading(true);
     setWorkspaceStatusLoadFailed(false);
     setWorkspaceArtifactId('');
+    setWorkspaceRole('frontend');
     setWorkspaceCodingTask(null);
     setWorkspaceCodingTaskPollingError('');
     getProductionWorkspaceStatus(workflow.threadId)
@@ -108,6 +117,23 @@ export function useWorkflowWorkspaceController({
   }, [workflow?.threadId]);
 
   React.useEffect(() => {
+    const boundArtifact = artifactVersions.find(
+      (artifact) => artifact.id === workspaceStatus?.artifactId,
+    );
+    const target = boundArtifact?.metadata?.target;
+    if (target === 'nestjs-api' && workspaceRole === 'frontend') {
+      setWorkspaceRole('backend');
+    } else if (
+      ['vue-page', 'react-page', 'vue-dashboard', 'react-dashboard'].includes(
+        String(target),
+      ) &&
+      workspaceRole === 'backend'
+    ) {
+      setWorkspaceRole('frontend');
+    }
+  }, [artifactVersions, workspaceRole, workspaceStatus?.artifactId]);
+
+  React.useEffect(() => {
     if (
       !workflow?.threadId ||
       !workspaceCodingTask ||
@@ -132,6 +158,9 @@ export function useWorkflowWorkspaceController({
         if (active && ['queued', 'running'].includes(task.status)) {
           timer = setTimeout(poll, 2000);
         } else if (active) {
+          void refreshArtifactVersions().catch(() =>
+            message.error('产物版本刷新失败'),
+          );
           void getProductionWorkspaceStatus(workflow.threadId)
             .then((statusResponse) => {
               const status =
@@ -180,6 +209,7 @@ export function useWorkflowWorkspaceController({
     try {
       const response = await startProductionWorkspace(workflow.threadId, {
         artifactId: workspaceArtifactId,
+        role: workspaceRole,
       });
       const status = unwrapData<WorkspaceStatusWithArtifact>(response);
       if (!status) {
@@ -225,6 +255,8 @@ export function useWorkflowWorkspaceController({
         artifactId: workspaceArtifactId,
         instruction: workspaceInstruction.trim(),
         requestId: crypto.randomUUID(),
+        role: workspaceRole,
+        task: workspaceTask,
       });
       const accepted = unwrapData<{
         taskId: string;
@@ -237,6 +269,11 @@ export function useWorkflowWorkspaceController({
         runId: accepted.runId,
         threadId: workflow.threadId,
         status: accepted.status,
+        role: workspaceRole,
+        taskType: workspaceTask,
+        artifactId: workspaceArtifactId,
+        outputArtifactId: null,
+        parentRunId: null,
         attempt: 0,
         lastCompletedStep: 0,
         summary: null,
@@ -245,13 +282,34 @@ export function useWorkflowWorkspaceController({
         events: [],
         updatedAt: new Date().toISOString(),
       });
-      message.success('Agent 开发任务已提交');
+      message.success(
+        workspaceTask === 'verify' ? 'QA 验证任务已提交' : 'Agent 开发任务已提交',
+      );
     } catch (error) {
       message.error(
         error instanceof Error ? error.message : 'Agent 开发任务失败',
       );
     } finally {
       setWorkspaceBusy(false);
+    }
+  };
+
+  const downloadCodingTaskReport = async () => {
+    if (!workflow || !workspaceCodingTask) return;
+    try {
+      const response = await downloadProductionWorkspaceCodingTaskReport(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `qa-report-${workspaceCodingTask.taskId}.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '下载 QA 报告失败');
     }
   };
 
@@ -491,6 +549,9 @@ export function useWorkflowWorkspaceController({
     workspaceStatusLoadFailed,
     workspaceArtifactId,
     setWorkspaceArtifactId,
+    workspaceRole,
+    setWorkspaceRole,
+    workspaceTask,
     workspaceBusy,
     workspaceInstruction,
     setWorkspaceInstruction,
@@ -508,6 +569,7 @@ export function useWorkflowWorkspaceController({
     setWorkspacePreviewUrl,
     startWorkspace,
     runWorkspaceAgent,
+    downloadCodingTaskReport,
     cancelWorkspaceCodingTask,
     resumeWorkspaceCodingTask,
     runWorkspaceCommand,

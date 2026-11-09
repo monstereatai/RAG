@@ -14,6 +14,9 @@ import { AgentTasksService } from '../agent-tasks/agent-tasks.service';
 import { DomainEventsService } from '../domain-events/domain-events.service';
 import { ProductionProjectWorkspaceAgentService } from './production-project-workspace-agent.service';
 import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
+import { ProductionTestAgentService } from './production-test-agent.service';
+import { ArtifactsService } from '../artifacts/artifacts.service';
+import { resolveProductionRoleAgentPlan } from './production-role-agent-policy';
 import type {
   ProductionWorkflowJobAttempt,
 } from './production-workflow-queue.service';
@@ -24,6 +27,14 @@ type CodingTaskJob = Extract<
   import('./production-workflow-queue.service').ProductionWorkflowJob,
   { operation: 'coding_task' }
 >;
+type CodingTaskContext = {
+  artifactId: string;
+  instruction: string;
+  role: 'frontend' | 'backend' | 'qa';
+  task: 'code' | 'verify';
+  strictRole: boolean;
+  parentRunId: string | null;
+};
 
 const CODING_TASK_DISPATCH_EVENT = 'workflow.dispatch.requested';
 const CODING_TASK_DISPATCH_NAMESPACE = 'coding-task-dispatch';
@@ -40,6 +51,8 @@ export class CodingTaskService implements OnModuleInit {
     private readonly queue: ProductionWorkflowQueueService,
     private readonly workspaceAgent: ProductionProjectWorkspaceAgentService,
     private readonly workspace: ProductionProjectWorkspaceService,
+    private readonly testAgent: ProductionTestAgentService,
+    private readonly artifacts: ArtifactsService,
   ) {}
 
   onModuleInit(): void {
@@ -60,8 +73,25 @@ export class CodingTaskService implements OnModuleInit {
     const artifactId = input.body.artifactId.trim();
     const instruction = input.body.instruction.trim();
     const requestId = input.body.requestId.trim().toLowerCase();
+    const plan = resolveProductionRoleAgentPlan({
+      role: input.body.role,
+      task: input.body.task,
+    });
+    const strictRole =
+      input.body.role !== undefined || input.body.task !== undefined;
     const requestHash = createHash('sha256')
-      .update(JSON.stringify([tenantId, ownerUserId, threadId, artifactId, instruction]))
+      .update(
+        JSON.stringify([
+          tenantId,
+          ownerUserId,
+          threadId,
+          plan.role,
+          plan.task,
+          strictRole,
+          artifactId,
+          instruction,
+        ]),
+      )
       .digest('hex');
 
     const existing = await this.tasks.findCodingTaskByRequest({
@@ -73,11 +103,14 @@ export class CodingTaskService implements OnModuleInit {
       return this.toAccepted(this.assertExisting(existing, requestHash, threadId));
     }
 
-    await this.workspace.validateCodingArtifact(
+    const workflowContext = await this.workspace.validateCodingArtifact(
       threadId,
       ownerUserId,
       tenantId,
       artifactId,
+      plan.role,
+      plan.task,
+      strictRole,
     );
 
     const taskId = randomUUID();
@@ -102,8 +135,8 @@ export class CodingTaskService implements OnModuleInit {
             tenantId,
             mode: 'coding',
             route: 'workspace_agent',
-            maxSteps: 10,
-            maxToolCalls: 8,
+            maxSteps: plan.task === 'verify' ? 6 : 10,
+            maxToolCalls: plan.task === 'verify' ? 4 : 8,
           },
           manager,
         );
@@ -118,6 +151,10 @@ export class CodingTaskService implements OnModuleInit {
             requestHash,
             artifactId,
             instruction,
+            role: plan.role,
+            task: plan.task,
+            strictRole,
+            parentRunId: workflowContext.runId,
           },
           manager,
         );
@@ -138,7 +175,13 @@ export class CodingTaskService implements OnModuleInit {
         await this.tasks.ensureCodingTaskEvent(
           created.task as AgentTaskEntity,
           'task.created',
-          { status: 'queued', taskType: 'coding_task' },
+          {
+            status: 'queued',
+            taskType: 'coding_task',
+            role: plan.role,
+            task: plan.task,
+            parentRunId: workflowContext.runId,
+          },
           `coding-task-created:${created.task!.id}`,
         );
       }
@@ -169,6 +212,7 @@ export class CodingTaskService implements OnModuleInit {
       input.tenantId?.trim() || 'legacy',
       input.threadId,
     );
+    const context = this.parseContext(task.codingContext);
     const events = await this.runtimeEvents.list(
       task.threadId,
       task.runId ?? undefined,
@@ -179,16 +223,58 @@ export class CodingTaskService implements OnModuleInit {
     return {
       taskId: task.id,
       runId: task.runId,
+      traceId: task.runId,
       threadId: task.threadId,
+      role: context.role,
+      taskType: context.task,
+      artifactId: context.artifactId,
+      parentRunId: context.parentRunId,
+      outputArtifactId: task.outputArtifactId,
       status: task.status,
       attempt: task.retryCount,
       lastCompletedStep: task.lastCompletedStep,
       summary: task.resultSummary,
       error: task.errorMessage,
+      failureReason: task.errorMessage,
       verification: this.parseJson(task.verification),
       events,
+      createdAt: task.createdAt,
       updatedAt: task.updatedAt,
     };
+  }
+
+  async getReportFile(input: {
+    taskId: string;
+    threadId: string;
+    ownerUserId: string;
+    tenantId?: string;
+  }) {
+    const task = await this.tasks.findOwnedCodingTask(
+      input.taskId,
+      input.ownerUserId,
+      input.tenantId?.trim() || 'legacy',
+      input.threadId,
+    );
+    if (!task.outputArtifactId) {
+      throw new ConflictException('QA report artifact is not available');
+    }
+    const artifact = await this.artifacts.getOwned(
+      task.outputArtifactId,
+      input.ownerUserId,
+    );
+    const metadata = this.parseJson(artifact.metadata) as
+      | Record<string, unknown>
+      | null;
+    if (
+      artifact.threadId !== input.threadId ||
+      (artifact.tenantId ?? 'legacy') !==
+        (input.tenantId?.trim() || 'legacy') ||
+      metadata?.studio !== 'qa' ||
+      metadata?.taskId !== task.id
+    ) {
+      throw new ConflictException('QA report artifact identity mismatch');
+    }
+    return this.artifacts.getFileOwned(artifact.id, input.ownerUserId);
   }
 
   async cancel(input: {
@@ -264,14 +350,31 @@ export class CodingTaskService implements OnModuleInit {
 
     const context = this.parseContext(task.codingContext);
     try {
-      await this.workspaceAgent.assertCanResume(
-        task.threadId,
-        task.ownerUserId!,
-        task.tenantId ?? undefined,
-        context.artifactId,
-        context.instruction,
-        { runId: task.runId, taskId: task.id },
-      );
+      if (context.task === 'verify') {
+        await this.testAgent.assertCanResume({
+          threadId: task.threadId,
+          userId: task.ownerUserId!,
+          tenantId: task.tenantId ?? undefined,
+          artifactId: context.artifactId,
+          instruction: context.instruction,
+          runId: task.runId,
+          taskId: task.id,
+        });
+      } else {
+        await this.workspaceAgent.assertCanResume(
+          task.threadId,
+          task.ownerUserId!,
+          task.tenantId ?? undefined,
+          context.artifactId,
+          context.instruction,
+          {
+            runId: task.runId,
+            taskId: task.id,
+            role: context.role as 'frontend' | 'backend',
+            strictRole: context.strictRole,
+          },
+        );
+      }
     } catch (error) {
       if (error instanceof AgentLoopResumeError) {
         const nextStatus =
@@ -359,10 +462,24 @@ export class CodingTaskService implements OnModuleInit {
       throw error;
     }
 
+    if (context.task === 'verify') {
+      await this.processVerificationJob(task, job, attempt, context);
+      return;
+    }
+
     let output: Awaited<
       ReturnType<ProductionProjectWorkspaceAgentService['runWithExecutionOptions']>
     >;
     try {
+      await this.workspace.validateCodingArtifact(
+        task.threadId,
+        task.ownerUserId!,
+        task.tenantId ?? undefined,
+        context.artifactId,
+        context.role,
+        'code',
+        context.strictRole,
+      );
       output = await this.workspaceAgent.runWithExecutionOptions(
         task.threadId,
         task.ownerUserId!,
@@ -373,6 +490,8 @@ export class CodingTaskService implements OnModuleInit {
           runId: task.runId!,
           taskId: task.id,
           resume: job.resume || attempt.attempt > 1,
+          role: context.role as 'frontend' | 'backend',
+          strictRole: context.strictRole,
         },
       );
     } catch (error) {
@@ -431,6 +550,10 @@ export class CodingTaskService implements OnModuleInit {
           task.ownerUserId!,
           task.tenantId ?? undefined,
           context.artifactId,
+          undefined,
+          context.role,
+          'code',
+          context.strictRole,
         );
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -457,6 +580,58 @@ export class CodingTaskService implements OnModuleInit {
           verification.diff.modified.length +
           verification.diff.deleted.length >
         0;
+      const currentTask = await this.tasks.findById(task.id);
+      if (currentTask.status === 'cancelled') {
+        await this.tasks.ensureCodingTaskEvent(
+          currentTask,
+          'task.cancelled',
+          { status: 'cancelled' },
+          `coding-task-cancelled:${currentTask.id}`,
+        );
+        return;
+      }
+      if (this.isTaskClosed(currentTask.status)) return;
+      let outputArtifactId: string | null = null;
+      if (hasDiff) {
+        try {
+          const outputArtifact = await this.workspace.exportWorkspace(
+            task.threadId,
+            task.ownerUserId!,
+            task.tenantId ?? undefined,
+            {
+              taskId: task.id,
+              role: context.role as 'frontend' | 'backend',
+              parentRunId: context.parentRunId,
+              traceId: task.runId!,
+            },
+          );
+          outputArtifactId = outputArtifact.id;
+        } catch (error) {
+          if (attempt.finalAttempt) {
+            const message = error instanceof Error ? error.message : String(error);
+            const run = await this.runs.finish(task.runId!, {
+              route: 'workspace_agent',
+              status: 'failed',
+              errorMessage: message.slice(0, 2_000),
+              retryCount: job.taskAttempt,
+            });
+            const saved = await this.saveTaskResult(task, {
+              status: run.status === 'cancelled' ? 'cancelled' : 'failed',
+              errorMessage: `Coding ZIP Artifact 保存失败：${message.slice(0, 1_500)}`,
+              resultSummary: output.summary.slice(0, 2_000),
+            });
+            if (saved) {
+              await this.tasks.ensureCodingTaskEvent(
+                saved,
+                saved.status === 'cancelled' ? 'task.cancelled' : 'task.failed',
+                { status: saved.status, error: saved.errorMessage },
+                `coding-task-artifact-failed:${saved.id}:${job.taskAttempt}`,
+              );
+            }
+          }
+          throw error;
+        }
+      }
       const status = hasFailedCheck
         ? 'verification_failed'
         : !hasDiff || !hasApplicableCheck
@@ -476,6 +651,7 @@ export class CodingTaskService implements OnModuleInit {
             ? '一项或多项声明的 package script 检查失败。'
             : null,
         verification: JSON.stringify(verification),
+        outputArtifactId,
         lastCompletedStep: output.steps.length,
       });
       if (saved) {
@@ -574,6 +750,216 @@ export class CodingTaskService implements OnModuleInit {
     );
   }
 
+  private async processVerificationJob(
+    task: AgentTaskEntity,
+    job: CodingTaskJob,
+    attempt: ProductionWorkflowJobAttempt,
+    context: CodingTaskContext,
+  ): Promise<void> {
+    let output: Awaited<
+      ReturnType<ProductionTestAgentService['runWithExecutionOptions']>
+    >;
+    try {
+      output = await this.testAgent.runWithExecutionOptions({
+        threadId: task.threadId,
+        userId: task.ownerUserId!,
+        tenantId: task.tenantId ?? undefined,
+        artifactId: context.artifactId,
+        instruction: context.instruction,
+        runId: task.runId!,
+        taskId: task.id,
+        parentRunId: context.parentRunId ?? undefined,
+        resume: job.resume || attempt.attempt > 1,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt.finalAttempt) {
+        const events = await this.runtimeEvents.list(
+          task.threadId,
+          task.runId!,
+          task.tenantId?.trim() || 'legacy',
+          undefined,
+          500,
+        );
+        const hasUnknownTool = events.some(
+          (event) => event.eventType === 'tool.unknown',
+        );
+        const status = hasUnknownTool
+          ? 'waiting_reconciliation'
+          : error instanceof AgentLoopResumeError &&
+              error.code === 'budget_exceeded'
+            ? 'budget_exceeded'
+            : 'failed';
+        const run = await this.runs.finish(task.runId!, {
+          route: 'workspace_agent',
+          status: 'failed',
+          errorMessage: message.slice(0, 2_000),
+          retryCount: job.taskAttempt,
+        });
+        const saved = await this.saveTaskResult(task, {
+          status: run.status === 'cancelled' ? 'cancelled' : status,
+          errorMessage: message.slice(0, 2_000),
+          resultSummary: null,
+        });
+        if (saved) {
+          await this.tasks.ensureCodingTaskEvent(
+            saved,
+            saved.status === 'waiting_reconciliation'
+              ? 'task.reconciliation_required'
+              : saved.status === 'cancelled'
+                ? 'task.cancelled'
+                : 'task.failed',
+            {
+              status: saved.status,
+              error: saved.errorMessage,
+              attempt: attempt.attempt,
+            },
+            `qa-task-failed:${saved.id}:${job.taskAttempt}`,
+          );
+        }
+      }
+      throw error;
+    }
+
+    let outputArtifactId: string | null = null;
+    if (output.report) {
+      const body = Buffer.from(`${JSON.stringify(output.report, null, 2)}\n`);
+      try {
+        const reportArtifact = await this.artifacts.createStudioVersion({
+          ownerUserId: task.ownerUserId!,
+          tenantId: task.tenantId ?? undefined,
+          threadId: task.threadId,
+          title: `QA 报告 ${task.id}`,
+          kind: 'json',
+          filename: `qa-report-${task.id}.json`,
+          sourceText: body.toString('utf8'),
+          body,
+          contentType: 'application/json; charset=utf-8',
+          metadata: {
+            studio: 'qa',
+            target: 'qa-report',
+            role: 'qa',
+            taskType: 'verify',
+            taskId: task.id,
+            parentRunId: context.parentRunId,
+            traceId: task.runId,
+            artifactId: context.artifactId,
+            artifactVersion: output.report.artifactVersion,
+          },
+        });
+        outputArtifactId = reportArtifact.id;
+      } catch (error) {
+        if (attempt.finalAttempt) {
+          const message = error instanceof Error ? error.message : String(error);
+          const run = await this.runs.finish(task.runId!, {
+            route: 'workspace_agent',
+            status: 'failed',
+            errorMessage: message.slice(0, 2_000),
+            retryCount: job.taskAttempt,
+          });
+          const saved = await this.saveTaskResult(task, {
+            status: run.status === 'cancelled' ? 'cancelled' : 'failed',
+            errorMessage: `QA 报告 Artifact 保存失败：${message.slice(0, 1_500)}`,
+            resultSummary: output.summary.slice(0, 2_000),
+          });
+          if (saved) {
+            await this.tasks.ensureCodingTaskEvent(
+              saved,
+              saved.status === 'cancelled' ? 'task.cancelled' : 'task.failed',
+              { status: saved.status, error: saved.errorMessage },
+              `qa-report-artifact-failed:${saved.id}:${job.taskAttempt}`,
+            );
+          }
+        }
+        throw error;
+      }
+    }
+
+    const events =
+      output.status === 'blocked'
+        ? await this.runtimeEvents.list(
+            task.threadId,
+            task.runId!,
+            task.tenantId?.trim() || 'legacy',
+            undefined,
+            500,
+          )
+        : [];
+    const hasUnknownTool = events.some(
+      (event) => event.eventType === 'tool.unknown',
+    );
+    const taskStatus =
+      output.status !== 'completed'
+        ? output.status === 'cancelled'
+          ? 'cancelled'
+          : output.status === 'budget_exceeded'
+            ? 'budget_exceeded'
+            : output.status === 'blocked'
+              ? hasUnknownTool
+                ? 'waiting_reconciliation'
+                : 'blocked'
+              : 'failed'
+        : output.report?.status === 'failed'
+          ? 'verification_failed'
+          : 'waiting_review';
+    const runStatus = output.status === 'completed' ? 'completed' : 'failed';
+    const run = await this.runs.finish(task.runId!, {
+      route: 'workspace_agent',
+      status: runStatus,
+      resultSummary: output.summary.slice(0, 2_000),
+      errorMessage:
+        output.status === 'completed' && output.report?.status === 'failed'
+          ? '一个或多个实际检查失败，请审阅 QA 报告。'
+          : output.report?.status === 'not_run'
+            ? '没有实际可用的检查结果，请审阅 QA 报告。'
+            : undefined,
+      retryCount: job.taskAttempt,
+    });
+    const saved = await this.saveTaskResult(task, {
+      status: run.status === 'cancelled' ? 'cancelled' : taskStatus,
+      resultSummary: output.report?.summary ?? output.summary.slice(0, 2_000),
+      errorMessage:
+        output.status !== 'completed'
+          ? output.summary.slice(0, 2_000)
+          : output.report?.status === 'failed'
+            ? '一个或多个实际检查失败，请审阅 QA 报告。'
+            : output.report?.status === 'not_run'
+              ? '没有实际可用的检查结果，请审阅 QA 报告。'
+              : null,
+      verification: output.report ? JSON.stringify(output.report) : null,
+      outputArtifactId,
+      lastCompletedStep: output.toolCalls,
+    });
+    if (saved) {
+      await this.tasks.ensureCodingTaskEvent(
+        saved,
+        saved.status === 'verification_failed'
+          ? 'task.verification_failed'
+          : saved.status === 'waiting_reconciliation'
+            ? 'task.reconciliation_required'
+          : saved.status === 'waiting_review'
+            ? 'task.review_required'
+            : saved.status === 'cancelled'
+              ? 'task.cancelled'
+              : saved.status === 'blocked'
+                ? 'task.blocked'
+                : saved.status === 'budget_exceeded'
+                  ? 'task.blocked'
+                  : 'task.failed',
+        {
+          status: saved.status,
+          role: 'qa',
+          taskType: 'verify',
+          summary: saved.resultSummary,
+          outputArtifactId: saved.outputArtifactId,
+          reportStatus: output.report?.status ?? null,
+          attempt: attempt.attempt,
+        },
+        `qa-task-result:${saved.id}:${job.taskAttempt}`,
+      );
+    }
+  }
+
   private isTaskClosed(status: string): boolean {
     return [
       'completed',
@@ -621,7 +1007,7 @@ export class CodingTaskService implements OnModuleInit {
     return { taskId: task.id, runId: task.runId, status: task.status };
   }
 
-  private parseContext(raw: string | null): { artifactId: string; instruction: string } {
+  private parseContext(raw: string | null): CodingTaskContext {
     try {
       const value = JSON.parse(raw ?? '') as Record<string, unknown>;
       if (
@@ -631,7 +1017,19 @@ export class CodingTaskService implements OnModuleInit {
       ) {
         throw new Error('invalid coding context');
       }
-      return { artifactId: value.artifactId, instruction: value.instruction };
+      const plan = resolveProductionRoleAgentPlan({
+        role: typeof value.role === 'string' ? value.role : undefined,
+        task: typeof value.task === 'string' ? value.task : undefined,
+      });
+      return {
+        artifactId: value.artifactId,
+        instruction: value.instruction,
+        role: plan.role,
+        task: plan.task,
+        strictRole: value.strictRole === true,
+        parentRunId:
+          typeof value.parentRunId === 'string' ? value.parentRunId : null,
+      };
     } catch {
       throw new ConflictException('Coding task context is unavailable');
     }

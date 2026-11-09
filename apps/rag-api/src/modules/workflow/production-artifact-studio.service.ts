@@ -123,6 +123,17 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
       if (target === 'activity-schema' || target === 'dashboard-schema') {
         continue;
       }
+      if (target === 'nestjs-api') {
+        result.push(
+          await this.saveNestJsApiVersion({
+            threadId,
+            userId,
+            tenantId,
+            context,
+          }),
+        );
+        continue;
+      }
       const schemaArtifact =
         target === 'vue-page' || target === 'react-page' ? activity : dashboard;
       if (!schemaArtifact) {
@@ -210,6 +221,11 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
       threadId,
     );
     const target = this.targetOf(base);
+    if (target === 'nestjs-api') {
+      throw new BadRequestException(
+        'NestJS 后端项目请通过隔离工作区 Coding Task 修改。',
+      );
+    }
     if (base.kind !== 'code' || this.isSchemaTarget(target)) {
       throw new BadRequestException('请选择一个已生成的 Vue/React 代码版本。');
     }
@@ -277,6 +293,11 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
       threadId,
     );
     const target = this.targetOf(base);
+    if (target === 'nestjs-api') {
+      throw new BadRequestException(
+        'NestJS 后端项目请通过隔离工作区 Coding Task 修改。',
+      );
+    }
     if (base.kind !== 'code' || this.isSchemaTarget(target)) {
       throw new BadRequestException('只能修改已生成的 Vue/React 代码版本。');
     }
@@ -444,6 +465,11 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
         ),
       };
     }
+    if (target === 'nestjs-api') {
+      throw new BadRequestException(
+        'NestJS 后端项目通过工作区 build/test 验证，不支持浏览器预览。',
+      );
+    }
     const stored = this.parseStoredCode(artifact.sourceText);
     return {
       html: await this.compileCodePreview(stored.framework, stored.files),
@@ -510,6 +536,13 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
       return {
         ...artifact,
         files: { [artifact.filename]: artifact.sourceText },
+      };
+    }
+    if (artifact.metadata?.target === 'nestjs-api') {
+      return {
+        ...artifact,
+        framework: 'nestjs',
+        files: this.parseStoredNestJsCode(artifact.sourceText),
       };
     }
     const stored = this.parseStoredCode(artifact.sourceText);
@@ -691,6 +724,156 @@ export class ProductionArtifactStudioService extends ProductionArtifactStudioSup
         filePaths: Object.keys(files),
       },
     });
+  }
+
+  private async saveNestJsApiVersion(input: {
+    threadId: string;
+    userId: string;
+    tenantId?: string;
+    context: Awaited<ReturnType<ProductionWorkflowService['codingContext']>>;
+  }) {
+    const previous = await this.versionsForTarget(
+      input.threadId,
+      input.userId,
+      'nestjs-api',
+    );
+    const version =
+      previous.reduce(
+        (maximum, item) =>
+          Math.max(maximum, Number(item.metadata?.version) || 0),
+        0,
+      ) + 1;
+    const backendStage = input.context.stages.find(
+      (stage) => stage.role === 'backend',
+    );
+    if (!backendStage) {
+      throw new BadRequestException('当前工作流没有已审批的后端岗位结果。');
+    }
+    const files = this.nestJsApiFiles(input.context);
+    const zip = new JSZip();
+    Object.entries(files).forEach(([filePath, content]) =>
+      zip.file(filePath, content),
+    );
+    const body = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+    });
+    const sourceText = JSON.stringify({ framework: 'nestjs', files });
+    return this.artifacts.createStudioVersion({
+      ownerUserId: input.userId,
+      tenantId: input.tenantId,
+      threadId: input.threadId,
+      title: `${LABELS['nestjs-api']} v${version}`,
+      kind: 'code',
+      filename: `nestjs-api-v${version}.zip`,
+      sourceText,
+      body,
+      contentType: 'application/zip',
+      metadata: {
+        target: 'nestjs-api',
+        version,
+        framework: 'nestjs',
+        workflowRunId: input.context.runId,
+        workflowProjectId: input.context.projectId,
+        backendStageRevision: backendStage.revision,
+        filePaths: Object.keys(files),
+      },
+    });
+  }
+
+  private parseStoredNestJsCode(value: string): CodeFiles {
+    try {
+      const parsed = JSON.parse(value) as {
+        framework?: unknown;
+        files?: unknown;
+      };
+      if (
+        parsed.framework !== 'nestjs' ||
+        !parsed.files ||
+        typeof parsed.files !== 'object' ||
+        Array.isArray(parsed.files)
+      ) {
+        throw new Error('invalid');
+      }
+      const files = parsed.files as Record<string, unknown>;
+      if (Object.values(files).some((source) => typeof source !== 'string')) {
+        throw new Error('invalid');
+      }
+      return files as Record<string, string>;
+    } catch {
+      throw new BadRequestException('保存的 NestJS 项目源文件无效。');
+    }
+  }
+
+  private nestJsApiFiles(
+    context: Awaited<ReturnType<ProductionWorkflowService['codingContext']>>,
+  ): CodeFiles {
+    const backendStage = context.stages.find((stage) => stage.role === 'backend');
+    const scope = backendStage
+      ? [
+          `项目：${context.projectId}`,
+          `需求：${backendStage.summary}`,
+          ...backendStage.deliverables.map(
+            (deliverable) => `${deliverable.title}：${deliverable.markdown}`,
+          ),
+        ].join('\n')
+      : `项目：${context.projectId}`;
+    const packageJson = {
+      name: 'production-workflow-backend',
+      private: true,
+      version: '1.0.0',
+      scripts: {
+        start: 'node dist/main.js',
+        'start:dev': 'tsx watch src/main.ts',
+        build: 'tsc -p tsconfig.json',
+        lint: 'tsc --noEmit -p tsconfig.json',
+        test: 'npm run build && node --test test/*.test.js',
+      },
+      dependencies: {
+        '@nestjs/common': '11.1.27',
+        '@nestjs/core': '11.1.27',
+        '@nestjs/platform-express': '11.1.27',
+        'class-transformer': '0.5.1',
+        'class-validator': '0.15.1',
+        'reflect-metadata': '0.2.2',
+        rxjs: '7.8.2',
+      },
+      devDependencies: {
+        '@types/node': '24.13.2',
+        tsx: '4.20.6',
+        typescript: '5.9.3',
+      },
+    };
+    return {
+      'package.json': `${JSON.stringify(packageJson, null, 2)}\n`,
+      'tsconfig.json': `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: 'ES2022',
+            module: 'CommonJS',
+            moduleResolution: 'Node',
+            rootDir: 'src',
+            outDir: 'dist',
+            strict: true,
+            esModuleInterop: true,
+            experimentalDecorators: true,
+            emitDecoratorMetadata: true,
+            skipLibCheck: true,
+            forceConsistentCasingInFileNames: true,
+          },
+          include: ['src/**/*.ts'],
+        },
+        null,
+        2,
+      )}\n`,
+      'src/main.ts': `import 'reflect-metadata';\nimport { ValidationPipe } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  app.setGlobalPrefix('api/v1');\n  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));\n  await app.listen(Number(process.env.PORT ?? 3000), '0.0.0.0');\n}\n\nvoid bootstrap();\n`,
+      'src/app.module.ts': `import { Module } from '@nestjs/common';\nimport { AppController } from './app.controller';\nimport { AppService } from './app.service';\n\n@Module({ controllers: [AppController], providers: [AppService] })\nexport class AppModule {}\n`,
+      'src/app.controller.ts': `import { Body, Controller, Get, Post } from '@nestjs/common';\nimport { AppService } from './app.service';\nimport { CreateTaskDto } from './dto/create-task.dto';\n\n@Controller()\nexport class AppController {\n  constructor(private readonly appService: AppService) {}\n\n  @Get('health')\n  health() {\n    return { status: 'ok' };\n  }\n\n  @Post('tasks')\n  createTask(@Body() input: CreateTaskDto) {\n    return this.appService.createTask(input);\n  }\n}\n`,
+      'src/app.service.ts': `import { Injectable } from '@nestjs/common';\nimport { randomUUID } from 'node:crypto';\nimport { CreateTaskDto } from './dto/create-task.dto';\n\n@Injectable()\nexport class AppService {\n  createTask(input: CreateTaskDto) {\n    return { id: randomUUID(), title: input.title.trim(), status: 'accepted' };\n  }\n}\n`,
+      'src/dto/create-task.dto.ts': `import { IsString, MaxLength, MinLength } from 'class-validator';\n\nexport class CreateTaskDto {\n  @IsString()\n  @MinLength(1)\n  @MaxLength(200)\n  title!: string;\n}\n`,
+      'test/app.service.test.js': `const assert = require('node:assert/strict');\nconst { test } = require('node:test');\nconst { AppService } = require('../dist/app.service.js');\n\ntest('creates an accepted task with a generated id', () => {\n  const result = new AppService().createTask({ title: '  example  ' });\n  assert.equal(result.title, 'example');\n  assert.equal(result.status, 'accepted');\n  assert.match(result.id, /^[0-9a-f-]{36}$/i);\n});\n`,
+      'README.md': `# ${context.projectId} 后端 API\n\n该 NestJS 11 项目由已审批的产研工作流后端结果生成，是用于隔离开发的可运行起点。\n\n## 已审批后端范围\n\n${scope}\n\n## 接口\n\n- GET /api/v1/health\n- POST /api/v1/tasks\n\n当前任务示例只在进程内生成响应，不连接数据库，也不包含真实业务数据。数据库、鉴权和迁移应由后续任务按审批后的契约明确实现。\n\n## 命令\n\n- npm install\n- npm run start:dev\n- npm run lint\n- npm test\n- npm run build\n`,
+    };
   }
 
   private async saveEditedCodeVersion(input: {

@@ -449,6 +449,9 @@ export class AgentOpsAdminController {
       ownerUserId,
       tenantId,
       body.artifactId,
+      body.role,
+      body.role === 'qa' ? 'verify' : 'code',
+      body.role !== undefined,
     );
   }
 
@@ -487,6 +490,30 @@ export class AgentOpsAdminController {
     @Query('tenantId') tenantId?: string,
   ) {
     return this.codingTasks.get({ taskId, threadId, ownerUserId, tenantId });
+  }
+
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId/report/download')
+  async downloadWorkspaceCodingTaskReport(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() response: Response,
+  ) {
+    const file = await this.codingTasks.getReportFile({
+      taskId,
+      threadId,
+      ownerUserId,
+      tenantId,
+    });
+    response
+      .status(200)
+      .type(file.artifact.contentType ?? 'application/octet-stream')
+      .setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(file.artifact.filename)}"`,
+      )
+      .send(file.body);
   }
 
   @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')

@@ -80,12 +80,19 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     userId: string,
     tenantId: string | undefined,
     artifactId: string,
+    role: 'frontend' | 'backend' | 'qa' = 'frontend',
+    task: 'code' | 'verify' = role === 'qa' ? 'verify' : 'code',
+    strictRole = false,
   ): Promise<WorkspaceStatus> {
     this.assertIdentity(threadId, userId);
     if (!artifactId || artifactId.length > 64) {
       throw new BadRequestException('artifactId is invalid.');
     }
-    await this.workflow.codingContext(threadId, userId, tenantId);
+    const workflowContext = await this.workflow.codingContext(
+      threadId,
+      userId,
+      tenantId,
+    );
     const artifact = await this.artifacts.getStudioVersion(
       artifactId,
       userId,
@@ -95,7 +102,15 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     if (
       artifact.status !== 'ready' ||
       artifact.kind !== 'code' ||
-      !artifact.filename.toLowerCase().endsWith('.zip')
+      !artifact.filename.toLowerCase().endsWith('.zip') ||
+      !this.artifactMatchesRole(artifact.metadata, role, artifact.sourceText) ||
+      (strictRole &&
+        !this.agentRoleMatchesScope(
+          workflowContext.selectedRoles,
+          artifact.metadata,
+          role,
+          task,
+        ))
     ) {
       throw new BadRequestException(
         'Workspace requires a ready generated code ZIP artifact.',
@@ -135,6 +150,11 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         throw new BadRequestException('Code ZIP exceeds the allowed size.');
       }
       const files = await this.unpackSeedZip(archive.body);
+      if (!this.backendArchiveManifestIsValid(artifact.metadata, files)) {
+        throw new BadRequestException(
+          'NestJS 后端 ZIP 缺少可运行的 package scripts 或入口文件。',
+        );
+      }
       const sandbox = await this.createSandbox(threadId, userId, tenantId);
       try {
         await sandbox.files.createDirectories([{ path: WORKSPACE_ROOT }]);
@@ -168,12 +188,23 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     userId: string,
     tenantId: string | undefined,
     artifactId: string,
-  ): Promise<void> {
+    role: 'frontend' | 'backend' | 'qa' = 'frontend',
+    task: 'code' | 'verify' = role === 'qa' ? 'verify' : 'code',
+    strictRole = false,
+  ): Promise<
+    Awaited<ReturnType<ProductionWorkflowService['codingContext']>> & {
+      artifactMetadata: string | null;
+    }
+  > {
     this.assertIdentity(threadId, userId);
     if (!artifactId || artifactId.length > 64) {
       throw new BadRequestException('artifactId is invalid.');
     }
-    await this.workflow.codingContext(threadId, userId, tenantId);
+    const workflowContext = await this.workflow.codingContext(
+      threadId,
+      userId,
+      tenantId,
+    );
     const artifact = await this.artifacts.getStudioVersion(
       artifactId,
       userId,
@@ -183,12 +214,21 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     if (
       artifact.status !== 'ready' ||
       artifact.kind !== 'code' ||
-      !artifact.filename.toLowerCase().endsWith('.zip')
+      !artifact.filename.toLowerCase().endsWith('.zip') ||
+      !this.artifactMatchesRole(artifact.metadata, role, artifact.sourceText) ||
+      (strictRole &&
+        !this.agentRoleMatchesScope(
+          workflowContext.selectedRoles,
+          artifact.metadata,
+          role,
+          task,
+        ))
     ) {
       throw new BadRequestException(
         'Workspace requires a ready generated code ZIP artifact.',
       );
     }
+    return { ...workflowContext, artifactMetadata: artifact.metadata };
   }
 
   async assertWorkspaceReady(
@@ -196,8 +236,19 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     userId: string,
     tenantId: string | undefined,
     artifactId: string,
+    role: 'frontend' | 'backend' | 'qa' = 'frontend',
+    task: 'code' | 'verify' = role === 'qa' ? 'verify' : 'code',
+    strictRole = false,
   ): Promise<void> {
-    await this.validateCodingArtifact(threadId, userId, tenantId, artifactId);
+    await this.validateCodingArtifact(
+      threadId,
+      userId,
+      tenantId,
+      artifactId,
+      role,
+      task,
+      strictRole,
+    );
     const { record, sandbox } = await this.getActiveWorkspace(
       threadId,
       userId,
@@ -220,12 +271,18 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     tenantId: string | undefined,
     artifactId: string,
     signal?: AbortSignal,
+    role: 'frontend' | 'backend' | 'qa' = 'frontend',
+    task: 'code' | 'verify' = role === 'qa' ? 'verify' : 'code',
+    strictRole = false,
   ) {
     const { diff, scripts, manifestError } = await this.inspectWorkspace(
       threadId,
       userId,
       tenantId,
       artifactId,
+      role,
+      task,
+      strictRole,
     );
     const checks: Record<
       'lint' | 'test' | 'build',
@@ -304,9 +361,20 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     userId: string,
     tenantId: string | undefined,
     artifactId: string,
+    role: 'frontend' | 'backend' | 'qa',
+    task: 'code' | 'verify',
+    strictRole: boolean,
   ) {
     this.assertIdentity(threadId, userId);
-    await this.validateCodingArtifact(threadId, userId, tenantId, artifactId);
+    const workflowContext = await this.validateCodingArtifact(
+      threadId,
+      userId,
+      tenantId,
+      artifactId,
+      role,
+      task,
+      strictRole,
+    );
     const { record, sandbox } = await this.getActiveWorkspace(
       threadId,
       userId,
@@ -324,6 +392,16 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         threadId,
       );
       const seedFiles = await this.unpackSeedZip(source.body);
+      if (
+        !this.backendArchiveManifestIsValid(
+          workflowContext.artifactMetadata,
+          seedFiles,
+        )
+      ) {
+        throw new BadRequestException(
+          'NestJS 后端 ZIP 缺少可运行的 package scripts 或入口文件。',
+        );
+      }
       const seed = new Map<string, Buffer>();
       for (const file of seedFiles) {
         const path = this.workspaceRelativePath(file.path);
@@ -428,6 +506,138 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     return path
       .split('/')
       .some((part) => part === 'node_modules' || part === '.git');
+  }
+
+  private parseArtifactMetadata(rawMetadata: string | null): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(rawMetadata ?? '{}') as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private artifactMatchesRole(
+    rawMetadata: string | null,
+    role: 'frontend' | 'backend' | 'qa',
+    sourceText: string,
+  ): boolean {
+    let target: unknown;
+    try {
+      target = (JSON.parse(rawMetadata ?? '{}') as Record<string, unknown>)
+        .target;
+    } catch {
+      return false;
+    }
+    const frontendTargets = [
+      'vue-page',
+      'react-page',
+      'vue-dashboard',
+      'react-dashboard',
+    ];
+    const matchesRole =
+      role === 'frontend'
+        ? frontendTargets.includes(String(target))
+        : role === 'backend'
+          ? target === 'nestjs-api'
+          : frontendTargets.includes(String(target)) || target === 'nestjs-api';
+    if (!matchesRole) return false;
+    if (target !== 'nestjs-api') return true;
+    try {
+      const source = JSON.parse(sourceText) as {
+        framework?: unknown;
+        files?: unknown;
+      };
+      return (
+        source.framework === 'nestjs' &&
+        source.files !== null &&
+        typeof source.files === 'object' &&
+        !Array.isArray(source.files) &&
+        this.nestJsFilesManifestIsValid(source.files as Record<string, unknown>)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private backendArchiveManifestIsValid(
+    rawMetadata: string | null,
+    files: Array<{ path: string; data: Uint8Array }>,
+  ): boolean {
+    let target: unknown;
+    try {
+      target = (JSON.parse(rawMetadata ?? '{}') as Record<string, unknown>)
+        .target;
+    } catch {
+      return false;
+    }
+    if (target !== 'nestjs-api') return true;
+    return this.nestJsFilesManifestIsValid(
+      Object.fromEntries(
+        files.map((file) => [
+          file.path,
+          Buffer.from(file.data).toString('utf8'),
+        ]),
+      ),
+    );
+  }
+
+  private nestJsFilesManifestIsValid(
+    files: Record<string, unknown>,
+  ): boolean {
+    try {
+      const packageJson = JSON.parse(String(files['package.json'])) as {
+        scripts?: Record<string, unknown>;
+      };
+      const scripts = packageJson.scripts ?? {};
+      return (
+        [
+          'src/main.ts',
+          'src/app.module.ts',
+          'src/app.controller.ts',
+          'src/app.service.ts',
+          'src/dto/create-task.dto.ts',
+          'test/app.service.test.js',
+        ].every((path) => typeof files[path] === 'string') &&
+        ['start', 'start:dev', 'build', 'lint', 'test'].every(
+          (name) =>
+            typeof scripts[name] === 'string' &&
+            (scripts[name] as string).trim().length > 0,
+        )
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private agentRoleMatchesScope(
+    selectedRoles: string[],
+    rawMetadata: string | null,
+    role: 'frontend' | 'backend' | 'qa',
+    task: 'code' | 'verify',
+  ): boolean {
+    let target: unknown;
+    try {
+      target = (JSON.parse(rawMetadata ?? '{}') as Record<string, unknown>)
+        .target;
+    } catch {
+      return false;
+    }
+    const artifactRole =
+      target === 'nestjs-api'
+        ? 'backend'
+        : ['vue-page', 'react-page', 'vue-dashboard', 'react-dashboard'].includes(
+              String(target),
+            )
+          ? 'frontend'
+          : null;
+    if (!artifactRole) return false;
+    if (role === 'qa' && task === 'verify') {
+      return selectedRoles.includes('qa') && selectedRoles.includes(artifactRole);
+    }
+    return task === 'code' && role === artifactRole && selectedRoles.includes(role);
   }
 
   async runCommand(
@@ -768,9 +978,35 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     threadId: string,
     userId: string,
     tenantId?: string,
+    task?: {
+      taskId: string;
+      role: 'frontend' | 'backend';
+      parentRunId: string | null;
+      traceId: string;
+    },
   ): Promise<Awaited<ReturnType<ArtifactsService['createStudioVersion']>>> {
     this.assertIdentity(threadId, userId);
     await this.workflow.codingContext(threadId, userId, tenantId);
+    if (task) {
+      const existing = (await this.artifacts.listStudioVersions(userId, threadId))
+        .find(
+          (item) =>
+            item.status === 'ready' &&
+            item.metadata?.codingTaskId === task.taskId,
+        );
+      if (existing) {
+        const existingRecord = await this.artifacts.getStudioVersion(
+          existing.id,
+          userId,
+          threadId,
+        );
+        if ((existingRecord.tenantId ?? null) === (tenantId ?? null)) {
+          return existing as Awaited<
+            ReturnType<ArtifactsService['createStudioVersion']>
+          >;
+        }
+      }
+    }
     const { record, sandbox } = await this.getActiveWorkspace(
       threadId,
       userId,
@@ -786,7 +1022,17 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
           'Workspace contains too many files to export.',
         );
       }
+      const sourceArtifact = await this.artifacts.getStudioVersion(
+        record.artifactId,
+        userId,
+        threadId,
+      );
+      const sourceMetadata = this.parseArtifactMetadata(
+        sourceArtifact.metadata,
+      );
+      const target = String(sourceMetadata.target ?? 'workspace-export');
       const zip = new JSZip();
+      const sourceFiles: Record<string, string> = {};
       let totalBytes = 0;
       let fileCount = 0;
       for (const file of files) {
@@ -827,12 +1073,27 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
           );
         }
         zip.file(relativePath, bytes);
+        sourceFiles[relativePath] = bytes.toString('utf8');
       }
       const body = await zip.generateAsync({
         type: 'nodebuffer',
         compression: 'DEFLATE',
       });
-      const version = Date.now();
+      const existingVersions = await this.artifacts.listStudioVersions(
+        userId,
+        threadId,
+      );
+      const version =
+        Math.max(
+          0,
+          ...existingVersions
+            .filter((item) => item.metadata?.target === target)
+            .map((item) => Number(item.metadata?.version) || 0),
+        ) + 1;
+      const framework =
+        typeof sourceMetadata.framework === 'string'
+          ? sourceMetadata.framework
+          : 'unknown';
       const artifact = await this.artifacts.createStudioVersion({
         ownerUserId: userId,
         tenantId,
@@ -841,22 +1102,31 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         kind: 'code',
         filename: `workspace-export-v${version}.zip`,
         sourceText: JSON.stringify({
+          framework,
+          files: sourceFiles,
           sourceWorkspaceArtifactId: record.artifactId,
           exportedAt: new Date().toISOString(),
           fileCount,
-          framework: await this.artifactFramework(
-            record.artifactId,
-            userId,
-            threadId,
-          ),
         }),
         body,
         contentType: 'application/zip',
         metadata: {
-          target: 'workspace-export',
+          ...sourceMetadata,
+          target,
           version,
+          parentArtifactId: record.artifactId,
           sourceArtifactId: record.artifactId,
           fileCount,
+          sourceEdited: true,
+          ...(task
+            ? {
+                codingTaskId: task.taskId,
+                role: task.role,
+                taskType: 'code',
+                parentRunId: task.parentRunId,
+                traceId: task.traceId,
+              }
+            : {}),
         },
       });
       return artifact;

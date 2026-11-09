@@ -426,27 +426,6 @@ export abstract class ProductionProjectWorkspaceSupport {
     };
   }
 
-  protected async artifactFramework(
-    artifactId: string,
-    userId: string,
-    threadId: string,
-  ): Promise<string | null> {
-    const artifact = await this.artifacts.getStudioVersion(
-      artifactId,
-      userId,
-      threadId,
-    );
-    try {
-      const metadata = JSON.parse(artifact.metadata ?? '{}') as Record<
-        string,
-        unknown
-      >;
-      return typeof metadata.framework === 'string' ? metadata.framework : null;
-    } catch {
-      return null;
-    }
-  }
-
   protected async wait(ms: number): Promise<void> {
     await new Promise<void>((resolve) => setTimeout(resolve, ms));
   }

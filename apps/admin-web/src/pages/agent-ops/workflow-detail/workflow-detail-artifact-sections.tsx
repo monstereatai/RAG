@@ -10,6 +10,10 @@ import { Alert, Button, Card, Checkbox, Input, Modal, Select, Tag } from 'antd';
 import type { ProductionArtifactTarget } from '../service';
 import type { WorkflowDetailLoadedController } from './workflow-detail-controller';
 import { ARTIFACT_OPTIONS, artifactLabel } from './workflow-detail-shared';
+import type {
+  ProductionCodingVerification,
+  ProductionQAReport,
+} from './workflow-detail-shared';
 
 const CODING_TASK_STATUS_LABELS = {
   queued: '排队中',
@@ -69,6 +73,9 @@ export function renderWorkflowArtifacts(
     workspaceStatusLoadFailed,
     workspaceArtifactId,
     setWorkspaceArtifactId,
+    workspaceRole,
+    setWorkspaceRole,
+    workspaceTask,
     workspaceBusy,
     workspaceInstruction,
     setWorkspaceInstruction,
@@ -102,6 +109,7 @@ export function renderWorkflowArtifacts(
     applyCodeArtifactEdit,
     startWorkspace,
     runWorkspaceAgent,
+    downloadCodingTaskReport,
     cancelWorkspaceCodingTask,
     resumeWorkspaceCodingTask,
     runWorkspaceCommand,
@@ -116,6 +124,61 @@ export function renderWorkflowArtifacts(
     simulateArtifactSync,
     restoreArtifactVersion,
   } = controller;
+  const frontendArtifactTargets = [
+    'vue-page',
+    'react-page',
+    'vue-dashboard',
+    'react-dashboard',
+  ];
+  const workspaceArtifactVersions = artifactVersions.filter((artifact) => {
+    if (artifact.kind !== 'code') return false;
+    const target = artifact.metadata?.target;
+    if (workspaceRole === 'backend') return target === 'nestjs-api';
+    if (workspaceRole === 'frontend') {
+      return frontendArtifactTargets.includes(String(target));
+    }
+    return frontendArtifactTargets.includes(String(target)) || target === 'nestjs-api';
+  });
+  const workspaceBoundTarget = artifactVersions.find(
+    (artifact) => artifact.id === workspaceStatus?.artifactId,
+  )?.metadata?.target;
+  const workspaceRoleOptions =
+    workspaceStatus?.artifactId && workspaceBoundTarget === 'nestjs-api'
+      ? [
+          { value: 'backend', label: '后端 Coding' },
+          { value: 'qa', label: 'QA 验证' },
+        ]
+      : workspaceStatus?.artifactId &&
+          frontendArtifactTargets.includes(String(workspaceBoundTarget))
+        ? [
+            { value: 'frontend', label: '前端 Coding' },
+            { value: 'qa', label: 'QA 验证' },
+          ]
+        : [
+            { value: 'frontend', label: '前端 Coding' },
+            { value: 'backend', label: '后端 Coding' },
+            { value: 'qa', label: 'QA 验证' },
+          ];
+  const qaReport =
+    workspaceCodingTask?.taskType === 'verify' &&
+    workspaceCodingTask.verification &&
+    Array.isArray(workspaceCodingTask.verification.checks)
+      ? (workspaceCodingTask.verification as ProductionQAReport)
+      : null;
+  const codingVerification =
+    workspaceCodingTask?.taskType !== 'verify' &&
+    workspaceCodingTask?.verification &&
+    'diff' in workspaceCodingTask.verification
+      ? (workspaceCodingTask.verification as ProductionCodingVerification)
+      : null;
+  const codingOutputArtifact =
+    workspaceCodingTask?.taskType !== 'verify' &&
+    workspaceCodingTask?.outputArtifactId
+      ? artifactVersions.find(
+          (artifact) =>
+            artifact.id === workspaceCodingTask.outputArtifactId,
+        )
+      : undefined;
   return (
     <>
       <Card title="多形态产物工作台" style={{ marginTop: 16 }}>
@@ -270,7 +333,7 @@ export function renderWorkflowArtifacts(
           <strong>自然语言修改生成代码</strong>
           <p style={{ margin: '6px 0 12px', color: '#667085' }}>
             选择已有 Vue、React
-            或大屏代码版本，描述修改要求。系统会先展示文件差异并编译预览；确认后保存为新
+            或大屏代码版本，描述修改要求。NestJS 后端项目请通过上方隔离工作区 Coding Task 修改。系统会先展示文件差异并编译预览；确认后保存为新
             ZIP 版本。只修改页面组件和样式，不修改依赖、构建配置或关联 Schema。
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -279,7 +342,11 @@ export function renderWorkflowArtifacts(
               style={{ minWidth: 360, flex: '1 1 360px' }}
               placeholder="选择一个 Vue / React / 大屏代码版本"
               options={artifactVersions
-                .filter((artifact) => artifact.kind === 'code')
+                .filter(
+                  (artifact) =>
+                    artifact.kind === 'code' &&
+                    artifact.metadata?.target !== 'nestjs-api',
+                )
                 .map((artifact) => ({
                   value: artifact.id,
                   label: `${artifactLabel(artifact.metadata?.target)} v${String(artifact.metadata?.version ?? '?')} · ${new Date(artifact.createdAt).toLocaleString()}`,
@@ -429,13 +496,15 @@ export function renderWorkflowArtifacts(
                     {lastSync?.objectId && (
                       <Tag color="gold">模拟 ID：{lastSync.objectId}</Tag>
                     )}
-                    <Button
-                      size="small"
-                      icon={<EyeOutlined />}
-                      onClick={() => void previewArtifact(artifact)}
-                    >
-                      预览
-                    </Button>
+                    {target !== 'nestjs-api' && (
+                      <Button
+                        size="small"
+                        icon={<EyeOutlined />}
+                        onClick={() => void previewArtifact(artifact)}
+                      >
+                        预览
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       icon={<CodeOutlined />}
@@ -477,9 +546,8 @@ export function renderWorkflowArtifacts(
       </Card>
       <Card title="Agent 项目开发工作区" style={{ marginTop: 16 }}>
         <p>
-          在 OpenSandbox 隔离工作区里让 Agent
-          修改项目、安装依赖和运行测试；可启动开发服务器预览，并把工作区导出为新的
-          ZIP 版本。工作区中的改动不会自动覆盖原始产物。
+          在 OpenSandbox 隔离工作区里按岗位运行 Coding Agent 或受控 QA
+          验证。QA 只能运行固定的 lint/test/build 检查，不会修改代码；所有结果保留人工审阅状态。
         </p>
         <div
           style={{
@@ -490,9 +558,36 @@ export function renderWorkflowArtifacts(
           }}
         >
           <Select
+            value={workspaceRole}
+            style={{ width: 150 }}
+            disabled={
+              workspaceStatusLoading ||
+              workspaceStatusLoadFailed ||
+              workspaceCodingTaskActive ||
+              workspaceBusy
+            }
+            options={workspaceRoleOptions}
+            onChange={(value) => {
+              setWorkspaceRole(value);
+              if (!workspaceStatus?.artifactId) setWorkspaceArtifactId('');
+              setWorkspacePreviewUrl('');
+            }}
+          />
+          <Select
+            value={workspaceTask}
+            style={{ width: 110 }}
+            disabled
+            options={[
+              {
+                value: workspaceTask,
+                label: workspaceTask === 'verify' ? 'verify' : 'code',
+              },
+            ]}
+          />
+          <Select
             value={workspaceArtifactId || undefined}
             style={{ minWidth: 360, flex: '1 1 360px' }}
-            placeholder="选择用于开发的 Vue / React 项目 ZIP"
+            placeholder="选择与岗位匹配的代码 ZIP"
             disabled={
               workspaceStatusLoading ||
               workspaceStatusLoadFailed ||
@@ -500,9 +595,7 @@ export function renderWorkflowArtifacts(
               Boolean(workspaceStatus?.artifactId) ||
               workspaceCodingTaskActive
             }
-            options={artifactVersions
-              .filter((artifact) => artifact.kind === 'code')
-              .map((artifact) => ({
+            options={workspaceArtifactVersions.map((artifact) => ({
                 value: artifact.id,
                 label: `${artifactLabel(artifact.metadata?.target)} v${String(artifact.metadata?.version ?? '?')} · ${new Date(artifact.createdAt).toLocaleString()}`,
               }))}
@@ -568,13 +661,17 @@ export function renderWorkflowArtifacts(
             borderRadius: 8,
           }}
         >
-          <strong>让 Agent 开发</strong>
+          <strong>{workspaceTask === 'verify' ? '提交 QA 验证' : '让 Agent 开发'}</strong>
           <Input.TextArea
             rows={3}
             maxLength={4000}
             value={workspaceInstruction}
             onChange={(event) => setWorkspaceInstruction(event.target.value)}
-            placeholder="例如：安装项目依赖，修复构建报错，再运行测试并说明结果"
+            placeholder={
+              workspaceTask === 'verify'
+                ? '填写本次验证目标或验收要求；Agent 只会执行固定 lint/test/build 检查'
+                : '例如：修复构建报错，再运行测试并说明结果'
+            }
             disabled={workspaceCodingTaskActive || workspaceBusy}
             style={{ marginTop: 10 }}
           />
@@ -593,7 +690,7 @@ export function renderWorkflowArtifacts(
             onClick={() => void runWorkspaceAgent()}
             style={{ marginTop: 8 }}
           >
-            提交异步开发任务
+            {workspaceTask === 'verify' ? '提交受控验证任务' : '提交异步开发任务'}
           </Button>
           {workspaceCodingTaskActive && (
             <Button
@@ -618,6 +715,12 @@ export function renderWorkflowArtifacts(
                 Task {workspaceCodingTask.taskId}
                 {workspaceCodingTask.runId
                   ? ` · Run ${workspaceCodingTask.runId}`
+                  : ''}
+                {workspaceCodingTask.parentRunId
+                  ? ` · Parent Run ${workspaceCodingTask.parentRunId}`
+                  : ''}
+                {workspaceCodingTask.artifactId
+                  ? ` · Artifact ${workspaceCodingTask.artifactId}`
                   : ''}
                 {` · 尝试 ${workspaceCodingTask.attempt} · 已完成步骤 ${workspaceCodingTask.lastCompletedStep}`}
               </div>
@@ -671,11 +774,85 @@ export function renderWorkflowArtifacts(
                   ))}
                 </details>
               )}
-              {workspaceCodingTask.verification && (
+              {qaReport && (
+                <div style={{ marginTop: 12 }}>
+                  <strong>QA 验证报告</strong>
+                  <div style={{ marginTop: 6 }}>
+                    <Tag color={codingTaskTagColor(qaReport.status)}>
+                      {qaReport.status === 'passed'
+                        ? '检查通过'
+                        : qaReport.status === 'failed'
+                          ? '检查失败'
+                          : '没有可用检查结果'}
+                    </Tag>
+                    <Tag color="gold">待人工审阅</Tag>
+                    <span style={{ color: '#667085' }}>
+                      {`产物 ${qaReport.artifactId} v${qaReport.artifactVersion} · Trace ${qaReport.traceId}`}
+                    </span>
+                  </div>
+                  <p>{qaReport.summary}</p>
+                  <strong>检查结果</strong>
+                  {qaReport.checks.map((check) => (
+                    <div
+                      key={check.name}
+                      style={{ borderTop: '1px solid #eaecf0', padding: 8 }}
+                    >
+                      <Tag color={codingTaskTagColor(check.status)}>
+                        {check.name}: {CHECK_STATUS_LABELS[check.status]}
+                      </Tag>
+                      {check.exitCode !== null && (
+                        <span style={{ marginLeft: 8 }}>
+                          exit {check.exitCode}
+                        </span>
+                      )}
+                      {check.summary && (
+                        <pre
+                          style={{
+                            maxHeight: 260,
+                            overflow: 'auto',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            margin: '6px 0 0',
+                          }}
+                        >
+                          {check.summary}
+                        </pre>
+                      )}
+                    </div>
+                  ))}
+                  <strong>诊断</strong>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{qaReport.diagnosis}</p>
+                  {qaReport.suggestedFixes.length > 0 && (
+                    <>
+                      <strong>建议修改</strong>
+                      <ul>
+                        {qaReport.suggestedFixes.map((fix) => (
+                          <li key={fix}>{fix}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  <Button
+                    icon={<DownloadOutlined />}
+                    disabled={!workspaceCodingTask.outputArtifactId}
+                    onClick={() => void downloadCodingTaskReport()}
+                  >
+                    下载 QA 报告 JSON
+                  </Button>
+                  <Alert
+                    type={qaReport.status === 'failed' ? 'error' : 'warning'}
+                    showIcon
+                    title="QA 结果需要人工审阅"
+                    description="报告来自隔离工作区的固定脚本检查，不会修改代码，也不会自动批准发布。"
+                    style={{ marginTop: 8 }}
+                  />
+                </div>
+              )}
+              {codingVerification && (
                 <div style={{ marginTop: 12 }}>
                   <strong>文件差异</strong>
                   {(['added', 'modified', 'deleted'] as const).map((kind) => {
-                    const files = workspaceCodingTask.verification?.diff[kind] ?? [];
+                    const files = codingVerification.diff[kind];
                     return (
                       <div key={kind} style={{ marginTop: 4 }}>
                         <span>
@@ -701,10 +878,10 @@ export function renderWorkflowArtifacts(
                   <strong style={{ display: 'block', marginTop: 12 }}>
                     验证结果 ·{' '}
                     {new Date(
-                      workspaceCodingTask.verification.checkedAt,
+                      codingVerification.checkedAt,
                     ).toLocaleString()}
                   </strong>
-                  {Object.entries(workspaceCodingTask.verification.checks).map(
+                  {Object.entries(codingVerification.checks).map(
                     ([name, check]) => (
                       <div
                         key={name}
@@ -744,6 +921,14 @@ export function renderWorkflowArtifacts(
                   )}
                 </div>
               )}
+              {codingOutputArtifact && (
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={() => void downloadArtifact(codingOutputArtifact)}
+                >
+                  下载 Coding ZIP
+                </Button>
+              )}
               {workspaceCodingTask.status === 'completed' && (
                 <Alert
                   type="success"
@@ -774,6 +959,7 @@ export function renderWorkflowArtifacts(
           )}
         </section>
 
+        {workspaceRole !== 'qa' && (
         <section style={{ marginTop: 16 }}>
           <strong>手动执行命令</strong>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -812,7 +998,9 @@ export function renderWorkflowArtifacts(
             </pre>
           )}
         </section>
+        )}
 
+        {workspaceRole !== 'qa' && (
         <section style={{ marginTop: 16 }}>
           <strong>开发服务器与预览</strong>
           <div
@@ -890,6 +1078,7 @@ export function renderWorkflowArtifacts(
             />
           )}
         </section>
+        )}
       </Card>
       <Modal
         title={previewTitle}

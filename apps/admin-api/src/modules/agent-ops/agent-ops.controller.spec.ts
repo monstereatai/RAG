@@ -11,8 +11,10 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
     proxyProductionWorkflowWorkspacePreview: jest.fn(),
     exportProductionWorkflowWorkspace: jest.fn(),
     deleteProductionWorkflowWorkspace: jest.fn(),
+    startProductionWorkflowWorkspace: jest.fn(),
     submitProductionWorkflowWorkspaceCodingTask: jest.fn(),
     getProductionWorkflowWorkspaceCodingTask: jest.fn(),
+    downloadProductionWorkflowWorkspaceCodingTaskReport: jest.fn(),
     cancelProductionWorkflowWorkspaceCodingTask: jest.fn(),
     resumeProductionWorkflowWorkspaceCodingTask: jest.fn(),
   };
@@ -271,5 +273,57 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
       .toEqual(['admin:qa-ops:write']);
     expect(Reflect.getMetadata(REQUIRE_PERMISSION_KEY, controller.getWorkflowWorkspaceCodingTask))
       .toEqual(['admin:qa-ops:read']);
+  });
+
+  it('forwards selected role and streams the QA report through read permission', async () => {
+    const req = { user: { userId: '42', tenantId: 'tenant-1' } };
+    const body = { artifactId: 'nestjs-1', role: 'qa' as const };
+    ragClient.startProductionWorkflowWorkspace.mockResolvedValue({
+      data: { ready: true },
+    });
+    ragClient.downloadProductionWorkflowWorkspaceCodingTaskReport.mockResolvedValue(
+      new Response('{"status":"passed"}', {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-disposition': 'attachment; filename=qa-report.json',
+        },
+      }),
+    );
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn().mockReturnThis(),
+    };
+
+    await expect(
+      controller.startWorkflowWorkspace('thread-1', body, req as never),
+    ).resolves.toEqual({ data: { ready: true } });
+    await controller.downloadWorkflowWorkspaceCodingTaskReport(
+      'thread-1',
+      'task-1',
+      req as never,
+      response as never,
+    );
+
+    expect(ragClient.startProductionWorkflowWorkspace).toHaveBeenCalledWith(
+      'thread-1', '42', 'tenant-1', body,
+    );
+    expect(ragClient.downloadProductionWorkflowWorkspaceCodingTaskReport)
+      .toHaveBeenCalledWith('thread-1', 'task-1', '42', 'tenant-1');
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'content-disposition',
+      'attachment; filename=qa-report.json',
+    );
+    expect(response.send).toHaveBeenCalledWith(
+      Buffer.from('{"status":"passed"}'),
+    );
+    expect(
+      Reflect.getMetadata(
+        REQUIRE_PERMISSION_KEY,
+        controller.downloadWorkflowWorkspaceCodingTaskReport,
+      ),
+    ).toEqual(['admin:qa-ops:read']);
   });
 });

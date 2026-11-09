@@ -74,6 +74,7 @@ describe('workflow workspace coding task controller', () => {
     const { result, unmount } = renderHook(() =>
       useWorkflowWorkspaceController({
         workflow: { threadId: 'thread-1' } as never,
+        artifactVersions: [],
         refreshArtifactVersions: vi.fn(),
         downloadArtifact: vi.fn(),
       }),
@@ -127,10 +128,50 @@ describe('workflow workspace coding task controller', () => {
     unmount();
   });
 
+  it('submits QA as a verify task against the bound backend artifact', async () => {
+    const { result, unmount } = renderHook(() =>
+      useWorkflowWorkspaceController({
+        workflow: { threadId: 'thread-1' } as never,
+        artifactVersions: [
+          {
+            id: 'artifact-1',
+            kind: 'code',
+            metadata: { target: 'nestjs-api', version: 1 },
+          } as never,
+        ],
+        refreshArtifactVersions: vi.fn(),
+        downloadArtifact: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.setWorkspaceRole('qa');
+      result.current.setWorkspaceInstruction('检查后端项目');
+    });
+    await act(async () => {
+      await result.current.runWorkspaceAgent();
+    });
+
+    expect(mocks.submitProductionWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        artifactId: 'artifact-1',
+        role: 'qa',
+        task: 'verify',
+      }),
+    );
+    expect(result.current.workspaceTask).toBe('verify');
+    unmount();
+  });
+
   it('cancels the active task and reloads its persisted status', async () => {
     const { result, unmount } = renderHook(() =>
       useWorkflowWorkspaceController({
         workflow: { threadId: 'thread-1' } as never,
+        artifactVersions: [],
         refreshArtifactVersions: vi.fn(),
         downloadArtifact: vi.fn(),
       }),

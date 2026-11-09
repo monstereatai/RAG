@@ -9,7 +9,7 @@ export const getProductionWorkspaceStatus = (threadId: string) =>
 
 export const startProductionWorkspace = (
   threadId: string,
-  body: { artifactId: string },
+  body: { artifactId: string; role?: 'frontend' | 'backend' | 'qa' },
 ) =>
   authRequest<unknown>(`${productionWorkspacePath(threadId)}/start`, {
     method: 'POST',
@@ -27,7 +27,13 @@ export const runProductionWorkspaceAgent = (
 
 export const submitProductionWorkspaceCodingTask = (
   threadId: string,
-  body: { artifactId: string; instruction: string; requestId: string },
+  body: {
+    artifactId: string;
+    instruction: string;
+    requestId: string;
+    role?: 'frontend' | 'backend' | 'qa';
+    task?: 'code' | 'verify';
+  },
 ) =>
   authRequest<unknown>(`${productionWorkspacePath(threadId)}/coding-tasks`, {
     method: 'POST',
@@ -215,6 +221,19 @@ export const downloadProductionArtifact = (
 ) =>
   fetch(
     `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+    {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
+      },
+    },
+  );
+
+export const downloadProductionWorkspaceCodingTaskReport = (
+  threadId: string,
+  taskId: string,
+) =>
+  fetch(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}/report/download`,
     {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,

@@ -2,6 +2,7 @@ import { ProductionProjectWorkspaceAgentService } from './production-project-wor
 import type { AgentLoopInput } from '../agent-loop/agent-loop.types';
 
 type WorkspaceAgentTestState = {
+  role: 'frontend' | 'backend';
   instruction: string;
   events: Array<{
     action: 'command' | 'start_dev_server' | 'stop_dev_server' | 'complete';
@@ -72,6 +73,7 @@ describe('ProductionProjectWorkspaceAgentService', () => {
             throw new Error('Expected a workspace command tool decision.');
           }
           expect(toolDecision.name).toBe('workspace_agent_command');
+          expect(toolDecision.role).toBe('backend');
           expect(toolDecision.allowedToolNames).toEqual([
             'workspace_agent_command',
           ]);
@@ -109,6 +111,7 @@ describe('ProductionProjectWorkspaceAgentService', () => {
       'tenant-1',
       'artifact-1',
       'Install and run tests.',
+      { role: 'backend', strictRole: true },
     );
 
     expect(workspace.startWorkspace).toHaveBeenCalledWith(
@@ -116,6 +119,9 @@ describe('ProductionProjectWorkspaceAgentService', () => {
       'owner-1',
       'tenant-1',
       'artifact-1',
+      'backend',
+      'code',
+      true,
     );
     expect(workspace.runCommand).toHaveBeenCalledWith(
       'thread-1',
@@ -149,7 +155,7 @@ describe('ProductionProjectWorkspaceAgentService', () => {
     const agentLoop = {
       resume: jest.fn().mockResolvedValue({
         status: 'blocked',
-        state: { instruction: '恢复任务', events: [] },
+        state: { role: 'backend', instruction: '恢复任务', events: [] },
         steps: 2,
         toolCalls: 1,
         terminationReason: '需要人工确认',
@@ -173,6 +179,8 @@ describe('ProductionProjectWorkspaceAgentService', () => {
           runId: 'run-stable',
           taskId: 'task-stable',
           resume: true,
+          role: 'backend',
+          strictRole: true,
         },
       ),
     ).resolves.toMatchObject({
@@ -182,7 +190,7 @@ describe('ProductionProjectWorkspaceAgentService', () => {
     });
 
     expect(workspace.assertWorkspaceReady).toHaveBeenCalledWith(
-      'thread-1', 'owner-1', 'tenant-1', 'artifact-1',
+      'thread-1', 'owner-1', 'tenant-1', 'artifact-1', 'backend', 'code', true,
     );
     expect(workspace.startWorkspace).not.toHaveBeenCalled();
     expect(agentLoop.resume).toHaveBeenCalledWith(
@@ -213,7 +221,16 @@ describe('ProductionProjectWorkspaceAgentService', () => {
       'tenant-1',
       'artifact-1',
       '恢复任务',
-      { runId: 'run-stable', taskId: 'task-stable' },
+      {
+        runId: 'run-stable',
+        taskId: 'task-stable',
+        role: 'backend',
+        strictRole: true,
+      },
+    );
+
+    expect(workspace.assertWorkspaceReady).toHaveBeenCalledWith(
+      'thread-1', 'owner-1', 'tenant-1', 'artifact-1', 'backend', 'code', true,
     );
 
     expect(agentLoop.assertCanResume).toHaveBeenCalledWith(

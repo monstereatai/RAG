@@ -1,5 +1,6 @@
 import {
   Equals,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -15,6 +16,10 @@ export class StartProductionProjectWorkspaceDto {
   @MinLength(1)
   @MaxLength(64)
   artifactId!: string;
+
+  @IsOptional()
+  @IsIn(['frontend', 'backend', 'qa'])
+  role?: 'frontend' | 'backend' | 'qa';
 }
 
 export class RunProductionProjectWorkspaceCommandDto {
@@ -79,6 +84,14 @@ export class SubmitWorkspaceCodingTaskDto {
 
   @IsUUID()
   requestId!: string;
+
+  @IsOptional()
+  @IsIn(['frontend', 'backend', 'qa'])
+  role?: 'frontend' | 'backend' | 'qa';
+
+  @IsOptional()
+  @IsIn(['code', 'verify'])
+  task?: 'code' | 'verify';
 }
 
 export interface WorkspaceCommandResult {

@@ -20,6 +20,7 @@ import { ProductionArtifactStudioService } from './production-artifact-studio.se
 import { ProductionProjectWorkspaceService } from './production-project-workspace.service';
 import { ProductionProjectWorkspaceAgentService } from './production-project-workspace-agent.service';
 import { CodingTaskService } from './coding-task.service';
+import { ProductionTestAgentService } from './production-test-agent.service';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { CodingTaskService } from './coding-task.service';
     ProductionArtifactStudioService,
     ProductionProjectWorkspaceService,
     ProductionProjectWorkspaceAgentService,
+    ProductionTestAgentService,
     CodingTaskService,
   ],
   exports: [
@@ -52,6 +54,7 @@ import { CodingTaskService } from './coding-task.service';
     ProductionArtifactStudioService,
     ProductionProjectWorkspaceService,
     ProductionProjectWorkspaceAgentService,
+    ProductionTestAgentService,
     CodingTaskService,
   ],
 })

@@ -14,7 +14,8 @@ export type ProductionArtifactTarget =
   | 'react-page'
   | 'dashboard-schema'
   | 'vue-dashboard'
-  | 'react-dashboard';
+  | 'react-dashboard'
+  | 'nestjs-api';
 
 export interface ProductionArtifactVersion {
   id: string;

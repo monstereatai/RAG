@@ -34,6 +34,7 @@ export const ARTIFACT_OPTIONS: Array<{
   { value: 'dashboard-schema', label: '数字大屏 Schema' },
   { value: 'vue-dashboard', label: 'Vue 数字大屏代码' },
   { value: 'react-dashboard', label: 'React 数字大屏代码' },
+  { value: 'nestjs-api', label: 'NestJS 后端 API 项目 ZIP' },
 ];
 
 export const artifactLabel = (target: unknown) =>
@@ -50,10 +51,7 @@ export interface ProductionArtifactEditDraft {
 export interface ProductionCodeEditDraft {
   baseArtifactId: string;
   instruction: string;
-  target: Exclude<
-    ProductionArtifactTarget,
-    'activity-schema' | 'dashboard-schema'
-  >;
+  target: Exclude<ProductionArtifactTarget, 'activity-schema' | 'dashboard-schema' | 'nestjs-api'>;
   framework: 'vue' | 'react';
   files: Record<string, string>;
   diff: Array<{ path: string; before: string; after: string }>;
@@ -75,13 +73,31 @@ export type ProductionCodingTaskStatus =
 export interface ProductionCodingTask {
   taskId: string;
   runId: string | null;
+  traceId?: string | null;
   threadId: string;
+  role?: 'frontend' | 'backend' | 'qa';
+  taskType?: 'code' | 'verify';
+  artifactId?: string;
+  parentRunId?: string | null;
+  outputArtifactId?: string | null;
   status: ProductionCodingTaskStatus;
   attempt: number;
   lastCompletedStep: number;
   summary: string | null;
   error: string | null;
-  verification?: {
+  failureReason?: string | null;
+  verification?: ProductionCodingVerification | ProductionQAReport | null;
+  events: Array<{
+    sequence: number;
+    eventType: string;
+    createdAt: string;
+    payload: unknown;
+  }>;
+  updatedAt: string;
+  createdAt?: string;
+}
+
+export interface ProductionCodingVerification {
     checkedAt: string;
     diff: {
       added: Array<{ path: string; sha256: string }>;
@@ -102,13 +118,27 @@ export interface ProductionCodingTask {
         reason?: string;
       }
     >;
-  } | null;
-  events: Array<{
-    sequence: number;
-    eventType: string;
-    createdAt: string;
-    payload: unknown;
+}
+
+export interface ProductionQAReport {
+  artifactId: string;
+  artifactVersion: string;
+  checks: Array<{
+    name: 'lint' | 'test' | 'build';
+    status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
+    exitCode: number | null;
+    summary: string;
+    logRef: string | null;
   }>;
+  diagnosis: string;
+  evidenceRefs: string[];
+  suggestedFixes: string[];
+  requiresHumanReview: true;
+  status: 'passed' | 'failed' | 'not_run';
+  summary: string;
+  parentRunId: string | null;
+  traceId: string;
+  createdAt: string;
   updatedAt: string;
 }
 

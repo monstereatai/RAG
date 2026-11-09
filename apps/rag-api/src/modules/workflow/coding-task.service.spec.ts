@@ -33,7 +33,12 @@ function createService() {
         source: 'zip',
         artifactId: input.artifactId,
         instruction: input.instruction,
+        role: input.role,
+        task: input.task,
+        strictRole: input.strictRole,
+        parentRunId: input.parentRunId,
       }),
+      outputArtifactId: null,
     })),
     findOwnedCodingTask: jest.fn(),
     findById: jest.fn(),
@@ -66,9 +71,19 @@ function createService() {
     assertCanResume: jest.fn().mockResolvedValue(undefined),
   };
   const workspace = {
-    validateCodingArtifact: jest.fn().mockResolvedValue(undefined),
+    validateCodingArtifact: jest.fn().mockResolvedValue({ runId: 'parent-run' }),
     assertWorkspaceReady: jest.fn().mockResolvedValue(undefined),
     verifyWorkspace: jest.fn(),
+    exportWorkspace: jest.fn().mockResolvedValue({ id: 'coding-output-artifact' }),
+  };
+  const testAgent = {
+    runWithExecutionOptions: jest.fn(),
+    assertCanResume: jest.fn().mockResolvedValue(undefined),
+  };
+  const artifacts = {
+    createStudioVersion: jest.fn().mockResolvedValue({ id: 'qa-report-artifact' }),
+    getOwned: jest.fn(),
+    getFileOwned: jest.fn(),
   };
   const service = new CodingTaskService(
     tasks as never,
@@ -78,8 +93,21 @@ function createService() {
     queue as never,
     workspaceAgent as never,
     workspace as never,
+    testAgent as never,
+    artifacts as never,
   );
-  return { service, tasks, runs, runtimeEvents, domainEvents, queue, workspaceAgent, workspace };
+  return {
+    service,
+    tasks,
+    runs,
+    runtimeEvents,
+    domainEvents,
+    queue,
+    workspaceAgent,
+    workspace,
+    testAgent,
+    artifacts,
+  };
 }
 
 describe('CodingTaskService', () => {
@@ -132,7 +160,18 @@ describe('CodingTaskService', () => {
   it('returns an existing task for the same request and rejects changed input', async () => {
     const { service, tasks, domainEvents } = createService();
     const requestHash = createHash('sha256')
-      .update(JSON.stringify([tenantId, ownerUserId, threadId, body.artifactId, body.instruction]))
+      .update(
+        JSON.stringify([
+          tenantId,
+          ownerUserId,
+          threadId,
+          'frontend',
+          'code',
+          false,
+          body.artifactId,
+          body.instruction,
+        ]),
+      )
       .digest('hex');
     const accepted = {
       id: taskId,
@@ -156,6 +195,50 @@ describe('CodingTaskService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('rejects reusing a request id after changing its execution role', async () => {
+    const { service, tasks, domainEvents } = createService();
+    const frontendBody = { ...body, role: 'frontend' as const, task: 'code' as const };
+    const requestHash = createHash('sha256')
+      .update(
+        JSON.stringify([
+          tenantId,
+          ownerUserId,
+          threadId,
+          'frontend',
+          'code',
+          true,
+          body.artifactId,
+          body.instruction,
+        ]),
+      )
+      .digest('hex');
+    tasks.findCodingTaskByRequest.mockResolvedValue({
+      id: taskId,
+      runId,
+      threadId,
+      requestHash,
+      status: 'queued',
+    });
+
+    await expect(
+      service.submit({
+        threadId,
+        ownerUserId,
+        tenantId,
+        body: frontendBody,
+      }),
+    ).resolves.toMatchObject({ taskId, runId, status: 'queued' });
+    await expect(
+      service.submit({
+        threadId,
+        ownerUserId,
+        tenantId,
+        body: { ...body, role: 'backend', task: 'code' },
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(domainEvents.transaction).not.toHaveBeenCalled();
+  });
+
   it('scopes task status reads to owner, tenant, and thread', async () => {
     const { service, tasks, runtimeEvents } = createService();
     tasks.findOwnedCodingTask.mockResolvedValue({
@@ -165,7 +248,11 @@ describe('CodingTaskService', () => {
       tenantId,
       status: 'running',
       retryCount: 0,
-      codingContext: '{}',
+      codingContext: JSON.stringify({
+        source: 'zip',
+        artifactId: body.artifactId,
+        instruction: body.instruction,
+      }),
       verification: null,
     });
 
@@ -184,6 +271,40 @@ describe('CodingTaskService', () => {
       undefined,
       200,
     );
+  });
+
+  it('scopes QA report downloads to the owning tenant and task', async () => {
+    const { service, tasks, artifacts } = createService();
+    const file = { artifact: { filename: 'qa-report.json' }, body: Buffer.from('{}') };
+    tasks.findOwnedCodingTask.mockResolvedValue({
+      id: taskId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      outputArtifactId: 'report-1',
+    });
+    artifacts.getOwned.mockResolvedValue({
+      id: 'report-1',
+      threadId,
+      tenantId,
+      metadata: JSON.stringify({ studio: 'qa', taskId }),
+    });
+    artifacts.getFileOwned.mockResolvedValue(file);
+
+    await expect(
+      service.getReportFile({ taskId, threadId, ownerUserId, tenantId }),
+    ).resolves.toBe(file);
+    expect(artifacts.getFileOwned).toHaveBeenCalledWith('report-1', ownerUserId);
+
+    artifacts.getOwned.mockResolvedValueOnce({
+      id: 'report-1',
+      threadId,
+      tenantId: 'other-tenant',
+      metadata: JSON.stringify({ studio: 'qa', taskId }),
+    });
+    await expect(
+      service.getReportFile({ taskId, threadId, ownerUserId, tenantId }),
+    ).rejects.toThrow('QA report artifact identity mismatch');
   });
 
   it('does not mark a task cancelled when the run already reached another terminal state', async () => {
@@ -236,6 +357,7 @@ describe('CodingTaskService', () => {
         source: 'zip',
         artifactId: 'artifact-1',
         instruction: '修复 lint',
+        parentRunId: 'parent-run',
       }),
     });
     tasks.updateCodingTask.mockResolvedValue({
@@ -278,10 +400,12 @@ describe('CodingTaskService', () => {
         source: 'zip',
         artifactId: 'artifact-1',
         instruction: '修复 lint',
+        parentRunId: 'parent-run',
       }),
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' });
     tasks.updateCodingTask.mockResolvedValue({ ...workerTask, status: 'running' });
     tasks.updateCodingTask.mockResolvedValueOnce({ ...workerTask, status: 'running' });
@@ -294,7 +418,11 @@ describe('CodingTaskService', () => {
     });
     workspace.verifyWorkspace.mockResolvedValue({
       checkedAt: new Date().toISOString(),
-      diff: { added: [], modified: [], deleted: [] },
+      diff: {
+        added: [{ path: 'src/main.ts', sha256: 'hash' }],
+        modified: [],
+        deleted: [],
+      },
       checks: {
         lint: { status: 'not_applicable', command: null, exitCode: null, output: '' },
         test: { status: 'not_applicable', command: null, exitCode: null, output: '' },
@@ -328,11 +456,31 @@ describe('CodingTaskService', () => {
       tenantId,
       'artifact-1',
       '修复 lint',
-      { runId, taskId, resume: false },
+      {
+        runId,
+        taskId,
+        resume: false,
+        role: 'frontend',
+        strictRole: false,
+      },
+    );
+    expect(workspace.exportWorkspace).toHaveBeenCalledWith(
+      threadId,
+      ownerUserId,
+      tenantId,
+      expect.objectContaining({
+        taskId,
+        role: 'frontend',
+        parentRunId: 'parent-run',
+        traceId: runId,
+      }),
     );
     expect(tasks.updateCodingTask).toHaveBeenLastCalledWith(
       taskId,
-      expect.objectContaining({ status: 'waiting_review' }),
+      expect.objectContaining({
+        status: 'waiting_review',
+        outputArtifactId: 'coding-output-artifact',
+      }),
     );
     expect(runs.finish).toHaveBeenCalledWith(
       runId,
@@ -458,6 +606,211 @@ describe('CodingTaskService', () => {
     expect(runs.finish).toHaveBeenCalledWith(
       runId,
       expect.objectContaining({ status: 'failed' }),
+    );
+  });
+
+  it('rejects unsupported role and task combinations before creating a run', async () => {
+    const { service, runs, workspace } = createService();
+
+    await expect(
+      service.submit({
+        threadId,
+        ownerUserId,
+        tenantId,
+        body: { ...body, role: 'qa', task: 'code' },
+      }),
+    ).rejects.toThrow('岗位与任务类型组合无效');
+
+    expect(workspace.validateCodingArtifact).not.toHaveBeenCalled();
+    expect(runs.start).not.toHaveBeenCalled();
+  });
+
+  it('stores the role-specific QA task and parent workflow run', async () => {
+    const { service, tasks, runs } = createService();
+
+    const accepted = await service.submit({
+      threadId,
+      ownerUserId,
+      tenantId,
+      body: { ...body, role: 'qa', task: 'verify' },
+    });
+
+    expect(accepted.status).toBe('queued');
+    expect(runs.start).toHaveBeenCalledWith(
+      expect.objectContaining({ maxSteps: 6, maxToolCalls: 4 }),
+      expect.anything(),
+    );
+    expect(tasks.createCodingTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'qa',
+        task: 'verify',
+        strictRole: true,
+        parentRunId: 'parent-run',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('runs QA through the bounded test agent and saves a human review report artifact', async () => {
+    const { service, tasks, runs, queue, testAgent, artifacts } = createService();
+    const qaReport = {
+      artifactId: 'artifact-1',
+      artifactVersion: '2',
+      checks: [
+        {
+          name: 'test',
+          status: 'passed',
+          exitCode: 0,
+          summary: '1 suite passed',
+          logRef: `${runId}:test`,
+        },
+      ],
+      diagnosis: '测试通过',
+      evidenceRefs: [`${runId}:test`],
+      suggestedFixes: [],
+      requiresHumanReview: true,
+      status: 'passed',
+      summary: '检查通过',
+      parentRunId: 'parent-run',
+      traceId: runId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const workerTask = {
+      id: taskId,
+      runId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      requestId,
+      taskType: 'coding_task',
+      status: 'queued',
+      retryCount: 0,
+      codingContext: JSON.stringify({
+        source: 'zip',
+        artifactId: 'artifact-1',
+        instruction: '验证项目',
+        role: 'qa',
+        task: 'verify',
+        strictRole: true,
+        parentRunId: 'parent-run',
+      }),
+    };
+    tasks.findById
+      .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' });
+    tasks.updateCodingTask
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
+      .mockResolvedValueOnce({ ...workerTask, status: 'waiting_review' });
+    testAgent.runWithExecutionOptions.mockResolvedValue({
+      status: 'completed',
+      summary: '检查通过',
+      toolCalls: 1,
+      report: qaReport,
+    });
+    runs.finish.mockResolvedValue({ id: runId, status: 'completed' });
+
+    service.onModuleInit();
+    const processor = queue.registerCodingTaskProcessor.mock.calls[0][0];
+    await processor(
+      {
+        id: `production-workflow-coding_task-${taskId.replace(/-/g, '')}-r0`,
+        operation: 'coding_task',
+        taskId,
+        taskAttempt: 0,
+        resume: false,
+        threadId,
+        userId: ownerUserId,
+        tenantId,
+      },
+      { attempt: 1, finalAttempt: true },
+    );
+
+    expect(testAgent.runWithExecutionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: 'artifact-1',
+        parentRunId: 'parent-run',
+        resume: false,
+      }),
+    );
+    expect(artifacts.createStudioVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          studio: 'qa',
+          taskId,
+          traceId: runId,
+        }),
+      }),
+    );
+    expect(tasks.updateCodingTask).toHaveBeenLastCalledWith(
+      taskId,
+      expect.objectContaining({
+        status: 'waiting_review',
+        outputArtifactId: 'qa-report-artifact',
+      }),
+    );
+  });
+
+  it('requires reconciliation when a QA tool result has an unknown side effect', async () => {
+    const { service, tasks, runs, runtimeEvents, queue, testAgent } = createService();
+    const workerTask = {
+      id: taskId,
+      runId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      taskType: 'coding_task',
+      status: 'queued',
+      retryCount: 0,
+      codingContext: JSON.stringify({
+        source: 'zip',
+        artifactId: 'artifact-1',
+        instruction: '检查项目',
+        role: 'qa',
+        task: 'verify',
+        strictRole: true,
+      }),
+    };
+    tasks.findById
+      .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' });
+    tasks.updateCodingTask
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
+      .mockResolvedValueOnce({ ...workerTask, status: 'waiting_reconciliation' });
+    runtimeEvents.list.mockResolvedValue([{ eventType: 'tool.unknown' }]);
+    testAgent.runWithExecutionOptions.mockResolvedValue({
+      status: 'blocked',
+      summary: 'QA 工具结果未知',
+      toolCalls: 1,
+      report: null,
+    });
+    runs.finish.mockResolvedValue({ id: runId, status: 'failed' });
+
+    service.onModuleInit();
+    const processor = queue.registerCodingTaskProcessor.mock.calls[0][0];
+    await processor(
+      {
+        id: `production-workflow-coding_task-${taskId.replace(/-/g, '')}-r0`,
+        operation: 'coding_task',
+        taskId,
+        taskAttempt: 0,
+        resume: false,
+        threadId,
+        userId: ownerUserId,
+        tenantId,
+      },
+      { attempt: 1, finalAttempt: true },
+    );
+
+    expect(tasks.updateCodingTask).toHaveBeenLastCalledWith(
+      taskId,
+      expect.objectContaining({ status: 'waiting_reconciliation' }),
+    );
+    expect(tasks.ensureCodingTaskEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'waiting_reconciliation' }),
+      'task.reconciliation_required',
+      expect.any(Object),
+      expect.any(String),
     );
   });
 });

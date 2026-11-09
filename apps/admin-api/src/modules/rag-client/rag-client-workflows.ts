@@ -312,6 +312,22 @@ export abstract class RagClientWorkflowBase extends RagClientContentBase {
     );
   }
 
+  downloadProductionWorkflowWorkspaceCodingTaskReport(
+    threadId: string,
+    taskId: string,
+    ownerUserId: string,
+    tenantId: string | undefined,
+  ) {
+    return this.requestRaw(
+      `/rag/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}/report/download${this.toQueryString({ ownerUserId: this.mapAdminUserId(ownerUserId), tenantId })}`,
+      true,
+      {},
+      'GET',
+      undefined,
+      30_000,
+    );
+  }
+
   cancelProductionWorkflowWorkspaceCodingTask(
     threadId: string,
     taskId: string,

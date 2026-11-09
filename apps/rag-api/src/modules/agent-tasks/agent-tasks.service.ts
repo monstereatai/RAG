@@ -38,6 +38,10 @@ export class AgentTasksService {
       requestHash: string;
       artifactId: string;
       instruction: string;
+      role: 'frontend' | 'backend' | 'qa';
+      task: 'code' | 'verify';
+      strictRole: boolean;
+      parentRunId?: string;
     },
     transactionManager: EntityManager,
   ): Promise<AgentTaskEntity> {
@@ -52,9 +56,15 @@ export class AgentTasksService {
         requestId: input.requestId,
         requestHash: input.requestHash,
         taskType: 'coding_task',
-        role: 'coding_agent',
-        title: 'Workspace Coding Task',
-        description: '异步 ZIP 工作区 Coding 任务',
+        role: input.role,
+        title:
+          input.task === 'verify'
+            ? 'Workspace Test Task'
+            : `Workspace ${input.role} Coding Task`,
+        description:
+          input.task === 'verify'
+            ? '异步 ZIP 工作区受控验证任务'
+            : `异步 ZIP 工作区 ${input.role} Coding 任务`,
         processType: 'async',
         status: 'queued',
         dependsOnTaskIds: '[]',
@@ -68,6 +78,10 @@ export class AgentTasksService {
           source: 'zip',
           artifactId: input.artifactId,
           instruction: input.instruction,
+          role: input.role,
+          task: input.task,
+          strictRole: input.strictRole,
+          parentRunId: input.parentRunId ?? null,
         }),
         verification: null,
         lastCompletedStep: 0,

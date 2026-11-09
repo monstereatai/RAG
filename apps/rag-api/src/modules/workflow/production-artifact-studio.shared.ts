@@ -5,6 +5,7 @@ export const PRODUCTION_ARTIFACT_TARGETS = [
   'dashboard-schema',
   'vue-dashboard',
   'react-dashboard',
+  'nestjs-api',
 ] as const;
 
 export type ProductionArtifactTarget =
@@ -25,4 +26,5 @@ export const LABELS: Record<ProductionArtifactTarget, string> = {
   'dashboard-schema': '数字大屏 Schema',
   'vue-dashboard': 'Vue 数字大屏项目',
   'react-dashboard': 'React 数字大屏项目',
+  'nestjs-api': 'NestJS 后端 API 项目',
 };

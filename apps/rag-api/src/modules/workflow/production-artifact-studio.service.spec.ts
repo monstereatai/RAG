@@ -121,6 +121,65 @@ describe('ProductionArtifactStudioService', () => {
     expect(codeSource.files['src/App.vue']).toContain('活动主视觉');
   });
 
+  it('generates a runnable NestJS ZIP from the approved backend stage', async () => {
+    const { service, workflows, artifacts, created } = setup();
+    workflows.codingContext.mockResolvedValue({
+      ...context,
+      runId: 'workflow-run-1',
+      selectedRoles: ['backend'],
+      stages: [
+        {
+          role: 'backend',
+          revision: 3,
+          summary: '任务 API',
+          deliverables: [
+            { title: '接口范围', markdown: '创建和查询任务。' },
+          ],
+        },
+      ],
+    });
+
+    const result = await service.generate('thread-1', 'owner-1', undefined, [
+      'nestjs-api',
+    ]);
+
+    expect(result.selectedTargets).toEqual(['nestjs-api']);
+    expect(created).toHaveLength(1);
+    expect(created[0].metadata).toEqual(
+      expect.objectContaining({
+        target: 'nestjs-api',
+        framework: 'nestjs',
+        workflowRunId: 'workflow-run-1',
+        backendStageRevision: 3,
+      }),
+    );
+    const source = JSON.parse(String(created[0].sourceText)) as {
+      framework: string;
+      files: Record<string, string>;
+    };
+    expect(source.framework).toBe('nestjs');
+    expect(source.files['src/main.ts']).toContain('NestFactory.create');
+    expect(source.files['src/app.controller.ts']).toContain("@Get('health')");
+    expect(source.files['src/dto/create-task.dto.ts']).toContain('@MaxLength(200)');
+    expect(JSON.parse(source.files['package.json'])).toMatchObject({
+      scripts: expect.objectContaining({
+        build: 'tsc -p tsconfig.json',
+        lint: 'tsc --noEmit -p tsconfig.json',
+        test: 'npm run build && node --test test/*.test.js',
+      }),
+    });
+    const archive = await JSZip.loadAsync(created[0].body as Buffer);
+    expect(await archive.file('src/main.ts')?.async('string')).toContain(
+      'NestFactory.create',
+    );
+    expect(artifacts.createStudioVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'nestjs-api-v1.zip',
+        contentType: 'application/zip',
+      }),
+    );
+  });
+
   it('proposes a validated edit and returns a field diff without saving a version', async () => {
     const { service, artifacts, llm, created } = setup();
     artifacts.getStudioVersion.mockResolvedValue({

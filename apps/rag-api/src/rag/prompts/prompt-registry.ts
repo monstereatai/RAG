@@ -26,6 +26,7 @@ import { structuredReportPromptTemplate } from '../../modules/structured/structu
 import { weeklySummaryPromptDefinitions } from '../../modules/weekly-summary/weekly-summary.prompts';
 import { productionProjectGenerationPromptDefinitions } from '../../modules/workflow/production-project-generation.prompts';
 import { productionProjectWorkspaceAgentPromptTemplate } from '../../modules/workflow/production-project-workspace-agent.prompts';
+import { productionTestAgentPromptTemplate } from '../../modules/workflow/production-test-agent.prompts';
 import { productionArtifactStudioPromptDefinitions } from '../../modules/workflow/production-artifact-studio.prompts';
 import { ragFallbackPromptDefinitions } from '../answer/rag-fallback.prompts';
 import { supervisorRouterPromptTemplate } from '../../modules/supervisor/supervisor-router.prompts';
@@ -371,6 +372,17 @@ export const promptRegistry: PromptRegistryEntry[] = [
     evaluationNote:
       '暂无专用离线质量评测和目标 OpenSandbox 命令越界回归；必须在真实服务上验证隔离而非依赖提示词。',
     rollback: '恢复上一版工作区 Agent 系统提示词并复查工具权限边界。',
+  },
+  {
+    name: 'workflow.test_agent',
+    version: contentVersion(productionTestAgentPromptTemplate),
+    owner: 'rag-backend',
+    purpose: '约束 QA Agent 仅通过服务端固定 lint/test/build 验证并生成诊断报告。',
+    file: 'src/modules/workflow/production-test-agent.prompts.ts',
+    evals: [],
+    evaluationNote:
+      '暂无专用离线质量评测；单测覆盖服务端固定工具、失败结果、无检查项和重复执行阻断；真实 OpenSandbox 验证需在配置环境运行。',
+    rollback: '恢复上一版 QA Agent 提示词并复核 verify 工具 allowlist。',
   },
   {
     name: 'workflow.artifact_studio.schema_edit',

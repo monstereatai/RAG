@@ -4,6 +4,8 @@
 
 ## 当前结论
 
+2026-11-09：Agent Ops 按需 Coding/QA 入口已透传 frontend/backend/qa 角色与 code/verify 任务；QA 报告下载经独立权限代理，并沿用原有 RAG service 边界。build、lint 和 Agent Ops/RAG client 定向测试 49/49 通过，E2E 19/19、migration check 通过。完整 `npm run verify` 仍有 1 个既有 speech-ticket 参数断言失败（19/20 suites、154/155 tests），lint 保留 2 条未改文件 warning；未执行 migration。真实上游沙箱链路待环境验收。
+
 2026-11-04：QA AG-UI SSE 转发、背压、断连取消和代理兜底已从控制器拆到 `QaOpsAguiStreamProxyService`；未传 `mode` 时默认 `auto`。3 个相关 Jest suites / 54 tests、改动文件 ESLint 通过。完整 `npm run verify` 的 build/lint 通过，Jest 为 153/154；唯一失败是现存语音票据控制器测试的参数断言。管理 API 未认证请求返回 401，真实 SSE 代理和快速/深度问答仍待有效登录态验证。
 
 2026-11-04：QA AG-UI 代理未传 `mode` 时默认 `auto`，定向测试 13/13、改动文件 ESLint 和 build 通过；完整 `npm run verify` 在现存语音票据测试失败处停止。独立端口管理 API 登录返回 401，真实问答代理验收待有效登录态。
@@ -83,6 +85,7 @@
 
 ## 最近验证
 
+- 2026-11-09：Agent Ops 请求/结果代理前端、后端、QA role/task 与 QA 报告下载。`npm run build`、`npm run lint`、Agent Ops controller/RAG client 定向 Jest 2 suites / 49 tests、E2E 2 suites / 19 tests、`migration:check` 通过；完整 `npm run verify` 仍被未改动的 speech-ticket tenant 参数断言阻断（19/20 suites、154/155 tests），lint 有 2 条未改文件 warning。没有执行 migration。
 - 2026-11-01：修正后台文档上传文件名解码，Admin API 的 Multer `defParamCharset` 设为 UTF-8，与 RAG API 上传入口保持一致。Admin API build、文档控制器定向测试 6/6、改动文件 ESLint 通过；重启后 `/health` 返回 200。
 - 2026-11-01：修复 Admin 文档上传代理。登录守卫提供数字类型 `userId`，上传代理此前只转换字符串，导致 RAG 收到未映射的数字 ID 并拒绝请求；现将安全整数也映射为 Admin principal。上传代理同时校验上游错误并解包成功响应中的 `taskId`，避免 403 被包装为 HTTP 201 而显示“上传成功”。新增两处回归覆盖。验证：build、lint（保留 2 条 warning）、两个定向套件 41/41、E2E 19/19、migration check 通过；全量 `npm run verify` 在 2 个无关单测套件失败（QA SSE mock 缺少 `res.on`；语音票据测试期望 tenant 参数与当前实现不符）。Admin API 重启后 `/health` 返回 200，RAG API 未重启。
 - 2026-09-23：管理接口授权与认证边界加固：公开注册固定普通角色；用户、订单、支付管理接口按现有角色权限码限制并过滤用户密码字段；JWT 增加 access/refresh 类型区分，登录和刷新拒绝停用账号，生产环境无数据库时拒绝启用内存演示用户。验证：`npm run verify` 通过（build、lint、unit 11 suites / 100 tests、e2e 2 suites / 19 tests、migration check）；lint 保留 3 条既有 warning。

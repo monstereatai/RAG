@@ -147,6 +147,7 @@ export class ProductionWorkflowQuery {
     }
     return {
       threadId: state.threadId,
+      runId: state.runId,
       projectId: state.projectId,
       status: state.status,
       selectedRoles: state.selectedRoles,
