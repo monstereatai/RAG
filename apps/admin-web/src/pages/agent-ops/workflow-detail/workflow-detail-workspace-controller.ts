@@ -16,8 +16,10 @@ import {
 } from '../service';
 import {
   cancelProductionWorkspaceCodingTask,
+  downloadProductionWorkspaceCodingTaskLogs,
   downloadProductionWorkspaceCodingTaskReport,
   getProductionWorkspaceCodingTask,
+  reviewProductionWorkspaceCodingTask,
   resumeProductionWorkspaceCodingTask,
   submitProductionWorkspaceCodingTask,
 } from '../workspace-service';
@@ -59,6 +61,7 @@ export function useWorkflowWorkspaceController({
   const [workspaceInstruction, setWorkspaceInstruction] = React.useState('');
   const [workspaceCodingTask, setWorkspaceCodingTask] =
     React.useState<ProductionCodingTask | null>(null);
+  const reviewRequestIds = React.useRef(new Map<string, string>());
   const [workspaceCodingTaskPollingError, setWorkspaceCodingTaskPollingError] =
     React.useState('');
   const [workspaceCommand, setWorkspaceCommand] = React.useState('');
@@ -310,6 +313,72 @@ export function useWorkflowWorkspaceController({
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '下载 QA 报告失败');
+    }
+  };
+
+  const downloadCodingTaskLogs = async () => {
+    if (!workflow || !workspaceCodingTask) return;
+    try {
+      const response = await downloadProductionWorkspaceCodingTaskLogs(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `qa-logs-${workspaceCodingTask.taskId}.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '下载 QA 日志失败');
+    }
+  };
+
+  const reviewWorkspaceCodingTask = async (
+    decision: 'approved' | 'rejected',
+    comment?: string,
+  ) => {
+    if (
+      !workflow ||
+      !workspaceCodingTask ||
+      workspaceCodingTask.status !== 'waiting_review'
+    ) {
+      return;
+    }
+    const normalizedComment = comment?.trim() || '';
+    if (decision === 'rejected' && !normalizedComment) {
+      message.error('驳回时必须填写审阅意见');
+      return;
+    }
+    const requestKey = `${workspaceCodingTask.taskId}:${decision}:${normalizedComment}`;
+    const reviewId =
+      reviewRequestIds.current.get(requestKey) ?? crypto.randomUUID();
+    reviewRequestIds.current.set(requestKey, reviewId);
+    setWorkspaceBusy(true);
+    try {
+      await reviewProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+        {
+          reviewId,
+          decision,
+          ...(normalizedComment ? { comment: normalizedComment } : {}),
+        },
+      );
+      const response = await getProductionWorkspaceCodingTask(
+        workflow.threadId,
+        workspaceCodingTask.taskId,
+      );
+      const task = unwrapData<ProductionCodingTask>(response);
+      if (!task?.taskId) throw new Error('任务状态响应为空');
+      setWorkspaceCodingTask(task);
+      reviewRequestIds.current.delete(requestKey);
+      message.success(decision === 'approved' ? 'QA 报告已批准' : 'QA 报告已驳回');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '提交 QA 审阅失败');
+    } finally {
+      setWorkspaceBusy(false);
     }
   };
 
@@ -570,6 +639,8 @@ export function useWorkflowWorkspaceController({
     startWorkspace,
     runWorkspaceAgent,
     downloadCodingTaskReport,
+    downloadCodingTaskLogs,
+    reviewWorkspaceCodingTask,
     cancelWorkspaceCodingTask,
     resumeWorkspaceCodingTask,
     runWorkspaceCommand,

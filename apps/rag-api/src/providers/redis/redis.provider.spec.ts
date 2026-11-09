@@ -33,4 +33,15 @@ describe('RedisProvider', () => {
     );
     expect(provider.isEnabled()).toBe(false);
   });
+
+  it('returns a monotonic fencing counter for workspace task leases', async () => {
+    const client = { incr: jest.fn().mockResolvedValueOnce(4).mockResolvedValueOnce(5) };
+    const provider = new RedisProvider({ get: jest.fn() } as never);
+    Object.assign(provider, { client, enabled: true });
+
+    await expect(provider.incrementRequired('workspace:fence')).resolves.toBe(4);
+    await expect(provider.incrementRequired('workspace:fence')).resolves.toBe(5);
+    expect(client.incr).toHaveBeenCalledTimes(2);
+    expect(provider.isEnabled()).toBe(true);
+  });
 });

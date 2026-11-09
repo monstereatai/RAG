@@ -123,4 +123,41 @@ describe('AgentTasksService retry execution handoff', () => {
       },
     });
   });
+
+  it('uses a status compare-and-set for review transitions', async () => {
+    const task = { id: 'task-1', taskType: 'coding_task', status: 'approved' };
+    const repository = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      findOne: jest.fn().mockResolvedValue(task),
+    };
+    const service = new AgentTasksService(repository as never, {} as never);
+
+    await expect(
+      service.transitionCodingTask('task-1', 'waiting_review', {
+        status: 'approved',
+        verification: '{"review":{}}',
+      }),
+    ).resolves.toBe(task);
+    expect(repository.update).toHaveBeenCalledWith(
+      { id: 'task-1', taskType: 'coding_task', status: 'waiting_review' },
+      { status: 'approved', verification: '{"review":{}}' },
+    );
+  });
+
+  it('records the reviewer identity as the audit event actor', async () => {
+    const events = { emit: jest.fn().mockResolvedValue(undefined) };
+    const service = new AgentTasksService({} as never, events as never);
+
+    await service.ensureCodingTaskEvent(
+      { id: 'task-1', tenantId: 'tenant-1', threadId: 'thread-1', runId: 'run-1' } as never,
+      'task.qa_approved',
+      { status: 'approved' },
+      'qa-review:task-1:review-1',
+      'reviewer-1',
+    );
+
+    expect(events.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: 'reviewer-1', target: 'qa' }),
+    );
+  });
 });

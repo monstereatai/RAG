@@ -48,6 +48,7 @@ import {
   RunProductionProjectWorkspaceCommandDto,
   StartProductionProjectWorkspaceDevServerDto,
   StartProductionProjectWorkspaceDto,
+  ReviewWorkspaceCodingTaskDto,
   SubmitWorkspaceCodingTaskDto,
 } from '../workflow/production-project-workspace.dto';
 import { AgenticRagService } from '../../rag/agentic/agentic-rag.service';
@@ -514,6 +515,47 @@ export class AgentOpsAdminController {
         `attachment; filename="${encodeURIComponent(file.artifact.filename)}"`,
       )
       .send(file.body);
+  }
+
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId/logs/download')
+  async downloadWorkspaceCodingTaskLogs(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Res() response: Response,
+  ) {
+    const file = await this.codingTasks.getLogsFile({
+      taskId,
+      threadId,
+      ownerUserId,
+      tenantId,
+    });
+    response
+      .status(200)
+      .type(file.artifact.contentType ?? 'application/octet-stream')
+      .setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(file.artifact.filename)}"`,
+      )
+      .send(file.body);
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/review')
+  reviewWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Query('ownerUserId') ownerUserId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() body: ReviewWorkspaceCodingTaskDto,
+  ) {
+    return this.codingTasks.review({
+      taskId,
+      threadId,
+      ownerUserId,
+      tenantId,
+      body,
+    });
   }
 
   @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')

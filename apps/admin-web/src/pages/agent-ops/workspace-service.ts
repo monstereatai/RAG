@@ -240,3 +240,30 @@ export const downloadProductionWorkspaceCodingTaskReport = (
       },
     },
   );
+
+export const downloadProductionWorkspaceCodingTaskLogs = (
+  threadId: string,
+  taskId: string,
+) =>
+  fetch(
+    `/api/admin/agent-ops/workflows/${encodeURIComponent(threadId)}/workspace/coding-tasks/${encodeURIComponent(taskId)}/logs/download`,
+    {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
+      },
+    },
+  );
+
+export const reviewProductionWorkspaceCodingTask = (
+  threadId: string,
+  taskId: string,
+  body: {
+    reviewId: string;
+    decision: 'approved' | 'rejected';
+    comment?: string;
+  },
+) =>
+  authRequest<unknown>(
+    `${productionWorkspacePath(threadId)}/coding-tasks/${encodeURIComponent(taskId)}/review`,
+    { method: 'POST', data: body },
+  );

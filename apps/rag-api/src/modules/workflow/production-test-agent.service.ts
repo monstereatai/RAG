@@ -29,23 +29,30 @@ type TestAgentState = {
   artifactId: string;
   instruction: string;
   verification: WorkspaceVerification | null;
+  verificationLogs: WorkspaceVerification['checks'] | null;
 };
 
 export interface ProductionTestAgentReport {
   artifactId: string;
   artifactVersion: string;
+  applicableChecks: Array<'lint' | 'test' | 'build'>;
+  requiredChecks: Array<'lint' | 'test' | 'build'>;
+  skippedChecks: Array<'lint' | 'test' | 'build'>;
   checks: Array<{
     name: 'lint' | 'test' | 'build';
     status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
     exitCode: number | null;
     summary: string;
+    outputTruncated: boolean;
+    logPreview: string | null;
     logRef: string | null;
   }>;
+  logsArtifactId: string | null;
   diagnosis: string;
   evidenceRefs: string[];
   suggestedFixes: string[];
   requiresHumanReview: true;
-  status: 'passed' | 'failed' | 'not_run';
+  status: 'passed' | 'failed' | 'incomplete' | 'not_run';
   summary: string;
   parentRunId: string | null;
   traceId: string;
@@ -58,6 +65,7 @@ export interface ProductionTestAgentOutput {
   summary: string;
   toolCalls: number;
   report: ProductionTestAgentReport | null;
+  logs: WorkspaceVerification['checks'] | null;
 }
 
 const MAX_STEPS = 6;
@@ -139,6 +147,7 @@ export class ProductionTestAgentService {
         artifactId: input.artifactId,
         instruction: normalizedInstruction,
         verification: null,
+        verificationLogs: null,
       },
       maxSteps: MAX_STEPS,
       maxToolCalls: MAX_TOOL_CALLS,
@@ -209,6 +218,7 @@ export class ProductionTestAgentService {
             reduce: (current, output) => ({
               ...current,
               verification: this.limitVerification(output as WorkspaceVerification),
+              verificationLogs: (output as WorkspaceVerification).checks,
             }),
           } satisfies AgentLoopDecision<TestAgentState, ProductionTestAgentReport>;
         }
@@ -251,6 +261,7 @@ export class ProductionTestAgentService {
         summary: result.output.summary,
         toolCalls: result.toolCalls,
         report: result.output,
+        logs: result.state.verificationLogs ?? null,
       };
     }
     const verification = result.state.verification;
@@ -258,6 +269,7 @@ export class ProductionTestAgentService {
       status: result.status,
       summary: result.terminationReason,
       toolCalls: result.toolCalls,
+      logs: result.state.verificationLogs ?? null,
       report: verification
         ? this.buildReport({
             verification,
@@ -307,6 +319,7 @@ export class ProductionTestAgentService {
         artifactId: input.artifactId,
         instruction: normalizedInstruction,
         verification: null,
+        verificationLogs: null,
       },
       maxSteps: MAX_STEPS,
       maxToolCalls: MAX_TOOL_CALLS,
@@ -357,26 +370,43 @@ export class ProductionTestAgentService {
           .filter(Boolean)
           .join('\n')
           .slice(-LOG_PREVIEW_LIMIT),
-        logRef: check.status === 'passed' || check.status === 'failed'
-          ? `${input.traceId}:${name}`
+        outputTruncated: check.outputTruncated === true,
+        logPreview: check.outputTruncated
+          ? [check.reason, check.output].filter(Boolean).join('\n').slice(-LOG_PREVIEW_LIMIT)
           : null,
+        logRef: null,
       };
     });
+    const requiredChecks = [...names];
+    const applicableChecks = checks
+      .filter((check) => check.status !== 'not_applicable')
+      .map((check) => check.name);
+    const skippedChecks = checks
+      .filter((check) => check.status === 'not_applicable')
+      .map((check) => check.name);
     const hasFailure = checks.some((check) => check.status === 'failed');
-    const hasUnrun = checks.some((check) => check.status === 'not_run');
-    const hasEvidence = checks.some(
+    const hasAnyRun = checks.some(
       (check) => check.status === 'passed' || check.status === 'failed',
+    );
+    const allRequiredChecksPassed = requiredChecks.every((name) =>
+      checks.some((check) => check.name === name && check.status === 'passed'),
     );
     const status = hasFailure
       ? 'failed'
-      : hasEvidence && !hasUnrun
+      : allRequiredChecksPassed
         ? 'passed'
-        : 'not_run';
+        : hasAnyRun
+          ? 'incomplete'
+          : 'not_run';
     const now = new Date().toISOString();
     return {
       artifactId: input.artifactId,
       artifactVersion: input.artifactVersion,
+      applicableChecks,
+      requiredChecks,
+      skippedChecks,
       checks,
+      logsArtifactId: null,
       diagnosis: input.diagnosis.slice(0, 4_000),
       evidenceRefs: checks
         .filter((check) => check.logRef)

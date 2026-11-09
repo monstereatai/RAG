@@ -99,6 +99,17 @@ export class RedisProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** 单调递增的严格计数，用于生成分布式租约 fencing token。 */
+  async incrementRequired(key: string): Promise<number> {
+    if (!this.enabled) throw new Error('Redis is unavailable');
+    try {
+      return Number(await this.client.incr(key));
+    } catch (err) {
+      this.enabled = false;
+      throw err;
+    }
+  }
+
   async setRequiredOrThrow(
     key: string,
     value: string,

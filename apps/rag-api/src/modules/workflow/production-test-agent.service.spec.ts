@@ -302,4 +302,89 @@ describe('ProductionTestAgentService', () => {
       requiresHumanReview: true,
     });
   });
+
+  it.each([
+    {
+      name: 'only lint is available',
+      statuses: ['passed', 'not_applicable', 'not_applicable'],
+      reportStatus: 'incomplete',
+      applicableChecks: ['lint'],
+      skippedChecks: ['test', 'build'],
+    },
+    {
+      name: 'only test is available',
+      statuses: ['not_applicable', 'passed', 'not_applicable'],
+      reportStatus: 'incomplete',
+      applicableChecks: ['test'],
+      skippedChecks: ['lint', 'build'],
+    },
+    {
+      name: 'all checks are unavailable',
+      statuses: ['not_applicable', 'not_applicable', 'not_applicable'],
+      reportStatus: 'not_run',
+      applicableChecks: [],
+      skippedChecks: ['lint', 'test', 'build'],
+    },
+    {
+      name: 'verification is interrupted after lint',
+      statuses: ['passed', 'not_run', 'not_run'],
+      reportStatus: 'incomplete',
+      applicableChecks: ['lint', 'test', 'build'],
+      skippedChecks: [],
+    },
+  ])(
+    'does not pass when $name',
+    async ({ statuses, reportStatus, applicableChecks, skippedChecks }) => {
+      const { service, workspace, verification } = setup([
+        {
+          action: 'verify_workspace',
+          summary: '执行检查',
+          diagnosis: '',
+          suggestedFixes: [],
+        },
+        {
+          action: 'complete',
+          summary: '检查结果',
+          diagnosis: '',
+          suggestedFixes: [],
+        },
+      ]);
+      const names = ['lint', 'test', 'build'] as const;
+      workspace.verifyWorkspace.mockResolvedValue({
+        ...verification,
+        checks: Object.fromEntries(
+          names.map((name, index) => [
+            name,
+            {
+              status: statuses[index],
+              command: statuses[index] === 'not_applicable' ? null : `npm run ${name}`,
+              exitCode: statuses[index] === 'passed' ? 0 : null,
+              output: statuses[index] === 'passed' ? `${name} passed` : '',
+              reason:
+                statuses[index] === 'not_applicable'
+                  ? 'package.json 未声明脚本。'
+                  : undefined,
+            },
+          ]),
+        ) as never,
+      });
+
+      const output = await service.runWithExecutionOptions({
+        threadId: 'thread-1',
+        userId: 'owner-1',
+        artifactId: 'artifact-1',
+        instruction: '检查所有质量门禁',
+        runId: 'qa-run-incomplete',
+        taskId: 'qa-task-incomplete',
+        resume: false,
+      });
+
+      expect(output.report).toMatchObject({
+        status: reportStatus,
+        applicableChecks,
+        requiredChecks: ['lint', 'test', 'build'],
+        skippedChecks,
+      });
+    },
+  );
 });

@@ -30,6 +30,8 @@ describe('AgentOpsAdminController task owner isolation', () => {
     cancel: jest.fn(),
     resume: jest.fn(),
     getReportFile: jest.fn(),
+    getLogsFile: jest.fn(),
+    review: jest.fn(),
   };
   const controller = new AgentOpsAdminController(
     workflows as never,
@@ -234,6 +236,39 @@ describe('AgentOpsAdminController task owner isolation', () => {
     });
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.type).toHaveBeenCalledWith('application/json');
+    expect(response.send).toHaveBeenCalledWith(body);
+  });
+
+  it('downloads scoped QA logs and forwards a review decision', async () => {
+    const body = Buffer.from('{"checks":{}}');
+    codingTasks.getLogsFile.mockResolvedValue({
+      artifact: { filename: 'qa-logs.json', contentType: 'application/json' },
+      body,
+    });
+    codingTasks.review.mockResolvedValue({ taskId: 'task-1', status: 'approved' });
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      type: jest.fn().mockReturnThis(),
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn().mockReturnThis(),
+    };
+    const review = { reviewId: '11111111-1111-4111-8111-111111111111', decision: 'approved' as const };
+
+    await controller.downloadWorkspaceCodingTaskLogs(
+      'thread-1', 'task-1', 'owner-1', 'tenant-1', response as never,
+    );
+    await expect(
+      controller.reviewWorkspaceCodingTask(
+        'thread-1', 'task-1', 'owner-1', 'tenant-1', review,
+      ),
+    ).resolves.toEqual({ taskId: 'task-1', status: 'approved' });
+
+    expect(codingTasks.getLogsFile).toHaveBeenCalledWith({
+      taskId: 'task-1', threadId: 'thread-1', ownerUserId: 'owner-1', tenantId: 'tenant-1',
+    });
+    expect(codingTasks.review).toHaveBeenCalledWith({
+      taskId: 'task-1', threadId: 'thread-1', ownerUserId: 'owner-1', tenantId: 'tenant-1', body: review,
+    });
     expect(response.send).toHaveBeenCalledWith(body);
   });
 

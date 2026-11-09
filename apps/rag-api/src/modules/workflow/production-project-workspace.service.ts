@@ -31,8 +31,12 @@ import {
   type SandboxCommandOutput,
   type PreviewTicketRecord,
   type WorkspaceRecord,
+  type WorkspaceVerificationResult,
 } from './production-project-workspace.shared';
-import { ProductionProjectWorkspaceSupport } from './production-project-workspace.support';
+import {
+  ProductionProjectWorkspaceSupport,
+  WorkspaceTaskLeaseLostError,
+} from './production-project-workspace.support';
 import {
   StartDevServerInput,
   WorkspaceCommandResult,
@@ -88,6 +92,20 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     if (!artifactId || artifactId.length > 64) {
       throw new BadRequestException('artifactId is invalid.');
     }
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.startWorkspace(
+          threadId,
+          userId,
+          tenantId,
+          artifactId,
+          role,
+          task,
+          strictRole,
+        ),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const workflowContext = await this.workflow.codingContext(
       threadId,
       userId,
@@ -157,8 +175,10 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
       }
       const sandbox = await this.createSandbox(threadId, userId, tenantId);
       try {
+        await this.assertWorkspaceTaskLease();
         await sandbox.files.createDirectories([{ path: WORKSPACE_ROOT }]);
         if (files.length) await sandbox.files.writeFiles(files);
+        await this.assertWorkspaceTaskLease();
         const record: WorkspaceRecord = {
           version: 1,
           tenantId: tenantId ?? null,
@@ -274,7 +294,23 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     role: 'frontend' | 'backend' | 'qa' = 'frontend',
     task: 'code' | 'verify' = role === 'qa' ? 'verify' : 'code',
     strictRole = false,
-  ) {
+  ): Promise<WorkspaceVerificationResult> {
+    this.assertIdentity(threadId, userId);
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.verifyWorkspace(
+          threadId,
+          userId,
+          tenantId,
+          artifactId,
+          signal,
+          role,
+          task,
+          strictRole,
+        ),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const { diff, scripts, manifestError } = await this.inspectWorkspace(
       threadId,
       userId,
@@ -291,6 +327,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         command: string | null;
         exitCode: number | null;
         output: string;
+        outputTruncated?: boolean;
         reason?: string;
       }
     > = {
@@ -338,6 +375,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
             command,
             exitCode: result.exitCode,
             output: result.output,
+            outputTruncated: result.outputTruncated,
             ...(result.timedOut ? { reason: '命令超时。' } : {}),
           };
         } catch (error) {
@@ -574,13 +612,14 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
       return false;
     }
     if (target !== 'nestjs-api') return true;
+    const normalizedFiles = new Map<string, string>();
+    for (const file of files) {
+      const path = this.workspaceRelativePath(file.path);
+      if (!path || normalizedFiles.has(path)) return false;
+      normalizedFiles.set(path, Buffer.from(file.data).toString('utf8'));
+    }
     return this.nestJsFilesManifestIsValid(
-      Object.fromEntries(
-        files.map((file) => [
-          file.path,
-          Buffer.from(file.data).toString('utf8'),
-        ]),
-      ),
+      Object.fromEntries(normalizedFiles),
     );
   }
 
@@ -651,6 +690,19 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     this.assertIdentity(threadId, userId);
     const normalizedCommand = this.validateCommand(command, MAX_COMMAND_LENGTH);
     const boundedTimeout = this.validateTimeout(timeoutSeconds);
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.runCommand(
+          threadId,
+          userId,
+          tenantId,
+          normalizedCommand,
+          boundedTimeout,
+          signal,
+        ),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const { sandbox } = await this.getActiveWorkspace(
       threadId,
       userId,
@@ -658,9 +710,13 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     );
     const startedAt = Date.now();
     const controller = new AbortController();
-    const forwardAbort = () => controller.abort(signal?.reason);
-    if (signal?.aborted) forwardAbort();
-    else signal?.addEventListener('abort', forwardAbort, { once: true });
+    const leaseSignal = this.workspaceTaskLeaseSignal();
+    const forwardCallerAbort = () => controller.abort(signal?.reason);
+    const forwardLeaseAbort = () => controller.abort(leaseSignal?.reason);
+    if (signal?.aborted) forwardCallerAbort();
+    else signal?.addEventListener('abort', forwardCallerAbort, { once: true });
+    if (leaseSignal?.aborted) forwardLeaseAbort();
+    else leaseSignal?.addEventListener('abort', forwardLeaseAbort, { once: true });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -668,11 +724,14 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     }, boundedTimeout * 1000);
     let execution: SandboxCommandOutput | undefined;
     let streamedOutput = '';
+    let streamedOutputTruncated = false;
     const appendOutput = (text: string) => {
-      streamedOutput = Buffer.concat([
-        Buffer.from(streamedOutput),
-        Buffer.from(text),
-      ])
+      const current = Buffer.from(streamedOutput);
+      const chunk = Buffer.from(text);
+      if (current.length + chunk.length > MAX_COMMAND_OUTPUT_BYTES) {
+        streamedOutputTruncated = true;
+      }
+      streamedOutput = Buffer.concat([current, chunk])
         .subarray(-MAX_COMMAND_OUTPUT_BYTES)
         .toString();
     };
@@ -696,13 +755,19 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
       appendOutput(`\nCommand timed out after ${boundedTimeout} seconds.`);
     } finally {
       clearTimeout(timer);
-      signal?.removeEventListener('abort', forwardAbort);
+      signal?.removeEventListener('abort', forwardCallerAbort);
+      leaseSignal?.removeEventListener('abort', forwardLeaseAbort);
       await sandbox.close();
     }
+    await this.assertWorkspaceTaskLease();
     const output = execution ? this.commandOutput(execution) : streamedOutput;
+    const outputTruncated =
+      streamedOutputTruncated ||
+      (execution ? this.commandOutputWasTruncated(execution) : false);
     return {
       command: normalizedCommand,
       output: this.truncateOutput(output || streamedOutput),
+      outputTruncated,
       exitCode: execution?.exitCode ?? null,
       durationMs: Date.now() - startedAt,
       timedOut,
@@ -729,6 +794,15 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
       input.command ?? `npm run dev -- --host 0.0.0.0 --port ${input.port}`,
       MAX_DEV_COMMAND_LENGTH,
     );
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.startDevServer(threadId, userId, tenantId, {
+          ...input,
+          command,
+        }),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const key = this.workspaceKey(threadId, userId, tenantId);
     return this.withWorkspaceLock(key, 'dev-server', async () => {
       const workspace = await this.getActiveWorkspace(
@@ -750,7 +824,9 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
           }
           if (previousStatus.running) {
             await sandbox.commands.interrupt(record.devServer.commandId);
+            await this.assertWorkspaceTaskLease();
           }
+          await this.assertWorkspaceTaskLease();
           await this.saveWorkspace(workspace.key, {
             ...record,
             devServer: null,
@@ -760,6 +836,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
           workingDirectory: WORKSPACE_ROOT,
           background: true,
         })) as SandboxCommandOutput;
+        await this.assertWorkspaceTaskLease();
         if (!execution.id) {
           throw new BadGatewayException(
             'OpenSandbox did not return a background command id.',
@@ -767,12 +844,14 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         }
         startedCommandId = execution.id;
         await this.waitForDevServerReady(sandbox, startedCommandId, input.port);
+        await this.assertWorkspaceTaskLease();
         const devServer = {
           commandId: execution.id,
           port: input.port,
           startedAt: new Date().toISOString(),
         };
         const updated = { ...record, devServer };
+        await this.assertWorkspaceTaskLease();
         await this.saveWorkspace(workspace.key, updated);
         return { status: 'running', ...devServer };
       } catch (error) {
@@ -782,7 +861,12 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         } catch {
           // Preserve the original failure; the short-lived sandbox remains the cleanup boundary.
         }
-        if (error instanceof BadGatewayException) throw error;
+        if (
+          error instanceof BadGatewayException ||
+          error instanceof WorkspaceTaskLeaseLostError
+        ) {
+          throw error;
+        }
         throw new BadGatewayException(
           'Sandbox dev server could not be started.',
         );
@@ -798,6 +882,12 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     tenantId?: string,
   ): Promise<{ stopped: boolean }> {
     this.assertIdentity(threadId, userId);
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.stopDevServer(threadId, userId, tenantId),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const key = this.workspaceKey(threadId, userId, tenantId);
     return this.withWorkspaceLock(key, 'dev-server', async () => {
       const {
@@ -810,16 +900,20 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         const commandStatus = await sandbox.commands.getCommandStatus(
           record.devServer.commandId,
         );
+        await this.assertWorkspaceTaskLease();
         if (commandStatus.running === undefined) {
           throw new BadGatewayException('Dev server status is unknown.');
         }
         if (commandStatus.running) {
           await sandbox.commands.interrupt(record.devServer.commandId);
+          await this.assertWorkspaceTaskLease();
         }
         const updated = { ...record, devServer: null };
+        await this.assertWorkspaceTaskLease();
         await this.saveWorkspace(workspaceKey, updated);
         return { stopped: true };
-      } catch {
+      } catch (error) {
+        if (error instanceof WorkspaceTaskLeaseLostError) throw error;
         throw new BadGatewayException(
           'Sandbox dev server could not be stopped.',
         );
@@ -986,6 +1080,12 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
     },
   ): Promise<Awaited<ReturnType<ArtifactsService['createStudioVersion']>>> {
     this.assertIdentity(threadId, userId);
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.exportWorkspace(threadId, userId, tenantId, task),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     await this.workflow.codingContext(threadId, userId, tenantId);
     if (task) {
       const existing = (await this.artifacts.listStudioVersions(userId, threadId))
@@ -1036,6 +1136,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
       let totalBytes = 0;
       let fileCount = 0;
       for (const file of files) {
+        await this.assertWorkspaceTaskLease();
         const relativePath = this.workspaceRelativePath(file.path);
         if (
           !relativePath ||
@@ -1094,6 +1195,7 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         typeof sourceMetadata.framework === 'string'
           ? sourceMetadata.framework
           : 'unknown';
+      await this.assertWorkspaceTaskLease();
       const artifact = await this.artifacts.createStudioVersion({
         ownerUserId: userId,
         tenantId,
@@ -1147,6 +1249,12 @@ export class ProductionProjectWorkspaceService extends ProductionProjectWorkspac
         'Explicitly confirm discarding the current workspace before destroying it.',
       );
     }
+    if (!this.hasWorkspaceTaskLease(threadId, userId, tenantId)) {
+      return this.withWorkspaceTaskLease(threadId, userId, tenantId, () =>
+        this.destroyWorkspace(threadId, userId, tenantId, confirmDiscard),
+      );
+    }
+    await this.assertWorkspaceTaskLease();
     const key = this.workspaceKey(threadId, userId, tenantId);
     const record = await this.readWorkspace(key, threadId, userId, tenantId);
     if (!record) return { destroyed: false };

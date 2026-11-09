@@ -15,6 +15,8 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
     submitProductionWorkflowWorkspaceCodingTask: jest.fn(),
     getProductionWorkflowWorkspaceCodingTask: jest.fn(),
     downloadProductionWorkflowWorkspaceCodingTaskReport: jest.fn(),
+    downloadProductionWorkflowWorkspaceCodingTaskLogs: jest.fn(),
+    reviewProductionWorkflowWorkspaceCodingTask: jest.fn(),
     cancelProductionWorkflowWorkspaceCodingTask: jest.fn(),
     resumeProductionWorkflowWorkspaceCodingTask: jest.fn(),
   };
@@ -325,5 +327,46 @@ describe('AgentOpsController workflow workspace preview proxy', () => {
         controller.downloadWorkflowWorkspaceCodingTaskReport,
       ),
     ).toEqual(['admin:qa-ops:read']);
+  });
+
+  it('forwards QA review through write permission and exposes logs through read permission', async () => {
+    const req = { user: { userId: '42', tenantId: 'tenant-1' } };
+    const review = {
+      reviewId: '11111111-1111-4111-8111-111111111111',
+      decision: 'rejected' as const,
+      comment: '补齐测试',
+    };
+    ragClient.reviewProductionWorkflowWorkspaceCodingTask.mockResolvedValue({
+      taskId: 'task-1', status: 'rejected',
+    });
+    ragClient.downloadProductionWorkflowWorkspaceCodingTaskLogs.mockResolvedValue(
+      new Response('{"checks":{}}', { status: 200 }),
+    );
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn().mockReturnThis(),
+    };
+
+    await expect(
+      controller.reviewWorkflowWorkspaceCodingTask(
+        'thread-1', 'task-1', review, req as never,
+      ),
+    ).resolves.toEqual({ taskId: 'task-1', status: 'rejected' });
+    await controller.downloadWorkflowWorkspaceCodingTaskLogs(
+      'thread-1', 'task-1', req as never, response as never,
+    );
+
+    expect(ragClient.reviewProductionWorkflowWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1', 'task-1', '42', 'tenant-1', review,
+    );
+    expect(ragClient.downloadProductionWorkflowWorkspaceCodingTaskLogs).toHaveBeenCalledWith(
+      'thread-1', 'task-1', '42', 'tenant-1',
+    );
+    expect(response.send).toHaveBeenCalledWith(Buffer.from('{"checks":{}}'));
+    expect(Reflect.getMetadata(REQUIRE_PERMISSION_KEY, controller.reviewWorkflowWorkspaceCodingTask))
+      .toEqual(['admin:qa-ops:write']);
+    expect(Reflect.getMetadata(REQUIRE_PERMISSION_KEY, controller.downloadWorkflowWorkspaceCodingTaskLogs))
+      .toEqual(['admin:qa-ops:read']);
   });
 });

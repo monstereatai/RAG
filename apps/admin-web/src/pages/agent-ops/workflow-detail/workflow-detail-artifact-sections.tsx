@@ -6,7 +6,17 @@ import {
   HistoryOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Checkbox, Input, Modal, Select, Tag } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Input,
+  message,
+  Modal,
+  Select,
+  Tag,
+} from 'antd';
 import type { ProductionArtifactTarget } from '../service';
 import type { WorkflowDetailLoadedController } from './workflow-detail-controller';
 import { ARTIFACT_OPTIONS, artifactLabel } from './workflow-detail-shared';
@@ -26,6 +36,8 @@ const CODING_TASK_STATUS_LABELS = {
   verification_failed: '验证失败',
   waiting_review: '待人工验收',
   waiting_reconciliation: '待对账',
+  approved: '已批准',
+  rejected: '已驳回',
 } as const;
 
 const CHECK_STATUS_LABELS = {
@@ -37,8 +49,10 @@ const CHECK_STATUS_LABELS = {
 
 const codingTaskTagColor = (status: string) => {
   if (status === 'completed' || status === 'passed') return 'green';
+  if (status === 'approved') return 'green';
   if (status === 'running') return 'blue';
   if (status === 'queued' || status === 'waiting_review') return 'gold';
+  if (status === 'rejected') return 'red';
   if (status === 'not_applicable' || status === 'not_run') return 'default';
   return 'orange';
 };
@@ -110,6 +124,8 @@ export function renderWorkflowArtifacts(
     startWorkspace,
     runWorkspaceAgent,
     downloadCodingTaskReport,
+    downloadCodingTaskLogs,
+    reviewWorkspaceCodingTask,
     cancelWorkspaceCodingTask,
     resumeWorkspaceCodingTask,
     runWorkspaceCommand,
@@ -186,6 +202,9 @@ export function renderWorkflowArtifacts(
           从已审批工作流生成 Schema、Vue/React 页面或数字大屏。可多选；当前
           Schema 是工作流内部结构，真实平台组件 ID 和导入契约待确认，代码 ZIP 由
           Schema 生成。
+        </p>
+        <p>
+          NestJS ZIP 当前提供可运行脚手架（health、tasks 示例和测试）；已审批业务范围仅写入 README，真实业务 API 仍需 Coding Agent 实现。
         </p>
         <Checkbox.Group
           options={ARTIFACT_OPTIONS}
@@ -780,17 +799,32 @@ export function renderWorkflowArtifacts(
                   <div style={{ marginTop: 6 }}>
                     <Tag color={codingTaskTagColor(qaReport.status)}>
                       {qaReport.status === 'passed'
-                        ? '检查通过'
+                        ? '质量门禁通过'
                         : qaReport.status === 'failed'
-                          ? '检查失败'
-                          : '没有可用检查结果'}
+                          ? '质量门禁失败'
+                          : qaReport.status === 'incomplete'
+                            ? '检查不完整'
+                            : '没有可用检查结果'}
                     </Tag>
-                    <Tag color="gold">待人工审阅</Tag>
+                    {workspaceCodingTask.status === 'waiting_review' && (
+                      <Tag color="gold">待人工审阅</Tag>
+                    )}
+                    {workspaceCodingTask.status === 'approved' && (
+                      <Tag color="green">已人工批准</Tag>
+                    )}
+                    {workspaceCodingTask.status === 'rejected' && (
+                      <Tag color="red">已人工驳回</Tag>
+                    )}
                     <span style={{ color: '#667085' }}>
                       {`产物 ${qaReport.artifactId} v${qaReport.artifactVersion} · Trace ${qaReport.traceId}`}
                     </span>
                   </div>
                   <p>{qaReport.summary}</p>
+                  <div style={{ color: '#667085', marginBottom: 8 }}>
+                    必需检查：{qaReport.requiredChecks?.join(', ') || '无'} ·
+                    适用检查：{qaReport.applicableChecks?.join(', ') || '无'} ·
+                    跳过检查：{qaReport.skippedChecks?.join(', ') || '无'}
+                  </div>
                   <strong>检查结果</strong>
                   {qaReport.checks.map((check) => (
                     <div
@@ -800,6 +834,9 @@ export function renderWorkflowArtifacts(
                       <Tag color={codingTaskTagColor(check.status)}>
                         {check.name}: {CHECK_STATUS_LABELS[check.status]}
                       </Tag>
+                      {check.outputTruncated && (
+                        <Tag color="orange">输出超过限制，以下为预览</Tag>
+                      )}
                       {check.exitCode !== null && (
                         <span style={{ marginLeft: 8 }}>
                           exit {check.exitCode}
@@ -839,13 +876,91 @@ export function renderWorkflowArtifacts(
                   >
                     下载 QA 报告 JSON
                   </Button>
-                  <Alert
-                    type={qaReport.status === 'failed' ? 'error' : 'warning'}
-                    showIcon
-                    title="QA 结果需要人工审阅"
-                    description="报告来自隔离工作区的固定脚本检查，不会修改代码，也不会自动批准发布。"
-                    style={{ marginTop: 8 }}
-                  />
+                  <Button
+                    icon={<DownloadOutlined />}
+                    disabled={!qaReport.logsArtifactId}
+                    onClick={() => void downloadCodingTaskLogs()}
+                  >
+                    下载检查日志 Artifact
+                  </Button>
+                  {qaReport.review ? (
+                    <Alert
+                      type={qaReport.review.decision === 'approved' ? 'success' : 'error'}
+                      showIcon
+                      title={qaReport.review.decision === 'approved' ? 'QA 已批准' : 'QA 已驳回'}
+                      description={
+                        <>
+                          <div>
+                            审阅人 {qaReport.review.reviewerUserId} ·{' '}
+                            {new Date(qaReport.review.reviewedAt).toLocaleString()}
+                          </div>
+                          <div>
+                            QA Artifact {qaReport.review.qaReportArtifactId} v
+                            {qaReport.review.artifactVersion}
+                          </div>
+                          {qaReport.review.comment && <div>意见：{qaReport.review.comment}</div>}
+                          {qaReport.review.remediationArtifactId && (
+                            <div>待修复产物：{qaReport.review.remediationArtifactId}</div>
+                          )}
+                          {qaReport.review.remediationTaskId && (
+                            <div>关联修复任务：{qaReport.review.remediationTaskId}</div>
+                          )}
+                        </>
+                      }
+                      style={{ marginTop: 8 }}
+                    />
+                  ) : workspaceCodingTask.status === 'waiting_review' ? (
+                    <>
+                      <Alert
+                        type={qaReport.status === 'failed' ? 'error' : 'warning'}
+                        showIcon
+                        title="QA 结果等待人工审阅"
+                        description="固定 lint/test/build 只执行一轮并生成诊断，不会修改代码或自动重测。修复后请基于新代码提交新的 QA 任务。Run 完成表示检查流程执行结束；质量门禁见报告状态。"
+                        style={{ marginTop: 8 }}
+                      />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <Button
+                          type="primary"
+                          disabled={workspaceBusy}
+                          onClick={() => void reviewWorkspaceCodingTask('approved')}
+                        >
+                          批准 QA 结果
+                        </Button>
+                        <Button
+                          danger
+                          disabled={workspaceBusy}
+                          onClick={() => {
+                            let comment = '';
+                            Modal.confirm({
+                              title: '驳回 QA 结果',
+                              content: (
+                                <Input.TextArea
+                                  autoSize={{ minRows: 3, maxRows: 8 }}
+                                  maxLength={2000}
+                                  placeholder="填写驳回原因和需要修复的内容"
+                                  onChange={(event) => {
+                                    comment = event.target.value;
+                                  }}
+                                />
+                              ),
+                              okText: '确认驳回',
+                              cancelText: '取消',
+                              okButtonProps: { danger: true },
+                              onOk: () => {
+                                if (!comment.trim()) {
+                                  message.error('请填写驳回意见');
+                                  return Promise.reject(new Error('comment required'));
+                                }
+                                return reviewWorkspaceCodingTask('rejected', comment);
+                              },
+                            });
+                          }}
+                        >
+                          驳回并记录意见
+                        </Button>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               )}
               {codingVerification && (

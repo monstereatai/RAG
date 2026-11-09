@@ -17,11 +17,15 @@ import { ProductionProjectWorkspaceService } from './production-project-workspac
 import { ProductionTestAgentService } from './production-test-agent.service';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { resolveProductionRoleAgentPlan } from './production-role-agent-policy';
+import { WorkspaceTaskLeaseLostError } from './production-project-workspace.support';
 import type {
   ProductionWorkflowJobAttempt,
 } from './production-workflow-queue.service';
 import { ProductionWorkflowQueueService } from './production-workflow-queue.service';
-import type { SubmitWorkspaceCodingTaskDto } from './production-project-workspace.dto';
+import type {
+  ReviewWorkspaceCodingTaskDto,
+  SubmitWorkspaceCodingTaskDto,
+} from './production-project-workspace.dto';
 
 type CodingTaskJob = Extract<
   import('./production-workflow-queue.service').ProductionWorkflowJob,
@@ -57,7 +61,7 @@ export class CodingTaskService implements OnModuleInit {
 
   onModuleInit(): void {
     this.queue.registerCodingTaskProcessor((job, attempt) =>
-      this.processJob(job, attempt),
+      this.processQueuedJob(job, attempt),
     );
   }
 
@@ -255,26 +259,173 @@ export class CodingTaskService implements OnModuleInit {
       input.tenantId?.trim() || 'legacy',
       input.threadId,
     );
-    if (!task.outputArtifactId) {
+    const context = this.parseContext(task.codingContext);
+    if (context.role !== 'qa' || context.task !== 'verify' || !task.outputArtifactId) {
       throw new ConflictException('QA report artifact is not available');
     }
-    const artifact = await this.artifacts.getOwned(
-      task.outputArtifactId,
+    const artifact = await this.getQaArtifact(task, task.outputArtifactId, 'qa-report', input);
+    return this.artifacts.getFileOwned(artifact.id, input.ownerUserId);
+  }
+
+  async getLogsFile(input: {
+    taskId: string;
+    threadId: string;
+    ownerUserId: string;
+    tenantId?: string;
+  }) {
+    const task = await this.tasks.findOwnedCodingTask(
+      input.taskId,
       input.ownerUserId,
+      input.tenantId?.trim() || 'legacy',
+      input.threadId,
     );
-    const metadata = this.parseJson(artifact.metadata) as
+    const context = this.parseContext(task.codingContext);
+    const verification = this.parseJson(task.verification) as
       | Record<string, unknown>
       | null;
+    const logsArtifactId = verification?.logsArtifactId;
     if (
-      artifact.threadId !== input.threadId ||
-      (artifact.tenantId ?? 'legacy') !==
-        (input.tenantId?.trim() || 'legacy') ||
-      metadata?.studio !== 'qa' ||
-      metadata?.taskId !== task.id
+      context.role !== 'qa' ||
+      context.task !== 'verify' ||
+      typeof logsArtifactId !== 'string'
     ) {
-      throw new ConflictException('QA report artifact identity mismatch');
+      throw new ConflictException('QA check logs are not available');
     }
+    const artifact = await this.getQaArtifact(task, logsArtifactId, 'qa-logs', input);
     return this.artifacts.getFileOwned(artifact.id, input.ownerUserId);
+  }
+
+  async review(input: {
+    taskId: string;
+    threadId: string;
+    ownerUserId: string;
+    tenantId?: string;
+    body: ReviewWorkspaceCodingTaskDto;
+  }) {
+    const tenantId = input.tenantId?.trim() || 'legacy';
+    const task = await this.tasks.findOwnedCodingTask(
+      input.taskId,
+      input.ownerUserId,
+      tenantId,
+      input.threadId,
+    );
+    const context = this.parseContext(task.codingContext);
+    if (context.role !== 'qa' || context.task !== 'verify' || !task.runId) {
+      throw new ConflictException('Only a QA verification task can be reviewed');
+    }
+    const verification = this.parseJson(task.verification) as
+      | Record<string, unknown>
+      | null;
+    const existingReview = verification?.review as
+      | Record<string, unknown>
+      | undefined;
+    const comment = input.body.comment?.trim() || null;
+    if (input.body.decision === 'rejected' && !comment) {
+      throw new ConflictException('A rejection comment is required');
+    }
+
+    if (task.status === 'approved' || task.status === 'rejected') {
+      if (
+        existingReview?.reviewId !== input.body.reviewId ||
+        existingReview?.reviewerUserId !== input.ownerUserId ||
+        existingReview?.decision !== input.body.decision ||
+        (existingReview?.comment ?? null) !== comment ||
+        (existingReview?.remediationTaskId ?? null) !==
+          (input.body.remediationTaskId ?? null)
+      ) {
+        throw new ConflictException('QA task already has a different review');
+      }
+      await this.emitReviewEvent(task, existingReview);
+      return { taskId: task.id, status: task.status, review: existingReview };
+    }
+    if (
+      task.status !== 'waiting_review' ||
+      verification?.requiresHumanReview !== true ||
+      !task.outputArtifactId
+    ) {
+      throw new ConflictException('QA task is not waiting for review');
+    }
+    if (input.body.remediationTaskId) {
+      const remediationTask = await this.tasks.findOwnedCodingTask(
+        input.body.remediationTaskId,
+        input.ownerUserId,
+        tenantId,
+        input.threadId,
+      );
+      const remediationContext = this.parseContext(remediationTask.codingContext);
+      if (
+        remediationContext.task !== 'code' ||
+        remediationContext.artifactId !== context.artifactId
+      ) {
+        throw new ConflictException(
+          'Remediation task must be a coding task for the reviewed artifact.',
+        );
+      }
+    }
+
+    const review = {
+      reviewId: input.body.reviewId,
+      reviewerUserId: input.ownerUserId,
+      reviewedAt: new Date().toISOString(),
+      decision: input.body.decision,
+      comment,
+      qaTaskId: task.id,
+      artifactId: context.artifactId,
+      qaReportArtifactId: task.outputArtifactId,
+      artifactVersion:
+        typeof verification.artifactVersion === 'string'
+          ? verification.artifactVersion
+          : context.artifactId,
+      remediationArtifactId:
+        input.body.decision === 'rejected' ? context.artifactId : null,
+      remediationTaskId: input.body.remediationTaskId ?? null,
+    };
+    const nextVerification = { ...verification, review };
+    const updated = await this.tasks.transitionCodingTask(
+      task.id,
+      'waiting_review',
+      {
+        status: input.body.decision,
+        verification: JSON.stringify(nextVerification),
+        errorMessage:
+          input.body.decision === 'rejected'
+            ? comment
+            : null,
+        resultSummary:
+          input.body.decision === 'approved'
+            ? 'QA 报告已由人工审阅并批准。'
+            : 'QA 报告已被驳回，需按审阅意见修复后重新提交 QA 任务。',
+      },
+    );
+    if (!updated) {
+      const latest = await this.tasks.findOwnedCodingTask(
+        task.id,
+        input.ownerUserId,
+        tenantId,
+        input.threadId,
+      );
+      const latestVerification = this.parseJson(latest.verification) as
+        | Record<string, unknown>
+        | null;
+      const latestReview = latestVerification?.review as
+        | Record<string, unknown>
+        | undefined;
+      if (
+        (latest.status !== 'approved' && latest.status !== 'rejected') ||
+        latestReview?.reviewId !== input.body.reviewId ||
+        latestReview?.reviewerUserId !== input.ownerUserId ||
+        latestReview?.decision !== input.body.decision ||
+        (latestReview?.comment ?? null) !== comment ||
+        (latestReview?.remediationTaskId ?? null) !==
+          (input.body.remediationTaskId ?? null)
+      ) {
+        throw new ConflictException('QA task state changed before review');
+      }
+      await this.emitReviewEvent(latest, latestReview);
+      return { taskId: latest.id, status: latest.status, review: latestReview };
+    }
+    await this.emitReviewEvent(updated, review);
+    return { taskId: updated.id, status: updated.status, review };
   }
 
   async cancel(input: {
@@ -495,8 +646,10 @@ export class CodingTaskService implements OnModuleInit {
         },
       );
     } catch (error) {
+      if (error instanceof WorkspaceTaskLeaseLostError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (attempt.finalAttempt) {
+        await this.workspace.assertWorkspaceTaskLeaseOwned();
         const status =
           error instanceof AgentLoopResumeError
             ? error.code === 'budget_exceeded'
@@ -556,6 +709,7 @@ export class CodingTaskService implements OnModuleInit {
           context.strictRole,
         );
       } catch (error) {
+        if (error instanceof WorkspaceTaskLeaseLostError) throw error;
         const reason = error instanceof Error ? error.message : String(error);
         const check = {
           status: 'not_run' as const,
@@ -607,7 +761,9 @@ export class CodingTaskService implements OnModuleInit {
           );
           outputArtifactId = outputArtifact.id;
         } catch (error) {
+          if (error instanceof WorkspaceTaskLeaseLostError) throw error;
           if (attempt.finalAttempt) {
+            await this.workspace.assertWorkspaceTaskLeaseOwned();
             const message = error instanceof Error ? error.message : String(error);
             const run = await this.runs.finish(task.runId!, {
               route: 'workspace_agent',
@@ -637,6 +793,7 @@ export class CodingTaskService implements OnModuleInit {
         : !hasDiff || !hasApplicableCheck
           ? 'waiting_review'
           : 'completed';
+      await this.workspace.assertWorkspaceTaskLeaseOwned();
       const run = await this.runs.finish(task.runId!, {
         route: 'workspace_agent',
         status: 'completed',
@@ -706,6 +863,7 @@ export class CodingTaskService implements OnModuleInit {
           : output.status === 'budget_exceeded'
             ? 'budget_exceeded'
             : 'failed';
+    await this.workspace.assertWorkspaceTaskLeaseOwned();
     const run = await this.runs.finish(task.runId!, {
       route: 'workspace_agent',
       status: status === 'cancelled' ? 'cancelled' : 'failed',
@@ -741,12 +899,36 @@ export class CodingTaskService implements OnModuleInit {
     task: AgentTaskEntity,
     input: Parameters<AgentTasksService['updateCodingTask']>[1],
   ): Promise<AgentTaskEntity | null> {
+    await this.workspace.assertWorkspaceTaskLeaseOwned();
     const current = await this.tasks.findById(task.id);
     if (current.status === 'cancelled') return current;
     if (this.isTaskClosed(current.status)) return current;
     return this.tasks.updateCodingTask(
       task.id,
       input,
+    );
+  }
+
+  private async processQueuedJob(
+    job: CodingTaskJob,
+    attempt: ProductionWorkflowJobAttempt,
+  ): Promise<void> {
+    const task = await this.tasks.findById(job.taskId);
+    if (
+      task.taskType !== 'coding_task' ||
+      task.threadId !== job.threadId ||
+      task.ownerUserId !== job.userId ||
+      (task.tenantId ?? 'legacy') !== (job.tenantId ?? 'legacy') ||
+      !task.runId
+    ) {
+      throw new ConflictException('Coding task dispatch identity mismatch');
+    }
+    if (this.isTaskClosed(task.status)) return;
+    await this.workspace.withWorkspaceTaskLease(
+      task.threadId,
+      task.ownerUserId!,
+      task.tenantId ?? undefined,
+      () => this.processJob(job, attempt),
     );
   }
 
@@ -772,8 +954,10 @@ export class CodingTaskService implements OnModuleInit {
         resume: job.resume || attempt.attempt > 1,
       });
     } catch (error) {
+      if (error instanceof WorkspaceTaskLeaseLostError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (attempt.finalAttempt) {
+        await this.workspace.assertWorkspaceTaskLeaseOwned();
         const events = await this.runtimeEvents.list(
           task.threadId,
           task.runId!,
@@ -822,34 +1006,95 @@ export class CodingTaskService implements OnModuleInit {
     }
 
     let outputArtifactId: string | null = null;
-    if (output.report) {
-      const body = Buffer.from(`${JSON.stringify(output.report, null, 2)}\n`);
-      try {
-        const reportArtifact = await this.artifacts.createStudioVersion({
-          ownerUserId: task.ownerUserId!,
-          tenantId: task.tenantId ?? undefined,
-          threadId: task.threadId,
-          title: `QA 报告 ${task.id}`,
-          kind: 'json',
-          filename: `qa-report-${task.id}.json`,
-          sourceText: body.toString('utf8'),
-          body,
-          contentType: 'application/json; charset=utf-8',
-          metadata: {
-            studio: 'qa',
-            target: 'qa-report',
-            role: 'qa',
-            taskType: 'verify',
+    let qaReport = output.report;
+    let logsArtifactId: string | null = null;
+    if (output.report && output.logs) {
+      const logsBody = Buffer.from(
+        `${JSON.stringify(
+          {
             taskId: task.id,
-            parentRunId: context.parentRunId,
-            traceId: task.runId,
             artifactId: context.artifactId,
-            artifactVersion: output.report.artifactVersion,
+            checks: Object.fromEntries(
+              Object.entries(output.logs).map(([name, check]) => [name, check]),
+            ),
           },
+          null,
+          2,
+        )}\n`,
+      );
+      try {
+        const logsArtifact = await this.saveQaArtifact(task, {
+          target: 'qa-logs',
+          title: `QA 检查日志 ${task.id}`,
+          filename: `qa-logs-${task.id}.json`,
+          body: logsBody,
+          artifactId: context.artifactId,
+          parentRunId: context.parentRunId,
+          traceId: task.runId!,
+        });
+        logsArtifactId = logsArtifact.id;
+      } catch (error) {
+        if (error instanceof WorkspaceTaskLeaseLostError) throw error;
+        if (attempt.finalAttempt) {
+          await this.workspace.assertWorkspaceTaskLeaseOwned();
+          const message = error instanceof Error ? error.message : String(error);
+          const run = await this.runs.finish(task.runId!, {
+            route: 'workspace_agent',
+            status: 'failed',
+            errorMessage: message.slice(0, 2_000),
+            retryCount: job.taskAttempt,
+          });
+          const saved = await this.saveTaskResult(task, {
+            status: run.status === 'cancelled' ? 'cancelled' : 'failed',
+            errorMessage: `QA 检查日志 Artifact 保存失败：${message.slice(0, 1_500)}`,
+            resultSummary: output.summary.slice(0, 2_000),
+          });
+          if (saved) {
+            await this.tasks.ensureCodingTaskEvent(
+              saved,
+              saved.status === 'cancelled' ? 'task.cancelled' : 'task.failed',
+              { status: saved.status, error: saved.errorMessage },
+              `qa-logs-artifact-failed:${saved.id}:${job.taskAttempt}`,
+            );
+          }
+        }
+        throw error;
+      }
+    }
+
+    if (qaReport) {
+      const report = {
+        ...qaReport,
+        logsArtifactId,
+        checks: qaReport.checks.map((check) => ({
+          ...check,
+          logRef:
+            logsArtifactId && !check.outputTruncated
+              ? `${logsArtifactId}#${check.name}`
+              : null,
+          logPreview: check.outputTruncated ? check.summary : null,
+        })),
+        evidenceRefs: logsArtifactId ? [logsArtifactId] : [],
+      };
+      qaReport = report;
+      const body = Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
+      try {
+        const reportArtifact = await this.saveQaArtifact(task, {
+          target: 'qa-report',
+          title: `QA 报告 ${task.id}`,
+          filename: `qa-report-${task.id}.json`,
+          body,
+          artifactId: context.artifactId,
+          parentRunId: context.parentRunId,
+          traceId: task.runId!,
+          artifactVersion: report.artifactVersion,
+          logsArtifactId,
         });
         outputArtifactId = reportArtifact.id;
       } catch (error) {
+        if (error instanceof WorkspaceTaskLeaseLostError) throw error;
         if (attempt.finalAttempt) {
+          await this.workspace.assertWorkspaceTaskLeaseOwned();
           const message = error instanceof Error ? error.message : String(error);
           const run = await this.runs.finish(task.runId!, {
             route: 'workspace_agent',
@@ -899,34 +1144,39 @@ export class CodingTaskService implements OnModuleInit {
                 ? 'waiting_reconciliation'
                 : 'blocked'
               : 'failed'
-        : output.report?.status === 'failed'
+        : qaReport?.status === 'failed'
           ? 'verification_failed'
           : 'waiting_review';
     const runStatus = output.status === 'completed' ? 'completed' : 'failed';
+    await this.workspace.assertWorkspaceTaskLeaseOwned();
     const run = await this.runs.finish(task.runId!, {
       route: 'workspace_agent',
       status: runStatus,
       resultSummary: output.summary.slice(0, 2_000),
       errorMessage:
-        output.status === 'completed' && output.report?.status === 'failed'
+        output.status === 'completed' && qaReport?.status === 'failed'
           ? '一个或多个实际检查失败，请审阅 QA 报告。'
-          : output.report?.status === 'not_run'
+          : qaReport?.status === 'not_run'
             ? '没有实际可用的检查结果，请审阅 QA 报告。'
+            : qaReport?.status === 'incomplete'
+              ? '必需的 lint/test/build 检查未全部通过，请人工审阅。'
             : undefined,
       retryCount: job.taskAttempt,
     });
     const saved = await this.saveTaskResult(task, {
       status: run.status === 'cancelled' ? 'cancelled' : taskStatus,
-      resultSummary: output.report?.summary ?? output.summary.slice(0, 2_000),
+      resultSummary: qaReport?.summary ?? output.summary.slice(0, 2_000),
       errorMessage:
         output.status !== 'completed'
           ? output.summary.slice(0, 2_000)
-          : output.report?.status === 'failed'
+          : qaReport?.status === 'failed'
             ? '一个或多个实际检查失败，请审阅 QA 报告。'
-            : output.report?.status === 'not_run'
+            : qaReport?.status === 'not_run'
               ? '没有实际可用的检查结果，请审阅 QA 报告。'
+              : qaReport?.status === 'incomplete'
+                ? '必需的 lint/test/build 检查未全部通过，请人工审阅。'
               : null,
-      verification: output.report ? JSON.stringify(output.report) : null,
+      verification: qaReport ? JSON.stringify(qaReport) : null,
       outputArtifactId,
       lastCompletedStep: output.toolCalls,
     });
@@ -952,7 +1202,7 @@ export class CodingTaskService implements OnModuleInit {
           taskType: 'verify',
           summary: saved.resultSummary,
           outputArtifactId: saved.outputArtifactId,
-          reportStatus: output.report?.status ?? null,
+          reportStatus: qaReport?.status ?? null,
           attempt: attempt.attempt,
         },
         `qa-task-result:${saved.id}:${job.taskAttempt}`,
@@ -970,7 +1220,120 @@ export class CodingTaskService implements OnModuleInit {
       'verification_failed',
       'waiting_review',
       'waiting_reconciliation',
+      'approved',
+      'rejected',
     ].includes(status);
+  }
+
+  private async getQaArtifact(
+    task: AgentTaskEntity,
+    artifactId: string,
+    target: 'qa-report' | 'qa-logs',
+    input: { threadId: string; ownerUserId: string; tenantId?: string },
+  ) {
+    const artifact = await this.artifacts.getOwned(artifactId, input.ownerUserId);
+    const metadata = this.parseJson(artifact.metadata) as
+      | Record<string, unknown>
+      | null;
+    if (
+      artifact.status !== 'ready' ||
+      artifact.threadId !== input.threadId ||
+      (artifact.tenantId ?? 'legacy') !== (input.tenantId?.trim() || 'legacy') ||
+      metadata?.studio !== 'qa' ||
+      metadata?.target !== target ||
+      metadata?.role !== 'qa' ||
+      metadata?.taskType !== 'verify' ||
+      metadata?.taskId !== task.id
+    ) {
+      throw new ConflictException(`QA ${target} artifact identity mismatch`);
+    }
+    return artifact;
+  }
+
+  private emitReviewEvent(
+    task: AgentTaskEntity,
+    review: Record<string, unknown>,
+  ) {
+    const reviewId = String(review.reviewId);
+    return this.tasks.ensureCodingTaskEvent(
+      task,
+      `task.qa_${String(review.decision)}`,
+      { status: review.decision, review },
+      `qa-review:${task.id}:${reviewId}`,
+      String(review.reviewerUserId),
+    );
+  }
+
+  private async saveQaArtifact(
+    task: AgentTaskEntity,
+    input: {
+      target: 'qa-report' | 'qa-logs';
+      title: string;
+      filename: string;
+      body: Buffer;
+      artifactId: string;
+      parentRunId: string | null;
+      traceId: string;
+      artifactVersion?: string;
+      logsArtifactId?: string | null;
+    },
+  ): Promise<{ id: string }> {
+    const versions = await this.artifacts.listStudioVersions(
+      task.ownerUserId!,
+      task.threadId,
+    );
+    const existing = versions.find(
+      (item) =>
+        item.status === 'ready' &&
+        item.metadata?.target === input.target &&
+        item.metadata?.taskId === task.id,
+    );
+    if (existing) {
+      const artifact = await this.artifacts.getOwned(
+        existing.id,
+        task.ownerUserId!,
+      );
+      const metadata = this.parseJson(artifact.metadata) as
+        | Record<string, unknown>
+        | null;
+      if (
+        artifact.status === 'ready' &&
+        artifact.threadId === task.threadId &&
+        (artifact.tenantId ?? 'legacy') === (task.tenantId ?? 'legacy') &&
+        metadata?.studio === 'qa' &&
+        metadata?.target === input.target &&
+        metadata?.taskId === task.id
+      ) {
+        return { id: artifact.id };
+      }
+    }
+    return this.artifacts.createStudioVersion({
+      ownerUserId: task.ownerUserId!,
+      tenantId: task.tenantId ?? undefined,
+      threadId: task.threadId,
+      title: input.title,
+      kind: 'json',
+      filename: input.filename,
+      sourceText: input.body.toString('utf8'),
+      body: input.body,
+      contentType: 'application/json; charset=utf-8',
+      metadata: {
+        studio: 'qa',
+        target: input.target,
+        role: 'qa',
+        taskType: 'verify',
+        taskId: task.id,
+        parentRunId: input.parentRunId,
+        traceId: input.traceId,
+        artifactId: input.artifactId,
+        ...(input.artifactVersion
+          ? { artifactVersion: input.artifactVersion }
+          : {}),
+        ...(input.logsArtifactId
+          ? { logsArtifactId: input.logsArtifactId }
+          : {}),
+      },
+    });
   }
 
   private toJob(task: AgentTaskEntity, resume: boolean): CodingTaskJob {

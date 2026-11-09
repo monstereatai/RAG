@@ -433,6 +433,49 @@ export class AgentOpsController {
     return res.send(Buffer.from(await response.arrayBuffer()));
   }
 
+  @Get('workflows/:threadId/workspace/coding-tasks/:taskId/logs/download')
+  @RequirePermission('admin:qa-ops:read')
+  async downloadWorkflowWorkspaceCodingTaskLogs(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const response =
+      await this.ragClient.downloadProductionWorkflowWorkspaceCodingTaskLogs(
+        threadId,
+        taskId,
+        this.userId(req),
+        this.tenantId(req),
+      );
+    res.status(response.status ?? 500);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    return res.send(Buffer.from(await response.arrayBuffer()));
+  }
+
+  @Post('workflows/:threadId/workspace/coding-tasks/:taskId/review')
+  @RequirePermission('admin:qa-ops:write')
+  reviewWorkflowWorkspaceCodingTask(
+    @Param('threadId') threadId: string,
+    @Param('taskId') taskId: string,
+    @Body()
+    body: {
+      reviewId: string;
+      decision: 'approved' | 'rejected';
+      comment?: string;
+      remediationTaskId?: string;
+    },
+    @Req() req: Request,
+  ) {
+    return this.ragClient.reviewProductionWorkflowWorkspaceCodingTask(
+      threadId,
+      taskId,
+      this.userId(req),
+      this.tenantId(req),
+      body,
+    );
+  }
+
   @Post('workflows/:threadId/workspace/coding-tasks/:taskId/cancel')
   @RequirePermission('admin:qa-ops:write')
   cancelWorkflowWorkspaceCodingTask(

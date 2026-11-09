@@ -94,9 +94,27 @@ export class SubmitWorkspaceCodingTaskDto {
   task?: 'code' | 'verify';
 }
 
+export class ReviewWorkspaceCodingTaskDto {
+  @IsUUID()
+  reviewId!: string;
+
+  @IsIn(['approved', 'rejected'])
+  decision!: 'approved' | 'rejected';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  comment?: string;
+
+  @IsOptional()
+  @IsUUID()
+  remediationTaskId?: string;
+}
+
 export interface WorkspaceCommandResult {
   command: string;
   output: string;
+  outputTruncated: boolean;
   exitCode: number | null;
   durationMs: number;
   timedOut: boolean;

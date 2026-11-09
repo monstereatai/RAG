@@ -7,7 +7,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import JSZip from 'jszip';
-import { createHash, randomBytes } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { URL } from 'node:url';
 import { ArtifactsService } from '../artifacts/artifacts.service';
 import { RedisProvider } from '../../providers/redis/redis.provider';
@@ -25,14 +26,165 @@ import {
   WORKSPACE_LOCK_RETRY_MS,
   WORKSPACE_LOCK_TTL_SECONDS,
   WORKSPACE_LOCK_WAIT_MS,
+  WORKSPACE_TASK_LEASE_RENEW_INTERVAL_MS,
+  WORKSPACE_TASK_LEASE_TTL_SECONDS,
   type SandboxCommandOutput,
   type WorkspaceRecord,
 } from './production-project-workspace.shared';
+
+interface WorkspaceTaskLeaseContext {
+  workspaceKey: string;
+  leaseKey: string;
+  fencingKey: string;
+  token: string;
+  fencingToken: number;
+  lost: boolean;
+  abortController: AbortController;
+}
+
+export class WorkspaceTaskLeaseLostError extends Error {
+  constructor() {
+    super('Workspace task lease was lost.');
+    this.name = 'WorkspaceTaskLeaseLostError';
+  }
+}
 
 export abstract class ProductionProjectWorkspaceSupport {
   protected abstract readonly config: ConfigService;
   protected abstract readonly redis: RedisProvider;
   protected abstract readonly artifacts: ArtifactsService;
+  private readonly taskLeaseContext =
+    new AsyncLocalStorage<WorkspaceTaskLeaseContext>();
+
+  async withWorkspaceTaskLease<T>(
+    threadId: string,
+    userId: string,
+    tenantId: string | undefined,
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    this.assertIdentity(threadId, userId);
+    const workspaceKey = this.workspaceKey(threadId, userId, tenantId);
+    const existing = this.taskLeaseContext.getStore();
+    if (existing) {
+      if (existing.workspaceKey !== workspaceKey) {
+        throw new ConflictException(
+          'A task cannot hold workspace leases for multiple workspaces.',
+        );
+      }
+      await this.assertWorkspaceTaskLease();
+      return callback();
+    }
+
+    this.assertRedis();
+    const leaseKey = `${workspaceKey}:task-execution-lease`;
+    const token = randomUUID();
+    while (
+      !(await this.redis.setIfAbsentRequired(
+        leaseKey,
+        token,
+        WORKSPACE_TASK_LEASE_TTL_SECONDS,
+      ))
+    ) {
+      await this.wait(WORKSPACE_LOCK_RETRY_MS);
+    }
+
+    const fencingKey = `${workspaceKey}:task-execution-fence`;
+    let fencingToken: number;
+    try {
+      fencingToken = await this.redis.incrementRequired(fencingKey);
+    } catch (error) {
+      await this.redis.releaseLock(leaseKey, token);
+      throw error;
+    }
+
+    const context: WorkspaceTaskLeaseContext = {
+      workspaceKey,
+      leaseKey,
+      fencingKey,
+      token,
+      fencingToken,
+      lost: false,
+      abortController: new AbortController(),
+    };
+    const renewal = setInterval(() => {
+      void this.redis
+        .renewLock(leaseKey, token, WORKSPACE_TASK_LEASE_TTL_SECONDS)
+        .then((renewed) => {
+          if (!renewed) this.loseWorkspaceTaskLease(context);
+        })
+        .catch(() => this.loseWorkspaceTaskLease(context));
+    }, WORKSPACE_TASK_LEASE_RENEW_INTERVAL_MS);
+
+    try {
+      return await this.taskLeaseContext.run(context, async () => {
+        await this.assertWorkspaceTaskLease();
+        const result = await callback();
+        await this.assertWorkspaceTaskLease();
+        return result;
+      });
+    } finally {
+      clearInterval(renewal);
+      await this.redis.releaseLock(leaseKey, token);
+    }
+  }
+
+  isWorkspaceTaskLeaseActive(
+    threadId: string,
+    userId: string,
+    tenantId?: string,
+  ): boolean {
+    return (
+      this.taskLeaseContext.getStore()?.workspaceKey ===
+      this.workspaceKey(threadId, userId, tenantId)
+    );
+  }
+
+  protected hasWorkspaceTaskLease(
+    threadId: string,
+    userId: string,
+    tenantId?: string,
+  ): boolean {
+    return this.isWorkspaceTaskLeaseActive(threadId, userId, tenantId);
+  }
+
+  protected workspaceTaskLeaseSignal(): AbortSignal | undefined {
+    return this.taskLeaseContext.getStore()?.abortController.signal;
+  }
+
+  async assertWorkspaceTaskLeaseOwned(): Promise<void> {
+    const context = this.taskLeaseContext.getStore();
+    if (!context) return;
+    if (context.lost) {
+      throw new WorkspaceTaskLeaseLostError();
+    }
+    let current: string | null;
+    let currentFence: string | null;
+    try {
+      [current, currentFence] = await Promise.all([
+        this.redis.getRequired(context.leaseKey),
+        this.redis.getRequired(context.fencingKey),
+      ]);
+    } catch {
+      this.loseWorkspaceTaskLease(context);
+      throw new WorkspaceTaskLeaseLostError();
+    }
+    if (
+      current !== context.token ||
+      Number(currentFence) !== context.fencingToken
+    ) {
+      this.loseWorkspaceTaskLease(context);
+      throw new WorkspaceTaskLeaseLostError();
+    }
+  }
+
+  protected assertWorkspaceTaskLease(): Promise<void> {
+    return this.assertWorkspaceTaskLeaseOwned();
+  }
+
+  private loseWorkspaceTaskLease(context: WorkspaceTaskLeaseContext): void {
+    context.lost = true;
+    context.abortController.abort();
+  }
 
   protected async unpackSeedZip(body: Buffer) {
     let zip: JSZip;
@@ -46,6 +198,7 @@ export abstract class ProductionProjectWorkspaceSupport {
       throw new BadRequestException('Code ZIP contains too many files.');
     }
     const output: Array<{ path: string; data: Uint8Array }> = [];
+    const paths = new Set<string>();
     let totalBytes = 0;
     for (const entry of entries) {
       if (
@@ -57,6 +210,10 @@ export abstract class ProductionProjectWorkspaceSupport {
       const relativePath = this.normalizeArchivePath(entry.name);
       if (!relativePath)
         throw new BadRequestException('Code ZIP contains an unsafe path.');
+      if (paths.has(relativePath)) {
+        throw new BadRequestException('Code ZIP contains duplicate paths.');
+      }
+      paths.add(relativePath);
       const uncompressedSize = (
         entry as JSZip.JSZipObject & {
           _data?: { uncompressedSize?: number };
@@ -129,12 +286,25 @@ export abstract class ProductionProjectWorkspaceSupport {
   }
 
   protected commandOutput(execution: SandboxCommandOutput): string {
+    return this.truncateOutput(this.commandOutputContent(execution));
+  }
+
+  protected commandOutputWasTruncated(
+    execution: SandboxCommandOutput,
+  ): boolean {
+    return (
+      Buffer.byteLength(this.commandOutputContent(execution)) >
+      MAX_COMMAND_OUTPUT_BYTES
+    );
+  }
+
+  private commandOutputContent(execution: SandboxCommandOutput): string {
     const chunks = [
       ...(execution.logs?.stdout ?? []).map((entry) => entry.text ?? ''),
       ...(execution.logs?.stderr ?? []).map((entry) => entry.text ?? ''),
       execution.error?.value ?? '',
     ];
-    return this.truncateOutput(chunks.filter(Boolean).join(''));
+    return chunks.filter(Boolean).join('');
   }
 
   protected truncateOutput(output: string): string {

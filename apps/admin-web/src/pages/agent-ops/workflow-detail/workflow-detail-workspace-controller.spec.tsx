@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getProductionWorkspaceCodingTask: vi.fn(),
   cancelProductionWorkspaceCodingTask: vi.fn(),
   resumeProductionWorkspaceCodingTask: vi.fn(),
+  reviewProductionWorkspaceCodingTask: vi.fn(),
 }));
 
 vi.mock('antd', () => ({
@@ -44,6 +45,8 @@ vi.mock('../workspace-service', () => ({
   getProductionWorkspaceCodingTask: mocks.getProductionWorkspaceCodingTask,
   resumeProductionWorkspaceCodingTask:
     mocks.resumeProductionWorkspaceCodingTask,
+  reviewProductionWorkspaceCodingTask:
+    mocks.reviewProductionWorkspaceCodingTask,
   submitProductionWorkspaceCodingTask:
     mocks.submitProductionWorkspaceCodingTask,
 }));
@@ -68,6 +71,7 @@ describe('workflow workspace coding task controller', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('submits without starting or awaiting the workspace agent and polls the task', async () => {
@@ -214,6 +218,67 @@ describe('workflow workspace coding task controller', () => {
       'task-1',
     );
     expect(result.current.workspaceCodingTask?.status).toBe('cancelled');
+    unmount();
+  });
+
+  it('submits an idempotent QA review and reloads the reviewed task', async () => {
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'review-request-id') });
+    const { result, unmount } = renderHook(() =>
+      useWorkflowWorkspaceController({
+        workflow: { threadId: 'thread-1' } as never,
+        artifactVersions: [],
+        refreshArtifactVersions: vi.fn(),
+        downloadArtifact: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.setWorkspaceRole('qa');
+      result.current.setWorkspaceInstruction('检查项目');
+    });
+    await act(async () => {
+      await result.current.runWorkspaceAgent();
+    });
+
+    const waitingReview = {
+      taskId: 'task-1',
+      runId: 'run-1',
+      threadId: 'thread-1',
+      role: 'qa' as const,
+      taskType: 'verify' as const,
+      status: 'waiting_review' as const,
+      attempt: 1,
+      lastCompletedStep: 1,
+      summary: '待审阅',
+      error: null,
+      verification: null,
+      events: [],
+      updatedAt: '2026-11-09T00:00:00.000Z',
+    };
+    mocks.getProductionWorkspaceCodingTask.mockResolvedValue(waitingReview);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(result.current.workspaceCodingTask?.status).toBe('waiting_review');
+
+    const approved = { ...waitingReview, status: 'approved' as const };
+    mocks.reviewProductionWorkspaceCodingTask.mockResolvedValue({
+      taskId: 'task-1', status: 'approved',
+    });
+    mocks.getProductionWorkspaceCodingTask.mockResolvedValueOnce(approved);
+    await act(async () => {
+      await result.current.reviewWorkspaceCodingTask('approved');
+    });
+
+    expect(mocks.reviewProductionWorkspaceCodingTask).toHaveBeenCalledWith(
+      'thread-1',
+      'task-1',
+      { reviewId: 'review-request-id', decision: 'approved' },
+    );
+    expect(result.current.workspaceCodingTask?.status).toBe('approved');
     unmount();
   });
 });

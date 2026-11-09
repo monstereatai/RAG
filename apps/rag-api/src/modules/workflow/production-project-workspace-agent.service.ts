@@ -80,6 +80,16 @@ export class ProductionProjectWorkspaceAgentService {
       strictRole?: boolean;
     },
   ): Promise<WorkspaceAgentOutput> {
+    if (
+      !this.workspace.isWorkspaceTaskLeaseActive(threadId, userId, tenantId)
+    ) {
+      return this.workspace.withWorkspaceTaskLease(
+        threadId,
+        userId,
+        tenantId,
+        () => this.run(threadId, userId, tenantId, artifactId, instruction, options),
+      );
+    }
     const normalizedInstruction = instruction.trim();
     if (!normalizedInstruction || normalizedInstruction.length > 4_000) {
       throw new BadRequestException('instruction must be 1–4000 characters');

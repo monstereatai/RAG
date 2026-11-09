@@ -152,11 +152,30 @@ export class AgentTasksService {
     return task;
   }
 
+  async transitionCodingTask(
+    id: string,
+    expectedStatus: string,
+    input: Partial<
+      Pick<
+        AgentTaskEntity,
+        'status' | 'resultSummary' | 'errorMessage' | 'verification'
+      >
+    >,
+  ): Promise<AgentTaskEntity | null> {
+    const result = await this.tasks.update(
+      { id, taskType: 'coding_task', status: expectedStatus },
+      input,
+    );
+    if (result.affected !== 1) return null;
+    return this.tasks.findOne({ where: { id, taskType: 'coding_task' } });
+  }
+
   async ensureCodingTaskEvent(
     task: AgentTaskEntity,
     eventType: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,
+    actor = 'coding_agent',
   ): Promise<void> {
     await this.events.emit({
       tenantId: task.tenantId ?? 'legacy',
@@ -164,8 +183,8 @@ export class AgentTasksService {
       runId: task.runId ?? undefined,
       taskId: task.id,
       eventType,
-      actor: 'coding_agent',
-      target: 'coding_agent',
+      actor,
+      target: actor === 'coding_agent' ? 'coding_agent' : 'qa',
       payload,
       idempotencyKey,
     });

@@ -40,6 +40,8 @@ const workspaceRecord = (
 describe('ProductionProjectWorkspaceService', () => {
   const redisValues = new Map<string, string>();
   const redisLocks = new Set<string>();
+  const redisLockTokens = new Map<string, string>();
+  const redisFenceValues = new Map<string, number>();
   let sandbox: ReturnType<typeof makeSandbox>;
   let service: ProductionProjectWorkspaceService;
   let redis: Record<string, jest.Mock>;
@@ -83,22 +85,42 @@ describe('ProductionProjectWorkspaceService', () => {
   function setup() {
     redisValues.clear();
     redisLocks.clear();
+    redisLockTokens.clear();
+    redisFenceValues.clear();
     createdStudioVersionInput = undefined;
     sandbox = makeSandbox();
     redis = {
       isEnabled: jest.fn(() => true),
       getRequired: jest.fn((key: string) =>
-        Promise.resolve(redisValues.get(key) ?? null),
+        Promise.resolve(
+          redisLockTokens.get(key) ??
+            redisValues.get(key) ??
+            (redisFenceValues.has(key)
+              ? String(redisFenceValues.get(key))
+              : null),
+        ),
       ),
-      setIfAbsentRequired: jest.fn((key: string) => {
+      incrementRequired: jest.fn((key: string) => {
+        const value = (redisFenceValues.get(key) ?? 0) + 1;
+        redisFenceValues.set(key, value);
+        return Promise.resolve(value);
+      }),
+      setIfAbsentRequired: jest.fn((key: string, value: string) => {
         if (redisLocks.has(key)) return Promise.resolve(false);
         redisLocks.add(key);
+        redisLockTokens.set(key, value);
         return Promise.resolve(true);
       }),
-      releaseLock: jest.fn((key: string) => {
-        redisLocks.delete(key);
+      releaseLock: jest.fn((key: string, value: string) => {
+        if (redisLockTokens.get(key) === value) {
+          redisLocks.delete(key);
+          redisLockTokens.delete(key);
+        }
         return Promise.resolve();
       }),
+      renewLock: jest.fn((key: string, value: string) =>
+        Promise.resolve(redisLockTokens.get(key) === value),
+      ),
       setRequiredOrThrow: jest.fn((key: string, value: string) => {
         redisValues.set(key, value);
         return Promise.resolve();
@@ -365,6 +387,66 @@ describe('ProductionProjectWorkspaceService', () => {
     expect(createSandbox).not.toHaveBeenCalled();
   });
 
+  it('starts a workspace from a valid NestJS ZIP with absolute sandbox paths', async () => {
+    const backendFiles = {
+      'package.json': JSON.stringify({
+        scripts: {
+          start: 'node dist/main.js',
+          'start:dev': 'tsx watch src/main.ts',
+          build: 'tsc -p tsconfig.json',
+          lint: 'tsc --noEmit -p tsconfig.json',
+          test: 'npm run build && node --test test/*.test.js',
+        },
+      }),
+      'src/main.ts': 'export {};',
+      'src/app.module.ts': 'export {};',
+      'src/app.controller.ts': 'export {};',
+      'src/app.service.ts': 'export {};',
+      'src/dto/create-task.dto.ts': 'export {};',
+      'test/app.service.test.js': 'test',
+    };
+    const archive = await new JSZip()
+      .file('package.json', backendFiles['package.json'])
+      .file('src/main.ts', backendFiles['src/main.ts'])
+      .file('src/app.module.ts', backendFiles['src/app.module.ts'])
+      .file('src/app.controller.ts', backendFiles['src/app.controller.ts'])
+      .file('src/app.service.ts', backendFiles['src/app.service.ts'])
+      .file('src/dto/create-task.dto.ts', backendFiles['src/dto/create-task.dto.ts'])
+      .file('test/app.service.test.js', backendFiles['test/app.service.test.js'])
+      .generateAsync({ type: 'nodebuffer' });
+    artifacts.getStudioVersion.mockResolvedValueOnce({
+      id: 'artifact-1',
+      tenantId: 'tenant-1',
+      ownerUserId: 'owner-1',
+      threadId: 'thread-1',
+      status: 'ready',
+      kind: 'code',
+      filename: 'nestjs-api-v1.zip',
+      metadata: JSON.stringify({ studio: 'production', target: 'nestjs-api' }),
+      sourceText: JSON.stringify({ framework: 'nestjs', files: backendFiles }),
+    });
+    artifacts.getStudioVersionFile.mockResolvedValueOnce({ body: archive });
+
+    await expect(
+      service.startWorkspace(
+        'thread-1',
+        'owner-1',
+        'tenant-1',
+        'artifact-1',
+        'backend',
+        'code',
+      ),
+    ).resolves.toMatchObject({ ready: true, artifactId: 'artifact-1' });
+
+    expect(createSandbox).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.writeFiles).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ path: '/root/workspace/package.json' }),
+        expect.objectContaining({ path: '/root/workspace/src/main.ts' }),
+      ]),
+    );
+  });
+
   it('applies CPU, memory, and disk limits when creating a workspace', async () => {
     await service.startWorkspace(
       'thread-1',
@@ -423,6 +505,100 @@ describe('ProductionProjectWorkspaceService', () => {
     expect(redisLocks.size).toBe(0);
   });
 
+  it('serializes tasks per workspace while allowing other workspaces to run concurrently', async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const calls: string[] = [];
+
+    const first = service.withWorkspaceTaskLease(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      async () => {
+        calls.push('first-start');
+        markFirstStarted();
+        await firstGate;
+        calls.push('first-end');
+      },
+    );
+    await firstStarted;
+
+    const second = service.withWorkspaceTaskLease(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      async () => {
+        calls.push('second');
+      },
+    );
+    const otherWorkspace = service.withWorkspaceTaskLease(
+      'thread-2',
+      'owner-1',
+      'tenant-1',
+      async () => {
+        calls.push('other-workspace');
+      },
+    );
+
+    await otherWorkspace;
+    expect(calls).toEqual(['first-start', 'other-workspace']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(calls).toEqual([
+      'first-start',
+      'other-workspace',
+      'first-end',
+      'second',
+    ]);
+    expect(redisLocks.size).toBe(0);
+  });
+
+  it('rejects a stale task after another worker takes over an expired lease', async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const leaseKey = `${identityKey('tenant-1', 'owner-1', 'thread-1')}:task-execution-lease`;
+    const first = service.withWorkspaceTaskLease(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      async () => {
+        markFirstStarted();
+        await firstGate;
+        await service.withWorkspaceTaskLease(
+          'thread-1',
+          'owner-1',
+          'tenant-1',
+          async () => undefined,
+        );
+      },
+    );
+    await firstStarted;
+    redisLocks.delete(leaseKey);
+    redisLockTokens.delete(leaseKey);
+
+    await service.withWorkspaceTaskLease(
+      'thread-1',
+      'owner-1',
+      'tenant-1',
+      async () => undefined,
+    );
+    releaseFirst();
+    await expect(first).rejects.toThrow('Workspace task lease was lost.');
+    expect(redisLocks.size).toBe(0);
+  });
+
   it('rejects unsafe ZIP paths before creating a sandbox', async () => {
     const archive = await makeArchive('../escape.ts', 'unsafe');
     artifacts.getStudioVersionFile.mockResolvedValue({ body: archive });
@@ -468,6 +644,7 @@ describe('ProductionProjectWorkspaceService', () => {
       command: 'npm test',
       exitCode: 0,
       timedOut: false,
+      outputTruncated: true,
     });
     expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(16 * 1024);
     expect(redis.setRequiredOrThrow).not.toHaveBeenCalled();

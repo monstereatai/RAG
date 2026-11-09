@@ -43,6 +43,7 @@ function createService() {
     findOwnedCodingTask: jest.fn(),
     findById: jest.fn(),
     updateCodingTask: jest.fn(),
+    transitionCodingTask: jest.fn(),
     ensureCodingTaskEvent: jest.fn().mockResolvedValue(undefined),
   };
   const runs = {
@@ -71,6 +72,15 @@ function createService() {
     assertCanResume: jest.fn().mockResolvedValue(undefined),
   };
   const workspace = {
+    assertWorkspaceTaskLeaseOwned: jest.fn().mockResolvedValue(undefined),
+    withWorkspaceTaskLease: jest.fn(
+      async (
+        _threadId: string,
+        _userId: string,
+        _tenantId: string | undefined,
+        callback: () => Promise<unknown>,
+      ) => callback(),
+    ),
     validateCodingArtifact: jest.fn().mockResolvedValue({ runId: 'parent-run' }),
     assertWorkspaceReady: jest.fn().mockResolvedValue(undefined),
     verifyWorkspace: jest.fn(),
@@ -81,7 +91,10 @@ function createService() {
     assertCanResume: jest.fn().mockResolvedValue(undefined),
   };
   const artifacts = {
-    createStudioVersion: jest.fn().mockResolvedValue({ id: 'qa-report-artifact' }),
+    createStudioVersion: jest.fn().mockImplementation(async (input) => ({
+      id: input.metadata.target === 'qa-logs' ? 'qa-logs-artifact' : 'qa-report-artifact',
+    })),
+    listStudioVersions: jest.fn().mockResolvedValue([]),
     getOwned: jest.fn(),
     getFileOwned: jest.fn(),
   };
@@ -281,13 +294,17 @@ describe('CodingTaskService', () => {
       threadId,
       tenantId,
       ownerUserId,
+      codingContext: JSON.stringify({
+        source: 'zip', artifactId: 'artifact-1', instruction: '检查项目', role: 'qa', task: 'verify',
+      }),
       outputArtifactId: 'report-1',
     });
     artifacts.getOwned.mockResolvedValue({
       id: 'report-1',
+      status: 'ready',
       threadId,
       tenantId,
-      metadata: JSON.stringify({ studio: 'qa', taskId }),
+      metadata: JSON.stringify({ studio: 'qa', target: 'qa-report', role: 'qa', taskType: 'verify', taskId }),
     });
     artifacts.getFileOwned.mockResolvedValue(file);
 
@@ -298,13 +315,42 @@ describe('CodingTaskService', () => {
 
     artifacts.getOwned.mockResolvedValueOnce({
       id: 'report-1',
+      status: 'ready',
       threadId,
       tenantId: 'other-tenant',
-      metadata: JSON.stringify({ studio: 'qa', taskId }),
+      metadata: JSON.stringify({ studio: 'qa', target: 'qa-report', role: 'qa', taskType: 'verify', taskId }),
     });
     await expect(
       service.getReportFile({ taskId, threadId, ownerUserId, tenantId }),
-    ).rejects.toThrow('QA report artifact identity mismatch');
+    ).rejects.toThrow('QA qa-report artifact identity mismatch');
+  });
+
+  it('downloads QA logs only when their artifact belongs to the same task scope', async () => {
+    const { service, tasks, artifacts } = createService();
+    const file = { artifact: { filename: 'qa-logs.json' }, body: Buffer.from('{}') };
+    tasks.findOwnedCodingTask.mockResolvedValue({
+      id: taskId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      codingContext: JSON.stringify({
+        source: 'zip', artifactId: 'artifact-1', instruction: '检查项目', role: 'qa', task: 'verify',
+      }),
+      verification: JSON.stringify({ logsArtifactId: 'logs-1' }),
+    });
+    artifacts.getOwned.mockResolvedValue({
+      id: 'logs-1',
+      status: 'ready',
+      threadId,
+      tenantId,
+      metadata: JSON.stringify({ studio: 'qa', target: 'qa-logs', role: 'qa', taskType: 'verify', taskId }),
+    });
+    artifacts.getFileOwned.mockResolvedValue(file);
+
+    await expect(
+      service.getLogsFile({ taskId, threadId, ownerUserId, tenantId }),
+    ).resolves.toBe(file);
+    expect(artifacts.getFileOwned).toHaveBeenCalledWith('logs-1', ownerUserId);
   });
 
   it('does not mark a task cancelled when the run already reached another terminal state', async () => {
@@ -405,6 +451,7 @@ describe('CodingTaskService', () => {
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' });
     tasks.updateCodingTask.mockResolvedValue({ ...workerTask, status: 'running' });
@@ -507,6 +554,7 @@ describe('CodingTaskService', () => {
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'cancelled' });
     tasks.updateCodingTask.mockResolvedValue({ ...workerTask, status: 'running' });
     workspaceAgent.runWithExecutionOptions.mockResolvedValue({
@@ -570,6 +618,7 @@ describe('CodingTaskService', () => {
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' });
     tasks.updateCodingTask
       .mockResolvedValueOnce({ ...workerTask, status: 'running' })
@@ -656,17 +705,40 @@ describe('CodingTaskService', () => {
     const qaReport = {
       artifactId: 'artifact-1',
       artifactVersion: '2',
+      applicableChecks: ['lint', 'test', 'build'],
+      requiredChecks: ['lint', 'test', 'build'],
+      skippedChecks: [],
       checks: [
+        {
+          name: 'lint',
+          status: 'passed',
+          exitCode: 0,
+          summary: 'lint output preview',
+          outputTruncated: true,
+          logPreview: 'lint output preview',
+          logRef: null,
+        },
         {
           name: 'test',
           status: 'passed',
           exitCode: 0,
           summary: '1 suite passed',
-          logRef: `${runId}:test`,
+          outputTruncated: false,
+          logPreview: null,
+          logRef: null,
+        },
+        {
+          name: 'build',
+          status: 'passed',
+          exitCode: 0,
+          summary: 'build passed',
+          outputTruncated: false,
+          logPreview: null,
+          logRef: null,
         },
       ],
       diagnosis: '测试通过',
-      evidenceRefs: [`${runId}:test`],
+      evidenceRefs: [],
       suggestedFixes: [],
       requiresHumanReview: true,
       status: 'passed',
@@ -698,6 +770,7 @@ describe('CodingTaskService', () => {
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' });
     tasks.updateCodingTask
       .mockResolvedValueOnce({ ...workerTask, status: 'running' })
@@ -707,6 +780,11 @@ describe('CodingTaskService', () => {
       summary: '检查通过',
       toolCalls: 1,
       report: qaReport,
+      logs: {
+        lint: { status: 'passed', command: 'npm run lint', exitCode: 0, output: 'lint output', outputTruncated: true },
+        test: { status: 'passed', command: 'npm test', exitCode: 0, output: 'test output' },
+        build: { status: 'passed', command: 'npm run build', exitCode: 0, output: 'build output' },
+      },
     });
     runs.finish.mockResolvedValue({ id: runId, status: 'completed' });
 
@@ -737,11 +815,24 @@ describe('CodingTaskService', () => {
       expect.objectContaining({
         metadata: expect.objectContaining({
           studio: 'qa',
+          target: 'qa-report',
           taskId,
           traceId: runId,
         }),
       }),
     );
+    expect(artifacts.createStudioVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ target: 'qa-logs', taskId }),
+      }),
+    );
+    const reportArtifactCall = artifacts.createStudioVersion.mock.calls.find(
+      ([input]) => input.metadata.target === 'qa-report',
+    );
+    expect(reportArtifactCall?.[0].sourceText).toContain('qa-logs-artifact#test');
+    expect(reportArtifactCall?.[0].sourceText).toContain('"logRef": null');
+    expect(reportArtifactCall?.[0].sourceText).toContain('"outputTruncated": true');
+    expect(reportArtifactCall?.[0].sourceText).toContain('"logPreview": "lint output preview"');
     expect(tasks.updateCodingTask).toHaveBeenLastCalledWith(
       taskId,
       expect.objectContaining({
@@ -773,6 +864,7 @@ describe('CodingTaskService', () => {
     };
     tasks.findById
       .mockResolvedValueOnce(workerTask)
+      .mockResolvedValueOnce({ ...workerTask, status: 'running' })
       .mockResolvedValueOnce({ ...workerTask, status: 'running' });
     tasks.updateCodingTask
       .mockResolvedValueOnce({ ...workerTask, status: 'running' })
@@ -812,5 +904,120 @@ describe('CodingTaskService', () => {
       expect.any(Object),
       expect.any(String),
     );
+  });
+
+  it('records an owner scoped QA review with an idempotent audit event', async () => {
+    const { service, tasks } = createService();
+    const qaTask = {
+      id: taskId,
+      runId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      taskType: 'coding_task',
+      status: 'waiting_review',
+      outputArtifactId: 'qa-report-artifact',
+      codingContext: JSON.stringify({
+        source: 'zip',
+        artifactId: 'artifact-1',
+        instruction: '检查项目',
+        role: 'qa',
+        task: 'verify',
+      }),
+      verification: JSON.stringify({ status: 'incomplete', requiresHumanReview: true }),
+    };
+    tasks.findOwnedCodingTask.mockResolvedValue(qaTask);
+    tasks.transitionCodingTask.mockImplementation(async (_id, _status, patch) => ({
+      ...qaTask,
+      status: patch.status,
+      verification: patch.verification,
+    }));
+
+    const result = await service.review({
+      taskId,
+      threadId,
+      ownerUserId,
+      tenantId,
+      body: {
+        reviewId: requestId,
+        decision: 'rejected',
+        comment: '补齐测试并重新运行 QA',
+      },
+    });
+
+    expect(result).toMatchObject({ taskId, status: 'rejected' });
+    expect(result.review).toMatchObject({
+      reviewId: requestId,
+      reviewerUserId: ownerUserId,
+      decision: 'rejected',
+      comment: '补齐测试并重新运行 QA',
+      artifactId: 'artifact-1',
+      remediationArtifactId: 'artifact-1',
+    });
+    expect(tasks.transitionCodingTask).toHaveBeenCalledWith(
+      taskId,
+      'waiting_review',
+      expect.objectContaining({ status: 'rejected' }),
+    );
+    expect(tasks.ensureCodingTaskEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'rejected' }),
+      'task.qa_rejected',
+      expect.objectContaining({ status: 'rejected' }),
+      `qa-review:${taskId}:${requestId}`,
+      ownerUserId,
+    );
+
+    tasks.findOwnedCodingTask.mockResolvedValue({
+      ...qaTask,
+      status: 'rejected',
+      verification: JSON.stringify({
+        status: 'incomplete',
+        requiresHumanReview: true,
+        review: result.review,
+      }),
+    });
+    await expect(
+      service.review({
+        taskId,
+        threadId,
+        ownerUserId,
+        tenantId,
+        body: {
+          reviewId: requestId,
+          decision: 'rejected',
+          comment: '补齐测试并重新运行 QA',
+        },
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', review: result.review });
+    expect(tasks.transitionCodingTask).toHaveBeenCalledTimes(1);
+    expect(tasks.ensureCodingTaskEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects QA reviews without a rejection comment', async () => {
+    const { service, tasks } = createService();
+    tasks.findOwnedCodingTask.mockResolvedValue({
+      id: taskId,
+      runId,
+      threadId,
+      tenantId,
+      ownerUserId,
+      taskType: 'coding_task',
+      status: 'waiting_review',
+      codingContext: JSON.stringify({
+        source: 'zip', artifactId: 'artifact-1', instruction: '检查项目', role: 'qa', task: 'verify',
+      }),
+      verification: JSON.stringify({ status: 'passed' }),
+    });
+
+    await expect(
+      service.review({
+        taskId,
+        threadId,
+        ownerUserId,
+        tenantId,
+        body: { reviewId: requestId, decision: 'rejected' },
+      }),
+    ).rejects.toThrow('A rejection comment is required');
+    expect(tasks.transitionCodingTask).not.toHaveBeenCalled();
   });
 });

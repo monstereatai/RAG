@@ -34,7 +34,7 @@ export const ARTIFACT_OPTIONS: Array<{
   { value: 'dashboard-schema', label: '数字大屏 Schema' },
   { value: 'vue-dashboard', label: 'Vue 数字大屏代码' },
   { value: 'react-dashboard', label: 'React 数字大屏代码' },
-  { value: 'nestjs-api', label: 'NestJS 后端 API 项目 ZIP' },
+  { value: 'nestjs-api', label: 'NestJS 后端 API 项目 ZIP（可运行脚手架）' },
 ];
 
 export const artifactLabel = (target: unknown) =>
@@ -68,7 +68,9 @@ export type ProductionCodingTaskStatus =
   | 'cancelled'
   | 'verification_failed'
   | 'waiting_review'
-  | 'waiting_reconciliation';
+  | 'waiting_reconciliation'
+  | 'approved'
+  | 'rejected';
 
 export interface ProductionCodingTask {
   taskId: string;
@@ -123,23 +125,42 @@ export interface ProductionCodingVerification {
 export interface ProductionQAReport {
   artifactId: string;
   artifactVersion: string;
+  applicableChecks?: Array<'lint' | 'test' | 'build'>;
+  requiredChecks?: Array<'lint' | 'test' | 'build'>;
+  skippedChecks?: Array<'lint' | 'test' | 'build'>;
+  logsArtifactId?: string | null;
   checks: Array<{
     name: 'lint' | 'test' | 'build';
     status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
     exitCode: number | null;
     summary: string;
+    outputTruncated?: boolean;
+    logPreview?: string | null;
     logRef: string | null;
   }>;
   diagnosis: string;
   evidenceRefs: string[];
   suggestedFixes: string[];
   requiresHumanReview: true;
-  status: 'passed' | 'failed' | 'not_run';
+  status: 'passed' | 'failed' | 'incomplete' | 'not_run';
   summary: string;
   parentRunId: string | null;
   traceId: string;
   createdAt: string;
   updatedAt: string;
+  review?: {
+    reviewId: string;
+    reviewerUserId: string;
+    reviewedAt: string;
+    decision: 'approved' | 'rejected';
+    comment: string | null;
+    qaTaskId: string;
+    artifactId: string;
+    qaReportArtifactId: string;
+    artifactVersion: string;
+    remediationArtifactId: string | null;
+    remediationTaskId: string | null;
+  };
 }
 
 export interface ProductionWorkspaceCommandResult {

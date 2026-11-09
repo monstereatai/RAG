@@ -32,6 +32,10 @@ export const WORKSPACE_LOCK_WAIT_MS = 30_000;
 
 export const WORKSPACE_LOCK_RETRY_MS = 100;
 
+export const WORKSPACE_TASK_LEASE_TTL_SECONDS = 6 * 60;
+
+export const WORKSPACE_TASK_LEASE_RENEW_INTERVAL_MS = 30_000;
+
 export const PREVIEW_UPSTREAM_TIMEOUT_MS = 45_000;
 
 export interface WorkspaceRecord {
@@ -69,4 +73,28 @@ export interface SandboxCommandOutput {
   error?: { value?: string };
   exitCode?: number | null;
   id?: string;
+}
+
+export interface WorkspaceVerificationResult {
+  checkedAt: string;
+  diff: {
+    added: Array<{ path: string; sha256: string }>;
+    modified: Array<{
+      path: string;
+      seedSha256: string;
+      workspaceSha256: string;
+    }>;
+    deleted: Array<{ path: string; sha256: string }>;
+  };
+  checks: Record<
+    'lint' | 'test' | 'build',
+    {
+      status: 'passed' | 'failed' | 'not_applicable' | 'not_run';
+      command: string | null;
+      exitCode: number | null;
+      output: string;
+      outputTruncated?: boolean;
+      reason?: string;
+    }
+  >;
 }

@@ -22,6 +22,7 @@ type WorkspaceAgentTestOutput = {
 
 describe('ProductionProjectWorkspaceAgentService', () => {
   it('runs arbitrary project commands only through the registered workspace tool', async () => {
+    let leaseActive = false;
     const instructionModel = {
       invoke: jest
         .fn()
@@ -42,6 +43,22 @@ describe('ProductionProjectWorkspaceAgentService', () => {
       })),
     };
     const workspace = {
+      isWorkspaceTaskLeaseActive: jest.fn(() => leaseActive),
+      withWorkspaceTaskLease: jest.fn(
+        async (
+          _threadId: string,
+          _userId: string,
+          _tenantId: string | undefined,
+          callback: () => Promise<unknown>,
+        ) => {
+          leaseActive = true;
+          try {
+            return await callback();
+          } finally {
+            leaseActive = false;
+          }
+        },
+      ),
       startWorkspace: jest.fn().mockResolvedValue({ ready: true }),
       runCommand: jest.fn().mockResolvedValue({
         command: 'npm test',
@@ -151,6 +168,7 @@ describe('ProductionProjectWorkspaceAgentService', () => {
     const workspace = {
       startWorkspace: jest.fn(),
       assertWorkspaceReady: jest.fn().mockResolvedValue(undefined),
+      isWorkspaceTaskLeaseActive: jest.fn().mockReturnValue(true),
     };
     const agentLoop = {
       resume: jest.fn().mockResolvedValue({
